@@ -219,15 +219,14 @@ export default function DeviceApprovalClient() {
             */}
             <div className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
               <p className="mb-2">
-                <strong className="text-[var(--v2-ink)]">It can</strong> create and manage agents —
-                including issuing <em>any</em> of your agents a new API key, which stops the old one
-                working immediately — set up a connection, and read your account: wallets, activity
-                and transactions.
+                <strong className="text-[var(--v2-ink)]">It can</strong> create and manage agents,
+                set up a connection, and read your account — wallets, activity and transactions.
               </p>
               <p>
                 <strong className="text-[var(--v2-ink)]">It cannot</strong> sign anything, approve a
-                budget, change your signers, move funds, or change your credentials. Approving a
-                budget stays with you, here.
+                budget, change your signers, move funds, change your credentials, or re-key an
+                agent — neither its delegate key nor its API key. Approving a budget stays with
+                you, here.
               </p>
             </div>
 

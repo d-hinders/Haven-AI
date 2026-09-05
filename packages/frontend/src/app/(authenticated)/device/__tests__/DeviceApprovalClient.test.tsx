@@ -65,13 +65,16 @@ describe('device approval screen', () => {
     }
   })
 
-  it('names issuing a new agent API key as something it CAN do', () => {
-    // `POST /agents/{id}/rotate-key` is on the owner-CLI allow-list, so the
-    // copy has to own it. It previously said "it cannot re-key an agent",
-    // which was true of the delegate key and read as a promise about this.
+  it('promises no key rotation of EITHER kind', () => {
+    // `POST /agents/{id}/rotate-key` was briefly on the allow-list, and while
+    // it was, this copy had to disclose it. The owner removed it on
+    // 2026-09-05, so the promise is whole again — and the copy names both
+    // kinds, because "re-key" alone read as a claim about the delegate key
+    // while the API key was still reachable.
     render(<DeviceApprovalClient />)
-    expect(screen.getByText(/new API key/i)).toBeInTheDocument()
-    expect(screen.getByText(/stops the old one working/i)).toBeInTheDocument()
+    expect(screen.getByText(/re-key an\s+agent/i)).toBeInTheDocument()
+    expect(screen.getByText(/neither its delegate key nor its API key/i)).toBeInTheDocument()
+    expect(screen.queryByText(/new API key/i)).not.toBeInTheDocument()
   })
 
   describe('the requester is named before the decision', () => {

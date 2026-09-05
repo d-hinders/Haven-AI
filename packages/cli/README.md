@@ -91,13 +91,13 @@ Exit codes carry the outcome an agent acts on: **3** when the code expired
 it. It is not removed — it is simply no longer what an agent gets by asking to
 log in.
 
-**What the approved session can do.** Create and manage agents — including
-issuing **any** of your agents a new API key, which stops the old one working
-immediately, whether or not this session created that agent — set up a
+**What the approved session can do.** Create and manage agents, set up a
 connection, and read your account. **What it cannot:** sign anything, approve a
-budget, change signers, move funds, change your credentials, or re-key an
-agent's delegate key (`/agents/:id/rekey/*`, which is a different thing from
-rotating its API key and is not on the list). The allow-list lives in
+budget, change signers, move funds, change your credentials, or rotate an
+agent's keys — neither the delegate key (`/agents/:id/rekey/*`) nor the API key
+(`/agents/:id/rotate-key`). `haven agents rotate-key` therefore needs an
+ordinary session (`haven login --email`), not a device-code one: issuing a
+fresh credential is a change of authority, and the human keeps those. The allow-list lives in
 `packages/backend/src/middleware/owner-cli.ts`; a route that is not on it
 refuses, because #1640 already refuses every purpose-carrying token everywhere
 and this is a single opt-in exception. A census test measures what the

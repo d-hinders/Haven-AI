@@ -249,6 +249,10 @@ describe('owner_cli route census (#2526)', () => {
     // goes red here without anyone remembering to extend a fixture.
     const forbidden: [RegExp, string][] = [
       [/rekey/i, 're-keying an agent'],
+      // Rotating an agent's API key mints a fresh plaintext credential and
+      // kills the live one. Removed from the list by owner decision on
+      // 2026-09-05; pinned here so it cannot return without this going red.
+      [/rotate-key/i, 'minting a fresh agent credential'],
       [/passkey/i, 'passkey management'],
       [/signers?(\/|$)/i, 'signer-set changes'],
       [/\/activate$/i, 'delegation activation'],
@@ -294,6 +298,7 @@ describe('owner_cli route census (#2526)', () => {
       { method: 'POST', path: '/agents/{id}/rekey/start' },
       { method: 'POST', path: '/agents/{id}/delegations/{hash}/activate' },
       { method: 'POST', path: '/safe/exec' },
+      { method: 'POST', path: '/agents/{id}/rotate-key' },
       { method: 'POST', path: '/auth/device/approve' },
     ]
     for (const route of mustRefuse) {

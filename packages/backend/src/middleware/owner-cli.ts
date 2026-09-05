@@ -66,7 +66,17 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // name — the census test caught it on its first run, which is the whole
   // reason it also checks this direction.
   { method: 'PUT', path: '/agents/{id}' },
-  { method: 'POST', path: '/agents/{id}/rotate-key' },
+  // `POST /agents/{id}/rotate-key` was here — the issue scoped it in — and is
+  // deliberately NOT, on the owner's decision of 2026-09-05. It issues a fresh
+  // plaintext agent API key and invalidates the old one, on ANY of the owner's
+  // agents rather than only one this session created: a live agent still
+  // holding the previous key starts getting 401s immediately and stays broken
+  // until a human re-provisions it. That is a credential mint plus a
+  // self-inflicted denial of service, and it sits against the boundary this
+  // whole opt-in exists to draw — "it cannot move a key" — which the security
+  // model, this file and the approval screen all state. An agent that needs a
+  // key rotated asks its human, which is the same answer the rest of the list
+  // gives for everything that changes authority rather than reading it.
   // Budgets are READ here. Building, activating and revoking a delegation are
   // authority changes and stay refused — C3 adds build + revoke later, and
   // never activate, which is the signature the human keeps.

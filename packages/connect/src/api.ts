@@ -91,6 +91,25 @@ export interface UpdateInstallStatusInput {
   nextUserAction: string
   errorCode?: string | null
   environmentLabel?: string
+  /**
+   * The other agent directories this machine holds, so the DASHBOARD can offer
+   * the owner a one-click revoke of what this setup superseded (#2561).
+   *
+   * A tri-state, and the middle case is why it is not a plain array:
+   *
+   * - a list  — the scan ran and found these;
+   * - `[]`    — the scan ran and found none;
+   * - `null` or absent — the scan could not run.
+   *
+   * The connector cannot revoke and must not: `POST /agents/:id/revoke` is
+   * owner-authenticated, and an agent credential retiring a sibling agent is
+   * the "agent editing its own authority" the re-key routes already refuse.
+   * So this reports, and a human clicks.
+   *
+   * `null` matters because the alternative is a dashboard telling somebody
+   * "nothing to revoke" about a machine nobody managed to read.
+   */
+  supersededAgentIds?: readonly string[] | null
 }
 
 export interface ConnectorContext {
@@ -237,6 +256,13 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           next_user_action: input.nextUserAction,
           error_code: input.errorCode ?? null,
           environment_label: input.environmentLabel,
+          // `?? null`, deliberately, and NOT the `input.x` shorthand the
+          // optional fields above use: `undefined` disappears from
+          // `JSON.stringify`, and an absent key means "unchanged" to the
+          // backend's jsonb merge. That is right for a probe result and wrong
+          // here — "the scan could not run" is a fact this report is making,
+          // not a fact it is declining to mention (#2561).
+          superseded_agent_ids: input.supersededAgentIds ?? null,
         }),
       })
     },

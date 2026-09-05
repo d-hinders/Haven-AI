@@ -749,9 +749,14 @@ async function executeConnect(
   // started before this run keeps spending as that agent. Name the superseded
   // agents here, at the moment the user is watching, with the one action only
   // they can take. Connect never revokes or deletes credentials itself.
+  // `null` means the scan could not run — kept apart from `[]` all the way to
+  // the install-status report (#2561), even though the `--json` outcome below
+  // still flattens it to `[]` for compatibility.
+  let supersededScan: string[] | null = null
   let supersededAgentIds: string[] = []
   try {
-    supersededAgentIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
+    supersededScan = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
+    supersededAgentIds = supersededScan ?? []
     if (supersededAgentsRetiredLocally === true) {
       // #2551: the local half is done; what remains is the owner's half, and
       // the restart every long-lived host still needs (#1681).
@@ -811,6 +816,10 @@ async function executeConnect(
       nextUserAction: runtimeInstall.nextUserAction,
       errorCode: runtimeInstall.errorCode,
       environmentLabel: options.environmentLabel ?? 'Local workspace',
+      // The raw scan result, `null` and all — NOT the flattened
+      // `supersededAgentIds` the outcome carries. Flattening here would hand
+      // the dashboard the same ambiguity this field exists to remove (#2561).
+      supersededAgentIds: supersededScan,
     })
   } catch (err) {
     log(`Could not report install status to Haven: ${err instanceof Error ? err.message : String(err)}`)
@@ -1516,13 +1525,28 @@ const RERUN_HINT = connectorRerunCommand()
  * not parse is named by its directory name, because "I could not read it" is
  * still a directory the user should know exists.
  */
-async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[]> {
+/**
+ * Every OTHER agent directory on this machine, or `null` when the scan could
+ * not run.
+ *
+ * The `null` is the whole point of the signature (#2561). This used to return
+ * `[]` for both "the credential root holds no other agent" and "the credential
+ * root could not be read", and the outcome field's own doc comment had to warn
+ * readers that emptiness was not a guarantee. A warning in prose cannot reach
+ * a dashboard: rendering "nothing to revoke" for a machine nobody scanned
+ * states something Haven does not know. So the two cases are distinguishable
+ * at the source, where the difference is actually observed.
+ */
+async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[] | null> {
   const root = defaultCredentialRoot(baseDir)
   let entries: string[] = []
   try {
     entries = await readdir(root)
   } catch {
-    return []
+    // The scan did not run. Callers that only want the heads-up treat this as
+    // empty; callers that report to Haven send `null` and let the dashboard
+    // stay silent rather than reassure.
+    return null
   }
   const ids: string[] = []
   for (const entry of entries) {

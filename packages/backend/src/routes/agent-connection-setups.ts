@@ -135,6 +135,14 @@ interface InstallStatusBody {
   next_user_action?: string
   error_code?: string | null
   environment_label?: string
+  /**
+   * #2561. Tri-state: a list (scanned, found these), `[]` (scanned, none), or
+   * `null` (the scan could not run). Sanitised by `sanitizeInstallStatus`,
+   * which shapes the ids but does not believe them — the connector falls back
+   * to a directory name when an `identity.json` will not parse, so ownership
+   * is resolved against the caller's own agents when the status is read.
+   */
+  superseded_agent_ids?: string[] | null
 }
 
 

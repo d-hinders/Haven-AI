@@ -4,6 +4,7 @@ import type { AgentConnectionSetupFlow } from '@/hooks/useAgentConnectionSetup'
 import { ConnectStepShell, type ConnectShellPhase } from './ConnectStepShell'
 import { DelegationApprovalStep } from './DelegationApprovalStep'
 import { FinalizingLocalSetup, SetupDoneState, SetupStatusState, TerminalSetupState } from './SetupStates'
+import { SupersededAgentsCard } from './SupersededAgentsCard'
 import { WaitingForConnector } from './WaitingForConnector'
 
 /**
@@ -149,6 +150,18 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         />
       )}
 
+
+      {connectView?.kind === 'active' && (
+        // Rendered BESIDE the done state rather than inside it: the offer is
+        // about agents this setup displaced, not about the setup that just
+        // succeeded, and folding a spend-authority action into a completion
+        // celebration is how it gets clicked without being read (#2561). It
+        // renders nothing at all unless the connector reported agents this
+        // owner actually has.
+        <SupersededAgentsCard
+          supersededAgentIds={setupStatus?.install_status?.superseded_agent_ids}
+        />
+      )}
 
       {connectView?.kind === 'active' && (
         <SetupDoneState

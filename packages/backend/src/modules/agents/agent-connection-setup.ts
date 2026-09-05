@@ -148,6 +148,40 @@ export function sanitizeInstallStatus(value: unknown): Record<string, unknown> {
   ]) {
     if (typeof raw[key] === 'boolean') status[key] = raw[key]
   }
+  // `superseded_agent_ids` — the one ARRAY this allowlist accepts (#2561), and
+  // a tri-state rather than a list:
+  //
+  //   a list  — the connector scanned and found these other agent directories
+  //   []      — it scanned and found none
+  //   null    — the scan could not run
+  //
+  // The null is load-bearing and follows `error_code`'s precedent above: it is
+  // handled before the typed loops, because every one of them would drop it.
+  // Without it the dashboard cannot tell "nothing to revoke" from "nobody
+  // looked", and telling an owner the first when the second is true is Haven
+  // asserting something it does not know about their machine.
+  //
+  // These ids are NOT trusted here beyond their shape. The connector falls
+  // back to the DIRECTORY NAME when an `identity.json` exists but does not
+  // parse, so the list can legitimately contain strings that are not agent ids
+  // at all. Ownership is resolved where it is known — against the caller's own
+  // agents when the status is read — never by believing the report.
+  if ('superseded_agent_ids' in raw) {
+    const field = raw.superseded_agent_ids
+    if (field === null) {
+      status.superseded_agent_ids = null
+    } else if (Array.isArray(field)) {
+      status.superseded_agent_ids = field
+        .filter((id): id is string => typeof id === 'string')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0 && !looksLikeRawPathOrSecret(id))
+        // Same 120-character ceiling the string fields use, and a count cap so
+        // a malformed or hostile report cannot grow the row without bound.
+        .map((id) => id.slice(0, 120))
+        .slice(0, 50)
+    }
+  }
+
   status.last_probe_at = new Date().toISOString()
   return status
 }

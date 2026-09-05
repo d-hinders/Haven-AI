@@ -442,7 +442,7 @@ counting methods disagreed by roughly a factor of two, and a call-site number wi
 command is not reproducible. It misses two things by construction. **`variant` is optional**,
 so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 1 and is
 nonetheless the most common button in the product. And it cannot see the four dynamic call
-sites (`DashboardClient.tsx:334`, `ConfirmDialog.tsx:52`, `ReplaceSigningKeyModal.tsx:933`,
+sites (`DashboardClient.tsx:334`, `ConfirmDialog.tsx:60`, `ReplaceSigningKeyModal.tsx:933`,
 `CopyBlock.tsx:39`). The shape of the distribution is the point, not the integer.
 
 **Ring tone lives with the fill ([#1817](https://github.com/d-hinders/Haven-AI/issues/1817)).**

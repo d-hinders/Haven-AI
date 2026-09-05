@@ -16,7 +16,7 @@ The server is intentionally local-only:
 - Haven's backend receives API identity plus signed payloads. It never receives
   the delegate key.
 
-## You are an AI agent and your user has no Haven account yet?
+## Are you an AI agent whose user has no Haven account yet?
 
 Read **`/for-agents.md`** on the Haven host your user gave you — or
 [the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)

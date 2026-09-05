@@ -91,11 +91,18 @@ export const AGENT_COMMAND_MODIFICATION_SENTENCE =
  * is committed at that path, so the fallback is a real file rather than a
  * promise.
  *
+ * Interrogative, not declarative-with-a-question-mark. `llms.txt` states the
+ * same idea declaratively because there it is a LINK TITLE in a list; an H2
+ * whose job is to catch the right reader and let everyone else skip is a
+ * question. The mismatched mood was a haven-design-reviewer finding, fixed
+ * while it was cheap: the string is byte-pinned in six files, so the cost of
+ * changing it only ever goes up.
+ *
  * It says what the agent CANNOT do first. The account and the passkey are the
  * user's, always — stating that up front is what stops an agent trying, and it
  * is the epic invariant no slice may weaken.
  */
-export const AGENT_README_SECTION_MD = `## You are an AI agent and your user has no Haven account yet?
+export const AGENT_README_SECTION_MD = `## Are you an AI agent whose user has no Haven account yet?
 
 Read **\`/for-agents.md\`** on the Haven host your user gave you — or
 [the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)

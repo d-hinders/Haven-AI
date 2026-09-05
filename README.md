@@ -25,7 +25,7 @@ Haven is an agentic stablecoin payment wallet. Users create or link a Haven acco
 
 Haven is non-custodial smart account software. User funds stay in a **user-controlled MetaMask Hybrid DeleGator smart account**, shown in product copy as a Haven wallet. An agent's spending authority is a **delegation you sign** — a budget with audited caveat enforcers (period budget with native refill, optional recipient pin, expiry) that the DelegationManager enforces on-chain at redemption. Haven helps users configure that authority, construct payment payloads, relay independently signed transactions, and understand activity. It does not hold user or agent private keys, make API credentials sufficient to spend, or make discretionary transfer decisions — and it holds no key that can change an account's signer set or redeem a delegation you did not sign.
 
-## You are an AI agent and your user has no Haven account yet?
+## Are you an AI agent whose user has no Haven account yet?
 
 Read **`/for-agents.md`** on the Haven host your user gave you — or
 [the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)

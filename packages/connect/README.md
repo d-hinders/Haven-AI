@@ -7,7 +7,7 @@ signing key and API key locally, stores them locally, and sends Haven only the
 public signing address, proof signature, and API-key hash. Haven never receives
 the private key or plaintext API key.
 
-## You are an AI agent and your user has no Haven account yet?
+## Are you an AI agent whose user has no Haven account yet?
 
 Read **`/for-agents.md`** on the Haven host your user gave you — or
 [the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
@@ -48,7 +48,6 @@ Do not point it at a project repository, shared folder, or cloud-synced folder.
 Use `--ack-local-tools` with Haven-generated setup prompts. It prepares the
 local Haven tools acknowledgement during setup so Codex and Claude Code can load
 Haven after a normal restart.
-
 
 ## Supported runtimes
 

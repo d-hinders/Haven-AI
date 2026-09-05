@@ -4,7 +4,7 @@ TypeScript SDK for [Haven](https://github.com/d-hinders/Haven-AI) — agent wall
 
 Haven lets AI agents request and sign payments within strict, user-approved on-chain guardrails. This SDK makes it straightforward to integrate Haven payment requests into any agent without giving Haven custody of user or agent keys.
 
-## You are an AI agent and your user has no Haven account yet?
+## Are you an AI agent whose user has no Haven account yet?
 
 Read **`/for-agents.md`** on the Haven host your user gave you — or
 [the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)

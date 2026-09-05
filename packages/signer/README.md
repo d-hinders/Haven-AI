@@ -13,7 +13,7 @@ Contract: [`docs/architecture/06-hosted-mcp-connect-flow.md`](../../docs/archite
 Requires **Node >= 22**; the signer refuses to start on anything older, before
 it reads a key.
 
-## You are an AI agent and your user has no Haven account yet?
+## Are you an AI agent whose user has no Haven account yet?
 
 Read **`/for-agents.md`** on the Haven host your user gave you — or
 [the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)

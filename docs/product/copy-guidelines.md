@@ -476,6 +476,18 @@ artifact that was already self-consistent.
 | The agent's API key, `sk_agent_…`, written to `~/.haven` | **agent credential** | `sk_live_…` (a different product's shape and never Haven's), agent key, API token |
 | The agent's signing key, made locally and never sent anywhere | **delegate key** | signing key (ambiguous — the user also signs), private key |
 
+**Scope, stated because the table above reads wider than it is enforced
+([#2576](https://github.com/d-hinders/Haven-AI/issues/2576)).** #2533 swept the
+eleven surfaces it named: the repo README, the five package READMEs,
+`llms.txt`, `llms-full.txt`, `402.md`, `402/index.html` and `for-agents.md`.
+**52 occurrences of "setup command" across 21 other files remain** — the
+dashboard connect modal, the connector's own printed strings and six operations
+docs — measured at the time of writing with the command in #2576, which also
+carries the positive control. They are not oversights; they are outside that
+issue's stated file list, and two of them need a judgement rather than a rename
+(the connector refuses a consumed setup *token*, where "setup" may be the right
+word). Treat the table as the destination and #2576 as the remaining distance.
+
 Two boundaries this table does **not** cross:
 
 - **`npx -y @haven_ai/connect@<channel>` stays verbatim** wherever it appears.

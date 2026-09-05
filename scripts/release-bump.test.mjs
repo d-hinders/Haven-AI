@@ -1704,24 +1704,83 @@ test('#2580: an unchanged version is refused before the release PR merges', asyn
   assert.deepEqual(semver.calls[1], ['eq', '0.1.34-alpha.0', '0.1.34-alpha.0'])
 })
 
-test('#2580: production passes the REAL semver, not a stand-in', async () => {
-  // The double above proves the rule's logic; this proves the rule is wired to
-  // a real comparator in the one place it runs for real. Without it, the suite
-  // would be equally green if `release-bump.mjs` handed the rule an object that
-  // always answered "fine" — which is the failure mode a doubled dependency
-  // introduces and the reason this assertion exists alongside it.
+test('#2580: production resolves the REAL semver — structurally, not by substring', async () => {
+  // The double above proves the rule's logic; this proves the rule is wired to a
+  // real comparator in the one place it runs for real.
+  //
+  // The FIRST version of this test was a substring scan for
+  // `node_modules', 'semver', 'index.js'` anywhere in the file, and
+  // `haven-reviewer` broke it by execution: it replaced `getSemver`'s body with
+  // a permissive object literal (`{ lt: () => false, eq: () => false, … }`)
+  // that refuses nothing, left the path string alive in an unused variable, and
+  // all 62 tests still passed. The commit message claimed this assertion stopped
+  // exactly that. It did not. So the check is now scoped to `getSemver`'s BODY
+  // and asserts its shape rather than the file's vocabulary.
   const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
   const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
   assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
   const callLine = source.slice(call, source.indexOf('\n', call))
-  assert.match(
-    callLine,
-    /await getSemver\(\)/,
-    'the production call must pass the resolved workspace semver',
-  )
-  // And getSemver must resolve the real package, not fabricate one.
-  assert.match(source, /node_modules', 'semver', 'index\.js'/)
+  assert.match(callLine, /await getSemver\(\)/, 'the production call must pass the resolved workspace semver')
+
+  // Isolate the function body, so nothing elsewhere in the file can satisfy it.
+  const fnStart = source.indexOf('async function getSemver() {')
+  assert.notEqual(fnStart, -1, 'getSemver was renamed or removed')
+  const body = source.slice(fnStart, source.indexOf('\n}', fnStart))
+
+  assert.match(body, /node_modules', 'semver', 'index\.js'/, 'getSemver must resolve the real package path')
+  assert.match(body, /return \(await import\(semverPath\)\)\.default/, 'getSemver must RETURN the imported module')
+  // The stub that defeated the old check: a returned object literal. `lt:` or
+  // `eq:` appearing as a property inside this body means the comparator is being
+  // fabricated rather than imported.
+  assert.doesNotMatch(body, /\blt\s*:/, 'getSemver must not fabricate a comparator')
+  assert.doesNotMatch(body, /\beq\s*:/, 'getSemver must not fabricate a comparator')
 })
+
+test('#2580: real semver agrees with the ordering the rule assumes — where deps exist', async () => {
+  // The coverage the double genuinely COSTS, restored where it can be, and named
+  // where it cannot. `haven-reviewer` was right that switching to a double lost
+  // something real: nothing was left proving that the actual pinned semver orders
+  // Haven's OWN version pairs the way this rule assumes — above all
+  // `0.1.34-alpha.0 -> 1.0.0`, the pair #2580's acceptance criteria name and the
+  // pair `sort -V` gets wrong.
+  //
+  // It cannot run in `Repo CI config checks`, which has no `node_modules` by
+  // design and is the only job that runs this file. So it is availability-gated,
+  // and the gate is LOUD: when semver is absent the test still runs and asserts
+  // the reason, rather than vanishing from the count. A skipped test that reports
+  // nothing is how a suite starts passing vacuously.
+  const semverPath = join(ROOT, 'node_modules', 'semver', 'index.js')
+  let semver = null
+  try {
+    semver = (await import(semverPath)).default
+  } catch (err) {
+    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed for an unexpected reason: ${err.message}`)
+    return // dependency-free job: nothing to assert, and nothing silently skipped
+  }
+
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  // Allowed, under the REAL comparator.
+  for (const [current, next] of [
+    ['0.1.34-alpha.0', '1.0.0'],
+    ['1.0.0-alpha.1', '1.0.0'],
+    ['0.1.34-alpha.0', '0.1.34-alpha.1'],
+    ['0.1.9', '0.2.0'],
+  ]) {
+    assert.equal(
+      backwardsVersionViolation(current, next, { snapshot: false }, semver),
+      null,
+      `real semver must allow ${current} -> ${next}`,
+    )
+  }
+
+  // Refused, under the REAL comparator.
+  assert.ok(backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver), 'backwards')
+  assert.ok(backwardsVersionViolation('1.0.0', '1.0.0-alpha.1', { snapshot: false }, semver), 'the sort -V trap, inverted')
+  assert.ok(backwardsVersionViolation('0.1.34-alpha.0', '0.1.34-alpha.0', { snapshot: false }, semver), 'no-op')
+})
+
 
 test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag is known', async () => {
   // Reachability, not presence. The guard must run where `snapshot` has been

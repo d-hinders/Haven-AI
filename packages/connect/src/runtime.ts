@@ -96,6 +96,17 @@ export interface ConnectOptions {
   waitForApproval?: boolean
   /** Test/injection overrides for the approval poll cadence and clock. */
   approvalWait?: ApprovalWaitOptions
+  /**
+   * #2528: how this run was invoked, reported to the backend at register so
+   * the onboarding funnel can segment machine-readable runs from narrated
+   * ones (D1, #2529).
+   *
+   * An explicit option rather than an inference from `waitForApproval`: that
+   * flag is already false for a prose run with no TTY (#2484) and can be set
+   * false by hand, so reading `--json` off it would mislabel real prose runs.
+   * Defaults to `'prose'` — the mode a caller who says nothing is in.
+   */
+  runMode?: 'json' | 'prose'
 }
 
 /** The stable machine-readable result emitted by `haven-connect --json`. */
@@ -119,7 +130,16 @@ export interface ConnectOutcome {
     instruction: string
   }
   next_action: string
-  approval: { required: boolean; expires_at: string | null }
+  /**
+   * `url` is #2528, additive within schema_version 1 — the same convention
+   * #2173, #2174, #2551, #2091 and #2279 followed for this object. Present
+   * only when the backend returned one: a deployment older than #2528 sends
+   * nothing, and a key whose value is `undefined` disappears from
+   * `JSON.stringify` anyway, so a consumer must test for it rather than
+   * assume it. `required: false` runs carry no url — there is nothing to
+   * approve.
+   */
+  approval: { required: boolean; expires_at: string | null; url?: string }
   verification: {
     tools: readonly ['haven_get_agent', 'haven_get_allowances']
     instruction: string
@@ -539,6 +559,9 @@ async function executeConnect(
       // slug — `serverNamesFor` is the one place the naming rule lives, and
       // the hosted name is what a user pastes into an MCP config.
       mcpServerName: serverNamesFor(serverName).hosted,
+      // #2528: 'prose' is the default because it is what a caller who says
+      // nothing is doing — the library entry point is not a --json run.
+      runMode: options.runMode ?? 'prose',
       connectorContext: {
         environment_label: options.environmentLabel ?? 'Local workspace',
         config_target: installCapabilities.canWriteRuntimeConfig
@@ -662,7 +685,7 @@ async function executeConnect(
           // relaying it verbatim hands the user everything without a second
           // call. No secrets: every value here is already in the
           // printSetupSummary output; nothing in it is a key or an address.
-          log(approveBudgetCta(setup))
+          log(approveBudgetCta(setup, registration.approval_url))
         }
       } catch {
         // ignore — the final report follows either way
@@ -817,7 +840,7 @@ async function executeConnect(
     approval = await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
   }
 
-  printNextSteps(runtimeInstall, log, approval)
+  printNextSteps(runtimeInstall, log, approval, registration.approval_url)
 
   const outcome = completionOutcome({
     runtimeInstall,
@@ -828,6 +851,7 @@ async function executeConnect(
     ...(replacing ? { retiredAgentIds } : {}),
     setupChallengeExpiresAt: setup.challenge.expires_at,
     approvalRequired: registration.agent_status === 'pending_approval',
+    approvalUrl: registration.approval_url,
   })
 
   // #2173: park the verdict on disk before returning it. A harness whose watch
@@ -859,6 +883,7 @@ export function completionOutcome(input: {
   retiredAgentIds?: readonly string[]
   setupChallengeExpiresAt?: string
   approvalRequired: boolean
+  approvalUrl?: string
 }): ConnectOutcome {
   const { runtimeInstall } = input
   const manualSetup = runtimeInstall.errorCode === 'manual_runtime_setup_required'
@@ -881,7 +906,16 @@ export function completionOutcome(input: {
         : runtimeProfile(runtimeInstall.runtime).activationInstruction,
     },
     next_action: nextAction,
-    approval: { required: input.approvalRequired, expires_at: null },
+    approval: {
+      required: input.approvalRequired,
+      expires_at: null,
+      // Only when there is something to approve AND the backend supplied a
+      // link. Never synthesised here: the connector does not know the
+      // dashboard's origin, and a guessed URL is worse than none — it is the
+      // "do not invent one" rule the agent runbook states, applied to the
+      // tool rather than the agent.
+      ...(input.approvalRequired && input.approvalUrl ? { url: input.approvalUrl } : {}),
+    },
     verification: {
       tools: ['haven_get_agent', 'haven_get_allowances'] as const,
       instruction: runtimeVerificationInstruction(runtimeInstall.runtime),
@@ -1142,15 +1176,20 @@ function printSetupSummary(setup: ResolvedSetup, log: (message: string) => void)
  * rows join with commas. One name for the gate throughout: the budget
  * (#1542).
  */
-function approveBudgetCta(setup: ResolvedSetup): string {
+function approveBudgetCta(setup: ResolvedSetup, approvalUrl?: string): string {
+  // #2528: the link replaces "in the Haven dashboard", which was a place the
+  // user had to go find. Falls back to the previous wording when the backend
+  // is older than #2528 and sent none — degrading to the old sentence is
+  // correct; printing `undefined` is not.
+  const where = approvalUrl ? `at ${approvalUrl}` : 'in the Haven dashboard'
   const budgetPhrase =
     setup.agent_budget.length > 0
       ? setup.agent_budget.map((budget) => `up to ${describeSetupBudget(budget)}`).join(', ')
       : undefined
   if (budgetPhrase) {
-    return `→ Action needed: approve this agent's budget — ${budgetPhrase} from ${setup.haven_wallet.name} on ${setup.haven_wallet.network} — in the Haven dashboard. The approval button is live now; setup continues here in the meantime.`
+    return `→ Action needed: approve this agent's budget — ${budgetPhrase} from ${setup.haven_wallet.name} on ${setup.haven_wallet.network} — ${where}. The approval button is live now; setup continues here in the meantime.`
   }
-  return "→ Action needed: approve this agent's budget in the Haven dashboard — the approval button is live now. Setup continues here in the meantime."
+  return `→ Action needed: approve this agent's budget ${where} — the approval button is live now. Setup continues here in the meantime.`
 }
 
 function describeSetupBudget(budget: ResolvedSetup['agent_budget'][number]): string {
@@ -1405,11 +1444,19 @@ export async function waitForBudgetApproval(
 export function completionHandoffLines(
   result: RuntimeInstallResult,
   approval?: BudgetApprovalOutcome,
+  approvalUrl?: string,
 ): string[] {
+  // #2528: "Return to Haven" is the sentence an agent had to translate into a
+  // place for its user. With a link it relays a destination instead. Optional
+  // throughout — a backend older than #2528 sends none and these lines read
+  // exactly as they did before.
+  const approveStep = approvalUrl
+    ? `Approve the budget at ${approvalUrl}. Approval — not restarting — unlocks Haven tools.`
+    : 'Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.'
   if (result.errorCode === 'manual_runtime_setup_required') {
     return [
       'Next steps:',
-      '1. Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.',
+      `1. ${approveStep}`,
       '2. Finish the manual MCP setup using the secret-free file references printed above, then start a fresh session in your runtime.',
       `3. ${runtimeVerificationInstruction(result.runtime)}`,
     ]
@@ -1437,7 +1484,7 @@ export function completionHandoffLines(
   }
   return [
     'Next steps:',
-    '1. Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.',
+    `1. ${approveStep}`,
     `2. ${activation}`,
     `3. ${runtimeVerificationInstruction(result.runtime)}`,
   ]
@@ -1510,6 +1557,7 @@ function printNextSteps(
   result: RuntimeInstallResult,
   log: (message: string) => void,
   approval?: BudgetApprovalOutcome,
+  approvalUrl?: string,
 ): void {
-  for (const line of completionHandoffLines(result, approval)) log(line)
+  for (const line of completionHandoffLines(result, approval, approvalUrl)) log(line)
 }

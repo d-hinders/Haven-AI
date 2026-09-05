@@ -27,7 +27,12 @@ import {
 import { normalizeAgentAllowances } from '../modules/agents/index.js'
 import { getChain } from '../domain/chains.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
-import { buildApprovalUrl, normalizeViaMarker } from '../domain/handoff-links.js'
+import {
+  buildApprovalUrl,
+  isUnknownRunMode,
+  normalizeRunMode,
+  normalizeViaMarker,
+} from '../domain/handoff-links.js'
 import {
   AGENT_APPROVAL_RELAY_JSON_SENTENCE,
   AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
@@ -36,6 +41,7 @@ import {
   AGENT_LOCAL_KEY_SENTENCE,
   AGENT_NETWORK_ACCESS_SENTENCE,
   AGENT_SECRET_HYGIENE_SENTENCE,
+  AGENT_WIRING_COLLISION_RELAY_SENTENCE,
 } from '@haven_ai/sdk'
 import {
   requestPassport,
@@ -95,6 +101,13 @@ interface RegisterSetupBody extends ResolveSetupBody {
    * rather than being guessed at.
    */
   mcp_server_name?: string
+  /**
+   * #2528: `'json'` when the connector ran with `--json`, `'prose'` otherwise.
+   * The connector is the only party that knows — the request is identical over
+   * the wire either way. Absent from connectors older than #2528; an
+   * unrecognised value is a 400, never a silent null.
+   */
+  run_mode?: string
   connector_context?: unknown
   install_capabilities?: {
     can_write_runtime_config?: boolean
@@ -329,6 +342,14 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     if (!request.body?.setup_token || typeof request.body.setup_token !== 'string') {
       return reply.code(401).send({ error: 'Invalid setup token' })
     }
+    // #2528: refuse an unrecognised run_mode rather than storing it or
+    // coercing it to null. This dimension segments the onboarding funnel, so a
+    // value nothing recognises must not enter it silently — and a caller that
+    // sent one deserves to be told, not to have it dropped. Checked BEFORE the
+    // transaction, beside the other refusals that cost nothing.
+    if (isUnknownRunMode(request.body.run_mode)) {
+      return reply.code(400).send({ error: 'Unsupported run_mode' })
+    }
 
     // #1129: resolved BEFORE the transaction opens. A configuration error must
     // refuse the whole registration up front — never after the setup token has
@@ -347,6 +368,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let setupUserId = ''
     let setupSource: string | null = null
     let setupVia: string | null = null
+    const runMode = normalizeRunMode(request.body.run_mode)
     try {
       await setups.inTransaction(async (tx) => {
         const setup = await setups.lockSetupByTokenHash(
@@ -439,6 +461,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             apiKeyPrefix,
             connectorVersion: stringOrNull(request.body.connector_version),
             runtime: stringOrNull(request.body.runtime),
+            runMode,
             connectorContext,
             installStatus: initialInstallStatus,
           },
@@ -459,6 +482,12 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         via: 'connection_setup',
         ...(setupSource ? { source: setupSource } : {}),
         ...(setupVia ? { handoff_via: setupVia } : {}),
+        // #2528: sits next to `source` so "share of agent-driven setups that
+        // ran machine-readable" is one query over onboarding_events, with no
+        // join back to the setups table. Omitted, not null, when the connector
+        // predates the field — an absent key and a null read differently in
+        // the metadata JSON, and absent is the honest one.
+        ...(runMode ? { run_mode: runMode } : {}),
       })
       emitFunnelEvent(setupUserId, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
     } catch (err) {
@@ -503,6 +532,12 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       api_key_scope: 'setup_pending',
       delegate_address: delegateAddress,
       hosted_mcp_url: hostedMcpUrlValue,
+      // #2528: the same link create and status already return, so the
+      // connector can print a URL instead of "return to Haven and approve" —
+      // and the agent relays a link rather than a sentence. Built from
+      // `config.frontendUrl`, same-origin, carrying no secret: the setup id is
+      // already in the connector's own outcome record.
+      approval_url: buildApprovalUrl(setupId),
       next_action: 'return_to_haven_for_wallet_approval',
       passport_requested: passportChainId != null,
     })
@@ -1146,6 +1181,13 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
     // instruction. Merging the two hands the user two actions at once, and the
     // one they can actually do now is the approval.
     AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+    // #2551, via #2567 → #2528: the third relay case. The prompt already names
+    // the other two occasions an agent must hand a decision back rather than
+    // act (approval required; the runtime refusal's one bounded retry), so a
+    // collision left unnamed is the one an agent resolves by guessing — and
+    // both guesses available to it, --replace and --name, change which agent
+    // holds spend authority on this machine.
+    AGENT_WIRING_COLLISION_RELAY_SENTENCE,
     // #1719: the old sentence said appending --json was the ONLY permitted
     // change, which forbade the one retry the connector now asks an agent for
     // by name. Exactly two changes are permitted, and the second is bounded to

@@ -372,7 +372,8 @@ function validateBoundary(shape: ClientShape, contract: ClientBoundary): void {
 describe('HavenClient structural boundary', () => {
   it('pins the package runtime export surface', () => {
     expect(Object.keys(sdk).sort()).toEqual([
-      // #2523: the agent-onboarding guidance. These seven sentences are the
+      // #2523: the agent-onboarding guidance. These eight sentences (#2528
+      // added the wiring-collision relay) are the
       // rules the backend's setup prompt states to an agent AND the ones the
       // `/for-agents.md` runbook repeats; exported so both read one string
       // rather than two copies that can disagree in front of an agent.
@@ -387,6 +388,7 @@ describe('HavenClient structural boundary', () => {
       'AGENT_PAYMENT_PHASE_VALUES',
       'AGENT_PAYMENT_RAIL_VALUES',
       'AGENT_SECRET_HYGIENE_SENTENCE',
+      'AGENT_WIRING_COLLISION_RELAY_SENTENCE',
       'AgentPaymentFailureCode',
       'AgentPaymentFailureCodeDescriptions',
       'AgentPaymentFailureCodeSchema',

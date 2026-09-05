@@ -92,7 +92,8 @@ it. It is not removed — it is simply no longer what an agent gets by asking to
 log in.
 
 **What the approved session can do.** Create and manage agents — including
-issuing an agent a new API key, which stops the old one working — set up a
+issuing **any** of your agents a new API key, which stops the old one working
+immediately, whether or not this session created that agent — set up a
 connection, and read your account. **What it cannot:** sign anything, approve a
 budget, change signers, move funds, change your credentials, or re-key an
 agent's delegate key (`/agents/:id/rekey/*`, which is a different thing from

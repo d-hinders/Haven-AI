@@ -50,8 +50,8 @@ interface CensusRoute {
   /** Fastify shape, e.g. `/agents/:id` — what `request.routeOptions.url` is. */
   fastifyUrl: string
   file: string
-  /** Does `authMiddleware` gate this route? */
-  authGated: boolean
+  /** How firmly `authMiddleware` gates this route. */
+  gate: Gate
 }
 
 /**
@@ -63,25 +63,50 @@ interface CensusRoute {
  * key — is a DIFFERENT door, and a route behind a different door cannot be
  * granted or refused by the `owner_cli` opt-in at all.
  */
-function authGateMap(source: string): boolean[] {
+type Gate = 'none' | 'conditional' | 'full'
+
+/**
+ * Which registrations `authMiddleware` actually gates, and how firmly.
+ *
+ * Three shapes in this codebase: a module-wide `addHook`, `authMiddleware` in
+ * one route's own options, or a DIFFERENT door entirely —
+ * `agent-connection-setups.ts`'s `authenticateConnectorStatusRequest`, which
+ * demands a literal `sk_agent_...` key. A route behind a different door cannot
+ * be granted or refused by the `owner_cli` opt-in at all.
+ *
+ * `conditional` is the third answer, and it exists because the second review
+ * round caught this function getting it wrong. A module hook is not always
+ * `authMiddleware` by name: `catalog.ts` hangs `eitherAuth` on the hook, which
+ * lets an anonymous public read through and DELEGATES to `authMiddleware` for
+ * everything else. Following the name and asking "does `authMiddleware` appear
+ * in there" answers YES for that wrapper — and would answer yes just as
+ * happily for a wrapper whose carve-out excluded far more. Substring presence
+ * is not control flow. So a wrapper that can return before it reaches
+ * `authMiddleware` is reported `conditional`, and the test below refuses to
+ * accept that as gating unless somebody has written down why.
+ */
+function authGateMap(source: string): Gate[] {
   const text = stripCommentsOutsideStrings(source)
 
-  // A module hook is not always `authMiddleware` by name. `catalog.ts` hangs
-  // `eitherAuth` on the hook, which lets an anonymous public read through and
-  // DELEGATES to `authMiddleware` for everything else — so the opt-in does
-  // apply there. Detecting only the literal name called that entry dead when
-  // it is live, which is the same "reads like coverage" mistake pointed the
-  // other way. So: follow the hook to its definition and ask whether
-  // `authMiddleware` is what it ends up calling.
-  const moduleWide = [...text.matchAll(
+  let moduleGate: Gate = 'none'
+  for (const [, hook] of text.matchAll(
     /addHook\(\s*['"](?:onRequest|preHandler)['"]\s*,\s*([A-Za-z_$][A-Za-z0-9_$]*)/g,
-  )].some(([, hook]) => {
-    if (hook === 'authMiddleware') return true
-    const defined = new RegExp(
-      `(?:function\\s+${hook}\\b|(?:const|let)\\s+${hook}\\s*[:=])`,
-    ).exec(text)
-    return defined ? text.slice(defined.index, defined.index + 1500).includes('authMiddleware') : false
-  })
+  )) {
+    if (hook === 'authMiddleware') {
+      moduleGate = 'full'
+      break
+    }
+    const defined = new RegExp(`(?:function\\s+${hook}\\b|(?:const|let)\\s+${hook}\\s*[:=])`).exec(text)
+    if (!defined) continue
+    const body = text.slice(defined.index, defined.index + 1500)
+    const authAt = body.indexOf('authMiddleware')
+    if (authAt < 0) continue
+    // A `return` reachable before `authMiddleware` is a carve-out: some
+    // requests never meet the middleware at all.
+    const bypasses = /(?:^|[^A-Za-z0-9_$])return(?![A-Za-z0-9_$])/.test(body.slice(0, authAt))
+    moduleGate = bypasses ? 'conditional' : 'full'
+    if (moduleGate === 'full') break
+  }
 
   const re = new RegExp(
     `\\b[A-Za-z_$][A-Za-z0-9_$]*\\.(get|post|put|patch|delete)[^'"\`(]*\\(\\s*(['"\`])([^'"\`]+)\\2`,
@@ -92,13 +117,13 @@ function authGateMap(source: string): boolean[] {
   while ((match = re.exec(text)) !== null) starts.push(match.index)
 
   return starts.map((start, i) => {
-    if (moduleWide) return true
+    if (moduleGate !== 'none') return moduleGate
     // The options object follows the path immediately. Bound the window at the
     // next registration so one route's `preHandler` cannot be credited to its
     // neighbour, and at 500 characters so the last route in a file does not
     // absorb the rest of the module.
     const end = Math.min(starts[i + 1] ?? text.length, start + 500)
-    return text.slice(start, end).includes('authMiddleware')
+    return text.slice(start, end).includes('authMiddleware') ? 'full' : 'none'
   })
 }
 
@@ -114,7 +139,7 @@ async function census(): Promise<CensusRoute[]> {
         path: fastifyPathToOpenApi(prefix, route.path),
         fastifyUrl: (prefix + (route.path === '/' ? '' : route.path)).replace(/\/+/g, '/') || '/',
         file,
-        authGated: gates[i] ?? false,
+        gate: gates[i] ?? 'none',
       })
     })
   }
@@ -140,8 +165,8 @@ describe('owner_cli route census (#2526)', () => {
     expect(new Set(routes.map((r) => r.file)).size).toBeGreaterThan(10)
     // And the gate detector must be able to say BOTH words. If it answered
     // `true` for everything, the auth-gating test below would pass vacuously.
-    expect(routes.some((r) => r.authGated)).toBe(true)
-    expect(routes.some((r) => !r.authGated)).toBe(true)
+    expect(routes.some((r) => r.gate === 'full')).toBe(true)
+    expect(routes.some((r) => r.gate === 'none')).toBe(true)
   })
 
   it('the ENFORCEMENT allows exactly the listed routes — measured through the door', async () => {
@@ -174,10 +199,33 @@ describe('owner_cli route census (#2526)', () => {
     // would sail through every other test in this file.
     const routes = await census()
     const byKey = new Map(routes.map((r) => [key(r), r]))
-    const notBehindAuth = OWNER_CLI_ALLOWED_ROUTES.map(key).filter(
-      (entry) => byKey.get(entry)?.authGated !== true,
-    )
+    // A route whose module gates CONDITIONALLY has to be acknowledged by name.
+    // `catalog.ts`'s hook lets an anonymous public read past without meeting
+    // `authMiddleware` at all, so "it is behind auth" is true of some requests
+    // and false of others — a distinction a substring search cannot make and
+    // this list must not paper over.
+    const CONDITIONAL_OK = new Map([
+      [
+        'GET /catalog',
+        'catalog.ts gates with `eitherAuth`, which lets an anonymous PUBLIC read ' +
+          'past. Granting owner_cli here grants nothing an unauthenticated caller ' +
+          'does not already have, so the carve-out cannot widen this entry.',
+      ],
+    ])
+    const notBehindAuth = OWNER_CLI_ALLOWED_ROUTES.map(key).filter((entry) => {
+      const gate = byKey.get(entry)?.gate
+      if (gate === 'full') return false
+      if (gate === 'conditional') return !CONDITIONAL_OK.has(entry)
+      return true
+    })
     expect(notBehindAuth).toEqual([])
+    // And the acknowledgements must stay live: one naming a route that is no
+    // longer conditional is a stale exemption, which is how a carve-out list
+    // turns back into decoration.
+    const staleAck = [...CONDITIONAL_OK.keys()].filter(
+      (entry) => byKey.get(entry)?.gate !== 'conditional',
+    )
+    expect(staleAck).toEqual([])
   })
 
   it('the allow-list names only routes that actually exist', async () => {
@@ -204,6 +252,14 @@ describe('owner_cli route census (#2526)', () => {
       [/passkey/i, 'passkey management'],
       [/signers?(\/|$)/i, 'signer-set changes'],
       [/\/activate$/i, 'delegation activation'],
+      // Build and revoke, not only activate. `owner-cli.ts` and the security
+      // model both name "delegation build/activate/revoke" as the forbidden
+      // class, and the first cut of this list only caught activate — so five
+      // real routes in `agent-delegations.ts` (`/delegations/build`,
+      // `/delegations/{hash}/revoke`, `.../revoke/submit`, `/revoke-all`,
+      // `/revoke-all/submit`) could have been added without this firing.
+      [/\/delegations\/(build|revoke)/i, 'building or revoking a delegation'],
+      [/\/revoke-all/i, 'revoking delegations wholesale'],
       [/\/safe\/exec/i, 'arbitrary Safe execution'],
       [/password|credentials/i, 'credential changes'],
       [/^\/accounts/i, 'account provisioning'],

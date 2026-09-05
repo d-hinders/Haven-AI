@@ -13,13 +13,13 @@ describe('haven guide text (#2525)', () => {
   it('is byte-for-byte the canonical SDK runbook', async () => {
     const canonical = (await readCanonicalRunbook()) as string
     expect(HAVEN_AGENT_RUNBOOK_MD).toBe(canonical)
-    // Both figures, because they differ and each gets quoted somewhere: 8,038
-    // UTF-8 bytes, 7,969 UTF-16 code units. The em-dashes are the gap — the
+    // Both figures, because they differ and each gets quoted somewhere: 8,060
+    // UTF-8 bytes, 7,991 UTF-16 code units. The em-dashes are the gap — the
     // same units confusion #2562 fixed in the docs chain gate. Moved by #2526,
     // which added the device-code login to step 1: the page told an agent it
     // must not have the user's password and offered no alternative to asking.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(8038)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(7969)
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(8060)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(7991)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

@@ -59,12 +59,14 @@ describe('/for-agents.md (#2523)', () => {
     // rule list and left in the setup prompt alone (~440 bytes), on the
     // reasoning recorded above that export.
     //
-    // 7800 -> 8100 for #2526 (the page is 8038 bytes at this commit). The
+    // 7800 -> 8100 for #2526 (the page is 8060 bytes at this commit). The
     // device-code login is the one addition this page's own premise demands:
     // step 1 tells an agent it must not have the user's password, and until
     // now the page offered no alternative to asking for one. The 257 bytes buy
     // the existence of `haven login`, that the human approves it in a browser,
-    // and its scope in both directions. Deliberately NOT added, and the reason
+    // and its scope in both directions — including that it can issue an agent
+    // a new API key, which the second review round caught this page omitting
+    // while the CLI README and the approval screen both disclosed it. Deliberately NOT added, and the reason
     // the number stays this small: the full hand-off script (~600 bytes), on
     // the grounds that the CLI prints its own code and link, so an agent that
     // knows the command exists does not need this page to compose the message.

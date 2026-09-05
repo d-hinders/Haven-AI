@@ -12,7 +12,7 @@ Your user gives you a **budget on their own account** — not their wallet, and 
 
 Four of the six steps are your user's — each needs a human signature or a human decision. The rest is yours. If they already have a funded account, start at step 3.
 
-1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, `npx @haven_ai/cli login` afterwards gets you a scoped session for steps 3-4 — they approve a code in the browser, you never hold their password. It can set up agents and read the account; it cannot sign, approve a budget, or move funds.
+1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, `npx @haven_ai/cli login` afterwards gets you a scoped session for steps 3-4 — they approve a code in the browser, you never hold their password. It can set up agents, issue them new keys, and read the account; it cannot sign, approve a budget, or move funds.
 2. **HUMAN — fund it.** USDC on Base, to the address the dashboard shows.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back.
 4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally, registering only the public address.

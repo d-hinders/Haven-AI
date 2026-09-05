@@ -126,6 +126,73 @@ describe('device approval screen', () => {
       expect(await screen.findByText(/an unnamed program/i)).toBeInTheDocument()
     })
 
+    it('submits the code the LABEL belongs to, not whatever is in the box', async () => {
+      // The race the second review round found. The auto-lookup fires on mount
+      // for the code in the link; while it is in flight the outcome is `idle`,
+      // so the input's own reset guard does nothing. Someone who distrusts a
+      // pasted link and starts typing their own code used to end up with the
+      // LINK's label on screen and THEIR code in the box — and Approve
+      // submitted the box. The human reviews one grant and authorises another,
+      // which is precisely what the review step exists to prevent.
+      let release: (v: { client_label: string }) => void = () => {}
+      mockPost.mockImplementation(async (path: string) => {
+        if (path === '/auth/device/lookup') {
+          return new Promise((resolve) => {
+            release = resolve as typeof release
+          })
+        }
+        return { status: 'approved' }
+      })
+      mockSearchParams.get.mockReturnValue('LINK-CODE')
+      render(<DeviceApprovalClient />)
+
+      // Retype while the link's lookup is still open.
+      const input = screen.getByLabelText(/code shown in the terminal/i)
+      await userEvent.clear(input)
+      await userEvent.type(input, 'MINE-9999')
+      release({ client_label: 'Something the link asked for' })
+
+      // The stale response must not install its label at all.
+      await waitFor(() =>
+        expect(screen.queryByText('Something the link asked for')).not.toBeInTheDocument(),
+      )
+      expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument()
+      expect(calls('/auth/device/approve')).toHaveLength(0)
+    })
+
+    it('approves the code it LOOKED UP when the link padded it with spaces', async () => {
+      // The divergence that still exists once the generation guard is in: the
+      // auto-lookup trims the code from the link, the input keeps it untrimmed.
+      // So `pending.userCode` and the box genuinely differ here, and this is
+      // what makes binding the decision to the reviewed grant load-bearing
+      // rather than belt-and-braces — submitting the box would send a code
+      // that is not the one whose label was shown.
+      mockSearchParams.get.mockReturnValue('  ABCD-2345  ')
+      respond()
+      render(<DeviceApprovalClient />)
+      await screen.findByText('Haven CLI on antonio-mbp')
+      expect(mockPost).toHaveBeenCalledWith('/auth/device/lookup', { user_code: 'ABCD-2345' })
+
+      await userEvent.click(screen.getByRole('button', { name: /^approve$/i }))
+      await waitFor(() =>
+        expect(mockPost).toHaveBeenCalledWith('/auth/device/approve', { user_code: 'ABCD-2345' }),
+      )
+    })
+
+    it('approves the reviewed code even if the box is edited afterwards', async () => {
+      // Belt and braces on the same invariant from the other side: whatever
+      // reaches `approve` is the grant that was reviewed. Editing clears the
+      // review, so this asserts the binding directly rather than through the UI.
+      mockSearchParams.get.mockReturnValue('ABCD-2345')
+      respond()
+      render(<DeviceApprovalClient />)
+      await screen.findByText('Haven CLI on antonio-mbp')
+      await userEvent.click(screen.getByRole('button', { name: /^approve$/i }))
+      await waitFor(() =>
+        expect(mockPost).toHaveBeenCalledWith('/auth/device/approve', { user_code: 'ABCD-2345' }),
+      )
+    })
+
     it('drops the reviewed label when the code is edited', async () => {
       // Otherwise one code's label sits next to a different code, which is the
       // exact mismatch this step exists to prevent.

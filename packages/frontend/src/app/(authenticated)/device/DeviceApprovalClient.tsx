@@ -8,7 +8,12 @@ import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { api, ApiRequestError } from '@/lib/api'
 
-type Pending = { clientLabel: string | null }
+/**
+ * A looked-up grant. `userCode` is stored WITH the label rather than read back
+ * from the input at decision time: the two must not be able to disagree, and
+ * they could — see `decide` below.
+ */
+type Pending = { userCode: string; clientLabel: string | null }
 
 type Outcome =
   | { kind: 'idle' }
@@ -61,19 +66,35 @@ export default function DeviceApprovalClient() {
     })
   }, [])
 
+  // Generation counter: every lookup and every edit to the code bumps it, and a
+  // response whose generation is stale is dropped. Without it, a lookup still
+  // in flight when the code is edited resolves AFTERWARDS and installs its
+  // label beside the new code — the `outcome.kind !== 'idle'` guard in the
+  // input's onChange cannot help, because during the fetch the outcome IS
+  // idle. That window is small and entirely reachable: the page auto-looks-up
+  // the code from the link on mount, which is exactly when someone who
+  // distrusts a pasted link starts typing their own.
+  const generation = useRef(0)
+
   const lookup = useCallback(
     async (userCode: string) => {
+      const mine = ++generation.current
       setSubmitting('lookup')
       setOutcome({ kind: 'idle' })
       try {
         const res = await api.post<{ client_label: string | null }>('/auth/device/lookup', {
           user_code: userCode,
         })
-        setOutcome({ kind: 'reviewing', pending: { clientLabel: res.client_label ?? null } })
+        if (mine !== generation.current) return
+        setOutcome({
+          kind: 'reviewing',
+          pending: { userCode, clientLabel: res.client_label ?? null },
+        })
       } catch (err) {
+        if (mine !== generation.current) return
         failed(err)
       } finally {
-        setSubmitting(null)
+        if (mine === generation.current) setSubmitting(null)
       }
     },
     [failed],
@@ -91,10 +112,17 @@ export default function DeviceApprovalClient() {
     void lookup(initial)
   }, [searchParams, lookup])
 
-  async function decide(deny: boolean) {
+  // Takes the reviewed grant, and submits ITS code — never the input's current
+  // value. The label on screen and the code being decided have to be the same
+  // grant, or the review step is theatre: a human who read one label would be
+  // granting a different session.
+  async function decide(pending: Pending, deny: boolean) {
     setSubmitting(deny ? 'deny' : 'approve')
     try {
-      await api.post('/auth/device/approve', { user_code: code, ...(deny ? { deny: true } : {}) })
+      await api.post('/auth/device/approve', {
+        user_code: pending.userCode,
+        ...(deny ? { deny: true } : {}),
+      })
       setOutcome({ kind: deny ? 'denied' : 'approved' })
     } catch (err) {
       failed(err)
@@ -132,7 +160,7 @@ export default function DeviceApprovalClient() {
             className="flex flex-col gap-5"
             onSubmit={(event) => {
               event.preventDefault()
-              if (reviewing) void decide(false)
+              if (reviewing) void decide(reviewing, false)
               else void lookup(code)
             }}
           >
@@ -153,6 +181,9 @@ export default function DeviceApprovalClient() {
                   // Editing the code invalidates what was looked up. Leaving
                   // the old label on screen next to a new code is exactly the
                   // mismatch this whole step exists to prevent.
+                  // Bump the generation so a lookup already in flight for the
+                  // OLD code cannot land its label beside this new one.
+                  generation.current += 1
                   if (outcome.kind !== 'idle') setOutcome({ kind: 'idle' })
                 }}
                 placeholder="XXXX-XXXX"
@@ -189,8 +220,9 @@ export default function DeviceApprovalClient() {
             <div className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
               <p className="mb-2">
                 <strong className="text-[var(--v2-ink)]">It can</strong> create and manage agents —
-                including issuing an agent a new API key, which stops the old one working — set up
-                a connection, and read your account: wallets, activity and transactions.
+                including issuing <em>any</em> of your agents a new API key, which stops the old one
+                working immediately — set up a connection, and read your account: wallets, activity
+                and transactions.
               </p>
               <p>
                 <strong className="text-[var(--v2-ink)]">It cannot</strong> sign anything, approve a
@@ -220,7 +252,7 @@ export default function DeviceApprovalClient() {
                   type="button"
                   variant="tertiary"
                   disabled={busy}
-                  onClick={() => void decide(true)}
+                  onClick={() => void decide(reviewing, true)}
                 >
                   {submitting === 'deny' ? 'Denying…' : 'Deny'}
                 </Button>

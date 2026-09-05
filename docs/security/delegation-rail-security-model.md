@@ -857,11 +857,26 @@ route nobody listed grants something nobody decided. The middleware reads the
 list, so the census guards real behaviour rather than a parallel document.
 
 **What an owner-CLI session cannot do**, by construction rather than by
-enumeration: signer changes, re-keying, passkey management,
-credential/password/email changes, account provisioning, transfers, and
-delegation build, activate or revoke. It can create an agent and ask for a
-budget. It cannot approve one. **The human keeps every signature**, which is
-the same boundary §3 draws for the delegation itself.
+enumeration: signer changes, re-keying the delegate key
+(`/agents/{id}/rekey/*`), passkey management, the user's own
+credential/password/email, account provisioning, transfers, and delegation
+build, activate or revoke. It can create an agent and ask for a budget. It
+cannot approve one. **The human keeps every signature**, which is the same
+boundary §3 draws for the delegation itself.
+
+**The one exception in that sentence, stated rather than buried.**
+`POST /agents/{id}/rotate-key` IS on the list. It issues a fresh plaintext
+agent API key and invalidates the old one — a credential change, on **any**
+agent the owner has, not only one this session created. A live agent process
+still holding the previous key starts getting 401s immediately and stays broken
+until a human re-provisions it. That is a self-inflicted denial of service an
+`owner_cli` token can cause, and it is the sharpest thing on the list; it is
+not a funds escalation, because the delegate SIGNING key never leaves the
+agent process and payments still require it. It is on the list because the
+issue scoped it there for an agent that manages its own credentials. Two things
+follow: the approval screen says so in what the session CAN do rather than
+hiding it under "manage agents", and whether it stays is an owner decision this
+document should record the next time it is asked, not an inherited assumption.
 
 `POST /auth/device/approve` is itself absent from the list, deliberately: a CLI
 session approving further CLI sessions would turn one human approval into an
@@ -873,3 +888,12 @@ enforced inside the UPDATE rather than by a read-then-write, and rows are
 purged after a ten-minute expiry — they are spent credentials, not history. A
 wrong, expired or already-decided code all answer alike, so codes are not
 enumerable by a signed-in caller.
+
+What actually carries that last claim is **entropy, not the rate limit**, and
+the distinction matters because the limit is not always armed: `authRateLimit`
+returns no limit at all when `TRUST_PROXY_HOPS <= 0` (§ the #1670 reasoning —
+an unbindable per-IP limit behind an untrusted proxy is a denial of service
+wearing the costume of a protection). A user code is 8 characters over a
+30-symbol alphabet — about 39 bits — inside a ten-minute window, which is not
+searchable even entirely unthrottled. A reader should not come away thinking
+the tier is load-bearing here; it bounds row creation, not guessing.

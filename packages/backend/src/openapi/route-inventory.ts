@@ -117,7 +117,13 @@ export function stripCommentsOutsideStrings(source: string): string {
  */
 export function fastifyPathToOpenApi(prefix: string, path: string): string {
   const full = (prefix + (path === '/' ? '' : path)).replace(/\/+/g, '/')
-  return full.replace(/:([A-Za-z0-9_]+)/g, '{$1}')
+  // A route mounted at `/` with NO prefix collapses to the empty string here,
+  // and the empty string is not a path OpenAPI can express — its name for the
+  // server root is `/`. Nothing exercised this until #2530 added an API root
+  // document, so the gate reported a registered route as `GET ` and no spec
+  // key could ever match it.
+  const normalized = full === '' ? '/' : full
+  return normalized.replace(/:([A-Za-z0-9_]+)/g, '{$1}')
 }
 
 /**

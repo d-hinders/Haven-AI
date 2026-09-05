@@ -827,6 +827,53 @@ export const openapiSpec = {
         },
       },
     },
+    '/': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getApiRoot',
+        summary: 'What this service is, and where its machine-readable contract lives.',
+        description:
+          'Unauthenticated root document (#2530). An agent handed only a backend URL had ' +
+          'nothing to read and had to guess the spec path. Deliberately thin and ' +
+          'non-sensitive: names, paths, and which credential each door wants — no version ' +
+          'or build identifier, which would fingerprint the deployment and buy an agent nothing.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The API root document.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiRootDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/discovery': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getDiscovery',
+        summary: 'Public, read-only facts an agent client needs to configure itself.',
+        description:
+          'The environment as data (#2531): which connector package this deployment hands ' +
+          'out, which hosted MCP it points at, which chains it serves, and where its spec ' +
+          'is. Every value is already public elsewhere — this route re-serves them together ' +
+          'so the frontend capability manifest does not restate the backend\'s env logic. ' +
+          'Never per-user or per-agent data, no relayer address, nothing from /health.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'Public deployment facts.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DiscoveryDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/auth/device/start': {
       post: {
         tags: ['Auth'],
@@ -3763,6 +3810,13 @@ export const openapiSpec = {
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to 30 days before `to`.' },
           { name: 'to', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to now.' },
+          {
+            name: 'segment',
+            in: 'query',
+            schema: { type: 'string', enum: ['via', 'run_mode'] },
+            description:
+              "Split the same steps by one dimension (#2529), added as `segments` alongside the unsegmented `steps`. `via` is the agent hand-off marker — it reads the funnel metadata key `handoff_via`, NOT the key literally named `via`, which predates it and records which CODE PATH created the record ('connection_setup' from the connect flow). Segmenting on that one would answer 'connection_setup' for every connect-modal agent and look like a working metric. `run_mode` is how the connector was invoked ('json' | 'prose', #2528). Attribution is resolved once PER USER from the earliest event in the window carrying the key, then carried across every step: only `signed_up` and `agent_created` write these keys, so a per-event split would report zero agent-driven first payments and read as 'agents never convert'. A user with no value for the key lands in the `unattributed` group — for `run_mode` that means a connector predating #2528, which is NOT the same fact as a `prose` run; the same definition is repeated on `segments.value` so a consumer reading only one of the two fields still learns it. Omitting the parameter returns the unsegmented body unchanged; an unrecognised value is a 400 rather than a silent fall-back to unsegmented.",
+          },
         ],
         responses: {
           '200': {
@@ -3793,6 +3847,31 @@ export const openapiSpec = {
                     medianTtfpMs: { type: ['integer', 'null'], description: 'Median signup→first-settled-payment in ms. Null when nobody has completed it in the window.' },
                     from: { type: 'string', format: 'date-time', description: 'The resolved window start.' },
                     to: { type: 'string', format: 'date-time', description: 'The resolved window end.' },
+                    segment: { type: 'string', enum: ['via', 'run_mode'], description: 'Echoed back only when the request asked for a split. Absent otherwise, together with `segments`.' },
+                    segments: {
+                      type: 'array',
+                      description:
+                        "Present only when `segment` was requested. One entry per distinct value of that dimension, each carrying the SAME seven steps as the unsegmented `steps`, so a group reads exactly like a funnel. Sorted alphabetically with `unattributed` last — that bucket means the user has no value for the key at all, which for `run_mode` is a connector predating #2528 and is NOT the same fact as 'prose'. Summing a step across groups equals the unsegmented count for that step.",
+                      items: {
+                        type: 'object',
+                        required: ['value', 'steps'],
+                        properties: {
+                          value: { type: 'string', description: "The dimension's value for this group, or 'unattributed' when the user carries none." },
+                          steps: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['event', 'users', 'conversionFromPrev'],
+                              properties: {
+                                event: { type: 'string', enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'] },
+                                users: { type: 'integer', description: 'DISTINCT users in this group who reached this step.' },
+                                conversionFromPrev: { type: ['number', 'null'], description: 'Null when the predecessor step counted zero users in THIS group — which includes the three permanently-zero retired stages, so the step after each of them is null by construction rather than by absence of data.' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -5832,6 +5911,59 @@ export const openapiSpec = {
         type: 'string',
         enum: Object.values(AgentPaymentRail),
         description: 'Stable rail identifier for Haven agent payment states.',
+      },
+      ApiRootDocument: {
+        type: 'object',
+        required: ['name', 'openapi', 'auth', 'health'],
+        properties: {
+          name: { type: 'string', enum: ['haven-api'] },
+          description: { type: 'string' },
+          openapi: {
+            type: 'string',
+            format: 'uri',
+            description:
+              'Absolute URL of this document, derived from the request — so the dev backend ' +
+              'names the dev backend and a request through the frontend proxy names the proxy.',
+          },
+          docs: { type: 'string', format: 'uri', description: 'Agent-readable product docs.' },
+          auth: {
+            type: 'object',
+            required: ['agent', 'owner'],
+            properties: {
+              agent: { type: 'string', description: 'How an agent credential is presented.' },
+              owner: { type: 'string', description: 'How an owner session is obtained.' },
+            },
+            additionalProperties: false,
+          },
+          health: { type: 'string', format: 'uri' },
+        },
+        additionalProperties: false,
+      },
+      DiscoveryDocument: {
+        type: 'object',
+        required: ['hosted_mcp_url', 'connector_package', 'openapi_url', 'chains'],
+        properties: {
+          hosted_mcp_url: {
+            anyOf: [{ type: 'string', format: 'uri' }, { type: 'null' }],
+            description:
+              'Null when this deployment has none configured — a discovery document that ' +
+              'refuses is less useful than one that says so, so the connect handout\'s ' +
+              'configuration error is reported here rather than propagated as a 500.',
+          },
+          hosted_mcp_note: { type: 'string', description: 'Why the URL is null, when it is.' },
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
+          openapi_url: { type: 'string', format: 'uri' },
+          chains: {
+            type: 'object',
+            required: ['deployable', 'supported'],
+            properties: {
+              deployable: { type: 'array', items: { type: 'integer' } },
+              supported: { type: 'array', items: { type: 'integer' } },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
       },
       DeviceAuthorizationStart: {
         type: 'object',

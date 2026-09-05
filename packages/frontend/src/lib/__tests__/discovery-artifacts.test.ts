@@ -37,22 +37,16 @@ const ARTIFACTS = [
 /**
  * Hosts an artifact may link to. Everything else must be a same-origin path.
  *
- * `github.com` is here for one reason and is expected to leave: the product
- * docs have no served home until #2532 (A5) publishes them under `/docs/`, so
- * `account-recovery` points at the public repository in the meantime. When A5
- * lands, that link becomes `/docs/account-recovery.md` and this entry should
- * be deleted — the deletion is the test that A5 finished the job.
+ * `github.com` USED to be here, for one temporary reason: the product docs had
+ * no served home, so `account-recovery` pointed at the public repository. #2532
+ * serves them from this origin under `/docs/`, so the link is now a path and
+ * the entry is gone. Its deletion was the stated test that #2532 finished the
+ * job; this is that deletion.
+ *
+ * The artifacts under test are back to the rule with no exception: own-product
+ * links are same-origin paths, and the only off-site host is npm.
  */
-const ALLOWED_HOSTS = new Set(['www.npmjs.com', 'github.com'])
-
-/**
- * The single `github.com` URL the allow-list exists for. Asserted exactly,
- * because a host-scoped allow-list would let any future GitHub link inherit a
- * permission granted to one temporary one — the comment above would stay
- * written while stopping being true.
- */
-const TEMPORARY_GITHUB_LINK =
-  'https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md'
+const ALLOWED_HOSTS = new Set(['www.npmjs.com'])
 
 const DEAD_HOSTS = ['haven.xyz', 'app.haven.xyz', 'docs.haven.xyz']
 
@@ -131,11 +125,18 @@ describe('discovery artifacts (#2520)', () => {
     }
   })
 
-  it('allows exactly one github.com link, the temporary docs one', () => {
+  it('links NO github.com url — the temporary docs exception is retired (#2532)', () => {
+    // The product docs are served from this origin now. A GitHub link
+    // reappearing here means someone re-introduced the placeholder rather than
+    // adding a doc to the serve-docs allowlist.
     const githubLinks = ARTIFACTS.flatMap((name) =>
       absoluteUrls(read(name)).filter((url) => new URL(url).hostname === 'github.com'),
     )
-    expect(githubLinks).toEqual([TEMPORARY_GITHUB_LINK])
+    expect(githubLinks).toEqual([])
+  })
+
+  it('points account recovery at the served path', () => {
+    expect(read('llms.txt')).toContain('](/docs/account-recovery.md)')
   })
 
   it('no shipped frontend source links a domain we do not own', () => {

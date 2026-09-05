@@ -28,6 +28,46 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this service is, and where its machine-readable contract lives.
+         * @description Unauthenticated root document (#2530). An agent handed only a backend URL had nothing to read and had to guess the spec path. Deliberately thin and non-sensitive: names, paths, and which credential each door wants — no version or build identifier, which would fingerprint the deployment and buy an agent nothing.
+         */
+        get: operations["getApiRoot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/discovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public, read-only facts an agent client needs to configure itself.
+         * @description The environment as data (#2531): which connector package this deployment hands out, which hosted MCP it points at, which chains it serves, and where its spec is. Every value is already public elsewhere — this route re-serves them together so the frontend capability manifest does not restate the backend's env logic. Never per-user or per-agent data, no relayer address, nothing from /health.
+         */
+        get: operations["getDiscovery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/device/start": {
         parameters: {
             query?: never;
@@ -2495,6 +2535,42 @@ export type components = {
          * @enum {string}
          */
         AgentPaymentRail: "direct" | "x402" | "mpp" | "mpp_demo" | "mpp_crypto" | "stripe_deposit" | "spt";
+        ApiRootDocument: {
+            /** @enum {string} */
+            name: "haven-api";
+            description?: string;
+            /**
+             * Format: uri
+             * @description Absolute URL of this document, derived from the request — so the dev backend names the dev backend and a request through the frontend proxy names the proxy.
+             */
+            openapi: string;
+            /**
+             * Format: uri
+             * @description Agent-readable product docs.
+             */
+            docs?: string;
+            auth: {
+                /** @description How an agent credential is presented. */
+                agent: string;
+                /** @description How an owner session is obtained. */
+                owner: string;
+            };
+            /** Format: uri */
+            health: string;
+        };
+        DiscoveryDocument: {
+            /** @description Null when this deployment has none configured — a discovery document that refuses is less useful than one that says so, so the connect handout's configuration error is reported here rather than propagated as a 500. */
+            hosted_mcp_url: string | null;
+            /** @description Why the URL is null, when it is. */
+            hosted_mcp_note?: string;
+            connector_package: string;
+            /** Format: uri */
+            openapi_url: string;
+            chains: {
+                deployable: number[];
+                supported: number[];
+            };
+        };
         DeviceAuthorizationStart: {
             /** @description The client's bearer credential for polling. Stored hashed. */
             device_code: string;
@@ -3767,6 +3843,46 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    getApiRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The API root document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiRootDocument"];
+                };
+            };
+        };
+    };
+    getDiscovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public deployment facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscoveryDocument"];
                 };
             };
         };
@@ -10066,6 +10182,8 @@ export interface operations {
                 from?: string;
                 /** @description Date; defaults to now. */
                 to?: string;
+                /** @description Split the same steps by one dimension (#2529), added as `segments` alongside the unsegmented `steps`. `via` is the agent hand-off marker — it reads the funnel metadata key `handoff_via`, NOT the key literally named `via`, which predates it and records which CODE PATH created the record ('connection_setup' from the connect flow). Segmenting on that one would answer 'connection_setup' for every connect-modal agent and look like a working metric. `run_mode` is how the connector was invoked ('json' | 'prose', #2528). Attribution is resolved once PER USER from the earliest event in the window carrying the key, then carried across every step: only `signed_up` and `agent_created` write these keys, so a per-event split would report zero agent-driven first payments and read as 'agents never convert'. A user with no value for the key lands in the `unattributed` group — for `run_mode` that means a connector predating #2528, which is NOT the same fact as a `prose` run; the same definition is repeated on `segments.value` so a consumer reading only one of the two fields still learns it. Omitting the parameter returns the unsegmented body unchanged; an unrecognised value is a 400 rather than a silent fall-back to unsegmented. */
+                segment?: "via" | "run_mode";
             };
             header?: never;
             path?: never;
@@ -10103,6 +10221,24 @@ export interface operations {
                          * @description The resolved window end.
                          */
                         to: string;
+                        /**
+                         * @description Echoed back only when the request asked for a split. Absent otherwise, together with `segments`.
+                         * @enum {string}
+                         */
+                        segment?: "via" | "run_mode";
+                        /** @description Present only when `segment` was requested. One entry per distinct value of that dimension, each carrying the SAME seven steps as the unsegmented `steps`, so a group reads exactly like a funnel. Sorted alphabetically with `unattributed` last — that bucket means the user has no value for the key at all, which for `run_mode` is a connector predating #2528 and is NOT the same fact as 'prose'. Summing a step across groups equals the unsegmented count for that step. */
+                        segments?: {
+                            /** @description The dimension's value for this group, or 'unattributed' when the user carries none. */
+                            value: string;
+                            steps: {
+                                /** @enum {string} */
+                                event: "signed_up" | "safe_deployed" | "safe_imported" | "agent_created" | "allowance_granted" | "safe_funded" | "first_payment_settled";
+                                /** @description DISTINCT users in this group who reached this step. */
+                                users: number;
+                                /** @description Null when the predecessor step counted zero users in THIS group — which includes the three permanently-zero retired stages, so the step after each of them is null by construction rather than by absence of data. */
+                                conversionFromPrev: number | null;
+                            }[];
+                        }[];
                     };
                 };
             };

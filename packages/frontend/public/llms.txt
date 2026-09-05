@@ -32,6 +32,10 @@ Haven connects agents through MCP (hosted, keyless) plus a local signer. Payment
 - [Agent Passport](/docs/agent-passport.md): the signed attestation that an agent was issued, bound, governed and is revocable
 - [Delegation rail security model](/docs/security-model.md): what the on-chain envelope enforces, and what it does not
 
+## Machine-readable
+
+- [Capability manifest](/.well-known/haven.json): the same environment as JSON — where to sign up, which steps only a human can do, the API and its spec, the connector package this deployment hands out, the chains it serves. Generated, never hand-edited.
+
 ## Optional
 
 - [Full agent-readable overview](/llms-full.txt): product model, payment flow, and integration surface in one file

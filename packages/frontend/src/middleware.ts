@@ -71,6 +71,7 @@ export const config = {
     '/llms.txt',
     '/llms-full.txt',
     '/docs/:path*',
+    '/.well-known/haven.json',
     '/402',
     '/402/:path*',
     '/402.md',

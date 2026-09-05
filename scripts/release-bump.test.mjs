@@ -1570,3 +1570,100 @@ test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed
   assert.match(out, /npm dist-tag add <name>@<version> latest/, 'the remedy is printed')
   assert.doesNotMatch(out, /ERROR: failed to publish/, 'must not report a publish failure')
 })
+
+// ── #2580: a release bump only ever moves the version forward ────────────────
+//
+// The defect this closes sits one step earlier than the symptom. #2536 made
+// `publish.yml` move the `latest` dist-tag onto whatever it publishes, without
+// comparing against the live `latest` — so publishing a genuinely new version
+// of an OLDER release line would drag `latest` down to it. Catching a
+// backwards version HERE means it fails at the release PR, where a human is
+// already looking and the remedy is to type a different number, rather than
+// after publication where the remedy is a manual dist-tag repair.
+//
+// The rule is imported and CALLED. It lives in its own module precisely so it
+// can be — `release-bump.mjs` runs `main()` at import.
+
+test('#2580: a lower version is refused, and the message says what it would break', async () => {
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+
+  // The scenario #2580 was filed for, in its own words.
+  const msg = backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver)
+  assert.ok(msg, 'a backwards bump must be refused')
+  assert.match(msg, /BACKWARDS/)
+  assert.match(msg, /latest/, 'the message must name the consequence, not just the rule')
+})
+
+test('#2580: the prerelease → release transition is ALLOWED (the case a sort -V guard breaks)', async () => {
+  // The control half, and the reason `sort -V` was rejected in #2580: it orders
+  // `1.0.0` BEFORE `1.0.0-alpha.1`, so a guard built on it would refuse the 1.0
+  // release this repo is heading toward — the one release that matters most.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+
+  for (const [current, next] of [
+    ['0.1.34-alpha.0', '1.0.0'],   // the exact pair #2580's acceptance criteria name
+    ['0.1.34-alpha.0', '0.1.34-alpha.1'],
+    ['0.1.34-alpha.0', '0.1.35-alpha.0'],
+    ['1.0.0-alpha.1', '1.0.0'],
+    ['0.1.9', '0.2.0'],
+  ]) {
+    assert.equal(
+      backwardsVersionViolation(current, next, { snapshot: false }, semver),
+      null,
+      `${current} -> ${next} must be allowed`,
+    )
+  }
+})
+
+test('#2580: a SNAPSHOT is exempt — 0.0.0-dev.* is below everything by design', async () => {
+  // The half most likely to be got wrong, and it was got wrong once already:
+  // #2536's own workflow guard shipped a draft that refused a snapshot on every
+  // channel and would have failed every dev publish. `0.0.0-` sorts below every
+  // real version deliberately, so that no `^0.1.x` range can resolve to one.
+  // Applying a forward-only rule to it would close the dev channel.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+
+  const snapshotV = '0.0.0-dev.202609021905.abc1234'
+  assert.equal(
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: true }, semver),
+    null,
+    'a snapshot run must not be refused for going "backwards"',
+  )
+
+  // The positive control: the SAME version without --snapshot is refused, so
+  // the exemption is the flag doing work and not the version shape being
+  // waved through everywhere.
+  assert.ok(
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: false }, semver),
+    'the same version outside snapshot mode must still be refused',
+  )
+})
+
+test('#2580: an unchanged version is refused before the release PR merges', async () => {
+  // npm rejects republishing an existing version, so a no-op bump fails AFTER
+  // the PR has landed. Cheaper to say so here.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+
+  const msg = backwardsVersionViolation('0.1.34-alpha.0', '0.1.34-alpha.0', { snapshot: false }, semver)
+  assert.ok(msg, 'a no-op bump must be refused')
+  assert.match(msg, /no-op/)
+})
+
+test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag is known', async () => {
+  // Reachability, not presence. The guard must run where `snapshot` has been
+  // parsed — it is read at `--snapshot` AFTER nextVersion() computes the
+  // version — and still before anything is written to the tree.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
+  const snapshotParse = source.indexOf("const snapshot = process.argv.includes('--snapshot')")
+  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
+  const firstWrite = source.indexOf('header(\'Changes to be applied\')')
+
+  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
+  assert.ok(snapshotParse !== -1 && snapshotParse < call, 'the call must come after --snapshot is parsed')
+  assert.ok(call < firstWrite, 'the call must come before the run starts reporting changes')
+})

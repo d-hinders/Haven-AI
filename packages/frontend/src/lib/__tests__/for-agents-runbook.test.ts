@@ -46,7 +46,19 @@ describe('/for-agents.md (#2523)', () => {
     // It moved again for the approval hand-off: saying what is actually true
     // about the connector's outcome takes more words than naming a link that
     // does not exist (haven-reviewer, blocking @ 1ba1b920).
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(7400)
+    //
+    // 7400 → 7800 for #2528 (the page is 7781 bytes at this commit), and the
+    // two things NOT done to avoid it are the
+    // reason the number is defensible. `approval.url` made the hand-off
+    // conditional, so the page now has to carry BOTH branches — the link and
+    // the tab — plus the rule that an agent may relay a link but never build
+    // one. That is ~230 bytes of contract, not prose creep. Trimmed first:
+    // the step-5 script went from two blockquotes back to one with the
+    // alternative in brackets (~110 bytes), and
+    // `AGENT_WIRING_COLLISION_RELAY_SENTENCE` was kept OUT of this page's
+    // rule list and left in the setup prompt alone (~440 bytes), on the
+    // reasoning recorded above that export.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(7800)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -69,24 +81,36 @@ describe('/for-agents.md (#2523)', () => {
     expect(served).toContain('/signup?next=/agents&via=agent')
     expect(served).toContain('/login?next=/agents')
     expect(served).toContain('/onboarding?next=/agents')
-    // Deliberately NOT a link for the approval step: `ConnectOutcome` carries
-    // no URL and no setup id, so an agent told to relay one would have none.
-    // The page says "go back to your Haven tab" instead, and says why. #2528 is
-    // the slice that would make a link honest here.
-    expect(served).not.toContain('<approval_url>')
+    // The approval step, RE-BASED by #2528. It used to be guarded as "never a
+    // link" because `ConnectOutcome` carried no URL to relay. It carries one
+    // now (`approval.url`), so the page offers it — and the invariant that
+    // actually survives is narrower and more important than the old one:
+    //
+    //   an agent may relay the link it was GIVEN; it must never CONSTRUCT one.
+    //
+    // That is why the assertions below are about assembly, not about links.
+    // The outcome still has no setup id, so a page that taught an agent to
+    // build `?setup=…` would be teaching it to guess.
     expect(served).not.toContain('?setup=<setup-id>')
+    expect(served).toContain('never assemble an approval link out of parts')
+    expect(served).toContain('The outcome carries no setup id')
+    // Both branches must be present, because `approval.url` is optional: a
+    // backend older than #2528 sends none, and an agent that only learned the
+    // link branch would have nothing to say there.
+    expect(served).toContain('approval.url')
     expect(served).toContain('Go back to the Haven tab where you created the agent')
-    expect(served).toContain('the connector\'s outcome carries no URL and no setup id')
-    // The CLASS, not the two instances. Removing `<approval_url>` and
-    // `?setup=<setup-id>` left the sentence they were instances OF standing in
-    // the no-browser section — "Every human step is a link" — which contradicts
-    // the fix 30 lines above it (haven-reviewer, blocking @ 718275cc). A
-    // universal claim about the human steps is the shape that keeps coming
-    // back, so it is the shape that is guarded. No legitimate use in this file.
+    // The CLASS, not the instances. Removing `<approval_url>` and
+    // `?setup=<setup-id>` once left the sentence they were instances OF
+    // standing in the no-browser section — "Every human step is a link" —
+    // which contradicted the fix 30 lines above it (haven-reviewer, blocking
+    // @ 718275cc). A universal claim about the human steps is the shape that
+    // keeps coming back, and it is still wrong under #2528: step 5 is a link
+    // only sometimes, and steps 4 and 6 are not human steps at all.
     for (const universal of ['every human step', 'each human step', 'every step is a link']) {
       expect(served.toLowerCase()).not.toContain(universal)
     }
-    expect(served).toContain('Step 5 is not a link')
+    // Conditional, not universal, in the other direction too.
+    expect(served).toContain('Step 5 is a link only when your run reported one')
   })
 
   it('tags every step with the actor who performs it', () => {
@@ -119,7 +143,11 @@ describe('/for-agents.md (#2523)', () => {
     expect(served).toContain('npx -y @haven_ai/connect@<channel> --doctor')
     expect(served).toContain('so the two-changes rule does not bind it')
     expect(served).toContain('"me" in them is your user, not Haven')
-    expect(served).toContain('carries no URL and no setup id, so do not invent one')
+    // #2528 re-based this one: the URL half became false when `approval.url`
+    // shipped. The surviving half — no setup id, so never build a link — is
+    // asserted above; what belongs in THIS list is the cold-read gap it
+    // answers, which is what an agent should do when there is no link.
+    expect(served).toContain('if it carried none, ask them to finish it in that same Haven tab')
     expect(served).toContain('no ETH: Haven sponsors the gas')
   })
 

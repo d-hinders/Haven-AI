@@ -55,6 +55,14 @@ export interface RegisterSetupInput extends ResolveSetupInput {
    * of those may render as unknown.
    */
   mcpServerName?: string
+  /**
+   * #2528: how this run was invoked — `'json'` when `--json` was passed,
+   * `'prose'` otherwise. The connector is the only party that can report it:
+   * the register call is byte-identical over the wire either way, so there is
+   * no header, user agent or timing signal the backend could recover it from.
+   * Optional on the wire so an older backend simply ignores it.
+   */
+  runMode?: 'json' | 'prose'
   connectorContext?: ConnectorContext
   installCapabilities?: {
     canWriteRuntimeConfig?: boolean
@@ -132,6 +140,13 @@ export interface RegisterSetupResponse {
   delegate_address: string
   hosted_mcp_url: string
   next_action: string
+  /**
+   * #2528: the absolute link that lands the user on this setup's budget
+   * approval. Optional because a backend older than #2528 does not send it,
+   * and the connector must degrade to its previous prose rather than print
+   * `undefined` — see `approvalCtaLine`.
+   */
+  approval_url?: string
 }
 
 /**
@@ -180,6 +195,7 @@ export function createConnectApiClient(baseUrl: string, fetchImpl: typeof fetch 
           runtime: input.runtime,
           connector_version: input.connectorVersion,
           mcp_server_name: input.mcpServerName,
+          run_mode: input.runMode,
           connector_context: input.connectorContext,
           install_capabilities: input.installCapabilities && {
             can_write_runtime_config: input.installCapabilities.canWriteRuntimeConfig,

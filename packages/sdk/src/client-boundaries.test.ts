@@ -377,6 +377,10 @@ describe('HavenClient structural boundary', () => {
       // rules the backend's setup prompt states to an agent AND the ones the
       // `/for-agents.md` runbook repeats; exported so both read one string
       // rather than two copies that can disagree in front of an agent.
+      // #2533 adds a ninth member of the same family for a different audience:
+      // AGENT_README_SECTION_MD is not a rule stated TO a connected agent but
+      // the entry that redirects one which has no account yet, carried
+      // verbatim by all five published READMEs and the repo README.
       'AGENT_APPROVAL_RELAY_JSON_SENTENCE',
       'AGENT_APPROVAL_RELAY_PROSE_SENTENCE',
       'AGENT_COMMAND_MODIFICATION_SENTENCE',
@@ -387,6 +391,7 @@ describe('HavenClient structural boundary', () => {
       'AGENT_PAYMENT_NEXT_ACTION_VALUES',
       'AGENT_PAYMENT_PHASE_VALUES',
       'AGENT_PAYMENT_RAIL_VALUES',
+      'AGENT_README_SECTION_MD',
       'AGENT_SECRET_HYGIENE_SENTENCE',
       'AGENT_WIRING_COLLISION_RELAY_SENTENCE',
       'AgentPaymentFailureCode',

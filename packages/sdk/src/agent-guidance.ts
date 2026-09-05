@@ -73,6 +73,47 @@ export const AGENT_COMMAND_MODIFICATION_SENTENCE =
   'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.'
 
 /**
+ * The agent-facing section every published README carries (#2533, A6).
+ *
+ * ONE string, six copies, one instrument. All five npm READMEs plus the repo
+ * README open with dashboard-first instructions, which strand the reader this
+ * epic exists for: an agent whose user has no account yet. This is the entry
+ * that redirects them, and it is defined here rather than written six times
+ * because six hand-maintained copies is exactly the drift #2310 was about —
+ * `agent-guidance.test.ts` fails if any copy differs by a byte.
+ *
+ * TWO links, and the second is not redundant. The path is correct wherever
+ * Haven is actually served and needs no host we do not own (#2520's rule); the
+ * GitHub URL is the one that resolves for a reader on npmjs.com, who has no
+ * origin to resolve a path against. A path alone would be unfollowable in the
+ * place these READMEs are most often read; an absolute app host alone would be
+ * a host nobody owns. Naming both is the honest answer, and the runbook itself
+ * is committed at that path, so the fallback is a real file rather than a
+ * promise.
+ *
+ * Interrogative, not declarative-with-a-question-mark. `llms.txt` states the
+ * same idea declaratively because there it is a LINK TITLE in a list; an H2
+ * whose job is to catch the right reader and let everyone else skip is a
+ * question. The mismatched mood was a haven-design-reviewer finding, fixed
+ * while it was cheap: the string is byte-pinned in six files, so the cost of
+ * changing it only ever goes up.
+ *
+ * It says what the agent CANNOT do first. The account and the passkey are the
+ * user's, always — stating that up front is what stops an agent trying, and it
+ * is the epic invariant no slice may weaken.
+ */
+export const AGENT_README_SECTION_MD = `## Are you an AI agent whose user has no Haven account yet?
+
+Read **\`/for-agents.md\`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with \`@haven_ai/cli\`.`
+
+/**
  * The runbook, served at `/for-agents.md`.
  *
  * Every link is a same-origin path (#2520): resolve it against the host the

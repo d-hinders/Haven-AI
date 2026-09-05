@@ -4,6 +4,17 @@ A terminal-native, scriptable companion to the Haven dashboard. Sign in as
 yourself and read or manage your account from the shell — used **alongside** the
 web app, not instead of it.
 
+## Are you an AI agent whose user has no Haven account yet?
+
+Read **`/for-agents.md`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with `@haven_ai/cli`.
+
 ## Install
 
 ```bash

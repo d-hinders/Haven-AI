@@ -7,6 +7,17 @@ signing key and API key locally, stores them locally, and sends Haven only the
 public signing address, proof signature, and API-key hash. Haven never receives
 the private key or plaintext API key.
 
+## You are an AI agent and your user has no Haven account yet?
+
+Read **`/for-agents.md`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with `@haven_ai/cli`.
+
 ```sh
 npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
@@ -37,6 +48,7 @@ Do not point it at a project repository, shared folder, or cloud-synced folder.
 Use `--ack-local-tools` with Haven-generated setup prompts. It prepares the
 local Haven tools acknowledgement during setup so Codex and Claude Code can load
 Haven after a normal restart.
+
 
 ## Supported runtimes
 
@@ -296,7 +308,7 @@ already-configured machine behaves as follows (characterized in
 `storage.test.ts`, `config-writers.test.ts`, `runtime.test.ts`, and
 `runtime-install.test.ts`, #1544/#1569):
 
-- **Re-running an already-consumed setup command** fails cleanly before any
+- **Re-running an already-consumed connector command** fails cleanly before any
   credential file or runtime configuration is touched — Haven refuses the
   consumed setup when Connect resolves it (or, in a rare concurrent-run race,
   at registration). The key pair minted for the attempt exists only in memory
@@ -523,7 +535,7 @@ HAVEN_SIGNER_SPEC=file:$PWD/packages/signer npx @haven_ai/connect@<channel> --se
 Environment variables rather than a flag, deliberately: the install runs from
 three entry points (`--setup`, `--doctor --repair`, `--rekey-finish`) and all
 three honour the same variables, so a re-key cannot silently reinstall the
-registry build; and the setup command is minted by the dashboard and pasted
+registry build; and the connector command is minted by the dashboard and pasted
 verbatim, often by an agent, so the override sits beside it instead of being
 spliced into a line the developer did not write.
 

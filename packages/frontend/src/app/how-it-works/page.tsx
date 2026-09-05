@@ -150,7 +150,7 @@ function VisualCredentials() {
         ))}
       </dl>
       <div className="mt-4 pt-4 border-t border-[var(--v2-border)] flex items-center justify-between">
-        <code className="text-[12px] font-mono text-[var(--v2-ink-2)]">sk_live_••••9aF2</code>
+        <code className="text-[12px] font-mono text-[var(--v2-ink-2)]">sk_agent_••••9aF2</code>
         <button className="text-[12px] font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]">Copy</button>
       </div>
     </Card>

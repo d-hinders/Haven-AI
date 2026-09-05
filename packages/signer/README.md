@@ -13,6 +13,17 @@ Contract: [`docs/architecture/06-hosted-mcp-connect-flow.md`](../../docs/archite
 Requires **Node >= 22**; the signer refuses to start on anything older, before
 it reads a key.
 
+## You are an AI agent and your user has no Haven account yet?
+
+Read **`/for-agents.md`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with `@haven_ai/cli`.
+
 ## Two ways to use it
 
 **As a local MCP signer** (for Claude Desktop / Code / Cursor) — run it

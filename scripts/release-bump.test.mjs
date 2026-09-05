@@ -1584,23 +1584,63 @@ test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed
 // The rule is imported and CALLED. It lives in its own module precisely so it
 // can be — `release-bump.mjs` runs `main()` at import.
 
+// The semver DOUBLE, and why these tests do not import the real one.
+//
+// This suite runs in `Repo CI config checks`, which is deliberately
+// dependency-free — checkout, setup-node, no `npm ci` — because it must run on
+// every PR in seconds. Importing `node_modules/semver` from here passes on a
+// developer machine and fails in that job with ERR_MODULE_NOT_FOUND, which is
+// exactly how the first version of these tests broke CI.
+//
+// Removing the import is not a downgrade, because the real semver was never
+// what these tests should have been exercising. `backwardsVersionViolation`
+// does not implement version ordering; it DELEGATES ordering to the comparator
+// it is handed and decides what to do with the answer. Ordering is semver's
+// own well-tested behaviour, and re-asserting it here tested someone else's
+// library. What is genuinely this module's to get wrong is the part a double
+// pins precisely: which comparator it calls, IN WHICH ARGUMENT ORDER, and
+// whether the snapshot flag short-circuits before either is consulted. An
+// arguments-swapped `lt(current, next)` is the most likely real bug in this
+// file, and the real semver would have let it through in half the cases while
+// looking green.
+function semverDouble({ lt = false, eq = false } = {}) {
+  const calls = []
+  return {
+    calls,
+    lt(a, b) { calls.push(['lt', a, b]); return lt },
+    eq(a, b) { calls.push(['eq', a, b]); return eq },
+  }
+}
+
 test('#2580: a lower version is refused, and the message says what it would break', async () => {
   const { backwardsVersionViolation } = await import('./release-version-order.mjs')
-  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+  const semver = semverDouble({ lt: true })
 
   // The scenario #2580 was filed for, in its own words.
   const msg = backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver)
   assert.ok(msg, 'a backwards bump must be refused')
   assert.match(msg, /BACKWARDS/)
   assert.match(msg, /latest/, 'the message must name the consequence, not just the rule')
+  assert.match(msg, /3\.0\.0/)
+  assert.match(msg, /2\.5\.1-alpha\.0/)
+
+  // ARGUMENT ORDER. `lt(next, current)` asks "is the new version below the old
+  // one" — the swapped form asks the opposite question and would refuse every
+  // legitimate forward bump while waving backwards ones through.
+  assert.deepEqual(semver.calls[0], ['lt', '2.5.1-alpha.0', '3.0.0'])
 })
 
 test('#2580: the prerelease → release transition is ALLOWED (the case a sort -V guard breaks)', async () => {
   // The control half, and the reason `sort -V` was rejected in #2580: it orders
   // `1.0.0` BEFORE `1.0.0-alpha.1`, so a guard built on it would refuse the 1.0
   // release this repo is heading toward — the one release that matters most.
+  //
+  // What this test can prove and what it cannot: with a comparator reporting
+  // "not lower, not equal", the rule allows the bump. That the REAL comparator
+  // answers that way for `0.1.34-alpha.0 -> 1.0.0` is semver's precedence rule
+  // (a prerelease sorts below its own release), not this module's — and it is
+  // why the module is handed semver rather than a shell pipeline.
   const { backwardsVersionViolation } = await import('./release-version-order.mjs')
-  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
 
   for (const [current, next] of [
     ['0.1.34-alpha.0', '1.0.0'],   // the exact pair #2580's acceptance criteria name
@@ -1609,35 +1649,45 @@ test('#2580: the prerelease → release transition is ALLOWED (the case a sort -
     ['1.0.0-alpha.1', '1.0.0'],
     ['0.1.9', '0.2.0'],
   ]) {
+    const semver = semverDouble({ lt: false, eq: false })
     assert.equal(
       backwardsVersionViolation(current, next, { snapshot: false }, semver),
       null,
       `${current} -> ${next} must be allowed`,
     )
+    // Both comparators are consulted before allowing — a rule that returned
+    // null without asking would pass this loop vacuously.
+    assert.deepEqual(semver.calls.map(c => c[0]), ['lt', 'eq'])
   }
 })
 
-test('#2580: a SNAPSHOT is exempt — 0.0.0-dev.* is below everything by design', async () => {
+test('#2580: a SNAPSHOT is exempt — and exempt BEFORE the comparator is consulted', async () => {
   // The half most likely to be got wrong, and it was got wrong once already:
   // #2536's own workflow guard shipped a draft that refused a snapshot on every
   // channel and would have failed every dev publish. `0.0.0-` sorts below every
   // real version deliberately, so that no `^0.1.x` range can resolve to one.
   // Applying a forward-only rule to it would close the dev channel.
   const { backwardsVersionViolation } = await import('./release-version-order.mjs')
-  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
 
   const snapshotV = '0.0.0-dev.202609021905.abc1234'
+
+  // `lt: true` is the hostile setting: a comparator that WOULD call this
+  // backwards. The snapshot flag must short-circuit above it, so the exemption
+  // cannot depend on how the version happens to compare.
+  const exempt = semverDouble({ lt: true, eq: true })
   assert.equal(
-    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: true }, semver),
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: true }, exempt),
     null,
     'a snapshot run must not be refused for going "backwards"',
   )
+  assert.deepEqual(exempt.calls, [], 'the snapshot exemption must precede any comparison')
 
   // The positive control: the SAME version without --snapshot is refused, so
   // the exemption is the flag doing work and not the version shape being
   // waved through everywhere.
+  const checked = semverDouble({ lt: true })
   assert.ok(
-    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: false }, semver),
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: false }, checked),
     'the same version outside snapshot mode must still be refused',
   )
 })
@@ -1646,11 +1696,31 @@ test('#2580: an unchanged version is refused before the release PR merges', asyn
   // npm rejects republishing an existing version, so a no-op bump fails AFTER
   // the PR has landed. Cheaper to say so here.
   const { backwardsVersionViolation } = await import('./release-version-order.mjs')
-  const semver = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+  const semver = semverDouble({ lt: false, eq: true })
 
   const msg = backwardsVersionViolation('0.1.34-alpha.0', '0.1.34-alpha.0', { snapshot: false }, semver)
   assert.ok(msg, 'a no-op bump must be refused')
   assert.match(msg, /no-op/)
+  assert.deepEqual(semver.calls[1], ['eq', '0.1.34-alpha.0', '0.1.34-alpha.0'])
+})
+
+test('#2580: production passes the REAL semver, not a stand-in', async () => {
+  // The double above proves the rule's logic; this proves the rule is wired to
+  // a real comparator in the one place it runs for real. Without it, the suite
+  // would be equally green if `release-bump.mjs` handed the rule an object that
+  // always answered "fine" — which is the failure mode a doubled dependency
+  // introduces and the reason this assertion exists alongside it.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
+  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
+  const callLine = source.slice(call, source.indexOf('\n', call))
+  assert.match(
+    callLine,
+    /await getSemver\(\)/,
+    'the production call must pass the resolved workspace semver',
+  )
+  // And getSemver must resolve the real package, not fabricate one.
+  assert.match(source, /node_modules', 'semver', 'index\.js'/)
 })
 
 test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag is known', async () => {

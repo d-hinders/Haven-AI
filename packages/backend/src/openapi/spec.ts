@@ -844,6 +844,12 @@ export const openapiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ApiRootDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/discovery': {
       get: {
         tags: ['Health'],
@@ -5786,6 +5792,9 @@ export const openapiSpec = {
             additionalProperties: false,
           },
           health: { type: 'string', format: 'uri' },
+        },
+        additionalProperties: false,
+      },
       DiscoveryDocument: {
         type: 'object',
         required: ['hosted_mcp_url', 'connector_package', 'openapi_url', 'chains'],

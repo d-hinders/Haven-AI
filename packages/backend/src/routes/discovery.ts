@@ -2,9 +2,13 @@ import { FastifyInstance, FastifyRequest } from 'fastify'
 import {
   CONNECTOR_PACKAGE,
   HostedMcpConfigError,
-  apiBaseUrl,
   hostedMcpUrl,
 } from './agent-connection-setups.js'
+// #2530 lifted `apiBaseUrl` out of the setups route into its own module and
+// changed it to take HEADERS rather than a request — `domain/` may not import
+// the web framework. This route follows it there rather than keeping a second
+// copy: one answer, three surfaces, which was the point of lifting it.
+import { apiBaseUrl } from '../domain/request-origin.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
 
 /**
@@ -37,7 +41,7 @@ export interface DiscoveryDocument {
 }
 
 export function buildDiscoveryDocument(request: FastifyRequest): DiscoveryDocument {
-  const base = apiBaseUrl(request)
+  const base = apiBaseUrl(request.headers)
 
   // `hostedMcpUrl` THROWS for a non-production backend with no
   // HAVEN_HOSTED_MCP_URL — the right behaviour for a connect handout, which

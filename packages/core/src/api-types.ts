@@ -29,7 +29,6 @@ export type paths = {
         trace?: never;
     };
     "/": {
-    "/discovery": {
         parameters: {
             query?: never;
             header?: never;
@@ -41,6 +40,22 @@ export type paths = {
          * @description Unauthenticated root document (#2530). An agent handed only a backend URL had nothing to read and had to guess the spec path. Deliberately thin and non-sensitive: names, paths, and which credential each door wants — no version or build identifier, which would fingerprint the deployment and buy an agent nothing.
          */
         get: operations["getApiRoot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/discovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
          * Public, read-only facts an agent client needs to configure itself.
          * @description The environment as data (#2531): which connector package this deployment hands out, which hosted MCP it points at, which chains it serves, and where its spec is. Every value is already public elsewhere — this route re-serves them together so the frontend capability manifest does not restate the backend's env logic. Never per-user or per-agent data, no relayer address, nothing from /health.
          */
@@ -2482,6 +2497,7 @@ export type components = {
             };
             /** Format: uri */
             health: string;
+        };
         DiscoveryDocument: {
             /** @description Null when this deployment has none configured — a discovery document that refuses is less useful than one that says so, so the connect handout's configuration error is reported here rather than propagated as a 500. */
             hosted_mcp_url: string | null;
@@ -3760,7 +3776,6 @@ export interface operations {
         };
     };
     getApiRoot: {
-    getDiscovery: {
         parameters: {
             query?: never;
             header?: never;
@@ -3770,13 +3785,31 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The API root document. */
-            /** @description Public deployment facts. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ApiRootDocument"];
+                };
+            };
+        };
+    };
+    getDiscovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public deployment facts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["DiscoveryDocument"];
                 };
             };

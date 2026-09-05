@@ -1226,20 +1226,6 @@ function joinApprovedActions(actions: string[]): string {
   return `${actions.slice(0, -1).join(', ')}, and ${actions[actions.length - 1]}`
 }
 
-<<<<<<< HEAD
-// #2531: exported so `GET /discovery` derives the same origin this route
-// already uses for the connector command — one answer, not two.
-export function apiBaseUrl(request: FastifyRequest): string {
-  const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
-  if (env) return env.replace(/\/+$/, '')
-  const host = request.headers.host ?? `localhost:${process.env.PORT ?? 3001}`
-  const proto = request.headers['x-forwarded-proto']
-  const scheme = typeof proto === 'string' && proto ? proto.split(',')[0] : 'http'
-  return `${scheme}://${host}`.replace(/\/+$/, '')
-}
-
-=======
->>>>>>> origin/dev
 /**
  * #1129: the default is paired to the backend's own identity. An explicit
  * variable always wins; the prod fallback is served only when the resolved

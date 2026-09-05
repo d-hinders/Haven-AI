@@ -218,7 +218,7 @@ export default function HowItWorks() {
           Your agent pays for things on its own, and you stay in control of every dollar.
         </p>
         <div className="flex flex-wrap gap-3">
-          <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+          <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
           <Button href="/protocols/x402" variant="ghost" size="lg">See the protocols</Button>
         </div>
         </div>
@@ -289,7 +289,7 @@ export default function HowItWorks() {
             No credit card. No setup call. Live in minutes.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+            <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
             <Button href="/protocols/x402" variant="ghost" size="lg">See the protocols</Button>
           </div>
         </div>

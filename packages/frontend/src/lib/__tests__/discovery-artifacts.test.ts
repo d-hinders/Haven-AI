@@ -22,7 +22,17 @@ import { join } from 'node:path'
 
 const PUBLIC_DIR = join(__dirname, '../../../public')
 
-const ARTIFACTS = ['llms.txt', 'llms-full.txt', '402.md', '402/index.html'] as const
+const ARTIFACTS = [
+  'llms.txt',
+  'llms-full.txt',
+  '402.md',
+  '402/index.html',
+  // #2523: the agent onboarding runbook is served from the same directory and
+  // is read by the same client, so the same link rules bind it. Its content is
+  // pinned separately (for-agents-runbook.test.ts); what is asserted here is
+  // only that it cannot reintroduce a host nobody owns.
+  'for-agents.md',
+] as const
 
 /**
  * Hosts an artifact may link to. Everything else must be a same-origin path.
@@ -100,6 +110,14 @@ describe('discovery artifacts (#2520)', () => {
     // one-liner into a file that has never had one.
     const carriers = ARTIFACTS.filter((name) => read(name).includes('npx @haven_ai/connect'))
     expect(carriers).toEqual(['llms-full.txt', '402.md', '402/index.html'])
+    // `for-agents.md` is deliberately NOT a carrier of the bare one-liner: the
+    // runbook prints the full connector command the backend builds, token flag
+    // included (`npx -y @haven_ai/connect@alpha --setup …`), because an agent
+    // reading it needs the shape it will be handed, not a command it could run
+    // as-is — and the dist-tag stays a `<channel>` placeholder, because a
+    // published package must not hard-code one (#2423). Asserted so the
+    // exclusion above reads as a decision.
+    expect(read('for-agents.md')).toContain('npx -y @haven_ai/connect@<channel> --setup')
     for (const name of carriers) {
       expect(read(name), name).toContain('npx @haven_ai/connect@alpha')
     }

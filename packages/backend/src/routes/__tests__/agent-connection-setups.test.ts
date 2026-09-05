@@ -7,6 +7,15 @@ import agentConnectionSetupRoutes, {
   CONNECTOR_PACKAGE,
   normalizeMcpServerName,
 } from '../agent-connection-setups.js'
+import {
+  AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
+  AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_JSON_MODE_SENTENCE,
+  AGENT_LOCAL_KEY_SENTENCE,
+  AGENT_NETWORK_ACCESS_SENTENCE,
+  AGENT_SECRET_HYGIENE_SENTENCE,
+} from '@haven_ai/sdk'
 
 const { mockQuery, mockConnect, mockClientQuery, mockClientRelease } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -310,6 +319,21 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('Only two changes to the command above are permitted, and no others: appending --json')
     expect(body.setup_prompt).toContain('could not determine the agent runtime')
     expect(body.setup_prompt).toContain('Never invent a runtime name')
+    // #2523: the rule sentences are imported from @haven_ai/sdk, so the prompt
+    // and the /for-agents.md runbook cannot say two different things about the
+    // same command. The literals above still pin the wording; these pin the
+    // wiring — they fail if the route reverts to its own inline copy.
+    for (const sentence of [
+      AGENT_JSON_MODE_SENTENCE,
+      AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+      AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
+      AGENT_COMMAND_MODIFICATION_SENTENCE,
+      AGENT_SECRET_HYGIENE_SENTENCE,
+      AGENT_LOCAL_KEY_SENTENCE,
+      AGENT_NETWORK_ACCESS_SENTENCE,
+    ]) {
+      expect(body.setup_prompt).toContain(sentence)
+    }
     // #2486: the closing sentence is the prose-mode fallback and says so —
     // the unconditional "When the connector finishes, tell me to return to
     // Haven to approve the budget." is gone (see the single-ask test below).

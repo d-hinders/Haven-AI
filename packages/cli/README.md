@@ -26,7 +26,8 @@ The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 ```bash
 # auth
 haven login --email you@example.com      # password via prompt or HAVEN_PASSWORD
-haven whoami
+haven whoami                             # user, session expiry, API URL
+haven guide                              # the agent onboarding runbook
 haven logout
 
 # read
@@ -55,6 +56,62 @@ Add `--json` to any read command for machine-readable output:
 ```bash
 haven agents list --json | jq '.[] | select(.status == "active") | .name'
 ```
+
+## For agents and scripts
+
+`--json` is a contract, not a formatting flag (#2525). Under it, **stdout
+carries exactly one JSON value and nothing else** — every sentence meant for a
+human goes to stderr. That holds for refusals too, which is the half a caller
+cannot work around: parse stdout, branch on the exit code, and read stderr only
+when a person is watching.
+
+```bash
+haven agents list --json                 # success: the payload, unchanged
+haven agents show missing --json         # failure: one object, still parseable
+```
+
+A failure is always:
+
+```json
+{ "ok": false, "error": { "code": "not_authenticated", "message": "Not authenticated.", "hint": "Run `haven login` ..." } }
+```
+
+Success keeps whatever shape the command already returned — including the bare
+arrays the list commands emit — so a script that parses a success today keeps
+working. `login`, `logout` and the manage commands, which used to print only a
+sentence, now emit an object as well.
+
+### Exit codes
+
+| Code | Meaning | What a caller should do |
+|---|---|---|
+| `0` | Success | Continue. |
+| `1` | Failed | Something broke that none of the below describes (a 5xx, an unexpected error). Retrying may help. |
+| `2` | Usage | The command line was wrong — unknown command, missing argument, bad flag, or a `--safe` that matches nothing. Fix the argv; retrying it unchanged will not help. |
+| `3` | Not authenticated | No stored session, or the backend rejected the one we have. Run `haven login`. |
+| `4` | Refused | The session is fine and the backend said no anyway (403, 410, other 4xx). The message is the backend's, echoed verbatim. |
+| `5` | Network | The backend could not be reached at all. Check connectivity and `--api`. |
+
+**Why a 401 is `3` and not `4`.** The two overlap by definition — a 401 *is* the
+backend refusing — and the split is made on what the caller does next: `3` means
+re-authenticate, `4` means do not bother, the session was never the problem.
+Collapsing them would leave an agent guessing which one it had.
+
+### `haven guide`
+
+```bash
+haven guide            # the agent onboarding runbook, as Markdown
+haven guide --json     # { ok, format, content }
+```
+
+Prints the same text served at `/for-agents.md` — what Haven is, which steps
+need a human, and what to say at each hand-off. It is compiled into the CLI, so
+it works with no session and no network, which is exactly the situation it
+describes how to get out of. The string is generated from
+`packages/sdk/src/agent-guidance.ts` by
+`node packages/cli/scripts/sync-agent-guidance.mjs` and byte-pinned to it by a
+test; the copy exists so this package keeps **zero runtime dependencies** and
+`npx @haven_ai/cli` stays a small install for an agent.
 
 ## Config
 

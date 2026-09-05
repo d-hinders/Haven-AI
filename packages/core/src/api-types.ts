@@ -2588,6 +2588,11 @@ export type components = {
             issue_passport?: boolean;
             /** @description Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused. */
             source?: string;
+            /**
+             * @description Agent hand-off marker (#2522). Present when the link the user followed was pasted by an agent. An ENUM, not a slug like `source`: it answers one closed question and the agent-driven funnel is segmented on it, so a free-text field would let a link author write anything into that metric. Sanitized server-side; any other value is stored as null rather than refused.
+             * @enum {string}
+             */
+            via?: "agent";
         };
         CreateAgentConnectionSetupResponse: {
             /** Format: uuid */
@@ -2599,6 +2604,8 @@ export type components = {
             connector_command: string;
             connector_package: string;
             setup_prompt: string;
+            /** Format: uri */
+            approval_url: string;
         };
         ResolveAgentConnectionSetupRequest: {
             setup_token: string;
@@ -2666,6 +2673,8 @@ export type components = {
             /** Format: uuid */
             setup_id: string;
             agent_id?: string | null;
+            /** Format: uri */
+            approval_url: string;
             status: components["schemas"]["AgentConnectionSetupState"];
             /** Format: date-time */
             expires_at?: string;

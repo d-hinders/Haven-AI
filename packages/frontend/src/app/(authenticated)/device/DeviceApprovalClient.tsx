@@ -206,16 +206,21 @@ export default function DeviceApprovalClient() {
               // `--v2-surface` tint reads as a resting shade rather than a
               // notice. `warning` is literal here, not decorative.
               //
-              // Focusable and announced, because the step change is silent
-              // otherwise: the submit button is one node whose label flips from
-              // Continue to Approve, so a keyboard or screen-reader user could
-              // be left focused on a button that quietly changed meaning. Focus
-              // moves here instead, which reads the requester out before the
-              // decision — the same order the sighted screen enforces.
+              // Focusable, because the step change is silent otherwise: the
+              // submit button is one node whose label flips from Continue to
+              // Approve, so a keyboard or screen-reader user could be left
+              // focused on a button that quietly changed meaning. Focus moves
+              // here instead, which reads the requester out before the decision
+              // — the same order the sighted screen enforces.
+              //
+              // Focus alone, with NO `aria-live`. It carried one and that was
+              // redundant: moving focus to a container already announces its
+              // contents, so a live region on the same node risks saying it
+              // twice — once for the mutation, once for the focus landing.
+              // `role="status"` would be the same thing under another name.
               <div
                 ref={reviewPanel}
                 tabIndex={-1}
-                aria-live="polite"
                 data-testid="device-client-label"
                 className="focus-visible:outline-none"
               >

@@ -82,7 +82,18 @@ export function ApprovalRequiredBanner({
             was "if you did not start this, deny it", which an attacker chooses
             the string for. Caught in a mobile capture, not by a test. */}
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
+          {/* The title needs the wrap too, not just the body. `min-w-0` above
+              lets the column shrink; without a break rule an unbroken token in
+              the TITLE still overflows it. Not hypothetical:
+              `ReplaceSigningKeyModal` passes `${agentName} cannot pay right
+              now`, and an agent name is free user text bounded only by the
+              API's 80-character ceiling — the same ceiling the /device hostile
+              label hits. That banner is `tone="danger"` on an irreversible
+              re-key, so the sentence it would push out of view is the one that
+              says the budget is not restored and this cannot be restarted. */}
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)] [overflow-wrap:anywhere]">
+            {title}
+          </h3>
           <div className={`${compact ? 'text-xs' : 'text-sm'} mt-1 leading-relaxed text-[var(--v2-ink-2)]`}>
             {children}
           </div>

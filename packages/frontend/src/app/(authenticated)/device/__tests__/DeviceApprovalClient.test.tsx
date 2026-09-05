@@ -159,7 +159,11 @@ describe('device approval screen', () => {
       render(<DeviceApprovalClient />)
       const panel = await screen.findByTestId('device-client-label')
       await waitFor(() => expect(panel).toHaveFocus())
-      expect(panel).toHaveAttribute('aria-live', 'polite')
+      // Focus is the whole mechanism. It deliberately carries no `aria-live`:
+      // focusing a container already announces it, and a live region on the
+      // same node would say it twice (haven-design-reviewer, re-review).
+      expect(panel).not.toHaveAttribute('aria-live')
+      expect(panel).toHaveAttribute('tabindex', '-1')
     })
 
     it('submits the code the LABEL belongs to, not whatever is in the box', async () => {

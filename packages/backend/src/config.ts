@@ -58,7 +58,7 @@ export function parseTrustProxyHops(raw: string | undefined): number {
 }
 
 /**
- * npm dist-tag the dashboard hands out in the connector setup command (#2422,
+ * npm dist-tag the dashboard hands out in the connector command (#2422,
  * epic #2420).
  *
  * Unset means `alpha`, and that default is the whole safety story here: the
@@ -86,7 +86,7 @@ export function parseTrustProxyHops(raw: string | undefined): number {
  * lowercase alphanumerics and hyphens, 32 chars max. It deliberately excludes
  * anything that could turn `@haven_ai/connect@<channel>` into a different
  * argument once it reaches a shell — whitespace, quotes, `;`, `&`, `$`,
- * backticks, `/`, `@`. The setup command is copied and pasted into a terminal
+ * backticks, `/`, `@`. The connector command is copied and pasted into a terminal
  * by a human or executed by an agent, so a channel is an injection surface,
  * not just a label. `shellQuote` in the route quotes the token and the API
  * URL; the package spec is NOT quoted, so this validation is what stands in
@@ -133,7 +133,7 @@ export const config = {
   rpcUrl: optionalEnv('RPC_URL', 'https://rpc.gnosischain.com'),
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
 
-  // #2422 (epic #2420): the npm dist-tag in the connector setup command the
+  // #2422 (epic #2420): the npm dist-tag in the connector command the
   // dashboard hands out. The dev Railway service is INTENDED to be set to
   // `dev`, so a developer testing against the dev backend installs the dev
   // package set — but that is an OPERATOR action, never an agent's, and it has

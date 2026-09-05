@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
+last-verified: "2026-09-05" # #2576: EDITED, scope = the one sentence describing what `HAVEN_CONNECTOR_CHANNEL` selects — "setup command" → **connector command**. Nothing about the dev environment, its services or its variables was re-verified. Prior: chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
 ---
 
 # Dev environment
@@ -216,7 +216,7 @@ Isolation rules that are non-negotiable for a payments product:
   isolating testnet from mainnet keys, though the deployed posture shares one
   key (see above).
 - **Connector channel** — `HAVEN_CONNECTOR_CHANNEL` on the dev **backend**
-  selects the npm dist-tag the dashboard's setup command hands out (#2422, epic
+  selects the npm dist-tag the dashboard's connector command hands out (#2422, epic
   #2420), and the same variable on the dev **hosted MCP** selects the tag its
   own "re-run the connector" hints name (#2423). Unset or empty means `alpha`;
   production leaves it unset, so the production handout is untouched by the

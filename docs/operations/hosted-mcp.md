@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/mcp-server/**
   - docker-compose.yml
-last-verified: "2026-09-03" # #2423: EDITED, scope = the Variables list in step 3 and the Variables bullet under "Verifying the custody posture in production". Both enumerated the service's environment variables and so became incomplete when the hosted server gained the optional HAVEN_CONNECTOR_CHANNEL (unset = alpha = today's behaviour; a malformed value refuses the boot). The custody claims those two lists exist to support are unchanged — the new variable is a dist-tag for hint text, carries no key material, and HAVEN_DELEGATE_KEY still refuses the boot. Nothing else in this document was re-verified in this pass. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-09-05" # #2576: EDITED, scope = step 4 of the custom-domain checklist — "connect command generator" → **connector command generator**, matching the canonical term. The step's substance (which frontend surface to update) was not re-verified. Prior: #2423: EDITED, scope = the Variables list in step 3 and the Variables bullet under "Verifying the custody posture in production". Both enumerated the service's environment variables and so became incomplete when the hosted server gained the optional HAVEN_CONNECTOR_CHANNEL (unset = alpha = today's behaviour; a malformed value refuses the boot). The custody claims those two lists exist to support are unchanged — the new variable is a dist-tag for hint text, carries no key material, and HAVEN_DELEGATE_KEY still refuses the boot. Nothing else in this document was re-verified in this pass. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
 ---
 
 # Deploy — Hosted MCP server (`@haven_ai/mcp-server`)
@@ -81,7 +81,7 @@ for the wire contract and the custody invariant.
 1. Railway → Service → **Networking → Custom Domain** → add `mcp.<your-domain>`.
 2. Add the displayed `CNAME` record at your DNS provider.
 3. Wait for Railway to issue a cert (TLS automatic).
-4. Update the frontend connect command generator to point at the custom domain.
+4. Update the frontend connector command generator to point at the custom domain.
 
 ## Local development
 

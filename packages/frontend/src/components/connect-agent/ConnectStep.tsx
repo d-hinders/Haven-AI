@@ -100,7 +100,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       {connectView?.kind === 'waiting_for_connector' && !setup && (
         <SetupStatusState
           title="Not connected yet"
-          body="Nothing to approve until the agent runs its setup command. That command is in the session where this setup was created, and you do not need it here."
+          body="Nothing to approve until the agent runs its connector command. That command is in the session where this setup was created, and you do not need it here."
           tone="neutral"
           primaryLabel="Close"
           onPrimary={flow.handleClose}

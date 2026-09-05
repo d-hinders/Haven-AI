@@ -87,7 +87,7 @@ describe('step 4 poll ticks cause no content shift (#1377 C)', () => {
     const slot = container.querySelector('[aria-live="polite"]')
     expect(slot).not.toBeNull()
     expect(slot?.textContent?.trim()).not.toBe('')
-    expect(slot?.textContent).toMatch(/waiting for the agent to run the setup command/i)
+    expect(slot?.textContent).toMatch(/waiting for the agent to run the connector command/i)
     expect(container.textContent).not.toContain('Haven has not received a connection yet')
 
     const elementsBefore = container.querySelectorAll('*').length

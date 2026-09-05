@@ -283,7 +283,7 @@ function promptAbortedError(reason: string): ConnectError {
   return new ConnectError(
     'runtime_prompt_aborted',
     `Runtime not chosen (${reason}). Nothing was written: no agent was created, no credentials were stored, and the Haven setup token is still unused. ` +
-      'Run the setup command again, or pass --runtime <name> to skip the prompt.',
+      'Run the connector command again, or pass --runtime <name> to skip the prompt.',
     'rerun_connect_and_choose_a_runtime',
   )
 }

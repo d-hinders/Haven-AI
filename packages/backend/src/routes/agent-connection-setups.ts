@@ -43,6 +43,9 @@ import {
   AGENT_SECRET_HYGIENE_SENTENCE,
   AGENT_WIRING_COLLISION_RELAY_SENTENCE,
 } from '@haven_ai/sdk'
+// #2530: lifted to a shared helper — the root document and the OpenAPI
+// servers[] list need the identical answer.
+import { apiBaseUrl } from '../domain/request-origin.js'
 import {
   requestPassport,
   issuePassportBestEffort,
@@ -278,7 +281,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         parsed.allowances,
       )
 
-      const apiUrl = apiBaseUrl(request)
+      const apiUrl = apiBaseUrl(request.headers)
       const command = buildConnectorCommand(setupToken, apiUrl, parsed.localMcp)
       return reply.code(201).send({
         setup_id: setupId,
@@ -1223,15 +1226,6 @@ function joinApprovedActions(actions: string[]): string {
   return `${actions.slice(0, -1).join(', ')}, and ${actions[actions.length - 1]}`
 }
 
-function apiBaseUrl(request: FastifyRequest): string {
-  const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
-  if (env) return env.replace(/\/+$/, '')
-  const host = request.headers.host ?? `localhost:${process.env.PORT ?? 3001}`
-  const proto = request.headers['x-forwarded-proto']
-  const scheme = typeof proto === 'string' && proto ? proto.split(',')[0] : 'http'
-  return `${scheme}://${host}`.replace(/\/+$/, '')
-}
-
 /**
  * #1129: the default is paired to the backend's own identity. An explicit
  * variable always wins; the prod fallback is served only when the resolved
@@ -1243,7 +1237,7 @@ function apiBaseUrl(request: FastifyRequest): string {
 export function hostedMcpUrl(request: FastifyRequest): string {
   const explicit = process.env.HAVEN_HOSTED_MCP_URL ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
   if (explicit) return explicit.replace(/\/+$/, '')
-  const self = apiBaseUrl(request)
+  const self = apiBaseUrl(request.headers)
   // A malformed self-URL (scheme-less HAVEN_API_URL, weird Host header) must
   // yield the ACTIONABLE config error, not a masked TypeError-500 (#1136
   // review) — treat unparseable as not-production.

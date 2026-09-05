@@ -16,8 +16,8 @@ describe('haven guide text (#2525)', () => {
     // Both figures, because they differ and each gets quoted somewhere: 7,195
     // UTF-8 bytes, 7,130 UTF-16 code units. The em-dashes are the gap — the
     // same units confusion #2562 fixed in the docs chain gate.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(7195)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(7130)
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(7781)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(7714)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

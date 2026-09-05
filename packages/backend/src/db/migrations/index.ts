@@ -75,6 +75,7 @@ import * as dropX402ResourceTables from './073_drop_x402_resource_tables.js'
 import * as agentConnectionSetupSource from './074_agent_connection_setup_source.js'
 import * as dropInertSafeRailSchema from './075_drop_inert_safe_rail_schema.js'
 import * as viaMarker from './076_via_marker.js'
+import * as setupRunMode from './077_setup_run_mode.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -209,4 +210,5 @@ export const migrations: Migration[] = [
   agentConnectionSetupSource,
   dropInertSafeRailSchema,
   viaMarker,
+  setupRunMode,
 ]

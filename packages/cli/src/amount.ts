@@ -19,13 +19,18 @@
  *
  * ## Excess precision is REFUSED, never rounded
  *
- * `parseUnits('1.9999999', 6)` silently returns 1999999n — it drops the digit
- * that would not fit. For a field a person typed and is about to authorise,
- * quietly changing the number is worse than declining it, so this mirrors the
- * modal's own `validateMoneyInput`, which refuses before it ever reaches
- * `parseUnits`. The rule is the same on both surfaces on purpose: a budget the
- * dashboard would not accept must not become acceptable by being typed into a
- * terminal instead.
+ * `parseUnits` ROUNDS the excess rather than dropping it, which is worse than
+ * it sounds: measured against viem, `parseUnits('1.9999999', 6)` is `2000000n`
+ * — **two whole tokens** — and `parseUnits('0.0000005', 6)` is `1n`, a budget
+ * conjured out of a value below the token's precision. An earlier version of
+ * this comment said it truncates to `1999999n`; that was wrong, and the truth
+ * is the stronger argument for refusing (haven-reviewer, #2527).
+ *
+ * For a field a person typed and is about to authorise, quietly changing the
+ * number is worse than declining it, so this mirrors the modal's own
+ * `validateMoneyInput`, which refuses before it ever reaches `parseUnits`. The
+ * rule is the same on both surfaces on purpose: a budget the dashboard would
+ * not accept must not become acceptable by being typed into a terminal.
  */
 
 export interface AmountResult {

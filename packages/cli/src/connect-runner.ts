@@ -158,32 +158,79 @@ export const nodeSpawner: Spawner = (command, args, onStderr) =>
 /**
  * Find the connector's outcome object in its stdout.
  *
- * The contract is one JSON object on stdout under `--json`, but this reads the
- * LAST parseable line rather than assuming the whole stream is that object —
- * a stray line from a package manager on the `npx` path would otherwise make a
- * successful run unreadable.
+ * The contract is one JSON object on stdout under `--json`, but this does not
+ * assume the whole stream is that object: a stray line from a package manager
+ * on the `npx` path would otherwise make a successful run unreadable, so the
+ * LAST balanced object wins. Nor does it assume the object is on ONE line —
+ * that assumption held for today's connector and nothing enforced it, and a
+ * pretty-printed refusal would have been reported as no outcome at all.
  */
 export function parseOutcome(stdout: string): { outcome: ConnectorOutcome | null; noise: string } {
   const lines = stdout.split('\n')
   const noise: string[] = []
   let outcome: ConnectorOutcome | null = null
 
+  // Accumulates a candidate object across lines. The contract is one JSON
+  // object on stdout, and today the connector writes it compact — but nothing
+  // in this repository ENFORCES that, and a line-oriented parser silently
+  // swallows a pretty-printed object into `noise`, turning a real refusal into
+  // "the connector produced no outcome" (haven-reviewer, #2527). Depth
+  // counting costs a few lines and removes the assumption.
+  let buffer: string[] = []
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  const consume = (text: string) => {
+    for (const ch of text) {
+      if (inString) {
+        if (escaped) escaped = false
+        else if (ch === '\\') escaped = true
+        else if (ch === '"') inString = false
+        continue
+      }
+      if (ch === '"') inString = true
+      else if (ch === '{') depth += 1
+      else if (ch === '}') depth -= 1
+    }
+  }
+
   for (const line of lines) {
     const text = line.trim()
     if (!text) continue
-    if (text.startsWith('{')) {
+
+    if (depth === 0 && !text.startsWith('{')) {
+      noise.push(text)
+      continue
+    }
+
+    buffer.push(text)
+    consume(text)
+
+    if (depth <= 0) {
+      // A balanced candidate. The LAST one wins, so a stray object printed by
+      // a package manager on the `npx` path cannot displace the outcome.
       try {
-        const parsed = JSON.parse(text) as unknown
+        const parsed = JSON.parse(buffer.join('\n')) as unknown
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           outcome = parsed as ConnectorOutcome
-          continue
+        } else {
+          noise.push(...buffer)
         }
       } catch {
-        // Not the outcome; fall through and keep it as noise.
+        noise.push(...buffer)
       }
+      buffer = []
+      depth = 0
+      inString = false
+      escaped = false
     }
-    noise.push(text)
   }
+
+  // An object that never closed is not an outcome; keep it readable instead of
+  // dropping it, so a truncated stream still says something.
+  if (buffer.length > 0) noise.push(...buffer)
+
   return { outcome, noise: noise.join('\n') }
 }
 

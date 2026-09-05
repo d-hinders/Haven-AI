@@ -67,9 +67,11 @@ describe('parseTokenAmount', () => {
   })
 
   it('REFUSES excess precision rather than rounding it away', () => {
-    // `parseUnits('1.9999999', 6)` returns 1999999n — it drops the last digit
-    // silently. For a number a person is about to authorise, declining beats
-    // changing it. The modal refuses first too; this keeps the two in step.
+    // `parseUnits('1.9999999', 6)` is 2000000n — it ROUNDS, so the excess does
+    // not vanish, it becomes two whole tokens. (Measured, not assumed; an
+    // earlier comment here claimed truncation to 1999999n and was wrong.) For a
+    // number a person is about to authorise, declining beats changing it. The
+    // modal refuses first too; this keeps the two in step.
     const result = parseTokenAmount('1.9999999', 6, 'USDC')
     expect(result.ok).toBe(false)
     expect(result.ok === false && result.message).toMatch(/USDC supports up to 6 decimal places/)

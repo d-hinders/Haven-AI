@@ -458,9 +458,14 @@ describe('agents connect (#2527)', () => {
     return { api: api as unknown as CliApi & { calls: string[] }, bodies }
   }
 
+  // Keyed WITH the query string on purpose. The recording fake falls back to
+  // the path-only key for GETs, so a route mocked as `GET /balances/0xsafe`
+  // would answer whether or not the CLI passed `chain_id` — which is exactly
+  // how the omission below went unnoticed until review. Mocking the real URL
+  // makes the parameter load-bearing in the test as well as in production.
   const ROUTES = {
     'GET /user/safes': SAFES,
-    'GET /balances/0xsafe': BALANCES,
+    'GET /balances/0xsafe?chain_id=84532': BALANCES,
     'POST /agent-connection-setups': SETUP,
   }
 
@@ -480,8 +485,28 @@ describe('agents connect (#2527)', () => {
     const body = bodies[0].body as { allowances: { allowance_amount: string; token_address: string }[] }
     expect(body.allowances[0].allowance_amount).toBe('25000000')
     expect(body.allowances[0].token_address).toBe('0xusdc')
-    // Decimals came from GET /balances, not from a table in the CLI.
-    expect(api.calls).toContain('GET /balances/0xsafe')
+    // Decimals came from GET /balances, not from a table in the CLI — and the
+    // call names the wallet's chain.
+    expect(api.calls).toContain('GET /balances/0xsafe?chain_id=84532')
+  })
+
+  it('asks for balances on the WALLET\'s chain, which is not optional', async () => {
+    // The same account address is provisioned on every supported chain, so the
+    // address usually owns more than one row and `GET /balances/:address`
+    // answers 400 `chain_id required` rather than guessing. Omitting it would
+    // have broken this command for the ordinary multi-chain account while
+    // `wallets balances`, which has always passed it, kept working.
+    const { api } = recordingApi({
+      'GET /user/safes': SAFES,
+      // Only the chain-qualified URL is served. A request without it falls
+      // through to the fake's 404, standing in for the backend's 400.
+      'GET /balances/0xsafe?chain_id=84532': BALANCES,
+      'POST /agent-connection-setups': SETUP,
+    })
+    const { deps } = harness({ makeApi: () => api })
+    const code = await run([...CONNECT_ARGV, '--json'], deps)
+    expect(code).toBe(0)
+    expect(api.calls.some((c) => c === 'GET /balances/0xsafe')).toBe(false)
   })
 
   it('records source=cli, and sends via ONLY when an agent says it is driving', async () => {

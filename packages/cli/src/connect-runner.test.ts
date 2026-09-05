@@ -102,6 +102,34 @@ describe('parseOutcome', () => {
     expect(noise).toContain('npm warn exec')
   })
 
+  it('reads a PRETTY-PRINTED outcome, which a line parser silently swallowed', () => {
+    // The contract is one JSON object on stdout and the connector writes it
+    // compact today — but nothing enforces that, and the line-oriented version
+    // of this parser turned a real refusal into "no outcome", losing the exit
+    // code 4 and the `next_action` a caller branches on.
+    const pretty = JSON.stringify(
+      { schema_version: 1, outcome: 'failed', error: { code: 'wiring_collision', next_action: 'relay_wiring_collision_to_user' } },
+      null,
+      2,
+    )
+    const { outcome } = parseOutcome(`${pretty}\n`)
+    expect(outcome?.error?.next_action).toBe('relay_wiring_collision_to_user')
+    expect(isRefusal(outcome)).toBe(true)
+  })
+
+  it('is not fooled by a brace inside a string value', () => {
+    // Depth counting has to ignore braces in strings, or a label like
+    // "{oops" would close the object early and lose the rest.
+    const { outcome } = parseOutcome('{\n  "outcome": "complete",\n  "note": "a } brace \\" here"\n}\n')
+    expect(outcome).toMatchObject({ outcome: 'complete' })
+  })
+
+  it('keeps an unterminated object as readable noise rather than dropping it', () => {
+    const { outcome, noise } = parseOutcome('{\n  "outcome": "fail')
+    expect(outcome).toBeNull()
+    expect(noise).toContain('"outcome"')
+  })
+
   it('returns null when there is no object at all', () => {
     expect(parseOutcome('nothing useful here').outcome).toBeNull()
   })

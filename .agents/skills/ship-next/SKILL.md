@@ -234,14 +234,17 @@ else* and is not restated here (#2455, landed by #2488). **Re-run the identical 
 when the pass returns** — an unchanged `--expect-head` is what makes the verdict a claim
 about a tree that stood still. A refusal is not a thing to work around: re-make the root.
 
-**Then remove it (#2601).** `git worktree remove <review-root> --force`, by the pass that
+**Then remove it (#2601).** `git worktree remove <review-root>` — **without `--force`** — by the pass that
 made it — nothing else can tell an abandoned review root from a live one, so if the pass
 does not do it, nobody does. That is not hypothetical: **173 worktrees were registered on
 one machine** before this line existed, none of them prunable, and `git worktree list`
 stopped being readable as the "is another session working here" signal the
 claim-before-build protocol leans on. `remove`, never `rm -rf` — the registration is the
 half that matters, and a deleted directory leaves a dangling entry only `prune` clears.
-The root **stays** on a `blocked` verdict or a guard refusal, because you are about to
+Plain `remove` REFUSES a root holding modified or untracked files and `--force` deletes it
+anyway — so when a pass produced a patch you asked for, the refusal is what keeps it.
+Treat a refusal as information: take the patch out of the root, or leave the root. The
+root also **stays** on a `blocked` verdict or a guard refusal, because you are about to
 inspect or re-make that tree.
 The mechanism and the guard's two limits are in
 [`ai-agent-workflow.md` § Review Isolation](../../../docs/contributing/ai-agent-workflow.md#review-isolation-2455);

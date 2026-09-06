@@ -4,7 +4,7 @@ status: current
 covers:
   - .claude/commands/qa-explore-ui.md
   - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-09-06" # #2538: EDITED, scope = the new § "Second scenario — agent-onboarding-cold" and one `covers:` entry. The cadence gains a second discovery pass on the same weekly/non-gating/dev-only shape; the scenario and rubric live in `.claude/commands/qa-explore-agent-onboarding.md`, so this section owns only the cadence and how to read the scores. Two things measured rather than asserted while writing it. First, the discovery chain to `/for-agents.md` is REDUNDANT — the landing `<link rel="alternate">` reaches it via `llms.txt:11`, `robots.txt` names it outright (`buildRobotsTxt` in `lib/discovery-surfaces.ts`), and `sitemap.xml` lists it — which is why score 1 records the shortest route USED rather than arrival: an arrival-only score cannot fall when one hook is removed, so it would be blind to the regression this scenario exists to catch. Second, the issue asks for a `workflow_dispatch` + weekly cron in `.github/workflows/qa-explore-ui.yml`; that file does not exist and its absence is this doc's own § Cadence decision, so the section keeps the owner-armed Routine shape and states the scenario-specific reason too (a cold agent cannot be cold inside this repo's runner). Escalated on the issue rather than reversed quietly. Scope: that section and the `covers:` addition. NOT re-verified: § Cadence, the finding→backlog loop, the cadence-wide guardrails, or the qa-explore-ui trigger prompt.
+last-verified: "2026-09-06" # #2538 (follow-up): EDITED, scope = one new subsection under § Cadence, "Whether a Routine is armed is NOT readable from this repository". The doc said "the owner arms a Routine" in three places and never said that the arming state is invisible from the tree, so a reader had no way to distinguish never-armed from armed-and-silent — which is exactly what happened: specified and closed 2026-07-12, zero run reports and zero filed findings by 2026-09-06. Measured three independent ways before writing it (the `bug-reports/` listing on `dev`; a search of open and closed issues for a finding filed by a run; the absence of any scheduled task at all). Names the committed dated run report as the only observable signal, and states the corollary for prompt authors — a run that cannot proceed reports that as its RESULT, so silence keeps meaning one thing. Two Routines were armed on 2026-09-06, which this note deliberately does NOT record as a fact about the repo: it would be an unverifiable claim of exactly the kind the subsection warns against. Scope: that subsection. NOT re-verified: § Cadence's own bullets, the trigger prompts, the finding→backlog loop, the guardrails, or the second-scenario section. Prior: #2538: EDITED, scope = the new § "Second scenario — agent-onboarding-cold" and one `covers:` entry. The cadence gains a second discovery pass on the same weekly/non-gating/dev-only shape; the scenario and rubric live in `.claude/commands/qa-explore-agent-onboarding.md`, so this section owns only the cadence and how to read the scores. Two things measured rather than asserted while writing it. First, the discovery chain to `/for-agents.md` is REDUNDANT — the landing `<link rel="alternate">` reaches it via `llms.txt:11`, `robots.txt` names it outright (`buildRobotsTxt` in `lib/discovery-surfaces.ts`), and `sitemap.xml` lists it — which is why score 1 records the shortest route USED rather than arrival: an arrival-only score cannot fall when one hook is removed, so it would be blind to the regression this scenario exists to catch. Second, the issue asks for a `workflow_dispatch` + weekly cron in `.github/workflows/qa-explore-ui.yml`; that file does not exist and its absence is this doc's own § Cadence decision, so the section keeps the owner-armed Routine shape and states the scenario-specific reason too (a cold agent cannot be cold inside this repo's runner). Escalated on the issue rather than reversed quietly. Scope: that section and the `covers:` addition. NOT re-verified: § Cadence, the finding→backlog loop, the cadence-wide guardrails, or the qa-explore-ui trigger prompt.
 ---
 
 # qa-explore-ui cadence — the UX-discovery heartbeat
@@ -18,6 +18,32 @@ It does **not** restate how the exploration works — that is the existing [`qa-
 - **Frequency:** weekly (proposed). It is a discovery pass, not a deploy gate — the exact day doesn't matter; consistency does.
 - **Trigger:** the owner arms a **Routine** (or runs it by hand) with the prompt in the next section. There is no CI job — this cadence is deliberately **non-gating** and must never block a promotion or a PR.
 - **Target:** the deployed **dev** environment only — a non-production Vercel deployment built with `NEXT_PUBLIC_HAVEN_ENV=dev`, re-pointed at the shared dev backend per the `qa-explore-ui` command's Phase 1. Signed in as the seeded **QA user**, on Base Sepolia. Never prod, never a real user (see [`agent-qa.md`](agent-qa.md) → "QA identity, funding & secrets" and "Stable dev targets").
+
+### Whether a Routine is armed is NOT readable from this repository
+
+A Routine lives in the owner's client, not in the tree. Nothing here — no file,
+no workflow, no check — can tell you whether one exists, when it last fired, or
+whether it fired and produced nothing. **The only observable signal is a
+committed run report under [`../bug-reports/`](../bug-reports/)**, dated.
+
+That is not a footnote. This cadence was specified and its issue closed on
+2026-07-12, and by 2026-09-06 it had produced **zero** run reports and zero
+backlog findings — measured three ways: the `bug-reports/` directory held only
+the template and two one-off records; no open or closed issue was a finding
+filed by a run; and no scheduled task existed at all. Nobody noticed for two
+months, because *never armed*, *armed but never fired* and *fired and found
+nothing* are indistinguishable from inside the repo.
+
+So: **read the reports, not the intention.** If the newest report under
+`bug-reports/` for a scenario is older than a couple of weeks, the cadence is
+not running, whatever anyone believes about it — and a run that finds nothing
+still writes a report saying so, precisely so silence keeps meaning one thing.
+
+A second consequence, for whoever writes the trigger prompts: a run that cannot
+proceed must say so **as its result** rather than exiting quietly. `qa-explore-ui`
+needs the seeded QA user's credentials, which an unattended run may not have; its
+prompt makes that check the first step and reports *blocked on credentials*
+rather than producing nothing. A blocked report is a signal. No report is not.
 
 ## Trigger prompt (arm this on the Routine)
 

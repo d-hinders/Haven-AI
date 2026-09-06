@@ -29,6 +29,26 @@
 export const BASE_SEPOLIA_RPC =
   process.env.QA_RPC_URL_BASE_SEPOLIA?.trim() || 'https://sepolia.base.org'
 
+/**
+ * Which observer node this run is watching, by CLASS — never by value (#2511).
+ *
+ * A provider URL embeds an API key (`…/v2/<KEY>`), so the endpoint itself must
+ * never reach a log, a report or an issue body. What a triager actually needs
+ * is one bit: was this run watching the shared public endpoint, whose outages
+ * arrive as scenario failures rather than as Haven defects, or a dedicated one.
+ *
+ * It exists as a function rather than an inline ternary in `run.ts` so the
+ * secret-safety property can be ASSERTED. The wiring it reports on was
+ * unreachable from CI between PR #2553 and #2511 — `chain.ts` read the variable
+ * and `qa-dev.yml` never passed it — and the reason nobody noticed is that a
+ * set variable and an unset one produced identical logs.
+ */
+export function describeObserverRpc(raw = process.env.QA_RPC_URL_BASE_SEPOLIA): string {
+  return raw?.trim()
+    ? 'dedicated (QA_RPC_URL_BASE_SEPOLIA set)'
+    : `PUBLIC ${'https://sepolia.base.org'} — outages here read as scenario failures`
+}
+
 /** Base Sepolia USDC — the asset every money-flow leg moves. */
 export const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 

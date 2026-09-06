@@ -217,6 +217,23 @@ jobs:
           # skip into a red run.
           QA_HOSTED_MCP_URL: ${{ vars.QA_HOSTED_MCP_URL || secrets.QA_HOSTED_MCP_URL }}
           QA_X402_BINDING_SIGNER: ${{ vars.QA_X402_BINDING_SIGNER || secrets.QA_X402_BINDING_SIGNER }}
+          # The node the harness OBSERVES through (#2511). `chain.ts` has read
+          # this since PR #2553 and nothing passed it in, so an operator could
+          # file the variable and watch the observer stay on the public
+          # endpoint — the knob existed and was unreachable.
+          #
+          # SECRET only, deliberately unlike its two neighbours above: a
+          # provider URL embeds an API key (`…/v2/<KEY>`), so the
+          # variable-first pattern that makes those two diagnosable in the run
+          # log would print a credential. The run's preamble names which
+          # endpoint CLASS is in use instead, which is the diagnosability that
+          # pattern was for.
+          #
+          # It must NOT be the node the backend writes through
+          # (`RPC_URL_BASE_SEPOLIA`): the harness reads a second node on
+          # purpose, and an on-chain assertion verified on the writer's own
+          # node proves only that the backend agrees with itself.
+          QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
           # Flake budget (#578): the harness is idempotent-safe to re-run, so a transient
           # testnet RPC hiccup gets one more shot before the run is called red. Bump via a
           # repo variable if a chain is flaky; keep low — each attempt consumes test funds.

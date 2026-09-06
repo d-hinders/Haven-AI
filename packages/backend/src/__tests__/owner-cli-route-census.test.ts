@@ -259,13 +259,15 @@ describe('owner_cli route census (#2526)', () => {
       [/passkey/i, 'passkey management'],
       [/signers?(\/|$)/i, 'signer-set changes'],
       [/\/activate$/i, 'delegation activation'],
-      // Build and revoke, not only activate. `owner-cli.ts` and the security
-      // model both name "delegation build/activate/revoke" as the forbidden
-      // class, and the first cut of this list only caught activate — so five
-      // real routes in `agent-delegations.ts` (`/delegations/build`,
-      // `/delegations/{hash}/revoke`, `.../revoke/submit`, `/revoke-all`,
-      // `/revoke-all/submit`) could have been added without this firing.
-      [/\/delegations\/(build|revoke)/i, 'building or revoking a delegation'],
+      // #2539 redefined the forbidden delegation shapes. Build and the
+      // per-hash revoke PREPARE are construct-and-hand-off — they return an
+      // unsigned signature request and a dashboard link, store no signature,
+      // and are deliberately ON the list now. What can never be on it is a
+      // SIGNATURE step: `.../activate` above, and every `.../submit` twin
+      // (per-hash revoke/submit, revoke-all/submit) plus the wholesale
+      // `/revoke-all` prepares. Five routes this regex class covers, stated
+      // for the reader rather than discovered by failure.
+      [/\/delegations\/.*\/submit$/i, 'a delegation signature step'],
       [/\/revoke-all/i, 'revoking delegations wholesale'],
       [/\/safe\/exec/i, 'arbitrary Safe execution'],
       [/password|credentials/i, 'credential changes'],
@@ -300,6 +302,8 @@ describe('owner_cli route census (#2526)', () => {
       { method: 'POST', path: '/accounts/hybrid' },
       { method: 'POST', path: '/agents/{id}/rekey/start' },
       { method: 'POST', path: '/agents/{id}/delegations/{hash}/activate' },
+      { method: 'POST', path: '/agents/{id}/delegations/{hash}/revoke/submit' },
+      { method: 'POST', path: '/agents/{id}/delegations/revoke-all/submit' },
       { method: 'POST', path: '/safe/exec' },
       { method: 'POST', path: '/agents/{id}/rotate-key' },
       { method: 'POST', path: '/auth/device/approve' },
@@ -320,7 +324,10 @@ describe('owner_cli route census (#2526)', () => {
     const routes = await census()
     const real = new Set(routes.map(key))
     // A few load-bearing entries asserted by name, so a wholesale replacement
-    // of the list fails rather than passing on its own new contents.
+    // of the list fails rather than passing on its own new contents. The two
+    // #2539 (C3) entries are pinned here the same way: the allow-list's whole
+    // point is that these two construct-and-hand-off routes are the ONLY
+    // delegation writes an owner_cli token may reach.
     for (const entry of [
       'POST /agents',
       'GET /agents',
@@ -329,6 +336,8 @@ describe('owner_cli route census (#2526)', () => {
       // #2534: the funding hand-off, load-bearing because it is the one entry
       // whose reach is an agent pasting instructions at its human.
       'GET /user/safes/{safeId}/funding',
+      'POST /agents/{id}/delegations/build',
+      'POST /agents/{id}/delegations/{hash}/revoke',
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)
@@ -402,8 +411,13 @@ describe('the skill\'s account of this list stays true to it (#2537)', () => {
     {
       claim: 'approve a budget',
       stated: /approve a\s+budget/,
-      // Activation is the owner signature this epic never delegates.
-      grantedBy: (path) => /\/delegations\/(build|activate|revoke)/.test(path),
+      // Activation is the owner signature this epic never delegates. #2539
+      // allow-lists `build` (construct-and-hand-off: it builds the unsigned
+      // delegation and hands the human a signing link — it does not approve)
+      // and `revoke` (removes authority). Neither approves a budget, so the
+      // only route that would falsify this claim is `activate`, which stays
+      // refused for owner_cli.
+      grantedBy: (path) => /\/delegations\/activate/.test(path),
     },
     {
       claim: 'rotate a key',

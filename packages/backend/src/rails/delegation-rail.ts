@@ -45,6 +45,10 @@ import { getChain } from '../domain/chains.js'
 
 import { getDelegationContracts, DELEGATION_RAIL_CHAIN_IDS, chainForId } from './delegation-contracts.js'
 
+// Re-exported so route handlers can name the delegation type without importing
+// the chain SDK directly (the `chain-sdk-not-in-routes` boundary, #2539).
+export type { Delegation }
+
 const ERC20_ABI = parseAbi(['function transfer(address to, uint256 amount) returns (bool)'])
 
 /**

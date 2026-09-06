@@ -72,3 +72,23 @@ export function isUnknownRunMode(value: unknown): boolean {
 export function buildApprovalUrl(setupId: string): string {
   return `${config.frontendUrl.replace(/\/+$/, '')}/agents?setup=${encodeURIComponent(setupId)}`
 }
+
+/**
+ * The link that lands a human on the grant form for one delegation build
+ * (#2539, C3 of the agent-first epic #2519).
+ *
+ * `POST /agents/:id/delegations/build` returns it as `signing_url`, and the
+ * #2539 CLI prints it: the human clicks, the agent detail page reads
+ * `?grant=<delegation hash>` from the URL, and the grant form opens with the
+ * pending build's fields already filled. Same absolute-URL reasoning as
+ * `buildApprovalUrl` above — this is pasted into a terminal and a chat, where
+ * a bare path resolves against nothing — and the same host source, so there
+ * is still no hard-coded domain and still nothing new to sweep.
+ *
+ * The query key is `grant`, matching B2's `?setup=` on the agents list: a
+ * deep link that names WHICH pending thing to show, resolved by the page from
+ * data it already fetches (`GET /agents/:id/delegations`).
+ */
+export function buildDelegationGrantUrl(agentId: string, delegationHash: string): string {
+  return `${config.frontendUrl.replace(/\/+$/, '')}/agents/${encodeURIComponent(agentId)}?grant=${encodeURIComponent(delegationHash)}`
+}

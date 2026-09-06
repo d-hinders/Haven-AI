@@ -342,7 +342,7 @@ export type paths = {
         put?: never;
         /**
          * Grant step 1: build an unsigned budget delegation for the owner to sign.
-         * @description Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827).
+         * @description Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.
          */
         post: operations["buildAgentDelegation"];
         delete?: never;
@@ -4855,7 +4855,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Pending delegation stored; the owner signs signing_payload next. */
+            /** @description Pending delegation stored (or an identical still-pending build reused); the owner signs next. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -4864,7 +4864,7 @@ export interface operations {
                     "application/json": {
                         /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
                         delegation_hash: string;
-                        /** @description Fresh per (agent, token, recipient) slot — replacement identity (#827). */
+                        /** @description Fresh per (agent, token, recipient) slot — replacement identity (#827). Repeated UNCHANGED when build reuses an identical still-pending row (#2539). */
                         version: number;
                         /** @example 0x1111111111111111111111111111111111111111 */
                         delegate_account_address: string;
@@ -4872,6 +4872,15 @@ export interface operations {
                         signing_payload: {
                             [key: string]: unknown;
                         };
+                        /** @description The build identifier. It IS the delegation hash — there is no second id and no new column (#2539). */
+                        build_id: string;
+                        /** @description The hash of the EIP-712 typed data to sign — the delegation_hash, named for the issue’s response shape (#2539). */
+                        typed_data_hash: string;
+                        /**
+                         * Format: uri
+                         * @description Dashboard grant form for this agent with the pending build prefilled (?grant=<delegation hash>). Host from the backend’s FRONTEND_URL, the same source buildApprovalUrl uses (#2539).
+                         */
+                        signing_url: string;
                     };
                 };
             };
@@ -5131,6 +5140,8 @@ export interface operations {
                         };
                         /** @example 0x1111111111111111111111111111111111111111 */
                         treasury_address: string;
+                        /** Format: uri */
+                        revocation_url: string;
                         instructions: string;
                     } | {
                         /** @enum {string} */
@@ -5141,6 +5152,8 @@ export interface operations {
                         };
                         /** @example 0x1111111111111111111111111111111111111111 */
                         treasury_address: string;
+                        /** Format: uri */
+                        revocation_url: string;
                         instructions: string;
                     };
                 };

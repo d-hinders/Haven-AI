@@ -38,9 +38,9 @@ The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 `--api <url>` or `HAVEN_API_URL` (e.g. a local backend at
 `http://localhost:3001`).
 
-> **This version: login, read, and backend-only management.** On-chain,
-> owner-signed actions (budgets, send) are signed in the
-> dashboard — this CLI never holds your keys. See
+> **This version: login, read, backend-only management, and budget
+> construct-and-hand-off.** On-chain, owner-signed actions (budget signature,
+> send) are signed in the dashboard — this CLI never holds your keys. See
 > [`docs/research/haven-cli.md`](../../docs/research/haven-cli.md) for the full
 > design and roadmap.
 
@@ -123,7 +123,44 @@ haven contacts add <name> <address> | contacts remove <id>
 haven agents connect --name <name> --budget <amount> --token USDC --period <minutes>
 haven agents connect --name <name> --budget 25 --token USDC --period 1440 --run
 haven agents connect --status <setupId> [--wait]
+
+# budgets: construct-and-hand-off (#2539) — the CLI never signs
+haven budget grant <agentId> --amount 25 --token USDC --period 1440
+haven budget grant <agentId> --amount 25 --token USDC --period 1440 --recipient <address> --wait
+haven budget revoke <agentId> <delegationHash> [--wait]
 ```
+
+### `haven budget grant` / `haven budget revoke` (#2539)
+
+Later budget changes — a second token, a raise, a recipient pin, a stop — no
+longer require describing where to click. Both commands CONSTRUCT the
+signature request and print a dashboard link; **the human signs in the
+browser**, with their passkey or wallet, every time. The CLI never signs and
+never calls `activate` — that is the whole design.
+
+- `budget grant <agentId> --amount <n> --token USDC --period <minutes>`
+  builds the pending delegation (period is whole **minutes**, at least `1` —
+  this rail has no one-time budget, and the CLI refuses `--period 0` rather
+  than letting `/delegations/build` answer it with a 400. `agents connect`
+  does take `--period 0`, but that sets `reset_period_min` on a different
+  route). `--amount` is in
+  whole tokens, read from your wallet's balances exactly like
+  `agents connect`; `--recipient` pins the budget to one address (omit for an
+  open budget); `--expires` takes unix seconds (default: 90 days).
+- `budget revoke <agentId> <delegationHash>` prepares the sponsored
+  revocation (no gas, one signature). The hash comes from
+  `haven agents show` or the dashboard.
+- `--wait` on either command polls until the human's signature lands (grant:
+  the hash turns `active`; revoke: the row turns `revoked`), 5 s interval, 15
+  minute ceiling. The build is idempotent for the same parameters while it is
+  still pending and unexpired — the dashboard form re-running the same grant
+  returns the same hash, so `--wait` converges instead of chasing a version
+  that never activates.
+- Under `--json`, grant returns the backend's build object —
+  `{ build_id, typed_data_hash, signing_url, delegation_hash, version }`
+  (`build_id` and `typed_data_hash` are the delegation hash, named for API
+  clarity) — plus `agent_id` and `status`. The link first, the settled status
+  after: the same two-emission shape as device login.
 
 ### `haven agents connect`
 
@@ -150,8 +187,9 @@ the human's decision.
 
 Two flags the issue sketched and this does not have, so you are not left
 looking for them: **`--recipient`** (a recipient pin lives in the delegation's
-caveat enforcers and is set when the human approves the budget — no API field
-takes one here) and **`haven agents create`** (`POST /agents` requires a
+caveat enforcers; `budget grant` above can set one, but a connect setup has no
+API field to carry it — the human adds it when approving) and
+**`haven agents create`** (`POST /agents` requires a
 delegate address, and a CLI an agent drives must never hold a signing key —
 `connect` is the path that generates one locally, on your machine).
 

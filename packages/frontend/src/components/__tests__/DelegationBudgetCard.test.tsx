@@ -123,6 +123,79 @@ describe('DelegationBudgetCard (#833)', () => {
     await waitFor(() => expect(mockRevoke).toHaveBeenCalled())
     expect(onBudgetChange).not.toHaveBeenCalled()
   })
+
+  // ── ?grant=<delegation hash> prefill (#2539) ──
+  // The CLI's signing link lands on this page with the pending build's hash;
+  // the form must open pre-filled from the row it already fetches.
+
+  function withSearch(search: string) {
+    // jsdom: seed and restore window.location.search around one test.
+    const original = window.location
+    // @ts-expect-error — jsdom permits the delete/delete-then-assign dance.
+    delete window.location
+    // @ts-expect-error — see above.
+    window.location = new URL(`https://app.haven.test/agents/agent-1${search}`) as unknown as Location
+    return () => {
+      // @ts-expect-error — see above.
+      window.location = original
+    }
+  }
+
+  it('?grant= pre-fills the grant form from the pending build the card already fetched (#2539)', async () => {
+    const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}`)
+    try {
+      mockGet.mockReturnValue([
+        budget({
+          delegation_hash: '0x' + 'cd'.repeat(32),
+          status: 'pending',
+          recipient_address: null,
+          budget_atomic: '5000000',
+          period_seconds: 86_400,
+        }),
+      ])
+      render(<DelegationBudgetCard {...PROPS} />)
+      await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('5'))
+      expect((screen.getByLabelText('Recipient') as HTMLInputElement).value).toBe('')
+      expect((screen.getByLabelText('Period') as HTMLSelectElement).value).toBe('86400')
+    } finally {
+      restore()
+    }
+  })
+
+  it('?grant= with a recipient pin pre-fills the recipient too (#2539)', async () => {
+    const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}`)
+    try {
+      mockGet.mockReturnValue([
+        budget({
+          delegation_hash: '0x' + 'cd'.repeat(32),
+          status: 'pending',
+          recipient_address: '0x' + 'cc'.repeat(20),
+          budget_atomic: '1500000',
+          period_seconds: 3_600,
+        }),
+      ])
+      render(<DelegationBudgetCard {...PROPS} />)
+      await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('1.5'))
+      expect((screen.getByLabelText('Recipient') as HTMLInputElement).value).toBe('0x' + 'cc'.repeat(20))
+      // An off-rhythm period (1h) gets its own Select option rather than
+      // silently desyncing from the state it displays.
+      expect((screen.getByLabelText('Period') as HTMLSelectElement).value).toBe('3600')
+    } finally {
+      restore()
+    }
+  })
+
+  it('an unknown or non-pending ?grant= hash leaves the form blank — never an error state (#2539)', async () => {
+    const restore = withSearch(`?grant=${'0x' + 'ef'.repeat(32)}`)
+    try {
+      mockGet.mockReturnValue([])
+      render(<DelegationBudgetCard {...PROPS} />)
+      await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+      expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('')
+    } finally {
+      restore()
+    }
+  })
 })
 
 // #2473: a failed budget fetch used to collapse into the same `null` as the

@@ -177,4 +177,52 @@ describe('discovery artifacts (#2520)', () => {
       'https://exit.example-cdn.com/x',
     ])
   })
+
+  /**
+   * No served artifact asserts a chain the deployment can contradict (#2596).
+   *
+   * These files are STATIC: one copy, served byte-identical from production
+   * and from every test deployment. So a bare chain name in them is a fact
+   * about one deployment printed on all of them, and the reader has no way to
+   * tell which one they are holding.
+   *
+   * #2591 fixed the sharp end of this — `/for-agents.md`'s funding step, where
+   * a wrong chain sends a human's real money somewhere it can never be
+   * recovered from. These four are the blunt end: they describe Haven's
+   * settlement rail rather than instructing a transfer, so nobody loses funds
+   * by reading them. They still matter, because an agent reads them ALONGSIDE
+   * the corrected runbook, and of two Haven-authored documents that disagree
+   * the assertive one is likelier to win — it reads as a product fact rather
+   * than as something to go and check.
+   *
+   * The rule is deliberately about the SHAPE, not the word "Base": any bare
+   * chain assertion is the defect, and naming the resolver is the fix.
+   */
+  it('names no chain without saying where the real one comes from (#2596)', () => {
+    const RESOLVER = '/.well-known/haven.json'
+    const offenders: string[] = []
+    for (const name of ARTIFACTS) {
+      const body = read(name)
+      for (const [index, line] of body.split('\n').entries()) {
+        if (!/\b(?:on|USDC on) (?:Base|Base Sepolia|Gnosis)\b/.test(line)) continue
+        // Qualified in place is the fix: the line may name a chain as long as
+        // it also says where the deployment's own answer lives.
+        if (line.includes(RESOLVER)) continue
+        offenders.push(`${name}:${index + 1}`)
+      }
+    }
+    expect(offenders, `bare chain assertion in a served artifact: ${offenders.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the matcher finds a bare chain assertion', () => {
+    // Four zeroes are only evidence if the matcher can return non-zero — and
+    // this one has to distinguish a bare assertion from a qualified one, which
+    // a presence check could not.
+    const bare = 'Payments settle in USDC on Base via x402.'
+    const qualified = 'Payments settle in USDC on Base; this deployment reports its chain in /.well-known/haven.json.'
+    const matches = (line: string) =>
+      /\b(?:on|USDC on) (?:Base|Base Sepolia|Gnosis)\b/.test(line) && !line.includes('/.well-known/haven.json')
+    expect(matches(bare)).toBe(true)
+    expect(matches(qualified)).toBe(false)
+  })
 })

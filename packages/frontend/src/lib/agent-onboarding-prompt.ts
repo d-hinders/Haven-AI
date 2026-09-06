@@ -1,5 +1,5 @@
 /**
- * The onboarding prompt, as the dashboard renders it (#2535, epic #2519).
+ * The onboarding prompt, as the `/agents` empty state renders it (#2535).
  *
  * A COPY, not the source. The canonical string is `AGENT_ONBOARDING_PROMPT` in
  * `packages/sdk/src/agent-guidance.ts`, where it sits beside the sentence

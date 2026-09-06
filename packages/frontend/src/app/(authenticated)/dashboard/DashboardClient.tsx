@@ -1,7 +1,6 @@
 'use client'
 
 import { ArrowLeftRight, Bot, ChevronRight, DollarSign, ShieldCheck, Wallet } from 'lucide-react'
-import { AgentOnboardingPromptCard } from '@/components/connect-agent/AgentOnboardingPromptCard'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -189,26 +188,6 @@ function ConnectedAgentsSection({
               </div>
             }
           />
-          {/* #2535: the agent-driven alternative, offered only where it can
-              actually succeed — gated on the SAME expression the "Connect agent"
-              button is, so the two cannot diverge.
-
-              What that gate is really buying, stated accurately because the
-              obvious rationale is wrong today: `hasAccounts` and
-              `canConnectAgents` are currently the SAME predicate
-              (`safes.length > 0`), because `listSessionSafesForUser` already
-              filters to `account_type = 'delegator_hybrid'` — so the
-              retired-rail account the second one reads as guarding against
-              never reaches this component. The gate is not redundant, though:
-              without an account the prompt's opening sentence ("I have a Haven
-              account and I am signed in") is simply false, and it would hand an
-              agent a job that must fail at `haven agents connect`. Keeping both
-              names is what makes this line survive the filtering changing.
-              (haven-reviewer caught the first version of this comment asserting
-              the retired-rail case as live.) */}
-          {hasAccounts && canConnectAgents ? (
-            <AgentOnboardingPromptCard className="mt-6" />
-          ) : null}
         </div>
       ) : (
         <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">

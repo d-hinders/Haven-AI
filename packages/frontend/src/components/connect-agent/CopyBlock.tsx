@@ -30,8 +30,8 @@ export function CopyBlock({
    * modal, where each block is a standalone content card on a plain background.
    * It is wrong inside another `Card`: `haven-design-reviewer` found the
    * onboarding-prompt card rendering `Card > Card.Section > CopyBlock`, where
-   * that third `Card` is a second independently bordered and shadowed box, and
-   * on the dashboard a third one — exactly the nested-filled-card composition
+   * that third `Card` is a second independently bordered and shadowed box —
+   * exactly the nested-filled-card composition
    * `Card.tsx`'s own invariant forbids and the mechanical gates cannot see.
    *
    * An opt-in flag rather than a change to the default, because the three

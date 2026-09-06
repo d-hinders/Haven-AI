@@ -7,8 +7,19 @@ import { useCopyTimeout } from '@/hooks/useCopyTimeout'
 import { buildAgentOnboardingPrompt } from '@/lib/agent-onboarding-prompt'
 
 /**
- * "Set up with your AI agent" — the whole-onboarding prompt, offered on the two
- * empty states a signed-in user with no agents can reach (#2535, epic #2519).
+ * "Set up with your AI agent" — the whole-onboarding prompt, offered on the
+ * `/agents` empty state (#2535, epic #2519).
+ *
+ * ## Why `/agents` only, when the issue asked for the dashboard too
+ *
+ * #2534 merged a first-run onboarding checklist onto the dashboard while this
+ * was in review. Rendered together, a signed-in user with no agents met THREE
+ * affordances for one job — the checklist's "Connect your first agent" step, the
+ * "No agents connected yet" empty state, and this card — and this card drew into
+ * a half-width column where the prompt wraps too narrowly to read. The dashboard
+ * placement was dropped on the owner's decision (2026-09-06); the checklist owns
+ * first-run agent guidance there, and this owns the agent-driven alternative on
+ * `/agents`, where the "or" divider states the relationship.
  *
  * ## Why this exists next to the connect modal rather than inside it
  *
@@ -68,7 +79,7 @@ export function AgentOnboardingPromptCard({ className }: { className?: string })
       <div className="p-5 md:p-6">
         {/* `nested`: this card IS the Card, so CopyBlock must not bring its own
             (#2535, haven-design-reviewer — the default shell made this
-            Card > Card.Section > Card, and three deep on the dashboard). */}
+            Card > Card.Section > Card). */}
         <CopyBlock
           label="Prompt for your agent"
           value={prompt}

@@ -29,7 +29,7 @@ import { ethers } from 'ethers'
 import { HavenApi } from '../lib/haven-api.js'
 import { merchant402Reason } from '../lib/merchant-402.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
-import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, describeObserverRpc } from '../lib/chain.js'
 import { MCP_HEADERS, decodeChallenge, mcpBody, readMcpOutcome } from '../lib/merchant-mcp.js'
 import { provisionThrowawayIdentity, payViaDelegation, signTyped } from '../lib/throwaway-identity.js'
 
@@ -201,7 +201,7 @@ export const x402Erc7710FreshAgent: Scenario = {
       return fail(
         `authorize returned 200 — so the backend's node saw ${identity.delegateAccountAddress} ` +
           `deployed (the deploy leg is fail-closed: an unconfirmed or reverted deploy 502s) — but ` +
-          `the harness's own node ${BASE_SEPOLIA_RPC} still reports no code after ` +
+          `the harness's own observer node [${describeObserverRpc()}] still reports no code after ` +
           `${TIMING.deployVisibleWaitMs / 1000}s of polling. The harness deliberately reads a ` +
           `SECOND node (the backend writes through RPC_URL_BASE_SEPOLIA), so the direct reading is ` +
           `that this node has not caught up. Settlement is not attempted: against an account this ` +

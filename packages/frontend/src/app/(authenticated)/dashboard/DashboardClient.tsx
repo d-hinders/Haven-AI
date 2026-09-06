@@ -13,6 +13,7 @@ import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useCountUp } from '@/hooks/useCountUp'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
+import { useSafeFunding } from '@/hooks/useSafeFunding'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
@@ -711,6 +712,16 @@ export default function DashboardClient() {
   // The DELEGATION-rail nudge above is untouched — `Backup & recovery` is live
   // and this is still the rail where new accounts land.
   const hasAgents = dataReady && agents.length > 0
+  // #2534: the funding facts for the onboarding card's step 1, read from the
+  // same endpoint `haven wallets funding` prints — one source for the
+  // instruction copy (address, chain, the minimum `@haven_ai/core` owns).
+  // Fetched only while the account is unfunded: a funded account has no
+  // instruction to show, and the hero/`hasFunds` state already settles the
+  // checklist. The hook surfaces errors instead of throwing so the card keeps
+  // its general copy when the read fails, exactly as the balance read does.
+  const { funding: safeFunding } = useSafeFunding(
+    !fundingStateKnown || hasFunds ? undefined : delegationSafe?.id,
+  )
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
   const hasFirstAgentPayment = Boolean(
@@ -1038,6 +1049,7 @@ export default function DashboardClient() {
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
             canConnectAgents={hasDelegationAccounts}
+            funding={safeFunding}
             onReceiveFunds={openReceiveForDefaultSafe}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}

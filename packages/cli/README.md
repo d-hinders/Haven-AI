@@ -44,6 +44,7 @@ haven logout
 # read
 haven wallets list
 haven wallets balances --safe <id|address>
+haven wallets funding [--safe <id|address>] [--wait]   # the paste-ready funding instruction (#2534)
 haven agents list
 haven agents show <id>
 haven budget show <agentId>
@@ -98,6 +99,21 @@ delegate address, and a CLI an agent drives must never hold a signing key —
 `connect` is the path that generates one locally, on your machine).
 
 Approving the budget stays with the human, in the browser, every time.
+
+### `haven wallets funding`
+
+Prints the funding instruction a human acts on: what to send (each token's
+documented minimum-useful amount), to which address, on which chain, plus the
+explorer link and a faucet link on testnets. It reads
+`GET /user/safes/:safeId/funding` — the same facts the dashboard's funding
+card shows — and composes nothing locally, so the printed sentence and the
+dashboard can never disagree about the amount.
+
+`--wait` polls the same read until the account counts as funded, printing the
+elapsed time on stderr while it waits, and exits 0 the moment `funded` flips.
+On timeout it exits 1 with the elapsed time in the message. It is read-only in
+every mode: it never sends anything and never touches a faucet — the transfer
+itself stays with the human.
 
 Add `--json` to any read command for machine-readable output:
 

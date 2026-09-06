@@ -68,6 +68,10 @@ function argvFor(command: string): string[] {
     // the usage path rather than the refusal path it is here to cover.
     'agents connect': ['--name', 'demo', '--budget', '25', '--token', 'USDC', '--period', '1440'],
     'wallets rename': ['s1', 'New name'],
+    // #2534: needs the /user/safes read stubbed in ROUTES to get past the
+    // wallet pick — the refusal rows below run against `refusingApi`, but the
+    // argv still has to parse, and `--wait` is a boolean flag, no extras needed.
+    'wallets funding': ['--safe', 's1'],
     'contacts add': ['Alice', '0xalice'], 'contacts remove': ['c1'],
     login: ['--email', 'ada@example.com'],
   }
@@ -172,6 +176,15 @@ describe('--json contract, success paths', () => {
   // `data()`/`text()` plumbing is trusted rather than asserted.
   const ROUTES: Record<string, unknown> = {
     'GET /user/safes': { safes: [{ id: 's1', safe_address: '0xabc', chain_id: 8453, name: 'Ops', is_default: true }] },
+    'GET /user/safes/s1/funding': {
+      account_address: '0xabc',
+      chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },
+      tokens: [
+        { symbol: 'USDC', address: '0xusdc', decimals: 6, balance_human: '0', minimum_useful_human: '5' },
+      ],
+      native: { symbol: 'ETH', balance_human: '0', needed: false },
+      funded: false,
+    },
     'GET /balances/0xabc': { balances: [{ symbol: 'USDC', formatted: '10.00', balance: '10000000' }] },
     'GET /agents': { agents: [{ id: 'a1', name: 'Payer', status: 'active' }] },
     'GET /agents/a1': { id: 'a1', name: 'Payer', status: 'active', allowances: [] },
@@ -205,6 +218,7 @@ describe('--json contract, success paths', () => {
   it.each([
     ['wallets list', ['wallets', 'list']],
     ['wallets balances', ['wallets', 'balances']],
+    ['wallets funding', ['wallets', 'funding']],
     ['agents list', ['agents', 'list']],
     ['agents show', ['agents', 'show', 'a1']],
     ['budget show', ['budget', 'show', 'a1']],

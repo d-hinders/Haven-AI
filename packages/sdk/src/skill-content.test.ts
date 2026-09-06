@@ -239,15 +239,26 @@ describe('onboarding and setup section (#2537)', () => {
   it('names only commands that exist, and describes funding as the human step', () => {
     expect(section).toContain('haven login')
     expect(section).toContain('haven agents connect')
-    // `haven wallets funding` is B4/#2534: still open, no PR, and absent from
-    // `dev` when this shipped. The issue's own text names it, and naming a
-    // command that does not exist is the defect #2535 refuses to ship — an
-    // agent that runs it gets an error it cannot diagnose, from the one
-    // document it was told to trust. Funding is described as what it actually
-    // is instead. Flip this assertion when B4 lands and add the command.
-    expect(section).not.toContain('wallets funding')
-    expect(section).toContain('Funding has no command')
-    expect(section).toMatch(/send USDC to it on Base\s+themselves/)
+    // `haven wallets funding` was B4/#2534 — open with no PR when this section
+    // was drafted, so the section described funding as the human step it is
+    // and this assertion pinned the omission, with a note to flip it when B4
+    // landed. **B4 landed as PR #2589 while this branch was open**, so it is
+    // flipped: the command is named, verified against `commands.ts:186` and
+    // `args.ts:132` on the rebased branch rather than on the strength of the
+    // merge notification.
+    expect(section).toContain('haven wallets funding')
+    // What did NOT change is the boundary. The command composes the message;
+    // it does not move money. An agent that read "there is a funding command"
+    // as "I can fund it" would be wrong in the most expensive direction, so
+    // the sentence says which half is still the human's.
+    expect(section).toContain('you cannot send the money')
+    expect(section).toMatch(/that transfer is\s+theirs/)
+    // #2591: the chain comes from the command, never from an assumption. The
+    // cold run of 2026-09-06 flagged "USDC on Base" on a Base Sepolia
+    // deployment as the one place a user could send real money to the wrong
+    // place; this section must not reintroduce a hard-coded chain.
+    expect(section).toContain('Read the chain from there rather')
+    expect(section).not.toMatch(/USDC to it on Base\b/)
   })
 
   it('keeps the four human-only steps whole', () => {

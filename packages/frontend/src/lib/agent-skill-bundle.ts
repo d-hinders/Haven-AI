@@ -94,11 +94,15 @@ Two of those steps you can do yourself, from the shell with \`@haven_ai/cli\`
   \`--period\` — creates a connection setup and prints two things: the
   connector command the backend built, and the approval link to give your user.
   Add \`--run\` to execute that command here as a child process.
+- \`haven wallets funding\` — prints the paste-ready funding instruction: what
+  to send, to which address, on which chain. Read the chain from there rather
+  than assuming one. \`--wait\` polls until the account counts as funded.
 
 **Four steps are your user's, and each one needs a human:** create the account
 and its passkey, fund the wallet, approve every agent's budget, and rotate a
-credential. Funding has no command — they open Haven, copy the wallet
-address, and send USDC to it on Base themselves.
+credential. You can compose the funding message for them with
+\`haven wallets funding\`, but you cannot send the money — that transfer is
+theirs, from a wallet you have no access to.
 
 Running the connector command is the step that wires this machine to the new
 agent — the command \`haven agents connect\` printed, or the one your user

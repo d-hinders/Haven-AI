@@ -88,7 +88,7 @@ describe('/for-agents.md (#2523)', () => {
     // from one source. The shape/amount/explorer stay in the command's own
     // output on purpose; this page names the command, it does not re-teach it.
     //
-    // 8600 -> 8900 for #2591 (the page is 8808 bytes at this commit). The cold
+    // 8600 -> 9200 for #2591 (the page is 9102 bytes at this commit). The cold
     // run of 2026-09-06 escalated the funding step to its user rather than
     // acting on it, and was right to: this page said "USDC on Base" while the
     // deployment it was fetched from reports Base Sepolia. That is the one
@@ -105,7 +105,7 @@ describe('/for-agents.md (#2523)', () => {
     // the command; enumerating `environment` and `chains.deployable` here
     // would duplicate a JSON document that is one fetch away and would go
     // stale the first time its shape changed.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(8900)
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(9200)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -207,7 +207,7 @@ describe('/for-agents.md (#2523)', () => {
     // first draft of this step named only the command, which left a
     // no-terminal agent told to read a number from somewhere it cannot reach
     // — and "never assume one" then has no alternative to offer.
-    expect(served).toContain('without a CLI session the dashboard shows all three')
+    expect(served).toMatch(/the dashboard's funding card shows the address and amount and its\s+Receive-funds screen names the chain/)
     // The hand-off carries it too, because that is the sentence the human
     // actually reads before opening a wallet.
     expect(served).toContain('let me get you the exact address **and network**')
@@ -222,7 +222,23 @@ describe('/for-agents.md (#2523)', () => {
     // this page told it to run.
     expect(served).toContain('--api <api-url>')
     expect(served).toContain('HAVEN_API_URL')
-    expect(served).toContain('the CLI defaults to localhost')
+    // NOT "defaults to localhost". It does not — `commands.ts:22` sets
+    // DEFAULT_API to Haven's hosted PRODUCTION backend, and has since #535
+    // (2026-06-25). The CLI's own `--help` still says localhost, which is
+    // where the first draft of this sentence got it: I read the help text and
+    // laundered it into three agent-served copies as fact (haven-reviewer,
+    // blocking). The correction matters because the truth is the more
+    // dangerous of the two — an omitted flag on a dev deployment does not fail
+    // loudly, it connects to production — and an agent told "you are talking
+    // to nothing" would treat a working command as proof it got the flag
+    // right. The stale help line is fixed under #2590.
+    expect(served).not.toMatch(/defaults to localhost/)
+    expect(served).toContain("the CLI's built-in default is Haven's hosted production backend")
+    expect(served).toContain('connects you somewhere real and wrong rather than failing')
+    // Not "every command needs it": `baseUrlFor` (commands.ts:209) prefers the
+    // saved session, so the flag is load-bearing on the first command only.
+    expect(served).not.toMatch(/every `haven` command needs/)
+    expect(served).toContain('on the first command')
     // #2534: step 2 names the command that prints the funding facts, so an
     // agent with a CLI session can hand its human a paste-ready instruction
     // instead of pointing at a dashboard screen. #2591 REWORDED that sentence

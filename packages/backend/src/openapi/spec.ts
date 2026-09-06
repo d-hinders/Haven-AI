@@ -6218,6 +6218,31 @@ export const openapiSpec = {
           next_user_action: { type: 'string' },
           error_code: { type: ['string', 'null'] },
           environment_label: { type: 'string' },
+          /**
+           * #2561. The other agent directories the connector found on the
+           * machine, so the dashboard can offer the owner a one-click revoke
+           * of what this setup superseded. The connector never revokes:
+           * `POST /agents/:id/revoke` is owner-authenticated, and an agent
+           * credential retiring a sibling agent is the "agent editing its own
+           * authority" the re-key routes refuse.
+           *
+           * A TRI-STATE, and the null is the point. A list means the scan ran
+           * and found these; `[]` means it ran and found none; `null` means it
+           * could not run. Absent means this report said nothing about it and
+           * the jsonb merge left whatever an earlier report wrote. Collapsing
+           * null into `[]` would have the dashboard tell an owner "nothing to
+           * revoke" about a machine nobody managed to read.
+           *
+           * The ids are shaped, not trusted: the connector falls back to the
+           * directory name when an `identity.json` exists but will not parse,
+           * so an entry here is not necessarily an agent id at all. Ownership
+           * is resolved on read against the caller's own agents.
+           */
+          superseded_agent_ids: {
+            type: ['array', 'null'],
+            items: { type: 'string', maxLength: 120 },
+            maxItems: 50,
+          },
           last_probe_at: { anyOf: [isoDateTime, { type: 'string' }] },
         },
         additionalProperties: false,

@@ -2700,6 +2700,7 @@ export type components = {
             next_user_action?: string;
             error_code?: string | null;
             environment_label?: string;
+            superseded_agent_ids?: string[] | null;
             last_probe_at?: string;
         };
         CreateAgentConnectionSetupRequest: {

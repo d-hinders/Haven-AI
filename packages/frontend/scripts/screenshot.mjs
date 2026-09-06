@@ -3019,6 +3019,121 @@ export const SCENARIOS = {
       await shoot(dialog, 'approved')
     },
   },
+
+  /**
+   * The superseded-agent revoke offer (#2561), which had no rendered evidence
+   * at all until two design-review passes each rebuilt a throwaway scenario to
+   * see it. Committed so the third does not have to, and so the state is
+   * captured the same way twice rather than off spec each time.
+   *
+   * Three variants, because the interesting behaviour is which of them renders
+   * NOTHING. The card intersects what the connector reported against the
+   * agents this owner has, so `null` (the scan could not run), `[]` and a
+   * report naming agents the owner does not hold all produce the same correct
+   * silence — and a capture of silence proves little. What is worth pinning is
+   * the offer itself, the long list, and the one branch where the card speaks
+   * without offering: the agent list failed to load, so it says so rather than
+   * implying there was nothing to replace.
+   */
+  ...Object.fromEntries(
+    [
+      ['one', ['agent-research'], 'a single superseded agent'],
+      // Both fixture agents, and they are the only two — an id this fixture
+      // does not have would have rendered ONE agent under a name promising
+      // several, which is a scenario measuring something other than its title.
+      // `agent-retired` is `paused`, not `revoked`, so it is still offerable:
+      // the card drops revoked agents, not paused ones.
+      ['many', ['agent-research', 'agent-retired'], 'several, each revocable on its own'],
+      ['failed', ['agent-research'], 'the agent list could not be read'],
+    ].map(([name, supersededIds, why]) => [
+      `connect-agent-superseded-${name}`,
+      {
+        description: `Connect agent, the completed setup's superseded-agent offer: ${why} (#2561)`,
+        api(apiPath, method) {
+          // `failed` breaks the read the card intersects against, which is the
+          // whole point of that variant.
+          if (name === 'failed' && apiPath === '/agents' && method !== 'POST') {
+            return httpError(500)
+          }
+          if (apiPath === '/agent-connection-setups' && method === 'POST') {
+            return {
+              setup_id: CONNECT_SETUP_ID,
+              status: 'active',
+              setup_token: CONNECT_SETUP_TOKEN,
+              expires_at: '2099-01-01T00:00:00.000Z',
+              connector_command: CONNECT_COMMAND,
+              setup_prompt: 'Please connect this workspace to Haven.',
+            }
+          }
+          if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+            return {
+              setup_id: CONNECT_SETUP_ID,
+              agent_id: 'agent-fixture-new',
+              status: 'active',
+              expires_at: '2099-01-01T00:00:00.000Z',
+              agent: { name: 'Research agent', description: null },
+              haven_wallet: {
+                id: FIXTURE_SAFE.id,
+                name: FIXTURE_SAFE.name,
+                address: FIXTURE_SAFE.safe_address,
+                chain_id: FIXTURE_SAFE.chain_id,
+                network: 'Base Sepolia',
+              },
+              agent_budget: [
+                {
+                  id: 'budget-1',
+                  token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                  token_symbol: 'USDC',
+                  allowance_amount: '25000000',
+                  reset_period_min: 1440,
+                },
+              ],
+              delegate_address: '0x3333333333333333333333333333333333333333',
+              install_status: {
+                runtime_mcp_mode: 'local_stdio',
+                local_mcp_configured: true,
+                local_mcp_acknowledged: true,
+                credential_files_written: true,
+                skill_installed: false,
+                restart_required: true,
+                // The field this whole slice carries. A list here, not `null`
+                // — the silent states are asserted by unit tests, which can
+                // check "rendered nothing" far more cheaply than a pixel can.
+                superseded_agent_ids: supersededIds,
+              },
+              approval: { status: 'confirmed', safe_tx_hash: null, tx_hash: null },
+            }
+          }
+          return undefined
+        },
+        async run({ page, vp, shoot }) {
+          await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 30_000 })
+          await dismissMobileSidebar(page, vp)
+
+          await page.getByRole('button', { name: 'Connect agent', exact: true }).first().click()
+          const dialog = page.getByRole('dialog')
+          await dialog.getByLabel('Agent name').fill('Research agent')
+          await dialog.getByRole('button', { name: 'Set agent budget' }).click()
+          await dialog.getByPlaceholder('Amount').fill('25')
+          await dialog.getByRole('button', { name: 'Review agent budget' }).click()
+          await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
+
+          // Waited on by the sentence each variant exists to produce, never a
+          // timeout: a run that lands anywhere else fails here rather than
+          // shooting the wrong state under this filename.
+          await dialog
+            .getByText(
+              name === 'failed'
+                ? /may have replaced an earlier agent/
+                : /This setup replaced /,
+            )
+            .waitFor({ timeout: 30_000 })
+          await shoot(dialog, name)
+        },
+      },
+    ]),
+  ),
+
   'wrong-wallet': {
     description:
       'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the header Wrong wallet pill and its popover',

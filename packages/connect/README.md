@@ -215,8 +215,22 @@ and the API key travels beside it in a header.
 re-run mints a NEW agent, and without `--replace` retires nothing, so those
 older agents still hold live API and signing keys — revoke them on the Haven
 agent page if you meant to replace them. Empty on a clean first run; an empty
-list is not a guarantee, since a scan that cannot read the credential root also
-yields one rather than failing a completed setup. On a `--replace` run, `retired_agent_ids` names the
+list here is not a guarantee, since a scan that cannot read the credential root
+also yields one rather than failing a completed setup.
+
+**The dashboard offers the revoke, never the connector (#2561).** The same ids
+now ride the install-status report, so the Haven dashboard can put a
+one-click revoke next to the setup that displaced them. The connector does not
+and must not do it: `POST /agents/:id/revoke` is owner-authenticated, and an
+agent credential retiring a sibling agent is the "agent editing its own
+authority" the re-key routes refuse. Nothing is revoked automatically — the
+owner clicks, one agent at a time.
+
+On the REPORT the field is a tri-state, unlike the `--json` outcome above: a
+list, `[]` when the scan ran and found none, and `null` when it could not run.
+That is the same ambiguity this paragraph warns you about, made machine-
+readable, so a dashboard never tells somebody their machine is clean when
+nobody managed to read it. On a `--replace` run, `retired_agent_ids` names the
 directories that were actually tombstoned and had their local key files removed
 — **the collision set only**, never the whole `superseded_agent_ids` list, which
 also names named agents that coexist with the replaced bare pair and are

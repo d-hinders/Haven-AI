@@ -852,14 +852,8 @@ describe('agents connect (#2527)', () => {
 describe('helpText covers every dispatchable command (#2590)', () => {
   const help = helpText()
 
-  it('names all of them', () => {
-    const missing = COMMANDS.filter((command) => {
-      // `wallets balances` may appear as `wallets balances [--safe …]`; a
-      // subcommand's words must appear together and in order, not merely both
-      // somewhere in the document.
-      const pattern = new RegExp(command.split(' ').map(escapeRegExp).join('\\s+'))
-      return !pattern.test(help)
-    })
+  it('names all of them, each as a usage line rather than in passing', () => {
+    const missing = COMMANDS.filter((command) => !usageLinePattern(command).test(help))
     expect(missing, `not named in --help: ${missing.join(', ')}`).toEqual([])
   })
 
@@ -867,8 +861,26 @@ describe('helpText covers every dispatchable command (#2590)', () => {
     // A green run above is only evidence if this can go red. Without it, a
     // matcher broken into always-true would pass silently — which is the
     // failure mode of every "assert nothing is missing" test.
-    const pattern = new RegExp(['agents', 'teleport'].join('\\s+'))
-    expect(pattern.test(help)).toBe(false)
+    expect(usageLinePattern('agents teleport').test(help)).toBe(false)
+  })
+
+  it('POSITIVE CONTROL: a command named only in PROSE does not count', () => {
+    // The tightening haven-reviewer asked for, asserted rather than described.
+    // The looser matcher this replaced looked for the words adjacent anywhere
+    // in the document, so a command mentioned in a sentence — but with no
+    // usage line a reader could act on — would have satisfied it. "Named" has
+    // to mean "listed as something you can run", or the guard certifies a help
+    // text that answers no question.
+    const prose = 'Run haven agents teleport when you need to move an agent.'
+    expect(usageLinePattern('agents teleport').test(prose)).toBe(false)
+    expect(usageLinePattern('agents teleport').test('  agents teleport <id>   Move it')).toBe(true)
+  })
+
+  it("POSITIVE CONTROL: a command's name does not match inside a longer word", () => {
+    // `login` compiled to a bare substring before the boundaries went in, so
+    // the word "relogin" anywhere in the help would have satisfied it.
+    expect(usageLinePattern('login').test('  relogin                 Do it again')).toBe(false)
+    expect(usageLinePattern('login').test('  login                   Sign in')).toBe(true)
   })
 
   it('describes login as the device flow it actually is', () => {
@@ -884,6 +896,25 @@ describe('helpText covers every dispatchable command (#2590)', () => {
     expect(help).toMatch(/login --email/)
   })
 })
+
+/**
+ * "The help NAMES this command" — as a usage line, not as prose.
+ *
+ * Anchored to the start of a line (after indentation) and closed with a word
+ * boundary, on two findings from the review of this PR. Unanchored, a command
+ * mentioned only in a sentence would have counted as named, and the guard
+ * would have certified a help text that answers no question a reader asked.
+ * Unbounded, single-word commands compiled to bare substrings, so `login`
+ * would have matched inside `relogin`.
+ *
+ * It still matches on WORDS rather than a rendered line: the help wraps and
+ * groups, and `agents connect` spans a usage line plus two continuations.
+ * Pinning the rendering would make this a test about layout — the kind of
+ * guard deleted the first time someone reflows a paragraph.
+ */
+function usageLinePattern(command: string): RegExp {
+  return new RegExp(`^\\s*${command.split(' ').map(escapeRegExp).join('\\s+')}\\b`, 'm')
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

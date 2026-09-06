@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
+import {
+  AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_SECRET_HYGIENE_SENTENCE,
+  AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+} from './agent-guidance.js'
 
 describe('generic skill content', () => {
   it('contains no secrets and no per-agent values', () => {
@@ -163,5 +169,109 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_BODY_MD.startsWith('# Haven: pay from a Haven wallet')).toBe(true)
     expect(HAVEN_SKILL_BODY_MD).not.toContain('name: haven-pay')
     expect(HAVEN_SKILL_BODY_MD).not.toMatch(/^---/m) // no front-matter fragments leaked
+  })
+})
+
+/**
+ * The onboarding section (#2537, D2).
+ *
+ * The skill triggers on "pay" and on a 402 and assumes the agent is already
+ * connected. An agent asked to *set Haven up* had no guidance at all, and the
+ * failure that produces is specific rather than vague: it reaches for a
+ * payment tool, because those are the only tools it has. Hence the section,
+ * and hence the first assertion below — the sentence that says the tools
+ * cannot do this is the one doing the work.
+ */
+describe('onboarding and setup section (#2537)', () => {
+  const section = HAVEN_SKILL_MD.slice(
+    HAVEN_SKILL_MD.indexOf('## Onboarding and setup'),
+    HAVEN_SKILL_MD.indexOf('## Identity and budget'),
+  )
+
+  it('exists, and is reachable — the front matter names the setup trigger too', () => {
+    expect(section.length).toBeGreaterThan(500)
+    // A section a runtime never loads is not guidance. The description is what
+    // decides whether this skill is in context when the user says "set Haven
+    // up", and it used to name only paying.
+    const frontMatter = HAVEN_SKILL_MD.slice(0, HAVEN_SKILL_MD.indexOf('\n---\n', 4))
+    expect(frontMatter).toMatch(/create a Haven account, create an agent, or connect one/)
+  })
+
+  it('says the payment tools cannot create authority', () => {
+    expect(section).toContain('None of the tools below creates authority')
+    expect(section).toMatch(/opens an account, mints a\s+credential, or approves a budget/)
+  })
+
+  it('quotes the shared rule sentences VERBATIM rather than restating them', () => {
+    // The epic's rule: a sentence on more than one surface has one home. These
+    // four also reach the agent through the backend setup prompt and the
+    // /for-agents.md runbook. Comparing against the imported constant is what
+    // makes a retyped near-copy fail — a `toContain('relay the approval')`
+    // would pass on a paraphrase, which is the drift this is here to stop.
+    for (const sentence of [
+      AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+      AGENT_COMMAND_MODIFICATION_SENTENCE,
+      AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+      AGENT_SECRET_HYGIENE_SENTENCE,
+    ]) {
+      expect(section).toContain(sentence)
+    }
+  })
+
+  it('resolves the two referents those sentences bring with them', () => {
+    // They are written in the user's voice for a prompt that has the connector
+    // command printed directly above them. Neither is true here: the reader is
+    // the agent, and this file prints no command. Both are named rather than
+    // left to inference, the same way the runbook names the first.
+    expect(section).toContain('"me" and "I" are your user, never Haven')
+    expect(section).toMatch(/"the command above" is\s+that connector command, not anything printed in this file/)
+  })
+
+  it('names only commands that exist, and describes funding as the human step', () => {
+    expect(section).toContain('haven login')
+    expect(section).toContain('haven agents connect')
+    // `haven wallets funding` is B4/#2534: still open, no PR, and absent from
+    // `dev` when this shipped. The issue's own text names it, and naming a
+    // command that does not exist is the defect #2535 refuses to ship — an
+    // agent that runs it gets an error it cannot diagnose, from the one
+    // document it was told to trust. Funding is described as what it actually
+    // is instead. Flip this assertion when B4 lands and add the command.
+    expect(section).not.toContain('wallets funding')
+    expect(section).toContain('Funding has no command')
+    expect(section).toMatch(/send USDC to it on Base\s+themselves/)
+  })
+
+  it('keeps the four human-only steps whole', () => {
+    // Dropping one leaves the user stuck at exactly that step with an agent
+    // that believes it is finished — the same failure the runbook's own
+    // four-of-six assertion guards.
+    expect(section).toContain("Four steps are your user's, and each one needs a human")
+    for (const step of [
+      'create the account',
+      'fund the wallet',
+      "approve every agent's budget",
+      'rotate a\ncredential',
+    ]) {
+      expect(section).toContain(step)
+    }
+  })
+
+  it('never suggests the agent supplies the account credentials', () => {
+    // Standing owner constraint (2026-09-04), asserted on every surface that
+    // addresses an agent about onboarding.
+    expect(section).not.toMatch(/enter (?:their|the user's) password/i)
+    expect(section).toContain('you never see or ask for their password')
+    // Positive control: the same matcher family finds what IS there, so the
+    // negative above is a fact about the text and not about the regex.
+    expect(section).toMatch(/ask for their password/i)
+  })
+
+  it('describes the login session as scoped, and names what it cannot do', () => {
+    // `owner_cli` is an allow-list (packages/backend/src/middleware/owner-cli.ts).
+    // An agent that believes the session is its user's full authority will
+    // promise things it cannot deliver; rotate-key in particular was
+    // allow-listed briefly and removed by the owner on 2026-09-05.
+    expect(section).toContain('allow-list')
+    expect(section).toMatch(/cannot approve a budget,\s+rotate a key, change a signer or move money/)
   })
 })

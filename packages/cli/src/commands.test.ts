@@ -161,6 +161,29 @@ describe('budget grant/revoke (#2539)', () => {
     }
   }
 
+  // #2539 follow-up, found by an independent review pass: the usage text said
+  // "0 means one-time", copied from `agents connect`'s `reset_period_min`.
+  // `/delegations/build` refuses `period_seconds < 60`, so `--period 0` was
+  // advertised, accepted, rendered as "one-time period" — and then 400'd by
+  // the backend every time. These two pin the refusal at the CLI boundary,
+  // where the message can name what to pass instead.
+  it('refuses --period 0 before any request, naming the minimum', async () => {
+    const api = grantApi()
+    const { deps, err } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '0'], deps)
+    expect(code).toBe(2)
+    expect(err.join('\n')).toMatch(/--period must be at least 1 minute/)
+    // The refusal costs no round trip: the backend never sees an unservable build.
+    expect(api.calls).toEqual([])
+  })
+
+  it('does not advertise a one-time period for a budget grant', async () => {
+    const { deps, err } = harness({ makeApi: () => grantApi() })
+    await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC'], deps)
+    expect(err.join('\n')).toContain('at least 1')
+    expect(err.join('\n')).not.toContain('one-time')
+  })
+
   it('grant builds, prints the signing link, and never signs', async () => {
     const api = grantApi()
     const { deps, out } = harness({ makeApi: () => api })

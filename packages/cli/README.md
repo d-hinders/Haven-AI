@@ -139,8 +139,11 @@ browser**, with their passkey or wallet, every time. The CLI never signs and
 never calls `activate` — that is the whole design.
 
 - `budget grant <agentId> --amount <n> --token USDC --period <minutes>`
-  builds the pending delegation (period is whole **minutes**; `0` would be a
-  one-time budget, and the backend floor is 60 seconds). `--amount` is in
+  builds the pending delegation (period is whole **minutes**, at least `1` —
+  this rail has no one-time budget, and the CLI refuses `--period 0` rather
+  than letting `/delegations/build` answer it with a 400. `agents connect`
+  does take `--period 0`, but that sets `reset_period_min` on a different
+  route). `--amount` is in
   whole tokens, read from your wallet's balances exactly like
   `agents connect`; `--recipient` pins the budget to one address (omit for an
   open budget); `--expires` takes unix seconds (default: 90 days).

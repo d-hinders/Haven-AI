@@ -624,7 +624,16 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
     throw new UsageError('Usage: haven budget grant <agentId> --amount 25 --token USDC --period <minutes> [--recipient <address>] [--expires <unix-seconds>] [--wait]')
   }
   if (!args.flags.amount || !args.flags.token || args.flags.period === undefined) {
-    throw new UsageError('--amount, --token and --period are required (period is whole minutes; 0 means one-time)')
+    throw new UsageError('--amount, --token and --period are required (period is whole minutes, at least 1)')
+  }
+  // The delegation rail has no one-time period: `/delegations/build` refuses
+  // anything under 60 seconds. `agents connect` DOES take `--period 0` for
+  // `reset_period_min`, which is a different field on a different route, and
+  // this command's usage text was first written from that convention — so a
+  // caller following it hit an opaque 400 from the backend instead of this
+  // sentence. Refuse it here, where the message can say what to pass instead.
+  if (args.flags.period < 1) {
+    throw new UsageError('--period must be at least 1 minute for a budget grant. A recurring budget is the only shape this rail has; `haven agents connect --period 0` is a different field on a different route.')
   }
   const { api } = await authed(args, d)
 
@@ -664,7 +673,7 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
   const emitGrant = (status?: DelegationRow['status']) =>
     emit(d, args.flags.json, { ...built, agent_id: id, status: status ?? 'pending' }, () =>
       [
-        `Budget of ${args.flags.amount} ${token.symbol} per ${args.flags.period === 0 ? 'one-time period' : `${args.flags.period} minutes`} built for agent ${id}.`,
+        `Budget of ${args.flags.amount} ${token.symbol} per ${args.flags.period} minutes built for agent ${id}.`,
         args.flags.recipient ? `Recipient pin: ${args.flags.recipient}` : null,
         'Open this link and sign — the budget goes live the moment you do:',
         built.signing_url,

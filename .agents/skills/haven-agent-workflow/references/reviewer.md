@@ -128,6 +128,7 @@ These mirror the preflight items in `docs/contributing/ai-agent-workflow.md` and
 - **Identifier Entropy.** Displayed key prefixes, setup-token prefixes, invoice numbers, nonces, or visual identifiers have enough entropy for their population and duplicate handling where needed.
 - **Credential Setup Copy.** Setup copy is consistent across UI, generated credential files, hosted-connect prompts, runtime snippets, SDK examples, and docs. It does not imply API credentials or Haven backend custody can spend.
 - **Browser Or Headless Verification.** Skipped browser verification is named and paired with a headless equivalent that covers the skipped animation, layout, routing, loading, or interaction risk.
+- **Instrument Self-Reference And Staleness.** A claim made from a measurement states what the instrument actually looked at. Reject a count taken over a multi-column listing without filtering to the column (`git worktree list | grep -c review` counts branch names), an absence claim made over an unfetched tree, and a "the value appears in the output" conclusion drawn from a probe that was passed the value. A correction is a new claim: the replacement sentence is verified against its instrument, never against the sentence it replaces.
 
 Return:
 - findings first, with severity and file/line references

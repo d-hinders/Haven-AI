@@ -10,10 +10,11 @@ covers:
   - .agents/skills/ship-next/SKILL.md
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/doc-reviewer.md
+  - .agents/skills/haven-agent-workflow/references/design-reviewer.md
   - docs/contributing/ai-agent-workflow.md
   - docs/contributing/ai-review-patterns.md
   - docs/bug-reports/qa-explore-agent-onboarding-2026-09-06.md
-last-verified: "2026-09-06" # New document. Every repository figure below was re-derived at `f8a7311c` while writing, and the command that produces it sits next to it. The four session counts (five rewrite defects, four instrument lies, three dangling half-sentences, two surviving mutations) are hand-counted from one session and say so; they are not derivable from the repository and are not presented as if they were. The one reproduction in § *The instrument lied* was run at `f8a7311c` and its output is quoted verbatim, with the caveat stated inline that a worktree list is machine-local and only the column disagreement generalises. NOT verified here: the pre-#2608 rejection behaviour of the five MCP tools, which is why § *Rewriting text you have just read* item 5 states the generalisation defect and not a per-tool count.
+last-verified: "2026-09-06" # New document. Every repository figure below was re-derived at `f8a7311c` while writing, and the command that produces it sits next to it. The four session counts (five rewrite defects, four instrument lies, three dangling half-sentences, two surviving mutations) are hand-counted from one session and say so; they are not derivable from the repository and are not presented as if they were. The one reproduction in § *The instrument lied* was run at `f8a7311c` and its output is quoted verbatim, with the caveat stated inline that a worktree list is machine-local and only the column disagreement generalises. NOT verified here: the pre-#2608 rejection behaviour of the five MCP tools, which is why § *Rewriting text you have just read* item 5 states the generalisation defect and not a per-tool count. One figure was REMOVED after review rather than caveated — a commit-count for the stale checkout in § *The instrument lied* item 3 — because it had no instrument, and the document's own H2 says an un-derived number does not get to stand next to derived ones. Four findings from the independent pass are folded in: the `covers:` gap on `design-reviewer.md` (this doc makes a claim about its content), the H2 row naming one home when the rule landed in three, two branch names quoted as substrings rather than in full, and that removed figure.
 ---
 
 # The one-session retrospective (2026-09-06)
@@ -126,14 +127,21 @@ false report if it had not been.
    git worktree list | awk '{print $1}' | grep -c '/review'  # 0
    ```
 
-   Both hits are branch names (`doc-reviewer`, `review-finds-less`). The
+   Both hits are branch names — `docs/2499-doc-reviewer-claim-derived-scope`
+   and `docs/2500-ship-next-build-so-review-finds-less`. The
    count was of the wrong column. **These two numbers are machine-local** —
    a worktree list is not in the repository, so another reader will get
    different values. What reproduces is the disagreement between the columns,
-   not the magnitudes.
-3. **The checkout was 200+ commits stale.** Twice, a local read was about to
-   be reported as "the code is not there". The code was there; the tree was
-   old. A `grep` over a stale worktree is a measurement of the past.
+   not the magnitudes — the independent review pass on this document re-ran
+   both commands and got `3` and `1`, which is the caveat working rather than
+   failing.
+3. **The checkout was stale.** Twice, a local read was about to be reported
+   as "the code is not there". The code was there; the tree was old — a
+   `grep` over a stale worktree is a measurement of the past, and its "not
+   found" is indistinguishable from a real absence. *A commit-count for that
+   staleness was quoted during the session and is deliberately not repeated
+   here: it was never instrumented, and this document is the wrong place to
+   carry an un-derived number.*
 4. **The issue search returned a hit I did not see.** The instrument was
    right and the reading was wrong, which is the failure mode no positive
    control catches.
@@ -178,7 +186,7 @@ mutation being mandatory rather than advised.
 | | Rule | Where it lands |
 |---|---|---|
 | **H1** | A correction is a new claim. Verify the replacement sentence against its instrument, never against the sentence it replaces — including when the old sentence is the thing you are fixing. | This document; `ai-review-patterns.md` § *Instrument Self-Reference And Staleness* |
-| **H2** | Before a "none found", check that the instrument is looking at the column, the tree and the process you mean. A grep over `git worktree list`, a stale checkout, and a command that echoes its own arguments all return well-formed wrong answers. | `ai-review-patterns.md` § *Instrument Self-Reference And Staleness* |
+| **H2** | Before a "none found", check that the instrument is looking at the column, the tree and the process you mean. A grep over `git worktree list`, a stale checkout, and a command that echoes its own arguments all return well-formed wrong answers. | All three of the lists this repository keeps in sync: `ai-review-patterns.md` § *Instrument Self-Reference And Staleness*, the Captain Self-Check Preflight in `ai-agent-workflow.md`, and the canonical reviewer role's must-check list |
 | **H3** | After editing a sentence, read it to its full stop in the rendered file. The tail that describes the old head is on the line the diff does not show. | This document |
 
 H1 and H3 are stated here and not yet mechanised anywhere: neither is checkable

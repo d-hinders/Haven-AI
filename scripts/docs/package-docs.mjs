@@ -164,7 +164,19 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
-    'last-verified': '2026-08-28',
+    // #2366 (part 1): EDITED — one new subsection under § Tools recording the
+    // `idempotencyKey` -> `idempotency_key` deprecation window. This is a
+    // published package's landing page and the argument is the replay contract
+    // on a payment, so the page has to say three things rather than one: the
+    // new spelling, that the old one still works and warns, and that sending
+    // both with DIFFERENT values is refused with nothing spent. The refusal is
+    // the part worth the space — Haven will not guess which replay scope a
+    // caller meant, because a wrong guess is a second spend. Written against
+    // `packages/mcp/src/tools.ts` on this branch. Scope: that subsection. NOT
+    // re-verified: the credential-file section, the Claude Desktop wiring, the
+    // consent flow, the audit log, the manual sanity test, or the
+    // non-custodial invariant.
+    'last-verified': '2026-09-06',
   },
   {
     doc: 'packages/connect/README.md',

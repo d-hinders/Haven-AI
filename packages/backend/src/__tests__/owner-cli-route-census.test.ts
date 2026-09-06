@@ -323,6 +323,9 @@ describe('owner_cli route census (#2526)', () => {
       'GET /agents',
       'POST /agent-connection-setups',
       'GET /user/safes',
+      // #2534: the funding hand-off, load-bearing because it is the one entry
+      // whose reach is an agent pasting instructions at its human.
+      'GET /user/safes/{safeId}/funding',
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)

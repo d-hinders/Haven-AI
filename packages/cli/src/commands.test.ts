@@ -126,6 +126,126 @@ describe('read commands', () => {
     expect(JSON.parse(json.out.join('\n'))).toEqual(safes)
   })
 
+  describe('wallets funding (#2534)', () => {
+    const FUNDING = {
+      account_address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },
+      tokens: [
+        { symbol: 'USDC', address: '0xusdc', decimals: 6, balance_human: '0', minimum_useful_human: '5' },
+      ],
+      native: { symbol: 'ETH', balance_human: '0', needed: false },
+      funded: false,
+    }
+
+    function fundingApi(states: Array<Record<string, unknown>>) {
+      let i = 0
+      const calls: string[] = []
+      return {
+        calls,
+        get: async <T,>(path: string) => {
+          calls.push(`GET ${path}`)
+          if (path === '/user/safes') {
+            return { safes: [{ id: 's1', safe_address: FUNDING.account_address, chain_id: 8453, name: 'Main', is_default: true }] } as T
+          }
+          if (path === '/user/safes/s1/funding') {
+            const state = states[Math.min(i, states.length - 1)]
+            i += 1
+            return { ...FUNDING, ...state } as T
+          }
+          throw new CliApiError(`Unmocked GET ${path}`, 404)
+        },
+        post: async <T,>() => {
+          throw new CliApiError('Unexpected POST in a read-only command', 405) as T
+        },
+        put: async <T,>() => {
+          throw new CliApiError('Unexpected PUT in a read-only command', 405) as T
+        },
+        del: async <T,>() => {
+          throw new CliApiError('Unexpected DELETE in a read-only command', 405) as T
+        },
+        getText: async () => '',
+      }
+    }
+
+    it('prints the paste-ready instruction from the response, in prose and as json', async () => {
+      const mk = () => fundingApi([{}])
+
+      const human = harness({ makeApi: mk })
+      expect(await run(['wallets', 'funding'], human.deps)).toBe(0)
+      const prose = human.out.join('\\n')
+      // Every number in the sentence comes from the response, not from a
+      // local copy of a constant.
+      expect(prose).toContain('Send at least 5 USDC on Base to 0x1111111111111111111111111111111111111111')
+      expect(prose).toContain('no gas token needed; Haven sponsors it')
+      expect(prose).toContain('Explorer: https://sepolia.basescan.org.')
+
+      const json = harness({ makeApi: mk })
+      expect(await run(['wallets', 'funding', '--json'], json.deps)).toBe(0)
+      expect(JSON.parse(json.out.join('\n'))).toMatchObject({ account_address: FUNDING.account_address, funded: false })
+      expect(json.out).toHaveLength(1)
+    })
+
+    it('refuses when no wallet matches --safe, or none exists', async () => {
+      const empty = harness({ makeApi: () => fundingApi([{}]) })
+      expect(await run(['wallets', 'funding', '--safe', 'nope', '--json'], empty.deps)).toBe(2)
+
+      const none = harness({
+        makeApi: () => fakeApi({ 'GET /user/safes': { safes: [] } }),
+      })
+      const code = await run(['wallets', 'funding', '--json'], none.deps)
+      expect(code).not.toBe(0)
+    })
+
+    it('--wait polls until funded flips, with elapsed time on stderr', async () => {
+      const api = fundingApi([{ funded: false }, { funded: false }, { funded: true }])
+      const sleep = vi.fn(async () => undefined)
+      const { deps, out, err } = harness({ makeApi: () => api, sleep })
+      const code = await run(['wallets', 'funding', '--wait', '--json'], deps)
+
+      expect(code).toBe(0)
+      expect(JSON.parse(out[out.length - 1])).toMatchObject({ funded: true })
+      expect(err.join('\n')).toMatch(/Still waiting after \d+[ms]+ — funded: no\./)
+      expect(err.join('\n')).toMatch(/funded after \d+[ms]+\./)
+      expect(sleep).toHaveBeenCalledTimes(2)
+    })
+
+    it('--wait exits 1 with the elapsed time when the cap runs out', async () => {
+      const api = fundingApi([{ funded: false }])
+      const { deps, out } = harness({
+        makeApi: () => api,
+        env: { HAVEN_FUNDING_WAIT_MS: '0-ish-invalid' },
+      })
+      // The cap env must be a number; an invalid one is a usage error (2), not
+      // a silent two-hour wait. Under --json the refusal is the stdout object.
+      expect(await run(['wallets', 'funding', '--wait', '--json'], deps)).toBe(2)
+      expect(JSON.parse(out[0])).toMatchObject({
+        ok: false,
+        error: { code: 'usage', message: expect.stringMatching(/must be positive numbers of milliseconds/) },
+      })
+
+      const timed = harness({
+        makeApi: () => fundingApi([{ funded: false }]),
+        env: { HAVEN_FUNDING_WAIT_MS: '1', HAVEN_FUNDING_POLL_MS: '1' },
+      })
+      expect(await run(['wallets', 'funding', '--wait', '--json'], timed.deps)).toBe(1)
+      // Under --json the failure is the stdout object (one JSON value, always);
+      // prose mode carries the same message on stderr.
+      expect(JSON.parse(timed.out[0])).toMatchObject({
+        ok: false,
+        error: { code: 'failed', message: expect.stringMatching(/Still not funded after \d+s/) },
+      })
+    })
+
+    it('never sends anything and never names a faucet call — the human acts on the facts', async () => {
+      const api = fundingApi([{ funded: false }])
+      const { deps, out } = harness({ makeApi: () => api })
+      await run(['wallets', 'funding'], deps)
+      // GETs only: the hand-off is read-only by construction.
+      expect(api.calls.every((c) => c.startsWith('GET '))).toBe(true)
+      expect(out.join('\n')).not.toMatch(/faucet/i)
+    })
+  })
+
   it('shows an agent budget', async () => {
     const agent = { id: 'a1', name: 'Research', status: 'active', allowances: [{ token_symbol: 'USDC', allowance_amount: '50', reset_period_min: 1440 }] }
     const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /agents/a1': agent }) })

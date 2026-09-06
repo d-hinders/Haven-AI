@@ -96,6 +96,14 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // route is not behind `authMiddleware`, so this cannot come back silently.
   // Read-only account context.
   { method: 'GET', path: '/user/safes' },
+  // #2534 (epic #2519 slice B4): the funding hand-off. The whole endpoint is
+  // READ-ONLY FACTS for the human — chain identity, the documented
+  // `minimum_useful_human` constants, live balances, a testnet faucet LINK.
+  // It constructs no transfer, calls no faucet, and grants no authority, so an
+  // agent-driven CLI session needs it to paste the instruction its human acts
+  // on ("Send at least 5 USDC on Base to 0x…"). GET on `/user/...` is the
+  // shape the census already classifies as a reading, not an arrangement.
+  { method: 'GET', path: '/user/safes/{safeId}/funding' },
   // Also corrected from the issue's text: balances are served under their own
   // prefix, and the activity surface has no bare route — it has a feed and a
   // per-agent stats read. Granting a path that does not exist grants nothing

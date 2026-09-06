@@ -777,6 +777,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/user/safes/{safeId}/funding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Machine-readable funding facts for one Safe: what to fund, with what, where, and how much.
+         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.
+         */
+        get: operations["getSafeFunding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/user/profile": {
         parameters: {
             query?: never;
@@ -3600,6 +3620,43 @@ export type components = {
         BalancesResponse: {
             /** @description Native token first, then ERC-20s in registry order. Never empty. */
             balances: components["schemas"]["BalanceItem"][];
+        };
+        FundingToken: {
+            symbol: string;
+            /**
+             * @description The token contract. (A funding token is always an ERC-20 — the chain-native asset is reported under `native`, not here.)
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            address: string;
+            decimals: number;
+            /** @description Human-decimal balance via formatTokenValue — '0' or <int>.<2–6 fraction digits>; '0' on balance-RPC failure. */
+            balance_human: string;
+            /** @description Documented per-token constant from @haven_ai/core — the smallest amount worth moving for this token (one small x402 payment plus headroom). A CONSTANT, not a policy: not a spend limit, not a minimum balance check. null when no constant is documented for the symbol; then `funded` ignores the token. */
+            minimum_useful_human: string | null;
+        };
+        FundingResponse: {
+            /**
+             * @description Where the human sends funds — the linked Safe address.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            account_address: string;
+            chain: {
+                id: number;
+                name: string;
+                explorer_url: string;
+            };
+            /** @description The chain's ERC-20s in registry order (native excluded — see `native`). */
+            tokens: components["schemas"]["FundingToken"][];
+            native: {
+                symbol: string;
+                balance_human: string;
+                /** @description Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI. */
+                needed: boolean;
+            };
+            /** @description Present ONLY on testnets, from the chain registry — where a HUMAN gets dev funds. Haven never calls a faucet. Absent (not null) on mainnets. */
+            faucet_url?: string;
+            /** @description True when ANY token balance ≥ its `minimum_useful_human` constant. Native gas is not part of the question. */
+            funded: boolean;
         };
         PortfolioBreakdown: {
             symbol: string;
@@ -7357,6 +7414,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getSafeFunding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Linked-Safe id (the delegation-rail account). */
+                safeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The funding picture for the linked Safe. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundingResponse"];
                 };
             };
             /** @description Error response */

@@ -1,134 +1,94 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import type { SafeFunding } from '@/hooks/useSafeFunding'
 
-function defaultProps(
-  overrides: Partial<Parameters<typeof DashboardOnboardingGuide>[0]> = {},
-) {
-  return {
-    hasFunds: false,
-    hasAgents: false,
-    hasFirstAgentPayment: false,
-    onReceiveFunds: vi.fn(),
-    onAddAgent: vi.fn(),
-    onShowAgentUsage: vi.fn(),
-    onDismiss: vi.fn(),
-    onDismissComplete: vi.fn(),
-    inProgressDismissed: false,
-    completeDismissed: false,
-    ...overrides,
-  }
+/**
+ * The empty-state funding card, fed by the funding endpoint (#2534).
+ *
+ * The card used to hard-code "Even $5" — a second copy of the minimum-useful
+ * constant `@haven_ai/core` owns, and the drift #2534 closes. What is pinned:
+ *
+ * 1. With funding facts, step 1 speaks the endpoint's numbers — the minimum,
+ *    the token, the no-gas guarantee, the account address — and holds no
+ *    "Even $5" of its own.
+ * 2. WITHOUT the payload (still loading, or the read failed) the step keeps
+ *    the old general copy and stays actionable: the checklist must not go
+ *    blank because one GET did.
+ * 3. The address line shows only while the account is unfunded — a completed
+ *    step collapses back to "Funded — your agents can spend."
+ */
+
+vi.mock('@/components/ui/Button', () => ({
+  Button: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+    <button onClick={onClick}>{children}</button>
+  ),
+}))
+
+const FUNDING: SafeFunding = {
+  account_address: '0xabc0000000000000000000000000000000000004',
+  chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },
+  tokens: [
+    { symbol: 'USDC', address: '0xusdc', decimals: 6, balance_human: '0', minimum_useful_human: '5' },
+  ],
+  native: { symbol: 'ETH', balance_human: '0', needed: false },
+  funded: false,
 }
 
-describe('DashboardOnboardingGuide', () => {
-  it('renders all three onboarding steps in canonical order', () => {
-    render(<DashboardOnboardingGuide {...defaultProps()} />)
+function renderGuide(overrides: Partial<Parameters<typeof DashboardOnboardingGuide>[0]> = {}) {
+  return render(
+    <DashboardOnboardingGuide
+      hasFunds={false}
+      hasAgents={false}
+      hasFirstAgentPayment={false}
+      onReceiveFunds={vi.fn()}
+      onAddAgent={vi.fn()}
+      onShowAgentUsage={vi.fn()}
+      onDismiss={vi.fn()}
+      onDismissComplete={vi.fn()}
+      inProgressDismissed={false}
+      completeDismissed={false}
+      {...overrides}
+    />,
+  )
+}
 
-    expect(screen.getByRole('heading', { name: 'Your first 3 steps' })).toBeInTheDocument()
-    expect(screen.getByText('Fund your Haven account')).toBeInTheDocument()
-    expect(screen.getByText('Connect your first agent')).toBeInTheDocument()
-    expect(screen.getByText('Make your first agent payment')).toBeInTheDocument()
+describe('DashboardOnboardingGuide — funding card (#2534)', () => {
+  it('renders step 1 from the endpoint payload, no local minimum', () => {
+    renderGuide({ funding: FUNDING })
+
+    const text = document.body.textContent ?? ''
+    expect(text).toContain('Add 5 USDC')
+    expect(text).toContain('no gas token needed: Haven sponsors it')
+    expect(text).toContain('Send to 0xabc0000000000000000000000000000000000004')
+    expect(text).toContain('sepolia.basescan.org')
+    expect(text).not.toContain('Even $5')
   })
 
-  it('routes the active step CTA to the funding flow when no funds yet', () => {
-    const onReceiveFunds = vi.fn()
-    render(<DashboardOnboardingGuide {...defaultProps({ onReceiveFunds })} />)
+  it('keeps the general copy while the funding read is absent', () => {
+    renderGuide({ funding: null })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Receive funds' }))
-    expect(onReceiveFunds).toHaveBeenCalledOnce()
-  })
-
-  it('advances the active CTA to the agent step once funds land', () => {
-    const onAddAgent = vi.fn()
-    render(
-      <DashboardOnboardingGuide
-        {...defaultProps({ hasFunds: true, onAddAgent })}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Connect agent' }))
-    expect(onAddAgent).toHaveBeenCalledOnce()
-  })
-
-  it('marks the agent step done even when fund is still pending (out-of-order completion)', () => {
-    render(
-      <DashboardOnboardingGuide
-        {...defaultProps({ hasAgents: true })}
-      />,
-    )
-
-    // Fund step is still the active CTA — agent step shows its completed body.
+    expect(document.body.textContent).toContain('Even $5 lets you try x402 micropayments.')
     expect(screen.getByRole('button', { name: 'Receive funds' })).toBeInTheDocument()
-    expect(screen.getByText('Agent connected.')).toBeInTheDocument()
   })
 
-  it('locks the first-payment step until an agent exists', () => {
-    render(<DashboardOnboardingGuide {...defaultProps({ hasFunds: true })} />)
+  it('hides the address line once the account is funded', () => {
+    renderGuide({ funding: FUNDING, hasFunds: true })
 
-    expect(screen.queryByRole('button', { name: 'Show me how' })).not.toBeInTheDocument()
-    expect(
-      screen.getByText('Connect an agent first to unlock this step.'),
-    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('Send to 0xabc')
+    expect(document.body.textContent).toContain('Funded — your agents can spend.')
   })
 
-  it('exposes the Show me how CTA only once an agent exists', () => {
-    const onShowAgentUsage = vi.fn()
-    render(
-      <DashboardOnboardingGuide
-        {...defaultProps({
-          hasFunds: true,
-          hasAgents: true,
-          onShowAgentUsage,
-        })}
-      />,
-    )
+  it('falls back to the general copy when no token carries a minimum', () => {
+    const noMinimum: SafeFunding = {
+      ...FUNDING,
+      tokens: [
+        { symbol: 'USDC', address: '0xusdc', decimals: 6, balance_human: '0', minimum_useful_human: null },
+      ],
+    }
+    renderGuide({ funding: noMinimum })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show me how' }))
-    expect(onShowAgentUsage).toHaveBeenCalledOnce()
-  })
-
-  it('renders the setup-complete banner when all three steps are done', () => {
-    const onDismissComplete = vi.fn()
-    render(
-      <DashboardOnboardingGuide
-        {...defaultProps({
-          hasFunds: true,
-          hasAgents: true,
-          hasFirstAgentPayment: true,
-          onDismissComplete,
-        })}
-      />,
-    )
-
-    expect(screen.getByText('Setup complete')).toBeInTheDocument()
-    expect(
-      screen.queryByRole('heading', { name: 'Your first 3 steps' }),
-    ).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(onDismissComplete).toHaveBeenCalledOnce()
-  })
-
-  it('hides the in-progress checklist when dismissed for the session', () => {
-    const { container } = render(
-      <DashboardOnboardingGuide
-        {...defaultProps({ inProgressDismissed: true })}
-      />,
-    )
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('hides the completion banner once dismissed', () => {
-    const { container } = render(
-      <DashboardOnboardingGuide
-        {...defaultProps({
-          hasFunds: true,
-          hasAgents: true,
-          hasFirstAgentPayment: true,
-          completeDismissed: true,
-        })}
-      />,
-    )
-    expect(container).toBeEmptyDOMElement()
+    expect(document.body.textContent).toContain('Add USDC so your agents have money to spend.')
+    expect(document.body.textContent).toContain('Send to 0xabc')
   })
 })

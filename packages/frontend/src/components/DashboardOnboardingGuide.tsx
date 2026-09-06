@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import type { SafeFunding } from '@/hooks/useSafeFunding'
 
 type StepStatus = 'complete' | 'active' | 'locked'
 
@@ -13,6 +14,8 @@ interface StepProps {
   title: string
   body: string
   completedBody: string
+  /** A second line under the body — the paste-ready facts (address, explorer). */
+  detail?: string
   cta?: { label: string; onClick: () => void }
 }
 
@@ -21,6 +24,16 @@ interface Props {
   hasAgents: boolean
   hasFirstAgentPayment: boolean
   canConnectAgents?: boolean
+  /**
+   * #2534: the funding facts from `GET /user/safes/:safeId/funding` — the same
+   * object `haven wallets funding` prints. The instruction text, the address
+   * and the minimum are rendered FROM this payload, so the card and the CLI
+   * cannot disagree: `@haven_ai/core` owns the minimum, the endpoint owns the
+   * sentence's inputs, this card owns only the layout. Optional so the card
+   * still renders (with the old general copy) while the read is in flight or
+   * failed — the checklist must not go blank because one GET did.
+   */
+  funding?: SafeFunding | null
   onReceiveFunds: () => void
   onAddAgent: () => void
   onShowAgentUsage: () => void
@@ -37,6 +50,7 @@ export default function DashboardOnboardingGuide({
   hasAgents,
   hasFirstAgentPayment,
   canConnectAgents = true,
+  funding = null,
   onReceiveFunds,
   onAddAgent,
   onShowAgentUsage,
@@ -88,11 +102,31 @@ export default function DashboardOnboardingGuide({
   // Active step is the first incomplete one in canonical order.
   const activeStep = !hasFunds ? 1 : !hasAgents ? 2 : !hasFirstAgentPayment ? 3 : null
 
+  // #2534: the funding instruction is rendered from the endpoint payload — the
+  // same object the CLI prints — so the card holds no second copy of the
+  // minimum-useful constant (`@haven_ai/core` owns it; the endpoint reads it).
+  // While the read is in flight or failed, the step keeps the general copy and
+  // stays actionable: the "Receive funds" CTA below does not depend on it.
+  const fundingToken = funding?.tokens.find((t) => t.minimum_useful_human !== null)
+  const fundingBody = funding
+    ? fundingToken
+      ? `Add ${fundingToken.minimum_useful_human} ${fundingToken.symbol} — ${
+          funding.native.needed
+            ? `plus ${funding.native.symbol} for gas`
+            : 'no gas token needed: Haven sponsors it'
+        }. Even a little less lets you start.`
+      : `Add USDC so your agents have money to spend.`
+    : 'Add USDC so your agents have money to spend. Even $5 lets you try x402 micropayments.'
+  const fundingDetail = funding
+    ? `Send to ${funding.account_address} — see it on ${funding.chain.explorer_url.replace(/^https?:\/\//, '')}`
+    : undefined
+
   const step1: StepProps = {
     status: hasFunds ? 'complete' : 'active',
     number: 1,
     title: 'Fund your Haven account',
-    body: 'Add USDC so your agents have money to spend. Even $5 lets you try x402 micropayments.',
+    body: fundingBody,
+    detail: hasFunds ? undefined : fundingDetail,
     completedBody: 'Funded — your agents can spend.',
     cta:
       activeStep === 1 ? { label: 'Receive funds', onClick: onReceiveFunds } : undefined,
@@ -149,7 +183,7 @@ export default function DashboardOnboardingGuide({
   )
 }
 
-function ChecklistRow({ status, number, title, body, completedBody, cta }: StepProps) {
+function ChecklistRow({ status, number, title, body, detail, completedBody, cta }: StepProps) {
   const isActive = status === 'active'
   const isComplete = status === 'complete'
   const isLocked = status === 'locked'
@@ -181,6 +215,11 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
           >
             {isComplete ? completedBody : body}
           </p>
+          {detail && !isComplete ? (
+            <p className="mt-1 break-all font-mono text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              {detail}
+            </p>
+          ) : null}
         </div>
       </div>
       {cta ? (

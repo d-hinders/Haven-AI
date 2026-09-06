@@ -863,7 +863,11 @@ delegate key (`/agents/{id}/rekey/*`) nor its API key
 credential/password/email, account provisioning, transfers, and delegation
 build, activate or revoke. It can create an agent and ask for a budget. It
 cannot approve one. **The human keeps every signature**, which is the same
-boundary §3 draws for the delegation itself.
+boundary §3 draws for the delegation itself. Since #2534 it can also read the
+funding instructions for one of the owner's Safes
+(`GET /user/safes/{safeId}/funding`): balances, chain facts and the documented
+minimum-useful amounts a human acts on — the same read-only category as the
+rest of the list, moving no money and touching no delegation state.
 
 **`POST /agents/{id}/rotate-key` was on the list and is not** — owner decision,
 2026-09-05. It issues a fresh plaintext agent API key and invalidates the old

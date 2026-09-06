@@ -114,7 +114,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 export function helpText(): string {
   return [
-    'haven — terminal-native companion to the Haven dashboard',
+    'haven — set up and run a Haven agent from the terminal. It never signs.',
     '',
     'Usage: haven <command> [subcommand] [options]',
     '',

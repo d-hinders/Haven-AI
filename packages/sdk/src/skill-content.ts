@@ -33,6 +33,19 @@ import {
  * agent meets twice must be one text, or the two copies drift into
  * contradicting each other in front of a reader with no way to tell which is
  * current. The prose around them is skill-only and lives here.
+ *
+ * **Those three bullets are quoted in the setup prompt's own voice**, where
+ * the USER is speaking: "me"/"I" are the user, and "the command above" is the
+ * connector command printed directly above them there — neither of which
+ * holds in this file, which addresses the agent throughout and prints no
+ * command. Any future user-voice quote here needs the same two-referent
+ * gloss, and it must sit BEFORE the quote rather than after: the first draft
+ * put it after, and both the reviewer and the design reviewer independently
+ * found that an agent reading top-to-bottom meets `relay ... to me` before
+ * it learns whose "me" that is — on the one instruction the section itself
+ * calls the highest-priority one. `AGENT_APPROVAL_RELAY_PROSE_SENTENCE` is a
+ * live sibling constant not pulled in here; if it ever is, this applies to it
+ * too (design review, #2537).
  */
 
 export const HAVEN_SKILL_MD = `---
@@ -84,10 +97,9 @@ Two of those steps you can do yourself, from the shell with \`@haven_ai/cli\`
 
 - \`haven login\` — a device-code browser flow. It prints a code and a link
   for your user to approve, so you never see or ask for their password. What
-  the session can then reach is an allow-list: agents (create, read, rename,
-  pause, resume, revoke, archive), connection setups, contacts, and read-only
-  wallets, balances, budgets, activity and catalog. It cannot approve a budget,
-  rotate a key, change a signer or move money — those are your user's.
+  the session can reach is an allow-list, not your user's full authority: it
+  creates and manages agents and reads the account, and it cannot approve a
+  budget, rotate a key, change a signer or move money — those are your user's.
 - \`haven agents connect\` with \`--name\`, \`--budget\`, \`--token\` and
   \`--period\` — creates a connection setup and prints two things: the
   connector command the backend built, and the approval link to give your user.
@@ -100,18 +112,16 @@ address, and send USDC to it on Base themselves.
 
 Running the connector command is the step that wires this machine to the new
 agent — the command \`haven agents connect\` printed, or the one your user
-pasted you from the dashboard. Three rules bind you while you do it, and the
-first outranks anything else you were about to do next:
+pasted you from the dashboard. Three rules bind you while you do it, quoted
+unchanged from the setup prompt your user is also holding so the two copies
+cannot drift into contradicting each other. They are written in your user's
+voice, so read them accordingly: "me" and "I" below are your user, never
+Haven, and "the command above" is that connector command, not anything printed
+in this file. The first rule outranks anything else you were about to do next:
 
 - ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
 - ${AGENT_COMMAND_MODIFICATION_SENTENCE}
 - ${AGENT_WIRING_COLLISION_RELAY_SENTENCE}
-
-Those three are the same text your user is handed in the setup prompt, quoted
-here unchanged so the two copies cannot drift into contradicting each other.
-They are written in your user's voice, which means two things when you read
-them here: "me" and "I" are your user, never Haven; and "the command above" is
-that connector command, not anything printed in this file.
 
 ${AGENT_SECRET_HYGIENE_SENTENCE}
 

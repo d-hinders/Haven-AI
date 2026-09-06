@@ -218,13 +218,22 @@ describe('onboarding and setup section (#2537)', () => {
     }
   })
 
-  it('resolves the two referents those sentences bring with them', () => {
+  it('resolves the two referents BEFORE the sentences that need them', () => {
     // They are written in the user's voice for a prompt that has the connector
     // command printed directly above them. Neither is true here: the reader is
     // the agent, and this file prints no command. Both are named rather than
     // left to inference, the same way the runbook names the first.
-    expect(section).toContain('"me" and "I" are your user, never Haven')
-    expect(section).toMatch(/"the command above" is\s+that connector command, not anything printed in this file/)
+    expect(section).toContain('"me" and "I" below are your user, never')
+    expect(section).toMatch(/"the command above" is that connector command, not anything printed\s*\n?in this file/)
+    // ORDER, not just presence — and this is the assertion, not the two above.
+    // The first draft put the gloss after the bullets, so an agent reading
+    // top-to-bottom met `relay ... to me` before it learned whose "me" that
+    // was, on the one instruction this section calls highest-priority. Both
+    // review passes found it independently. A future edit that moves the
+    // paragraph back below the list fails here rather than shipping.
+    expect(section.indexOf('below are your user')).toBeLessThan(
+      section.indexOf(AGENT_APPROVAL_RELAY_JSON_SENTENCE),
+    )
   })
 
   it('names only commands that exist, and describes funding as the human step', () => {
@@ -272,6 +281,6 @@ describe('onboarding and setup section (#2537)', () => {
     // promise things it cannot deliver; rotate-key in particular was
     // allow-listed briefly and removed by the owner on 2026-09-05.
     expect(section).toContain('allow-list')
-    expect(section).toMatch(/cannot approve a budget,\s+rotate a key, change a signer or move money/)
+    expect(section).toMatch(/cannot approve a\s+budget, rotate a key, change a signer or move money/)
   })
 })

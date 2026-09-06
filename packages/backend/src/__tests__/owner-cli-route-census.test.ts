@@ -11,6 +11,7 @@ import {
   isOwnerCliAllowed,
   routeAllowsOwnerCli,
 } from '../middleware/owner-cli.js'
+import { HAVEN_SKILL_MD } from '@haven_ai/sdk'
 import type { FastifyRequest } from 'fastify'
 
 /**
@@ -329,6 +330,85 @@ describe('owner_cli route census (#2526)', () => {
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)
+    }
+  })
+})
+
+/**
+ * The skill's PROSE about this list, tied to the list (#2537).
+ *
+ * The shipped `haven-pay` skill tells an agent what a `haven login` session
+ * can and cannot do. That paragraph was accurate when written and had nothing
+ * holding it there: re-adding `rotate-key` to the allow-list would have left
+ * the skill asserting the opposite of the truth, installed on every connected
+ * machine, with no test anywhere going red. A haven-reviewer finding on
+ * #2537, and the same "a guard that cannot fail is not a guard" shape the
+ * census above exists for.
+ *
+ * It is deliberately NOT a prose matcher. Each capability the skill DENIES is
+ * mapped to the route shapes that would grant it, and the assertion is that
+ * no such route is allow-listed. So it fails on a change to the LIST — which
+ * is the thing that can silently make the prose false — rather than on a
+ * rewording of the sentence.
+ */
+describe('the skill\'s account of this list stays true to it (#2537)', () => {
+  const section = HAVEN_SKILL_MD.slice(
+    HAVEN_SKILL_MD.indexOf('## Onboarding and setup'),
+    HAVEN_SKILL_MD.indexOf('## Identity and budget'),
+  )
+
+  /** Each denial the skill makes, and the routes that would falsify it. */
+  const DENIALS: ReadonlyArray<{ claim: string; grantedBy: (path: string, method: string) => boolean }> = [
+    {
+      claim: 'approve a budget',
+      // Activation is the owner signature this epic never delegates.
+      grantedBy: (path) => /\/delegations\/(build|activate|revoke)/.test(path),
+    },
+    {
+      claim: 'rotate a key',
+      grantedBy: (path) => path.includes('rotate-key') || path.includes('/rekey'),
+    },
+    {
+      claim: 'change a signer',
+      grantedBy: (path) => path.includes('account-signers') || path.includes('/passkey'),
+    },
+    {
+      claim: 'move money',
+      grantedBy: (path, method) =>
+        method !== 'GET' &&
+        /^\/(payments|x402|machine-payments|safe\/exec)/.test(path),
+    },
+  ]
+
+  it('states the four denials it is checked against', () => {
+    // If the sentence is reworded past these words the mapping below is
+    // measuring a claim the skill no longer makes, and this says so loudly
+    // rather than passing vacuously.
+    expect(section).toContain('allow-list')
+    for (const { claim } of DENIALS) expect(section, claim).toContain(claim)
+  })
+
+  it('has no allow-listed route that grants any of them', () => {
+    for (const { claim, grantedBy } of DENIALS) {
+      const offending = OWNER_CLI_ALLOWED_ROUTES.filter((r) => grantedBy(r.path, r.method))
+      expect(offending.map(key), `the skill says a session cannot ${claim}`).toEqual([])
+    }
+  })
+
+  it('POSITIVE CONTROL: each matcher finds the route it is looking for', () => {
+    // Four zeroes above are only evidence if the matchers can return non-zero.
+    // Written against routes that really exist and are really refused.
+    const wouldGrant: ReadonlyArray<[string, { method: string; path: string }]> = [
+      ['approve a budget', { method: 'POST', path: '/agents/{id}/delegations/activate' }],
+      ['rotate a key', { method: 'POST', path: '/agents/{id}/rotate-key' }],
+      ['change a signer', { method: 'POST', path: '/agents/{id}/account-signers' }],
+      ['move money', { method: 'POST', path: '/payments' }],
+    ]
+    for (const [claim, route] of wouldGrant) {
+      const denial = DENIALS.find((d) => d.claim === claim)!
+      expect(denial.grantedBy(route.path, route.method), `${claim} matcher is inert`).toBe(true)
+      // And each is genuinely refused today, so the guard is guarding a fact.
+      expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)
     }
   })
 })

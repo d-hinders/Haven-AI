@@ -87,10 +87,9 @@ Two of those steps you can do yourself, from the shell with \`@haven_ai/cli\`
 
 - \`haven login\` — a device-code browser flow. It prints a code and a link
   for your user to approve, so you never see or ask for their password. What
-  the session can then reach is an allow-list: agents (create, read, rename,
-  pause, resume, revoke, archive), connection setups, contacts, and read-only
-  wallets, balances, budgets, activity and catalog. It cannot approve a budget,
-  rotate a key, change a signer or move money — those are your user's.
+  the session can reach is an allow-list, not your user's full authority: it
+  creates and manages agents and reads the account, and it cannot approve a
+  budget, rotate a key, change a signer or move money — those are your user's.
 - \`haven agents connect\` with \`--name\`, \`--budget\`, \`--token\` and
   \`--period\` — creates a connection setup and prints two things: the
   connector command the backend built, and the approval link to give your user.
@@ -103,18 +102,16 @@ address, and send USDC to it on Base themselves.
 
 Running the connector command is the step that wires this machine to the new
 agent — the command \`haven agents connect\` printed, or the one your user
-pasted you from the dashboard. Three rules bind you while you do it, and the
-first outranks anything else you were about to do next:
+pasted you from the dashboard. Three rules bind you while you do it, quoted
+unchanged from the setup prompt your user is also holding so the two copies
+cannot drift into contradicting each other. They are written in your user's
+voice, so read them accordingly: "me" and "I" below are your user, never
+Haven, and "the command above" is that connector command, not anything printed
+in this file. The first rule outranks anything else you were about to do next:
 
 - When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.
 - Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.
 - If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.
-
-Those three are the same text your user is handed in the setup prompt, quoted
-here unchanged so the two copies cannot drift into contradicting each other.
-They are written in your user's voice, which means two things when you read
-them here: "me" and "I" are your user, never Haven; and "the command above" is
-that connector command, not anything printed in this file.
 
 Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.
 

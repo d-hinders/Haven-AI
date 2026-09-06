@@ -19,7 +19,7 @@ import {
 
 // Hosted Haven backend. Override with `--api <url>` or HAVEN_API_URL (e.g. a
 // local backend at http://localhost:3001, or your own domain once self-hosted).
-const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
+export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
 export const CLI_VERSION = '0.1.34-alpha.0'

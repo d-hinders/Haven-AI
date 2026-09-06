@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { run, type RunDeps } from './commands.js'
+import { run, COMMANDS, DEFAULT_API, type RunDeps } from './commands.js'
+import { helpText } from './args.js'
 import type { Session, SessionStore } from './session.js'
 import { CliApiError, type CliApi } from './api.js'
 
@@ -825,3 +826,116 @@ describe('agents connect (#2527)', () => {
     })
   })
 })
+
+/**
+ * `--help` names every command the CLI dispatches (#2590).
+ *
+ * Found by the cold-agent onboarding run of 2026-09-06 (#2538), and the way it
+ * was found is the argument for this test. An agent followed `/for-agents.md`
+ * to step 3, ran `haven --help` to check the command it had been told to use,
+ * did not find `agents connect` in it, and concluded the command does not
+ * exist. It does — it is in `COMMANDS`, it is in `dispatch`'s switch, and it
+ * works. Three surfaces told that agent to run a command the CLI's own help
+ * omitted.
+ *
+ * `COMMANDS` is already pinned against `dispatch` by the drift test above, so
+ * this closes the remaining edge of the same triangle: list ↔ dispatch was
+ * guarded, list ↔ help was not. A command added without a help line now fails
+ * here rather than reaching an agent that cannot find it.
+ *
+ * It matches on the command WORDS rather than a formatted line, because the
+ * help wraps and groups: `agents connect` spans a usage line and two
+ * continuation lines. Matching the rendering would make this a test about
+ * layout, which is the kind of guard that gets deleted the first time someone
+ * reflows a paragraph.
+ */
+describe('helpText covers every dispatchable command (#2590)', () => {
+  const help = helpText()
+
+  it('names all of them, each as a usage line rather than in passing', () => {
+    const missing = COMMANDS.filter((command) => !usageLinePattern(command).test(help))
+    expect(missing, `not named in --help: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the matcher can report a command as missing', () => {
+    // A green run above is only evidence if this can go red. Without it, a
+    // matcher broken into always-true would pass silently — which is the
+    // failure mode of every "assert nothing is missing" test.
+    expect(usageLinePattern('agents teleport').test(help)).toBe(false)
+  })
+
+  it('POSITIVE CONTROL: a command named only in PROSE does not count', () => {
+    // The tightening haven-reviewer asked for, asserted rather than described.
+    // The looser matcher this replaced looked for the words adjacent anywhere
+    // in the document, so a command mentioned in a sentence — but with no
+    // usage line a reader could act on — would have satisfied it. "Named" has
+    // to mean "listed as something you can run", or the guard certifies a help
+    // text that answers no question.
+    const prose = 'Run haven agents teleport when you need to move an agent.'
+    expect(usageLinePattern('agents teleport').test(prose)).toBe(false)
+    expect(usageLinePattern('agents teleport').test('  agents teleport <id>   Move it')).toBe(true)
+  })
+
+  it("POSITIVE CONTROL: a command's name does not match inside a longer word", () => {
+    // `login` compiled to a bare substring before the boundaries went in, so
+    // the word "relogin" anywhere in the help would have satisfied it.
+    expect(usageLinePattern('login').test('  relogin                 Do it again')).toBe(false)
+    expect(usageLinePattern('login').test('  login                   Sign in')).toBe(true)
+  })
+
+  it('describes the --api default as what DEFAULT_API actually is', () => {
+    // The help said "default: HAVEN_API_URL or http://localhost:3001" from
+    // before #535 (2026-06-25) repointed `DEFAULT_API` at the hosted backend,
+    // and kept saying it for two and a half months. That is not a cosmetic
+    // staleness: the true default is more dangerous than the stated one. An
+    // omitted `--api` on a dev or self-hosted deployment does not fail
+    // loudly — it connects to Haven's production backend — so a reader who
+    // believes the help treats a working command as proof the flag was right.
+    //
+    // It also propagated. #2591's first draft copied this line into the agent
+    // runbook, which is served to agents from three synced copies, before a
+    // review caught it. A stale help line is an agent-facing claim.
+    expect(help).not.toContain('localhost:3001')
+    expect(help).toContain("Haven's hosted")
+    expect(help).toContain('NOT localhost')
+    // Pinned against the constant rather than a literal URL, so this cannot
+    // drift the way the sentence it replaces did.
+    expect(help).not.toContain(DEFAULT_API)
+  })
+
+  it('describes login as the device flow it actually is', () => {
+    // #2526 made the browser flow the DEFAULT; `commands.ts` says so in as
+    // many words. The help said "Sign in (password via prompt or
+    // HAVEN_PASSWORD)" for as long as that was false, contradicting
+    // /for-agents.md, the setup prompt and the haven-pay skill — and telling
+    // an agent it needs its user's password, which is the one thing every
+    // agent-facing surface promises it will never need.
+    expect(help).toMatch(/login\s+Sign in\. Opens a browser device-code approval by default/)
+    expect(help).toContain('never asks for a password')
+    // The password path still exists and is still findable.
+    expect(help).toMatch(/login --email/)
+  })
+})
+
+/**
+ * "The help NAMES this command" — as a usage line, not as prose.
+ *
+ * Anchored to the start of a line (after indentation) and closed with a word
+ * boundary, on two findings from the review of this PR. Unanchored, a command
+ * mentioned only in a sentence would have counted as named, and the guard
+ * would have certified a help text that answers no question a reader asked.
+ * Unbounded, single-word commands compiled to bare substrings, so `login`
+ * would have matched inside `relogin`.
+ *
+ * It still matches on WORDS rather than a rendered line: the help wraps and
+ * groups, and `agents connect` spans a usage line plus two continuations.
+ * Pinning the rendering would make this a test about layout — the kind of
+ * guard deleted the first time someone reflows a paragraph.
+ */
+function usageLinePattern(command: string): RegExp {
+  return new RegExp(`^\\s*${command.split(' ').map(escapeRegExp).join('\\s+')}\\b`, 'm')
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

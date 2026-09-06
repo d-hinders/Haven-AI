@@ -20,6 +20,15 @@ function read(relative: string): string {
   return readFileSync(join(FRONTEND_ROOT, relative), 'utf8')
 }
 
+/** A served artifact under `public/`, or null if the path is not one. */
+function readPublic(servedPath: string): string | null {
+  try {
+    return readFileSync(join(FRONTEND_ROOT, 'public', servedPath.replace(/^\//, '')), 'utf8')
+  } catch {
+    return null
+  }
+}
+
 /**
  * The discovery hooks of #2521. These guard the two failure modes the
  * 2026-09-04 cold test hit: an artifact nothing advertises, and an auth wall a
@@ -201,6 +210,49 @@ describe('the hooks are actually wired into the app', () => {
     // An absolute host here is the A1 defect (#2520) reintroduced one layer up:
     // it would be wrong on every deployment but the one it was written for.
     expect(layout).not.toMatch(/href="https?:\/\//)
+  })
+
+  /**
+   * The CHAIN, not the links (#2538).
+   *
+   * Every assertion around this one checks a hook in isolation: the layout has
+   * a `rel="alternate"`, the landing page has the sentence, the footer has the
+   * item. None of them checks that following one ARRIVES anywhere, and
+   * measuring the hooks turned up why that matters: all three point at the
+   * same file, `/llms.txt`, so the entire "found it from the landing HTML
+   * alone" route hangs on one link inside it. Delete that line and every test
+   * in this file stays green while an agent handed the URL can no longer reach
+   * the runbook without falling back to `robots.txt` or guessing.
+   *
+   * That is the regression the cold-agent scenario scores as band 3 -> 2
+   * (`docs/operations/qa-explore-ui-cadence.md` § Second scenario). Scoring it
+   * weekly in a report is worth having; catching it here is better.
+   */
+  it('a landing-HTML hook actually REACHES the agent runbook, not just some file', () => {
+    const layout = read('src/app/layout.tsx')
+    const page = read('src/app/page.tsx')
+    const footer = read('src/components/marketing/SiteFooter.tsx')
+
+    // Each hook's destination, taken from the hook rather than assumed.
+    const destinations = [
+      layout.match(/rel="alternate"[\s\S]{0,200}?href="(\/[^"]+)"/)?.[1],
+      page.match(/If you are an AI agent[\s\S]{0,300}?href="(\/[^"]+)"/)?.[1],
+      footer.match(/'For agents',\s*href: '(\/[^']+)'/)?.[1],
+    ]
+    for (const destination of destinations) {
+      expect(destination, 'a landing hook lost its destination').toBeTruthy()
+    }
+
+    // Follow each one hop into the file it names, and require that at least
+    // one of them names the runbook.
+    const reached = destinations.filter((destination) => {
+      const body = readPublic(destination!)
+      return body !== null && body.includes('/for-agents.md')
+    })
+    expect(
+      reached.length,
+      `no landing hook reaches /for-agents.md — followed ${destinations.join(', ')}`,
+    ).toBeGreaterThan(0)
   })
 
   it('the landing page carries the agent sentence in server-rendered content', () => {

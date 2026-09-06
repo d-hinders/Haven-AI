@@ -5,10 +5,21 @@ import {
   deleteSafeForUser,
   findOwnedSafeAddress,
   findOwnedSafeDefaultFlag,
+  findOwnedSafeForFunding,
   listSafesForUser,
   renameSafeForUser,
   setDefaultSafeForUser,
 } from '../infra/repositories/user-safes.js'
+import { getChainClient } from '../infra/chain/index.js'
+import { formatTokenValue } from '../domain/tokens.js'
+import { getChain } from '../domain/chains.js'
+import {
+  formatTokenAmount,
+  getFaucetUrl,
+  minimumUsefulTokens,
+  parseTokenAmount,
+  UUID_RE,
+} from '@haven_ai/core'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -107,7 +118,119 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
     },
   )
 
-  // ── Approvers (Safe owners) — DELETED (#1988, epic #1440 slice 5) ────
+  // ── Funding facts (#2534) ─────────────────────────────────────────
+//
+// `GET /user/safes/:safeId/funding` — the machine-readable funding hand-off.
+//
+// Funding is a HUMAN step (a transfer from the user's own wallet or exchange);
+// today the only instruction is the address the dashboard renders, which an
+// agent driving the CLI cannot see. This endpoint is READ-ONLY FACTS for the
+// human to act on: chain identity, the per-token `minimum_useful_human`
+// constants from `@haven_ai/core`, and the live balances. It constructs no
+// transfer, calls no faucet, and grants no authority — the `owner_cli`
+// opt-in covers it for exactly that reason, via the central allow-list.
+
+interface FundingToken {
+  symbol: string
+  address: string
+  decimals: number
+  balance_human: string
+  minimum_useful_human: string | null
+}
+
+interface FundingResponse {
+  account_address: string
+  chain: { id: number; name: string; explorer_url: string }
+  tokens: FundingToken[]
+  native: { symbol: string; balance_human: string; needed: boolean }
+  faucet_url?: string
+  funded: boolean
+}
+
+app.get<{ Params: { safeId: string } }>(
+  '/:safeId/funding',
+  async (request, reply): Promise<FundingResponse> => {
+    const { sub } = request.user as { sub: string }
+    const { safeId } = request.params
+
+    // Format first: a malformed id cannot name a row, so answering 400 rather
+    // than 404 keeps the two cases apart for a caller debugging a typo.
+    if (!UUID_RE.test(safeId)) {
+      return reply.code(400).send({ error: 'Invalid Safe id' }) as never
+    }
+
+    // ONE tenant-scoped read: ownership, the Safe address and its chain, with
+    // the delegation-rail scope the account lists apply (#2413) — funding
+    // instructions are for the account an agent spends from.
+    const owned = await findOwnedSafeForFunding(safeId, sub)
+    if (!owned) {
+      return reply.code(404).send({ error: 'Safe not found' }) as never
+    }
+    const chainId = owned.chain_id
+    const chain = getChain(chainId)
+
+    // The same ethers-backed balance read `GET /balances/:safeAddress` runs —
+    // no new chain machinery, and a failed read reads as zero exactly as it
+    // does there (a balance RPC hiccup must not 500 a hand-off whose whole
+    // job is to be pasteable).
+    const client = getChainClient('ethers')
+    const tokens = Object.values(chain.tokens)
+    const nativeToken = tokens.find((t) => t.address === null)!
+    const erc20Tokens = tokens.filter((t) => t.address !== null)
+
+    const results = await Promise.allSettled([
+      client.getNativeBalance(chainId, owned.safe_address),
+      ...erc20Tokens.map((token) =>
+        client.getTokenBalance(chainId, token.address!, owned.safe_address),
+      ),
+    ])
+
+    const nativeRaw =
+      results[0].status === 'fulfilled' ? results[0].value.toString() : '0'
+
+    // One pass over the ERC-20s: project each balance to its human shape and
+    // keep the raw atomic value alongside, because `funded` compares at the
+    // atomic level (the same bigint the balance RPC returned) rather than
+    // re-parsing a rounded human string.
+    let funded = false
+    const fundingTokens: FundingToken[] = erc20Tokens.map((token, i) => {
+      const result = results[i + 1]
+      const raw = result.status === 'fulfilled' ? result.value.toString() : '0'
+      const minimum = minimumUsefulTokens(token.symbol)
+      const rawBigint = BigInt(raw)
+      if (minimum !== undefined && rawBigint >= parseTokenAmount(minimum, token.decimals)) {
+        funded = true
+      }
+      return {
+        symbol: token.symbol,
+        address: token.address!,
+        decimals: token.decimals,
+        balance_human: formatTokenValue(raw, token.decimals),
+        minimum_useful_human: minimum ?? null,
+      }
+    })
+
+    const response: FundingResponse = {
+      account_address: owned.safe_address,
+      chain: { id: chainId, name: chain.name, explorer_url: chain.explorerUrl },
+      tokens: fundingTokens,
+      native: {
+        symbol: nativeToken.symbol,
+        balance_human: formatTokenAmount(BigInt(nativeRaw), nativeToken.decimals),
+        // Sponsored UserOps: the human never needs ETH/xDAI to fund.
+        needed: false,
+      },
+      funded,
+    }
+    const faucet = getFaucetUrl(chainId)
+    if (faucet !== undefined) {
+      response.faucet_url = faucet
+    }
+    return response
+  },
+)
+
+// ── Approvers (Safe owners) — DELETED (#1988, epic #1440 slice 5) ────
   //
   // Five routes lived here: `GET /user/safes/known-approvers`, `GET|POST
   // /user/safes/:safeId/approvers`, `POST /user/safes/:safeId/approvers/tx`

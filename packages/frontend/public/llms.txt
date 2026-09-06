@@ -2,7 +2,7 @@
 
 > Haven is the buy-side control layer for AI-agent payments: give your agent a budget, not your wallet. Agents pay x402 (HTTP 402) merchants autonomously within owner-set, on-chain-enforced budgets. Non-custodial — the agent never holds a key, Haven never holds funds, and every budget can be inspected and revoked without Haven.
 
-Haven connects agents through MCP (hosted, keyless) plus a local signer. Payments settle in USDC on Base via x402, using ERC-7710 delegated settlement natively and EIP-3009 as the compatibility path — so a Haven agent with an open (unpinned) budget can pay any standard x402 merchant today; recipient-pinned budgets settle via ERC-7710 only. Every payment produces a receipt: which agent, what it bought, which policy allowed it, and the on-chain proof.
+Haven connects agents through MCP (hosted, keyless) plus a local signer. Payments settle in USDC via x402, on the chains this deployment reports as chains.deployable in /.well-known/haven.json, using ERC-7710 delegated settlement natively and EIP-3009 as the compatibility path — so a Haven agent with an open (unpinned) budget can pay any standard x402 merchant today; recipient-pinned budgets settle via ERC-7710 only. Every payment produces a receipt: which agent, what it bought, which policy allowed it, and the on-chain proof.
 
 > Links below are paths on this same host: resolve them against the URL you fetched this file from.
 

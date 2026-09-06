@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { run, type RunDeps } from './commands.js'
+import { run, COMMANDS, DEFAULT_API, type RunDeps } from './commands.js'
+import { helpText } from './args.js'
 import type { Session, SessionStore } from './session.js'
 import { CliApiError, type CliApi } from './api.js'
 
@@ -65,7 +66,16 @@ describe('run — auth gating', () => {
   it('prints help with no command', async () => {
     const { deps, out } = harness()
     expect(await run([], deps)).toBe(0)
-    expect(out.join('\n')).toMatch(/terminal-native companion/)
+    const help = out.join('\n')
+    expect(help).toMatch(/set up and run a Haven agent from the terminal/)
+    // #2536: the banner said "terminal-native companion to the Haven dashboard"
+    // and this test pinned it there. That framing stopped being true when
+    // C1/#2526 and C2/#2527 landed — an agent drives the setup itself now, and
+    // the one reader who cannot open the dashboard was being told the tool
+    // complements it. The README was rewritten and this line, which is what a
+    // user or agent ACTUALLY sees first, was left behind (haven-doc-reviewer).
+    // Asserted negatively too, so the retired claim cannot return quietly.
+    expect(help).not.toMatch(/companion to the Haven dashboard/)
   })
 
   it('reports unknown commands', async () => {
@@ -270,6 +280,126 @@ describe('read commands', () => {
     const json = harness({ makeApi: mk })
     await run(['wallets', 'list', '--json'], json.deps)
     expect(JSON.parse(json.out.join('\n'))).toEqual(safes)
+  })
+
+  describe('wallets funding (#2534)', () => {
+    const FUNDING = {
+      account_address: '0x1111111111111111111111111111111111111111',
+      chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },
+      tokens: [
+        { symbol: 'USDC', address: '0xusdc', decimals: 6, balance_human: '0', minimum_useful_human: '5' },
+      ],
+      native: { symbol: 'ETH', balance_human: '0', needed: false },
+      funded: false,
+    }
+
+    function fundingApi(states: Array<Record<string, unknown>>) {
+      let i = 0
+      const calls: string[] = []
+      return {
+        calls,
+        get: async <T,>(path: string) => {
+          calls.push(`GET ${path}`)
+          if (path === '/user/safes') {
+            return { safes: [{ id: 's1', safe_address: FUNDING.account_address, chain_id: 8453, name: 'Main', is_default: true }] } as T
+          }
+          if (path === '/user/safes/s1/funding') {
+            const state = states[Math.min(i, states.length - 1)]
+            i += 1
+            return { ...FUNDING, ...state } as T
+          }
+          throw new CliApiError(`Unmocked GET ${path}`, 404)
+        },
+        post: async <T,>() => {
+          throw new CliApiError('Unexpected POST in a read-only command', 405) as T
+        },
+        put: async <T,>() => {
+          throw new CliApiError('Unexpected PUT in a read-only command', 405) as T
+        },
+        del: async <T,>() => {
+          throw new CliApiError('Unexpected DELETE in a read-only command', 405) as T
+        },
+        getText: async () => '',
+      }
+    }
+
+    it('prints the paste-ready instruction from the response, in prose and as json', async () => {
+      const mk = () => fundingApi([{}])
+
+      const human = harness({ makeApi: mk })
+      expect(await run(['wallets', 'funding'], human.deps)).toBe(0)
+      const prose = human.out.join('\\n')
+      // Every number in the sentence comes from the response, not from a
+      // local copy of a constant.
+      expect(prose).toContain('Send at least 5 USDC on Base to 0x1111111111111111111111111111111111111111')
+      expect(prose).toContain('no gas token needed; Haven sponsors it')
+      expect(prose).toContain('Explorer: https://sepolia.basescan.org.')
+
+      const json = harness({ makeApi: mk })
+      expect(await run(['wallets', 'funding', '--json'], json.deps)).toBe(0)
+      expect(JSON.parse(json.out.join('\n'))).toMatchObject({ account_address: FUNDING.account_address, funded: false })
+      expect(json.out).toHaveLength(1)
+    })
+
+    it('refuses when no wallet matches --safe, or none exists', async () => {
+      const empty = harness({ makeApi: () => fundingApi([{}]) })
+      expect(await run(['wallets', 'funding', '--safe', 'nope', '--json'], empty.deps)).toBe(2)
+
+      const none = harness({
+        makeApi: () => fakeApi({ 'GET /user/safes': { safes: [] } }),
+      })
+      const code = await run(['wallets', 'funding', '--json'], none.deps)
+      expect(code).not.toBe(0)
+    })
+
+    it('--wait polls until funded flips, with elapsed time on stderr', async () => {
+      const api = fundingApi([{ funded: false }, { funded: false }, { funded: true }])
+      const sleep = vi.fn(async () => undefined)
+      const { deps, out, err } = harness({ makeApi: () => api, sleep })
+      const code = await run(['wallets', 'funding', '--wait', '--json'], deps)
+
+      expect(code).toBe(0)
+      expect(JSON.parse(out[out.length - 1])).toMatchObject({ funded: true })
+      expect(err.join('\n')).toMatch(/Still waiting after \d+[ms]+ — funded: no\./)
+      expect(err.join('\n')).toMatch(/funded after \d+[ms]+\./)
+      expect(sleep).toHaveBeenCalledTimes(2)
+    })
+
+    it('--wait exits 1 with the elapsed time when the cap runs out', async () => {
+      const api = fundingApi([{ funded: false }])
+      const { deps, out } = harness({
+        makeApi: () => api,
+        env: { HAVEN_FUNDING_WAIT_MS: '0-ish-invalid' },
+      })
+      // The cap env must be a number; an invalid one is a usage error (2), not
+      // a silent two-hour wait. Under --json the refusal is the stdout object.
+      expect(await run(['wallets', 'funding', '--wait', '--json'], deps)).toBe(2)
+      expect(JSON.parse(out[0])).toMatchObject({
+        ok: false,
+        error: { code: 'usage', message: expect.stringMatching(/must be positive numbers of milliseconds/) },
+      })
+
+      const timed = harness({
+        makeApi: () => fundingApi([{ funded: false }]),
+        env: { HAVEN_FUNDING_WAIT_MS: '1', HAVEN_FUNDING_POLL_MS: '1' },
+      })
+      expect(await run(['wallets', 'funding', '--wait', '--json'], timed.deps)).toBe(1)
+      // Under --json the failure is the stdout object (one JSON value, always);
+      // prose mode carries the same message on stderr.
+      expect(JSON.parse(timed.out[0])).toMatchObject({
+        ok: false,
+        error: { code: 'failed', message: expect.stringMatching(/Still not funded after \d+s/) },
+      })
+    })
+
+    it('never sends anything and never names a faucet call — the human acts on the facts', async () => {
+      const api = fundingApi([{ funded: false }])
+      const { deps, out } = harness({ makeApi: () => api })
+      await run(['wallets', 'funding'], deps)
+      // GETs only: the hand-off is read-only by construction.
+      expect(api.calls.every((c) => c.startsWith('GET '))).toBe(true)
+      expect(out.join('\n')).not.toMatch(/faucet/i)
+    })
   })
 
   it('shows an agent budget', async () => {
@@ -851,3 +981,116 @@ describe('agents connect (#2527)', () => {
     })
   })
 })
+
+/**
+ * `--help` names every command the CLI dispatches (#2590).
+ *
+ * Found by the cold-agent onboarding run of 2026-09-06 (#2538), and the way it
+ * was found is the argument for this test. An agent followed `/for-agents.md`
+ * to step 3, ran `haven --help` to check the command it had been told to use,
+ * did not find `agents connect` in it, and concluded the command does not
+ * exist. It does — it is in `COMMANDS`, it is in `dispatch`'s switch, and it
+ * works. Three surfaces told that agent to run a command the CLI's own help
+ * omitted.
+ *
+ * `COMMANDS` is already pinned against `dispatch` by the drift test above, so
+ * this closes the remaining edge of the same triangle: list ↔ dispatch was
+ * guarded, list ↔ help was not. A command added without a help line now fails
+ * here rather than reaching an agent that cannot find it.
+ *
+ * It matches on the command WORDS rather than a formatted line, because the
+ * help wraps and groups: `agents connect` spans a usage line and two
+ * continuation lines. Matching the rendering would make this a test about
+ * layout, which is the kind of guard that gets deleted the first time someone
+ * reflows a paragraph.
+ */
+describe('helpText covers every dispatchable command (#2590)', () => {
+  const help = helpText()
+
+  it('names all of them, each as a usage line rather than in passing', () => {
+    const missing = COMMANDS.filter((command) => !usageLinePattern(command).test(help))
+    expect(missing, `not named in --help: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the matcher can report a command as missing', () => {
+    // A green run above is only evidence if this can go red. Without it, a
+    // matcher broken into always-true would pass silently — which is the
+    // failure mode of every "assert nothing is missing" test.
+    expect(usageLinePattern('agents teleport').test(help)).toBe(false)
+  })
+
+  it('POSITIVE CONTROL: a command named only in PROSE does not count', () => {
+    // The tightening haven-reviewer asked for, asserted rather than described.
+    // The looser matcher this replaced looked for the words adjacent anywhere
+    // in the document, so a command mentioned in a sentence — but with no
+    // usage line a reader could act on — would have satisfied it. "Named" has
+    // to mean "listed as something you can run", or the guard certifies a help
+    // text that answers no question.
+    const prose = 'Run haven agents teleport when you need to move an agent.'
+    expect(usageLinePattern('agents teleport').test(prose)).toBe(false)
+    expect(usageLinePattern('agents teleport').test('  agents teleport <id>   Move it')).toBe(true)
+  })
+
+  it("POSITIVE CONTROL: a command's name does not match inside a longer word", () => {
+    // `login` compiled to a bare substring before the boundaries went in, so
+    // the word "relogin" anywhere in the help would have satisfied it.
+    expect(usageLinePattern('login').test('  relogin                 Do it again')).toBe(false)
+    expect(usageLinePattern('login').test('  login                   Sign in')).toBe(true)
+  })
+
+  it('describes the --api default as what DEFAULT_API actually is', () => {
+    // The help said "default: HAVEN_API_URL or http://localhost:3001" from
+    // before #535 (2026-06-25) repointed `DEFAULT_API` at the hosted backend,
+    // and kept saying it for two and a half months. That is not a cosmetic
+    // staleness: the true default is more dangerous than the stated one. An
+    // omitted `--api` on a dev or self-hosted deployment does not fail
+    // loudly — it connects to Haven's production backend — so a reader who
+    // believes the help treats a working command as proof the flag was right.
+    //
+    // It also propagated. #2591's first draft copied this line into the agent
+    // runbook, which is served to agents from three synced copies, before a
+    // review caught it. A stale help line is an agent-facing claim.
+    expect(help).not.toContain('localhost:3001')
+    expect(help).toContain("Haven's hosted")
+    expect(help).toContain('NOT localhost')
+    // Pinned against the constant rather than a literal URL, so this cannot
+    // drift the way the sentence it replaces did.
+    expect(help).not.toContain(DEFAULT_API)
+  })
+
+  it('describes login as the device flow it actually is', () => {
+    // #2526 made the browser flow the DEFAULT; `commands.ts` says so in as
+    // many words. The help said "Sign in (password via prompt or
+    // HAVEN_PASSWORD)" for as long as that was false, contradicting
+    // /for-agents.md, the setup prompt and the haven-pay skill — and telling
+    // an agent it needs its user's password, which is the one thing every
+    // agent-facing surface promises it will never need.
+    expect(help).toMatch(/login\s+Sign in\. Opens a browser device-code approval by default/)
+    expect(help).toContain('never asks for a password')
+    // The password path still exists and is still findable.
+    expect(help).toMatch(/login --email/)
+  })
+})
+
+/**
+ * "The help NAMES this command" — as a usage line, not as prose.
+ *
+ * Anchored to the start of a line (after indentation) and closed with a word
+ * boundary, on two findings from the review of this PR. Unanchored, a command
+ * mentioned only in a sentence would have counted as named, and the guard
+ * would have certified a help text that answers no question a reader asked.
+ * Unbounded, single-word commands compiled to bare substrings, so `login`
+ * would have matched inside `relogin`.
+ *
+ * It still matches on WORDS rather than a rendered line: the help wraps and
+ * groups, and `agents connect` spans a usage line plus two continuations.
+ * Pinning the rendering would make this a test about layout — the kind of
+ * guard deleted the first time someone reflows a paragraph.
+ */
+function usageLinePattern(command: string): RegExp {
+  return new RegExp(`^\\s*${command.split(' ').map(escapeRegExp).join('\\s+')}\\b`, 'm')
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

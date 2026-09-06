@@ -118,4 +118,46 @@ describe('within-budget-settle, re-based onto the delegation rail', () => {
     const r = await withinBudgetSettle.run(bare)
     expect(r.skipped).toBe(true)
   })
+
+  /**
+   * The precondition refusal is about THIS leg (#2594).
+   *
+   * Pinned as behaviour rather than as an argument, because the defect it
+   * guards is a sentence in a run report: on 2026-09-06 this leg failed with
+   * "refusing to build an over-budget amount from a number the chain did not
+   * supply", a use it never makes — it checks a FLOOR. The fix is one argument
+   * at the call site, and reverting that argument is invisible unless something
+   * asserts the message the leg actually produces. Mutation-found: the first
+   * version of this fix could be reverted with every test still green.
+   */
+  it('refuses a fallback read for ITS OWN reason, not the over-budget one', async () => {
+    mockGetAllowances.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        allowances: [
+          {
+            token_symbol: 'USDC',
+            configured_amount: '1.00',
+            // The 2026-09-06 shape: the enforcer read failed and the backend
+            // fell back to the full configured budget (#1145).
+            onchain: { remaining: '1000000', remaining_is_from_chain: false },
+          },
+        ],
+      },
+    })
+
+    const result = await withinBudgetSettle.run(ctx)
+
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/FALLBACK, not a live enforcer read/)
+    // The finding itself.
+    expect(result.detail).not.toMatch(/over-budget amount/)
+    // And the reason a reader of the report needs: the fallback is optimistic,
+    // so clearing this leg's floor would prove nothing.
+    expect(result.detail).toMatch(/FULL configured budget/)
+    // No payment was attempted — a precondition failure must not look like a
+    // settlement one, which is the whole point of refusing here.
+    expect(mockCreatePayment).not.toHaveBeenCalled()
+  })
 })

@@ -12,8 +12,8 @@ Your user gives you a **budget on their own account** — not their wallet, and 
 
 Four of the six steps are your user's — each needs a human signature or a human decision. The rest is yours. If they already have a funded account, start at step 3.
 
-1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, `npx @haven_ai/cli login` afterwards gets you a scoped session for steps 3-4 — they approve a code in the browser, you never hold their password. It can set up agents and read the account; it cannot sign, approve a budget, move funds, or rotate any agent's keys.
-2. **HUMAN — fund it.** USDC on Base, to the address the dashboard shows.
+1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, `npx @haven_ai/cli login --api <api-url>` afterwards gets you a scoped session for steps 3-4 (that flag or `HAVEN_API_URL`, on the first command — the session then remembers the backend; **the CLI's built-in default is Haven's hosted production backend**, so on any other deployment an omitted flag connects you somewhere real and wrong rather than failing) — they approve a code in the browser, you never hold their password. It can set up agents and read the account; it cannot sign, approve a budget, move funds, or rotate any agent's keys.
+2. **HUMAN — fund it.** USDC only, no ETH: Haven sponsors the gas. `haven wallets funding` prints the address, the amount **and which chain** in one place; without a CLI session, the dashboard's funding card shows the address and amount and its Receive-funds screen names the chain. Read the chain off whichever you used and put it in your message — never assume one: a testnet deployment and production both call themselves Haven.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back. With a CLI session (step 1) you can do this step yourself: `haven agents connect --name <n> --budget <amount> --token USDC --period <minutes>` prints the same connector command and approval link; add `--run` to do step 4 too.
 4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally, registering only the public address.
 5. **HUMAN — approve the budget** with their passkey, in the Haven tab they created the agent in: it advances to the approval step by itself once your run registers.
@@ -44,7 +44,7 @@ Send these as your own message, `<host>` replaced by the host you fetched this f
 
 **At funding** (step 2):
 
-> Your Haven account needs USDC on Base before I can pay for anything — USDC only, no ETH: Haven sponsors the gas. The dashboard shows the address to send it to; a small amount first is fine.
+> Your Haven account needs USDC before I can pay for anything — USDC only, no ETH: Haven sponsors the gas. Before you send anything, let me get you the exact address **and network** — `haven wallets funding` prints both, and the dashboard shows the same. Please do not send to an address or a chain I have not confirmed with you; a small amount first is fine.
 
 **At the budget** (step 3):
 

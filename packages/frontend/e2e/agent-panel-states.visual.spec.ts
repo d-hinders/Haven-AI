@@ -70,6 +70,35 @@ test.describe('agent panel empty states and card banners', () => {
     await expect(empty).toHaveScreenshot('agentpanel-empty-no-agents-desktop.png', SNAPSHOT_OPTIONS)
   })
 
+  /**
+   * #2535: the clip above is scoped to the EmptyState's own box, so the "or"
+   * divider and the onboarding-prompt card that #2535 renders BELOW it sit
+   * entirely outside it — the gate would stay green through any regression to
+   * either. Found by `haven-design-reviewer` as a coverage gap the PR itself
+   * introduced, and closed here rather than left for a later reader to discover.
+   *
+   * Scoped to the card, not the page: `/agents` is documented as unfit for
+   * whole-page capture in `product-routes.visual.spec.ts` (a real `readContract`
+   * against a chain the harness does not have makes it flaky), and that
+   * reasoning applies to this route however much of it is captured.
+   */
+  test('agent panel empty state — the agent-onboarding prompt card', async ({ page }) => {
+    await seedAgents(page, [])
+    await page.goto('/agents')
+    await settle(page)
+
+    const card = page
+      .getByRole('heading', { name: 'Set up with your AI agent' })
+      .locator('xpath=ancestor::*[contains(@class, "rounded-[10px]")][1]')
+    await expect(card).toHaveCount(1)
+    // Assert the composition the design review cleared, so a regression that
+    // preserves the screenshot's shape still fails on the facts that matter.
+    await expect(card).toContainText('Prompt for your agent')
+    await expect(card.getByRole('button', { name: 'Copy' })).toHaveCount(1)
+    await expect(card.getByRole('link', { name: 'Read the agent guide' })).toHaveCount(1)
+    await expect(card).toHaveScreenshot('agentpanel-empty-onboarding-prompt-desktop.png', SNAPSHOT_OPTIONS)
+  })
+
   for (const seeded of [
     { slug: 'paused', title: 'Paused in Haven', agent: agentState({ status: 'paused' }) },
     {

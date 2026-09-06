@@ -19,7 +19,7 @@ import {
 
 // Hosted Haven backend. Override with `--api <url>` or HAVEN_API_URL (e.g. a
 // local backend at http://localhost:3001, or your own domain once self-hosted).
-const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
+export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
 export const CLI_VERSION = '0.1.34-alpha.0'
@@ -63,7 +63,7 @@ interface ResolvedDeps {
  */
 export const COMMANDS = [
   'login', 'logout', 'whoami', 'guide',
-  'wallets list', 'wallets balances', 'wallets rename',
+  'wallets list', 'wallets balances', 'wallets rename', 'wallets funding',
   'agents list', 'agents show', 'agents pause', 'agents resume', 'agents revoke',
   'agents rotate-key', 'agents rename', 'agents connect',
   'budget show', 'budget grant', 'budget revoke',
@@ -102,6 +102,22 @@ interface SetupStatus {
   agent_id: string | null
   approval_url: string
   expires_at: string
+}
+
+/** `GET /user/safes/:safeId/funding` — the wire shape the route documents. */
+interface FundingResponse {
+  account_address: string
+  chain: { id: number; name: string; explorer_url: string }
+  tokens: {
+    symbol: string
+    address: string
+    decimals: number
+    balance_human: string
+    minimum_useful_human: string | null
+  }[]
+  native: { symbol: string; balance_human: string; needed: boolean }
+  funded: boolean
+  faucet_url?: string
 }
 
 /** Entry point. Returns a process exit code; never throws for expected errors. */
@@ -167,6 +183,7 @@ async function dispatch(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
     case 'whoami': return cmdWhoami(args, d)
     case 'wallets list': return cmdWalletsList(args, d)
     case 'wallets balances': return cmdWalletsBalances(args, d)
+    case 'wallets funding': return cmdWalletsFunding(args, d)
     case 'agents list': return cmdAgentsList(args, d)
     case 'agents show': return cmdAgentsShow(args, d)
     case 'agents connect': return cmdAgentsConnect(args, d)
@@ -400,6 +417,106 @@ function pickSafe(safes: Safe[], ref?: string): Safe | undefined {
   if (!ref) return safes.find((s) => s.is_default) ?? safes[0]
   const lower = ref.toLowerCase()
   return safes.find((s) => s.id === ref || s.safe_address.toLowerCase() === lower)
+}
+
+// ── Wallet funding (#2534) ──────────────────────────────────────────
+
+/**
+ * The paste-ready funding instruction, read from the backend.
+ *
+ * The endpoint is the source; this command renders it. Every number in the
+ * prose — the minimum to send, the address, the explorer link — comes out of
+ * the response, so the CLI, the dashboard's funding card and the backend's
+ * own docs cannot drift apart: `@haven_ai/core` owns the constants, the
+ * route composes them, and nothing here repeats one. Prose mode prints the
+ * sentence an agent hands to its human; `--json` prints the response object
+ * itself, so a machine that wants to relay fields rather than a sentence has
+ * the same facts in the same place.
+ *
+ * `--wait` polls until `funded` flips — how a turn actually waits out a human
+ * moving money — with elapsed time visible so nobody stares at a silent
+ * terminal. It exits 0 once funded and 1 on timeout (elapsed time in the
+ * message); it never sends anything, never touches a faucet — this is
+ * read-only facts for the human to act on, whatever the flag.
+ */
+async function cmdWalletsFunding(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  const { api } = await authed(args, d)
+  const { safes } = await api.get<{ safes: Safe[] }>('/user/safes')
+  const safe = pickSafe(safes, args.flags.safe)
+  if (!safe) {
+    if (args.flags.safe) throw new UsageError(`No wallet matches "${args.flags.safe}".`)
+    throw new CliApiError('No Haven wallet found.', 404)
+  }
+  // The endpoint is keyed by safe ID and resolves ownership itself — the
+  // address/chain in the response are the route's answer, not ours to compose.
+  const funding = await api.get<FundingResponse>(`/user/safes/${safe.id}/funding`)
+
+  if (!args.flags.wait) {
+    emitFunding(d, funding)
+    return EXIT.ok
+  }
+
+  // ── `--wait`: poll until the human's transfer lands ────────────────
+  const started = Date.now()
+  // The poll interval, injectable so tests can run the loop without real time.
+  const pollMs = Number(d.env.HAVEN_FUNDING_POLL_MS ?? '5000')
+  // A default cap, not a guess about the user's patience: two hours covers a
+  // bank-transfer detour, and `HAVEN_FUNDING_WAIT_MS` shortens it for tests.
+  const waitMs = Number(d.env.HAVEN_FUNDING_WAIT_MS ?? String(2 * 60 * 60 * 1000))
+  if (!Number.isFinite(pollMs) || pollMs <= 0 || !Number.isFinite(waitMs) || waitMs <= 0) {
+    throw new UsageError('HAVEN_FUNDING_POLL_MS / HAVEN_FUNDING_WAIT_MS must be positive numbers of milliseconds')
+  }
+  let current = funding
+  for (;;) {
+    // The cap is checked BEFORE each poll, so a zero-length wait exits without
+    // ever calling the endpoint twice.
+    const spent = Date.now() - started
+    if (spent >= waitMs) {
+      throw new HavenCliError(
+        `Still not funded after ${elapsedLabel(spent)} — the transfer may not have landed yet. Check the explorer link, then re-run.`,
+        EXIT.failed,
+      )
+    }
+    await d.sleep(pollMs)
+    current = await api.get<FundingResponse>(`/user/safes/${safe.id}/funding`)
+    if (current.funded) break
+    d.o.note(`Still waiting after ${elapsedLabel(Date.now() - started)} — funded: no.`)
+  }
+  d.o.note(`Account shows funded after ${elapsedLabel(Date.now() - started)}.`)
+  emitFunding(d, current)
+  return EXIT.ok
+}
+
+/** One renderer, both modes: prose carries the paste-ready sentence. */
+function emitFunding(d: ResolvedDeps, funding: FundingResponse): void {
+  emit(d, d.o.json, funding, () => {
+    const token = funding.tokens.find((t) => t.minimum_useful_human !== null)
+    const asset = token
+      ? `at least ${token.minimum_useful_human} ${token.symbol}`
+      : funding.native.needed
+        ? funding.native.symbol
+        : 'USDC'
+    const gas = funding.native.needed
+      ? ` plus ${funding.native.symbol} for gas`
+      : ' — no gas token needed; Haven sponsors it'
+    const faucet = funding.faucet_url !== undefined ? ` faucet: ${funding.faucet_url},` : ''
+    return [
+      `Send ${asset} on ${funding.chain.name} to ${funding.account_address}${gas}.`,
+      `Explorer: ${funding.chain.explorer_url}.${faucet ? faucet.slice(0, -1) : ''}`,
+      funding.funded ? 'The account already counts as funded.' : 'Nothing has arrived yet.',
+    ].join('\n')
+  })
+}
+
+/** `83s` → `1m23s` → `1h02m` — the poll line and the timeout message share it. */
+function elapsedLabel(ms: number): string {
+  const total = Math.floor(ms / 1000)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`
+  if (m > 0) return `${m}m${String(s).padStart(2, '0')}s`
+  return `${s}s`
 }
 
 // ── Agents & budget ─────────────────────────────────────────────────

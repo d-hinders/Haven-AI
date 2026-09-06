@@ -104,6 +104,37 @@ export const FIND_OWNED_SAFE_ADDRESS_SQL = `SELECT id, safe_address FROM user_sa
 
 export const FIND_OWNED_SAFE_DEFAULT_FLAG_SQL = `SELECT id, is_default FROM user_safes WHERE id = $1 AND user_id = $2`
 
+/**
+ * The funding read's ownership check (#2534).
+ *
+ * `FIND_OWNED_SAFE_ADDRESS_SQL` kept no `account_type` filter because rename/
+ * default/unlink manage whatever the user once linked. The funding endpoint is
+ * a DELEGATION-rail surface — it tells a human how to fund the account their
+ * agent spends from — so it scopes like the surviving account lists
+ * (`DELEGATION_RAIL_ONLY`): a legacy Safe row answers 404 exactly as it does
+ * on `GET /user/safes`, rather than funding instructions for a rail nothing
+ * new joins. `chain_id` comes back with the row so the route runs ONE query
+ * instead of an ownership probe plus a list read.
+ */
+export const FIND_OWNED_SAFE_FOR_FUNDING_SQL = `SELECT id, safe_address, chain_id FROM user_safes
+       WHERE id = $1 AND user_id = $2 ${DELEGATION_RAIL_ONLY}`
+
+/**
+ * `userId` is REQUIRED — the funding route's ownership check runs before any
+ * chain read. Null when the id is unknown, another user's, or a legacy-Safe row.
+ */
+export async function findOwnedSafeForFunding(
+  safeId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<{ id: string; safe_address: string; chain_id: number } | null> {
+  const result = await db.query<{ id: string; safe_address: string; chain_id: number }>(
+    FIND_OWNED_SAFE_FOR_FUNDING_SQL,
+    [safeId, userId],
+  )
+  return result.rows[0] ?? null
+}
+
 /** `userId` is REQUIRED — tenant scope for the Safe list. */
 export async function listSafesForUser(
   userId: string,

@@ -381,12 +381,18 @@ describe('HavenClient structural boundary', () => {
       // AGENT_README_SECTION_MD is not a rule stated TO a connected agent but
       // the entry that redirects one which has no account yet, carried
       // verbatim by all five published READMEs and the repo README.
+      // #2535 adds AGENT_ONBOARDING_PROMPT: not a sentence but a whole prompt,
+      // and a THIRD audience again — the signed-in user's agent, before any
+      // setup exists. It reuses two of the sentences above verbatim rather than
+      // restating them, which is why it belongs in this family and not beside
+      // the runbook: same rules, different reader, one source.
       'AGENT_APPROVAL_RELAY_JSON_SENTENCE',
       'AGENT_APPROVAL_RELAY_PROSE_SENTENCE',
       'AGENT_COMMAND_MODIFICATION_SENTENCE',
       'AGENT_JSON_MODE_SENTENCE',
       'AGENT_LOCAL_KEY_SENTENCE',
       'AGENT_NETWORK_ACCESS_SENTENCE',
+      'AGENT_ONBOARDING_PROMPT',
       'AGENT_PAYMENT_FAILURE_CODE_VALUES',
       'AGENT_PAYMENT_NEXT_ACTION_VALUES',
       'AGENT_PAYMENT_PHASE_VALUES',

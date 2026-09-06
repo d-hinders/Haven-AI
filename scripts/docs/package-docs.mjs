@@ -164,7 +164,19 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
-    'last-verified': '2026-08-28',
+    // #2366 (part 1): EDITED — one new subsection under § Tools recording the
+    // `idempotencyKey` -> `idempotency_key` deprecation window. This is a
+    // published package's landing page and the argument is the replay contract
+    // on a payment, so the page has to say three things rather than one: the
+    // new spelling, that the old one still works and warns, and that sending
+    // both with DIFFERENT values is refused with nothing spent. The refusal is
+    // the part worth the space — Haven will not guess which replay scope a
+    // caller meant, because a wrong guess is a second spend. Written against
+    // `packages/mcp/src/tools.ts` on this branch. Scope: that subsection. NOT
+    // re-verified: the credential-file section, the Claude Desktop wiring, the
+    // consent flow, the audit log, the manual sanity test, or the
+    // non-custodial invariant.
+    'last-verified': '2026-09-06',
   },
   {
     doc: 'packages/connect/README.md',
@@ -219,7 +231,60 @@ export const GOVERNED_PACKAGE_DOCS = [
     // one section it had edited — haven-doc-reviewer @ 514a2cc5.) The opening
     // "companion to the dashboard" framing is #2536's to rewrite, not this
     // issue's. Scope: those sections and this date.
-    'last-verified': '2026-09-04',
+    // #2590: re-verified, NOT edited — and the re-verification IS the finding.
+    // This README already documents both things `--help` got wrong: `agents
+    // connect` with its four flags and `--run` (§ *`haven agents connect`*),
+    // and the browser-approved default login (§ *Signing in without a password
+    // (#2526)*, which states plainly that `haven login` starts a browser flow
+    // by default and never asks for a password). So #2526 and #2527 each
+    // updated this file and neither updated `helpText()` in
+    // `packages/cli/src/args.ts` — one surface of the same package, in the same
+    // PRs, silently left behind, and an agent found it before we did (#2538's
+    // cold run). Nothing here needed changing; the guard added under #2590 pins
+    // `helpText()` against `COMMANDS` so the two cannot diverge again. Scope:
+    // the login and `agents connect` sections, re-read against `commands.ts` on
+    // this branch. NOT re-verified: Install, Config, Custody, the `--json`
+    // contract, the exit-code table, or the SIE export section. Prior:
+    // '2026-09-04' — see the #2525 note above.
+    // #2536: EDITED — the opening framing and the section order. It said "a
+    // terminal-native, scriptable companion to the Haven dashboard — used
+    // alongside the web app, not instead of it", which stopped being true when
+    // C1/#2526 and C2/#2527 landed: an agent drives the setup end to end up to
+    // the steps needing a human signature. Restructured agent-first (a new
+    // § *Setting Haven up as an agent*; § *Usage* retitled as the full command
+    // surface), with the `--json` contract and exit codes POINTED AT rather
+    // than restated — § *For agents and scripts* owns them and a second copy is
+    // what drifts. Two corrections while there: the usage block showed
+    // `haven login --email` as the only form (bare `login` has been the device
+    // flow since #2526 — the same defect #2590 fixed in `--help`), and the
+    // `--api` note now says the default is Haven's hosted PRODUCTION backend,
+    // so an omitted flag connects somewhere real and wrong rather than failing.
+    // The npx path is recorded as measured, not asserted (clean directory,
+    // 2026-09-06): @alpha and the bare form both 0.1.34-alpha.0, @dev the
+    // snapshot — the bare form matching is the owner's `latest` decision
+    // working end to end. The byte-pinned agent-facing section (#2533) is
+    // untouched. Scope: the opening, § Install's npx paragraph, the new section
+    // and § Usage's title and auth block. NOT re-verified: § For agents and
+    // scripts' contract, the exit-code table, the SIE export section, Config or
+    // Custody.
+    //
+    // Follow-up in the same PR, on a haven-doc-reviewer finding: the CLI's own
+    // `--help` banner (`args.ts:117`) STILL said "terminal-native companion to
+    // the Haven dashboard" — the exact framing this entry calls retired. So the
+    // README was corrected and the line a user or agent actually sees first was
+    // left behind, which is the #2590 defect class reopening in the same file
+    // two edits later. Rewritten, and `commands.test.ts` now asserts the
+    // retired phrase is ABSENT as well as asserting the new one, so it cannot
+    // return quietly. `args.ts` is inside this doc's own `covers:` glob, which
+    // is how the gate reached it.
+    //
+    // Named rather than hidden: the `--api` default now has FOUR prose homes —
+    // `helpText()` (#2590), the SDK runbook (#2591), this README's new section,
+    // and § Config. All four agree today; a change to the real default would
+    // need all four. That is the shape #2590/#2591 exist to prevent, and it is
+    // recorded here rather than claimed solved. Prior: '2026-09-06' — see the
+    // #2590 note above.
+    'last-verified': '2026-09-06',
   },
   {
     doc: 'packages/mcp-server/README.md',

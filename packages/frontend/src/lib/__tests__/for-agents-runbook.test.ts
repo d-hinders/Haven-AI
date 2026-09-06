@@ -81,7 +81,26 @@ describe('/for-agents.md (#2523)', () => {
     // the grounds that the CLI prints its own code and link, so an agent that
     // knows the command exists does not need this page to compose the message.
     //
-    // 8400 -> 9100 for #2539 (the page is 8972 bytes at this commit). The
+    // 8400 -> 8600 for #2534 (the page is 8527 bytes at this commit). Two
+    // additions, both the command's own publicity: step 2 names
+    // `haven wallets funding`, and the funding hand-off offers to paste what
+    // it prints — the same facts the endpoint and the dashboard card serve,
+    // from one source. The shape/amount/explorer stay in the command's own
+    // output on purpose; this page names the command, it does not re-teach it.
+    //
+    // 8600 -> 9200 for #2591 (the page is 9102 bytes at this commit). The cold
+    // run of 2026-09-06 escalated the funding step to its user rather than
+    // acting on it, and was right to: this page said "USDC on Base" while the
+    // deployment it was fetched from reports Base Sepolia. That is the one
+    // step where a confused human sends real money somewhere irreversible, and
+    // a static file served from every deployment cannot name a chain — so it
+    // now names the SOURCE of the chain instead and tells the agent not to
+    // assume one. The second 100-odd bytes buy the `--api` flag: the CLI
+    // defaults to localhost, no agent-facing surface said so, and the same run
+    // reported that an agent following the prose path alone fails silently
+    // against a host that is not Haven.
+    //
+    // 9200 -> 9900 for #2539 (the page is 9785 bytes at this commit). The
     // issue's own acceptance criterion names this page as a place the budget
     // grant/revoke commands must be named: the whole epic is "later budget
     // changes are dashboard-only", and a runbook that stops at the first
@@ -91,7 +110,13 @@ describe('/for-agents.md (#2523)', () => {
     // off; the human still signs, every time. Deliberately NOT added: the
     // flag-by-flag reference and the refusal shapes (CLI README's job, same
     // split #2527 recorded).
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(9100)
+    //
+    // Deliberately NOT added, and the reason the number is not higher: the
+    // well-known manifest's own shape. The page says to read the chain from
+    // the command; enumerating `environment` and `chains.deployable` here
+    // would duplicate a JSON document that is one fetch away and would go
+    // stale the first time its shape changed.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(9900)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -182,6 +207,57 @@ describe('/for-agents.md (#2523)', () => {
     // answers, which is what an agent should do when there is no link.
     expect(served).toContain('if it carried none, ask them to finish it in that same Haven tab')
     expect(served).toContain('no ETH: Haven sponsors the gas')
+    // #2591: the chain is READ, never assumed. The page is one static file
+    // served from every deployment, so any chain name it states is wrong
+    // somewhere — and "somewhere" includes a testnet, where the user sends
+    // real money to an address that will never hold it.
+    expect(served).not.toMatch(/USDC on Base\b/)
+    expect(served).toContain('and which chain')
+    expect(served).toContain('never assume one')
+    // An agent WITHOUT a CLI session still needs a route to the chain. The
+    // first draft of this step named only the command, which left a
+    // no-terminal agent told to read a number from somewhere it cannot reach
+    // — and "never assume one" then has no alternative to offer.
+    expect(served).toMatch(/the dashboard's funding card shows the address and amount and its\s+Receive-funds screen names the chain/)
+    // The hand-off carries it too, because that is the sentence the human
+    // actually reads before opening a wallet.
+    expect(served).toContain('let me get you the exact address **and network**')
+    expect(served).toMatch(/do not send to an address or a chain I have not\s+confirmed/)
+    // Positive control: the matcher family finds what IS there, so the
+    // negative above is a fact about the page and not about the regex.
+    expect(served).toMatch(/USDC\b/)
+
+    // #2591: the CLI's API base. It defaults to localhost, so an agent that
+    // followed this page's prose and skipped the well-known manifest was
+    // talking to nothing — a silent, misattributable failure on a command
+    // this page told it to run.
+    expect(served).toContain('--api <api-url>')
+    expect(served).toContain('HAVEN_API_URL')
+    // NOT "defaults to localhost". It does not — `commands.ts:22` sets
+    // DEFAULT_API to Haven's hosted PRODUCTION backend, and has since #535
+    // (2026-06-25). The CLI's own `--help` still says localhost, which is
+    // where the first draft of this sentence got it: I read the help text and
+    // laundered it into three agent-served copies as fact (haven-reviewer,
+    // blocking). The correction matters because the truth is the more
+    // dangerous of the two — an omitted flag on a dev deployment does not fail
+    // loudly, it connects to production — and an agent told "you are talking
+    // to nothing" would treat a working command as proof it got the flag
+    // right. The stale help line is fixed under #2590.
+    expect(served).not.toMatch(/defaults to localhost/)
+    expect(served).toContain("the CLI's built-in default is Haven's hosted production backend")
+    expect(served).toContain('connects you somewhere real and wrong rather than failing')
+    // Not "every command needs it": `baseUrlFor` (commands.ts:209) prefers the
+    // saved session, so the flag is load-bearing on the first command only.
+    expect(served).not.toMatch(/every `haven` command needs/)
+    expect(served).toContain('on the first command')
+    // #2534: step 2 names the command that prints the funding facts, so an
+    // agent with a CLI session can hand its human a paste-ready instruction
+    // instead of pointing at a dashboard screen. #2591 REWORDED that sentence
+    // — the chain joined the address and the amount — so the assertion is
+    // re-based on the property #2534 was protecting rather than on its
+    // phrasing. Both facts are still pinned, one of them twice: the command is
+    // named, and what it prints now includes the chain (asserted above).
+    expect(served).toContain('`haven wallets funding` prints the address, the amount')
   })
 
   it('names no npm dist-tag of its own', () => {

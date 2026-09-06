@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   extractRoutes,
@@ -11,7 +13,7 @@ import {
   isOwnerCliAllowed,
   routeAllowsOwnerCli,
 } from '../middleware/owner-cli.js'
-import { HAVEN_SKILL_MD } from '@haven_ai/sdk'
+
 import type { FastifyRequest } from 'fastify'
 
 /**
@@ -352,28 +354,70 @@ describe('owner_cli route census (#2526)', () => {
  * rewording of the sentence.
  */
 describe('the skill\'s account of this list stays true to it (#2537)', () => {
-  const section = HAVEN_SKILL_MD.slice(
-    HAVEN_SKILL_MD.indexOf('## Onboarding and setup'),
-    HAVEN_SKILL_MD.indexOf('## Identity and budget'),
+  /**
+   * Read as SOURCE TEXT, never through `@haven_ai/sdk`.
+   *
+   * The first version of this imported `HAVEN_SKILL_MD` from the built
+   * package, and it passed locally while failing in CI — because the backend
+   * resolves the workspace `dist/`, so the assertion was reading whatever the
+   * SDK happened to have been built from last. Mine was one edit stale, so a
+   * green run here meant nothing about the text this branch actually ships.
+   * A test that can validate bytes the repo no longer contains is the same
+   * false-instrument class as a zero from a probe that was tree-shaken away.
+   *
+   * Reading the file is also the only route available: a relative import
+   * across packages fails `tsc`'s rootDir, which is why
+   * `connector-command-parity.test.ts` asserts via text too.
+   */
+  const skillSource = readFileSync(
+    join(import.meta.dirname, '../../../sdk/src/skill-content.ts'),
+    'utf8',
+  )
+  const section = skillSource.slice(
+    skillSource.indexOf('## Onboarding and setup'),
+    skillSource.indexOf('## Identity and budget'),
   )
 
-  /** Each denial the skill makes, and the routes that would falsify it. */
-  const DENIALS: ReadonlyArray<{ claim: string; grantedBy: (path: string, method: string) => boolean }> = [
+  it('found the section at all — the read is a real one', () => {
+    // Positive control on the instrument itself. If the path breaks or the
+    // heading is renamed, every assertion below would pass over an empty
+    // string and this suite would go quietly green while checking nothing.
+    expect(section.length).toBeGreaterThan(500)
+    expect(section).toContain('None of the tools below creates authority')
+  })
+
+  /**
+   * Each denial the skill makes, and the routes that would falsify it.
+   *
+   * The claim is a REGEX rather than a literal because the source is wrapped
+   * prose: `cannot approve a\n  budget` is the same sentence as
+   * `cannot approve a budget` and a literal match calls one of them absent.
+   * That is what broke the first CI run of this test.
+   */
+  const DENIALS: ReadonlyArray<{
+    claim: string
+    stated: RegExp
+    grantedBy: (path: string, method: string) => boolean
+  }> = [
     {
       claim: 'approve a budget',
+      stated: /approve a\s+budget/,
       // Activation is the owner signature this epic never delegates.
       grantedBy: (path) => /\/delegations\/(build|activate|revoke)/.test(path),
     },
     {
       claim: 'rotate a key',
+      stated: /rotate a\s+key/,
       grantedBy: (path) => path.includes('rotate-key') || path.includes('/rekey'),
     },
     {
       claim: 'change a signer',
+      stated: /change a\s+signer/,
       grantedBy: (path) => path.includes('account-signers') || path.includes('/passkey'),
     },
     {
       claim: 'move money',
+      stated: /move\s+money/,
       grantedBy: (path, method) =>
         method !== 'GET' &&
         /^\/(payments|x402|machine-payments|safe\/exec)/.test(path),
@@ -385,7 +429,7 @@ describe('the skill\'s account of this list stays true to it (#2537)', () => {
     // measuring a claim the skill no longer makes, and this says so loudly
     // rather than passing vacuously.
     expect(section).toContain('allow-list')
-    for (const { claim } of DENIALS) expect(section, claim).toContain(claim)
+    for (const { claim, stated } of DENIALS) expect(section, claim).toMatch(stated)
   })
 
   it('has no allow-listed route that grants any of them', () => {

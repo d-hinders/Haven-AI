@@ -51,6 +51,8 @@ import {
   delegationSigningPayload,
   type HavenBudgetPolicy,
 } from '../rails/delegation-policy.js'
+import type { Delegation } from '@metamask/smart-accounts-kit'
+import { buildDelegationGrantUrl } from '../domain/handoff-links.js'
 import {
   createTreasuryOps,
   delegationRailBundlerUrl,
@@ -58,6 +60,7 @@ import {
 } from '../rails/delegation-rail.js'
 import {
   activatePendingDelegationInSlot,
+  findReusablePendingDelegation,
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
 } from '../infra/repositories/delegation-budgets.js'
@@ -306,6 +309,42 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return reply.code(400).send({ error: 'expires_at must be in the future' })
     }
 
+    // ── Reuse an identical still-pending build (#2539) ──
+    // The dashboard form calls build again on its own (re-render, retry),
+    // and the #2539 CLI points its --wait poller at a SPECIFIC hash: a
+    // second build minting a fresh version would strand that hash pending
+    // forever. An identical (agent, token, recipient, budget, period) slot
+    // with a still-pending, unexpired row therefore returns THAT row — same
+    // hash, same version, 201 shape unchanged — and inserts nothing.
+    const reusable = await findReusablePendingDelegation(
+      request.params.id,
+      token_address,
+      recipient_address ? recipient_address.toLowerCase() : null,
+      budget_atomic,
+      period_seconds,
+      expiry,
+    )
+    if (reusable) {
+      const reused = JSON.parse(reusable.delegation_json) as Omit<Delegation, 'signature'>
+      return reply.code(201).send({
+        delegation_hash: reusable.delegation_hash,
+        version: reusable.version,
+        delegate_account_address: await computeHybridAccountAddress(agent.chain_id, {
+          ownerAddress: agent.delegate_address as Address,
+        }),
+        signing_payload: delegationSigningPayload(reused, agent.chain_id),
+        // #2539: the construct-and-hand-off response. `build_id` IS the
+        // delegation hash — there is no second identifier and no new column;
+        // `signing_url` is the dashboard grant form with ?grant= prefill
+        // (B2's ?setup= pattern), whose host comes from the same
+        // config.frontendUrl buildApprovalUrl already uses. The CLI and the
+        // dashboard end up on the same page with the same fields filled.
+        build_id: reusable.delegation_hash,
+        typed_data_hash: reusable.delegation_hash,
+        signing_url: buildDelegationGrantUrl(request.params.id, reusable.delegation_hash),
+      })
+    }
+
     // Version = next per (agent, token, recipient|open) — fresh identity per
     // replacement (#827/#813).
     const versionRow = await pool.query<{ next_version: number }>(
@@ -366,6 +405,16 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       delegate_account_address: delegateAccountAddress,
       // The OWNER signs this client-side (EIP-712). One signature, no tx.
       signing_payload: delegationSigningPayload(delegation, agent.chain_id),
+      // #2539: the construct-and-hand-off fields. `build_id` IS the delegation
+      // hash — there is no second identifier and no new column — and
+      // `signing_url` is the dashboard grant form with ?grant= prefill (B2's
+      // ?setup= pattern), whose host comes from the same config.frontendUrl
+      // buildApprovalUrl already uses. Present on EVERY 201, reused row or
+      // fresh: the #2539 CLI consumes the first build it makes, which by
+      // definition is not a reuse.
+      build_id: hash,
+      typed_data_hash: hash,
+      signing_url: buildDelegationGrantUrl(request.params.id, hash),
     })
   })
 

@@ -1380,7 +1380,7 @@ export const openapiSpec = {
         operationId: 'buildAgentDelegation',
         summary: 'Grant step 1: build an unsigned budget delegation for the owner to sign.',
         description:
-          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827).',
+          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -1410,20 +1410,33 @@ export const openapiSpec = {
         },
         responses: {
           '201': {
-            description: 'Pending delegation stored; the owner signs signing_payload next.',
+            description: 'Pending delegation stored (or an identical still-pending build reused); the owner signs next.',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['delegation_hash', 'version', 'delegate_account_address', 'signing_payload'],
+                  required: ['delegation_hash', 'version', 'delegate_account_address', 'signing_payload', 'build_id', 'typed_data_hash', 'signing_url'],
                   properties: {
                     delegation_hash: delegationHash,
-                    version: { type: 'integer', description: 'Fresh per (agent, token, recipient) slot — replacement identity (#827).' },
+                    version: { type: 'integer', description: 'Fresh per (agent, token, recipient) slot — replacement identity (#827). Repeated UNCHANGED when build reuses an identical still-pending row (#2539).' },
                     delegate_account_address: address,
                     signing_payload: {
                       type: 'object',
                       description: "EIP-712 typed data (primaryType 'Delegation') the owner signs verbatim.",
                       additionalProperties: true,
+                    },
+                    build_id: {
+                      ...delegationHash,
+                      description: 'The build identifier. It IS the delegation hash — there is no second id and no new column (#2539).',
+                    },
+                    typed_data_hash: {
+                      ...delegationHash,
+                      description: 'The hash of the EIP-712 typed data to sign — the delegation_hash, named for the issue\u2019s response shape (#2539).',
+                    },
+                    signing_url: {
+                      type: 'string',
+                      format: 'uri',
+                      description: 'Dashboard grant form for this agent with the pending build prefilled (?grant=<delegation hash>). Host from the backend\u2019s FRONTEND_URL, the same source buildApprovalUrl uses (#2539).',
                     },
                   },
                 },

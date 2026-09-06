@@ -106,6 +106,11 @@ function mockDb(opts: {
   version?: number
   stored?: Record<string, unknown> | null
   owner?: string | null
+  /**
+   * #2539: the row the build-reuse lookup finds. Unset means "nothing to
+   * reuse", which keeps every earlier test on its exact old path.
+   */
+  reusable?: { id: string; delegation_hash: string; version: number; delegation_json: string }
   passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string; created_at?: Date | string | null }>
   waiverAt?: string | null
   list?: Array<Record<string, unknown>>
@@ -144,6 +149,12 @@ function mockDb(opts: {
     }
     if (/COALESCE\(MAX\(version\)/.test(s)) {
       return Promise.resolve({ rows: [{ next_version: opts.version ?? 1 }] })
+    }
+    // #2539: the reuse lookup — a still-pending, unexpired row for the exact
+    // slot. `reusable` set hands back that one row; unset means "nothing to
+    // reuse" so every pre-#2539 test keeps its exact old path.
+    if (/budget_atomic::numeric/.test(s)) {
+      return Promise.resolve({ rows: opts.reusable ? [opts.reusable] : [] })
     }
     // loadHybridOwnerConfig (#885): the account row, then its passkey set.
     if (/SELECT id, owner_address, single_signer_waiver_at FROM user_safes/.test(s)) {
@@ -1027,6 +1038,203 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json()).toMatchObject({ revoked: true, tx_hash: '0xfeed' })
       expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/revoke/submit', res.json())
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(true)
+    })
+  })
+
+  // ── #2539 characterization (money.md §2): pin the surface the CLI's
+  // construct-and-hand-off slice rides on BEFORE anything changes. The CLI
+  // never signs and never calls activate — the properties pinned here are the
+  // ones that keep that true:
+  //   1. build stores a pending row and hands back typed data, never a
+  //      signature;
+  //   2. revoke PREPARES a signature request and returns it — nothing flips
+  //      without the /submit step and its owner signature;
+  //   3. activate still demands an owner signature.
+  describe('#2539 characterization — the surface the CLI hands off to', () => {
+    const grantBody = { token_address: USDC, budget_atomic: '5000000', period_seconds: 86_400 }
+
+    it('CHARACTERIZATION: build stores a pending row and reports the version', async () => {
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(res.statusCode).toBe(201)
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))!
+      expect(String(insert[0])).toContain("'pending'")
+      expect(res.json()).toMatchObject({ version: 1 })
+    })
+
+    it('CHARACTERIZATION: a rebuild of the same slot today mints a SECOND pending row, no reuse', async () => {
+      // Today the dashboard's own rebuild of the same (agent, token,
+      // recipient) budget bypasses any reuse: same body, fresh MAX(version)+1
+      // read, fresh insert. That duplicate pending row is exactly why #2539
+      // must add reuse — the CLI prints a link to a pending row, the form's
+      // own rebuild would otherwise leave that row behind and poll the CLI's
+      // --wait with a version that never goes active.
+      mockDb({})
+      const first = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(first.statusCode).toBe(201)
+      mockDb({})
+      const second = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(second.statusCode).toBe(201)
+      expect(
+        mockQuery.mock.calls.filter((c) => /INSERT INTO agent_delegations/.test(String(c[0]))).length,
+      ).toBe(2)
+    })
+
+    it('CHARACTERIZATION: revoke prepare returns the signature request and flips NOTHING', async () => {
+      // Same stored row the sibling tests use — a full signed delegation the
+      // revocation builder can encode.
+      mockDb({
+        stored: {
+          delegation_json: JSON.stringify({ delegate: DELEGATE_ACCOUNT, delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1', signature: '0x' + 'cd'.repeat(65) }),
+          status: 'active',
+        },
+      })
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn().mockResolvedValue({
+          userOperation: { sender: TREASURY, nonce: 1n, callData: '0xdead' },
+          userOpHash: '0x' + 'ee'.repeat(32),
+          signingTypedData: { domain: {}, types: {}, primaryType: 'PackedUserOperation', message: {} },
+        }),
+        submitCall: vi.fn(),
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke`,
+        payload: {},
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ signature_scheme: 'eip712_userop' })
+      expect(res.json().signing_payload).toBeTruthy()
+      // The row is untouched until /submit: no revoked UPDATE ran.
+      expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
+    })
+
+    it('CHARACTERIZATION: revoke on an already-revoked hash is a 409', async () => {
+      mockDb({ stored: { delegation_json: '{}', status: 'revoked' } })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke`, payload: {},
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'Already revoked' })
+    })
+
+    it('CHARACTERIZATION: activate still demands an owner signature and writes nothing without one', async () => {
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`, payload: {},
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/owner signature is required/)
+      expect(mockQuery.mock.calls.some((c) => /UPDATE agent_delegations/.test(String(c[0])))).toBe(false)
+    })
+
+    it('CHARACTERIZATION: the pending row is listed with the parameters a grant link prefill needs', async () => {
+      // The ?grant= prefill is built ONLY from what GET /:id/delegations
+      // already returns — no new backend read. This pins that the list really
+      // carries token, recipient, amount, period and expiry for a pending row.
+      mockDb({
+        list: [{
+          ...DELEGATION_ROW,
+          status: 'pending',
+          recipient_address: null,
+        }],
+      })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      const row = res.json().delegations[0]
+      expect(row.status).toBe('pending')
+      expect(row.token_address).toBe(USDC.toLowerCase())
+      expect(row.recipient_address).toBeNull()
+      expect(row.budget_atomic).toBe('5000000')
+      expect(row.period_seconds).toBe(86_400)
+      expect(row.expires_at).toBeTruthy()
+    })
+
+    // ── #2539 new behaviour: the build is idempotent within its expiry ──
+    // Same slot + still-pending + unexpired → THE SAME row comes back: same
+    // hash, same version, no second insert. This is what lets the CLI print a
+    // link to a hash and then poll for that hash to go active while the
+    // dashboard's own form rebuilds the same grant underneath it.
+
+    function reusableRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'row-reuse-1',
+        delegation_hash: '0x' + 'c1'.repeat(32),
+        version: 1,
+        delegation_json: JSON.stringify({
+          delegate: DELEGATE_ACCOUNT, delegator: TREASURY,
+          authority: `0x${'0'.repeat(64)}`, caveats: [], salt: 1n.toString(),
+        }),
+        ...overrides,
+      }
+    }
+
+    it('#2539: an identical still-pending build is REUSED — same hash and version, nothing inserted', async () => {
+      mockDb({ reusable: reusableRow() })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(res.statusCode).toBe(201)
+      const body = res.json()
+      expect(body.delegation_hash).toBe(reusableRow().delegation_hash)
+      expect(body.version).toBe(1)
+      expect(body.build_id).toBe(body.delegation_hash)
+      expect(body.typed_data_hash).toBe(body.delegation_hash)
+      expect(body.signing_url).toContain('/agents/')
+      expect(body.signing_url).toContain(`grant=${reusableRow().delegation_hash}`)
+      // Reuse, not a second offer: no insert ran, and the response still
+      // matches the documented 201 shape (checked against the real payload).
+      expect(mockQuery.mock.calls.some((c) => /INSERT INTO agent_delegations/.test(String(c[0])))).toBe(false)
+      expectMatchesSpec('POST', '/agents/{id}/delegations/build', body, '201')
+      expect(JSON.stringify(body)).not.toMatch(/"signature":\s*"0x[0-9a-f]{130}/i)
+    })
+
+    it('#2539: reuse keeps the 201 shape coherent with the reused row, not the request', async () => {
+      // The signing_payload is rebuilt from the STORED delegation, and the
+      // delegate account address is re-derived from the agent's CURRENT key —
+      // so what the owner is asked to sign is the thing that is actually
+      // pending, whatever arrived in the request body.
+      mockDb({ reusable: reusableRow({ version: 3 }) })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().version).toBe(3)
+      expect(res.json().delegate_account_address).toBe(DELEGATE_ACCOUNT)
+      expect(res.json().signing_payload.primaryType).toBe('Delegation')
+    })
+
+    it('#2539: a DIFFERENT budget or recipient on the same slot still builds a fresh version', async () => {
+      // Reuse matches the full parameter set — budget included. A raise is a
+      // new offer (a new version), never a silent re-handing of the old one.
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+        payload: { ...grantBody, budget_atomic: '9000000' },
+      })
+      expect(res.statusCode).toBe(201)
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))!
+      expect(String(insert[0])).toContain("'pending'")
+      expect(res.json().version).toBe(1)
+    })
+
+    it('#2539: the reuse lookup is scoped to the exact slot', async () => {
+      mockDb({ reusable: reusableRow() })
+      await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+        payload: { ...grantBody, recipient_address: RECIPIENT },
+      })
+      const lookup = mockQuery.mock.calls.find((c) => /budget_atomic::numeric/.test(String(c[0])))!
+      // recipient goes in as a parameter and the lookup is per-agent — a
+      // pinned grant and an open grant on the same token are different slots.
+      expect(lookup[1]).toContain(AGENT_ID)
+      expect(lookup[1][2]).toBe(RECIPIENT.toLowerCase())
     })
   })
 

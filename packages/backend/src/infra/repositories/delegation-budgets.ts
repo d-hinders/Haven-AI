@@ -53,6 +53,63 @@ export async function listActiveDelegations(
   return result.rows
 }
 
+/**
+ * The still-pending build of a slot, when there is one (#2539).
+ *
+ * `build` used to be write-only: every call minted a fresh version and
+ * inserted a fresh pending row, so the dashboard form's own rebuild of the
+ * grant it was already showing left the older pending row behind forever. For
+ * the dashboard that was invisible (it signs whatever build just returned);
+ * for #2539's CLI it is fatal — the CLI prints a link to a pending row's hash
+ * and then polls `GET /agents/:id/delegations` for THAT hash to go active,
+ * which never converges if a second build bumped the version.
+ *
+ * So the same `(agent, token, recipient|open, budget, period)` slot with a
+ * still-pending, unexpired row now RETURNS that row instead of building a
+ * competitor to it: same hash, same version, 201 shape unchanged. The
+ * parameters must match exactly — budget included, so "raise my budget" builds
+ * a NEW version rather than silently re-handing the old amount — and the row
+ * must still be pending (an already-signed slot is a replacement, #827's fresh
+ * identity) and unexpired (an expired offer is dead; reuse would print a link
+ * whose signature the chain refuses at the timestamp caveat).
+ *
+ * `budget_atomic` is a decimal string (VARCHAR(78)) because amounts must
+ * survive above Number.MAX_SAFE_INTEGER; the comparison casts both sides to
+ * numeric, so '5000000' and '05000000' match and '5000001' does not.
+ */
+export const FIND_REUSABLE_PENDING_DELEGATION_SQL = `SELECT id, delegation_hash, version, delegation_json
+     FROM agent_delegations
+     WHERE agent_id = $1
+       AND token_address = LOWER($2)
+       AND recipient_address IS NOT DISTINCT FROM LOWER($3)
+       AND status = 'pending'
+       AND budget_atomic::numeric = $4::numeric
+       AND period_seconds = $5
+       AND expires_at >= $6
+     ORDER BY created_at ASC`
+
+export interface ReusablePendingDelegationRow {
+  id: string
+  delegation_hash: string
+  version: number
+  delegation_json: string
+}
+
+export async function findReusablePendingDelegation(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  budgetAtomic: string,
+  periodSeconds: number,
+  expiresAt: number,
+): Promise<ReusablePendingDelegationRow | null> {
+  const result = await pool.query<ReusablePendingDelegationRow>(
+    FIND_REUSABLE_PENDING_DELEGATION_SQL,
+    [agentId, tokenAddress, recipientAddress, budgetAtomic, periodSeconds, expiresAt],
+  )
+  return result.rows[0] ?? null
+}
+
 // ── Payment authorization selection (moved from rails/delegation-authorization.ts, #999)
 
 /**

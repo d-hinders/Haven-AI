@@ -30,10 +30,21 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
  *
  * Everything that changes AUTHORITY rather than reading or arranging it:
  * signer changes, re-keying, passkey management, credential/password/email
- * changes, account provisioning, transfers, and delegation build/activate/
- * revoke. An owner CLI session can create an agent and hand it a budget request
- * — it cannot approve that budget, and it cannot move a key. The human keeps
- * every signature, which is this epic's standing owner constraint.
+ * changes, account provisioning, transfers, and activation. An owner CLI
+ * session can create an agent and hand it a budget request — it cannot approve
+ * that budget, and it cannot move a key. The human keeps every signature,
+ * which is this epic's standing owner constraint.
+ *
+ * #2539 (C3) adds exactly two DELEGATION routes, and their safety property is
+ * worth stating because "build" and "revoke" sound like authority changes:
+ * both CONSTRUCT a signature request and hand it back. Build returns unsigned
+ * typed data plus a link to the dashboard grant form; revoke PREPARE returns
+ * an unsigned UserOp. Neither stores a signature, neither flips a row, and
+ * neither is the signature step — the /submit and /activate twins stay refused
+ * and stay the exclusive business of an owner-signed session. The refusal is
+ * not decoration here: an owner_cli token can print the same link a human
+ * clicks, but the human's signature (WebAuthn or owner key, in the browser) is
+ * still the only thing that can complete either flow.
  */
 
 export const OWNER_CLI_PURPOSE = 'owner_cli'
@@ -77,10 +88,18 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // model, this file and the approval screen all state. An agent that needs a
   // key rotated asks its human, which is the same answer the rest of the list
   // gives for everything that changes authority rather than reading it.
-  // Budgets are READ here. Building, activating and revoking a delegation are
-  // authority changes and stay refused — C3 adds build + revoke later, and
-  // never activate, which is the signature the human keeps.
+  // Budgets are READ here, and — since #2539 (C3) — construct-and-hand-off:
+  // `POST /agents/{id}/delegations/build` builds the unsigned delegation and
+  // returns a dashboard signing link; the per-hash revoke PREPARES the
+  // sponsored disableDelegation UserOp for an owner signature. Neither stores
+  // a signature and neither changes a row; the signature always happens in the
+  // owner's browser. Their SIGNATURE steps — `.../activate`,
+  // `.../revoke/submit`, and `revoke-all(/submit)` — stay refused and stay
+  // owner-session-only. C3 adds build + revoke and NEVER activate, which is
+  // the signature the human keeps.
   { method: 'GET', path: '/agents/{id}/delegations' },
+  { method: 'POST', path: '/agents/{id}/delegations/build' },
+  { method: 'POST', path: '/agents/{id}/delegations/{hash}/revoke' },
   // Connect setups: create one and watch it, which is what an agent needs to
   // hand its user an approval link.
   { method: 'POST', path: '/agent-connection-setups' },

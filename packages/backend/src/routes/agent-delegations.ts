@@ -51,12 +51,12 @@ import {
   delegationSigningPayload,
   type HavenBudgetPolicy,
 } from '../rails/delegation-policy.js'
-import type { Delegation } from '@metamask/smart-accounts-kit'
 import { buildDelegationGrantUrl } from '../domain/handoff-links.js'
 import {
   createTreasuryOps,
   delegationRailBundlerUrl,
   readDisabledDelegationHashes,
+  type Delegation,
 } from '../rails/delegation-rail.js'
 import {
   activatePendingDelegationInSlot,

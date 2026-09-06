@@ -14,6 +14,7 @@ import { BotIcon } from './agent-panel/agent-display'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
+import { AgentOnboardingPromptCard } from './connect-agent/AgentOnboardingPromptCard'
 
 /**
  * The agents panel's shell: header, list layout, empty states, and modals.
@@ -223,6 +224,31 @@ export default function AgentPanel() {
           }
         />
       )}
+
+      {/* #2535: the agent-driven ALTERNATIVE to the button above — rendered on the
+          same condition, so a user who would rather hand the whole job to an
+          agent has something to paste before they ever open the modal.
+
+          The "or" divider is not decoration. Without it these are two
+          full-width blocks that both ask the user to start, with no hierarchy
+          saying which — `haven-design-reviewer` read the first version as two
+          competing calls to action rather than one choice, before reading
+          either. The divider is what makes the relationship legible at a glance
+          instead of only after reading the card's description. */}
+      {!loading &&
+        agents.length === 0 &&
+        !agentsError &&
+        !finalizingAgent &&
+        !finalizeTimedOut && (
+          <>
+            <div className="mt-6 flex items-center gap-3" aria-hidden="true">
+              <span className="h-px flex-1 bg-[var(--v2-border)]" />
+              <span className="text-xs text-[var(--v2-ink-3)]">or</span>
+              <span className="h-px flex-1 bg-[var(--v2-border)]" />
+            </div>
+            <AgentOnboardingPromptCard className="mt-6" />
+          </>
+        )}
 
       {!loading && agents.length === 0 && agentsError ? (
         <EmptyState

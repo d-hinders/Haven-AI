@@ -254,3 +254,74 @@ Nothing here needs you to. Steps 1-3 are links: hand your user the full \`<host>
 
 Next: [your agent hit a 402](/402.md) · [everything agent-readable](/llms.txt)
 `
+
+/**
+ * The **onboarding prompt** — the whole-onboarding text the dashboard offers a
+ * signed-in user to paste to their agent (#2535, epic #2519).
+ *
+ * ## It is NOT the "setup prompt", and the distinction is load-bearing
+ *
+ * `setup prompt` is one of the four canonical agent-facing terms
+ * (`docs/product/copy-guidelines.md` § Agent-facing vocabulary, settled by
+ * #2533 and swept by #2576): it names the text the CONNECT MODAL hands back,
+ * which carries a one-time setup token and the connector command. This string
+ * is a different object with a different lifetime — it exists before any setup
+ * does, contains no token and no secret, and is therefore safe to render to a
+ * signed-in user who has not created an agent yet. Calling both "the setup
+ * prompt" would undo the disambiguation those two issues paid for, so this one
+ * is the **onboarding prompt** wherever it is named.
+ *
+ * ## Why a shared export rather than a route
+ *
+ * The issue offered `GET /agent-connection-setups/agent-prompt` or a static
+ * export. The export wins on cost and on the #2523 precedent: no new route, no
+ * auth question, and no `owner_cli` allow-list entry — and the allow-list is
+ * fail-closed by design, so every entry is a decision. The route would only
+ * earn those three if the prompt had to vary per user, and it deliberately does
+ * not: it names commands and links, never account state.
+ *
+ * ## What keeps it from drifting from the setup prompt
+ *
+ * The two are built from the SAME sentence constants above — this one reuses
+ * the approval-relay and secret-hygiene rules verbatim rather than paraphrasing
+ * them, which is the whole reason those constants exist. A test asserts that
+ * containment, so a reworded copy here fails rather than quietly disagreeing
+ * with what `buildSetupPrompt` tells the same agent minutes later.
+ *
+ * The frontend cannot import this: `packages/frontend` has zero `@haven_ai/*`
+ * runtime dependencies by design (standalone Vercel deploys). It keeps a copy
+ * in `src/lib/agent-onboarding-prompt.ts`, byte-pinned to this string by
+ * `src/lib/__tests__/agent-onboarding-prompt.test.ts`, exactly as the runbook
+ * and the skill are pinned.
+ *
+ * ## The origin placeholder
+ *
+ * `{{HAVEN_ORIGIN}}` is substituted by the renderer with the host the user is
+ * actually signed in to, so dev, preview and production each produce a truthful
+ * prompt from one string. It is a placeholder rather than a build-time constant
+ * for the same reason `<channel>` is one in the runbook: this text is committed,
+ * and a baked host is wrong everywhere except where it was baked.
+ *
+ * ## Wording constraints (same as the runbook's, and not stylistic)
+ *
+ * The human keeps every signature; there is no headless account path; it must
+ * never suggest the agent enters the user's password; the owner-signed budget
+ * is what authorises a payment, and Haven constructs and relays. Every command
+ * it names exists at merge time — `haven login` (#2526) and
+ * `haven agents connect` (#2527) both landed before this shipped, which is the
+ * condition #2535 made blocking.
+ */
+export const AGENT_ONBOARDING_PROMPT = `I have a Haven account and I am signed in at {{HAVEN_ORIGIN}}. Please set up Haven so you can pay for things within a budget I approve.
+
+Start by reading {{HAVEN_ORIGIN}}/for-agents.md — it is written for you and explains which steps are mine.
+
+Then:
+
+1. Run \`npx @haven_ai/cli login\`. It prints a link and a code and does not need my password — it must never ask for it. Give me the link straight away and wait for me to approve it in my browser.
+2. Once I have approved, run \`haven agents connect --name <a name you choose> --budget <amount> --token USDC --period <minutes>\` with the budget I tell you. If I have not given you one, ask me before running it. Add \`--run\` to complete the connection in the same step.
+3. ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
+4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means you can pay, \`needs_approval\` means my approval has not landed yet.
+
+Two things only I can do: approving that budget with my passkey, and funding the account with USDC on Base — no ETH, Haven sponsors the gas. Tell me if either is missing rather than working around it.
+
+${AGENT_SECRET_HYGIENE_SENTENCE}`

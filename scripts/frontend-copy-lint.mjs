@@ -81,6 +81,12 @@ export const SCAN_FILES = [
   // skill" button (SetupStates.tsx) as `haven-pay/SKILL.md`, then read by an
   // agent as instructions. The originating case for this allowlist.
   'packages/frontend/src/lib/agent-skill-bundle.ts',
+  // #2535: the onboarding prompt a user pastes to their agent. Agent-facing
+  // prose living outside SCAN_DIRS, exactly like the skill bundle above — its
+  // canonical twin `packages/sdk/src/agent-guidance.ts` is already listed below,
+  // so listing this copy keeps the gate reading BOTH sides of a byte-pinned pair
+  // rather than only the source.
+  'packages/frontend/src/lib/agent-onboarding-prompt.ts',
   // The other artifact of that same download flow: `buildHandoff` /
   // `buildDotenv` become README.md and .env.example inside the SDK-starter zip.
   'packages/frontend/src/lib/agent-handoff.ts',

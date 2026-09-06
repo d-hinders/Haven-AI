@@ -35,6 +35,20 @@ const ARTIFACTS = [
 ] as const
 
 /**
+ * A chain named as a fact in a served artifact (#2596).
+ *
+ * Shape matcher, NOT a semantic one, and the difference is asserted below
+ * rather than left to this comment: it knows the three chain names Haven
+ * serves, their numeric ids, and the "on the X network" phrasing. A sentence
+ * that asserts a chain without using any of those passes. The first version
+ * of this guard also missed "on the Base network" and a bare chain id, both
+ * found by review — widened here, and the residual ceiling is pinned by a
+ * control so nobody reads a green run as more than it is.
+ */
+const CHAIN_ASSERTION = /\b(?:Base Sepolia|Base|Gnosis)\b|\bchain\s+(?:100|8453|84532)\b/
+const RESOLVER = '/.well-known/haven.json'
+
+/**
  * Hosts an artifact may link to. Everything else must be a same-origin path.
  *
  * `github.com` USED to be here, for one temporary reason: the product docs had
@@ -199,30 +213,56 @@ describe('discovery artifacts (#2520)', () => {
    * chain assertion is the defect, and naming the resolver is the fix.
    */
   it('names no chain without saying where the real one comes from (#2596)', () => {
-    const RESOLVER = '/.well-known/haven.json'
     const offenders: string[] = []
     for (const name of ARTIFACTS) {
-      const body = read(name)
-      for (const [index, line] of body.split('\n').entries()) {
-        if (!/\b(?:on|USDC on) (?:Base|Base Sepolia|Gnosis)\b/.test(line)) continue
-        // Qualified in place is the fix: the line may name a chain as long as
-        // it also says where the deployment's own answer lives.
-        if (line.includes(RESOLVER)) continue
-        offenders.push(`${name}:${index + 1}`)
+      for (const [index, line] of read(name).split('\n').entries()) {
+        // SENTENCE granularity, not line. These files have very long lines —
+        // `llms.txt:5` is one paragraph — so a line-level exemption let a
+        // resolver mentioned for an unrelated reason clear a bare chain claim
+        // somewhere else on the same line. Demonstrated by haven-reviewer:
+        // "We only support USDC on Base. Also see /.well-known/haven.json for
+        // our privacy policy." passed. Splitting on sentence boundaries makes
+        // the exemption apply to the claim it is actually attached to.
+        for (const sentence of line.split(/(?<=[.;])\s+/)) {
+          if (!CHAIN_ASSERTION.test(sentence)) continue
+          if (sentence.includes(RESOLVER)) continue
+          offenders.push(`${name}:${index + 1}`)
+        }
       }
     }
     expect(offenders, `bare chain assertion in a served artifact: ${offenders.join(', ')}`).toEqual([])
   })
 
-  it('POSITIVE CONTROL: the matcher finds a bare chain assertion', () => {
-    // Four zeroes are only evidence if the matcher can return non-zero — and
-    // this one has to distinguish a bare assertion from a qualified one, which
-    // a presence check could not.
+  it('POSITIVE CONTROL: the matcher separates a bare assertion from a qualified one', () => {
     const bare = 'Payments settle in USDC on Base via x402.'
-    const qualified = 'Payments settle in USDC on Base; this deployment reports its chain in /.well-known/haven.json.'
-    const matches = (line: string) =>
-      /\b(?:on|USDC on) (?:Base|Base Sepolia|Gnosis)\b/.test(line) && !line.includes('/.well-known/haven.json')
-    expect(matches(bare)).toBe(true)
-    expect(matches(qualified)).toBe(false)
+    const qualified = `Payments settle in USDC on the chains reported in ${RESOLVER}.`
+    expect(CHAIN_ASSERTION.test(bare) && !bare.includes(RESOLVER)).toBe(true)
+    expect(CHAIN_ASSERTION.test(qualified) && !qualified.includes(RESOLVER)).toBe(false)
+  })
+
+  it('POSITIVE CONTROL: the widened shapes are caught, and the ceiling is where it says', () => {
+    // Each of these slipped the first version of the pattern (haven-reviewer).
+    for (const caught of [
+      'settles on Base mainnet.',
+      'on the Base network for now.',
+      'Deployed to chain 8453 today.',
+      'Payments run on Gnosis.',
+    ]) {
+      expect(CHAIN_ASSERTION.test(caught), caught).toBe(true)
+    }
+    // And the ceiling, asserted rather than described, because the comment
+    // above used to claim this catches "any bare chain assertion" and it does
+    // not — it is a shape matcher, not a semantic one. A paraphrase that names
+    // no chain, no id and no network word passes, and a green run is not
+    // evidence about one.
+    expect(CHAIN_ASSERTION.test('Settlement happens where the treasury lives.')).toBe(false)
+  })
+
+  it('POSITIVE CONTROL: a resolver mentioned for something else does not exempt a chain claim', () => {
+    // The vacuous pass the sentence split closes.
+    const smuggled = `We only support USDC on Base. Also see ${RESOLVER} for our privacy policy.`
+    const sentences = smuggled.split(/(?<=[.;])\s+/)
+    const cleared = sentences.filter((x) => CHAIN_ASSERTION.test(x) && !x.includes(RESOLVER))
+    expect(cleared).toHaveLength(1)
   })
 })

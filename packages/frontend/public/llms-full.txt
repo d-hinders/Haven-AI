@@ -19,7 +19,7 @@ One line: give your agent a budget, not your wallet.
 2. It asks Haven for a quote/authorization; Haven checks the exact payment terms against the agent's live budget.
 3. Within budget: the agent signs locally (the key never leaves the runtime) and Haven relays. Over budget or wrong recipient: the payment is refused — the agent cannot bypass the limit.
 4. Settlement is per-merchant: ERC-7710 delegated settlement natively (funds move user-account → merchant directly), or the standard EIP-3009 transfer-with-authorization path for merchants on standard x402 today. In practice a Haven agent with an open (unpinned) budget can pay any standard x402 merchant today, through one policy and audit layer; a recipient-pinned budget settles via ERC-7710 only, by design — pinning and the EIP-3009 funding path are mutually exclusive.
-5. Settles in USDC, on the chain this deployment reports in /.well-known/haven.json (Base in production, Base Sepolia on a test deployment). Stripe MPP support is on the roadmap; the policy layer is rail-neutral by design.
+5. Settles in USDC, on the chains this deployment reports as chains.deployable in /.well-known/haven.json. Stripe MPP support is on the roadmap; the policy layer is rail-neutral by design.
 
 ## Integration surface
 

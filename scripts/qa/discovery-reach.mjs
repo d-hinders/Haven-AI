@@ -38,8 +38,18 @@ const footer = read('packages/frontend/src/components/marketing/SiteFooter.tsx')
  * `<link>`. They are collected together because, measured, they turn out to
  * point at the same place: see the note this script prints.
  */
-const alternates = [...layout.matchAll(/rel="alternate"[\s\S]{0,200}?href="([^"]+)"/g)].map((m) => m[1])
-  .concat([...layout.matchAll(/href="([^"]+)"[\s\S]{0,200}?rel="alternate"/g)].map((m) => m[1]))
+// Deduped HERE, not downstream. The two patterns overlap: with two adjacent
+// <link rel="alternate"> tags, the first tag's href is also "within 200 chars
+// BEFORE a rel=alternate" — the second tag's. That double-counted /llms.txt,
+// and while `uniqueAlternates` fixed it for the band computation, the raw
+// array was still used for the printed hook COUNT, which therefore said 5
+// when there are 4. It said so in the shipped run report too (haven-reviewer,
+// #2538). An instrument that is right about its verdict and wrong about its
+// arithmetic is still an instrument that lied.
+const alternates = [...new Set(
+  [...layout.matchAll(/rel="alternate"[\s\S]{0,200}?href="([^"]+)"/g)].map((m) => m[1])
+    .concat([...layout.matchAll(/href="([^"]+)"[\s\S]{0,200}?rel="alternate"/g)].map((m) => m[1])),
+)]
 const sentence = [...landing.matchAll(/If you are an AI agent[\s\S]{0,300}?href="([^"]+)"/g)].map((m) => m[1])
 const footerLinks = [...footer.matchAll(/'For agents',\s*href: '([^']+)'/g)].map((m) => m[1])
 const uniqueAlternates = [...new Set([...alternates, ...sentence, ...footerLinks])]
@@ -54,7 +64,10 @@ for (const href of uniqueAlternates) {
   if (body.includes(TARGET)) hops.push({ via: href, hop: 2 })
 }
 
-const inRobots = surfaces.includes(`#   ${TARGET.slice(1)}`) || /buildRobotsTxt[\s\S]*?for-agents\.md/.test(surfaces)
+// `#   /for-agents.md` — WITH the slash. This read `TARGET.slice(1)` and so
+// could never match; the `||` fallback covered for it, which is how a dead
+// assertion survives (haven-reviewer, #2538).
+const inRobots = surfaces.includes(`#   ${TARGET}`)
 const inSitemap = /PUBLIC_SURFACES[\s\S]*?'\/for-agents\.md'/.test(surfaces)
 
 const band = hops.length > 0 ? 3 : inRobots || inSitemap ? 2 : 1
@@ -78,7 +91,9 @@ console.log(`  why:         ${why}`)
 // hangs on one line inside it. Removing that line drops the ceiling to 2 with
 // every existing hook test still green, which is why the chain has its own
 // assertion in discovery-surfaces.test.ts (#2538).
-const landingTargets = [...new Set([...alternates, ...sentence, ...footerLinks])].filter((h) => h.startsWith('/') && !h.startsWith('/api/'))
-if (landingTargets.length === 1 && band === 3) {
-  console.log(`  NOTE:        all ${alternates.length + sentence.length + footerLinks.length} landing hooks point at ${landingTargets[0]} — band 3 depends on ONE link inside it`)
+const hooks = [...alternates, ...sentence, ...footerLinks]
+const agentFacing = [...new Set(hooks)].filter((h) => h.startsWith('/') && !h.startsWith('/api/'))
+if (agentFacing.length === 1 && band === 3) {
+  const n = hooks.filter((h) => h === agentFacing[0]).length
+  console.log(`  NOTE:        ${n} of the ${hooks.length} landing hooks point at ${agentFacing[0]}, and no other agent-facing route exists — band 3 depends on ONE link inside it`)
 }

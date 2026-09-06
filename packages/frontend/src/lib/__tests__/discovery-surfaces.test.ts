@@ -245,9 +245,18 @@ describe('the hooks are actually wired into the app', () => {
 
     // Follow each one hop into the file it names, and require that at least
     // one of them names the runbook.
+    //
+    // A hook that points STRAIGHT at the runbook counts, and that case has to
+    // be handled first: `/for-agents.md` does not contain its own path, so
+    // reading its body and looking for the string would score a direct link as
+    // "did not reach". That is the shape a future fix for the single point of
+    // failure this test documents would most naturally take, so the test must
+    // not fail the fix (haven-reviewer, #2538).
+    const RUNBOOK = '/for-agents.md'
     const reached = destinations.filter((destination) => {
+      if (destination === RUNBOOK) return true
       const body = readPublic(destination!)
-      return body !== null && body.includes('/for-agents.md')
+      return body !== null && body.includes(RUNBOOK)
     })
     expect(
       reached.length,

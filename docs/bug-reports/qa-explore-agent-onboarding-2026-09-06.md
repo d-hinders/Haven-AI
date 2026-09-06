@@ -33,12 +33,25 @@ read as *an upper bound corroborated by a run*, not as an independent replicatio
 band-3 result is independently supported by the deterministic ceiling measurement below,
 which does not depend on the agent at all.
 
+> **Corrected after review.** Two numbers in the first version of this report were
+> wrong, and both were mine rather than the run's. Score 2 was published as "4 of 4"
+> without applying this scenario's own rubric — which scored out of four including
+> credential rotation, a human-only step that is not part of setup, so no first reply
+> should ever name it. The rubric now scores the three setup steps and says why rotation
+> is excluded; run 1 is 3 of 3 and A0 is 2 of 3 (A0 never reached funding — its own
+> §6 says so, and neither of its hand-off scripts mentions it). The A0 gloss also said
+> "funding named", which inverted the one step A0 missed. Separately, "five landing
+> hooks" came from the measurement script double-counting one `<link>` through two
+> overlapping regexes; there are four, three of which point at `/llms.txt`. The script
+> is fixed at the source. Found by haven-reviewer; the movement figure survives both
+> corrections, the denominators did not.
+
 ## Scores
 
 | # | Score | A0 (2026-09-04) | Movement |
 |---|---|---|---|
 | **1. Discovery** | **3** — landing `<head>` → `/llms.txt` → `/for-agents.md`, nothing guessed | **1** — "discovery of them is pure guesswork" | **+2** |
-| **2. First reply** | **4 of 4** human steps named | 3 of 4 (funding named; the passkey framed as a step, not as human-only) | **+1** |
+| **2. First reply** | **3 of 3** setup steps named | **2 of 3** — funding never named | **+1** |
 | **3. Tool calls to the login wall** | **7** | ~10 round-trips to the same wall | — (first measurement on this definition) |
 | **4. The two commands** | `haven login` **not attempted**; `agents connect` **blocked** — see below | neither existed at A0 | new |
 
@@ -66,19 +79,20 @@ measures the *ceiling* rather than one agent and so is reproducible:
 Band 1 is exactly A0's behaviour, which is the check that the rubric is calibrated
 against something real rather than invented.
 
-**One structural finding, not visible to the agent.** All *five* landing hooks — the
-`<link rel="alternate">`, the "If you are an AI agent" sentence, and the footer's "For
-agents" — point at the **same file**, and a single line inside `llms.txt` is the only
-link onward to `/for-agents.md`. Delete that one line and the ceiling falls to 2 while
+**One structural finding, not visible to the agent.** The landing HTML carries four
+hooks — two `<link rel="alternate">` tags, the "If you are an AI agent" sentence and the
+footer's "For agents" — and **three of them point at the same file**, `/llms.txt`; the
+fourth is the OpenAPI spec, not a route to the runbook. A single line inside `llms.txt`
+is the only link onward to `/for-agents.md`. Delete that one line and the ceiling falls to 2 while
 every existing hook test stays green, because each of them checks a hook in isolation and
 none checks that following one *arrives*. Fixed in the same PR by a chain assertion in
 `discovery-surfaces.test.ts` — mutation-proven: dropping the line turns exactly that one
 test red.
 
-### 2. First reply — 4 of 4
+### 2. First reply — 3 of 3
 
-It named all four human-only steps: signup with password and passkey, funding, creating
-the agent and choosing the budget, and approving the budget with the passkey. It also
+It named all three setup steps that are the human's: signup with password and passkey,
+funding, and approving the budget with the passkey. It also
 volunteered the boundary unprompted — *"I will not enter your password or create your
 passkey, and I will not approve the budget. Those three are the whole security model."*
 

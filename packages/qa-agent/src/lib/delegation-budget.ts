@@ -16,7 +16,7 @@
  * reason, and the run report is where that matters: on 2026-09-06 four scenarios
  * failed together and `within-budget-settle`'s line read "refusing to build an
  * over-budget amount from a number the chain did not supply" — a use it never
- * makes. A reader of that report learns something false about the leg. `purpose`
+ * makes. A reader of that report learns something false about the leg. `use`
  * is what keeps each refusal about its own caller.
  */
 

@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   extractRoutes,
@@ -11,6 +13,7 @@ import {
   isOwnerCliAllowed,
   routeAllowsOwnerCli,
 } from '../middleware/owner-cli.js'
+
 import type { FastifyRequest } from 'fastify'
 
 /**
@@ -323,9 +326,133 @@ describe('owner_cli route census (#2526)', () => {
       'GET /agents',
       'POST /agent-connection-setups',
       'GET /user/safes',
+      // #2534: the funding hand-off, load-bearing because it is the one entry
+      // whose reach is an agent pasting instructions at its human.
+      'GET /user/safes/{safeId}/funding',
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)
+    }
+  })
+})
+
+/**
+ * The skill's PROSE about this list, tied to the list (#2537).
+ *
+ * The shipped `haven-pay` skill tells an agent what a `haven login` session
+ * can and cannot do. That paragraph was accurate when written and had nothing
+ * holding it there: re-adding `rotate-key` to the allow-list would have left
+ * the skill asserting the opposite of the truth, installed on every connected
+ * machine, with no test anywhere going red. A haven-reviewer finding on
+ * #2537, and the same "a guard that cannot fail is not a guard" shape the
+ * census above exists for.
+ *
+ * It is deliberately NOT a prose matcher. Each capability the skill DENIES is
+ * mapped to the route shapes that would grant it, and the assertion is that
+ * no such route is allow-listed. So it fails on a change to the LIST — which
+ * is the thing that can silently make the prose false — rather than on a
+ * rewording of the sentence.
+ */
+describe('the skill\'s account of this list stays true to it (#2537)', () => {
+  /**
+   * Read as SOURCE TEXT, never through `@haven_ai/sdk`.
+   *
+   * The first version of this imported `HAVEN_SKILL_MD` from the built
+   * package, and it passed locally while failing in CI — because the backend
+   * resolves the workspace `dist/`, so the assertion was reading whatever the
+   * SDK happened to have been built from last. Mine was one edit stale, so a
+   * green run here meant nothing about the text this branch actually ships.
+   * A test that can validate bytes the repo no longer contains is the same
+   * false-instrument class as a zero from a probe that was tree-shaken away.
+   *
+   * Reading the file is also the only route available: a relative import
+   * across packages fails `tsc`'s rootDir, which is why
+   * `connector-command-parity.test.ts` asserts via text too.
+   */
+  const skillSource = readFileSync(
+    join(import.meta.dirname, '../../../sdk/src/skill-content.ts'),
+    'utf8',
+  )
+  const section = skillSource.slice(
+    skillSource.indexOf('## Onboarding and setup'),
+    skillSource.indexOf('## Identity and budget'),
+  )
+
+  it('found the section at all — the read is a real one', () => {
+    // Positive control on the instrument itself. If the path breaks or the
+    // heading is renamed, every assertion below would pass over an empty
+    // string and this suite would go quietly green while checking nothing.
+    expect(section.length).toBeGreaterThan(500)
+    expect(section).toContain('None of the tools below creates authority')
+  })
+
+  /**
+   * Each denial the skill makes, and the routes that would falsify it.
+   *
+   * The claim is a REGEX rather than a literal because the source is wrapped
+   * prose: `cannot approve a\n  budget` is the same sentence as
+   * `cannot approve a budget` and a literal match calls one of them absent.
+   * That is what broke the first CI run of this test.
+   */
+  const DENIALS: ReadonlyArray<{
+    claim: string
+    stated: RegExp
+    grantedBy: (path: string, method: string) => boolean
+  }> = [
+    {
+      claim: 'approve a budget',
+      stated: /approve a\s+budget/,
+      // Activation is the owner signature this epic never delegates.
+      grantedBy: (path) => /\/delegations\/(build|activate|revoke)/.test(path),
+    },
+    {
+      claim: 'rotate a key',
+      stated: /rotate a\s+key/,
+      grantedBy: (path) => path.includes('rotate-key') || path.includes('/rekey'),
+    },
+    {
+      claim: 'change a signer',
+      stated: /change a\s+signer/,
+      grantedBy: (path) => path.includes('account-signers') || path.includes('/passkey'),
+    },
+    {
+      claim: 'move money',
+      stated: /move\s+money/,
+      grantedBy: (path, method) =>
+        method !== 'GET' &&
+        /^\/(payments|x402|machine-payments|safe\/exec)/.test(path),
+    },
+  ]
+
+  it('states the four denials it is checked against', () => {
+    // If the sentence is reworded past these words the mapping below is
+    // measuring a claim the skill no longer makes, and this says so loudly
+    // rather than passing vacuously.
+    expect(section).toContain('allow-list')
+    for (const { claim, stated } of DENIALS) expect(section, claim).toMatch(stated)
+  })
+
+  it('has no allow-listed route that grants any of them', () => {
+    for (const { claim, grantedBy } of DENIALS) {
+      const offending = OWNER_CLI_ALLOWED_ROUTES.filter((r) => grantedBy(r.path, r.method))
+      expect(offending.map(key), `the skill says a session cannot ${claim}`).toEqual([])
+    }
+  })
+
+  it('POSITIVE CONTROL: each matcher finds the route it is looking for', () => {
+    // Four zeroes above are only evidence if the matchers can return non-zero.
+    // Written against routes that really exist and are really refused.
+    const wouldGrant: ReadonlyArray<[string, { method: string; path: string }]> = [
+      ['approve a budget', { method: 'POST', path: '/agents/{id}/delegations/activate' }],
+      ['rotate a key', { method: 'POST', path: '/agents/{id}/rotate-key' }],
+      ['change a signer', { method: 'POST', path: '/agents/{id}/account-signers' }],
+      ['move money', { method: 'POST', path: '/payments' }],
+    ]
+    for (const [claim, route] of wouldGrant) {
+      const denial = DENIALS.find((d) => d.claim === claim)!
+      expect(denial.grantedBy(route.path, route.method), `${claim} matcher is inert`).toBe(true)
+      // And each is genuinely refused today, so the guard is guarding a fact.
+      expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)
     }
   })
 })

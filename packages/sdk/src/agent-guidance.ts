@@ -178,7 +178,7 @@ Your user gives you a **budget on their own account** — not their wallet, and 
 Four of the six steps are your user's — each needs a human signature or a human decision. The rest is yours. If they already have a funded account, start at step 3.
 
 1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, \`npx @haven_ai/cli login\` afterwards gets you a scoped session for steps 3-4 — they approve a code in the browser, you never hold their password. It can set up agents and read the account; it cannot sign, approve a budget, move funds, or rotate any agent's keys.
-2. **HUMAN — fund it.** USDC on Base, to the address the dashboard shows.
+2. **HUMAN — fund it.** USDC on Base, to the address the dashboard shows. With a CLI session, \`haven wallets funding\` prints the address and the amount to send.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back. With a CLI session (step 1) you can do this step yourself: \`haven agents connect --name <n> --budget <amount> --token USDC --period <minutes>\` prints the same connector command and approval link; add \`--run\` to do step 4 too.
 4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally, registering only the public address.
 5. **HUMAN — approve the budget** with their passkey, in the Haven tab they created the agent in: it advances to the approval step by itself once your run registers.
@@ -198,7 +198,7 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 **At funding** (step 2):
 
-> Your Haven account needs USDC on Base before I can pay for anything — USDC only, no ETH: Haven sponsors the gas. The dashboard shows the address to send it to; a small amount first is fine.
+> Your Haven account needs USDC on Base before I can pay for anything — USDC only, no ETH: Haven sponsors the gas. The dashboard shows the address to send it to; a small amount first is fine. If I have a terminal session, \`haven wallets funding\` prints the address, the amount and an explorer link — say the word and I will paste them here.
 
 **At the budget** (step 3):
 

@@ -1,3 +1,10 @@
+import {
+  AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_SECRET_HYGIENE_SENTENCE,
+  AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+} from './agent-guidance.js'
+
 /**
  * The generic Haven payment skill — canonical copy.
  *
@@ -11,16 +18,39 @@
  * auto-install the skill into runtime skills folders.
  *
  * `packages/frontend/src/lib/agent-skill-bundle.ts` keeps a deliberately
- * decoupled inline copy (the download fallback): frontend has zero
- * `@haven_ai/*` dependencies so it can deploy standalone on Vercel without an
- * unpublished SDK export. A parity test in that package's test suite imports
+ * decoupled inline copy (the download fallback): the frontend does not depend
+ * on the SDK, so it can deploy standalone on Vercel without an unpublished
+ * export. It is NOT `@haven_ai/*`-free — it takes `@haven_ai/core` with the
+ * `"*"` workspace pin — and this comment said otherwise until #2537 checked
+ * the manifest; the material point is the one that survives, and it is about
+ * the SDK specifically. A parity test in that package's test suite imports
  * this canonical string and asserts byte-for-byte equality, so the two copies
  * cannot drift.
+ *
+ * **The onboarding section (#2537) is COMPOSED, not written here.** Its rule
+ * sentences are interpolated from `agent-guidance.ts`, which is also where the
+ * backend's setup prompt and the `/for-agents.md` runbook get them: a rule an
+ * agent meets twice must be one text, or the two copies drift into
+ * contradicting each other in front of a reader with no way to tell which is
+ * current. The prose around them is skill-only and lives here.
+ *
+ * **Those three bullets are quoted in the setup prompt's own voice**, where
+ * the USER is speaking: "me"/"I" are the user, and "the command above" is the
+ * connector command printed directly above them there — neither of which
+ * holds in this file, which addresses the agent throughout and prints no
+ * command. Any future user-voice quote here needs the same two-referent
+ * gloss, and it must sit BEFORE the quote rather than after: the first draft
+ * put it after, and both the reviewer and the design reviewer independently
+ * found that an agent reading top-to-bottom meets `relay ... to me` before
+ * it learns whose "me" that is — on the one instruction the section itself
+ * calls the highest-priority one. `AGENT_APPROVAL_RELAY_PROSE_SENTENCE` is a
+ * live sibling constant not pulled in here; if it ever is, this applies to it
+ * too (design review, #2537).
  */
 
 export const HAVEN_SKILL_MD = `---
 name: haven-pay
-description: Pay for things from the user's Haven wallet within their agent rules. Use when the user asks to send, pay, tip, or transfer crypto — or when a request hits an HTTP 402 (x402) paywall.
+description: Pay for things from the user's Haven wallet within their agent rules, and set Haven up when it is not yet connected. Use when the user asks to send, pay, tip, or transfer crypto; when a request hits an HTTP 402 (x402) paywall; or when they ask to create a Haven account, create an agent, or connect one.
 ---
 
 # Haven: pay from a Haven wallet
@@ -45,6 +75,59 @@ the source of truth.
 - The user asks to send money, pay someone, tip, donate, or transfer tokens.
 - A request returns HTTP 402 (x402): use the Haven pay tools to settle it,
   then retry the original request.
+
+## Onboarding and setup
+
+You are in this mode when there is no Haven agent credential on this machine,
+or when your user asks you to create a Haven account, create an agent, or
+connect one — for themselves or for someone else.
+
+**None of the tools below creates authority.** They spend a budget a human
+already signed. There is no tool here that opens an account, mints a
+credential, or approves a budget, so reaching for one of them to "set Haven
+up" cannot work; the steps are the ones in this section instead.
+
+Start by reading \`/for-agents.md\` on the Haven host — the origin of the
+\`api_url\` in your \`agent.json\` if you have one, otherwise the host your user
+names. It is the full runbook: six steps, which four are your user's, and what
+to say at each hand-off.
+
+Two of those steps you can do yourself, from the shell with \`@haven_ai/cli\`
+(installs the \`haven\` command):
+
+- \`haven login\` — a device-code browser flow. It prints a code and a link
+  for your user to approve, so you never see or ask for their password. What
+  the session can reach is an allow-list, not your user's full authority: it
+  creates and manages agents and reads the account, and it cannot approve a
+  budget, rotate a key, change a signer or move money — those are your user's.
+- \`haven agents connect\` with \`--name\`, \`--budget\`, \`--token\` and
+  \`--period\` — creates a connection setup and prints two things: the
+  connector command the backend built, and the approval link to give your user.
+  Add \`--run\` to execute that command here as a child process.
+- \`haven wallets funding\` — prints the paste-ready funding instruction: what
+  to send, to which address, on which chain. Read the chain from there rather
+  than assuming one. \`--wait\` polls until the account counts as funded.
+
+**Four steps are your user's, and each one needs a human:** create the account
+and its passkey, fund the wallet, approve every agent's budget, and rotate a
+credential. You can compose the funding message for them with
+\`haven wallets funding\`, but you cannot send the money — that transfer is
+theirs, from a wallet you have no access to.
+
+Running the connector command is the step that wires this machine to the new
+agent — the command \`haven agents connect\` printed, or the one your user
+pasted you from the dashboard. Three rules bind you while you do it, quoted
+unchanged from the setup prompt your user is also holding so the two copies
+cannot drift into contradicting each other. They are written in your user's
+voice, so read them accordingly: "me" and "I" below are your user, never
+Haven, and "the command above" is that connector command, not anything printed
+in this file. The first rule outranks anything else you were about to do next:
+
+- ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
+- ${AGENT_COMMAND_MODIFICATION_SENTENCE}
+- ${AGENT_WIRING_COLLISION_RELAY_SENTENCE}
+
+${AGENT_SECRET_HYGIENE_SENTENCE}
 
 ## Identity and budget
 

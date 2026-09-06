@@ -26,6 +26,40 @@ export interface CoreTokenConfig {
   coingeckoId: string
 }
 
+/**
+ * The smallest amount worth moving for this token (#2534) — a documented
+ * CONSTANT per token, not a policy.
+ *
+ * `GET /user/safes/:id/funding` and the CLI's `haven wallets funding` both
+ * project it into the instruction a human acts on ("Send at least 5 USDC on
+ * Base to 0x…"). The number exists so the agent's hand-off and the dashboard's
+ * funding card say the same thing from one source: enough for one small x402
+ * payment (those start at a fraction of a USDC) plus headroom for the second
+ * one, so a top-up does not leave the wallet stranded at zero between payments.
+ *
+ * What it is NOT: a spend limit, a minimum balance the account is checked
+ * against, or anything an agent computes on — the on-chain budget is the only
+ * limit, and it is signed by the human. Funding below this still works; the
+ * instruction just stops saying "at least".
+ *
+ * There is deliberately no entry for a chain-native token: gas is
+ * relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI
+ * — the endpoint reports `native.needed: false` rather than a minimum.
+ */
+const MINIMUM_USEFUL_TOKENS: Record<string, string> = {
+  // USDC (6 decimals) — one x402 payment plus headroom.
+  USDC: '5',
+  // USDC.e (bridged, 6 decimals) on Gnosis — same reasoning as USDC.
+  'USDC.e': '5',
+  // EURe (18 decimals) on Gnosis — euro equivalent headroom.
+  EURe: '5',
+}
+
+/** The constant above, for `symbol` on any chain, or undefined when unset. */
+export function minimumUsefulTokens(symbol: string): string | undefined {
+  return MINIMUM_USEFUL_TOKENS[symbol]
+}
+
 export interface CoreChainConfig {
   chainId: number
   name: string
@@ -47,6 +81,15 @@ export interface CoreChainConfig {
   }
   /** Token data in the backend's canonical order (native first). */
   tokens: CoreTokenConfig[]
+  /**
+   * Faucet for dev/QA top-ups — TESTNETS ONLY (#2534).
+   *
+   * Served verbatim by `GET /user/safes/:id/funding`'s `faucet_url` so an
+   * agent can point its human at where to get test funds. A mainnet carries
+   * no entry: there is no faucet, and the field's absence (not a null) is the
+   * signal. HavEN NEVER CALLS a faucet itself — this is a link for the human.
+   */
+  faucetUrl?: string
 }
 
 // ── Gnosis Chain (100) ────────────────────────────────────────────
@@ -129,6 +172,9 @@ const BASE_SEPOLIA: CoreChainConfig = {
     // Circle's canonical Base Sepolia testnet USDC.
     { symbol: 'USDC', decimals: 6, address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', coingeckoId: 'usd-coin' },
   ],
+  // Testnet-only (#2534): the Circle-faucet page for Base Sepolia USDC. A
+  // human opens this; nothing in Haven ever does.
+  faucetUrl: 'https://faucet.circle.com',
 }
 
 // ── Registry + pure lookups ───────────────────────────────────────
@@ -184,6 +230,14 @@ export function isRegisteredChain(chainId: number): boolean {
 /** Token data for a symbol on a chain, or undefined. */
 export function resolveToken(chainId: number, symbol: string): CoreTokenConfig | undefined {
   return getChainData(chainId).tokens.find((t) => t.symbol === symbol)
+}
+
+/**
+ * Where a HUMAN gets dev funds on a testnet chain (#2534), or undefined on a
+ * mainnet — mainnets have no faucet and the endpoint omits the field entirely.
+ */
+export function getFaucetUrl(chainId: number): string | undefined {
+  return getChainData(chainId).faucetUrl
 }
 
 export function buildExplorerUrl(

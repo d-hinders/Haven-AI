@@ -80,7 +80,14 @@ describe('/for-agents.md (#2523)', () => {
     // the number stays this small: the full hand-off script (~600 bytes), on
     // the grounds that the CLI prints its own code and link, so an agent that
     // knows the command exists does not need this page to compose the message.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(8400)
+    //
+    // 8400 -> 8600 for #2534 (the page is 8527 bytes at this commit). Two
+    // additions, both the command's own publicity: step 2 names
+    // `haven wallets funding`, and the funding hand-off offers to paste what
+    // it prints — the same facts the endpoint and the dashboard card serve,
+    // from one source. The shape/amount/explorer stay in the command's own
+    // output on purpose; this page names the command, it does not re-teach it.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(8600)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -171,6 +178,10 @@ describe('/for-agents.md (#2523)', () => {
     // answers, which is what an agent should do when there is no link.
     expect(served).toContain('if it carried none, ask them to finish it in that same Haven tab')
     expect(served).toContain('no ETH: Haven sponsors the gas')
+    // #2534: step 2 names the command that prints the funding facts, so an
+    // agent with a CLI session can hand its human a paste-ready instruction
+    // instead of pointing at a dashboard screen.
+    expect(served).toContain('`haven wallets funding` prints the address and the amount to send')
   })
 
   it('names no npm dist-tag of its own', () => {

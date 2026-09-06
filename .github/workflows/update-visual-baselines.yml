@@ -97,6 +97,27 @@ jobs:
       # Note the fallback cannot be "fixed" by having this workflow push a
       # second, empty commit: the gate keys on WHO pushed, not on what was
       # pushed, so the second push parks exactly like the first.
+      #
+      # The two paragraphs above are true but INCOMPLETE, and the gap is the
+      # whole recovery cost (#2599). Both name the push routes and neither
+      # names the third way out, which needs no push at all:
+      #
+      #   Re-run each parked run. A re-run is a fresh attempt attributed to
+      #   whoever triggers it, so it re-attributes the run away from the bot
+      #   and the approval gate lets it through. Observed on PR #2598: all
+      #   five `action_required` runs on the bot commit came back
+      #   `run_attempt: 2`, `triggering_actor: d-hinders` after
+      #   `gh api --method POST repos/<o>/<r>/actions/runs/<id>/rerun`, and CI
+      #   went green with no push, no force-push, and no empty commit behind.
+      #
+      # And "approve them" is not universally available: approving needs a
+      # real user, and a GitHub App installation token that just dispatched
+      # this workflow cannot approve what it parked — the approve endpoint
+      # answers `403 Resource not accessible by integration` for that token.
+      # That is precisely the automated caller most likely to be stuck here,
+      # which is why the re-run is the remedy to reach for first and why the
+      # follow-up comment (scripts/ci/baseline-push-followup.mjs) lists it
+      # ahead of the force-push block.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}

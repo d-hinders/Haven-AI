@@ -254,7 +254,24 @@ export const GOVERNED_PACKAGE_DOCS = [
     // untouched. Scope: the opening, § Install's npx paragraph, the new section
     // and § Usage's title and auth block. NOT re-verified: § For agents and
     // scripts' contract, the exit-code table, the SIE export section, Config or
-    // Custody. Prior: '2026-09-06' — see the #2590 note above.
+    // Custody.
+    //
+    // Follow-up in the same PR, on a haven-doc-reviewer finding: the CLI's own
+    // `--help` banner (`args.ts:117`) STILL said "terminal-native companion to
+    // the Haven dashboard" — the exact framing this entry calls retired. So the
+    // README was corrected and the line a user or agent actually sees first was
+    // left behind, which is the #2590 defect class reopening in the same file
+    // two edits later. Rewritten, and `commands.test.ts` now asserts the
+    // retired phrase is ABSENT as well as asserting the new one, so it cannot
+    // return quietly. `args.ts` is inside this doc's own `covers:` glob, which
+    // is how the gate reached it.
+    //
+    // Named rather than hidden: the `--api` default now has FOUR prose homes —
+    // `helpText()` (#2590), the SDK runbook (#2591), this README's new section,
+    // and § Config. All four agree today; a change to the real default would
+    // need all four. That is the shape #2590/#2591 exist to prevent, and it is
+    // recorded here rather than claimed solved. Prior: '2026-09-06' — see the
+    // #2590 note above.
     'last-verified': '2026-09-06',
   },
   {

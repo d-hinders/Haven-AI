@@ -66,7 +66,16 @@ describe('run — auth gating', () => {
   it('prints help with no command', async () => {
     const { deps, out } = harness()
     expect(await run([], deps)).toBe(0)
-    expect(out.join('\n')).toMatch(/terminal-native companion/)
+    const help = out.join('\n')
+    expect(help).toMatch(/set up and run a Haven agent from the terminal/)
+    // #2536: the banner said "terminal-native companion to the Haven dashboard"
+    // and this test pinned it there. That framing stopped being true when
+    // C1/#2526 and C2/#2527 landed — an agent drives the setup itself now, and
+    // the one reader who cannot open the dashboard was being told the tool
+    // complements it. The README was rewritten and this line, which is what a
+    // user or agent ACTUALLY sees first, was left behind (haven-doc-reviewer).
+    // Asserted negatively too, so the retired claim cannot return quietly.
+    expect(help).not.toMatch(/companion to the Haven dashboard/)
   })
 
   it('reports unknown commands', async () => {

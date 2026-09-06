@@ -2,6 +2,14 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// db-mock-exempt: no database behaviour is under test here. The pool is mocked
+// at the repository seam and balances at the chain-client seam (getChainClient),
+// so the suite pins the ROUTE contract — auth, the owner_cli allow-list opt-in,
+// the 404 scoping, and the funding payload shape — with no SQL and no chain
+// state. Same boundary the sibling user-safes-list/delete/characterization route
+// tests mock at; a new file cannot join the shrink-only positional-mock baseline,
+// so the documented file-level exemption applies.
+
 /**
  * Characterization coverage for `GET /user/safes/:safeId/funding` — written
  * BEFORE the endpoint exists (#2534, epic #2519 slice B4), so the route's

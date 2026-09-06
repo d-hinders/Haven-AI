@@ -66,7 +66,7 @@ export const COMMANDS = [
   'wallets list', 'wallets balances', 'wallets rename',
   'agents list', 'agents show', 'agents pause', 'agents resume', 'agents revoke',
   'agents rotate-key', 'agents rename', 'agents connect',
-  'budget show',
+  'budget show', 'budget grant', 'budget revoke',
   'activity list', 'activity export',
   'catalog list',
   'contacts list', 'contacts add', 'contacts remove',
@@ -176,6 +176,8 @@ async function dispatch(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
     case 'agents rotate-key': return cmdAgentRotateKey(args, d)
     case 'agents rename': return cmdAgentRename(args, d)
     case 'budget show': return cmdBudgetShow(args, d)
+    case 'budget grant': return cmdBudgetGrant(args, d)
+    case 'budget revoke': return cmdBudgetRevoke(args, d)
     case 'wallets rename': return cmdWalletRename(args, d)
     case 'activity list': return cmdActivityList(args, d)
     case 'activity export': return cmdActivityExport(args, d)
@@ -451,6 +453,209 @@ async function cmdBudgetShow(args: ParsedArgs, d: ResolvedDeps): Promise<number>
 function budgetSummary(allowances?: Allowance[]): string {
   if (!allowances || allowances.length === 0) return '—'
   return allowances.map((a) => `${a.allowance_amount} ${a.token_symbol}`).join(', ')
+}
+
+// ── Budget grant/revoke (#2539, C3) — construct-and-hand-off ────────────────
+//
+// Both commands CONSTRUCT a signature request and print a dashboard link the
+// human signs in the browser. The CLI never signs and never calls activate —
+// that is the whole safety property of this slice, and the reason the backend
+// allow-list can carry build + revoke-prepare at all.
+
+/** The POST /agents/:id/delegations/build response the CLI consumes (#2539). */
+interface DelegationBuild {
+  delegation_hash: string
+  version: number
+  /** The same value as delegation_hash — one identifier, no new column. */
+  build_id: string
+  typed_data_hash: string
+  signing_url: string
+}
+
+/** One row of GET /agents/:id/delegations (#2539's --wait reads these). */
+interface DelegationRow {
+  delegation_hash: string
+  version: number
+  status: 'pending' | 'active' | 'replaced' | 'revoked'
+}
+
+/** The POST /agents/:id/delegations/:hash/revoke prepare response (#2539). */
+interface RevocationPrepare {
+  signature_scheme?: 'eip712_userop' | 'webauthn_userop'
+  /** Dashboard revoke link, built by the backend from its own FRONTEND_URL. */
+  revocation_url?: string
+}
+
+/** How long `--wait` polls before giving up. */
+const BUDGET_WAIT_TIMEOUT_S = 15 * 60
+const BUDGET_WAIT_INTERVAL_MS = 5_000
+
+/**
+ * `haven budget grant` — construct the budget delegation, hand the signature
+ * to the human (#2539).
+ *
+ * Calls the build route with the owner_cli session, stores nothing itself,
+ * and prints the signing link the backend built. `--wait` polls the agent's
+ * delegation list for the returned hash to reach `active`, which converges
+ * because the build is idempotent within its expiry: the dashboard form's own
+ * rebuild of the same grant returns the SAME hash instead of minting a new
+ * version that would strand this poller.
+ */
+async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  const id = args.positionals[0]
+  if (!id) {
+    throw new UsageError('Usage: haven budget grant <agentId> --amount 25 --token USDC --period <minutes> [--recipient <address>] [--expires <unix-seconds>] [--wait]')
+  }
+  if (!args.flags.amount || !args.flags.token || args.flags.period === undefined) {
+    throw new UsageError('--amount, --token and --period are required (period is whole minutes; 0 means one-time)')
+  }
+  const { api } = await authed(args, d)
+
+  // Fail fast on the rail this command cannot serve, and read the token's
+  // decimals from the backend — the same registry the dashboard form sizes
+  // budgets with, never a local table.
+  const agent = await api.get<Agent & { account_type?: string | null; safe_address: string | null; safe_chain_id: number | null }>(`/agents/${id}`)
+  if (agent.account_type !== 'delegator_hybrid') {
+    throw new HavenCliError(
+      `Agent ${id} is not on the delegation rail — budgets are managed from the dashboard for this account.`,
+      EXIT.refused,
+    )
+  }
+  if (!agent.safe_address || !agent.safe_chain_id) {
+    throw new HavenCliError(`Agent ${id} has no wallet assigned yet — connect it first.`, EXIT.refused)
+  }
+  const { balances } = await api.get<{ balances: BalanceToken[] }>(
+    `/balances/${agent.safe_address}?chain_id=${agent.safe_chain_id}`,
+  )
+  const wanted = args.flags.token.trim().toUpperCase()
+  const token = balances.find((b) => b.symbol.toUpperCase() === wanted)
+  if (!token || !token.address) {
+    const known = balances.map((b) => b.symbol).join(', ')
+    throw new UsageError(`Unknown token ${args.flags.token} on this wallet's chain. Available: ${known || 'none'}`)
+  }
+  const amount = parseTokenAmount(args.flags.amount, token.decimals, token.symbol)
+  if (!amount.ok) throw new UsageError(amount.message)
+
+  const built = await api.post<DelegationBuild>(`/agents/${id}/delegations/build`, {
+    token_address: token.address,
+    recipient_address: args.flags.recipient ?? null,
+    budget_atomic: amount.atomic,
+    period_seconds: args.flags.period * 60,
+    ...(args.flags.expires !== undefined ? { expires_at: args.flags.expires } : {}),
+  })
+
+  const emitGrant = (status?: DelegationRow['status']) =>
+    emit(d, args.flags.json, { ...built, agent_id: id, status: status ?? 'pending' }, () =>
+      [
+        `Budget of ${args.flags.amount} ${token.symbol} per ${args.flags.period === 0 ? 'one-time period' : `${args.flags.period} minutes`} built for agent ${id}.`,
+        args.flags.recipient ? `Recipient pin: ${args.flags.recipient}` : null,
+        'Open this link and sign — the budget goes live the moment you do:',
+        built.signing_url,
+        `Delegation: ${built.delegation_hash} (version ${built.version})`,
+        status === 'active' ? 'Signed and active.' : 'Waiting for your signature. Run the same command with --wait to poll until it is active.',
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n'),
+    )
+
+  emitGrant()
+  if (!args.flags.wait) return EXIT.ok
+
+  const deadline = Date.now() + BUDGET_WAIT_TIMEOUT_S * 1000
+  while (Date.now() < deadline) {
+    await d.sleep(BUDGET_WAIT_INTERVAL_MS)
+    const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
+    const mine = delegations.find((row) => row.delegation_hash === built.delegation_hash)
+    if (mine?.status === 'active') {
+      emitGrant('active')
+      return EXIT.ok
+    }
+    if (mine?.status === 'revoked' || mine?.status === 'replaced') {
+      throw new HavenCliError(
+        `Delegation ${built.delegation_hash} is now ${mine.status} without being signed.`,
+        EXIT.refused,
+      )
+    }
+  }
+  throw new HavenCliError(
+    `Timed out waiting for delegation ${built.delegation_hash} to go active (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The signing link stays valid until it expires — sign it, or rerun with --wait.`,
+    EXIT.failed,
+  )
+}
+
+/**
+ * `haven budget revoke` — prepare the revocation, hand the signature to the
+ * human (#2539).
+ *
+ * Calls the per-hash revoke PREPARE route (one sponsored UserOp, unsigned)
+ * and prints the revocation link the backend built. Nothing is submitted and
+ * no row flips here: the budget keeps working until the owner signs in the
+ * dashboard, which is what `--wait` polls for.
+ */
+async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  const [id, hash] = args.positionals
+  if (!id || !hash) throw new UsageError('Usage: haven budget revoke <agentId> <delegationHash> [--wait]')
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+    throw new UsageError('The delegation hash must be 0x followed by 64 hex characters — `haven agents show` or the dashboard lists them.')
+  }
+
+  const { api } = await authed(args, d)
+  const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
+  const row = delegations.find((r) => r.delegation_hash.toLowerCase() === hash.toLowerCase())
+  if (!row) {
+    throw new HavenCliError(`No delegation ${hash} on agent ${id}.`, EXIT.refused)
+  }
+  if (row.status === 'revoked') {
+    throw new HavenCliError(`Delegation ${hash} is already revoked.`, EXIT.refused)
+  }
+  if (row.status === 'replaced') {
+    throw new HavenCliError(
+      `Delegation ${hash} was already replaced by a newer grant — nothing to revoke.`,
+      EXIT.refused,
+    )
+  }
+
+  // PREPARE only: the response carries the unsigned UserOp and the dashboard
+  // link. The /submit step stays owner-session-only by design.
+  const prepared = await api.post<RevocationPrepare>(`/agents/${id}/delegations/${hash}/revoke`, {})
+  const revokeUrl = prepared.revocation_url
+  if (!revokeUrl) {
+    throw new HavenCliError(
+      'The backend did not return a revocation link — it may be older than #2539. Finish the revocation in the dashboard.',
+      EXIT.failed,
+    )
+  }
+
+  const emitRevoke = (status: DelegationRow['status'] | 'pending_revoke') =>
+    emit(d, args.flags.json, { agent_id: id, delegation_hash: hash, status, ...prepared }, () =>
+      [
+        'Revocation prepared — one signature, sponsored (no gas).',
+        'Open this link and sign to stop this budget:',
+        revokeUrl,
+        `Delegation: ${hash}`,
+        status === 'revoked' ? 'Revoked.' : 'The budget keeps working until you sign. Run the same command with --wait to poll until it is revoked.',
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n'),
+    )
+
+  emitRevoke('pending_revoke')
+  if (!args.flags.wait) return EXIT.ok
+
+  const deadline = Date.now() + BUDGET_WAIT_TIMEOUT_S * 1000
+  while (Date.now() < deadline) {
+    await d.sleep(BUDGET_WAIT_INTERVAL_MS)
+    const { delegations: after } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
+    const mine = after.find((r) => r.delegation_hash.toLowerCase() === hash.toLowerCase())
+    if (mine?.status === 'revoked') {
+      emitRevoke('revoked')
+      return EXIT.ok
+    }
+  }
+  throw new HavenCliError(
+    `Timed out waiting for delegation ${hash} to be revoked (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The link stays valid — sign it, or rerun with --wait.`,
+    EXIT.failed,
+  )
 }
 
 function resetLabel(mins: number): string {

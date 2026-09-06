@@ -13,13 +13,11 @@ describe('haven guide text (#2525)', () => {
   it('is byte-for-byte the canonical SDK runbook', async () => {
     const canonical = (await readCanonicalRunbook()) as string
     expect(HAVEN_AGENT_RUNBOOK_MD).toBe(canonical)
-    // Both figures, because they differ and each gets quoted somewhere: 8,289
-    // UTF-8 bytes, 8,220 UTF-16 code units. The em-dashes are the gap — the
-    // same units confusion #2562 fixed in the docs chain gate. Moved by #2526,
-    // which added the device-code login to step 1: the page told an agent it
-    // must not have the user's password and offered no alternative to asking.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(8289)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(8220)
+    // Both figures, because they differ and each gets quoted somewhere. Moved
+    // by #2539: the runbook now names the budget grant/revoke commands (see
+    // the size-ceiling note in for-agents-runbook.test.ts for the budget).
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(8972)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(8899)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

@@ -31,12 +31,35 @@ export interface ParsedArgs {
     period?: number
     status?: string
     /**
-     * #2527: deliberately absent — `--recipient`. The issue sketched one, and
-     * neither `POST /agents` nor `POST /agent-connection-setups` has a field to
+     * #2539: the budget magnitude for `budget grant`, in whole tokens as you
+     * would say it (`25` is 25 USDC) — parsed to atomic units with decimals
+     * read from the backend, exactly like `agents connect`'s --budget. Named
+     * --amount because the issue's command sketch does, and because a grant
+     * is not the same decision as a connect.
+     */
+    amount?: string
+    /**
+     * #2539: optional recipient pin for `budget grant`. An ADDRESS the budget
+     * may pay and nobody else — the caveat enforcer set at build time. Absent
+     * means an open budget, exactly like the dashboard form's blank field.
+     */
+    recipient?: string
+    /**
+     * #2539: optional expiry (unix seconds) for `budget grant`. Absent lets
+     * the backend default (now + 90 days), the same default the dashboard's
+     * builds get.
+     */
+    expires?: number
+    /**
+     * #2527: deliberately absent — `--recipient` for `agents connect`. The
+     * issue sketched one, and neither `POST /agents` nor
+     * `POST /agent-connection-setups` has a field to
      * put it in: a recipient pin lives in the delegation's caveat enforcers and
      * is set when the human approves the budget. A flag accepted here would
      * either be silently dropped or invent a wire field, and a budget control
      * that looks applied and is not is worse than one you cannot ask for.
+     * (Note: `budget grant` DOES take `--recipient` — the delegation build
+     * route has that field; connect does not.)
      */
   }
 }
@@ -45,6 +68,7 @@ const VALUE_FLAGS = new Set([
   '--api', '--email', '--safe', '--agent', '--limit', '--offset', '--direction',
   '--format', '--from', '--to', '--company',
   '--name', '--budget', '--token', '--period', '--status',
+  '--amount', '--recipient', '--expires',
 ])
 
 /**
@@ -95,6 +119,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
       } else if (arg === '--direction') {
         if (value !== 'in' && value !== 'out') throw new Error('--direction must be "in" or "out"')
         flags.direction = value
+      } else if (arg === '--recipient') {
+        flags.recipient = value
+      } else if (arg === '--amount') {
+        flags.amount = value
+      } else if (arg === '--expires') {
+        const n = Number(value)
+        if (!Number.isInteger(n) || n <= 0) throw new Error('--expires must be a unix timestamp in seconds')
+        flags.expires = n
       } else if (arg === '--format') {
         if (value !== 'csv' && value !== 'sie') throw new Error('--format must be "csv" or "sie"')
         flags.format = value
@@ -146,6 +178,13 @@ export function helpText(): string {
     '  agents rename <id> <name>',
     '  wallets rename <id> <name>',
     '  contacts add <name> <address> | contacts remove <id>',
+    '',
+    'Budgets (construct-and-hand-off — the CLI never signs, #2539):',
+    '  budget grant <agentId> --amount <n> --token USDC --period <minutes>',
+    '          [--recipient <address>] [--expires <unix-s>] [--wait]',
+    '        Prints a signing link; the human signs in the dashboard.',
+    '  budget revoke <agentId> <delegationHash> [--wait]',
+    '        Prints a revocation link; the human signs in the dashboard.',
     '',
     'Options:',
     '  --json                  One JSON value on stdout, prose on stderr, on every',

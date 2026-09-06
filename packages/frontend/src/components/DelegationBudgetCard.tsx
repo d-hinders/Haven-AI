@@ -9,7 +9,7 @@
  * (asserted in the tests); a budget is "a budget that refills itself".
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
@@ -62,6 +62,60 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
   const [amount, setAmount] = useState('')
   const [period, setPeriod] = useState(86_400)
   const [recipient, setRecipient] = useState('')
+
+  // ── ?grant=<delegation hash> prefill (#2539) ──
+  // The #2539 CLI's signing link lands here: the backend built a pending
+  // budget and printed a URL carrying its hash. The grant form opens with
+  // that build's fields already filled, so what the human signs is exactly
+  // what was constructed — not a re-typed approximation of it. The values
+  // come from the pending row this card already fetches; there is no second
+  // read and no new backend route.
+  //
+  // Same stance as `?setup=` on the agents list (B2): a foreign or unknown
+  // hash is not an error state — the lookup finds nothing and the form stays
+  // blank. The URL is tidied once applied; a stale link after that simply
+  // opens the normal form.
+  const grantHash = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    const g = new URLSearchParams(window.location.search).get('grant')
+    return g && /^0x[0-9a-fA-F]{64}$/.test(g) ? g : null
+  }, [])
+  const [prefill, setPrefill] = useState<{ hash: string; periodSeconds: number } | null>(null)
+
+  useEffect(() => {
+    if (!grantHash || budgets === null || prefill) return
+    const row = budgets.find((b) => b.delegation_hash === grantHash && b.status === 'pending')
+    if (!row) return
+    const t = tokens.find((x) => x.address.toLowerCase() === row.token_address.toLowerCase())
+    if (t) setToken(t.address)
+    try {
+      setAmount(formatUnits(BigInt(row.budget_atomic), t?.decimals ?? 18))
+    } catch {
+      // A malformed stored amount leaves the field empty rather than
+      // prefilling something the form would refuse — the human types it.
+    }
+    setPeriod(row.period_seconds)
+    setRecipient(row.recipient_address ?? '')
+    setPrefill({ hash: grantHash, periodSeconds: row.period_seconds })
+    try {
+      window.history.replaceState(null, '', `/agents/${agentId}`)
+    } catch {
+      // A URL that stays untidy is not worth a thrown render.
+    }
+  }, [grantHash, budgets, tokens, agentId, prefill])
+
+  // The period picker offers the day/week/month rhythm; a prefilled build may
+  // carry any period the CLI chose (an hour, a minute-floor of 60s), so the
+  // prefilled value gets its own option instead of silently desyncing the
+  // Select from the state it shows.
+  const periodOptions = useMemo(() => {
+    const list = [...PERIODS]
+    const prefilled = prefill?.periodSeconds
+    if (prefilled !== undefined && !list.some((p) => p.seconds === prefilled)) {
+      list.push({ label: `every ${prefilled}s`, seconds: prefilled })
+    }
+    return list
+  }, [prefill])
 
   const tokenCfg = useMemo(
     () => tokens.find((t) => t.address.toLowerCase() === token.toLowerCase()) ?? tokens[0],
@@ -205,7 +259,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               <span className="self-center text-sm text-[var(--v2-ink-muted)]">{tokenCfg?.symbol}</span>
             )}
             <Select value={String(period)} onChange={(e) => setPeriod(Number(e.target.value))} aria-label="Period" className="sm:w-36">
-              {PERIODS.map((p) => (
+              {periodOptions.map((p) => (
                 <option key={p.seconds} value={p.seconds}>{p.label}</option>
               ))}
             </Select>

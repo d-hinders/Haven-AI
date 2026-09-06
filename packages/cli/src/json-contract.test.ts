@@ -63,6 +63,11 @@ function argvFor(command: string): string[] {
     'agents show': ['a1'], 'agents pause': ['a1'], 'agents resume': ['a1'],
     'agents revoke': ['a1', '--yes'], 'agents rotate-key': ['a1'],
     'agents rename': ['a1', 'New name'], 'budget show': ['a1'],
+    // #2539: complete lines, for the same reason `agents connect` has one —
+    // these commands refuse on their own usage before calling the backend,
+    // and the rows here assert the refusal path, not the usage path.
+    'budget grant': ['a1', '--amount', '25', '--token', 'USDC', '--period', '1440'],
+    'budget revoke': ['a1', `0x${'ab'.repeat(32)}`],
     // #2527: `agents connect` refuses on its own usage before it ever calls
     // the backend, so it needs a complete line here or this row would assert
     // the usage path rather than the refusal path it is here to cover.

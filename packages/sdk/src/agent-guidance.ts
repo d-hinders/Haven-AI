@@ -184,6 +184,17 @@ Four of the six steps are your user's — each needs a human signature or a huma
 5. **HUMAN — approve the budget** with their passkey, in the Haven tab they created the agent in: it advances to the approval step by itself once your run registers.
 6. **YOU — verify, then pay.**
 
+## Budget changes later (second token, raise, revoke)
+
+The first budget rides the setup above. After the agent exists, a CLI session can construct the LATER changes — a second token, a bigger amount, a recipient pin, a stop — and hand your user a link; the human still signs, every time:
+
+\`\`\`
+haven budget grant <agentId> --amount <n> --token USDC --period <minutes> [--recipient <address>] [--wait]
+haven budget revoke <agentId> <delegationHash> [--wait]
+\`\`\`
+
+The CLI never signs: it prints a dashboard link, your user opens it and signs with their passkey or wallet. \`--wait\` polls until the human's signature lands. The hash for \`revoke\` is in \`haven agents show <agentId>\`.
+
 ## Hand-off scripts
 
 Send these as your own message, \`<host>\` replaced by the host you fetched this file from. Say what you cannot do, not only what they must.

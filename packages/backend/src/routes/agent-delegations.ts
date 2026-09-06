@@ -857,6 +857,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
             user_op_hash: prepared.userOpHash,
             user_operation,
             treasury_address: prepared.treasuryAddress,
+            // #2539: where the human signs. The CLI prints this link instead
+            // of guessing the dashboard's host — same source as signing_url.
+            revocation_url: buildDelegationGrantUrl(request.params.id, request.params.hash),
             instructions:
               'Sign user_op_hash with the account passkey (WebAuthn), then POST /revoke/submit',
           }
@@ -868,6 +871,10 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           signing_payload: prepared.signingTypedData,
           user_operation,
           treasury_address: prepared.treasuryAddress,
+          // #2539: where the human signs — the agent detail page carries the
+          // budget card and its Stop buttons. Built from FRONTEND_URL here so
+          // no client (the #2539 CLI among them) has to guess the host.
+          revocation_url: buildDelegationGrantUrl(request.params.id, request.params.hash),
           instructions: 'Sign signing_payload (EIP-712) with the treasury owner key, then POST /revoke/submit',
         }
       } catch (err) {

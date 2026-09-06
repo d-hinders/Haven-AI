@@ -80,7 +80,18 @@ describe('/for-agents.md (#2523)', () => {
     // the number stays this small: the full hand-off script (~600 bytes), on
     // the grounds that the CLI prints its own code and link, so an agent that
     // knows the command exists does not need this page to compose the message.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(8400)
+    //
+    // 8400 -> 9100 for #2539 (the page is 8972 bytes at this commit). The
+    // issue's own acceptance criterion names this page as a place the budget
+    // grant/revoke commands must be named: the whole epic is "later budget
+    // changes are dashboard-only", and a runbook that stops at the first
+    // budget leaves the agent describing clicks again. The ~680 bytes buy the
+    // two commands, where the revoke hash comes from, and the one sentence
+    // that keeps the page's own rule intact — the CLI constructs and hands
+    // off; the human still signs, every time. Deliberately NOT added: the
+    // flag-by-flag reference and the refusal shapes (CLI README's job, same
+    // split #2527 recorded).
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(9100)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {

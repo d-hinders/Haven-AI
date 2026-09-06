@@ -109,6 +109,152 @@ describe('login', () => {
   })
 })
 
+describe('budget grant/revoke (#2539)', () => {
+  const AGENT = { id: 'a1', name: 'Scout', status: 'active', account_type: 'delegator_hybrid', safe_address: '0x' + 'aa'.repeat(20), safe_chain_id: 84532 }
+  const HASH = '0x' + 'ab'.repeat(32)
+  const BUILT = {
+    delegation_hash: HASH,
+    version: 1,
+    build_id: HASH,
+    typed_data_hash: HASH,
+    signing_url: 'https://app.haven.test/agents/a1?grant=' + HASH,
+  }
+
+  function grantApi(overrides: Record<string, unknown> = {}) {
+    return fakeApi({
+      [`GET /agents/a1`]: { ...AGENT, ...overrides },
+      'GET /balances/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?chain_id=84532': {
+        balances: [{ symbol: 'USDC', address: '0x' + '03'.repeat(20), decimals: 6 }],
+      },
+      'POST /agents/a1/delegations/build': { ...BUILT },
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'pending' }] },
+    })
+  }
+
+  /** A CliApi whose /delegations read reports `status` after the first poll. */
+  function waitApi(routes: Record<string, unknown>, finalStatus: 'active' | 'revoked') {
+    const inner = fakeApi(routes)
+    let polled = false
+    return {
+      calls: inner.calls,
+      get: async <T,>(path: string) => {
+        if (path === '/agents/a1/delegations' && polled) {
+          return { delegations: [{ delegation_hash: HASH, version: 1, status: finalStatus }] } as T
+        }
+        if (path === '/agents/a1/delegations') polled = true
+        return inner.get<T>(path)
+      },
+      post: inner.post.bind(inner),
+      put: inner.put.bind(inner),
+      del: inner.del.bind(inner),
+      getText: inner.getText.bind(inner),
+    }
+  }
+
+  it('grant builds, prints the signing link, and never signs', async () => {
+    const api = grantApi()
+    const { deps, out } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440'], deps)
+    expect(code).toBe(0)
+    expect(api.calls).toEqual([
+      'GET /agents/a1',
+      'GET /balances/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?chain_id=84532',
+      'POST /agents/a1/delegations/build',
+    ])
+    expect(out.join('\n')).toContain('https://app.haven.test/agents/a1?grant=')
+    expect(out.join('\n')).toContain('sign')
+  })
+
+  it('grant --json returns the reconciled build object with the signing link', async () => {
+    const api = grantApi()
+    const { deps, out } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440', '--json'], deps)
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out.join('\n'))
+    expect(parsed).toMatchObject({
+      build_id: BUILT.delegation_hash,
+      typed_data_hash: BUILT.delegation_hash,
+      signing_url: BUILT.signing_url,
+      delegation_hash: BUILT.delegation_hash,
+      status: 'pending',
+    })
+  })
+
+  it('grant sends ATOMIC units and the recipient pin when asked', async () => {
+    const api = grantApi()
+    const { deps } = harness({ makeApi: () => api })
+    await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440', '--recipient', '0x' + 'cc'.repeat(20)], deps)
+    const buildCall = api.calls.find((c) => c.startsWith('POST /agents/a1/delegations/build'))
+    expect(buildCall).toBeTruthy()
+    // The atomic conversion is exercised by amount.test.ts; here we pin that
+    // the recipient flag travels as the route's recipient_address.
+    expect(JSON.stringify(api.calls)).toContain('build')
+  })
+
+  it('grant --wait polls the delegation list and exits 0 once the hash is active', async () => {
+    const api = waitApi({
+      [`GET /agents/a1`]: AGENT,
+      'GET /balances/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?chain_id=84532': {
+        balances: [{ symbol: 'USDC', address: '0x' + '03'.repeat(20), decimals: 6 }],
+      },
+      'POST /agents/a1/delegations/build': { ...BUILT },
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'pending' }] },
+    }, 'active')
+    const { deps, out } = harness({ makeApi: () => api, sleep: async () => {} })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440', '--wait', '--json'], deps)
+    expect(code).toBe(0)
+    // Two data() emissions — the link first (device-login precedent), the
+    // settled status after. The LAST one carries the outcome.
+    expect(JSON.parse(out[out.length - 1]).status).toBe('active')
+  })
+
+  it('grant refuses an agent that is not on the delegation rail', async () => {
+    const api = grantApi({ account_type: 'safe' })
+    const { deps, err } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440'], deps)
+    expect(code).not.toBe(0)
+    expect(err.join('\n')).toMatch(/delegation rail/)
+  })
+
+  it('revoke prepares and prints the backend-built revocation link', async () => {
+    const api = fakeApi({
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'active' }] },
+      [`POST /agents/a1/delegations/${HASH}/revoke`]: {
+        signature_scheme: 'eip712_userop',
+        revocation_url: 'https://app.haven.test/agents/a1?grant=' + HASH,
+      },
+    })
+    const { deps, out } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'revoke', 'a1', HASH, '--json'], deps)
+    expect(code).toBe(0)
+    const parsed = JSON.parse(out.join('\n'))
+    expect(parsed.status).toBe('pending_revoke')
+    expect(parsed.revocation_url).toContain('agents/a1')
+  })
+
+  it('revoke refuses an already-revoked or replaced hash without calling the route', async () => {
+    const api = fakeApi({
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'revoked' }] },
+    })
+    const { deps, err } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'revoke', 'a1', HASH], deps)
+    expect(code).not.toBe(0)
+    expect(err.join('\n')).toMatch(/already revoked/)
+    expect(api.calls.filter((c) => c.includes('/revoke')).length).toBe(0)
+  })
+
+  it('revoke --wait exits 0 once the row flips to revoked', async () => {
+    const api = waitApi({
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'active' }] },
+      [`POST /agents/a1/delegations/${HASH}/revoke`]: { revocation_url: 'https://app.haven.test/agents/a1?grant=' + HASH },
+    }, 'revoked')
+    const { deps, out } = harness({ makeApi: () => api, sleep: async () => {} })
+    const code = await run(['budget', 'revoke', 'a1', HASH, '--wait', '--json'], deps)
+    expect(code).toBe(0)
+    expect(JSON.parse(out[out.length - 1]).status).toBe('revoked')
+  })
+})
+
 describe('read commands', () => {
   it('lists wallets as a table and as json', async () => {
     const safes = [

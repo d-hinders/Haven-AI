@@ -202,23 +202,27 @@ const preparedTreasuryOp = {
   oneOf: [
     {
       type: 'object',
-      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'instructions'],
+      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'instructions', 'revocation_url'],
       properties: {
         signature_scheme: { type: 'string', enum: ['eip712_userop'] },
         signing_payload: eip712Payload,
         user_operation: preparedUserOperation,
         treasury_address: address,
+        // #2539: the dashboard page the human signs from — built from
+        // FRONTEND_URL by the same helper as build's signing_url.
+        revocation_url: { type: 'string', format: 'uri' },
         instructions: { type: 'string' },
       },
     },
     {
       type: 'object',
-      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'instructions'],
+      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'instructions', 'revocation_url'],
       properties: {
         signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
         user_op_hash: { type: 'string' },
         user_operation: preparedUserOperation,
         treasury_address: address,
+        revocation_url: { type: 'string', format: 'uri' },
         instructions: { type: 'string' },
       },
     },

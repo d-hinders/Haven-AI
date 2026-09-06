@@ -5083,6 +5083,8 @@ export interface operations {
                         };
                         /** @example 0x1111111111111111111111111111111111111111 */
                         treasury_address: string;
+                        /** Format: uri */
+                        revocation_url: string;
                         instructions: string;
                     } | {
                         /** @enum {string} */
@@ -5093,6 +5095,8 @@ export interface operations {
                         };
                         /** @example 0x1111111111111111111111111111111111111111 */
                         treasury_address: string;
+                        /** Format: uri */
+                        revocation_url: string;
                         instructions: string;
                     };
                 };

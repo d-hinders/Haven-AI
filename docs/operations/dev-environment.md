@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-09-05" # #2576: EDITED, scope = the one sentence describing what `HAVEN_CONNECTOR_CHANNEL` selects — "setup command" → **connector command**. Nothing about the dev environment, its services or its variables was re-verified. Prior: chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
+last-verified: "2026-09-06" # #2511: EDITED, scope = ONE new bullet in § Configuration recording the two Base Sepolia RPC endpoints and why they must not be collapsed into one. The section listed `RPC_URL` and `RPC_URL_BASE` but neither `RPC_URL_BASE_SEPOLIA` nor the harness's `QA_RPC_URL_BASE_SEPOLIA`, so the one rule an operator can break by being helpful — pointing both at the same dedicated provider, which deletes the harness's independence from the node the backend wrote through — lived only in a code comment at `packages/qa-agent/src/lib/chain.ts`. Written against `packages/backend/src/config.ts` and that file on this branch. The bullet also names the secret-vs-variable choice (a provider URL embeds an API key, so it is a secret and not a repo variable, unlike its neighbours in `qa-dev.yml`) and the two things that make a misconfiguration visible: the backend's boot warning and the harness's endpoint-CLASS preamble. Scope: that bullet. NOT re-verified: the topology diagram, the branch-to-deploy mapping, the other isolation rules, or the inspection section. Prior: #2576: EDITED, scope = the one sentence describing what `HAVEN_CONNECTOR_CHANNEL` selects — "setup command" → **connector command**. Nothing about the dev environment, its services or its variables was re-verified. Prior: chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
 ---
 
 # Dev environment
@@ -208,6 +208,17 @@ Isolation rules that are non-negotiable for a payments product:
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
   chain 100 is dead per above), `RPC_URL_BASE` → **Base Sepolia**. Swap to
   mainnet RPCs only if a test genuinely needs mainnet state.
+- **Two Base Sepolia RPCs, and they must stay two** (#2511). The backend
+  WRITES through `RPC_URL_BASE_SEPOLIA`; the QA harness OBSERVES through
+  `QA_RPC_URL_BASE_SEPOLIA` (a GitHub Actions **secret**, since a provider URL
+  embeds an API key). Both default to the shared public `https://sepolia.base.org`,
+  whose rate limits arrive as `qa-dev` scenario failures rather than as Haven
+  defects — that is what #2594 was. Point them at dedicated endpoints, but
+  **not the same one**: an on-chain assertion verified on the node the backend
+  wrote through proves only that the backend agrees with itself. The backend
+  logs a boot warning when its variable is unset, and the harness prints which
+  endpoint CLASS it is observing through (never the URL) in its run preamble.
+
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

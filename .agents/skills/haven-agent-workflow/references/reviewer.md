@@ -29,6 +29,31 @@ the live tree.
 **Never `cd` to the builder's worktree**, and never re-point the review at it
 because something is missing there. Report what you cannot see instead.
 
+## After the verdict: remove the root you were given (#2601)
+
+The pass that made the root is the only actor that knows it is over. Nothing
+else can tell an abandoned review root from a live one, so nobody else can
+clean it up — which is why 173 worktrees accumulated before this line existed.
+
+```bash
+git worktree remove <review-root> --force
+```
+
+`git worktree remove`, never `rm -rf`: the **registration** is the half that
+matters. A deleted directory leaves a dangling entry that only `git worktree
+prune` clears, and `prune` is exactly what cannot help here — it reclaims
+worktrees whose directory is gone, and these all had live ones.
+
+**Two cases where the root STAYS**, because the builder may need to stand in it:
+
+- a **blocked** verdict, or a guard refusal — the captain is going to re-make or
+  inspect the tree, and deleting it turns a blocked pass into a lost one;
+- any finding you could not fully verify and flagged as such, if you named the
+  root as where the evidence sits.
+
+Say which you did. "Root removed" and "root kept, blocked on X" are both
+verdict-carrying facts; silence is the thing that leaves them behind.
+
 Default posture:
 - Read only unless the captain explicitly asks for a patch.
 - Prioritize bugs, security risks, behavioral regressions, unclear money movement, confusing agent authority, and missing tests.

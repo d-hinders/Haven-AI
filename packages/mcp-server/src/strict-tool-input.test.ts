@@ -133,9 +133,15 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   haven_complete_mcp_tool: 'payment_required',
   haven_send: 'idempotencyKey',
   haven_pay_mcp_tool: 'idempotencyKey',
-  // The local surface's local-ONLY field, not a case variant: refusing it is
-  // what stops a body-bearing POST being quoted with an empty body.
-  haven_quote_x402: 'body',
+  // Was `body` until #2366 — the ONE divergence where refusing removed a
+  // capability rather than protecting one, because the hosted quote then
+  // probed a body-bearing POST with an empty body and described a request the
+  // caller never made. `body` is now declared on both surfaces and spelled the
+  // same, so it is no longer a crossover key at all. The remaining local-only
+  // spelling on this tool is `idempotencyKey`, which is #2366's OTHER half —
+  // still open, because converging it renames an argument on a published
+  // package and needs a deprecation window.
+  haven_quote_x402: 'idempotencyKey',
   haven_pay_x402_quote: 'idempotencyKey',
   // #2349 — batch 3. Each is a key a real caller would plausibly reach for on
   // that tool, and the value the message says it is read from instead:
@@ -512,7 +518,8 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
   const CROSSOVER: Record<string, string> = {
     haven_send: 'idempotencyKey',
     haven_pay_mcp_tool: 'idempotencyKey',
-    haven_quote_x402: 'body',
+    // #2366 converged `body`; `idempotencyKey` is the divergence that remains.
+    haven_quote_x402: 'idempotencyKey',
     haven_pay_x402_quote: 'idempotencyKey',
   }
 

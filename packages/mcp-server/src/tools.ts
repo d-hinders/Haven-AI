@@ -287,6 +287,16 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     url: z.string().url(),
     method: z.string().optional(),
     headers: z.record(z.string()).optional(),
+    /**
+     * #2366. The one divergence #2348's refusal REMOVED a capability to close:
+     * the hosted quote had no field to route a payload to, so a body-bearing
+     * POST paywall was probed with an EMPTY body and the quote described a
+     * request the caller never made (measured over the real transport:
+     * `POST /paid :: `). Refusing was strictly better than lying; this makes
+     * it answerable. Same shape and same name as the local surface's, so this
+     * argument is now spelled once across both.
+     */
+    body: z.string().optional(),
   },
   haven_pay_x402_quote: {
     // The parsed HTTP 402 PaymentRequired the agent received from the merchant
@@ -626,8 +636,8 @@ export const STRICT_INPUT_TOOLS = {
     "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
     'silently replaced by a different one rather than merely lost.',
   haven_quote_x402:
-    'This is the HOSTED surface. It takes url, method and headers only. The local MCP ' +
-    '(@haven_ai/mcp) additionally takes body and idempotencyKey — carrying either here used ' +
+    'This is the HOSTED surface. It takes url, method, headers and body. The local MCP ' +
+    '(@haven_ai/mcp) additionally takes idempotencyKey — carrying it here used ' +
     'to be dropped in silence, and a body-bearing POST was then probed with an EMPTY body, ' +
     'so the quote described a different request than the one the caller meant to pay for. ' +
     'The hosted surface has no body field to route it to; quote a GET resource, or use ' +
@@ -2233,6 +2243,13 @@ export function createToolHandlers(
       const init: RequestInit = {}
       if (args.method) init.method = args.method
       if (args.headers) init.headers = args.headers
+      // `!== undefined`, not truthiness, matching the local surface's
+      // `requestInit`: an empty-string body is a body, and a paywall that
+      // varies on `POST` with no payload is a different request from one with
+      // no body at all. Conflating them is the same class of error this tool
+      // was refusing rather than committing. No Content-Type is inferred —
+      // the caller sends `headers` for that, exactly as locally.
+      if (args.body !== undefined) init.body = args.body
       try {
         const quote: X402Quote = await haven.quoteX402(args.url, init)
         // Return the full quote — the agent passes paymentRequired to haven_pay_x402_quote.

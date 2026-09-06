@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { run, COMMANDS, type RunDeps } from './commands.js'
+import { run, COMMANDS, DEFAULT_API, type RunDeps } from './commands.js'
 import { helpText } from './args.js'
 import type { Session, SessionStore } from './session.js'
 import { CliApiError, type CliApi } from './api.js'
@@ -881,6 +881,26 @@ describe('helpText covers every dispatchable command (#2590)', () => {
     // the word "relogin" anywhere in the help would have satisfied it.
     expect(usageLinePattern('login').test('  relogin                 Do it again')).toBe(false)
     expect(usageLinePattern('login').test('  login                   Sign in')).toBe(true)
+  })
+
+  it('describes the --api default as what DEFAULT_API actually is', () => {
+    // The help said "default: HAVEN_API_URL or http://localhost:3001" from
+    // before #535 (2026-06-25) repointed `DEFAULT_API` at the hosted backend,
+    // and kept saying it for two and a half months. That is not a cosmetic
+    // staleness: the true default is more dangerous than the stated one. An
+    // omitted `--api` on a dev or self-hosted deployment does not fail
+    // loudly — it connects to Haven's production backend — so a reader who
+    // believes the help treats a working command as proof the flag was right.
+    //
+    // It also propagated. #2591's first draft copied this line into the agent
+    // runbook, which is served to agents from three synced copies, before a
+    // review caught it. A stale help line is an agent-facing claim.
+    expect(help).not.toContain('localhost:3001')
+    expect(help).toContain("Haven's hosted")
+    expect(help).toContain('NOT localhost')
+    // Pinned against the constant rather than a literal URL, so this cannot
+    // drift the way the sentence it replaces did.
+    expect(help).not.toContain(DEFAULT_API)
   })
 
   it('describes login as the device flow it actually is', () => {

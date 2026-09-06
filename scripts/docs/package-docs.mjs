@@ -234,6 +234,27 @@ export const GOVERNED_PACKAGE_DOCS = [
     // this branch. NOT re-verified: Install, Config, Custody, the `--json`
     // contract, the exit-code table, or the SIE export section. Prior:
     // '2026-09-04' — see the #2525 note above.
+    // #2536: EDITED — the opening framing and the section order. It said "a
+    // terminal-native, scriptable companion to the Haven dashboard — used
+    // alongside the web app, not instead of it", which stopped being true when
+    // C1/#2526 and C2/#2527 landed: an agent drives the setup end to end up to
+    // the steps needing a human signature. Restructured agent-first (a new
+    // § *Setting Haven up as an agent*; § *Usage* retitled as the full command
+    // surface), with the `--json` contract and exit codes POINTED AT rather
+    // than restated — § *For agents and scripts* owns them and a second copy is
+    // what drifts. Two corrections while there: the usage block showed
+    // `haven login --email` as the only form (bare `login` has been the device
+    // flow since #2526 — the same defect #2590 fixed in `--help`), and the
+    // `--api` note now says the default is Haven's hosted PRODUCTION backend,
+    // so an omitted flag connects somewhere real and wrong rather than failing.
+    // The npx path is recorded as measured, not asserted (clean directory,
+    // 2026-09-06): @alpha and the bare form both 0.1.34-alpha.0, @dev the
+    // snapshot — the bare form matching is the owner's `latest` decision
+    // working end to end. The byte-pinned agent-facing section (#2533) is
+    // untouched. Scope: the opening, § Install's npx paragraph, the new section
+    // and § Usage's title and auth block. NOT re-verified: § For agents and
+    // scripts' contract, the exit-code table, the SIE export section, Config or
+    // Custody. Prior: '2026-09-06' — see the #2590 note above.
     'last-verified': '2026-09-06',
   },
   {

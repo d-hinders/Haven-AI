@@ -341,6 +341,108 @@ describe('commentApiArgs — POST vs PATCH', () => {
   })
 })
 
+describe('#2599 — the re-run remedy, and the approval-entitlement correction', () => {
+  // The comment used to offer exactly two ways out — approve, or push from your
+  // own credentials — and asserted that a dispatcher can "almost certainly"
+  // approve. Both halves were incomplete, and the second was flatly wrong for
+  // the caller most likely to be stuck here:
+  //
+  //   - A third recovery needs no push at all. Re-running a parked run is a
+  //     fresh attempt attributed to whoever triggers it, so it re-attributes
+  //     the run away from the bot and the approval gate lets it through.
+  //     Measured on PR #2598: five `action_required` runs came back
+  //     `run_attempt: 2` / `triggering_actor: d-hinders` after
+  //     `POST .../actions/runs/:id/rerun`, and CI went green with no push.
+  //   - A GitHub App installation token that just dispatched the workflow is
+  //     refused the approval it caused to be parked: the approve endpoint
+  //     answers `403 Resource not accessible by integration`.
+  //
+  // These are prose pins, which is the whole point: an unasserted sentence in
+  // this comment has already cost four sessions once (#1777), and a sentence
+  // nobody pins is a sentence that quietly reverts. Every assertion here is
+  // red against the pre-#2599 text — the re-run block did not exist, the 403
+  // was unnamed, and the over-assertion was the sentence being deleted.
+  const parked = [
+    { name: 'CI', id: 32586761757, url: 'https://gh/runs/32586761757' },
+    { name: 'Docs quality', id: 32586761737, url: 'https://gh/runs/32586761737' },
+  ]
+  const build = (p) =>
+    buildComment({ repo: 'o/r', branch: 'b', sha: 'abc123def456', runUrl: 'https://gh/runs/9', parked: p })
+
+  test('names the re-run remedy with a pasteable call, against the run ids it enumerates', () => {
+    const body = build(parked)
+    assert.match(body, /re-run each parked run/i)
+    assert.match(body, /gh api --method POST "repos\/o\/r\/actions\/runs\/\$id\/rerun"/)
+    assert.match(body, /gh run rerun/)
+    // The invocation is meant to be used WITH the ids the comment already lists,
+    // so it must not read as a third enumeration the reader has to go find.
+    assert.match(body, /run ids (listed )?above/i)
+  })
+
+  test('the re-run sits ahead of the force-push / empty-commit fallback', () => {
+    const body = build(parked)
+    const rerun = body.indexOf('actions/runs/$id/rerun')
+    assert.ok(rerun > 0, 'the re-run invocation must be present to be ordered')
+    assert.ok(rerun < body.indexOf('--force-with-lease'), 're-run before the force-push block')
+    assert.ok(rerun < body.indexOf('--allow-empty'), 're-run before the empty-commit alternative')
+    // Ordering is "ahead of the push routes", NOT "ahead of approval": the
+    // enumerated one-click approve list is still what the reader is offered
+    // first, because when it is available it is the least-effort route.
+    assert.ok(body.indexOf('Approve and run') < rerun, 'approval stays the lead remedy')
+    assert.ok(body.indexOf('#### Recovery') < rerun)
+  })
+
+  test('the approval sentence stops asserting that a dispatcher can almost certainly approve', () => {
+    const body = build(parked)
+    assert.doesNotMatch(body, /almost certainly/)
+    assert.doesNotMatch(body, /the same write access dispatching this workflow already needed/i)
+    assert.doesNotMatch(body, /anyone who could dispatch .* already has the write access/i)
+  })
+
+  test('the App-token exception is named as a known exception, with the observed status', () => {
+    const body = build(parked)
+    assert.match(body, /403/)
+    assert.match(body, /App installation token/)
+    assert.match(body, /Resource not accessible by integration/)
+    // Naming the status is not decoration: "dispatch succeeded, therefore approve
+    // will work" is exactly the inference that strands an automated caller.
+    assert.match(body, /dispatch(ing)? (does not imply|is not) /i)
+  })
+
+  test('the mechanism is cited to a measurement, not asserted', () => {
+    const body = build(parked)
+    assert.match(body, /#2598/)
+    assert.match(body, /run_attempt: 2/)
+    assert.match(body, /triggering_actor: d-hinders/)
+  })
+
+  test('the not-enumerable fallback offers the re-run too', () => {
+    // The fallback is the branch an automated caller on an App token will
+    // actually land in — the runs often appear after the poll window, and that
+    // same caller cannot approve. Leaving it approve-only would give the reader
+    // one remedy and it is the one they cannot perform.
+    const md = renderParkedSection({ repo: 'o/r', sha: 'abc123def456', parked: [] })
+    assert.match(md, /run rerun/)
+    assert.match(md, /Approve and run/) // still offered, not replaced
+  })
+
+  test('BASELINE_PUSH_TOKEN stays the permanent fix — this shortens recovery, it does not replace the secret', () => {
+    const body = build(parked)
+    assert.match(body, /The permanent fix\*{0,2} is setting the `BASELINE_PUSH_TOKEN` secret/)
+    assert.match(body, /#1777/)
+    // The re-run prose must not creep into competing with the secret.
+    assert.doesNotMatch(body, /permanent fix\*{0,2} is (the )?re-?run/i)
+  })
+
+  test('both branches carry the recovery — neither collapses to push-only advice', () => {
+    for (const p of [parked, []]) {
+      const body = build(p)
+      assert.match(body, /rerun/i)
+      assert.match(body, /without any push/)
+    }
+  })
+})
+
 describe('findStickyCommentId', () => {
   test('finds our marker among unrelated comments', () => {
     const found = findStickyCommentId([

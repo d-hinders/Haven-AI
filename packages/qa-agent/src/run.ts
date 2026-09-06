@@ -10,6 +10,7 @@
  */
 
 import { loadQaConfig, QaConfigError } from './config.js'
+import { describeObserverRpc } from './lib/chain.js'
 import type { Scenario, ScenarioContext, ScenarioResult } from './scenarios/types.js'
 import { withinBudgetSettle } from './scenarios/within-budget-settle.js'
 import { overBudgetRefused } from './scenarios/over-budget-refused.js'
@@ -145,6 +146,14 @@ async function main(): Promise<void> {
   const ctx: ScenarioContext = { cfg }
 
   console.log(`Haven money-flow QA → ${cfg.apiUrl}`)
+  // Which observer node, by CLASS not by value (#2511). The URL can embed a
+  // provider key, so it is never printed. What a triager needs is the one bit
+  // this answers: was the run watching the shared public endpoint — whose
+  // outages arrive as scenario failures rather than defects — or a dedicated
+  // one. Without it, "set the variable" and "the variable never reached the
+  // job" produce identical logs, which is how the knob sat unreachable from
+  // PR #2553 until #2511's wiring.
+  console.log(`observer RPC → ${describeObserverRpc()}`)
 
   // #1530: state the preconditions BEFORE the first leg. The harness used to
   // assert only what happened during a run, so an exhausted merchant

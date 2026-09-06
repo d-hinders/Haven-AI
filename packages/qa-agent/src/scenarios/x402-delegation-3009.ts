@@ -118,7 +118,7 @@ import { HavenApi, type MachinePaymentReceipt } from '../lib/haven-api.js'
 import { merchant402Reason } from '../lib/merchant-402.js'
 import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
-import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, describeObserverRpc } from '../lib/chain.js'
 
 // Circle's canonical Base Sepolia USDC (matches the SDK's CHAIN_USDC[84532]).
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
@@ -413,7 +413,8 @@ export const x402Delegation3009: Scenario = {
       // the same EOA; naming only the first would send triage at the bridge.
       return fail(
         `delegate EOA still holds ${fmt(verdict.caused)} USDC of this payment's own ${fmt(funded)} USDC ` +
-          `after ${TIMING.deliveryWaitMs / 1000}s of polling ${BASE_SEPOLIA_RPC} — either the merchant ` +
+          `after ${TIMING.deliveryWaitMs / 1000}s of polling the harness's observer node ` +
+          `[${describeObserverRpc()}] — either the merchant ` +
           `leg has not settled, or this node has not caught up with it (the harness reads a different ` +
           `node from the one the backend writes through). Either way the payment is not observably ` +
           `delivered, and this is not sub-floor dust: it is the whole transaction, and passing here ` +

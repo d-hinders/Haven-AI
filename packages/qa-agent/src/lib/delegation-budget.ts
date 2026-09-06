@@ -9,6 +9,15 @@
  *
  * So the amount is DERIVED from the chain, and the read is refused rather than
  * guessed when the backend says the number is a fallback.
+ *
+ * **Two callers, two reasons, and they are not interchangeable (#2594).** The
+ * over-budget legs use the number as a CEILING to exceed; `within-budget-settle`
+ * uses it as a FLOOR to clear. Both must refuse a fallback, but not for the same
+ * reason, and the run report is where that matters: on 2026-09-06 four scenarios
+ * failed together and `within-budget-settle`'s line read "refusing to build an
+ * over-budget amount from a number the chain did not supply" — a use it never
+ * makes. A reader of that report learns something false about the leg. `use`
+ * is what keeps each refusal about its own caller.
  */
 
 import type { HavenApi } from './haven-api.js'
@@ -28,9 +37,31 @@ export interface OnchainBudget {
  * refused for a reason the leg did not establish, which is the exact vacuous
  * pass #2016 was filed about.
  */
+/**
+ * What the caller does with the number, which decides why a fallback is unusable.
+ *
+ * `ceiling` — the leg derives an amount ABOVE the budget and expects a refusal.
+ * `floor` — the leg needs the budget to be at least its fixed amount.
+ */
+export type BudgetUse = 'ceiling' | 'floor'
+
+const FALLBACK_REASON: Record<BudgetUse, string> = {
+  ceiling:
+    'refusing to build an over-budget amount from a number the chain did not supply',
+  // The fallback IS the full configured budget (#1145), so it is OPTIMISTIC:
+  // it can clear a floor the real remaining would not, which turns budget
+  // exhaustion into what reads as a settlement defect — the exact
+  // misattribution this leg's own precondition exists to prevent.
+  floor:
+    'the fallback reports the FULL configured budget, so it can clear a floor the real ' +
+    'remaining would not — and this leg would then report a settlement failure for a ' +
+    'budget that was simply spent',
+}
+
 export async function readOnchainBudget(
   api: HavenApi,
   symbol = 'USDC',
+  use: BudgetUse = 'ceiling',
 ): Promise<OnchainBudget | { error: string }> {
   const res = await api.getAllowances()
   if (!res.ok) {
@@ -46,7 +77,7 @@ export async function readOnchainBudget(
     return {
       error:
         `the ${symbol} remaining budget is a FALLBACK, not a live enforcer read — ` +
-        'refusing to build an over-budget amount from a number the chain did not supply',
+        FALLBACK_REASON[use],
     }
   }
   const remaining = BigInt(onchain.remaining)

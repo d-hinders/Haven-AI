@@ -50,12 +50,16 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
     asset: z.enum(['ETH', 'USDC']),
     recipient: z.string().min(1),
     amount: z.string().min(1),
+    idempotency_key: z.string().optional(),
+    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
   },
   haven_pay_mcp_tool: {
     merchant_url: z.string().url(),
     tool_name: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()).optional(),
+    idempotency_key: z.string().optional(),
+    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
   },
   haven_quote_x402: {
@@ -63,10 +67,14 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
     method: z.string().optional(),
     headers: headersSchema,
     body: z.string().optional(),
+    idempotency_key: z.string().optional(),
+    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
   },
   haven_pay_x402_quote: {
     quote: z.unknown(),
+    idempotency_key: z.string().optional(),
+    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
   },
   haven_pay_x402: {
@@ -74,6 +82,8 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
     method: z.string().optional(),
     headers: headersSchema,
     body: z.string().optional(),
+    idempotency_key: z.string().optional(),
+    /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
   },
   haven_resume_x402_payment: {
@@ -134,6 +144,15 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
 export interface ToolSuccess<T> {
   success: true
   data: T
+  /**
+   * Non-fatal notices about the CALL, not about its result (#2366).
+   *
+   * Additive and optional: a caller that ignores it sees exactly what it saw
+   * before. It exists so a deprecation can be announced on the surface that
+   * observes it — the alternative was a divergence nothing ever told anyone to
+   * leave, which is how `idempotencyKey` survived #2312 and #2348.
+   */
+  warnings?: string[]
 }
 
 export interface ToolFailure {
@@ -156,8 +175,13 @@ export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName, (input: unknown) => Promise<ToolPayload>> {
   return {
     haven_send: async (input) => {
+      // #2366: resolved OUTSIDE the payload so its warnings can ride on the
+      // success, and BEFORE anything is contacted so an ambiguous pair refuses
+      // without spending.
+      const pf = preflight('haven_send', input)
+      if ('success' in pf) return pf
+      const { args, warnings } = pf
       return runTool(async () => {
-        const args = objectInput('haven_send', input)
         try {
           const result = await haven.pay({
             token: args.asset,
@@ -165,7 +189,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
             to: args.recipient,
             // #1207: was accepted by the schema but silently dropped — now
             // carried to the backend's replay contract.
-            idempotencyKey: typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined,
+            idempotencyKey: args.idempotencyKey,
           })
           return {
             payment_id: result.paymentId,
@@ -198,12 +222,17 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           }
           throw err
         }
-      })
+      }, warnings)
     },
 
     haven_pay_mcp_tool: async (input) => {
+      // #2366: hoisted out of `runTool` so a refusal is a refusal rather than
+      // a success carrying one as its payload, and so the warning can ride on
+      // the result.
+      const pf = preflight('haven_pay_mcp_tool', input)
+      if ('success' in pf) return pf
+      const { args, warnings } = pf
       return runTool(async () => {
-        const args = objectInput('haven_pay_mcp_tool', input)
         const envelope = buildMcpToolsCallEnvelope(args.tool_name as string, args.arguments as Record<string, unknown> | undefined)
         const init: RequestInit = {
           method: 'POST',
@@ -223,7 +252,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         // `X402UnexpectedStatusError` (#1300): "this URL isn't the MCP
         // endpoint," expressed as a Response instead of a thrown error.
         let merchantUrl = args.merchant_url as string
-        const idempotencyKey = args.idempotencyKey as string | undefined
+        const idempotencyKey = args.idempotencyKey
         const attempt = () => haven.fetch(merchantUrl, init, { idempotencyKey })
 
         let response = await attempt()
@@ -251,13 +280,16 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           merchant_url: merchantUrl,
           ...(merchantUrl !== args.merchant_url ? { merchant_url_discovered_from: args.merchant_url } : {}),
         }
-      })
+      }, warnings)
     },
 
     haven_quote_x402: async (input) => {
-      const args = objectInput('haven_quote_x402', input)
+      const pf = preflight('haven_quote_x402', input)
+      if ('success' in pf) return pf
+      const { args, warnings } = pf
       try {
-        return { success: true, data: await haven.quoteX402(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey }) }
+        const data = await haven.quoteX402(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey })
+        return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data }
       } catch (err) {
         // #1328: quoteX402 still refuses a MACHINE-PAYMENT-CHALLENGE response as
         // a defensive shape guard, but nothing in Haven produces that header
@@ -268,7 +300,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
     },
 
     haven_pay_x402_quote: async (input) => {
-      const args = objectInput('haven_pay_x402_quote', input)
+      const pf = preflight('haven_pay_x402_quote', input)
+      if ('success' in pf) return pf
+      const { args, warnings } = pf
       const quote = args.quote as Record<string, unknown> | null | undefined
       // Guard before network calls so the agent gets actionable guidance rather
       // than an opaque SDK error.
@@ -289,15 +323,17 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       return runTool(async () => {
         const response = await haven.payX402Quote(args.quote as X402Quote, { idempotencyKey: args.idempotencyKey })
         return responsePayload(response)
-      })
+      }, warnings)
     },
 
     haven_pay_x402: async (input) => {
-      const args = objectInput('haven_pay_x402', input)
+      const pf = preflight('haven_pay_x402', input)
+      if ('success' in pf) return pf
+      const { args, warnings } = pf
       return runTool(async () => {
         const response = await haven.fetch(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey })
         return responsePayload(response)
-      })
+      }, warnings)
     },
 
     haven_resume_x402_payment: async (input) => {
@@ -436,6 +472,77 @@ function wrongTool(code: string, message: string, suggested_tool?: string): Tool
   return { success: false, code, message, suggested_tool }
 }
 
+/**
+ * The one spelling, and the window that gets us there (#2366).
+ *
+ * Haven's wire convention is snake_case, and the hosted MCP surface already
+ * follows it. This package shipped `idempotencyKey` and is PUBLISHED, so the
+ * rename cannot be a single release: an installed caller passing the old name
+ * must keep working, and must be told. Owner decision 2026-09-06 — accept both,
+ * warn on the old, drop it later.
+ *
+ * Both present with DIFFERENT values is refused rather than resolved. Picking
+ * either would be Haven deciding which replay scope the caller meant, and on a
+ * payment argument a wrong guess turns a retry into a second spend — the exact
+ * failure #2348 measured when the hosted surface dropped the key. Both present
+ * and EQUAL is not ambiguous and is accepted.
+ */
+/**
+ * Parse the input and resolve the idempotency-key spelling, in one step (#2366).
+ *
+ * Both have to happen BEFORE `runTool`, because a `ToolFailure` returned from
+ * inside its callback becomes `data` — a refusal wearing a success. But moving
+ * `objectInput` out on its own lost the normalisation `runTool` was giving its
+ * schema errors, which turned two "rejects at schema level" tests red. So the
+ * pair is hoisted together and normalised here, and every caller gets the same
+ * two exits: a failure to return, or args plus any warnings to carry.
+ */
+function preflight<TName extends HavenMcpToolName>(
+  name: TName,
+  input: unknown,
+): { args: Record<string, any>; warnings: string[] } | ToolFailure {
+  let args: Record<string, any>
+  try {
+    args = objectInput(name, input)
+  } catch (err) {
+    return normalizeError(err)
+  }
+  const idem = resolveIdempotencyKey(args)
+  if ('success' in idem) return idem
+  if (idem.key !== undefined) args = { ...args, idempotencyKey: idem.key }
+  return { args, warnings: idem.warnings }
+}
+
+export function resolveIdempotencyKey(
+  args: Record<string, unknown>,
+): { key?: string; warnings: string[] } | ToolFailure {
+  const modern = typeof args.idempotency_key === 'string' ? args.idempotency_key : undefined
+  const legacy = typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined
+
+  if (modern !== undefined && legacy !== undefined && modern !== legacy) {
+    return {
+      success: false,
+      code: 'AMBIGUOUS_IDEMPOTENCY_KEY',
+      message:
+        'Both idempotency_key and idempotencyKey were sent with different values. ' +
+        'Nothing was contacted or spent. Send exactly one — idempotency_key is the ' +
+        'current spelling; idempotencyKey is deprecated and will be removed.',
+    }
+  }
+  if (modern !== undefined) return { key: modern, warnings: [] }
+  if (legacy !== undefined) {
+    return {
+      key: legacy,
+      warnings: [
+        'idempotencyKey is deprecated and will be removed in a future release of ' +
+          '@haven_ai/mcp. Send idempotency_key instead — it is the spelling the hosted ' +
+          'Haven MCP surface and every other Haven wire contract use.',
+      ],
+    }
+  }
+  return { warnings: [] }
+}
+
 /** Build a JSON-RPC 2.0 tools/call envelope for an MCP merchant. */
 function buildMcpToolsCallEnvelope(
   toolName: string,
@@ -468,9 +575,12 @@ function requestInit(input: { method?: string; headers?: Record<string, string>;
   }
 }
 
-async function runTool<T>(fn: () => Promise<T>): Promise<ToolPayload<T>> {
+async function runTool<T>(fn: () => Promise<T>, warnings: string[] = []): Promise<ToolPayload<T>> {
   try {
-    return { success: true, data: await fn() }
+    const data = await fn()
+    // #2366: attached only when there is something to say, so a caller that
+    // sends the current spelling sees the response shape it always saw.
+    return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data }
   } catch (err) {
     return normalizeError(err)
   }

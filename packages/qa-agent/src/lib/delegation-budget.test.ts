@@ -70,4 +70,48 @@ describe('overBudgetAmount', () => {
       expect(overBudgetAmount(remaining) > remaining).toBe(true)
     }
   })
+
+  /**
+   * The refusal says why THIS caller cannot use a fallback (#2594).
+   *
+   * Both uses must refuse — that is #2016 and is unchanged. What #2594 fixes is
+   * that the reason travels into the run report, where a wrong one teaches a
+   * reader something false about a leg. On 2026-09-06 four scenarios failed
+   * together and `within-budget-settle`'s line said it was "refusing to build an
+   * over-budget amount". It makes a floor check; it builds no such thing.
+   */
+  describe('the fallback refusal is about the caller that got it (#2594)', () => {
+    const fallback = api(200, row({ remaining: '1000000', remaining_is_from_chain: false }))
+
+    it('still refuses for BOTH uses — the #2016 property is untouched', async () => {
+      for (const use of ['ceiling', 'floor'] as const) {
+        const r = await readOnchainBudget(fallback, 'USDC', use)
+        expect(r, use).toHaveProperty('error')
+        expect((r as { error: string }).error, use).toMatch(/FALLBACK, not a live enforcer read/)
+      }
+    })
+
+    it('gives the ceiling caller the over-budget reason, and only it', async () => {
+      const r = await readOnchainBudget(fallback, 'USDC', 'ceiling')
+      expect((r as { error: string }).error).toMatch(/refusing to build an over-budget amount/)
+    })
+
+    it('gives the floor caller a reason about ITS use, never the over-budget one', async () => {
+      const r = await readOnchainBudget(fallback, 'USDC', 'floor')
+      const { error } = r as { error: string }
+      // The whole finding: this string reached a run report for a leg that
+      // never builds one.
+      expect(error).not.toMatch(/over-budget amount/)
+      // And it says the thing a reader of that report needs: the fallback is
+      // optimistic, so clearing the floor would prove nothing.
+      expect(error).toMatch(/FULL configured budget/)
+      expect(error).toMatch(/settlement failure for a budget that was simply spent/)
+    })
+
+    it('defaults to the ceiling reason, so an un-migrated caller is unchanged', async () => {
+      const explicit = await readOnchainBudget(fallback, 'USDC', 'ceiling')
+      const implicit = await readOnchainBudget(fallback)
+      expect(implicit).toEqual(explicit)
+    })
+  })
 })

@@ -38,7 +38,10 @@ export const withinBudgetSettle: Scenario = {
 
     // Establish the precondition rather than assume it: a leg that fails
     // because the budget is spent must say so, not report a settle defect.
-    const budget = await readOnchainBudget(api)
+    // `'floor'`: this leg needs the budget to be at least AMOUNT_ATOMIC. It does
+    // not build an over-budget amount, and until #2594 a fallback read told it
+    // — and the run report — that it did.
+    const budget = await readOnchainBudget(api, 'USDC', 'floor')
     if ('error' in budget) return fail(`precondition: ${budget.error}`)
     if (budget.remaining < AMOUNT_ATOMIC) {
       return fail(

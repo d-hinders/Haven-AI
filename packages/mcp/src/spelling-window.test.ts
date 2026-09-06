@@ -21,7 +21,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { HavenClient } from '@haven_ai/sdk'
 import { buildMcpServer } from './server.js'
-import { toolSchemas } from './tools.js'
+import { createToolHandlers, toolSchemas } from './tools.js'
 
 /** A HavenClient stub that records what `pay` was actually handed. */
 function stubHaven() {
@@ -153,5 +153,51 @@ describe('idempotency-key spelling window (#2366)', () => {
       expect(Object.keys(shape), name).toContain('idempotency_key')
       expect(Object.keys(shape), name).toContain('idempotencyKey')
     }
+  })
+
+  /**
+   * A schema rejection is a structured failure on the DIRECT-HANDLER path (#2366).
+   *
+   * `preflight` moved `objectInput` inside a try/catch for all five tools, and
+   * for three of them that changed the response shape — a change this PR first
+   * described as preservation, which it was not (haven-reviewer, who ran base
+   * and head side by side rather than reading them).
+   *
+   * The distinction is the part worth pinning, and it is not the obvious one:
+   *
+   * - **Through the MCP client**, nothing changed and nothing could. The SDK
+   *   validates against the registered schema before a handler runs and returns
+   *   its own `-32602 Invalid arguments`, identically before and after. My first
+   *   version of this test asserted through the transport and failed on all
+   *   four tools for that reason — the instrument could not see the thing it
+   *   was pointed at.
+   * - **Through `createToolHandlers` directly** — an exported entry point, and
+   *   the one the hosted server's own suite calls "the direct-embedder path" —
+   *   `haven_quote_x402`, `haven_pay_x402_quote` and `haven_pay_x402` used to
+   *   THROW a raw ZodError out of the handler, while `haven_send` and
+   *   `haven_pay_mcp_tool` already returned `{ success: false, code, message }`.
+   *   All five are structured now.
+   *
+   * That is an improvement rather than an accident, and it was untested for
+   * exactly the three tools whose behaviour changed — the two that were already
+   * structured are the two that had tests, which is why nobody noticed.
+   */
+  const SCHEMA_REJECTS = [
+    ['haven_quote_x402', { url: 'not-a-url' }],
+    ['haven_pay_x402', { url: 'not-a-url' }],
+    ['haven_pay_x402_quote', { quote: {}, idempotency_key: 42 }],
+    ['haven_send', { asset: 'DOGE', recipient: '0xabc', amount: '1' }],
+    ['haven_pay_mcp_tool', { merchant_url: 'not-a-url', tool_name: 't' }],
+  ] as const
+
+  it.each(SCHEMA_REJECTS)('%s rejects bad input as a structured failure, never a throw', async (name, args) => {
+    const { haven, seen } = stubHaven()
+    const handlers = createToolHandlers(haven)
+    const result = await handlers[name as keyof typeof handlers](args)
+    // The shape, not the wording: a caller branches on `code`.
+    expect(result, name).toMatchObject({ success: false })
+    expect((result as { code?: string }).code, name).toBeTruthy()
+    // And nothing was contacted.
+    expect(seen, name).toHaveLength(0)
   })
 })

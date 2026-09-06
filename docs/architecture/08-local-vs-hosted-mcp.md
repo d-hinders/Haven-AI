@@ -211,9 +211,10 @@ Renaming one to the other would change *what a caller must send*, not what it is
 called — silently, in the direction that looks correct. It needs its own
 decision and is not part of this window.
 
-The reason the spelling half needed a window — accept both, warn on the old, then drop — which is a release-train
-decision rather than a parse one. It stays open on
-[#2366](https://github.com/d-hinders/Haven-AI/issues/2366) awaiting that call.
+**Nothing schedules the removal.** The window is open; its closing is a
+release-train decision and has not been taken. Until it is, `idempotencyKey`
+keeps working and keeps warning — which is a window only for as long as someone
+means to shut it.
 
 Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools.ts`, and `packages/signer/src/tools.ts` as the

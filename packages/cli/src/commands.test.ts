@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { run, type RunDeps } from './commands.js'
+import { run, COMMANDS, type RunDeps } from './commands.js'
+import { helpText } from './args.js'
 import type { Session, SessionStore } from './session.js'
 import { CliApiError, type CliApi } from './api.js'
 
@@ -825,3 +826,65 @@ describe('agents connect (#2527)', () => {
     })
   })
 })
+
+/**
+ * `--help` names every command the CLI dispatches (#2590).
+ *
+ * Found by the cold-agent onboarding run of 2026-09-06 (#2538), and the way it
+ * was found is the argument for this test. An agent followed `/for-agents.md`
+ * to step 3, ran `haven --help` to check the command it had been told to use,
+ * did not find `agents connect` in it, and concluded the command does not
+ * exist. It does — it is in `COMMANDS`, it is in `dispatch`'s switch, and it
+ * works. Three surfaces told that agent to run a command the CLI's own help
+ * omitted.
+ *
+ * `COMMANDS` is already pinned against `dispatch` by the drift test above, so
+ * this closes the remaining edge of the same triangle: list ↔ dispatch was
+ * guarded, list ↔ help was not. A command added without a help line now fails
+ * here rather than reaching an agent that cannot find it.
+ *
+ * It matches on the command WORDS rather than a formatted line, because the
+ * help wraps and groups: `agents connect` spans a usage line and two
+ * continuation lines. Matching the rendering would make this a test about
+ * layout, which is the kind of guard that gets deleted the first time someone
+ * reflows a paragraph.
+ */
+describe('helpText covers every dispatchable command (#2590)', () => {
+  const help = helpText()
+
+  it('names all of them', () => {
+    const missing = COMMANDS.filter((command) => {
+      // `wallets balances` may appear as `wallets balances [--safe …]`; a
+      // subcommand's words must appear together and in order, not merely both
+      // somewhere in the document.
+      const pattern = new RegExp(command.split(' ').map(escapeRegExp).join('\\s+'))
+      return !pattern.test(help)
+    })
+    expect(missing, `not named in --help: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('POSITIVE CONTROL: the matcher can report a command as missing', () => {
+    // A green run above is only evidence if this can go red. Without it, a
+    // matcher broken into always-true would pass silently — which is the
+    // failure mode of every "assert nothing is missing" test.
+    const pattern = new RegExp(['agents', 'teleport'].join('\\s+'))
+    expect(pattern.test(help)).toBe(false)
+  })
+
+  it('describes login as the device flow it actually is', () => {
+    // #2526 made the browser flow the DEFAULT; `commands.ts` says so in as
+    // many words. The help said "Sign in (password via prompt or
+    // HAVEN_PASSWORD)" for as long as that was false, contradicting
+    // /for-agents.md, the setup prompt and the haven-pay skill — and telling
+    // an agent it needs its user's password, which is the one thing every
+    // agent-facing surface promises it will never need.
+    expect(help).toMatch(/login\s+Sign in\. Opens a browser device-code approval by default/)
+    expect(help).toContain('never asks for a password')
+    // The password path still exists and is still findable.
+    expect(help).toMatch(/login --email/)
+  })
+})
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

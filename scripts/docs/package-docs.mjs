@@ -219,7 +219,22 @@ export const GOVERNED_PACKAGE_DOCS = [
     // one section it had edited — haven-doc-reviewer @ 514a2cc5.) The opening
     // "companion to the dashboard" framing is #2536's to rewrite, not this
     // issue's. Scope: those sections and this date.
-    'last-verified': '2026-09-04',
+    // #2590: re-verified, NOT edited — and the re-verification IS the finding.
+    // This README already documents both things `--help` got wrong: `agents
+    // connect` with its four flags and `--run` (§ *`haven agents connect`*),
+    // and the browser-approved default login (§ *Signing in without a password
+    // (#2526)*, which states plainly that `haven login` starts a browser flow
+    // by default and never asks for a password). So #2526 and #2527 each
+    // updated this file and neither updated `helpText()` in
+    // `packages/cli/src/args.ts` — one surface of the same package, in the same
+    // PRs, silently left behind, and an agent found it before we did (#2538's
+    // cold run). Nothing here needed changing; the guard added under #2590 pins
+    // `helpText()` against `COMMANDS` so the two cannot diverge again. Scope:
+    // the login and `agents connect` sections, re-read against `commands.ts` on
+    // this branch. NOT re-verified: Install, Config, Custody, the `--json`
+    // contract, the exit-code table, or the SIE export section. Prior:
+    // '2026-09-04' — see the #2525 note above.
+    'last-verified': '2026-09-06',
   },
   {
     doc: 'packages/mcp-server/README.md',

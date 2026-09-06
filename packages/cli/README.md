@@ -1,8 +1,13 @@
 # @haven_ai/cli
 
-A terminal-native, scriptable companion to the Haven dashboard. Sign in as
-yourself and read or manage your account from the shell — used **alongside** the
-web app, not instead of it.
+The terminal surface for setting up and running a Haven agent — **an agent can
+drive it end to end**, up to the steps that need a human signature. It is also a
+scriptable companion for a human power user; both readers are served below, agent
+first, because the agent is the one that cannot fall back to the dashboard.
+
+What it never does is sign. On-chain, owner-signed actions — approving a budget,
+rotating a key, moving funds — happen in the dashboard with the owner's passkey.
+This CLI reads, arranges and hands off.
 
 ## Are you an AI agent whose user has no Haven account yet?
 
@@ -22,6 +27,13 @@ npm i -g @haven_ai/cli@alpha   # or run ad hoc: npx @haven_ai/cli@alpha <command
 haven --help
 ```
 
+A bare `npx @haven_ai/cli` resolves to the **same version** as `@alpha`: the
+`latest` dist-tag now tracks the newest published release (owner decision
+2026-09-04, mechanism in `publish.yml` since #2536). Verified on 2026-09-06 from
+a clean directory — `@alpha` and the bare form both `0.1.34-alpha.0`, `@dev` the
+snapshot `0.0.0-dev.202609061037.7cf43bb`. The pinned `@alpha` stays in the
+one-liner above because every generated artifact quotes that string verbatim.
+
 The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 `--api <url>` or `HAVEN_API_URL` (e.g. a local backend at
 `http://localhost:3001`).
@@ -32,11 +44,56 @@ The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 > [`docs/research/haven-cli.md`](../../docs/research/haven-cli.md) for the full
 > design and roadmap.
 
-## Usage
+## Setting Haven up as an agent
+
+The path an agent walks, and where it stops. Four of the six steps in
+[`/for-agents.md`](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+are your user's; these are the two that are yours.
+
+```bash
+# 1. Get a scoped session. Prints a code and a link for your user to approve in
+#    a browser — you never see or ask for their password.
+npx -y @haven_ai/cli@alpha login --api <api-url>
+
+# 2. Create the agent and its budget. Prints the connector command the backend
+#    built, and the approval link to hand your user.
+haven agents connect --name <name> --budget 25 --token USDC --period 1440
+
+#    --run executes that command here instead of printing it for a human.
+haven agents connect --name <name> --budget 25 --token USDC --period 1440 --run
+```
+
+`haven guide` prints the whole runbook — the same text served at
+`/for-agents.md`, so you can read it without a network round trip.
+
+**What the session can and cannot do.** It is an allow-list, not your user's
+authority: it creates and manages agents and reads the account, and it **cannot**
+approve a budget, rotate a key, change a signer or move money. Those need your
+user, every time.
+
+**Funding is theirs too, and has a command anyway.** `haven wallets funding`
+prints the address, the amount **and which chain** — read the chain from there
+rather than assuming one. You can compose the message; you cannot send the money.
+
+**Every command takes `--json`**, and every refusal is a JSON object with a
+machine-readable `code`. The contract and the six exit codes are in
+[*For agents and scripts*](#for-agents-and-scripts) below — read that before
+branching on anything.
+
+**Pass `--api <url>` or set `HAVEN_API_URL` on the first command.** The session
+remembers the backend afterwards. There is a default and it is Haven's hosted
+**production** backend, so on any other deployment an omitted flag does not fail
+— it connects somewhere real and wrong.
+
+## Usage — the full command surface
+
+Everything the CLI does, for a human power user and as the reference an agent
+checks a command against. `haven --help` prints the same list.
 
 ```bash
 # auth
-haven login --email you@example.com      # password via prompt or HAVEN_PASSWORD
+haven login                              # browser device-code approval (the default)
+haven login --email you@example.com      # password path instead (prompt or HAVEN_PASSWORD)
 haven whoami                             # user, session expiry, API URL
 haven guide                              # the agent onboarding runbook
 haven logout

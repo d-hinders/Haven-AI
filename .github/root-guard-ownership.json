@@ -75,6 +75,18 @@
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
+      "path": "scripts/retired-rail-prose-ratchet.mjs",
+      "jobs": ["backend"],
+      "runsVia": ["lint:retired-rail-prose"],
+      "reason": "The shrink-only ratchet that stops the retired-rail prose phrase family growing back across packages/** (#2685). It scans all packages but only backend_checks runs it."
+    },
+    {
+      "path": "scripts/retired-rail-prose-ratchet.test.mjs",
+      "jobs": ["backend"],
+      "runsVia": ["lint:retired-rail-prose:test"],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
       "path": "scripts/generate-api-types.mjs",
       "jobs": ["backend"],
       "runsVia": ["check:api-types"],

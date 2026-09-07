@@ -44,8 +44,16 @@ describe('haven guide text (#2525)', () => {
     // The true version is the more urgent one — on a non-production
     // deployment an omitted flag does not fail, it connects somewhere real and
     // wrong — so the page says that instead.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10224)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10141)
+    //
+    // 0.1.36-alpha.0: +1 byte, and it is a single SPACE. #2617 and #2618 each
+    // added a sentence to step 1 and the seam between them lost the gap —
+    // "never a tag you pick.Do not hold the process open". Neither PR could
+    // see it, because each read only its own sentence; it surfaced when the
+    // release shard's SDK-delta claim was reviewed against the merged string.
+    // Caught before publication: 0.1.35-alpha.0 predates #2617, so the run-on
+    // never reached npm.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10225)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10142)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

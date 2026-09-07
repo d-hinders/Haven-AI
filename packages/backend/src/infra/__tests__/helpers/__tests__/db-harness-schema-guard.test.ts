@@ -50,7 +50,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import db from '../../../../db.js'
-import { assertWorkerSchemaAtHead, describeDb, initDbHarness } from '../db-harness.js'
+import {
+  assertWorkerSchemaAtHead,
+  describeDb,
+  initDbHarness,
+  WORKER_SCHEMA,
+} from '../db-harness.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -70,7 +75,7 @@ describeDb('assertWorkerSchemaAtHead (#2625)', () => {
       await db.query('ALTER TABLE agents ADD COLUMN __scratch_leak_2625 text')
       try {
         await expect(assertWorkerSchemaAtHead()).rejects.toThrow(
-          /different column\/index shape.*agents/s,
+          /different COLUMN or INDEX shape.*agents \(columns \+/s,
         )
       } finally {
         // Restore head so later tests/files on this worker are not poisoned
@@ -85,8 +90,11 @@ describeDb('assertWorkerSchemaAtHead (#2625)', () => {
         'CREATE INDEX __scratch_leak_2625_idx ON agents (delegate_address, created_at)',
       )
       try {
+        // Asserts INDEXES specifically. Matching the columns half here would
+        // have passed on the wrong evidence — the message names both halves,
+        // so a loose pattern cannot tell this test from the one above it.
         await expect(assertWorkerSchemaAtHead()).rejects.toThrow(
-          /different column\/index shape.*agents/s,
+          /different COLUMN or INDEX shape.*agents \(indexes \+__scratch_leak_2625_idx\)/s,
         )
       } finally {
         await db.query('DROP INDEX IF EXISTS __scratch_leak_2625_idx')
@@ -141,18 +149,77 @@ describeDb('fixture: a sibling afterAll throws with no explicit guard registrati
 })
 `
 
+/**
+ * Drop the fixture's leaked column from EVERY schema that has it, found by
+ * catalog query rather than by name (#2625).
+ *
+ * The child's `VITEST_WORKER_ID` is assigned by its own vitest, not by the
+ * env this process passes, so the exact schema it lands in is not something
+ * this test can predict — and on the run that matters most it has no message
+ * to read the name out of. Asking the catalog which schemas actually carry
+ * the column needs neither prediction nor a successful assertion.
+ */
+async function dropFixtureLeakEverywhere(): Promise<void> {
+  const { rows } = await db.query<{ table_schema: string }>(
+    "SELECT table_schema FROM information_schema.columns WHERE column_name = '__scratch_2625_fixture_leak'",
+  )
+  for (const { table_schema } of rows) {
+    await db.query(
+      `ALTER TABLE ${table_schema}.agents DROP COLUMN IF EXISTS __scratch_2625_fixture_leak`,
+    )
+  }
+}
+
 describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => {
   it(
     "reports the drift purely from importing db-harness.js — no call site opts in, and the sibling's throw does not suppress it",
     async () => {
       const fixturePath = path.join(__dirname, `hook-order-2625.${process.pid}.fixture.test.ts`)
       fs.writeFileSync(fixturePath, FIXTURE_SOURCE)
+      // BEFORE the spawn, not only after (#2625). The child's schema is a
+      // FIXED name that outlives the run, so a leak left by any earlier run —
+      // an aborted one, or a hand-run of the fixture — is still there when the
+      // child migrates. `headShape` is captured AFTER migrations, so a
+      // pre-existing leak is baked into head itself: the drift is present and
+      // the guard is correctly silent, and this test would fail claiming the
+      // guard does not fire. That made the reproduction vacuous exactly once
+      // it had succeeded. Cleaning first makes each run start from head.
+      await dropFixtureLeakEverywhere()
       let leakedSchema: string | null = null
       try {
+        // The child MUST NOT drift a schema a parent worker is using
+        // (#2625, found by review). A spawned `vitest run` always gets
+        // `VITEST_WORKER_ID=1`, so without this suffix the fixture drifted
+        // `test_w1` while the parent suite was still running files on it —
+        // and a co-running innocent file then failed with the guard's
+        // message, blamed for drift it did not cause. Reproduced twice out of
+        // two attempts: 6 and 7 mis-attributed failures.
+        //
+        // That is the mis-attribution #2616 and #2625 exist to remove,
+        // reintroduced by the test that proves they work. The suffix gives the
+        // child a schema of its own.
         const result = spawnSync(
           'npx',
           ['vitest', 'run', fixturePath, '--reporter=basic', '--no-file-parallelism'],
-          { cwd: process.cwd(), encoding: 'utf-8' },
+          {
+            // The PACKAGE root, derived from this file — never
+            // `process.cwd()` (#2625). vitest's cwd is whatever invoked the
+            // parent run: `npm run test -w packages/backend` gives the
+            // package, a repo-root `vitest --root packages/backend` gives the
+            // repo root. In the latter the child resolved the ROOT vitest
+            // config, which has no backend setup file and therefore no
+            // DATABASE_URL — so the child died before collection and this
+            // test failed on a missing guard message, blaming the guard for
+            // a spawn defect.
+            cwd: path.resolve(__dirname, '..', '..', '..', '..', '..'),
+            encoding: 'utf-8',
+            // A FIXED suffix, not one per pid. Per-pid gave the child a brand
+            // new schema every run, so it paid a full migration set each time
+            // — slow enough to blow the 60 s budget — and left one orphaned
+            // schema behind per run, which is the accumulation #2622 is about.
+            // A fixed name is created once and reused.
+            env: { ...process.env, HAVEN_TEST_SCHEMA_SUFFIX: '_guard2625' },
+          },
         )
         const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
 
@@ -166,22 +233,33 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
         // reported the drift, naming the affected table by its shape
         // difference — even though nothing in the fixture ever called
         // `assertWorkerSchemaAtHead()` itself.
-        const attribution = output.match(/this file left (test_w\d+) off migration head/)
+        // Allows the isolation suffix this test now sets. The pattern was
+        // `test_w\d+` and stopped matching the moment the child got its own
+        // schema — the fix to one defect breaking the assertion that proves
+        // another.
+        const attribution = output.match(/this file left (test_w[\w]+) off migration head/)
         expect(attribution).not.toBeNull()
         leakedSchema = attribution?.[1] ?? null
-        expect(output).toContain('different column/index shape: agents')
+        expect(output).toMatch(/different COLUMN or INDEX shape: agents \(columns \+__scratch/)
+        // And the child used ITS OWN schema, not the one THIS process is
+        // bound to — the whole point of the isolation suffix. Asserted
+        // against `WORKER_SCHEMA` rather than a name pattern: the pattern
+        // form was `/_guard2625_/`, with a trailing underscore that no
+        // schema name can ever have, so it could only fail. Comparing to the
+        // parent's actual schema states the property directly and cannot
+        // drift from how the name is spelled.
+        expect(leakedSchema).toBe(`${WORKER_SCHEMA}${'_guard2625'}`)
+        expect(leakedSchema).not.toBe(WORKER_SCHEMA)
       } finally {
         fs.rmSync(fixturePath, { force: true })
-        // The fixture's drift was never restored (that is the point of the
-        // reproduction) — repair it here so it cannot poison a later file on
-        // whichever worker the child landed in, the way #2616's own
-        // reservoir did. Fully qualified because the child's worker schema
-        // is not necessarily this file's own.
-        if (leakedSchema) {
-          await db.query(
-            `ALTER TABLE ${leakedSchema}.agents DROP COLUMN IF EXISTS __scratch_2625_fixture_leak`,
-          )
-        }
+        // The fixture's drift is never restored by the fixture (that is the
+        // point of the reproduction) — repair it here so it cannot poison a
+        // later file on whichever worker the child landed in, the way #2616's
+        // own reservoir did. UNCONDITIONAL: the earlier version repaired only
+        // the schema it had parsed out of the child's message, so the run that
+        // needed cleaning most — the one where the guard did NOT report, and
+        // there was no message to parse — was the one it skipped.
+        await dropFixtureLeakEverywhere()
       }
     },
     60_000,

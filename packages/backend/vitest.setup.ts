@@ -1,4 +1,5 @@
 import { DEFAULT_TEST_DATABASE_URL } from './src/infra/__tests__/helpers/db-availability.js'
+import { workerSchemaName } from './src/infra/__tests__/helpers/worker-schema.js'
 
 // Default matches `docker compose up -d postgres` AND the ci.yml service
 // container (the old postgres:postgres/haven_test default matched neither —
@@ -36,9 +37,13 @@ process.env.DB_POOL_MAX ??= '5'
 // extension needs public here (verified: only plpgsql, in pg_catalog;
 // gen_random_uuid is core PG13+), and the migrations create everything a
 // repository touches inside the worker schema.
+//
+// The name comes from `workerSchemaName()` (#2625) — the ONE definition,
+// shared with the db-harness guard that fingerprints this same schema. A
+// second copy of the expression lived here and drifted from that one,
+// silently disabling the guard; see that module's comment.
 {
   const url = new URL(process.env.DATABASE_URL)
-  const worker = process.env.VITEST_WORKER_ID ?? '0'
-  url.searchParams.set('options', `-c search_path=test_w${worker}`)
+  url.searchParams.set('options', `-c search_path=${workerSchemaName()}`)
   process.env.DATABASE_URL = url.toString()
 }

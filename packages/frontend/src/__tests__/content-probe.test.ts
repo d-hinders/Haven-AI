@@ -122,7 +122,7 @@ describe('readContentProbe', () => {
   })
 
   it('reproduces the exact /agents shape the guard refuses', () => {
-    // Three `AllowanceBarSkeleton`s in three `AgentCard`s, transcribed from
+    // Three budget-loading rows in three `AgentCard`s, transcribed from
     // `components/agent-panel/{AllowanceBar,AgentCard}.tsx` as this change
     // leaves them. This is the DOM behind the measured 886 chars / 150 elements
     // / 1856px capture.

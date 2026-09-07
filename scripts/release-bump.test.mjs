@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -14,6 +18,42 @@ import {
   manifestTableViolations,
   rewriteManifestTable,
 } from './release-manifest-doc.mjs'
+import {
+  formatSnapshotVersion,
+  isSnapshotVersion,
+  snapshotModeViolation,
+} from './release-snapshot-version.mjs'
+import {
+  CONNECTOR_CHANNEL_CONSTANT,
+  CONNECTOR_CHANNEL_FILE,
+  channelForVersion,
+  publishWorkflowChannelScript,
+  readConnectorChannel,
+  rewriteConnectorChannel,
+} from './release-channel.mjs'
+import { execFile } from 'node:child_process'
+import { readdir } from 'node:fs/promises'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * Any `@haven_ai/connect@<tag>` literal — the shape #2423 removed from the
+ * published packages' source. Deliberately matches ANY tag, not just `alpha`:
+ * a hard-coded `@dev` would be the same defect pointing the other way.
+ */
+const HARD_CODED_CHANNEL = /@haven_ai\/connect@[a-z][a-z0-9-]*/
+
+/** Every file under `dir`, recursively. */
+async function walk(dir) {
+  const out = []
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...(await walk(full)))
+    else out.push(full)
+  }
+  return out
+}
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -277,6 +317,61 @@ async function manualFallbackBlock() {
   return readme.slice(start, end)
 }
 
+/**
+ * The PROD-channel build step of `publish.yml`, and ONLY it (#2421).
+ *
+ * The three `#1791` guards below compare the emergency manual fallback in
+ * `scripts/README.md` against "what publish.yml builds". That used to be the
+ * whole file, because the file had one build step. Since #2421 it has two —
+ * the prod step, and the dev-channel snapshot step, which builds `cli`
+ * explicitly because `release-bump.mjs` wipes its dist and never rebuilds it.
+ * A whole-file scan therefore reads `['cli', 'sdk', 'signer', 'mcp',
+ * 'connect', 'cli']` and fails against a `scripts/README.md` that is not
+ * wrong: the manual fallback is the break-glass substitute for the PROD
+ * publish path, so the prod step is the only thing it can meaningfully
+ * mirror.
+ *
+ * Narrowing a guard is how guards die, so the narrowing is pinned: this
+ * asserts the step it selected really carries the prod `if:` condition. If
+ * someone renames the step, drops the condition, or points the dev step at
+ * this name, the helper fails loudly rather than silently returning the wrong
+ * step's build list — or an empty one, which would make every assertion below
+ * vacuously true.
+ */
+function prodBuildStep(workflow) {
+  return workflowStep(workflow, 'Build published packages in dependency order', 'prod')
+}
+
+/** The dev-channel snapshot step, selected and pinned the same way. */
+function devSnapshotStep(workflow) {
+  return workflowStep(workflow, 'Bump the throwaway tree to a snapshot version and build', 'dev')
+}
+
+function workflowStep(workflow, name, channel) {
+  // BRITTLE BY CONSTRUCTION, and deliberately so: this reads YAML structure
+  // with string matching, because this suite has no third-party imports. The
+  // `\n      - name:` sentinel below assumes the six-space step indentation
+  // `publish.yml` uses today. An unrelated reformat of that file — a job
+  // rename, a nesting change, a switch to flow style — would move it.
+  //
+  // That is acceptable ONLY because every failure here is a throw. If you are
+  // editing this because it broke, the fix is to re-point the matcher at the
+  // real structure, never to relax an assertion until it passes: these helpers
+  // feed the guards for the production publish path, and a matcher that
+  // silently selects nothing turns all of them green.
+  const start = workflow.indexOf(`- name: ${name}`)
+  assert.notEqual(start, -1, `publish.yml no longer has a step named "${name}"`)
+  const rest = workflow.slice(start)
+  const next = rest.indexOf('\n      - name:')
+  const step = next === -1 ? rest : rest.slice(0, next)
+  assert.match(
+    step,
+    new RegExp(`if: steps\\.channel\\.outputs\\.channel == '${channel}'`),
+    `the step "${name}" is no longer the ${channel}-channel one — rescope this guard rather than deleting the assertion`,
+  )
+  return step
+}
+
 test('the manual fallback publishes every published package, and only those (#1791)', async () => {
   const block = await manualFallbackBlock()
   const expected = await publishedPackageDirs()
@@ -321,8 +416,15 @@ test('the manual fallback builds in the order publish.yml builds in (#1791)', as
     [...text.matchAll(/npm run build -w packages\/(\S+)/g)].map((m) => m[1])
 
   const documented = order(block)
-  const actual = order(workflow)
+  // Scoped to the PROD step since #2421 — see prodBuildStep() for why, and for
+  // what stops the scoping from quietly selecting nothing.
+  const actual = order(prodBuildStep(workflow))
   assert.ok(actual.length > 0, 'publish.yml no longer builds packages with `npm run build -w`')
+  assert.equal(
+    actual.length,
+    (await publishedPackageDirs()).length,
+    'the prod build step no longer builds every published package — the scoping above may have selected the wrong step',
+  )
   assert.deepEqual(
     documented,
     actual,
@@ -604,4 +706,1187 @@ test('the REAL manifest table agrees with the REAL source constants (#1790)', as
     [],
     'the Supported Runtime Manifest table has drifted from the version constants it mirrors',
   )
+})
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Dev-channel snapshots (#2421, epic #2420)
+ *
+ * `.github/workflows/publish.yml` publishes a snapshot of every published
+ * package on each package-touching push to `dev`, under the `dev` dist-tag.
+ * The version shape and the mode check live in release-snapshot-version.mjs
+ * because two consumers must agree about them: the workflow PRODUCES the
+ * version, this script VALIDATES it.
+ *
+ * The invariant these cases exist for: a snapshot must never be able to land
+ * on `alpha` or `latest`, and the `main` path must never publish a
+ * 0.0.0-dev.* version. publish.yml holds the first two enforcement points;
+ * this file holds the third, and it is the one that matters when a HUMAN is
+ * at the keyboard — a snapshot version committed to a release branch would
+ * ride the dev → main promotion straight onto the production channel.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const SNAP = '0.0.0-dev.202609021905.abc1234'
+
+test('the snapshot version has the documented shape (#2421)', () => {
+  assert.equal(
+    formatSnapshotVersion({ timestamp: '202609021905', sha: 'abc1234' }),
+    SNAP,
+  )
+  assert.ok(isSnapshotVersion(SNAP))
+  // Longer short-shas are legal — `git rev-parse --short` lengthens as a
+  // repository grows, and a version that stops validating on a busy Tuesday
+  // is a guard that fails for the wrong reason.
+  assert.ok(isSnapshotVersion(formatSnapshotVersion({ timestamp: '202609021905', sha: 'abc1234def90' })))
+  // An uppercase sha is normalised rather than refused.
+  assert.equal(formatSnapshotVersion({ timestamp: '202609021905', sha: 'ABC1234' }), SNAP)
+})
+
+test('a malformed timestamp or sha is refused, not silently normalised (#2421)', () => {
+  assert.throws(() => formatSnapshotVersion({ timestamp: '2026090219', sha: 'abc1234' }), /12 digits/)
+  assert.throws(() => formatSnapshotVersion({ timestamp: '202609021905', sha: 'abcd' }), /7-40 hex/)
+  assert.throws(() => formatSnapshotVersion({ timestamp: '202609021905', sha: 'zzzzzzz' }), /7-40 hex/)
+})
+
+test('an all-digit short sha with a leading zero is refused — semver rejects it (#2421)', () => {
+  // Not a hypothetical and not cosmetic: semver forbids a leading zero in a
+  // NUMERIC prerelease identifier, so `0.0.0-dev.<ts>.0123456` is not a valid
+  // version at all. Verified against the workspace semver: it returns null for
+  // that string and a version for `…​.1234567`. Roughly 1 commit in 268 —
+  // first character '0' (1/16), remaining six all digits ((10/16)^6). Refused
+  // here, where the message can say what to do,
+  // rather than 90 seconds later inside the bump with "not a valid semver
+  // string".
+  assert.throws(() => formatSnapshotVersion({ timestamp: '202609021905', sha: '0123456' }), /leading zero/)
+  // All digits WITHOUT a leading zero is a legal numeric identifier and must
+  // still be accepted — refusing it too would be the over-broad guard.
+  assert.equal(
+    formatSnapshotVersion({ timestamp: '202609021905', sha: '1234567' }),
+    '0.0.0-dev.202609021905.1234567',
+  )
+})
+
+test('MUTATION PROOF: the mode check refuses a snapshot version WITHOUT --snapshot (#2421)', () => {
+  // The direction that protects production. A 0.0.0-dev.* version reaching a
+  // release branch is not caught by anything else in the repository: the
+  // lockfile guard, the manifest-table check and the bundle verifier are all
+  // happy with it, and publish.yml would then see it on the `main` ref.
+  const violation = snapshotModeViolation(SNAP, { snapshot: false })
+  assert.match(String(violation), /alpha\/latest|alpha or latest/)
+  // And it is the SNAPSHOT-ness that trips it, not the string's novelty:
+  // ordinary release versions pass the same call unchanged.
+  for (const ok of ['0.1.29-alpha.0', '0.2.0', '1.0.0-beta.3']) {
+    assert.equal(snapshotModeViolation(ok, { snapshot: false }), null, ok)
+  }
+})
+
+test('MUTATION PROOF: the mode check refuses a real version WITH --snapshot (#2421)', () => {
+  // The other direction, which protects the dev channel rather than prod: a
+  // snapshot run that somehow carried a real version would publish that real
+  // version out of an unreviewed `dev` commit.
+  assert.match(String(snapshotModeViolation('0.1.29-alpha.0', { snapshot: true })), /--snapshot requires/)
+  // A version that merely LOOKS snapshot-ish is not good enough either — the
+  // prefix is not the shape.
+  assert.match(String(snapshotModeViolation('0.0.0-dev.abc', { snapshot: true })), /--snapshot requires/)
+  assert.equal(snapshotModeViolation(SNAP, { snapshot: true }), null)
+})
+
+test('the bump wires the mode check in BEFORE it writes anything (#2421)', async () => {
+  // A check that runs after the first write leaves a half-bumped tree behind
+  // on refusal, and — worse for the invariant — proves nothing about a run
+  // that was going to fail anyway. Assert on the ORDER in the source, because
+  // no unit test of a pure function can see it.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const check = source.indexOf('snapshotModeViolation(')
+  const firstWrite = source.indexOf('await updatePackageVersion(')
+  assert.ok(check !== -1, 'release-bump.mjs no longer calls snapshotModeViolation')
+  assert.ok(firstWrite !== -1, 'could not find the first package.json write')
+  assert.ok(
+    check < firstWrite,
+    'release-bump.mjs checks snapshot mode AFTER it starts writing — a refusal would leave a half-bumped tree',
+  )
+  // The flag is read from argv, not inferred from the version. Inferring it
+  // would make the check tautological: every 0.0.0-dev.* version would define
+  // itself as an intentional snapshot.
+  assert.match(source, /process\.argv\.includes\('--snapshot'\)/)
+})
+
+test('the snapshot sign-off does not print the release checklist (#2421)', async () => {
+  // The release sign-off tells the operator to write a CASP shard, run the
+  // coupling gate and open a PR from a release branch. In a snapshot run there
+  // is no branch and no commit — the CI tree is discarded — so printing it
+  // would be an instruction nobody can follow, in the logs of a job that has
+  // already done everything asked of it.
+  const block = await doneBlock()
+  const snapshotBranch = block.slice(block.indexOf('if (snapshot) {'), block.indexOf('log(`\\n  Released:'))
+  assert.ok(snapshotBranch.length > 100, 'the sign-off no longer has a snapshot branch')
+  const printed = emitted(snapshotBranch)
+  for (const forbidden of ['casp-changelog', 'release branch', 'docs:coupling']) {
+    assert.ok(!printed.includes(forbidden), `the snapshot sign-off must not mention "${forbidden}"`)
+  }
+  // It must still say the thing that is true and non-obvious.
+  assert.match(printed, /THROWAWAY/)
+})
+
+test('the dev-channel snapshot BUILDS every package it publishes (#2421)', async () => {
+  // The defect this exists for, found by hand during #2421 and nearly shipped:
+  // `release-bump.mjs` wipes ALL five dists (`wipeAllDists()` iterates
+  // `PACKAGES`) but deliberately does not rebuild `cli` — its builds exist to
+  // verify the connect bundle, and `cli` inlines nothing that check reads.
+  // On the PROD channel that is harmless, because publish.yml's own build step
+  // rebuilds every published package from a clean checkout. On the DEV channel
+  // the bump IS the build, so `@haven_ai/cli` would have been published with an
+  // empty `dist` — its `files` ships `dist` and its `main` points into it, so
+  // the tarball would install and then fail to run.
+  //
+  // Nothing else in the repository can see this: the wipe list and the build
+  // list live in different files, and both are individually correct.
+  const expected = await publishedPackageDirs()
+  const workflow = await readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
+  const bump = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
+  // Both derivations below read CALL STYLE, not behaviour, and are therefore
+  // coupled to how release-bump.mjs happens to spell its builds today:
+  // `run('npm', ['run', 'build', '-w', 'packages/sdk'])`. Rewriting those calls
+  // — a helper, a loop over PACKAGES, a template literal — would stop matching
+  // without changing what is built. The explicit non-empty assertions below
+  // exist for exactly that: a zero-match must fail as a zero-match, and not be
+  // rescued by the accident that "no package is built" also happens to trip the
+  // missing-packages assertion at the end. Guaranteed, not incidental.
+  const builtByBump = [...bump.matchAll(/'build', '-w', 'packages\/([\w-]+)'/g)].map((m) => m[1])
+  assert.ok(
+    builtByBump.length > 0,
+    'read no builds out of release-bump.mjs — its build calls were reworded and this ' +
+      'derivation is now blind. Re-point the matcher; do not relax the assertion.',
+  )
+  // connect is built by invoking tsup in its directory rather than through the
+  // workspace script — see the build-order comment in release-bump.mjs.
+  if (/join\(ROOT, 'packages', 'connect'\)/.test(bump)) builtByBump.push('connect')
+
+  const builtByStep = [...devSnapshotStep(workflow).matchAll(/npm run build -w packages\/(\S+)/g)]
+    .map((m) => m[1])
+  assert.ok(
+    builtByStep.length > 0,
+    'read no builds out of the dev snapshot step — the step exists (devSnapshotStep asserted ' +
+      'that) but this matcher found nothing in it. Re-point the matcher.',
+  )
+
+  const built = new Set([...builtByBump, ...builtByStep])
+  assert.deepEqual(
+    expected.filter((pkg) => !built.has(pkg)),
+    [],
+    'the dev-channel snapshot publishes a package it never builds. release-bump.mjs wipes every ' +
+      'dist; anything it does not rebuild must be built explicitly in the snapshot step, or the ' +
+      'published tarball ships an empty dist.',
+  )
+})
+/* ── The publish.yml shell guards, pinned (#2421) ─────────────────────────────
+ *
+ * Enforcement points 1 and 2 for the invariant "a snapshot must never be able
+ * to land on `alpha` or `latest`, and the `main` path must never publish a
+ * `0.0.0-dev.*` version" live in bash inside `.github/workflows/publish.yml`.
+ * The third (`snapshotModeViolation`) is pinned above by ordinary unit tests.
+ *
+ * These two were originally proven by hand, once. A review on this PR called
+ * that out and was right: a guard proven once by hand and not pinned in CI
+ * regresses silently on the next PR that touches the file it lives in — and
+ * this file is the production publish path. So the real shell is EXTRACTED
+ * from the workflow and EXECUTED here.
+ *
+ * Extracted, never copied. A second copy of the guard in this file would drift
+ * from the workflow and then pass while production failed — the exact defect
+ * `.github/money-path-globs.json` exists to prevent one directory over. If the
+ * extraction stops finding the step or the function, these tests fail loudly
+ * rather than silently testing nothing.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A step's `run: |` block, dedented, without a YAML dependency.
+ *
+ * Deliberately not `yaml`-parsed: this suite has no third-party imports and
+ * runs as a bare `node --test` in CI (`.github/workflows/ci.yml`). The block
+ * shape is fixed, and every failure mode here is a throw, not a silent empty
+ * string.
+ */
+function stepRunScript(workflow, name) {
+  const lines = workflow.split('\n')
+  const startIdx = lines.findIndex((l) => l.includes(`- name: ${name}`))
+  assert.notEqual(startIdx, -1, `publish.yml has no step named "${name}"`)
+
+  let runIdx = -1
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^\s*- name: /.test(lines[i])) break
+    if (/^\s*run: \|\s*$/.test(lines[i])) { runIdx = i; break }
+  }
+  assert.notEqual(runIdx, -1, `the step "${name}" has no block-scalar \`run: |\``)
+
+  // KNOWN LIMIT: the loop below ends the block at the first line indented no
+  // further than `run:`. A line inside the script that happens to look like
+  // `- name:` at that indent would truncate the body EARLY and silently —
+  // returning a short script rather than throwing, which is the one failure
+  // mode this design set out to avoid. No such line exists in publish.yml
+  // today and the shell there is indented well past it. If you add one, this
+  // reads less than it should; the tests that EXECUTE the extracted script
+  // would fail on the truncation, which is the backstop — with one gap worth
+  // knowing: a truncation confined to the COSMETIC TAIL (the step-summary
+  // table and the final exit-status block, after the publish loop has already
+  // run) could still leave the executed guards behaving correctly and so
+  // escape those tests. The guards themselves are upstream of that point, so
+  // the invariant stays covered; the reporting would not be.
+  const runIndent = lines[runIdx].match(/^\s*/)[0].length
+  const body = []
+  for (let i = runIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '') { body.push(''); continue }
+    if (line.match(/^\s*/)[0].length <= runIndent) break
+    body.push(line)
+  }
+  while (body.length && body[body.length - 1] === '') body.pop()
+  assert.ok(body.length > 0, `the step "${name}" has an empty run block`)
+  const dedent = Math.min(...body.filter((l) => l !== '').map((l) => l.match(/^\s*/)[0].length))
+  return body.map((l) => (l === '' ? '' : l.slice(dedent))).join('\n') + '\n'
+}
+
+/** Run a script under bash and return its exit code and combined output. */
+function runBash(script, { env = {}, args = [] } = {}) {
+  const file = join(tmpdir(), `haven-2421-${randomUUID()}.sh`)
+  writeFileSync(file, script)
+  try {
+    const r = spawnSync('bash', [file, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    })
+    return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
+  } finally {
+    rmSync(file, { force: true })
+  }
+}
+
+async function publishWorkflow() {
+  return readFile(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8')
+}
+
+/** The channel-resolution guard, run for real. */
+function resolveChannel(script, REF_NAME, REQUESTED) {
+  const outFile = join(tmpdir(), `haven-2421-out-${randomUUID()}`)
+  writeFileSync(outFile, '')
+  try {
+    const r = runBash(script, { env: { REF_NAME, REQUESTED, GITHUB_OUTPUT: outFile } })
+    return { ...r, output: readFileSync(outFile, 'utf8').trim() }
+  } finally {
+    rmSync(outFile, { force: true })
+  }
+}
+
+/** `assert_publish_allowed()` lifted out of the publish step and invoked. */
+function assertPublishAllowedScript(workflow) {
+  const step = stepRunScript(workflow, 'Publish packages whose version is not yet on npm')
+  const start = step.indexOf('assert_publish_allowed() {')
+  assert.notEqual(start, -1, 'the publish step no longer defines assert_publish_allowed()')
+  const rest = step.slice(start).split('\n')
+  const collected = []
+  let depth = 0
+  for (const line of rest) {
+    collected.push(line)
+    depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length
+    if (depth === 0 && collected.length > 1) break
+  }
+  assert.equal(depth, 0, 'could not find the end of assert_publish_allowed()')
+  return `set -euo pipefail\n${collected.join('\n')}\nassert_publish_allowed "$1" "$2" "$3"\n`
+}
+
+const SNAPSHOT_V = '0.0.0-dev.202609021905.abc1234'
+const REAL_V = '0.1.29-alpha.0'
+
+test('GUARD 1/3: the ref decides the channel, and a mismatch is refused (#2421)', async () => {
+  // The ONLY route by which `dev`-branch code could reach `alpha`: a
+  // workflow_dispatch of channel=prod on the `dev` ref skips the snapshot bump
+  // and publishes the committed release version under its own prerelease tag.
+  // Nothing downstream can see it, because by then the version and the tag both
+  // look entirely ordinary.
+  const script = stepRunScript(await publishWorkflow(), 'Resolve the publish channel')
+
+  const refused = [
+    ['dev', 'prod'],       // ← the alpha case
+    ['main', 'dev'],
+    ['feature/x', 'auto'],
+    ['release/0.1.29', 'auto'],
+  ]
+  for (const [ref, requested] of refused) {
+    const { code, out } = resolveChannel(script, ref, requested)
+    assert.notEqual(code, 0, `ref=${ref} channel=${requested} must be REFUSED, got exit ${code}`)
+    assert.match(out, /GUARD:/, `the refusal for ref=${ref} channel=${requested} must say why`)
+  }
+
+  // The control half. A guard that refuses everything protects nothing, and
+  // these are the four combinations the workflow must actually run on.
+  for (const [ref, requested, expected] of [
+    ['dev', 'auto', 'dev'],
+    ['dev', 'dev', 'dev'],
+    ['main', 'auto', 'prod'],
+    ['main', 'prod', 'prod'],
+  ]) {
+    const { code, output } = resolveChannel(script, ref, requested)
+    assert.equal(code, 0, `ref=${ref} channel=${requested} must be ALLOWED`)
+    assert.equal(output, `channel=${expected}`, `ref=${ref} must resolve to ${expected}`)
+  }
+})
+
+test('GUARD 2/3: no (channel, version, tag) triple reaches npm unchecked (#2421)', async () => {
+  const script = assertPublishAllowedScript(await publishWorkflow())
+  const run = (channel, version, tag) => runBash(script, { args: [channel, version, tag] })
+
+  // THE INVARIANT, both directions. Each of these is a real defect, not
+  // symmetry: a snapshot on alpha/latest is a throwaway build on the channel
+  // users install from, and a real version on `dev` is an unreviewed `dev`
+  // commit published under a version people can pin.
+  const refused = [
+    ['prod', SNAPSHOT_V, 'alpha'],   // ← the alpha case
+    ['prod', SNAPSHOT_V, 'latest'],  // ← the latest case
+    ['prod', SNAPSHOT_V, 'dev'],
+    ['prod', REAL_V, 'dev'],
+    ['dev', REAL_V, 'alpha'],
+    ['dev', REAL_V, 'dev'],
+    ['dev', SNAPSHOT_V, 'alpha'],
+    ['dev', SNAPSHOT_V, 'latest'],
+    ['staging', REAL_V, 'alpha'],    // an unknown channel fails closed
+  ]
+  for (const [channel, version, tag] of refused) {
+    const { code, out } = run(channel, version, tag)
+    assert.notEqual(code, 0, `(${channel}, ${version}, ${tag}) must be REFUSED, got exit ${code}`)
+    assert.match(out, /GUARD:/, `(${channel}, ${version}, ${tag}) must say why it was refused`)
+  }
+
+  // The control half again — the two shapes production actually publishes, and
+  // the one the dev channel does.
+  for (const [channel, version, tag] of [
+    ['prod', REAL_V, 'alpha'],
+    ['prod', '0.2.0', 'latest'],
+    ['dev', SNAPSHOT_V, 'dev'],
+  ]) {
+    const { code, out } = run(channel, version, tag)
+    assert.equal(code, 0, `(${channel}, ${version}, ${tag}) must be ALLOWED, got exit ${code}: ${out}`)
+  }
+})
+
+test('the guard is called before every publish, and outside the failure isolation (#2421)', async () => {
+  // Executing the function proves what it decides; it cannot prove it is
+  // WIRED IN. A guard defined and never called is the failure mode that looks
+  // most like success. Two structural facts carry that, and both are cheap
+  // literal checks over a file with no other legitimate use of these strings.
+  const step = stepRunScript(await publishWorkflow(), 'Publish packages whose version is not yet on npm')
+
+  const call = step.indexOf('assert_publish_allowed "$channel" "$version" "$tag"')
+  assert.notEqual(call, -1, 'the publish loop no longer CALLS assert_publish_allowed')
+
+  // Before the skip check: a version that should never have been built must
+  // fail the job loudly, not be reported as "already on npm" because someone
+  // got there first.
+  const skip = step.indexOf('npm view "$name@$version"')
+  assert.notEqual(skip, -1, 'the publish loop no longer has the already-on-npm skip')
+  assert.ok(call < skip, 'assert_publish_allowed must run BEFORE the already-on-npm skip')
+
+  // And before the publish itself.
+  const publish = step.indexOf('npm publish -w')
+  assert.notEqual(publish, -1, 'the publish loop no longer publishes')
+  assert.ok(call < publish, 'assert_publish_allowed must run BEFORE npm publish')
+
+  // Deliberately NOT wrapped in the per-package `if ... ; then` isolation that
+  // `npm publish` gets (#1159): a package failing to publish is an incident, a
+  // triple that should be impossible is a defect in this file, and continuing
+  // the loop would publish four more of them.
+  // WHAT THIS TEST DOES NOT PROVE, stated because it previously pretended to.
+  //
+  // An earlier version asserted here that the call is UNCONDITIONAL, by
+  // checking the call line for `if` / `||` / `&&`. Review defeated it twice
+  // over: wrapping the call in a `case "$channel" in dev) : ;; *) …` skips the
+  // guard for the dev channel while `indexOf` still finds the call and the
+  // line contains none of those tokens; and appending `&` makes it
+  // fire-and-forget, so `set -e` never sees the failure. Both mutations
+  // published five packages while this file reported zero failures.
+  //
+  // A regex over source text can only answer "does this string appear". The
+  // question that matters is "is the guard reached on every path", which is
+  // behavioural — so it is answered by executing the loop, in the test below.
+  // Do not re-add a textual unconditionality check here; widening the pattern
+  // is what produced two false green results.
+})
+
+/**
+ * Run the REAL publish loop, with `npm` stubbed, and report what it published.
+ *
+ * This is the behavioural answer to "is the guard reached on every path" —
+ * the question two successive TEXTUAL assertions got wrong (see the note in
+ * the structural test above). It builds a throwaway tree with five
+ * package.json files at the version under test, puts a recording `npm` stub
+ * on PATH whose `view` always exits non-zero (nothing is on the registry, so
+ * the loop always proceeds to the publish it is being tested on), executes
+ * the step's own shell, and returns every publish that actually happened.
+ *
+ * A guard that is skipped, backgrounded, or deleted shows up here as
+ * PUBLISHES THAT SHOULD NOT EXIST, whatever the source text looks like.
+ */
+function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
+  const dir = join(tmpdir(), `haven-2421-loop-${randomUUID()}`)
+  mkdirSync(join(dir, 'bin'), { recursive: true })
+  for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
+    mkdirSync(join(dir, 'packages', p), { recursive: true })
+    writeFileSync(
+      join(dir, 'packages', p, 'package.json'),
+      JSON.stringify({ name: `@haven_ai/${p}`, version }),
+    )
+  }
+  const log = join(dir, 'npm.log')
+  writeFileSync(log, '')
+  writeFileSync(
+    join(dir, 'bin', 'npm'),
+    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  dist-tag) exit ${distTagExit} ;;\n  *) exit 0 ;;\nesac\n`,
+  )
+  spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
+  const summary = join(dir, 'summary.md')
+  writeFileSync(summary, '')
+
+  const file = join(dir, 'step.sh')
+  writeFileSync(file, stepRunScript(workflow, 'Publish packages whose version is not yet on npm'))
+
+  const env = {
+    ...process.env,
+    PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+    HAVEN_PUBLISH_CHANNEL: channel,
+    GITHUB_STEP_SUMMARY: summary,
+  }
+  if (tag) env.HAVEN_PUBLISH_TAG = tag
+  else delete env.HAVEN_PUBLISH_TAG
+
+  const r = spawnSync('bash', [file], { cwd: dir, encoding: 'utf8', env })
+  const calls = readFileSync(log, 'utf8').split('\n')
+  const published = calls.filter((l) => l.startsWith('publish'))
+  // #2536: every `npm dist-tag add <pkg>@<v> latest` the step actually made.
+  // Read from the same recorder as `published`, so a guard that is skipped,
+  // backgrounded or deleted shows up here as a TAG MOVE THAT SHOULD NOT EXIST
+  // — whatever the source text says.
+  const distTags = calls.filter((l) => l.startsWith('dist-tag'))
+  rmSync(dir, { recursive: true, force: true })
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, distTags }
+}
+
+/**
+ * Run the lifted `promote_latest()` with a STUBBED npm on PATH.
+ *
+ * Not a convenience. The first version of this test ran the real `npm`, which
+ * issued a live `PUT https://registry.npmjs.org/.../dist-tags/latest` against a
+ * real package and was stopped only by a 401. A unit test for a guard must not
+ * be one credential away from mutating the registry it is describing.
+ */
+function runPromoteLatest(script, args, { viewExit = 0 } = {}) {
+  const dir = join(tmpdir(), `haven-2536-pl-${randomUUID()}`)
+  mkdirSync(join(dir, 'bin'), { recursive: true })
+  const log = join(dir, 'npm.log')
+  writeFileSync(log, '')
+  writeFileSync(
+    join(dir, 'bin', 'npm'),
+    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit ${viewExit} ;;\n  *) exit 0 ;;\nesac\n`,
+  )
+  spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
+  try {
+    const r = runBash(script, { args, env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}` } })
+    return { ...r, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/** `promote_latest()` lifted out of the publish step and invoked (#2536). */
+function promoteLatestScript(workflow) {
+  const step = stepRunScript(workflow, 'Publish packages whose version is not yet on npm')
+  const start = step.indexOf('promote_latest() {')
+  assert.notEqual(start, -1, 'the publish step no longer defines promote_latest()')
+  const rest = step.slice(start).split('\n')
+  const collected = []
+  let depth = 0
+  for (const line of rest) {
+    collected.push(line)
+    depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length
+    if (depth === 0 && collected.length > 1) break
+  }
+  assert.equal(depth, 0, 'could not find the end of promote_latest()')
+  return `set -euo pipefail\n${collected.join('\n')}\npromote_latest "$1" "$2" "$3" "$4"\n`
+}
+
+test('GUARD 2/3 (behavioural): a forbidden combination PUBLISHES NOTHING (#2421)', async () => {
+  // The invariant, proven by execution rather than by reading. Each row is a
+  // real way the wrong artifact could reach the wrong channel; every one must
+  // end with a failed job and an EMPTY publish list.
+  const workflow = await publishWorkflow()
+
+  for (const [label, args] of [
+    ['prod channel sees a snapshot version', { channel: 'prod', version: SNAPSHOT_V, tag: null }],
+    ['dev channel forced to the alpha tag', { channel: 'dev', version: SNAPSHOT_V, tag: 'alpha' }],
+    ['dev channel forced to latest', { channel: 'dev', version: SNAPSHOT_V, tag: 'latest' }],
+    ['dev channel sees a real version', { channel: 'dev', version: REAL_V, tag: 'dev' }],
+    ['an unknown channel', { channel: 'staging', version: REAL_V, tag: null }],
+  ]) {
+    const { code, out, published } = runPublishLoop(workflow, args)
+    assert.notEqual(code, 0, `${label}: the job must FAIL, got exit ${code}`)
+    assert.deepEqual(
+      published,
+      [],
+      `${label}: the guard was bypassed — ${published.length} package(s) were published. ` +
+        'This is the failure a textual "is the call unconditional" assertion cannot see.',
+    )
+    // Prove the GUARD refused, not merely that something failed. Without this,
+    // a mutation making the script die before it ever reaches the guard — a
+    // typo, a missing variable, an early `exit 1` — satisfies both assertions
+    // above while proving nothing about the invariant. The "permitted
+    // combinations" test below happens to close that hole today, but only as a
+    // side effect of existing; coverage that depends on another test's
+    // existence is not coverage.
+    assert.match(
+      out,
+      /GUARD:/,
+      `${label}: the job failed, but not with a GUARD refusal — it may have died before ` +
+        'reaching the guard, which would make the assertions above vacuous.',
+    )
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Connector channel (#2423, slice 3 of epic #2420)
+//
+// The published packages' "re-run `npx @haven_ai/connect@<tag>`" hints render
+// from one build-time constant. Two things can go wrong and they fail
+// differently, so they are guarded separately:
+//
+//   1. the bump script's rule for choosing the channel drifts away from
+//      publish.yml's rule for choosing the `npm publish --tag` — the packages
+//      would then tell a user to install from a channel they were not
+//      published under;
+//   2. the bump stops writing the constant at all — the constant would sit at
+//      the previous release's channel, which is right until the first release
+//      that changes channel and silently wrong from then on.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('channelForVersion implements the documented rule', () => {
+  assert.equal(channelForVersion('0.1.34-alpha.0'), 'alpha')
+  assert.equal(channelForVersion('0.0.0-dev.202609021200.abc1234'), 'dev')
+  assert.equal(channelForVersion('0.2.0'), 'latest')
+  assert.equal(channelForVersion('1.0.0-beta.2'), 'beta')
+  // A prerelease label with no trailing dot segment is still the whole label.
+  assert.equal(channelForVersion('0.1.0-alpha'), 'alpha')
+  assert.throws(() => channelForVersion(''), /expected a version string/)
+  assert.throws(() => channelForVersion(undefined), /expected a version string/)
+})
+
+test('release-bump and publish.yml derive the SAME channel — proved by RUNNING the workflow shell', async () => {
+  // The rule lives in two languages. This does not compare their source text —
+  // a reworded but equivalent `case` would fail such a check, and a rewritten
+  // and DIFFERENT one could pass it if the regex were loose. It extracts the
+  // workflow's own `case` block and EXECUTES it in bash, then compares the tag
+  // it prints against channelForVersion for the same input.
+  const script = await publishWorkflowChannelScript(join(ROOT, '.github', 'workflows', 'publish.yml'))
+
+  const versions = [
+    '0.1.34-alpha.0',
+    '0.1.0-alpha',
+    '0.0.0-dev.202609021200.abc1234',
+    '0.0.0-dev.202601010000.0abcdef',
+    '0.2.0',
+    '1.0.0',
+    '1.0.0-beta.2',
+    '2.3.4-rc.1',
+  ]
+
+  // Instrument self-test FIRST: if the extracted shell cannot produce two
+  // different answers, agreement below would be vacuous.
+  const answers = new Set()
+  for (const version of versions) {
+    const { stdout } = await execFileAsync('bash', ['-c', script, 'workflow-channel', version])
+    answers.add(stdout)
+  }
+  assert.ok(
+    answers.size >= 3,
+    `the extracted publish.yml shell produced only ${answers.size} distinct answers ` +
+      `(${[...answers].join(', ')}) — it is not discriminating, so agreement would prove nothing`,
+  )
+
+  for (const version of versions) {
+    const { stdout } = await execFileAsync('bash', ['-c', script, 'workflow-channel', version])
+    assert.equal(
+      stdout,
+      channelForVersion(version),
+      `publish.yml and channelForVersion disagree on ${version}: the workflow would publish ` +
+        `under "${stdout}" while the packages' re-run hints would say "${channelForVersion(version)}"`,
+    )
+  }
+})
+
+test('GUARD 2/3 (behavioural): the permitted combinations still publish all five (#2421)', async () => {
+  // The control half, and it is not a formality: a guard that refuses
+  // everything protects nothing, and this suite would still be green.
+  const workflow = await publishWorkflow()
+
+  for (const [label, args] of [
+    ['prod publishes a real prerelease', { channel: 'prod', version: REAL_V, tag: null }],
+    ['prod publishes a stable release', { channel: 'prod', version: '0.2.0', tag: null }],
+    ['dev publishes a snapshot', { channel: 'dev', version: SNAPSHOT_V, tag: 'dev' }],
+  ]) {
+    const { code, published, out } = runPublishLoop(workflow, args)
+    assert.equal(code, 0, `${label}: the job must SUCCEED, got exit ${code}: ${out}`)
+    assert.equal(published.length, 5, `${label}: expected 5 publishes, got ${published.length}`)
+  }
+})
+
+test('the REAL connector channel constant agrees with the REAL package version', async () => {
+  // The drift guard, and the one that catches an UNWIRED bump. It runs on
+  // every pull request, not only at release: if release-bump.mjs ever stops
+  // rewriting HAVEN_CONNECTOR_CHANNEL, the first release that changes channel
+  // leaves the constant behind and this goes red on that release's own PR.
+  const source = await readFile(join(ROOT, CONNECTOR_CHANNEL_FILE), 'utf8')
+  const declared = readConnectorChannel(source)
+  assert.ok(declared, `could not read ${CONNECTOR_CHANNEL_CONSTANT} from ${CONNECTOR_CHANNEL_FILE}`)
+
+  const sdkPkg = JSON.parse(await readFile(join(ROOT, 'packages', 'sdk', 'package.json'), 'utf8'))
+  assert.equal(
+    declared,
+    channelForVersion(sdkPkg.version),
+    `${CONNECTOR_CHANNEL_FILE} declares channel "${declared}" but ${sdkPkg.version} publishes ` +
+      `under "${channelForVersion(sdkPkg.version)}" — do not hand-edit the constant; re-run the bump`,
+  )
+})
+
+test('rewriteConnectorChannel rewrites the real file, and reports a rename instead of silently passing', async () => {
+  const source = await readFile(join(ROOT, CONNECTOR_CHANNEL_FILE), 'utf8')
+
+  const rewritten = rewriteConnectorChannel(source, 'dev')
+  assert.equal(readConnectorChannel(rewritten), 'dev')
+  // Only the constant moved: everything else in the file is untouched.
+  assert.equal(rewritten.replace("= 'dev'", "= 'alpha'"), source.replace(/= '[a-z0-9-]+'/, "= 'alpha'"))
+
+  // The failure mode that matters: someone renames or reshapes the
+  // declaration and the bump's regex quietly matches nothing. `null` is what
+  // makes release-bump.mjs die instead of shipping the previous channel.
+  const renamed = source.replace(
+    `export const ${CONNECTOR_CHANNEL_CONSTANT}`,
+    'export const HAVEN_CONNECTOR_DIST_TAG',
+  )
+  assert.notEqual(renamed, source, 'expected the rename fixture to actually change the source')
+  assert.equal(rewriteConnectorChannel(renamed, 'dev'), null)
+})
+
+test('no published package still hard-codes a connector channel in a re-run hint', async () => {
+  // The acceptance criterion of #2423, as a standing guard. This one IS a text
+  // search, and legitimately so: the question is literally "does this literal
+  // appear anywhere it should not", which is exactly what a text search
+  // answers well. (Whether a guard is REACHED is the question a text search
+  // answers badly, and that is not this.)
+  const scanned = []
+  for (const pkg of ['sdk', 'signer', 'mcp', 'mcp-server', 'connect', 'cli']) {
+    const dir = join(ROOT, 'packages', pkg, 'src')
+    for (const file of await walk(dir)) {
+      if (file.endsWith('.test.ts') || file.endsWith('.test.tsx')) continue
+      // The constant's own home is exempt, exactly as the acceptance criterion
+      // of #2423 words it: its prose explains the rule with worked examples,
+      // and the code below asserts that exemption is load-bearing rather than
+      // decorative, so it cannot quietly become an escape hatch.
+      if (file.endsWith(join('sdk', 'src', 'connector-channel.ts'))) continue
+      scanned.push([file, await readFile(file, 'utf8')])
+    }
+  }
+
+  // Instrument self-test: prove the scanner CAN say yes before believing its
+  // no. `packages/connect/README.md` is the npm landing page and still carries
+  // the literal by design (a README is not rendered from a constant), so it is
+  // a known positive control that lives right next to the negative set.
+  const control = await readFile(join(ROOT, 'packages', 'connect', 'README.md'), 'utf8')
+  assert.ok(
+    HARD_CODED_CHANNEL.test(await readFile(join(ROOT, CONNECTOR_CHANNEL_FILE), 'utf8')),
+    `${CONNECTOR_CHANNEL_FILE} is skipped above on the grounds that its PROSE carries the ` +
+      'literal. It no longer does, so the skip is now an unexplained hole — delete it.',
+  )
+  assert.ok(
+    HARD_CODED_CHANNEL.test(control),
+    'the scanner found no hard-coded channel in packages/connect/README.md, where one is known ' +
+      'to exist — the pattern is broken and its "no findings" below would be meaningless',
+  )
+
+  const findings = scanned
+    .filter(([, text]) => HARD_CODED_CHANNEL.test(text))
+    .map(([file]) => file.slice(ROOT.length + 1))
+  assert.deepEqual(
+    findings,
+    [],
+    'these files hard-code a connector channel instead of rendering it from ' +
+      `${CONNECTOR_CHANNEL_CONSTANT} (#2423): ${findings.join(', ')}`,
+  )
+})
+
+// ── #2536: `latest` follows the newest published release ─────────────────────
+//
+// The owner decision these prove: "We should build it so the latest version of
+// the packages is used… we should not have users run old versions." npm
+// resolves a bare `npm install` / `npx` through the `latest` dist-tag and never
+// through the highest version number, so publishing a prerelease under `alpha`
+// alone leaves `latest` where it was — which is how a bare
+// `npx @haven_ai/connect` came to install a build 34 releases old.
+//
+// Every assertion below is on what the step ACTUALLY CALLED, recorded by the
+// stub `npm` on PATH, not on the workflow's source text.
+
+test('#2536: a prod prerelease publishes under alpha AND moves latest to itself', async () => {
+  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+  })
+
+  assert.equal(code, 0, 'the run must succeed')
+  assert.equal(published.length, 5, 'all five packages publish')
+  for (const line of published) {
+    assert.match(line, /--tag alpha\b/, `the prerelease tag is kept: ${line}`)
+  }
+
+  // The point of the change.
+  assert.equal(distTags.length, 5, 'latest moves for all five packages')
+  for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
+    assert.ok(
+      distTags.some((l) => l === `dist-tag add @haven_ai/${p}@${REAL_V} latest`),
+      `expected latest to move for @haven_ai/${p}; got ${JSON.stringify(distTags)}`,
+    )
+  }
+})
+
+test('#2536: a STABLE prod version moves nothing — npm publish already set latest', async () => {
+  // Not a nicety. A redundant `dist-tag add` would be a second, unguarded
+  // route to the same tag, and the guard reading `$tag` is what keeps the two
+  // paths from disagreeing.
+  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: '0.2.0',
+    tag: null,
+  })
+
+  assert.equal(code, 0)
+  assert.equal(published.length, 5)
+  for (const line of published) assert.match(line, /--tag latest\b/)
+  assert.deepEqual(distTags, [], 'a stable release needs no tag move')
+})
+
+test('#2536: the dev channel NEVER touches latest', async () => {
+  // The invariant the whole file is built around, extended to the new step:
+  // a snapshot may reach only the `dev` dist-tag.
+  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'dev',
+    version: SNAPSHOT_V,
+    tag: 'dev',
+  })
+
+  assert.equal(code, 0)
+  assert.equal(published.length, 5, 'snapshots still publish')
+  for (const line of published) assert.match(line, /--tag dev\b/)
+  assert.deepEqual(distTags, [], 'a snapshot must never reach latest')
+})
+
+test('#2536 GUARD 4/4: a snapshot never reaches latest — refused on prod, no-op on dev', async () => {
+  // The distinction is the whole of this guard, and an earlier draft got it
+  // wrong in a way only execution caught: it refused a snapshot on EVERY
+  // channel, which failed every dev publish, because on the dev channel a
+  // snapshot version is the ordinary case. Both rows below end with `latest`
+  // untouched; they differ in whether the run survives.
+  const script = promoteLatestScript(await publishWorkflow())
+
+  const refused = runPromoteLatest(script, ['prod', '@haven_ai/sdk', SNAPSHOT_V, 'alpha'])
+  assert.notEqual(refused.code, 0, 'a snapshot on the prod channel must be refused')
+  assert.match(refused.out, /GUARD:/, 'the refusal must say why')
+  assert.deepEqual(refused.calls, [], 'a refused call must reach npm not at all')
+
+  const devNoop = runPromoteLatest(script, ['dev', '@haven_ai/sdk', SNAPSHOT_V, 'dev'])
+  assert.equal(devNoop.code, 0, `a snapshot on the dev channel is ordinary, got: ${devNoop.out}`)
+  assert.doesNotMatch(devNoop.out, /GUARD:/, 'the ordinary dev path must not print a guard refusal')
+  assert.deepEqual(devNoop.calls, [], 'the dev no-op must move no tag')
+
+  // A non-snapshot version on a non-prod channel. Unreachable through the
+  // publish loop — `assert_publish_allowed` refuses that pair before any
+  // publish — so a loop-level mutation test cannot see the line that handles
+  // it, and one that dropped the line survived. Asked directly, it is
+  // load-bearing: without it this row moves `latest` from the dev channel.
+  const devReal = runPromoteLatest(script, ['dev', '@haven_ai/sdk', REAL_V, 'alpha'])
+  assert.equal(devReal.code, 0, `a non-prod channel is a no-op, got: ${devReal.out}`)
+  assert.deepEqual(devReal.calls, [], 'only the prod channel may move latest')
+
+  // The control half — a guard that refuses everything protects nothing.
+  const allowed = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'])
+  assert.equal(allowed.code, 0, `a real prerelease must be allowed, got: ${allowed.out}`)
+  // The full call sequence, not just the move. The `view` is the before-value
+  // printed into the run log so a backwards move is visible in the record
+  // (haven-reviewer, this PR): it is informational, must never fail the job,
+  // and must never be mistaken for a decision — there is exactly ONE
+  // `dist-tag` call and nothing branches on what the view returned.
+  assert.deepEqual(
+    allowed.calls,
+    [`view @haven_ai/sdk dist-tags.latest`, `dist-tag add @haven_ai/sdk@${REAL_V} latest`],
+    'the allowed path reads the before-value, then makes exactly one tag move',
+  )
+  assert.equal(
+    allowed.calls.filter((c) => c.startsWith('dist-tag')).length,
+    1,
+    'exactly one tag move, whatever the informational read returned',
+  )
+})
+
+test('#2536: a registry read that fails must not stop the tag move', async () => {
+  // The before-value printed into the run log is INFORMATIONAL. A transient
+  // `npm view` failure must never fail a publish that succeeded.
+  //
+  // Why this test is at the unit level and not through the publish loop: the
+  // loop calls `promote_latest` inside an `if`, and bash suppresses `errexit`
+  // for a function invoked as a condition — so a failing read is invisible
+  // there whatever the code does. Called directly, as here, `errexit` applies,
+  // which is the context that can actually punish a missing `|| echo unknown`.
+  // A mutation dropping it survives the loop-level test and dies here.
+  const script = promoteLatestScript(await publishWorkflow())
+
+  const r = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'], { viewExit: 1 })
+  assert.equal(r.code, 0, `a failed registry read must not fail the move, got: ${r.out}`)
+  assert.ok(
+    r.calls.includes(`dist-tag add @haven_ai/sdk@${REAL_V} latest`),
+    `the tag move must still happen; calls were ${JSON.stringify(r.calls)}`,
+  )
+  assert.match(r.out, /unknown/, 'the log records the before-value as unknown rather than blank')
+})
+
+test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed', async () => {
+  // The state this reports is real and specific: the package is live under its
+  // own tag and only `latest` is stale. Calling that "FAILED" would send the
+  // next reader hunting for a publish that did happen.
+  const { code, out, published } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    distTagExit: 1,
+  })
+
+  assert.notEqual(code, 0, 'the job must fail so the stale tag is not silent')
+  assert.equal(published.length, 5, 'the packages did publish')
+  assert.match(out, /failed to move the latest dist-tag/i)
+  assert.match(out, /npm dist-tag add <name>@<version> latest/, 'the remedy is printed')
+  assert.doesNotMatch(out, /ERROR: failed to publish/, 'must not report a publish failure')
+})
+
+// ── #2580: a release bump only ever moves the version forward ────────────────
+//
+// The defect this closes sits one step earlier than the symptom. #2536 made
+// `publish.yml` move the `latest` dist-tag onto whatever it publishes, without
+// comparing against the live `latest` — so publishing a genuinely new version
+// of an OLDER release line would drag `latest` down to it. Catching a
+// backwards version HERE means it fails at the release PR, where a human is
+// already looking and the remedy is to type a different number, rather than
+// after publication where the remedy is a manual dist-tag repair.
+//
+// The rule is imported and CALLED. It lives in its own module precisely so it
+// can be — `release-bump.mjs` runs `main()` at import.
+
+// The semver DOUBLE, and why these tests do not import the real one.
+//
+// This suite runs in `Repo CI config checks`, which is deliberately
+// dependency-free — checkout, setup-node, no `npm ci` — because it must run on
+// every PR in seconds. Importing `node_modules/semver` from here passes on a
+// developer machine and fails in that job with ERR_MODULE_NOT_FOUND, which is
+// exactly how the first version of these tests broke CI.
+//
+// Removing the import is not a downgrade, because the real semver was never
+// what these tests should have been exercising. `backwardsVersionViolation`
+// does not implement version ordering; it DELEGATES ordering to the comparator
+// it is handed and decides what to do with the answer. Ordering is semver's
+// own well-tested behaviour, and re-asserting it here tested someone else's
+// library. What is genuinely this module's to get wrong is the part a double
+// pins precisely: which comparator it calls, IN WHICH ARGUMENT ORDER, and
+// whether the snapshot flag short-circuits before either is consulted. An
+// arguments-swapped `lt(current, next)` is the most likely real bug in this
+// file, and the real semver would have let it through in half the cases while
+// looking green.
+// The rule self-checks its comparator with known-answer probes and fails CLOSED
+// if they are wrong, so the double must answer THOSE truthfully while still
+// returning the configured verdict for the pair actually under test. Probe calls
+// are kept out of `calls`, so the argument-order assertions below still describe
+// the real question the rule asked rather than the warm-up.
+const PROBES = new Map([
+  ['1.0.0|2.0.0|lt', true],
+  ['2.0.0|1.0.0|lt', false],
+  ['1.0.0-alpha.1|1.0.0|lt', true],
+  ['1.0.0|1.0.0|eq', true],
+  ['1.0.0|2.0.0|eq', false],
+])
+
+function semverDouble({ lt = false, eq = false } = {}) {
+  const calls = []
+  const answer = (op, a, b, configured) => {
+    const probe = PROBES.get(`${a}|${b}|${op}`)
+    if (probe !== undefined) return probe
+    calls.push([op, a, b])
+    return configured
+  }
+  return {
+    calls,
+    lt(a, b) { return answer('lt', a, b, lt) },
+    eq(a, b) { return answer('eq', a, b, eq) },
+  }
+}
+
+test('#2580: a lower version is refused, and the message says what it would break', async () => {
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = semverDouble({ lt: true })
+
+  // The scenario #2580 was filed for, in its own words.
+  const msg = backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver)
+  assert.ok(msg, 'a backwards bump must be refused')
+  assert.match(msg, /BACKWARDS/)
+  assert.match(msg, /latest/, 'the message must name the consequence, not just the rule')
+  assert.match(msg, /3\.0\.0/)
+  assert.match(msg, /2\.5\.1-alpha\.0/)
+
+  // ARGUMENT ORDER. `lt(next, current)` asks "is the new version below the old
+  // one" — the swapped form asks the opposite question and would refuse every
+  // legitimate forward bump while waving backwards ones through.
+  assert.deepEqual(semver.calls[0], ['lt', '2.5.1-alpha.0', '3.0.0'])
+})
+
+test('#2580: the prerelease → release transition is ALLOWED (the case a sort -V guard breaks)', async () => {
+  // The control half, and the reason `sort -V` was rejected in #2580: it orders
+  // `1.0.0` BEFORE `1.0.0-alpha.1`, so a guard built on it would refuse the 1.0
+  // release this repo is heading toward — the one release that matters most.
+  //
+  // What this test can prove and what it cannot: with a comparator reporting
+  // "not lower, not equal", the rule allows the bump. That the REAL comparator
+  // answers that way for `0.1.34-alpha.0 -> 1.0.0` is semver's precedence rule
+  // (a prerelease sorts below its own release), not this module's — and it is
+  // why the module is handed semver rather than a shell pipeline.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  for (const [current, next] of [
+    ['0.1.34-alpha.0', '1.0.0'],   // the exact pair #2580's acceptance criteria name
+    ['0.1.34-alpha.0', '0.1.34-alpha.1'],
+    ['0.1.34-alpha.0', '0.1.35-alpha.0'],
+    ['1.0.0-alpha.1', '1.0.0'],
+    ['0.1.9', '0.2.0'],
+  ]) {
+    const semver = semverDouble({ lt: false, eq: false })
+    assert.equal(
+      backwardsVersionViolation(current, next, { snapshot: false }, semver),
+      null,
+      `${current} -> ${next} must be allowed`,
+    )
+    // Both comparators are consulted before allowing — a rule that returned
+    // null without asking would pass this loop vacuously.
+    assert.deepEqual(semver.calls.map(c => c[0]), ['lt', 'eq'])
+  }
+})
+
+test('#2580: a SNAPSHOT is exempt — and exempt BEFORE the comparator is consulted', async () => {
+  // The half most likely to be got wrong, and it was got wrong once already:
+  // #2536's own workflow guard shipped a draft that refused a snapshot on every
+  // channel and would have failed every dev publish. `0.0.0-` sorts below every
+  // real version deliberately, so that no `^0.1.x` range can resolve to one.
+  // Applying a forward-only rule to it would close the dev channel.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  const snapshotV = '0.0.0-dev.202609021905.abc1234'
+
+  // `lt: true` is the hostile setting: a comparator that WOULD call this
+  // backwards. The snapshot flag must short-circuit above it, so the exemption
+  // cannot depend on how the version happens to compare.
+  const exempt = semverDouble({ lt: true, eq: true })
+  assert.equal(
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: true }, exempt),
+    null,
+    'a snapshot run must not be refused for going "backwards"',
+  )
+  assert.deepEqual(exempt.calls, [], 'the snapshot exemption must precede any comparison')
+
+  // The positive control: the SAME version without --snapshot is refused, so
+  // the exemption is the flag doing work and not the version shape being
+  // waved through everywhere.
+  const checked = semverDouble({ lt: true })
+  assert.ok(
+    backwardsVersionViolation('0.1.34-alpha.0', snapshotV, { snapshot: false }, checked),
+    'the same version outside snapshot mode must still be refused',
+  )
+})
+
+test('#2580: an unchanged version is refused before the release PR merges', async () => {
+  // npm rejects republishing an existing version, so a no-op bump fails AFTER
+  // the PR has landed. Cheaper to say so here.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+  const semver = semverDouble({ lt: false, eq: true })
+
+  const msg = backwardsVersionViolation('0.1.34-alpha.0', '0.1.34-alpha.0', { snapshot: false }, semver)
+  assert.ok(msg, 'a no-op bump must be refused')
+  assert.match(msg, /no-op/)
+  assert.deepEqual(semver.calls[1], ['eq', '0.1.34-alpha.0', '0.1.34-alpha.0'])
+})
+
+test('#2580: production resolves the REAL semver — structure ALWAYS, identity where deps exist', async () => {
+  // Five guards have stood here. All five were defeated by `haven-reviewer`, each
+  // by a stub that satisfied the guard's words while fabricating the comparator:
+  //   1. a whole-file substring scan → inline object literal, path string parked
+  //      in an unused variable;
+  //   2. a scan scoped to `getSemver`'s body → the fabrication moved into an
+  //      imported sibling module, path string parked in a comment;
+  //   3. a scan scoped to `resolveSemver`'s body rejecting `lt:`/`eq:` → ES6
+  //      SHORTHAND METHODS (`lt(a, b) { … }`), which carry no colon, wrapped in a
+  //      try/catch so identity still held whenever semver happened to exist.
+  //
+  // Two further evasions followed and are NOT closed by anything in this test:
+  //   4. keep the REAL module and mutate `.lt`/`.eq` on it after resolution —
+  //      identity is preserved, so the identity assertion below accepts it;
+  //   5. computed keys (`f['l'+'t']`) returned via `.then(ok, fail)` — no `catch`
+  //      keyword, no `lt:` spelling.
+  // Those are handled at RUNTIME instead, by the comparator self-check in
+  // `backwardsVersionViolation`, which fails closed. See the test below.
+  //
+  // Two lessons are encoded here. First, each fix was scoped too narrowly to the
+  // attack that prompted it, so the checks now reject the fabrication SHAPE
+  // (`lt` followed by `:` or `(`) rather than one spelling of it. An earlier
+  // version of this comment also claimed they "reject a swallowed import
+  // outright"; that was false, and the `catch` ban it referred to is gone.
+  // Second — the reason evasion 3 survived its first fix — the structural check
+  // used to run ONLY in the dependency-free branch, so with dependencies present
+  // nothing inspected the source at all. It now runs
+  // UNCONDITIONALLY, and identity is layered on top where it can be proven.
+  const { resolveSemver } = await import('./release-version-order.mjs')
+
+  // ── Always: structure ──────────────────────────────────────────────────────
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const fnStart = source.indexOf('async function getSemver() {')
+  assert.notEqual(fnStart, -1, 'getSemver was renamed or removed')
+  assert.match(source.slice(fnStart, source.indexOf('\n}', fnStart)), /return resolveSemver\(ROOT\)/)
+  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
+  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
+  assert.match(source.slice(call, source.indexOf('\n', call)), /await getSemver\(\)/)
+
+  const order = await readFile(join(ROOT, 'scripts', 'release-version-order.mjs'), 'utf8')
+  const fn = order.slice(order.indexOf('export async function resolveSemver('))
+  const body = fn.slice(0, fn.indexOf('\n}'))
+  assert.match(body, /const semverPath = join\(root, 'node_modules', 'semver', 'index\.js'\)/)
+  assert.match(body, /return \(await import\(semverPath\)\)\.default/)
+  // `[:(]`, not `:` alone — a shorthand method has no colon.
+  assert.doesNotMatch(body, /\blt\s*[:(]/, 'resolveSemver must not fabricate a comparator')
+  assert.doesNotMatch(body, /\beq\s*[:(]/, 'resolveSemver must not fabricate a comparator')
+  // NOTE: there is deliberately no `catch` ban here any more. An earlier version
+  // banned the keyword outright, which `haven-reviewer` showed both evadable
+  // (`.then(onFulfilled, onRejected)` swallows a rejection without the word) and
+  // false-positive-prone (a `catch` that RE-THROWS with a better message is
+  // legitimate and would have tripped it). The swallow case is now handled where
+  // it actually matters — at runtime, by the comparator self-check in
+  // `backwardsVersionViolation`, which fails CLOSED. These remaining text checks
+  // are cheap accidental-drift detection, not a boundary.
+
+  // ── Where dependencies exist: identity ─────────────────────────────────────
+  // Identity is not a property of source text, so it defeats every stub that
+  // SUBSTITUTES a different object — but NOT one that keeps the real object and
+  // mutates its methods afterwards (evasion 4). It also cannot run in
+  // `Repo CI config checks`, which has no node_modules by design and is the only
+  // job running this file — which is why the structural half above is
+  // unconditional rather than a fallback, and why the runtime self-check exists.
+  let real = null
+  try {
+    real = (await import(join(ROOT, 'node_modules', 'semver', 'index.js'))).default
+  } catch (err) {
+    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed unexpectedly: ${err.message}`)
+    return
+  }
+  assert.strictEqual(await resolveSemver(ROOT), real, 'resolveSemver must return the real semver module itself')
+})
+
+test('#2580: a comparator that does not order versions is REFUSED, not trusted', async () => {
+  // The fix that ended a five-round arms race. Five successive STATIC guards on
+  // how the comparator is obtained were each defeated by a differently-spelled
+  // fabrication: an inline object literal, an imported sibling module, ES6
+  // shorthand methods, post-resolution mutation of the real module, and a
+  // `.then(onFulfilled, onRejected)` swallow. A text scan cannot win that,
+  // because what it inspects is not what runs.
+  //
+  // Every one of those stubs shared a property the text never looked at: it
+  // answered `false` to everything, so the rule silently ALLOWED a backwards
+  // release. The rule now probes its comparator with known-answer facts and
+  // refuses the bump when they are wrong — so the degenerate case is safe by
+  // construction rather than by detection, and it fails CLOSED.
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  const permissive = [
+    ['inline object literal', { lt: () => false, eq: () => false }],
+    ['ES6 shorthand methods', { lt(a, b) { return false }, eq(a, b) { return false } }],
+    ['computed-key fallback', (() => { const f = {}; f['l' + 't'] = () => false; f['e' + 'q'] = () => false; return f })()],
+    ['always-true comparator', { lt: () => true, eq: () => true }],
+  ]
+  for (const [name, semver] of permissive) {
+    const msg = backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver)
+    assert.ok(msg, `${name}: a broken comparator must not silently allow a backwards bump`)
+    assert.match(msg, /self-check/, `${name}: and the refusal must say why`)
+  }
+
+  // A snapshot is still exempt BEFORE the self-check, so a missing install cannot
+  // break the dev channel — the exemption's whole point.
+  assert.equal(
+    backwardsVersionViolation('0.1.34-alpha.0', '0.0.0-dev.202609021905.abc1234', { snapshot: true }, { lt: () => false, eq: () => false }),
+    null,
+  )
+})
+
+test('#2580: real semver agrees with the ordering the rule assumes — where deps exist', async () => {
+  // The coverage the double genuinely COSTS, restored where it can be, and named
+  // where it cannot. `haven-reviewer` was right that switching to a double lost
+  // something real: nothing was left proving that the actual pinned semver orders
+  // Haven's OWN version pairs the way this rule assumes — above all
+  // `0.1.34-alpha.0 -> 1.0.0`, the pair #2580's acceptance criteria name and the
+  // pair `sort -V` gets wrong.
+  //
+  // It cannot run in `Repo CI config checks`, which has no `node_modules` by
+  // design and is the only job that runs this file. So it is availability-gated,
+  // and the gate is LOUD: when semver is absent the test still runs and asserts
+  // the reason, rather than vanishing from the count. A skipped test that reports
+  // nothing is how a suite starts passing vacuously.
+  const semverPath = join(ROOT, 'node_modules', 'semver', 'index.js')
+  let semver = null
+  try {
+    semver = (await import(semverPath)).default
+  } catch (err) {
+    assert.equal(err.code, 'ERR_MODULE_NOT_FOUND', `semver import failed for an unexpected reason: ${err.message}`)
+    return // dependency-free job: nothing to assert, and nothing silently skipped
+  }
+
+  const { backwardsVersionViolation } = await import('./release-version-order.mjs')
+
+  // Allowed, under the REAL comparator.
+  for (const [current, next] of [
+    ['0.1.34-alpha.0', '1.0.0'],
+    ['1.0.0-alpha.1', '1.0.0'],
+    ['0.1.34-alpha.0', '0.1.34-alpha.1'],
+    ['0.1.9', '0.2.0'],
+  ]) {
+    assert.equal(
+      backwardsVersionViolation(current, next, { snapshot: false }, semver),
+      null,
+      `real semver must allow ${current} -> ${next}`,
+    )
+  }
+
+  // Refused, under the REAL comparator.
+  assert.ok(backwardsVersionViolation('3.0.0', '2.5.1-alpha.0', { snapshot: false }, semver), 'backwards')
+  assert.ok(backwardsVersionViolation('1.0.0', '1.0.0-alpha.1', { snapshot: false }, semver), 'the sort -V trap, inverted')
+  assert.ok(backwardsVersionViolation('0.1.34-alpha.0', '0.1.34-alpha.0', { snapshot: false }, semver), 'no-op')
+})
+
+
+test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag is known', async () => {
+  // Reachability, not presence. The guard must run where `snapshot` has been
+  // parsed — it is read at `--snapshot` AFTER nextVersion() computes the
+  // version — and still before anything is written to the tree.
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+
+  const snapshotParse = source.indexOf("const snapshot = process.argv.includes('--snapshot')")
+  const call = source.indexOf('backwardsVersionViolation(currentVersion, newVersion')
+  const firstWrite = source.indexOf('header(\'Changes to be applied\')')
+
+  assert.notEqual(call, -1, 'release-bump.mjs no longer calls backwardsVersionViolation')
+  assert.ok(snapshotParse !== -1 && snapshotParse < call, 'the call must come after --snapshot is parsed')
+  assert.ok(call < firstWrite, 'the call must come before the run starts reporting changes')
 })

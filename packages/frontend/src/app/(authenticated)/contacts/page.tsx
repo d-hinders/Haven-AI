@@ -490,7 +490,7 @@ export default function ContactsPage() {
         <EmptyState
           icon={<ContactIcon />}
           title="No saved recipients yet"
-          body="Add a contact for any wallet address you pay often. Haven will show the name in Send, approvals, and transaction history. You confirm the network when sending."
+          body="Add a contact for any wallet address you pay often. Haven will show the name in Send and transaction history. You confirm the network when sending."
           action={<Button onClick={() => setShowAdd(true)}>Add your first contact</Button>}
         />
       )}

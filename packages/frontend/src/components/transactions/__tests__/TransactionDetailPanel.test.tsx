@@ -59,7 +59,9 @@ describe('TransactionDetailPanel', () => {
         paymentId: 'pay_abcdef123456',
       }),
     )
-    expect(screen.getByText('Payment')).toBeInTheDocument()
+    // #2357: the section heading names the protocol, because the drawer is the
+    // advanced surface — the primary row title no longer does.
+    expect(screen.getByText('x402 payment')).toBeInTheDocument()
     expect(screen.getByText('Resource')).toBeInTheDocument()
     expect(screen.getByText('api.example.com')).toBeInTheDocument() // hostname, not full URL
     expect(screen.getByText('Merchant')).toBeInTheDocument()

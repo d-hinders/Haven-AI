@@ -8,7 +8,7 @@ covers:
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-09-01" # #2329: harness section re-read against db-harness.ts and gains § *Harness calls belong in a HOOK, not in a test body* — the `beforeAll`/`beforeEach` example was already here as a preference, and two files that ignored it charged the cold migration-run cost to vitest's 5000 ms `testTimeout` instead of the `hookTimeout: 120_000` `vitest.config.ts` sizes for it, reddening a required check twice on unrelated PRs (#2274, #2295). Records the rule, its two escapes, the structural guard that now enforces it, the new 2000 ms slow-call diagnostic, and why raising `testTimeout` was rejected (#2209's "would only have moved the date", one level up). Verified on this branch against native Postgres: the CI failure reproduces deterministically and passes after the fix; measured cold init 572 ms quiet at 73 migrations, warm `resetDb()` ~25 ms. Scope: the harness section and the new subsection only — resetDb()'s DELETE mechanics and the #2211 numbers above them were re-read but NOT re-measured, and nothing outside § *Using the harness* was re-verified. The rule is suite-scoped (a hook in a sibling `describe` does not warm a cold call) and resolves local helper functions to a fixed point in both directions — harness calls reached through a helper, and hooks REGISTERED through one, the latter found by haven-reviewer on re-review as the same hole through a different door. Its one stated limit (a call behind an object method) is pinned by a fixture rather than left implied, and the doc says so, because a guard read as a closed guarantee is worse than one whose edges are written down — both tightened after haven-reviewer reproduced a silent pass for each against the first draft. The hook/body file counts here are AST-derived against `origin/dev`, not grepped — haven-doc-reviewer caught an off-by-one (48 -> 47) in the first draft that came from an indentation heuristic, and the corrected sentence also names the third category the two-bucket framing had hidden (a file budgeted by its own explicit timeout). Prior: #2211: resetDb() now empties the worker schema with foreign-key-ordered DELETEs instead of one TRUNCATE ... RESTART IDENTITY CASCADE — same coverage (every table, every time), cost now set by rows written rather than by relation count: ~371 ms -> ~48 ms quiet, ~414-448 ms -> ~52-61 ms loaded, 861 s -> 345 s of backend test time; harness section re-read against db-harness.ts and the resetDb()-in-a-loop convention rewritten around the new mechanics (the convention itself stands). Prior: #2209: harness section re-read against db-harness.ts; adds the resetDb()-in-a-loop convention with measured per-call cost (~250 ms quiet / ~800 ms-1.2 s loaded at 38 tables) — no harness behaviour changed, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
+last-verified: "2026-09-02" # #2354: § *Using the harness* gains § *A warm reset that loses to contention* — the warm resetDb() cost measured phase by phase at 1/2/4/8 concurrent workers and 10 vs 36 tables (DELETE path flat in both; floor = catalog read, which scales with pg_class size — 205 orphaned worker schemas locally; TRUNCATE fallback scales with relations AND workers), the proof that a warm reset never takes the migration advisory lock, the deterministic table-lock reproduction of the 5000 ms signature, and the three changes: planEmptying() scopes the cycle fallback to the cycle footprint, RESET_LOCK_WAIT_MS bounds a relation-lock wait and names the holder by pid, the slow-call announcement names its phase (incl. `acquiring connection`, bounded by the pool's connectionTimeoutMillis, haven-reviewer should-fix); the residual limit (slow with no holder) is PINNED by two fixtures rather than described (haven-reviewer should-fix, #2354 item 4); pool exhaustion named as the third wait with its own wrapped failure and fixture (haven-doc-reviewer re-review finding). Verified on this branch against native Postgres 16 under a load average of 9-115 (parallel agent sessions) — the maxima quoted are contended numbers. Scope: the new subsection only; the #2329 subsection was re-read (its ~25 ms warm figure is now qualified as fresh-catalog in the new text rather than edited); the #2211 paragraph's 38 tables / 136 indexes was re-counted with readSchemaShape()'s own predicate — 36 / 130 today, migration 073 (2026-08-31) dropped x402_receipts and x402_resources — and the paragraph now says so (haven-doc-reviewer finding: the diff quoted 36, 38 and 39 without reconciling them); its timings were NOT re-measured. Prior: #2329: harness section re-read against db-harness.ts and gains § *Harness calls belong in a HOOK, not in a test body* — the `beforeAll`/`beforeEach` example was already here as a preference, and two files that ignored it charged the cold migration-run cost to vitest's 5000 ms `testTimeout` instead of the `hookTimeout: 120_000` `vitest.config.ts` sizes for it, reddening a required check twice on unrelated PRs (#2274, #2295). Records the rule, its two escapes, the structural guard that now enforces it, the new 2000 ms slow-call diagnostic, and why raising `testTimeout` was rejected (#2209's "would only have moved the date", one level up). Verified on this branch against native Postgres: the CI failure reproduces deterministically and passes after the fix; measured cold init 572 ms quiet at 73 migrations, warm `resetDb()` ~25 ms. Scope: the harness section and the new subsection only — resetDb()'s DELETE mechanics and the #2211 numbers above them were re-read but NOT re-measured, and nothing outside § *Using the harness* was re-verified. The rule is suite-scoped (a hook in a sibling `describe` does not warm a cold call) and resolves local helper functions to a fixed point in both directions — harness calls reached through a helper, and hooks REGISTERED through one, the latter found by haven-reviewer on re-review as the same hole through a different door. Its one stated limit (a call behind an object method) is pinned by a fixture rather than left implied, and the doc says so, because a guard read as a closed guarantee is worse than one whose edges are written down — both tightened after haven-reviewer reproduced a silent pass for each against the first draft. The hook/body file counts here are AST-derived against `origin/dev`, not grepped — haven-doc-reviewer caught an off-by-one (48 -> 47) in the first draft that came from an indentation heuristic, and the corrected sentence also names the third category the two-bucket framing had hidden (a file budgeted by its own explicit timeout). Prior: #2211: resetDb() now empties the worker schema with foreign-key-ordered DELETEs instead of one TRUNCATE ... RESTART IDENTITY CASCADE — same coverage (every table, every time), cost now set by rows written rather than by relation count: ~371 ms -> ~48 ms quiet, ~414-448 ms -> ~52-61 ms loaded, 861 s -> 345 s of backend test time; harness section re-read against db-harness.ts and the resetDb()-in-a-loop convention rewritten around the new mechanics (the convention itself stands). Prior: #2209: harness section re-read against db-harness.ts; adds the resetDb()-in-a-loop convention with measured per-call cost (~250 ms quiet / ~800 ms-1.2 s loaded at 38 tables) — no harness behaviour changed, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
 ---
 
 # Backend testing strategy: the real-database rule
@@ -147,7 +147,10 @@ table list. `TRUNCATE` costs a roughly fixed amount **per relation** — every
 truncated table and every one of its indexes gets a fresh relfilenode — so the
 reset got slower with every migration that added a table, regardless of what any
 test did. At 38 tables / 136 indexes that measured ~371 ms quiet and ~414–448 ms
-under the parallel load of a concurrent backend run; a six-case loop paid seven
+under the parallel load of a concurrent backend run (38 was the count when #2211
+landed on 2026-08-30; migration `073_drop_x402_resource_tables` dropped
+`x402_receipts` and `x402_resources` the next day, so the same query counts
+**36 tables / 130 indexes** today — the figures #2354 quotes below); a six-case loop paid seven
 resets and blew vitest's 5 s default `testTimeout` (#2209), and a bumped timeout
 would only have moved the date.
 
@@ -241,6 +244,156 @@ the log before any timeout could fire — naming the reset, the advisory lock an
 the hook/test distinction, and printing the total when it finishes. The old
 failure named an innocent test and said nothing about the cause, which is why
 diagnosing it took a `dev`-baseline comparison at all.
+
+### A warm reset that loses to contention (#2354)
+
+The rule above narrows the exposure; it does not remove contention
+sensitivity. `haven-reviewer`, reviewing #2329 under its own ad-hoc concurrent
+load, saw `db-harness-reset-cleans-everything.test.ts` — warm, and with every
+call site in the right place — exceed the 5000 ms `testTimeout`, then pass
+alone in 647 ms. Six interleaved rounds against clean `dev` gave 0/6 failures
+on both arms, so it never reproduced under ordinary load. A test that fails only
+when the machine is busy reports on the machine, and reads as a flake every
+time — the same family as
+[#2319](https://github.com/d-hinders/Haven-AI/issues/2319).
+
+**The mechanism was measured before anything was changed**, phase by phase,
+with a script mirroring `performReset()` statement for statement (one Node
+process per simulated worker, each in its own `test_w<N>` schema, using `pg`
+directly against `postgres://haven:haven@localhost:5432/haven`; the script is
+attached to the #2354 pull request) — native Postgres 16, 20 resets per worker,
+medians (the machine carried a load average
+of 9–115 from parallel agent sessions throughout, so the maxima below are
+contended numbers, not quiet ones). The population is the one `readSchemaShape()`
+reads, counted with its own predicate against the migrated worker schema
+(74 migrations applied, 2026-09-02):
+
+```sql
+-- psql postgres://haven:haven@localhost:5432/haven   (native PostgreSQL 16.13, 2026-09-02)
+SELECT count(*) FROM pg_tables t
+ WHERE t.schemaname = 'test_w1' AND t.tablename <> 'schema_migrations';
+-- 36      (SELECT count(*) FROM pg_indexes WHERE schemaname = 'test_w1';  -- 130)
+```
+
+That is #2211's 38 / 136 minus the two tables migration 073 dropped, not a
+different population — the census file's `tableCensus()` uses the identical
+predicate, so "36" here, "36 DELETEs" in the phase label and the census are
+three readings of one query.
+
+| path | 1 worker | 2 | 4 | 8 | what moves |
+| --- | --- | --- | --- | --- | --- |
+| DELETE — catalog read | 86 ms | 94 | 100 | 108 | flat in workers |
+| DELETE — the 36 `DELETE`s | 5 ms | 6 | 6 | 6 | flat in workers **and** tables (10 vs 36 tables: 1.5 vs 3.2 ms) |
+| TRUNCATE fallback — all 36 relations | 394 ms | 333 | 482 | **819** | ~8 ms per relation (10 vs 36: 162 vs 298 ms), ~2× from 1 to 8 workers, **6.2 s** max under I/O saturation |
+
+So the distinguishing question has a clear answer. **The DELETE path scales
+with neither workers nor tables.** Its floor is the catalog read, and that
+scales with the size of the whole database's catalog: the developer database
+these numbers came from had accumulated **205 orphaned `test_w<N>` schemas**
+(worker ids are not reused across runs), so `readSchemaShape()` seq-scanned
+46 730 `pg_class` rows twice per reset — ~100 ms where a fresh CI Postgres pays
+a few. The ~25 ms warm figure quoted in the rule above is a fresh-catalog
+number; the local floor is set by how many runs the database has seen. **The
+one path that scales with both relations and workers is the `TRUNCATE`
+fallback**, and before #2354 a single foreign-key cycle anywhere sent *every*
+table down it — exactly what the census file's cycle case did, in a test body,
+on the 5000 ms budget. That is the test that failed.
+
+**And the advisory lock explains nothing here.** A warm reset never takes it —
+`ensureMigrated()` is memoised — which was proved rather than reasoned: holding
+`811000061` from an external `psql` session for 8 s while the file ran, the
+`beforeAll` waited under `hookTimeout` and every test then passed (exit 0). The
+lock is the cold path's whole story (#2329) and no part of this one.
+
+**What a warm reset can genuinely lose to is a relation lock** held by another
+session on *this worker's* tables — other workers live in other schemas.
+Reproduced deterministically: an external session holding a plain `ACCESS
+SHARE` on one table (`BEGIN; SELECT … FROM test_w1.users; pg_sleep(45)`) lets
+every `DELETE` through and blocks the `TRUNCATE` — the cycle case died with a
+bare `Test timed out in 5000ms` naming the test and nothing else (exit 1); the
+same file alone passed (exit 0). Realistic holders: a transaction a test left
+open, or an orphaned vitest worker with the same `VITEST_WORKER_ID` (#2319
+found eight orphans on one machine).
+
+**What changed, and why none of it is a bigger number:**
+
+1. **The fallback is scoped to the cycle's footprint.** `planEmptying()`
+   `DELETE`s every table Kahn's algorithm can order and `TRUNCATE … CASCADE`s
+   only the ones it cannot — the cycle members and the tables they reference.
+   Coverage is identical (the two halves always partition the table list, and
+   `plan-delete-order.test.ts` pins that); the cost is now the cycle's
+   relations, not the schema's. The census file's cycle case truncates 2
+   relations (`cycle_a`, `cycle_b`) instead of 38 (the 36 above plus those
+   two), and the reproduction above goes green.
+2. **A lock wait is bounded and named.** The emptying runs in one transaction
+   under `RESET_LOCK_WAIT_MS` (3000 ms) via `lock_timeout`, which counts only
+   time spent waiting for a lock another session *holds* — a busy machine with
+   no holder never trips it. On expiry the reset throws
+   `db-harness: resetDb() gave up after 3000 ms waiting for a relation lock in
+   test_wN (phase: …). Held by: pid P (client backend, idle in transaction,
+   xact 3s, "LOCK TABLE …")` — the holder's pid, state, transaction age and
+   last statement, read from `pg_locks` × `pg_stat_activity` after the reset's
+   own transaction rolled back. `db-harness-reset-contention.test.ts` pins that
+   the failure is bounded, attributed to the *right* session by pid, and
+   recoverable (the pooled connection comes back clean and the next reset
+   succeeds), and that the three budgets are ordered:
+   `SLOW_HARNESS_CALL_MS` (2000) < `RESET_LOCK_WAIT_MS` (3000) < 5000 — the
+   announcement says which *phase* is stuck, the deadline says *who* holds it,
+   and both land before the anonymous per-test timeout could.
+3. **The slow-call announcement names its phase.** Before #2354 it printed the
+   cold explanation — the migration run and the advisory lock — verbatim for a
+   warm reset blocked on a table lock, pointing the reader at the one thing a
+   warm reset never waits on. It now reads
+   `resetDb() has been running 2s in phase "emptying (36 DELETEs)"` and, for a
+   warm phase, says that the migration run is already paid and what a warm
+   call can actually be waiting on.
+
+**The per-test budget is untouched.** A reset that simply hangs still dies at
+5000 ms; the change makes the failure honest about its cause, not rarer for
+the wrong reasons. Proved by mutation: a reset that leaves `rate_limit_counters`
+dirty fails the census on that table; a fallback that skips its `TRUNCATE`
+fails the cycle case; a harness without the `lock_timeout` hangs the contention
+test until its own budget kills it; and the same external lock that reproduced
+the timeout now produces the named failure instead — each restored from a `cp`
+backup and verified byte-identical with `diff -q`.
+
+**What is deliberately not fixed — and pinned so it cannot be closed
+silently.** A machine loaded enough that a 5 ms `DELETE` batch takes seconds —
+observed once here at a load average of 115 — still times the test out, with no
+holder to name. That is the machine's cost, and no budget makes it a property
+of the code. What the harness owes that case is honesty, and two fixtures in
+`db-harness-reset-contention.test.ts` hold it to that: a reset slowed by a
+statement-level trigger sleeping through one `DELETE` (no lock anywhere) must
+announce `in phase "emptying (N DELETEs)"` (N = the current table count) as a
+*WARM call*, name nobody, and
+complete; and the lock message's no-holder branch, read directly, must say "no
+session holds a lock on this schema any more" rather than invent a pid. The
+day either starts lying — or someone "fixes" the residue by making a slow reset
+fail — those go red.
+
+A third wait has its own name. A pooled connection under **pool exhaustion**
+(every one of the worker's `DB_POOL_MAX` clients — 5 under vitest — checked out
+by a test that never released one) is bounded by the pool's own
+`connectionTimeoutMillis` (`config.dbPoolConnectionTimeout`), never by
+`lock_timeout`, and it surfaces in whichever phase first needs the pool —
+usually `catalog read`, since `readSchemaShape()` runs before the dedicated
+client is taken, otherwise `acquiring connection`. pg-pool's bare "timeout
+exceeded when trying to connect" is wrapped into `db-harness: resetDb() could
+not get a pooled connection (phase: …) — pool exhaustion: all DB_POOL_MAX=5 …`
+so it reads like the lock failure, and the announcement's cause line branches
+on the phase so a label and its explanation cannot disagree. Pinned by a
+fixture that checks out all `DB_POOL_MAX` clients and expects exactly that
+message, then recovers (`npx vitest run
+src/infra/__tests__/helpers/__tests__/db-harness-reset-contention.test.ts`
+from `packages/backend`, same host as the query above). Acquisition measured
+at a 0.1 ms median here — the `connect` row of the same phase-timing script
+that produced the table, one Node process per worker against
+`postgres://haven:haven@localhost:5432/haven`; named for the day it is not.
+
+The 205 orphaned worker schemas are a local catalog-bloat cost (each adds ~37
+tables and ~130 indexes to every `pg_class` scan) that CI's fresh service
+container never pays; pruning them is a developer-database housekeeping matter,
+not a harness change.
 
 ## The ratchet
 

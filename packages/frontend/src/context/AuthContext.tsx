@@ -27,7 +27,11 @@ export interface UserSafe {
   name: string
   is_default: boolean
   created_at: string
-  /** 'delegator_hybrid' on the delegation rail; null/legacy = Safe rail (#1069). */
+  /**
+   * Always 'delegator_hybrid' since #2413: the account-list queries filter the
+   * retired Safe rail out, so no other value reaches the client. Kept on the
+   * type because the column still holds legacy values in the database.
+   */
   account_type?: string | null
   /**
    * #1205: server-computed by `needsBackupSignerRecommendation` — true when a
@@ -63,7 +67,7 @@ interface AuthState {
   activeSafe: UserSafe | null
   passkeys: ListPasskeysResponse['passkeys']
   setActiveSafe: (safe: UserSafe) => void
-  signup: (name: string, email: string, password: string) => Promise<User>
+  signup: (name: string, email: string, password: string, via?: string | null) => Promise<User>
   login: (email: string, password: string) => Promise<User>
   logout: () => void
   updateUser: (partial: Partial<User>) => void
@@ -145,9 +149,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // account's set so useActiveSigner can see it. Per-safe failures are
     // skipped silently, same as the loop above: the gate simply stays at
     // no_signer for that account until the next refresh.
-    const hybridSafes = (u.safes ?? []).filter((s) => s.account_type === 'delegator_hybrid')
+    // #2413: every account the API returns is on the delegation rail, so the
+    // filter that used to sit here selected all of them.
     await Promise.all(
-      hybridSafes.map(async (safe) => {
+      (u.safes ?? []).map(async (safe) => {
         try {
           const signers = await api.get<HybridAccountSigners>(
             `/accounts/hybrid/${safe.safe_address}/signers?chain_id=${safe.chain_id}`,
@@ -209,11 +214,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [hydratePasskeys, syncActiveSafe])
 
   const signup = useCallback(
-    async (name: string, email: string, password: string): Promise<User> => {
+    // `via` is the #2522 agent hand-off marker. Optional and omitted when
+    // absent rather than sent as null: the backend sanitises it to the enum
+    // `agent` or null either way, and an absent field keeps the request shape
+    // identical to what every existing caller sends.
+    async (name: string, email: string, password: string, via?: string | null): Promise<User> => {
       const res = await api.post<AuthResponse>('/auth/signup', {
         name,
         email,
         password,
+        ...(via ? { via } : {}),
       })
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)

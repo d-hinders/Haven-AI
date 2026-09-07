@@ -36,7 +36,8 @@ const ARROW_PATH = 'M3.5 8h9M9 4.5L12.5 8 9 11.5'
 
 /**
  * Trailing arrows this page renders: #1954's three, plus the brand band's
- * "Get early access" (already hidden by #1957).
+ * "Create your account" (already hidden by #1957; renamed from "Get early
+ * access" in #2524).
  */
 const TRAILING_ARROW_COUNT = 4
 

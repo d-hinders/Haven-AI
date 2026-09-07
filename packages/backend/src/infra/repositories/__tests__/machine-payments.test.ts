@@ -12,7 +12,9 @@ import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-h
 import {
   attachEvidenceProof,
   claimPreparedSweep,
+  claimPreparedSweepForBoundAgent,
   findEvidenceAnchorForAgent,
+  insertPreparedSweepForBoundAgent,
   insertMerchantReceiptOnce,
   listEvidenceReceiptsForAgent,
   markSweepSubmitted,
@@ -37,6 +39,19 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
     [user.rows[0].id],
   )
   return { agentId: agent.rows[0].id, userId: user.rows[0].id }
+}
+
+async function seedBoundAgent(): Promise<{ agentId: string; userId: string; safeAddress: string }> {
+  const agent = await seedAgent()
+  const safeAddress = ADDR(String(++seq).padStart(2, '0'))
+  const safe = await db.query<{ id: string }>(
+    `INSERT INTO user_safes (user_id, safe_address, chain_id, name, account_type, execution_rail)
+     VALUES ($1, $2, 84532, 'Bound test account', 'delegator_hybrid', 'delegation')
+     RETURNING id`,
+    [agent.userId, safeAddress],
+  )
+  await db.query(`UPDATE agents SET safe_id = $1 WHERE id = $2`, [safe.rows[0].id, agent.agentId])
+  return { ...agent, safeAddress }
 }
 
 async function seedIntent(agentId: string, userId: string): Promise<string> {
@@ -328,6 +343,56 @@ describeDb('machine-payments repository (#1224)', () => {
     )
     expect(row.rows[0].status).toBe('submitted')
     expect(await claimPreparedSweep(sweepId)).toBe(false)
+  })
+
+  it('revalidates the current Safe binding before insert and claim', async () => {
+    const agent = await seedBoundAgent()
+    const nonce = `0x${'8'.repeat(64)}`
+    const input = {
+      agentId: agent.agentId,
+      userId: agent.userId,
+      chainId: 84532,
+      tokenAddress: ADDR('0e'),
+      fromAddress: ADDR('d1'),
+      toAddress: agent.safeAddress,
+      valueAtomic: '100000',
+      validAfter: '0',
+      validBefore: '9999999999',
+      nonce,
+    }
+
+    expect(await insertPreparedSweepForBoundAgent(input)).toBe(true)
+    const inserted = await db.query<{ id: string }>(
+      `SELECT id FROM delegate_sweeps WHERE agent_id = $1 AND nonce = $2`,
+      [agent.agentId, nonce],
+    )
+    const sweepId = inserted.rows[0].id
+
+    const claims = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        claimPreparedSweepForBoundAgent(
+          sweepId,
+          agent.agentId,
+          agent.userId,
+          agent.safeAddress,
+        ),
+      ),
+    )
+    expect(claims.filter((claim) => claim === 'claimed')).toHaveLength(1)
+    expect(claims.filter((claim) => claim === 'already_claimed')).toHaveLength(5)
+
+    // Safe unlink orphans the agent row. A stale prepared request must not
+    // claim against the old destination after that binding disappears.
+    await db.query(`UPDATE agents SET safe_id = NULL WHERE id = $1`, [agent.agentId])
+    expect(
+      await claimPreparedSweepForBoundAgent(
+        sweepId,
+        agent.agentId,
+        agent.userId,
+        agent.safeAddress,
+      ),
+    ).toBe('not_bound')
+    expect(await insertPreparedSweepForBoundAgent(input)).toBe(false)
   })
 
   // ── Merchant receipts: first write wins ────────────────────────────────

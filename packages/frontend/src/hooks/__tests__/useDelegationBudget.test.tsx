@@ -52,6 +52,17 @@ beforeEach(() => {
 })
 
 describe('useDelegationBudget passkey dispatch (#887)', () => {
+  it('does not read delegation endpoints when the caller disables the rail', async () => {
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532, { enabled: false }))
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(mockGet).not.toHaveBeenCalled()
+    expect(result.current.ready).toBe(false)
+  })
+
   it('a passkey-only account is ready WITHOUT a connected wallet', async () => {
     mockApi(PASSKEY_SIGNERS)
     const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))

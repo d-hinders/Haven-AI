@@ -51,11 +51,8 @@ import { allowanceModuleRailRetired, serializeUserOp } from '../../rails/executi
  * deleted) — case 5 is what makes every refusal in this file meaningful.
  */
 
-const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
+const { mockQuery, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  allowanceMocks: {
-    getTokenAllowance: vi.fn(),
-  },
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
@@ -67,7 +64,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
 }))
 
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 // Only the network seam of the delegation rail (bundler/EntryPoint/account) is
 // mocked — everything else (the shape check, the claim/confirm writes) is
@@ -166,7 +162,6 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
   afterAll(async () => { await app.close() })
   beforeEach(() => {
     mockQuery.mockReset()
-    for (const m of Object.values(allowanceMocks)) m.mockReset()
     for (const m of Object.values(fiatMocks)) m.mockReset()
     for (const m of Object.values(delegationMocks)) m.mockReset()
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })

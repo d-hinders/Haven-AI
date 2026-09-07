@@ -36,7 +36,9 @@ Haven's connector writes Codex MCP configuration to `~/.codex/config.toml`. Curr
    **correct, not residue**: `SKILL.md` *Required Sequence* step 4 preserves it
    deliberately so a stale long-lived host can name the agent it is parked on.
    `npx @haven_ai/connect@alpha --doctor --runtime codex` reports such a
-   directory as `retired`; that is a clean result. Do **not** delete `~/.haven`
+   directory as `retired`; that is a clean result (any published connector gives
+   this inventory — the doctor reads local files, and its one channel-sensitive
+   check, `signer_runtime`, has no install left to pass on after a reset). Do **not** delete `~/.haven`
    outright to make this check read "absent" — that destroys the diagnosis this
    reset exists to leave behind ([#2175](https://github.com/d-hinders/Haven-AI/issues/2175)).
    Full absence is correct only after the user confirms every long-lived host
@@ -52,8 +54,15 @@ Do not continue unless every relevant scope is clean.
 2. Guide the user to run the published connector:
 
    ```bash
-   npx @haven_ai/connect@alpha --setup <token> --api <url>
+   npx -y <connector_package> --setup <token> --api <url>
    ```
+
+   Use the package the target backend's own setup response names — its
+   `connector_package`, which is also the package named inside its
+   `connector_command`. Since #2422 that dist-tag is set per deployment by
+   `HAVEN_CONNECTOR_CHANNEL` and is `@alpha` only in production; pinning
+   `@alpha` by hand against a `@dev` backend installs a signer that skews
+   against it.
 
 3. Verify the new `~/.haven/agents/<id>/signer.json` contains `x402_binding_signer`. If missing, report the likely deployed backend configuration fault; do not patch it manually.
 4. Confirm `codex mcp list` shows `haven` and `haven_signer` connected and the signer tools are available.

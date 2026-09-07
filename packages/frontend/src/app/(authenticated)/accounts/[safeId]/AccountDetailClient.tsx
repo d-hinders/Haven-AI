@@ -1,28 +1,26 @@
 'use client'
 
-import { ArrowRight, Check, Clipboard, EllipsisVertical, X } from 'lucide-react'
+import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
-import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { useBalances } from '@/hooks/useBalances'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { usePortfolio } from '@/hooks/usePortfolio'
-import { useSafeDetails } from '@/hooks/useSafeDetails'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useUserSafes } from '@/hooks/useUserSafes'
+import { ApiRequestError } from '@/lib/api'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import DelegationSendModal from '@/components/DelegationSendModal'
 import AccountSignersCard from '@/components/AccountSignersCard'
 import ReceiveFundsModal from '@/components/ReceiveFundsModal'
-import RetiredRailNotice, { type RetiredRailOwnerAccess } from '@/components/RetiredRailNotice'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { CopyButton } from '@/components/ui/CopyButton'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +30,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -44,31 +43,7 @@ import { agentStatusPresentation } from '@/lib/payment-status'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const { toast } = useToast()
-  const copy = async () => {
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-    toast.success('Address copied')
-  }
-  return (
-    <button
-      onClick={copy}
-      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-      title="Copy"
-      aria-label="Copy address"
-    >
-      {copied ? (
-        <Icon icon={Check} className="w-3.5 h-3.5 text-[var(--v2-success)] animate-check-pop" />
-      ) : (
-        <Icon icon={Clipboard} className="w-3.5 h-3.5" />
-      )}
-    </button>
-  )
-}
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
   return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
@@ -78,11 +53,6 @@ function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
   }).format(value)
 }
 
-function approvalSummary(threshold?: number, ownerCount?: number): string {
-  if (!threshold || !ownerCount) return 'Loading approval details'
-  const approverLabel = ownerCount === 1 ? 'approver' : 'approvers'
-  return `${threshold} of ${ownerCount} ${approverLabel} required`
-}
 
 function formatResetPeriod(minutes: number): string {
   if (minutes === 1440) return 'per day'
@@ -110,63 +80,6 @@ function agentAccessSummary(agent: Agent, chainId: number | null): string {
   return `${agentBudgetSummary(agent, chainId)} · ${formatAgentLastActivity(agent.mcp_last_seen_at)}`
 }
 
-type ApproverType = 'passkey' | 'wallet' | 'unknown'
-
-const APPROVER_TYPE_LABEL: Record<ApproverType, string> = {
-  passkey: 'Passkey',
-  wallet: 'Wallet',
-  unknown: 'Unknown',
-}
-
-/**
- * Shown as VISIBLE text under the list whenever any owner is 'unknown', not as
- * a tooltip. Two reasons, and the second is the load-bearing one:
- *
- * 1. `design-review.md:108` — tooltips "do not hide essential instructions".
- *    Without this sentence, `Unknown` is an unexplained gap on a list a user
- *    may be auditing to decide whether they still control the account.
- * 2. `Tooltip` cannot carry it. Its bubble is `whitespace-nowrap` with no
- *    max-width (`Tooltip.tsx:96`), so a sentence renders as one unwrapped bar
- *    far wider than a 390px viewport; and its `onFocus`/`onBlur` never fire,
- *    because the wrapper is a plain `<span>` and `StatusBadge` is a
- *    non-focusable `<span>` too, so the copy would be unreachable by touch
- *    AND by keyboard. Every other `Tooltip` caller passes a short address or
- *    name, which is why neither limit has bitten before. Both are shared-
- *    primitive debt filed separately rather than fixed under a badge issue.
- */
-const UNKNOWN_APPROVER_NOTE =
-  'Unknown means Haven holds no record identifying that approver — it could be a passkey enrolled outside Haven, a rotated one, or a wallet. The label reports what Haven knows, not what the approver is.'
-
-/**
- * #2017: classify one on-chain Safe owner for the Approvers badge, from
- * POSITIVE evidence only.
- *
- * The predicate this replaced was `passkeyAddresses.has(owner) ? 'Passkey' :
- * 'Wallet'`, which reasons from ABSENCE. `passkeyAddresses` is Haven's current
- * live record of enrolled passkeys for THIS Safe on THIS chain — it is not
- * ground truth about the on-chain owner set. An owner is missing from it when
- * enrolment was revoked or rotated, when the passkey list is stale or still
- * loading, or when the owner was added outside Haven. `POST /safe/exec`
- * deliberately authorises a backup passkey Haven holds no binding row for
- * against the Safe's live owner list, so "no passkey row" means the fast-path
- * binding is absent, not that the owner is a wallet.
- *
- * The only positive evidence Haven has for 'wallet' is the user's OWN
- * `wallet_address` — the owner directory (`useOwnerDirectory`) carries aliases
- * and account membership, not an owner TYPE, so it cannot supply one.
- * Everything else is 'unknown', and the badge then says so rather than
- * guessing. This mirrors `retiredRailOwnerAccess` below, so the file has one
- * rule about owner identity instead of two.
- */
-function classifyApprover(
-  normalizedOwner: string,
-  passkeyAddresses: ReadonlySet<string>,
-  knownWalletOwner: string | null | undefined,
-): ApproverType {
-  if (passkeyAddresses.has(normalizedOwner)) return 'passkey'
-  if (knownWalletOwner && normalizedOwner === knownWalletOwner) return 'wallet'
-  return 'unknown'
-}
 
 export default function AccountDetailClient() {
   const params = useParams()
@@ -174,7 +87,6 @@ export default function AccountDetailClient() {
   const safeId = params.safeId as string
 
   const { user, activeSafe, setActiveSafe, loading: authLoading, passkeys = [] } = useAuth()
-  const { getOwnerAlias } = useOwnerDirectory()
   const { renameSafe, removeSafe, setDefault, loading: safesLoading } = useUserSafes()
   const { toast } = useToast()
   const { currency } = usePreferences()
@@ -201,54 +113,14 @@ export default function AccountDetailClient() {
       account.name,
     )
   }
-  const passkeyAddresses = new Set(
-    passkeys
-      .filter(
-        (passkey) =>
-          passkey.chain_id === chainId &&
-          (!safeAddress || passkey.safe_address?.toLowerCase() === safeAddress.toLowerCase()),
-      )
-      .map((passkey) => passkey.signer_address.toLowerCase()),
-  )
 
   // Build linked-agent list
   const safeAgents = agents.filter((a) => a.safe_id === safeId)
 
-  const {
-    details,
-    loading: detailsLoading,
-    error: detailsError,
-    refetch: refetchDetails,
-    // #1107: a delegator_hybrid account has no Safe contract — fetching Safe
-    // details 500s and pollutes every console session on the default rail.
-    // The signer set (Backup & recovery card) is that rail's approval story.
-  } = useSafeDetails(safe?.account_type === 'delegator_hybrid' ? null : safeAddress, { chainId })
 
-  // #1989: what a legacy account's owner can still DO about their funds
-  // depends on whether any owner is a WALLET, and BOTH branches require
-  // POSITIVE evidence. The obvious predicate — "some owner is not a passkey we
-  // know about, therefore a wallet" — reasons from ABSENCE, and its failure
-  // mode is the one that hurts: `POST /safe/exec` deliberately authorises a
-  // backup passkey that Haven holds no binding row for (that is the #1229 fast
-  // path being absent, not the passkey being absent), so an owner Haven cannot
-  // identify is NOT evidence of a wallet. Reading it as one would tell a
-  // passkey-only owner to go and sign at Safe's interface, which cannot help
-  // them, about funds they may not otherwise be able to reach.
-  //
-  // So: a known wallet owner proves 'wallet'. Every owner being a known passkey
-  // proves 'passkey-only'. Anything else — an owner we cannot classify, or a
-  // still-loading/failed owner read — is 'unknown', and the notice then claims
-  // nothing about how to reach the funds. The asymmetry is deliberate: being
-  // wrongly told to contact Haven costs a message, being wrongly told to use
-  // Safe's interface costs trust at the worst possible moment.
-  const knownWalletOwner = user?.wallet_address?.toLowerCase()
-  const retiredRailOwnerAccess: RetiredRailOwnerAccess = !details
-    ? 'unknown'
-    : details.owners.some((owner) => owner.toLowerCase() === knownWalletOwner)
-      ? 'wallet'
-      : details.owners.every((owner) => passkeyAddresses.has(owner.toLowerCase()))
-        ? 'passkey-only'
-        : 'unknown'
+  // #2413: the deposit gate was about retired accounts, which no longer
+  // render. Every account reachable here is a live delegation account whose
+  // owner can move funds out, so Receive is unconditional again.
 
   const {
     totalUsd,
@@ -278,15 +150,12 @@ export default function AccountDetailClient() {
   const chain = getChainConfig(chainId)
   const formattedTotal = formatFiatValue(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
-  const approvalMethodCount = details?.owners.length ?? 0
-  const approvalCopy = details
-    ? approvalSummary(details.threshold, approvalMethodCount)
-    : detailsError
-      ? 'Approval details could not be verified'
-      : 'Approval details unavailable'
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState<{ message: string; retryable: boolean } | null>(
+    null,
+  )
   const [sendOpen, setSendOpen] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
 
@@ -307,22 +176,66 @@ export default function AccountDetailClient() {
     setRenameOpen(false)
   }
 
+  // The unlink is REFUSED, not merely failed, while an agent on this account
+  // still holds spending authority or a recovery is mid-flight — the backend
+  // answers 409 and keeps the account intact. Without a catch the rejection
+  // became an unhandled promise rejection: the button stopped spinning and
+  // nothing else happened, so the refusal read as a broken button.
+  //
+  // Deliberately NOT `err.message`, matching `RemoveAgentDialog`: `api.ts`
+  // throws the backend's raw error string, and this is a destructive-flow
+  // dialog. The 409's three causes share one remedy the user can act on, so
+  // the copy names that instead of restating the server's sentence.
+  //
+  // Two words in it are load-bearing, both from the design review:
+  //  - "a budget", not "an active budget" — `HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL`
+  //    matches `status IN ('pending', 'active')`, so a grant that was never
+  //    activated blocks the unlink too.
+  //  - "recovering funds", not "a recovery" — this page already renders a
+  //    "Backup & recovery" card (`AccountSignersCard`), which is signer
+  //    replacement and has nothing to do with the sweep this refusal means.
+  //    The phrasing follows the sweep screen's own vocabulary instead.
   const handleRemoveConfirmed = async () => {
     if (!safe) return
     setRemoving(true)
+    setRemoveError(null)
     try {
       await removeSafe(safe.id)
       router.push('/accounts')
+    } catch (err) {
+      setRemoveError(
+        err instanceof ApiRequestError && err.status === 409
+          ? {
+              message:
+                'An agent on this account still has a budget, or is part-way through recovering funds or replacing its signing key. Finish or stop that from the Agents page, then remove the account.',
+              // The remedy is OUTSIDE this dialog and `Modal`'s backdrop blocks
+              // the page behind it, so pressing the primary action again can
+              // only reproduce the identical refusal. `RemoveAgentDialog` draws
+              // the same line: its `filing_failed` (retryable here) relabels to
+              // "Finish removal", while `too_many` (go act elsewhere) keeps the
+              // original label rather than inviting a useless second press.
+              retryable: false,
+            }
+          : {
+              message: 'The account could not be removed. Check your connection and try again.',
+              retryable: true,
+            },
+      )
     } finally {
       setRemoving(false)
     }
+  }
+
+  const closeRemoveDialog = () => {
+    setRemoveOpen(false)
+    setRemoveError(null)
   }
 
   // While auth context is still hydrating `user.safes`, avoid flashing
   // "Account not found" — the safe lookup will resolve once safes load.
   if (authLoading || !user) {
     return (
-      <div className="max-w-5xl py-16 flex items-center justify-center gap-2">
+      <div role="status" aria-busy="true" aria-label="Loading account" className="max-w-5xl py-16 flex items-center justify-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
         <span className="text-xs text-[var(--v2-ink-3)]">Loading account...</span>
       </div>
@@ -341,7 +254,9 @@ export default function AccountDetailClient() {
     <div className="max-w-5xl space-y-6">
       <PageHeader
         title={safe.name}
-        subtitle="Control the funds, agent access, and recent activity for this Haven wallet."
+        subtitle={
+          'Control the funds, agent access, and recent activity for this Haven wallet.'
+        }
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
@@ -356,11 +271,9 @@ export default function AccountDetailClient() {
                     rail. Delegation accounts keep the sponsored owner-send.
                     Hidden rather than disabled, per #1079 — a legacy account
                     stays fully readable and simply offers no spend action. */}
-                {safe.account_type === 'delegator_hybrid' ? (
-                  <Button onClick={() => setSendOpen(true)}>
-                    Send
-                  </Button>
-                ) : null}
+                <Button onClick={() => setSendOpen(true)}>
+                  Send
+                </Button>
                 <Button variant="ghost" onClick={() => setReceiveOpen(true)}>
                   Receive
                 </Button>
@@ -375,7 +288,7 @@ export default function AccountDetailClient() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -403,10 +316,6 @@ export default function AccountDetailClient() {
         }
       />
 
-      {safe.account_type !== 'delegator_hybrid' ? (
-        <RetiredRailNotice ownerAccess={retiredRailOwnerAccess} />
-      ) : null}
-
       <Card hover={false} elevation="raised" className="overflow-hidden">
         <Card.Header padding="none" className="px-5 py-5 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -433,20 +342,22 @@ export default function AccountDetailClient() {
         <div className="p-4 sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Token balances</h2>
-            <button
+            <Button
+              type="button"
+              variant="tertiary"
+              size="sm"
               onClick={handleBalancesRefresh}
-              className="text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
             >
               Refresh
-            </button>
+            </Button>
           </div>
           {portfolioLoading ? (
-            <div className="space-y-2">
+            <div role="status" aria-busy="true" aria-label="Loading token balances" className="space-y-2">
               {[0, 1, 2].map((item) => (
                 <div key={item} className="grid grid-cols-3 gap-4 px-2 py-2">
-                  <div className="h-4 w-16 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="h-4 w-20 justify-self-end rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="h-4 w-24 justify-self-end rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-4 w-20 justify-self-end" />
+                  <Skeleton className="h-4 w-24 justify-self-end" />
                 </div>
               ))}
             </div>
@@ -499,13 +410,14 @@ export default function AccountDetailClient() {
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent access</h2>
-            <Link
+            <Button
               href="/agents"
-              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+              variant="tertiary"
+              size="sm"
+              trailingIcon
             >
               View all agents
-              <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
-            </Link>
+            </Button>
           </div>
           <p className="mt-1 max-w-2xl pb-5 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Agents can request payments from this Haven wallet when their status and agent budget allow it.
@@ -513,19 +425,50 @@ export default function AccountDetailClient() {
         </div>
 
         {agentsLoading ? (
-          <Card.Section divided>
-            {[0, 1, 2].map((item) => (
-              <div key={item} className="px-4 py-3.5">
-                <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="mt-2 h-3 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+          <div role="status" aria-busy="true" aria-label="Loading agent access">
+            <Card.Section divided>
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="px-4 py-3.5">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="mt-2 h-3 w-24" />
+                </div>
+              ))}
+            </Card.Section>
+          </div>
+        ) : agentsError && safeAgents.length > 0 ? (
+          <>
+            <div className="border-t border-warning/30 px-5 py-3 text-sm text-[var(--v2-ink-2)]">
+              <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
+                <span>Showing the last successful agent records. Try again to refresh them.</span>
+                <Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>
               </div>
-            ))}
-          </Card.Section>
+            </div>
+            <Card.Section divided>
+              {safeAgents.map((agent) => {
+                const status = agentStatusPresentation(agent.status)
+                return (
+                  <Row
+                    key={agent.id}
+                    href={`/agents/${agent.id}`}
+                    title={agent.name}
+                    subtitle={agentAccessSummary(agent, chainId)}
+                    trailing={
+                      agent.status === 'active'
+                        ? undefined
+                        : <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                    }
+                  />
+                )
+              })}
+            </Card.Section>
+          </>
         ) : agentsError ? (
           <div className="border-t border-[var(--v2-border)]">
             <EmptyState
               title="Agent access could not load"
-              body="Haven could not verify which agents can request payments from this wallet."
+              body={
+                'Haven could not verify which agents can request payments from this wallet.'
+              }
               className="py-8"
               action={<Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>}
             />
@@ -553,9 +496,13 @@ export default function AccountDetailClient() {
           <div className="border-t border-[var(--v2-border)]">
             <EmptyState
               title="No agents connected"
-              body="Connect an agent when you want it to request payments from this Haven wallet."
+              body={
+                'Connect an agent when you want it to request payments from this Haven wallet.'
+              }
               className="py-8"
-              action={<Button href="/agents" size="sm">Connect agent</Button>}
+              action={
+                <Button href="/agents" size="sm">Connect agent</Button>
+              }
             />
           </div>
         )}
@@ -563,13 +510,11 @@ export default function AccountDetailClient() {
 
       {/* #1089: backup & recovery is an account capability, not an agent one —
           it works from the moment the account exists, with no agent required. */}
-      {safe.account_type === 'delegator_hybrid' ? (
-        <AccountSignersCard
-          safeAddress={safe.safe_address}
-          chainId={chainId}
-          userEmail={user?.email ?? ''}
-        />
-      ) : null}
+      <AccountSignersCard
+        safeAddress={safe.safe_address}
+        chainId={chainId}
+        userEmail={user?.email ?? ''}
+      />
 
       {/* Account info */}
       <Card hover={false} className="p-5 sm:p-6">
@@ -579,11 +524,16 @@ export default function AccountDetailClient() {
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+        {/* #2413: single-column now. This was `sm:grid-cols-2` for the Address
+            / Required-approvals pair; with the approvals block deleted, the
+            two-column rule left the lone remaining child in column 1 and a
+            dead half-card to its right at `sm:` and above. Caught by the
+            rendered design pass, on a route the screenshot set did not cover. */}
+        <div className="grid grid-cols-1 gap-6">
           {/* Address */}
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {safeAddress ? (
                 <Tooltip label={safeAddress} mono>
                   <span className="text-sm font-mono text-[var(--v2-ink)]">
@@ -593,98 +543,16 @@ export default function AccountDetailClient() {
               ) : (
                 <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
               )}
-              {safeAddress && <CopyButton text={safeAddress} />}
+              {safeAddress && <CopyButton value={safeAddress} label="address" />}
               {safeAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', safeAddress)} label="Open wallet address externally" />}
             </div>
           </div>
-
-          {/* Threshold */}
-          <div>
-            <p className="text-xs text-[var(--v2-ink-3)] mb-1">Required approvals</p>
-            {detailsLoading ? (
-              <div className="h-5 w-24 bg-[var(--v2-surface-2)] rounded animate-pulse" />
-            ) : details ? (
-              <span className="text-sm text-[var(--v2-ink)]">
-                {approvalCopy}
-              </span>
-            ) : detailsError ? (
-              <span className="inline-flex flex-col items-start gap-2 text-sm text-[var(--v2-ink-2)]">
-                {approvalCopy}
-                <button
-                  type="button"
-                  onClick={refetchDetails}
-                  className="text-xs font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
-                >
-                  Try again
-                </button>
-              </span>
-            ) : (
-              <span className="text-sm text-[var(--v2-ink-3)]">—</span>
-            )}
-          </div>
+          {/* #2413: "Required approvals" and "Approvers" lived here. Both were
+              fed by the Safe-details read that this slice deletes, and both
+              were already inert for a delegation account — the hook behind
+              them was gated to the retired rail. Delegation signers are shown
+              by AccountSignersCard above, which is the live control. */}
         </div>
-
-        {/* Approvers */}
-        {details && details.owners.length > 0 && (
-          <div className="mt-6 pt-5 border-t border-[var(--v2-border)]">
-            <p className="text-xs text-[var(--v2-ink-3)] mb-3">Approvers</p>
-            <div className="space-y-2">
-              {details.owners.map((owner) => {
-                const normalizedOwner = owner.toLowerCase()
-                const isYou =
-                  user?.wallet_address?.toLowerCase() === normalizedOwner || passkeyAddresses.has(normalizedOwner)
-                // #2017: positive evidence only — see `classifyApprover`.
-                const approverType = classifyApprover(
-                  normalizedOwner,
-                  passkeyAddresses,
-                  knownWalletOwner,
-                )
-                const ownerAlias = getOwnerAlias(owner)
-                return (
-                  <div
-                    key={owner}
-                    className="flex flex-wrap items-center gap-2 py-1.5"
-                  >
-                    {ownerAlias ? (
-                      <span className="text-sm font-medium text-[var(--v2-ink)]">
-                        {ownerAlias}
-                      </span>
-                    ) : (
-                      <Tooltip label={owner} mono>
-                        <span className="text-sm font-mono text-[var(--v2-ink)]">
-                          {truncate(owner)}
-                        </span>
-                      </Tooltip>
-                    )}
-                    {ownerAlias && (
-                      <Tooltip label={owner} mono>
-                        <span className="text-xs font-mono text-[var(--v2-ink-3)]">
-                          {truncate(owner)}
-                        </span>
-                      </Tooltip>
-                    )}
-                    <CopyButton text={owner} />
-                    <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', owner)} label="Open approver externally" />
-                    <StatusBadge>{APPROVER_TYPE_LABEL[approverType]}</StatusBadge>
-                    {isYou && (
-                      <StatusBadge tone="brand">You</StatusBadge>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-            {details.owners.some(
-              (owner) =>
-                classifyApprover(owner.toLowerCase(), passkeyAddresses, knownWalletOwner) ===
-                'unknown',
-            ) && (
-              <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                {UNKNOWN_APPROVER_NOTE}
-              </p>
-            )}
-          </div>
-        )}
-
       </Card>
 
       {/* Full transaction history */}
@@ -694,13 +562,14 @@ export default function AccountDetailClient() {
             <div className="flex items-center gap-3">
               <h2 className="text-base font-semibold text-[var(--v2-ink)]">Transaction history</h2>
               {!txLoading && total > 0 ? (
-                <Link
+                <Button
                   href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)]"
+                  variant="tertiary"
+                  size="sm"
+                  trailingIcon
                 >
                   View all
-                  <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
-                </Link>
+                </Button>
               ) : null}
             </div>
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
@@ -744,7 +613,7 @@ export default function AccountDetailClient() {
         backing a wagmi wallet-client subscription) don't run in the
         background on every account page view.
       */}
-      {sendOpen && safeAddress && safe.account_type === 'delegator_hybrid' && (
+      {sendOpen && safeAddress && (
         <DelegationSendModal
           open
           onClose={() => setSendOpen(false)}
@@ -768,11 +637,21 @@ export default function AccountDetailClient() {
       )}
       <ConfirmDialog
         open={removeOpen}
-        onCancel={() => setRemoveOpen(false)}
+        onCancel={closeRemoveDialog}
         onConfirm={handleRemoveConfirmed}
-        title={`Delete ${safe.name}?`}
-        body="This only removes the account from Haven. Funds on-chain are unaffected and you can re-import it later."
-        confirmLabel="Delete account"
+        title={`Remove ${safe.name}?`}
+        body={(
+          <div className="space-y-3">
+            <p>
+              This only removes the account from Haven. Funds on-chain are unaffected. Removing it
+              may permanently remove this read-only record from Haven.
+            </p>
+            {removeError && (
+              <InlineAlert>{removeError.message}</InlineAlert>
+            )}
+          </div>
+        )}
+        confirmLabel={removeError?.retryable ? 'Try again' : 'Remove account'}
         loading={removing}
       />
     </div>
@@ -790,8 +669,10 @@ function RenameModal({
   onRename: (name: string) => Promise<void>
   loading: boolean
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
   const [name, setName] = useState(safe.name)
   const [error, setError] = useState('')
+  useFocusTrap(panelRef, true)
   useEscapeToClose(true, onClose, { enabled: !loading })
 
   const handleSubmit = async (e: FormEvent) => {
@@ -813,25 +694,33 @@ function RenameModal({
   return (
     <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
-      <div className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-modal">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-account-title"
+        className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+      >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
+            <h2 id="rename-account-title" className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Give this Haven account a name only you see.</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             disabled={loading}
             aria-label="Close"
-            className="rounded-md p-1 text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Icon icon={X} className="h-5 w-5" />
           </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 p-5">
           <div>
-            <label className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
+            <label htmlFor="rename-account-name" className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
             <input
+              id="rename-account-name"
               type="text"
               value={name}
               onChange={(e) => {

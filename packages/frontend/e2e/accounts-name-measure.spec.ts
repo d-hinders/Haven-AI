@@ -19,13 +19,30 @@
  * 1280 with `● Base Sepolia` — it overflowed and stranded the separator, which
  * is the same defect one row down. Measured, not assumed.)
  *
- * #2236 — the hover actions were `absolute top-3 right-3` and measure
+ * #2236 — the hover actions were `absolute top-3 right-3` and measured
  * **102.6px** ("Set active" 72.6 + gap 4 + the star 26), while the title row
  * reserved a hand-picked `pr-12` (48px). Measured hovered on unchanged `dev`,
  * they painted a **42.7 x 14px** region of the name's own box at 1280 and
  * **46.6 x 18px** at 390. The actions are now the title row's second column in
  * normal flow, so the reservation IS what they measure — and is zero on a card
  * that renders neither button.
+ *
+ * #2374 — the star is GONE. The card's actions block now holds exactly one
+ * control, "Set active", so the pair figures above (102.6, and 108.6 after
+ * #2241's gap) are HISTORY: they explain why the reservation is derived rather
+ * than describing what it currently measures. Nothing in this file pins them,
+ * which is precisely #2236's fix working — the reservation is read at run time
+ * from the rendered block, so removing a control moves the number without
+ * moving a line of this spec.
+ *
+ * What #2374 DID move here, all of it recorded at its own call site: the focus
+ * test now tabs to "Set active" rather than to the star (the star was the last
+ * control and the ring-clipping question was about the card's right edge — it
+ * still is, one control over); the compound-state test's card A becomes
+ * one-badge-and-NO-action, which is a state nothing else in this file covers;
+ * and a new arm pins the single NON-default account, which was the gap #2374's
+ * investigation found — the existing single-account test seeds
+ * `is_default: true`, so a lone non-default account was asserted nowhere.
  *
  * WHY THESE THREE ARE ONE SPEC AND NOT THREE. They are one row's width, spent
  * three ways: the name's measure, where the badges sit, and what the actions
@@ -95,11 +112,11 @@ const ORDINARY_NAME = 'Operating wallet'
  */
 const UNBOUNDED_NAME = 'Treasury operations wallet for the European entity'
 /**
- * The SECOND card is the only one that renders hover actions — both buttons
- * are gated on `!isActive` / `!safe.is_default`, so the active+default card
- * the issues photograph renders none at all. #2236 lives here, and its name is
- * long on purpose: a short one would not reach the actions even when the row
- * was mis-reserved, which is exactly how the mismatch stayed latent.
+ * The SECOND card is the only one that renders hover actions here — the one
+ * remaining button is gated on `!isActive`, so the seeded active card renders
+ * none at all. #2236 lives here, and its name is long on purpose: a short one
+ * would not reach the actions even when the row was mis-reserved, which is
+ * exactly how the mismatch stayed latent.
  */
 const ACTION_CARD_NAME = 'Imported Safe for the European entity treasury'
 /**
@@ -520,6 +537,24 @@ test('/accounts: the hover actions reserve their own width and never cover the n
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 })
 
+    // (a0) HIDDEN UNTIL HOVERED, on a device that can hover (#2241).
+    //
+    // #2241 moved the reveal from a bare `opacity-0 group-hover:opacity-100`
+    // to a `(hover: hover)`-gated form, so that a touch device — which can
+    // never satisfy `group-hover` — gets the control visible instead of
+    // invisible-and-still-tappable. This project is `chromium-desktop`, a
+    // hover-capable pointer, and the OTHER half of that change is that
+    // nothing here moves: the actions must still be hidden until the card is
+    // hovered. Without this the touch fix could be "achieved" by dropping the
+    // hover treatment entirely, and no test in either file would notice.
+    await page.mouse.move(0, 0)
+    const unhovered = await readCardSettled(page, ACTION_CARD_NAME)
+    expect(unhovered.actionsRect, `@${width}px: the action card renders no actions at all`).not.toBeNull()
+    expect(
+      unhovered.actionsOpacity,
+      `@${width}px: the actions are at opacity ${unhovered.actionsOpacity} with the pointer off the card — on a hover-capable pointer they are meant to stay hidden until hover`,
+    ).toBeLessThan(0.01)
+
     // (a) The action-bearing card, hovered.
     const achievedOpacity = await hoverCardUntilActionsVisible(page, ACTION_CARD_NAME)
     const hovered = await readCardSettled(page, ACTION_CARD_NAME)
@@ -561,9 +596,10 @@ test('/accounts: the hover actions reserve their own width and never cover the n
     ).toBe(true)
 
     // (c) The card that renders NO actions reserves nothing for them. `pr-12`
-    // was unconditional while both buttons are gated on `!isActive` /
-    // `!safe.is_default`, so the active+default card — the one both issues
-    // photograph — was losing 48px of name to buttons that did not exist.
+    // was unconditional while the buttons were gated, so the active card — the
+    // one both issues photograph — was losing 48px of name to buttons that did
+    // not exist. Since #2374 the sole remaining button is gated on `!isActive`
+    // alone, so EVERY active card is this quiet case, default or not.
     await page.mouse.move(0, 0)
     const quiet = await readCardSettled(page, ORDINARY_NAME)
     expect(quiet.actionsRect, `@${width}px: the active+default card renders hover actions`).toBeNull()
@@ -575,40 +611,196 @@ test('/accounts: the hover actions reserve their own width and never cover the n
 })
 
 /**
- * The COMPOUND state — one badge AND one action on the same card.
+ * FOCUS, not hover — the state #2241 said nobody had captured, and the one
+ * `haven-design-reviewer` could not clear from screenshots (#2241, raised on
+ * this PR's own first rendered pass).
  *
- * Raised by `haven-reviewer` as a coverage gap, and it was right: every other
- * test here puts the seeded active+default account on card one (both badges,
- * NEITHER button, since both are gated on `!isActive` / `!safe.is_default`)
- * and a neither-active-nor-default account on card two (no badges, BOTH
- * buttons). So the two extremes were measured and the middle was not — even
- * though badge visibility and action visibility are independent predicates,
- * and the middle is the ordinary state for anyone whose active account is not
- * their default one.
+ * Two distinct questions, and the second is the one #2241's fix could have
+ * broken without anybody noticing:
  *
- * This fixture makes the ACTIVE account the non-default one, which renders
- * both halves of the middle at once:
+ *  1. **Does `focus-within` still reveal?** The reveal used to be a bare
+ *     `focus-within:opacity-100`. It is now `[@media(hover:hover)]:focus-within`,
+ *     so on a hover-capable pointer — this project — a keyboard user must still
+ *     get the controls by tabbing to them. Nothing else in either spec would
+ *     catch that variant being dropped along with the `group-hover` one, since
+ *     the mobile spec never enters this branch at all.
+ *  2. **Does the focus ring clip?** #2241 listed this as explicitly not
+ *     captured. The rightmost control sits at the card's right content edge and
+ *     takes a `focus-visible:ring-2` — an outset ring, painted OUTSIDE the
+ *     border box — so the question is whether the card's own padding absorbs
+ *     it. Asserted as geometry (the ring box inside the card's padding box)
+ *     rather than as a class string, for the same reason as everything else in
+ *     this file.
  *
- *   card A (active, not default)  -> `Active` badge + the star button alone
+ *     Since #2374 that rightmost control is "Set active" rather than the star.
+ *     The ring is the same `focus-visible:ring-2` on the same edge; what
+ *     changed is which element carries it, and the button is WIDER than the
+ *     star was, so this is the harder case of the two rather than a weakening.
+ *
+ * Both widths, because the padding differs (`p-5` at 390, `sm:p-6` at 1280) and
+ * the 1280 grid gives the card a different width entirely.
+ */
+test('/accounts: focus reveals the actions and the ring clears the card edge', async ({ page }) => {
+  test.slow()
+  await mockHavenApi(page)
+  await seedAuthenticatedSession(page)
+  await serveAccounts(page, [
+    { ...testSafe, name: ORDINARY_NAME, is_default: true },
+    { ...SECOND_SAFE, name: ACTION_CARD_NAME },
+  ])
+  await openAccounts(page)
+
+  /*
+    The ring width is READ from the rendered `box-shadow` rather than pinned to
+    the `ring-2` in the class string. A constant here would make the clearance
+    check blind to the one edit most likely to cause the clip it is watching
+    for — someone widening the ring — which is the shape of guard #2241's own
+    mutation pass exists to reject.
+  */
+
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 })
+    // Start from the resting state, so the reveal below is attributable to
+    // focus and not to a pointer left on the card by an earlier read.
+    await page.mouse.move(0, 0)
+    await dismissMobileSidebar(page)
+    const setActive = page.locator(
+      `a[aria-label="${ACTION_CARD_NAME}"] button[aria-label="Set ${ACTION_CARD_NAME} as active"]`,
+    )
+    await setActive.scrollIntoViewIfNeeded()
+    /*
+      Focus the button BY KEYBOARD, not with `locator.focus()`.
+
+      `:focus-visible` is a heuristic on the last input modality: after the
+      pointer work above (and `dismissMobileSidebar`'s tap), Chromium treats a
+      programmatic `focus()` as pointer-initiated and paints NO ring. The first
+      draft of this test did exactly that and read a 0px ring at 390 — which is
+      why the ring width is asserted to be non-zero below rather than trusted.
+      Focusing a SIBLING and pressing Tab makes the modality keyboard, which is
+      the state a keyboard user is actually in.
+
+      The sibling used to be the other button. #2374 left this card one control,
+      so the anchor that WRAPS it is the sibling now — the card itself is
+      focusable (`<Link href>`), and Tab from it lands on the button inside. That
+      is also the real keyboard path a user takes to reach it, which the
+      button-to-button hop never was.
+    */
+    await page.locator(`a[aria-label="${ACTION_CARD_NAME}"]`).focus()
+    await page.keyboard.press('Tab')
+    await page.waitForTimeout(400)
+
+    const reading = await readCardSettled(page, ACTION_CARD_NAME)
+    expect(
+      reading.actionsOpacity,
+      `@${width}px: the actions are at opacity ${reading.actionsOpacity} with "Set active" focused — \`focus-within\` no longer reveals them, so a keyboard user cannot see what they are on`,
+    ).toBeGreaterThan(0.9)
+
+    const ring = await page.evaluate(
+      ({ label, buttonLabel }) => {
+        const card = document.querySelector(`a[aria-label="${label}"]`) as HTMLElement
+        const btn = card.querySelector(`button[aria-label="${buttonLabel}"]`) as HTMLElement
+        const focused = document.activeElement === btn
+        const cardBox = card.getBoundingClientRect()
+        const cs = getComputedStyle(card)
+        const pad = {
+          top: parseFloat(cs.paddingTop) || 0,
+          right: parseFloat(cs.paddingRight) || 0,
+          bottom: parseFloat(cs.paddingBottom) || 0,
+          left: parseFloat(cs.paddingLeft) || 0,
+        }
+        /*
+          Tailwind paints a ring as an outset `box-shadow` with a spread. Take
+          the widest px value in the shadow list — the ring plus any offset —
+          so a `ring-2` -> `ring-8` edit moves this number instead of being
+          invisible to it.
+        */
+        const shadow = getComputedStyle(btn).boxShadow
+        const ringWidth = Math.max(
+          0,
+          ...(shadow.match(/(-?[\d.]+)px/g) ?? []).map((v) => Math.abs(parseFloat(v))),
+        )
+        const b = btn.getBoundingClientRect()
+        return {
+          focused,
+          ringWidth,
+          // Clearance from each edge of the ring box to the card's BORDER box.
+          // Positive means the ring is inside the card entirely.
+          clearance: {
+            right: +(cardBox.right - (b.right + ringWidth)).toFixed(1),
+            top: +(b.top - ringWidth - cardBox.top).toFixed(1),
+            bottom: +(cardBox.bottom - (b.bottom + ringWidth)).toFixed(1),
+          },
+          padRight: pad.right,
+          padTop: pad.top,
+        }
+      },
+      { label: ACTION_CARD_NAME, buttonLabel: `Set ${ACTION_CARD_NAME} as active` },
+    )
+
+    // Non-vacuity: a clearance measured on an UNfocused button says nothing
+    // about a focus ring.
+    expect(reading.actionsRect, `@${width}px: the card renders no actions`).not.toBeNull()
+    expect(ring.focused, `@${width}px: "Set active" never took focus`).toBe(true)
+    // ...and it must actually be PAINTING a ring, or a clearance measured with
+    // a zero-width ring is a clearance for no ring at all.
+    expect(
+      ring.ringWidth,
+      `@${width}px: the focused "Set active" paints no ring (box-shadow width ${ring.ringWidth}px)`,
+    ).toBeGreaterThan(0)
+
+    for (const [edge, value] of Object.entries(ring.clearance)) {
+      expect(
+        value,
+        `@${width}px: the focused "Set active"'s ${ring.ringWidth}px ring overhangs the card's ${edge} edge by ${(-value).toFixed(1)}px (card padding right ${ring.padRight}px, top ${ring.padTop}px)`,
+      ).toBeGreaterThanOrEqual(0)
+    }
+  }
+})
+
+/**
+ * The COMPOUND state — a badge and an action varying INDEPENDENTLY.
+ *
+ * Raised by `haven-reviewer` as a coverage gap on #2236, and it was right:
+ * every other test here puts the seeded active account on card one and a
+ * neither-active-nor-default account on card two, so the two extremes were
+ * measured and the middle was not — even though badge visibility and action
+ * visibility are independent predicates, and the middle is the ordinary state
+ * for anyone whose active account is not their default one.
+ *
+ * This fixture makes the ACTIVE account the non-default one:
+ *
+ *   card A (active, not default)  -> `Active` badge + NO action
  *   card B (default, not active)  -> `default` badge + "Set active" alone
  *
- * and asserts on both that the badge is on the name's line, the button never
- * covers the name, and the reservation is still exactly what the button
- * measures — a single 26px star reserves 26px, not the 102.6px of a full pair
- * and not the 48px of the old `pr-12`. That last reading is the one no other
- * test in this file can produce, because nowhere else does a card render a
- * PARTIAL actions block.
+ * ## What #2374 changed about this test, and why it got STRONGER
+ *
+ * Card A used to render the star alone, and this test's headline reading was
+ * "a single 26px star reserves 26px, not the 108.6px of a full pair". The star
+ * is gone, so card A now renders NO action at all — and that is a state no
+ * other test in this file produces. The existing no-action case is the
+ * active+DEFAULT card (two badges); this one is active and NOT default (one
+ * badge), which is exactly the combination #2374's investigation found
+ * unasserted anywhere.
+ *
+ * So the two cards now assert two different halves, and both are needed:
+ *
+ *   - card A: a badge, no action, and a reservation of ZERO. If the star ever
+ *     came back this is the first thing to go red, because the card would
+ *     start reserving width again for a control it is not supposed to have.
+ *   - card B: a badge, exactly one action, and a reservation that tracks it.
+ *     A `pr-*` step cannot do this: whatever number it held would be right for
+ *     at most one of the combinations this card can render.
  */
-test('/accounts: a card with one badge and one action reserves only that action', async ({ page }) => {
+test('/accounts: badges and actions vary independently, and each reserves only what it renders', async ({ page }) => {
   test.slow()
   // Short names, and the arithmetic is the reason. The compound state has
   // LESS room than either extreme, which is not obvious and which the first
-  // version of this test got wrong: card A carries a 58.2px badge AND a 26px
-  // star, so at 1280 the name may measure at most 265 - 26 - 8 - 58.2 - 8 =
-  // 164.8px before the badge wraps; card B carries a 52.1px badge and the
-  // 72.6px "Set active" button, leaving 124.3px. `Operating wallet Europe`
-  // (~182px) exceeded card A's budget and wrapped the badge — correctly, per
-  // #2223, but it is not the state this test is about.
+  // version of this test got wrong: card A carried a 58.2px badge AND (then) a
+  // 26px star, so at 1280 the name could measure at most
+  // 265 - 26 - 8 - 58.2 - 8 = 164.8px before the badge wrapped;
+  // `Operating wallet Europe` (~182px) exceeded that. Card A has more room now
+  // that the star is gone, but the names stay short: this test is about
+  // reservations, and a wrapping badge is a different test's subject.
   const ACTIVE_NOT_DEFAULT = ORDINARY_NAME
   const DEFAULT_NOT_ACTIVE = 'Imported Safe'
   await mockHavenApi(page)
@@ -625,11 +817,13 @@ test('/accounts: a card with one badge and one action reserves only that action'
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 })
 
-    for (const [name, badge] of [
-      [ACTIVE_NOT_DEFAULT, 'Active'],
-      [DEFAULT_NOT_ACTIVE, 'default'],
+    for (const [name, badge, expectsAction] of [
+      [ACTIVE_NOT_DEFAULT, 'Active', false],
+      [DEFAULT_NOT_ACTIVE, 'default', true],
     ] as const) {
-      const achievedOpacity = await hoverCardUntilActionsVisible(page, name)
+      const achievedOpacity = expectsAction
+        ? await hoverCardUntilActionsVisible(page, name)
+        : 0
       const reading = await readCardSettled(page, name)
 
       // Exactly one badge, and it is the one this card's state earns.
@@ -639,7 +833,26 @@ test('/accounts: a card with one badge and one action reserves only that action'
         `@${width}px: the ${badge} badge (y ${reading.badgeRects[badge].y}) is not on the name's line (y ${reading.nameRect.y})`,
       ).toBeGreaterThanOrEqual(reading.badgeRects[badge].h)
 
-      // Exactly one action, actually hovered, and not over the name.
+      if (!expectsAction) {
+        /*
+          Card A — active, NOT default. Since #2374 this card has no action at
+          all, and it must therefore reserve nothing. This is the arm that goes
+          red first on a reintroduced set-default control: the block would come
+          back into flow and take width from the name, which is the #2223 cost
+          the whole file exists to watch.
+        */
+        expect(
+          reading.actionsRect,
+          `@${width}px: "${name}" is the active account and renders an actions block anyway — the only card action is gated on \`!isActive\``,
+        ).toBeNull()
+        expect(
+          reading.cardInner - reading.rowInner,
+          `@${width}px: "${name}" reserves ${(reading.cardInner - reading.rowInner).toFixed(1)}px for actions it does not render`,
+        ).toBeLessThanOrEqual(1)
+        continue
+      }
+
+      // Card B — exactly one action, actually hovered, and not over the name.
       expect(reading.actionsRect, `@${width}px: "${name}" renders no actions`).not.toBeNull()
       expect(
         achievedOpacity,
@@ -651,9 +864,7 @@ test('/accounts: a card with one badge and one action reserves only that action'
         `@${width}px: the hovered action covers ${over.x}x${over.y}px of "${name}"'s box`,
       ).toBe(0)
 
-      // And the reservation tracks the PARTIAL block. A `pr-*` step cannot do
-      // this: whatever number it held would be right for at most one of the
-      // three action combinations this card can render.
+      // And the reservation tracks the block it actually renders.
       const accounted = reading.rowInner + reading.actionsRect!.w
       expect(
         reading.cardInner - accounted,
@@ -687,5 +898,119 @@ test('/accounts: the single-account case is unchanged — no badges, name in ful
       reading.truncated,
       `@${width}px: "${reading.text}" is ellipsised with one account and no badges`,
     ).toBe(false)
+  }
+})
+
+
+/**
+ * The single NON-default account — the arm this file did not have (#2374).
+ *
+ * ## Why it was missing, and why that mattered
+ *
+ * The test directly above seeds `{ ...testSafe, name: ORDINARY_NAME,
+ * is_default: true }`. Every other fixture in this file seeds two accounts. So
+ * a rendered set of exactly ONE account that is NOT the default was asserted
+ * nowhere — and that is the state in which the card's old set-default star was
+ * at its worst:
+ *
+ *   - both badges are gated on `safes.length > 1`, so the word `default`
+ *     renders NOWHERE on the page;
+ *   - `/accounts/<id>` gates its own "Set as default" on
+ *     `!safe.is_default && (user?.safes?.length ?? 0) > 1`, so the detail page
+ *     deliberately hides the action in this exact state;
+ *   - the card's star was gated on `!safe.is_default` ALONE, so it rendered
+ *     anyway — a permanently visible, unlabelled control for an action that
+ *     cannot do anything, on a page that never says the word it refers to.
+ *
+ * It is latent on today's backend, which is why nobody hit it: `is_default` is
+ * inserted as `isFirst` and the oldest survivor is promoted on unlink, so a
+ * lone account is normally the default. It stops being latent the moment a
+ * rendered account set is FILTERED rather than being the whole set.
+ *
+ * ## What this arm asserts, and why each part is here
+ *
+ * `getAttribute('aria-label')` is scanned across the whole document rather
+ * than inside the card, so a control that moved elsewhere on the page still
+ * counts. Both the accessible name and the visible text are matched, because a
+ * reintroduction could arrive as the old `aria-label`-only star OR as the
+ * labelled `Set default` variant the decision rejected.
+ *
+ * NON-VACUITY IS THE FIRST ASSERTION, not the last. An absence check on a page
+ * that failed to render is a green run that proves nothing — the exact
+ * false-zero this file's `sr-only` note is about, one surface over. So the card
+ * itself must be present and named before anything is asserted to be missing.
+ */
+test('/accounts: a lone NON-default account offers no set-default control', async ({ page }) => {
+  test.slow()
+  await mockHavenApi(page)
+  await seedAuthenticatedSession(page)
+  await serveAccounts(page, [{ ...testSafe, name: ORDINARY_NAME, is_default: false }])
+  await openAccounts(page)
+
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: 900 })
+    const reading = await readCardSettled(page, ORDINARY_NAME)
+
+    // Non-vacuity, in TWO parts, and the second was missing until
+    // `haven-reviewer` found it. (a) the page really rendered this account —
+    // read through `readCard`'s `h3` lookup.
+    expect(
+      reading.text,
+      `@${width}px: the lone account card did not render its name — every absence below would be vacuous`,
+    ).toBe(ORDINARY_NAME)
+
+    // Unchanged from the default-flagged single-account case: with one account
+    // neither badge renders, whatever `is_default` says.
+    expect(
+      reading.badges,
+      `@${width}px: a lone account rendered ${JSON.stringify(reading.badges)} — both badges are gated on \`safes.length > 1\``,
+    ).toEqual([])
+    expect(
+      reading.truncated,
+      `@${width}px: "${reading.text}" is ellipsised with one account and no badges`,
+    ).toBe(false)
+
+    // The pin. This card is the seeded ACTIVE account, so "Set active" is gated
+    // off too and the whole actions block should be absent — but the assertion
+    // that matters is the named one, because a future action on this card must
+    // not silently re-admit a set-default control.
+    const controls = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('button, a[role="button"]')).map((el) =>
+        `${el.getAttribute('aria-label') ?? ''} ${el.textContent ?? ''}`.trim(),
+      ),
+    )
+    /*
+      (b) — and the SAME scan must be shown able to return something.
+
+      `haven-reviewer` was right that (a) alone borrows its confidence: it
+      proves the card rendered, through `readCard`'s `h3` lookup, and says
+      nothing about whether `document.querySelectorAll('button, a[role=...]')`
+      — the query the absence claim below actually rests on — can find a
+      control at all. A scan that has never returned anything is not evidence
+      of an absence.
+
+      This card is the seeded ACTIVE account, so it deliberately renders no
+      action of its own; the control that proves the scan works is the
+      sidebar's account switcher, which is on every authenticated page. Naming
+      what it found in the message keeps a future failure diagnosable rather
+      than just "expected > 0".
+    */
+    expect(
+      controls.length,
+      `@${width}px: the control scan found NOTHING on the whole page — it cannot yet distinguish "no set-default control" from "nothing rendered". It saw ${JSON.stringify(controls)}`,
+    ).toBeGreaterThan(0)
+
+    expect(
+      controls.filter((n) => /default/i.test(n)),
+      `@${width}px: a lone NON-default account offers ${JSON.stringify(controls.filter((n) => /default/i.test(n)))} — #2374 removed the card's set-default control, and this is the state in which it was most misleading`,
+    ).toEqual([])
+    expect(
+      reading.actionsRect,
+      `@${width}px: the lone active account renders an actions block`,
+    ).toBeNull()
+    expect(
+      reading.cardInner - reading.rowInner,
+      `@${width}px: the lone account reserves ${(reading.cardInner - reading.rowInner).toFixed(1)}px for actions it does not render`,
+    ).toBeLessThanOrEqual(1)
   }
 })

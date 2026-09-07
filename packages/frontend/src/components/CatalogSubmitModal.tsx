@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Skeleton } from '@/components/ui/Skeleton'
 import {
@@ -303,30 +304,26 @@ export default function CatalogSubmitModal({
             >
               Resource URL
             </label>
-            <Input
-              id="catalog-resource-url"
-              type="url"
-              value={resourceUrl}
-              onChange={(e) => setResourceUrl(e.target.value)}
-              placeholder="https://your-service.example/pay"
-              invalid={formError !== null}
-              autoComplete="off"
-              aria-describedby={formError ? 'catalog-resource-url-error' : undefined}
-            />
-            {formError ? (
-              <p
-                id="catalog-resource-url-error"
-                className="mt-1.5 text-xs text-[var(--v2-danger)]"
-                role="alert"
-              >
-                {formError}
-              </p>
-            ) : (
-              <p className="mt-1.5 text-xs text-[var(--v2-ink-3)]">
-                An https endpoint that answers a payment request. No username or password in the
-                URL.
-              </p>
-            )}
+            <div className="space-y-1.5">
+              <Input
+                id="catalog-resource-url"
+                type="url"
+                value={resourceUrl}
+                onChange={(e) => setResourceUrl(e.target.value)}
+                placeholder="https://your-service.example/pay"
+                invalid={formError !== null}
+                autoComplete="off"
+                aria-describedby={formError ? 'catalog-resource-url-error' : undefined}
+              />
+              {formError ? (
+                <InlineAlert id="catalog-resource-url-error">{formError}</InlineAlert>
+              ) : (
+                <p className="text-xs text-[var(--v2-ink-3)]">
+                  An https endpoint that answers a payment request. No username or password in the
+                  URL.
+                </p>
+              )}
+            </div>
           </div>
 
           {/*

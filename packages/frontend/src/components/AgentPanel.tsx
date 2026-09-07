@@ -2,16 +2,19 @@
 
 import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { useCallback, useMemo, useState } from 'react'
+import { useAuth } from '@/context/AuthContext'
+import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import ConnectAgentModal from './ConnectAgentModal'
 import EditAgentModal from './EditAgentModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
-import { UnmanagedDelegateCard } from './agent-panel/UnmanagedDelegateCard'
 import { Button } from './ui/Button'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
+import { AgentOnboardingPromptCard } from './connect-agent/AgentOnboardingPromptCard'
 
 /**
  * The agents panel's shell: header, list layout, empty states, and modals.
@@ -21,21 +24,64 @@ import { Skeleton } from './ui/Skeleton'
  * `./agent-panel/`.
  */
 export default function AgentPanel() {
+  const removedAgentsPanelId = 'removed-agent-list'
   const panel = useAgentPanelState()
   const {
     safeAddress,
     chainId,
     agents,
     loading,
+    error: agentsError,
     visibleAgents,
     removedAgents,
-    unmanagedDelegates,
     finalizingAgent,
     finalizeTimedOut,
+    refetchAgents,
   } = panel
 
+  /**
+   * `/agents?setup=<id>` — the budget-approval hand-off link (#2522).
+   *
+   * An agent cannot approve a budget; a human must. So the agent pastes this
+   * link and the human lands on the exact step for that setup instead of being
+   * told to "go to Haven and approve the budget". A foreign or unknown id is
+   * not special-cased here: the modal opens, `GET /agent-connection-setups/:id`
+   * answers 404 for a setup that is not this owner's, and the flow renders its
+   * not-found state.
+   *
+   * `setup` is a SHARED parameter: `?setup=first` already means "auto-open the
+   * connect flow for this user's first agent" (#352). The two do not collide —
+   * that handler tests for the literal `'first'` and `parseSetupId` accepts
+   * only a UUID — and `lib/__tests__/handoff-links.test.ts` pins both halves so a
+   * future loosening of either shape fails a test rather than a user.
+   */
+  const resumeSetupId = useMemo(
+    () => (typeof window === 'undefined' ? null : setupIdFromSearch(window.location.search)),
+    [],
+  )
+  const [resumeDismissed, setResumeDismissed] = useState(false)
+  const activeResumeSetupId = resumeDismissed ? null : resumeSetupId
+
+  const closeConnectModal = useCallback(() => {
+    panel.setConnectAgentOpen(false)
+    if (!resumeSetupId) return
+    // `resumeDismissed` is what actually keeps the modal shut; the URL tidy is
+    // cosmetic, so it uses `history.replaceState` rather than the Next router.
+    // A router navigation would re-render the page to change nothing, and
+    // reaching for `useRouter` here would make every AgentPanel test mount an
+    // app router to render a panel that does not navigate.
+    setResumeDismissed(true)
+    try {
+      window.history.replaceState(null, '', '/agents')
+    } catch {
+      // A URL that stays tidy is not worth a thrown render.
+    }
+  }, [panel, resumeSetupId])
+
+
   if (!safeAddress) {
-    return (
+  
+  return (
       <EmptyState
         icon={<BotIcon size={20} />}
         title="Create a Haven account to manage agents"
@@ -70,19 +116,34 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => panel.setConnectAgentOpen(true)}
-            size="sm"
-          >
+          <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
             Connect agent
           </Button>
         </div>
       </div>
 
+      {agentsError && agents.length > 0 ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
+        >
+          Agent data could not refresh. Showing the last loaded records.
+          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetchAgents()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+
       {/* Agents view */}
       {loading && agents.length === 0 && (
-        <div className="space-y-3">
+        <div
+          className="space-y-3"
+          role="status"
+          aria-busy="true"
+          aria-live="polite"
+          aria-label="Loading agents"
+        >
           {[0, 1].map((i) => (
             <div
               key={i}
@@ -107,16 +168,18 @@ export default function AgentPanel() {
           but this only renders when the list is empty (first agent); for
           subsequent agents the existing list stays visible and the new one just
           appends. */}
-      {!loading && agents.length === 0 && unmanagedDelegates.length === 0 && finalizingAgent && (
-        <EmptyState
-          tone="neutral"
-          icon={
-            /* Heavier stroke: matches the original spinner's 3px ring weight. */
-            <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
-          }
-          title="Finalizing your agent…"
-          body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
-        />
+      {!loading && agents.length === 0 && finalizingAgent && (
+        <div role="status" aria-busy="true" aria-live="polite" aria-label="Finalizing agent setup">
+          <EmptyState
+            tone="neutral"
+            icon={
+              /* Heavier stroke: matches the original spinner's 3px ring weight. */
+              <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
+            }
+            title="Finalizing your agent…"
+            body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."
+          />
+        </div>
       )}
 
       {/* Timeout fallback — the poll exhausted its window without the agent
@@ -124,7 +187,7 @@ export default function AgentPanel() {
           user it may still be confirming and let them re-check. */}
       {!loading &&
         agents.length === 0 &&
-        unmanagedDelegates.length === 0 &&
+        !agentsError &&
         !finalizingAgent &&
         finalizeTimedOut && (
           <EmptyState
@@ -147,7 +210,7 @@ export default function AgentPanel() {
       {/* Empty state */}
       {!loading &&
         agents.length === 0 &&
-        unmanagedDelegates.length === 0 &&
+        !agentsError &&
         !finalizingAgent &&
         !finalizeTimedOut && (
         <EmptyState
@@ -156,16 +219,49 @@ export default function AgentPanel() {
           body="Set agent rules, then add your Haven credential to your agent so it can make payments within those rules."
           action={
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button onClick={() => panel.setConnectAgentOpen(true)}>
-                Connect agent
-              </Button>
+              <Button onClick={() => panel.setConnectAgentOpen(true)}>Connect agent</Button>
             </div>
           }
         />
       )}
 
+      {/* #2535: the agent-driven ALTERNATIVE to the button above — rendered on the
+          same condition, so a user who would rather hand the whole job to an
+          agent has something to paste before they ever open the modal.
+
+          The "or" divider is not decoration. Without it these are two
+          full-width blocks that both ask the user to start, with no hierarchy
+          saying which — `haven-design-reviewer` read the first version as two
+          competing calls to action rather than one choice, before reading
+          either. The divider is what makes the relationship legible at a glance
+          instead of only after reading the card's description. */}
+      {!loading &&
+        agents.length === 0 &&
+        !agentsError &&
+        !finalizingAgent &&
+        !finalizeTimedOut && (
+          <>
+            <div className="mt-6 flex items-center gap-3" aria-hidden="true">
+              <span className="h-px flex-1 bg-[var(--v2-border)]" />
+              <span className="text-xs text-[var(--v2-ink-3)]">or</span>
+              <span className="h-px flex-1 bg-[var(--v2-border)]" />
+            </div>
+            <AgentOnboardingPromptCard className="mt-6" />
+          </>
+        )}
+
+      {!loading && agents.length === 0 && agentsError ? (
+        <EmptyState
+          tone="warning"
+          icon={<Icon icon={CircleAlert} className="h-5 w-5" />}
+          title="Agents could not load"
+          body="Haven could not load your connected agents right now. Try again before assuming there are none."
+          action={<Button onClick={() => void refetchAgents()}>Try again</Button>}
+        />
+      ) : null}
+
       {/* Agent list */}
-      {(agents.length > 0 || unmanagedDelegates.length > 0) && (
+      {agents.length > 0 && (
         <div className="space-y-4">
           {/*
             #2043: the `not recorded` explanation, ONCE, as visible text, and
@@ -195,25 +291,17 @@ export default function AgentPanel() {
           {visibleAgents.length > 0 && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
-                const delegateKey = agent.delegate_address?.toLowerCase() ?? ''
                 const usesActiveSafe = panel.agentUsesActiveSafe(agent)
-                const chainData = delegateKey && usesActiveSafe
-                  ? panel.onChainData.get(delegateKey)?.allowances ?? null
-                  : null
                 const agentChainId = agent.safe_chain_id ?? chainId
 
                 return (
                   <AgentCard
                     key={agent.id}
                     agent={agent}
-                    onChainAllowances={chainData}
-                    onChainLoading={usesActiveSafe ? panel.onChainLoading : false}
-                    chainTimeSec={panel.chainTimeSec}
                     onViewDetails={panel.handleViewDetails}
                     onEdit={panel.handleEdit}
                     onPause={panel.handlePause}
                     onResume={panel.handleResume}
-                    onRevoke={panel.handleRevoke}
                     onRevokeCredential={panel.revokeAgentCredential}
                     onArchive={panel.handleArchive}
                     onRestore={panel.handleRestore}
@@ -231,8 +319,11 @@ export default function AgentPanel() {
           {removedAgents.length > 0 && (
             <div className="pt-1">
               <button
+                type="button"
                 onClick={() => panel.setShowRemovedAgents((prev) => !prev)}
-                className="inline-flex items-center gap-2 text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+                aria-expanded={panel.showRemovedAgents}
+                aria-controls={removedAgentsPanelId}
+                className="inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-xs text-[var(--v2-ink-2)] transition-colors hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
               >
                 <Icon
                   icon={ChevronRight}
@@ -244,54 +335,42 @@ export default function AgentPanel() {
             </div>
           )}
 
-          {panel.showRemovedAgents && (
-            <div className="grid items-start gap-4 lg:grid-cols-2">
-              {removedAgents.map((agent) => (
-                <AgentCard
-                  key={agent.id}
-                  agent={agent}
-                  onChainAllowances={null}
-                  onChainLoading={false}
-                  chainTimeSec={panel.chainTimeSec}
-                  onViewDetails={panel.handleViewDetails}
-                  onEdit={panel.handleEdit}
-                  onPause={panel.handlePause}
-                  onResume={panel.handleResume}
-                  onRevoke={panel.handleRevoke}
-                  onRevokeCredential={panel.revokeAgentCredential}
-                  onArchive={panel.handleArchive}
-                  onRestore={panel.handleRestore}
-                  busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                  canUseWalletActions={panel.agentUsesActiveSafe(agent)}
-                  chainId={agent.safe_chain_id ?? chainId}
-                />
-              ))}
-            </div>
-          )}
+          <div
+            id={removedAgentsPanelId}
+            hidden={!panel.showRemovedAgents}
+            role="group"
+            aria-label="Removed agents"
+            className="grid items-start gap-4 lg:grid-cols-2"
+          >
+            {removedAgents.map((agent) => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                onViewDetails={panel.handleViewDetails}
+                onEdit={panel.handleEdit}
+                onPause={panel.handlePause}
+                onResume={panel.handleResume}
+                onRevokeCredential={panel.revokeAgentCredential}
+                onArchive={panel.handleArchive}
+                onRestore={panel.handleRestore}
+                busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
+                canUseWalletActions={panel.agentUsesActiveSafe(agent)}
+                chainId={agent.safe_chain_id ?? chainId}
+              />
+            ))}
+          </div>
 
-          {/* Unmanaged network delegates */}
-          {unmanagedDelegates.map((d) => (
-            <UnmanagedDelegateCard
-              key={d.address}
-              delegate={d.address}
-              allowances={d.allowances}
-              chainTimeSec={panel.chainTimeSec}
-              chainId={chainId}
-              pendingHavenSetup={panel.isPendingHavenSetup(d.address)}
-              onRevoke={() => panel.handleRevokeUnmanaged(d.address)}
-              revoking={panel.busyAgentId === d.address && panel.busyAction === 'revoke'}
-            />
-          ))}
         </div>
       )}
 
       <ConnectAgentModal
-        open={panel.connectAgentOpen}
-        onClose={() => panel.setConnectAgentOpen(false)}
+        open={panel.connectAgentOpen || Boolean(activeResumeSetupId)}
+        onClose={closeConnectModal}
         starterAllowance={panel.firstAgentSetup}
         safeAddress={safeAddress}
         safeId={panel.activeSafeId}
         onSetupUpdated={panel.handleSetupUpdated}
+        resumeSetupId={activeResumeSetupId}
       />
 
       {/* Edit agent modal */}
@@ -300,12 +379,6 @@ export default function AgentPanel() {
           open={!!panel.editAgent}
           onClose={() => panel.setEditAgent(null)}
           agent={panel.editAgent}
-          safeAddress={safeAddress}
-          chainId={chainId}
-          safeDetails={panel.safeDetails}
-          existingOnChainAllowances={
-            panel.onChainData.get(panel.editAgent.delegate_address?.toLowerCase() ?? '')?.allowances ?? null
-          }
           onUpdated={panel.handleAgentEdited}
         />
       )}

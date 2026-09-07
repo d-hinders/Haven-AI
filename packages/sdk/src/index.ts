@@ -10,6 +10,32 @@ export { toolDescriptions, composeDescription } from './tool-descriptions.js'
 export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
 
 export { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
+export {
+  HAVEN_AGENT_RUNBOOK_MD,
+  AGENT_SECRET_HYGIENE_SENTENCE,
+  AGENT_LOCAL_KEY_SENTENCE,
+  AGENT_NETWORK_ACCESS_SENTENCE,
+  AGENT_JSON_MODE_SENTENCE,
+  AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
+  AGENT_README_SECTION_MD,
+  AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+  AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_ONBOARDING_PROMPT,
+} from './agent-guidance.js'
+
+// The npm dist-tag every published package's "re-run the connector" hint names
+// (#2423). One build-time constant, written by `scripts/release-bump.mjs` from
+// the release version with the same rule `publish.yml` uses to pick the
+// `--tag`, so a `@dev` snapshot tells its tester to re-run `@dev`.
+export {
+  HAVEN_CONNECTOR_CHANNEL,
+  CONNECTOR_PACKAGE_NAME,
+  connectorSpec,
+  connectorRerunCommand,
+  resolveConnectorChannel,
+  isConnectorChannel,
+} from './connector-channel.js'
 
 // The Node.js floor every published Haven package enforces (#1161). Shared here
 // because connect (at setup), signer and mcp (at startup) all need the same
@@ -106,6 +132,7 @@ export {
   HavenUnsupportedSignerVersionError,
   SignerRefusalCode,
   SIGNER_UPDATE_FALLBACK,
+  signerUpdateFallback,
 } from './types.js'
 
 export {

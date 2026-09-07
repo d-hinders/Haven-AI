@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-08-25" # #1743: §3's fourth failure class gains its ENCODED recovery — step 2 now runs `ops:cancel-stuck-attest` (operator-triggered, Option A; no timer) instead of prescribing a hand-run 0-value self-send, step 3 names the hand-run cancel itself as a hazard the command removes, and the closing paragraph flips from "automating it is a known gap" to "the trigger stays human by owner decision". Both race outcomes documented as self-resolving (attest wins → receipt recovery on the original anchor + lane-cap incident alert for the dead cancel; cancel wins → burned nonce is the #1745 evidence and the sweep re-mints once). Only §3 re-verified in this pass. Prior: #1745: §3's passport-attest procedure LOSES its duplicate-hunt steps — the re-mint is now guarded in code (a re-anchor needs the prior tx's nonce consumed by something else), so cancelling a stuck nonce can no longer release a queued duplicate, and the cancel is self-completing: the burned nonce IS the evidence the sweep needs. A hand-run fee bump is named as the remaining hazard, since it leaves no outbound record. Prior: #1735: §3 gains a FOURTH failure class — a passport attest that broadcasts and does not confirm, which unlike the deploy does not self-heal; numbered operator runbook added, sequenced around the #1745 re-mint race. Prior: #1722: §3 gains a third failure class — a deploy that broadcasts and does not confirm is bounded at 120 s and handed to the #1558 bump worker, NOT relayer exhaustion; §1's gas-payer claims re-read against the code and unchanged. Prior: #1721: §1 and §3 re-read against the code — the relayer-paid factory deploy now has TWO trigger sites (grant activation in routes/agent-delegations.ts and, since #1667, the first erc7710 authorize in modules/x402/delegation-authorize.ts), so the drained-relayer blast radius and the erc7710 "sponsors nothing" line were corrected and the 502/429 surfaces named. §2 credential claims spot-checked (delegationRailBundlerUrl, DELEGATION_RAIL_SPONSORSHIP_POLICY_ID); §§4-5 are policy/incident prose, unchanged. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of reconciliation-probe tooling; prior notes remain in git history.
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -269,7 +269,8 @@ Probes:
   factory, Hybrid impl, 8 enforcers) is live bytecode on every enabled
   chain. Run on deploy and daily; exit 1 = stop before any rail use.
 - `ops:check-mainnet-reconciliation` — the read-only 8453 probe (#1067):
-  /health, relayer-monitor liveness + low-water, and (in the prod shell)
+  public `/health`, authenticated `/health/ops` relayer-monitor liveness +
+  low-water, and (in the prod shell)
   the lingering-delegate scan. The mainnet canary procedure that uses it:
   [`mainnet-canary.md`](mainnet-canary.md).
 

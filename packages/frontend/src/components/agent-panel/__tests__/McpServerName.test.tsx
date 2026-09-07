@@ -77,8 +77,9 @@ describe('McpServerName', () => {
   /**
    * #2043: the null branch carries the LABEL and nothing else. Its
    * explanation is hoisted to one note above the list (`AgentPanel`), because
-   * `AgentCard`'s composite `role="link"` means no tooltip here is reachable
-   * by keyboard or touch — see `MCP_NOT_RECORDED_NOTE`.
+   * The agent name is now a real link, but this label remains plain text, so
+   * no tooltip here is reachable by keyboard or touch — see
+   * `MCP_NOT_RECORDED_NOTE`.
    */
   it('puts no explanation behind a hover a keyboard or touch user cannot perform', () => {
     render(<McpServerName value={null} />)

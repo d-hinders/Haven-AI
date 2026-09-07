@@ -28,7 +28,14 @@
  * Set PROBE_SHOTS_DIR to also write evidence PNGs; CI asserts only.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession, testSafe, testSafeAddress, testUser } from './fixtures/haven-api'
+import {
+  mockHavenApi,
+  seedAuthenticatedSession,
+  serveOwnerOnlyHybridSigners,
+  testSafe,
+  testSafeAddress,
+  testUser,
+} from './fixtures/haven-api'
 
 const HYBRID_KEY_ID = '0x0102030405060708'
 // credentialIdFromKeyId('0x0102030405060708') → base64url("\x01…\x08")
@@ -97,19 +104,17 @@ async function installConnectedWallet(page: Page, address: string) {
   )
 }
 
-/** Owner-only signer set: an EOA owner, zero enrolled passkeys (#2068's shape). */
+/**
+ * Owner-only signer set: an EOA owner, zero enrolled passkeys (#2068's shape).
+ * Served by the shared `serveOwnerOnlyHybridSigners` since #2284 — the
+ * collapsed-WalletButton pixel gate renders the same account, and one
+ * encoding of "same account, same signer-set answer" is the point. No
+ * `/auth/me` override: the shared `testSafe` has been `delegator_hybrid` by
+ * default since #2264, so `hybridUser` is what the fixture already serves.
+ */
 async function mockOwnerOnlyHybridAccount(page: Page) {
   await mockHavenApi(page)
-  await page.route('**/api/auth/me', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(hybridUser) })
-  })
-  await page.route(`**/api/accounts/hybrid/${testSafeAddress}/signers**`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ...hybridSigners, owner_address: OWNER_ADDRESS, passkeys: [] }),
-    })
-  })
+  await serveOwnerOnlyHybridSigners(page, OWNER_ADDRESS)
 }
 
 async function shoot(page: Page, name: string) {

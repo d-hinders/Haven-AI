@@ -13,6 +13,17 @@ Contract: [`docs/architecture/06-hosted-mcp-connect-flow.md`](../../docs/archite
 Requires **Node >= 22**; the signer refuses to start on anything older, before
 it reads a key.
 
+## Are you an AI agent whose user has no Haven account yet?
+
+Read **`/for-agents.md`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with `@haven_ai/cli`.
+
 ## Two ways to use it
 
 **As a local MCP signer** (for Claude Desktop / Code / Cursor) — run it
@@ -21,22 +32,30 @@ the Haven dashboard hands out, which writes the MCP config and pins the
 runtime:
 
 ```sh
-npx @haven_ai/connect@alpha
+npx @haven_ai/connect@<channel>
 ```
+
+`<channel>` is a placeholder: production hands out `@alpha`, and it is the right
+answer unless your dashboard hands you a different one — **run the command that dashboard shows
+you**, which names the npm dist-tag that backend is paired with. This signer's
+own messages do the same: since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423)
+every "rerun the connector" hint it prints names the channel THIS build was
+published under, so a build installed from a non-production channel tells you
+to reinstall from that same channel rather than sending you to production.
 
 Rerunning it is also the documented fix for a signer that has fallen behind the
 backend's expected-context version. To run the signer directly:
 
 ```sh
-HAVEN_DELEGATE_KEY=0x... npx @haven_ai/signer
+HAVEN_DELEGATE_KEY=0x... npx @haven_ai/signer@alpha
 # or
-npx @haven_ai/signer --credentials /path/to/haven-agent.json
+npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json
 ```
 
 On first launch, the signer prints the delegate address, any wallet/network
 metadata found in the credential file, and the sign-only tool list. It refuses
 to start until acknowledged with either `HAVEN_SIGNER_ACK=<hash>` or
-`npx @haven_ai/signer --credentials /path/to/haven-agent.json --ack`.
+`npx @haven_ai/signer@alpha --credentials /path/to/haven-agent.json --ack`.
 
 It exposes four stdio MCP tools, all sign-only:
 
@@ -77,7 +96,7 @@ const { paymentHeader } = await signer.buildX402PaymentHeader(
 The signer also exposes `signPaymentHash(hash)` (raw ECDSA over a legacy
 AllowanceModule funding/transfer hash) and `signX402FundingHash(hash, expected)`
 for v1 contexts, and `signSweepAuthorization(input)` for the gasless sweep. All
-five are methods on the object `createEdgeSigner` returns, not standalone
+six are methods on the object `createEdgeSigner` returns, not standalone
 exports.
 
 ## Orchestration
@@ -179,17 +198,33 @@ The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
 `delegate_key` (with a permissive-file warning). It stays in this process, and
 is never transmitted.
 
-**The signer makes exactly one kind of network call.** Since
-[#1263](https://github.com/d-hinders/Haven-AI/issues/1263) it performs an
+**The signer makes at most one kind of network call, on one path, and it is a
+read.** Since [#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the
+`{ payment_id }` form of `haven_sign` and `haven_sign_x402` performs an
 authenticated, read-only `GET /x402/:payment_id/sign-context` against Haven, so
 that agents never have to relay multi-KB EIP-712 payloads through a model's
-context window. It reads `api_url` and `api_key` from an `identity.json` sitting
-next to the signer credential file — the signer's own credential still needs no
-`api_key`. The signer **core** (`src/core.ts`) remains network-free, and fetched
-bytes are treated as untrusted input exactly like a tool argument: the same
-digest re-derivation and Haven-binding verification apply, because what makes
-them safe is the verification, not where they came from. It never relays,
-submits, or broadcasts.
+context window. **Only the Bearer API key goes out; the delegate key is never
+part of that request or its response.** Nothing else in the package reaches the
+network: `haven_x402_sign_header` and `haven_sign_sweep_delegate` never fetch,
+the library surface above (`createEdgeSigner` and its six signing methods, over
+the network-free `src/core.ts`) never fetches, and passing the payload as
+`typed_data_b64` instead of `payment_id` keeps even the two fetching tools
+offline. It never relays, submits, or broadcasts.
+
+The fetch needs `api_url` and `api_key` from an `identity.json` sitting **next
+to the signer credential file** — the signer's own credential still needs no
+`api_key`. So the network call is a property of how you start the signer, not
+just of which tool you call: run it from `HAVEN_DELEGATE_KEY` alone and there is
+no credential file, hence no directory to find an `identity.json` in, so the
+`{ payment_id }` form refuses with a message naming the `typed_data_b64`
+fallback rather than reaching out — and the process makes no network calls at
+all. Egress is needed by `--credentials` / `HAVEN_CREDENTIALS` runs that use the
+preferred `{ payment_id }` call, which is what the connector install above
+sets up.
+
+Fetched bytes are treated as untrusted input exactly like a tool argument: the
+same digest re-derivation and Haven-binding verification apply, because what
+makes them safe is the verification, not where they came from.
 
 Connect Agent 2 may create the signer credential file locally during setup. In
 that flow Haven receives the public signing address, proof, API-key hash/prefix,

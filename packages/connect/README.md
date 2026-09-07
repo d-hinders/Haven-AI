@@ -7,9 +7,32 @@ signing key and API key locally, stores them locally, and sends Haven only the
 public signing address, proof signature, and API-key hash. Haven never receives
 the private key or plaintext API key.
 
+## Are you an AI agent whose user has no Haven account yet?
+
+Read **`/for-agents.md`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with `@haven_ai/cli`.
+
 ```sh
-npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
+npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.example --ack-local-tools --runtime claude-code
 ```
+
+`<channel>` is a placeholder, like `hv_setup_...` and the API URL beside it:
+**the Haven dashboard hands you the exact command to run — copy that one.** The
+channel is per-deployment and has been since #2422: the backend's setup response
+names the whole package in `connector_package`, production hands out
+`@haven_ai/connect@alpha`, and a non-production deployment can be configured to
+hand out another, such as `@haven_ai/connect@dev`. This README ships inside every
+channel's tarball and is the npm landing page for all of them, so a literal here
+would be wrong for every reader it did not describe (#2515).
+Read `connector_package` rather than assuming any particular backend's channel. Pinning `@alpha` by hand against such a backend
+installs a signer that skews against it — the signer refuses to sign an
+`x402_expected_context_version` it does not know.
 
 The connector writes owner-only credential files outside the project by default:
 
@@ -80,7 +103,8 @@ already-running host, which is why the restart guidance below matters.
 
 ## Retiring an old agent directory
 
-Re-running setup creates a NEW agent and retires nothing. Long-lived MCP hosts
+Re-running setup without `--replace` creates a NEW agent and retires nothing
+(with `--replace`, see [Running setup again](#running-setup-again)). Long-lived MCP hosts
 (gateways, TUI workers, editors, desktop apps) load their MCP wiring once, at
 process start — a host started before your latest setup keeps spawning the OLD
 agent's signer path forever, and when that directory is later removed the spawn
@@ -93,8 +117,11 @@ minutes. Two rules follow:
 2. **Tombstone a directory before (or instead of) deleting it:**
 
    ```
-   npx @haven_ai/connect@alpha --tombstone ~/.haven/agents/<directory> --reason "superseded" --json
+   npx @haven_ai/connect@<channel> --tombstone ~/.haven/agents/<directory> --reason "superseded" --json
    ```
+
+   `<channel>` is the placeholder defined under the first example; this command
+   rewrites local files only, so any published connector does the same job.
 
    This replaces the directory's signer wrapper with a diagnostic that logs the
    retirement (agent id, date, reason, restart guidance) to the host's MCP
@@ -123,9 +150,12 @@ Hermes) the `MCP_HAVEN_API_KEY` dotenv line behind, and the runtime quoted as
 one agent while signing as another. `--unwire` is the erase half:
 
 ```
-npx @haven_ai/connect@alpha --unwire ~/.haven/agents/<directory> [--reason "..."]
-npx @haven_ai/connect@alpha --unwire --name research [--reason "..."]
+npx @haven_ai/connect@<channel> --unwire ~/.haven/agents/<directory> [--reason "..."]
+npx @haven_ai/connect@<channel> --unwire --name research [--reason "..."]
 ```
+
+`<channel>` is the placeholder defined under the first example; `--unwire`
+touches local files only, so any published connector does the same job.
 
 It tombstone-first (so a stale long-lived host still hears `HAVEN-TOMBSTONE`,
 never a masked `ENOENT`), then removes THAT agent's hosted + signer pair from
@@ -150,16 +180,30 @@ Pass `--json` when a launcher needs a machine-readable completion record. Connec
 writes progress and human recovery notes to stderr and exactly one JSON object
 to stdout, with `schema_version: 1` and `outcome` set to `complete`,
 `action_required`, or `failed`. Structured runs skip the interactive
-budget-approval wait so the record is emitted promptly; approve in the Haven
-dashboard whenever ready and verify later with the read-only `haven_get_agent`
+budget-approval wait so the record is emitted promptly; open `approval.url`
+whenever ready and verify later with the read-only `haven_get_agent`
 tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
-when the backend does not provide an approval expiry), the two
-read-only verification tools, `hosted_mcp_url`, and `superseded_agent_ids`. It
+when the backend does not provide an approval expiry) and `approval.url`, the two
+read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`, and —
+on a run that replaced existing wiring — `superseded_agents_retired_locally`
+with `retired_agent_ids`. It
 contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older
 fields remain for additive compatibility.
+
+`approval.url` (#2528) is the absolute link to this setup's budget approval,
+returned by the backend at register. Present only when `approval.required` is
+`true` **and** the backend is new enough to send one — a deployment older than
+#2528 omits the key entirely, which is why a caller must test for it rather
+than assume it. In prose mode the same link replaces "Return to Haven" in the
+printed next steps. It carries no secret (the setup token never appears in it),
+and it is the ONLY approval link a caller should use: the outcome carries no
+setup id, so there is nothing to assemble one from — relay the whole link or
+none. The connector also reports `run_mode` (`json` or `prose`) to the backend
+at register, so Haven can tell an automated setup from a narrated one; it is
+sent, not returned, and appears in no output.
 
 `hosted_mcp_url` is the hosted MCP endpoint this run wired up — **not** the
 backend URL you passed as `--api`. The hosted MCP server is a separate
@@ -168,11 +212,40 @@ mismatch. It is non-secret: the same string goes into your own MCP config file,
 and the API key travels beside it in a header.
 
 `superseded_agent_ids` lists the other agent directories on this machine. A
-re-run mints a NEW agent and retires nothing, so those older agents still hold
-live API and signing keys — revoke them on the Haven agent page if you meant to
-replace them. Empty on a clean first run; an empty list is not a guarantee,
-since a scan that cannot read the credential root also yields one rather than
-failing a completed setup.
+re-run mints a NEW agent, and without `--replace` retires nothing, so those
+older agents still hold live API and signing keys — revoke them on the Haven
+agent page if you meant to replace them. Empty on a clean first run; an empty
+list here is not a guarantee, since a scan that cannot read the credential root
+also yields one rather than failing a completed setup.
+
+**The dashboard offers the revoke, never the connector (#2561).** The same ids
+now ride the install-status report, so the Haven dashboard can put a
+one-click revoke next to the setup that displaced them. The connector does not
+and must not do it: `POST /agents/:id/revoke` is owner-authenticated, and an
+agent credential retiring a sibling agent is the "agent editing its own
+authority" the re-key routes refuse. Nothing is revoked automatically — the
+owner clicks, one agent at a time.
+
+On the REPORT the field is a tri-state, unlike the `--json` outcome above: a
+list, `[]` when the scan ran and found none, and `null` when it could not run.
+That is the same ambiguity this paragraph warns you about, made machine-
+readable, so a dashboard never tells somebody their machine is clean when
+nobody managed to read it. On a `--replace` run, `retired_agent_ids` names the
+directories that were actually tombstoned and had their local key files removed
+— **the collision set only**, never the whole `superseded_agent_ids` list, which
+also names named agents that coexist with the replaced bare pair and are
+untouched — and `superseded_agents_retired_locally` is `true` when that
+retirement covered every collision entry (`false`: the install ended with an
+error code and the retirement was skipped, or one entry failed). Both fields
+are absent on any other run and say nothing about the backend, where nothing is
+revoked.
+
+A `wiring_collision` refusal (a non-interactive bare setup over a live
+previous agent, #2551) carries `error.superseded_agent_ids` and
+`error.suggested_name` — the ids the human needs in order to decide, and a
+valid `--name` the run can be re-issued with — with `next_action:
+relay_wiring_collision_to_user`. It is a relay, not a retry hint: do not append
+`--replace` or `--name` on the agent's own initiative.
 
 For a recoverable install, configuration, probe, consent, or manual-runtime
 condition, inspect `error.code` and `error.next_action`, then follow the safe
@@ -221,11 +294,24 @@ an extra "about to create agent X, proceed?" gate. That is deliberate: the
 consent already happened when the user minted the one-time setup prompt in the
 Haven dashboard, which enumerates exactly what the command may do. The setup
 stays cancellable from the dashboard throughout, and the registered agent
-starts `pending_approval` with zero spend authority — nothing can move funds
-until the user approves the budget in Haven. A CLI-side confirmation would add
-friction without adding a security boundary. (The local-signer tool-exposure
+starts `pending_approval` with zero spending authority — no budgeted spend can
+move until the user approves the budget in Haven. The exact sweep-recovery
+routes remain available only to recover a stranded delegate balance and do not
+grant spending authority. A CLI-side confirmation would add friction without
+adding a security boundary. (The local-signer tool-exposure
 acknowledgement is a separate, machine-checkable consent about what the local
 MCP tools expose, not a registration gate.)
+
+The one question Connect does put before registration is not about the
+agent being created but about the one already here: a **wiring collision**
+([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)). When the bare
+`haven` / `haven-signer` pair on this machine already belongs to a different
+agent whose directory still holds a live key, proceeding would silently
+re-point that pair — the state `--doctor` reports as a still-spend-capable
+`superseded` directory. That choice (replace it, or install alongside under a
+name) belongs to the user, and it is asked *before* the key is minted or the
+agent registered so that declining leaves no orphaned `pending_approval` agent
+behind. See [Running setup again](#running-setup-again).
 
 ## Running setup again
 
@@ -235,7 +321,7 @@ already-configured machine behaves as follows (characterized in
 `storage.test.ts`, `config-writers.test.ts`, `runtime.test.ts`, and
 `runtime-install.test.ts`, #1544/#1569):
 
-- **Re-running an already-consumed setup command** fails cleanly before any
+- **Re-running an already-consumed connector command** fails cleanly before any
   credential file or runtime configuration is touched — Haven refuses the
   consumed setup when Connect resolves it (or, in a rare concurrent-run race,
   at registration). The key pair minted for the attempt exists only in memory
@@ -244,17 +330,44 @@ already-configured machine behaves as follows (characterized in
   credentials into its own directory under `~/.haven/agents/<agent-id>/`,
   alongside the previous agent's directory, which stays byte-identical.
   Nothing is rotated, revoked, or deleted locally.
-- **Runtime MCP entries are replaced, not duplicated**: Connect owns the
-  `haven` and `haven-signer` entries (and the managed Codex/Hermes
-  equivalents) and re-points them at the newest agent's credentials.
-  Unrelated MCP servers and configuration are preserved. Without `--name`, one
-  runtime is therefore wired to one Haven agent — the newest one. With
+- **A bare re-run over a live previous agent is a decision, not a default
+  ([#2551](https://github.com/d-hinders/Haven-AI/issues/2551)).** Before
+  minting a key or registering, Connect scans the credential root for a
+  bare-pair directory that still holds a usable key — the same reading
+  `--doctor` classifies as `wired` or `superseded`; `retired`, `orphaned`,
+  `parked` and **named** directories never count. If it finds one:
+  - an **interactive terminal** is asked to choose — **replace** (below) or
+    **install alongside** under a name Connect proposes from the agent's
+    display name (e.g. `payment-agent`), collision-checked against the
+    directories already there;
+  - a **non-interactive run** (`--json`, CI, an agent tool call, a pipe)
+    refuses with `wiring_collision` — nothing written, token still unused —
+    naming the superseded agent ids and the two flags that resolve it. The
+    refusal is written as a **relay instruction**: an agent running the
+    dashboard's command may append only `--json` (and `--runtime` after a
+    runtime refusal), so it must hand the choice to its user rather than add
+    a flag itself, and re-run only with the flag the user picks.
+  - **`--replace`** is the unattended answer "yes, replace". `--name <slug>`
+    installs alongside. Passing both is a usage error — they contradict.
+- **Replacing re-points the bare pair, then retires the previous directory
+  locally.** Connect owns the `haven` and `haven-signer` entries (and the
+  managed Codex/Hermes equivalents) and re-points them at the new agent's
+  credentials; unrelated MCP servers and configuration are preserved. Once
+  the runtime install has actually completed, each superseded directory is
+  tombstoned and its local key files removed — the same teardown `--unwire`
+  performs — so `--doctor` reads it as `retired` rather than still
+  spend-capable. If the install ends with an error code the retirement is
+  **skipped**, because the old wiring may still be the only working one; the
+  outcome's `superseded_agents_retired_locally` says which happened and
+  `retired_agent_ids` names exactly the directories it reached. With
   `--name`, each agent owns its own suffixed pair and they coexist; see
   [Running several agents in one runtime](#running-several-agents-in-one-runtime).
-- **The previous agent is not revoked by a re-run.** Its credentials remain on
-  disk and its authority remains whatever its on-chain rules say. Revoke
-  agents you no longer use from the Haven dashboard, then delete their
-  credential directories.
+- **The previous agent is not revoked by a re-run — with or without
+  `--replace`.** Local retirement is local: its authority remains whatever
+  its on-chain rules and the Haven agent page say. Revoke agents you no
+  longer use from the Haven dashboard. Connect never calls revoke — that
+  route is owner-authenticated, and an agent credential revoking a sibling
+  agent would be an agent editing its own authority.
 - **A re-run never overwrites an existing credential file.** A write that would
   collide with an existing `identity.json`/`signer.json`/`agent.json` is
   refused outright (and a partially failed write rolls itself back), so a
@@ -271,9 +384,13 @@ directory, so several agents coexist in one runtime instead of replacing each
 other:
 
 ```sh
-npx -y @haven_ai/connect@alpha --setup hv_setup_... --api https://api.haven.example \
+npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.example \
   --name research --runtime claude-code
 ```
+
+As above, `<channel>` is a placeholder like the rest of this line: take the
+package from the setup response's `connector_package`
+and add `--name` to the command the dashboard gave you.
 
 | | Without `--name` | With `--name research` |
 |---|---|---|
@@ -313,15 +430,23 @@ design. So it runs in two phases with the dashboard between them:
 
 ```sh
 # 1. On this machine: generate the new key, print its public address.
-npx -y @haven_ai/connect@alpha --rekey [--name research]
+npx -y @haven_ai/connect@<channel> --rekey [--name research]
 
 # 2. In the dashboard: agent → Replace signing key → paste that address.
 #    Sign the steps. It shows a new API key ONCE.
 
 # 3. Back here: write the new credentials and rewire this agent's MCP pair.
-npx -y @haven_ai/connect@alpha --rekey-finish --api-key sk_agent_... \
+npx -y @haven_ai/connect@<channel> --rekey-finish --api-key sk_agent_... \
   --runtime claude-code [--name research]
 ```
+
+**Phase one prints the exact phase-two command — prefer it over the line above.**
+Since [#2423](https://github.com/d-hinders/Haven-AI/issues/2423) the connector
+builds that command from the npm dist-tag **it** was published under, so a build
+installed from a non-production channel tells you to finish with that same
+channel rather than sending you to production mid-re-key. `@alpha` is what
+production hands out and is right for a production install; it is not right for
+every install, which is why the tool computes it and this page cannot.
 
 Between the two phases nothing has changed: the agent keeps working on its old
 key until you finish. Phase one refuses up front what the backend would refuse
@@ -349,12 +474,19 @@ across the rest is yours.
 ## Diagnosing a stuck setup: `--doctor` / `--repair` (#1589)
 
 ```bash
-npx @haven_ai/connect@alpha --doctor --runtime codex-desktop
-npx @haven_ai/connect@alpha --doctor --repair --runtime codex-desktop
+npx @haven_ai/connect@<channel> --doctor --runtime codex-desktop
+npx @haven_ai/connect@<channel> --doctor --repair --runtime codex-desktop
 ```
 
+`<channel>` is the placeholder defined under the first example — and here it is
+not indifferent: `signer_runtime` compares the sidecar against the manifest of
+the connector **that runs the check**, so a doctor from another channel reports
+a skew that is not there. Use the channel your dashboard hands out.
+
 `--doctor` is read-only and needs NO setup token: it checks the runtime config,
-the agent credential files, the pinned signer runtime install, the hosted MCP
+the agent credential files, the pinned signer runtime install (and, since
+#2424, whether that install was made under a local runtime-spec override —
+see the last section of this file), the hosted MCP
 (authorized `tools/list`), and starts the local signer for a real stdio
 handshake — reporting its advertised compat versions. Every failing check
 prints one concrete repair action; the exit code is non-zero on any failure.
@@ -362,10 +494,14 @@ Add `--json` for a machine-readable report. No secret material is ever
 printed.
 
 `--doctor` also probes every OTHER agent credential directory it did not
-select (#1688). A re-run of setup mints a NEW agent and retires nothing, so
-a directory from a previous setup can hold an API key that still
-authenticates — meaning any host that started before the re-run keeps
-spending as the agent you believe you replaced. A superseded directory
+select (#1688). A re-run of setup mints a NEW agent and, unless it ran with
+`--replace` (#2551), retires nothing, so a directory from a previous setup
+can hold an API key that still authenticates — meaning any host that started
+before the re-run keeps spending as the agent you believe you replaced. Since
+#2551 a bare setup no longer reaches that state silently: it asks at a
+terminal and refuses everywhere else, so a `superseded` directory now means
+someone chose it — a `--replace` whose install failed, an older connector, or
+a directory this scan could not classify. A superseded directory
 whose key is still live is a FAILING check naming the agent id, with the
 repair spelled out: revoke it on the Haven agent page, then remove the
 directory. An already-revoked one reports as informational; an unreachable
@@ -381,3 +517,85 @@ which.
 `--repair` re-runs what setup already owns — reinstall the pinned signer
 runtime, rewrite the wrapper + sidecar, and re-write the runtime config from
 the STORED credentials. It never touches keys and never needs a new token.
+
+## Installing an unpublished signer / SDK / MCP build (`HAVEN_SIGNER_SPEC`, #2424)
+
+Setup installs the connector's **pinned** siblings — `@haven_ai/signer@<pin>`
+and `@haven_ai/sdk@<pin>` into `~/.haven/signer-runtime/<pin>`, and for
+`--local` also `@haven_ai/mcp@<pin>` into `~/.haven/mcp-runtime/<pin>`. That
+is right for every user and wrong for the one developer iterating on the
+signer or SDK, who otherwise has to publish to find out whether a change works
+end to end. Three environment variables name a different spec:
+
+| Variable | Replaces | Read by |
+|---|---|---|
+| `HAVEN_SIGNER_SPEC` | `@haven_ai/signer@<pin>` | the signer runtime (default topology) |
+| `HAVEN_SDK_SPEC` | `@haven_ai/sdk@<pin>` | both runtimes — each installs the SDK |
+| `HAVEN_MCP_SPEC` | `@haven_ai/mcp@<pin>` | the `--local` MCP runtime |
+
+A value is anything `npm install` accepts for that package: a checkout
+(`file:/abs/path/to/packages/signer`), a tarball from `npm pack`
+(`/abs/haven_ai-signer-0.0.0.tgz`), or an explicit version
+(`@haven_ai/signer@<version>`). Set it in the shell that runs the setup
+command — the command itself is unchanged:
+
+```bash
+HAVEN_SIGNER_SPEC=file:$PWD/packages/signer npx @haven_ai/connect@<channel> --setup <token> --runtime claude-code
+```
+
+`<channel>` is the placeholder defined under the first example.
+
+Environment variables rather than a flag, deliberately: the install runs from
+three entry points (`--setup`, `--doctor --repair`, `--rekey-finish`) and all
+three honour the same variables, so a re-key cannot silently reinstall the
+registry build; and the connector command is minted by the dashboard and pasted
+verbatim, often by an agent, so the override sits beside it instead of being
+spliced into a line the developer did not write.
+
+**What an active override changes:**
+
+- The runtime directory is `~/.haven/signer-runtime/override-<hash>` (or
+  `mcp-runtime/override-<hash>`), keyed by a short hash of the **resolved**
+  specs — overridden and pinned alike — so it can never poison the
+  version-named directory the normal path reuses, and a pinned-sibling bump
+  gets a fresh one.
+- The install is **never reused** from an earlier run: a rebuilt `file:`
+  package must not be shadowed by a cache hit.
+- Setup prints `RUNTIME SPEC OVERRIDE ACTIVE …` first, naming each variable
+  and the pin it replaced; `--rekey-finish` prints the same line.
+- `signer-runtime.json` / `mcp-runtime.json` record the override under
+  `runtime_spec_override`, and their `*_version` fields hold what npm actually
+  installed rather than the manifest pins.
+- The wrapper the agent client launches carries a
+  `// HAVEN RUNTIME SPEC OVERRIDE (#2424): …` comment.
+- `--doctor` reports a failing `runtime_spec_override` check — "runtime spec
+  overridden — not the pinned manifest" — whenever the sidecar says the
+  install ran under one **or** a `HAVEN_*_SPEC` variable is set in the shell
+  running the doctor (a `--repair` from that shell would install it). The
+  override is legitimate; the finding is its record. Under an override the
+  `signer_runtime` check compares the directory against the sidecar's own
+  record, not the manifest.
+
+**What it never changes:** the post-setup handshake probe still requires
+every tool in the manifest's `requiredTools` / `requiredSignerTools`, so a
+local build that dropped a tool fails setup exactly like a bad registry
+version would. A set-but-malformed value — empty, containing whitespace or a
+shell metacharacter — is refused **before** npm runs and before anything is
+written, with a message naming the variable. With no variable set, nothing
+here runs: the install arguments, directory, sidecar and wrapper are
+byte-for-byte what they were before the override existed (pinned by exact
+characterization tests in `signer-runtime.test.ts` and
+`local-mcp-runtime.test.ts`).
+
+To return to the pinned manifest: unset the variables and run
+`--doctor --repair --runtime <runtime>` (or re-run setup). The override
+directories live under `~/.haven` like every other runtime directory, so the
+same reset that removes `~/.haven` removes them.
+
+That is the loop for a build that has **not** merged. For one that has — a
+`@dev` snapshot of all five packages, published from every package-touching
+push to `dev` — and for the owner steps that make the dev dashboard hand out
+`npx -y @haven_ai/connect@dev …` in the first place, see the repository runbook
+[`docs/operations/package-dev-channel.md`](https://github.com/d-hinders/Haven-AI/blob/dev/docs/operations/package-dev-channel.md).
+The two compose: `@dev` picks the connector, these variables pick what it
+installs.

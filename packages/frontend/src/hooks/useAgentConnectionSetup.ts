@@ -3,30 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Address, parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { useAccount, usePublicClient, useSwitchChain } from 'wagmi'
-import {
-  allowanceModuleFor,
-  RESET_PERIODS,
-  type AllowanceSetup,
-} from '@/lib/allowance-module'
+import { useAccount, useSwitchChain } from 'wagmi'
+import { RESET_PERIODS } from '@/lib/budget-period'
 import { api, getResolvedApiBaseUrl } from '@/lib/api'
 import { resolveDiscoverySource } from '@/lib/discovery'
 import type { ApiSchema } from '@haven_ai/core'
 import { useAuth, type UserSafe } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { useSafeDetails } from '@/hooks/useSafeDetails'
-import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
 } from '@/hooks/useAgentConnectionSetupStatus'
-import { getChainConfig, getExplorerUrl, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
+import { getChainConfig, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
 import { getChainTokens } from '@/lib/safe-tx'
-import { executeAgentSetup } from '@/lib/agent-setup'
-import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
 
 // ── Flow types ─────────────────────────────────────────────────────
 
@@ -54,7 +46,10 @@ type ResolveSetupResponse = ApiSchema<'ResolveAgentConnectionSetupResponse'>
 type RegisterSetupResponse = ApiSchema<'RegisterAgentConnectionSetupResponse'>
 
 export interface ManualCredential {
+  /** The prose prompt (the pre-#2482 rendering, kept for agent workspaces). */
   prompt: string
+  /** The .env rendering — the default, pasteable into backend secrets (#2482). */
+  env: string
   apiKey: string
   delegatePrivateKey: `0x${string}`
   delegateAddress: string
@@ -69,25 +64,21 @@ export interface UseAgentConnectionSetupOptions {
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
   /** See ConnectAgentModal's prop of the same name. */
   starterAllowance?: boolean
+  /**
+   * Resume an EXISTING setup instead of creating a new one (#2522).
+   *
+   * This is what `/agents?setup=<id>` opens: an agent hands its user a link to
+   * the exact step, and the flow starts on the connect step reading that
+   * setup's live status rather than at "name your agent". There is no setup
+   * TOKEN on this path and there must not be — the token is a create-time
+   * secret, and the person following this link is here to approve a budget,
+   * not to re-run the connector.
+   */
+  resumeSetupId?: string | null
 }
 
 // ── Rail awareness (#1069 / #1070) ─────────────────────────────────
 
-/**
- * #1069: the wallet-approval step is the LEGACY rail's mechanism. A
- * delegation-rail account (Hybrid DeleGator, possibly passkey-only) has no
- * AllowanceModule and may have no connectable EOA — its approval is the
- * budget grant. The connect flow branches the final step on this.
- *
- * Extracted pure so the branch that broke live (#1070: the modal offered
- * "Connect wallet" to a passkey-owned account) is directly unit-testable.
- */
-export function isDelegationRailAccount(
-  selectedSafe: Pick<UserSafe, 'account_type'> | null | undefined,
-  activeSafe: Pick<UserSafe, 'account_type'> | null | undefined,
-): boolean {
-  return (selectedSafe?.account_type ?? activeSafe?.account_type) === 'delegator_hybrid'
-}
 
 /**
  * #1073: on the delegation rail each budget is its own signature, so setup
@@ -99,14 +90,12 @@ export function isDelegationRailAccount(
  * A delegation budget also refills on a real period boundary; "One-time" (0)
  * has no delegation equivalent, so it is not offered on this rail.
  */
-export function railBudgetRules(isDelegationAccount: boolean, allowanceCount: number): {
+export function railBudgetRules(allowanceCount: number): {
   budgetSlotsFull: boolean
   resetPeriodOptions: ReadonlyArray<(typeof RESET_PERIODS)[number]>
 } {
-  const budgetSlotsFull = isDelegationAccount && allowanceCount >= 1
-  const resetPeriodOptions = isDelegationAccount
-    ? RESET_PERIODS.filter((period) => period.value > 0)
-    : RESET_PERIODS
+  const budgetSlotsFull = allowanceCount >= 1
+  const resetPeriodOptions = RESET_PERIODS.filter((period) => period.value > 0)
   return { budgetSlotsFull, resetPeriodOptions }
 }
 
@@ -114,9 +103,6 @@ export type ConnectStepView =
   | { kind: 'waiting_for_connector' }
   | { kind: 'finalizing_local' }
   | { kind: 'delegation_approval'; agentId: string }
-  | { kind: 'legacy_approval' }
-  | { kind: 'approval_in_progress' }
-  | { kind: 'proposed' }
   | { kind: 'active' }
   | { kind: 'expired' }
   | { kind: 'cancelled' }
@@ -125,46 +111,35 @@ export type ConnectStepView =
   | null
 
 /**
- * Which body the connect step renders for the current setup status — including
- * the #1069/#1070 rail branch: when the setup is ready for approval, a
- * delegation account approves the budget in-modal (never the legacy Safe
- * wallet-approval, which dead-ends a passkey-only account), and the legacy
- * rail keeps the Safe transaction step.
+ * Which body the connect step renders for the current setup status.
+ *
+ * #2413 removed the #1069/#1070 rail branch. It refused the legacy Safe rail
+ * before a signable step; no legacy account reaches the connect modal now,
+ * because the account list filters the retired rail out, so `retired_rail` had
+ * no reachable input and `approval_in_progress` / `proposed` — both legacy
+ * wallet-approval states — could not be produced either.
  */
 export function resolveConnectStepView({
   visibleStatus,
   installStatus,
-  isDelegationAccount,
   agentId,
 }: {
   visibleStatus: string | undefined
   installStatus: AgentConnectionSetupStatusResponse['install_status'] | undefined
-  isDelegationAccount: boolean
   agentId: string | null | undefined
 }): ConnectStepView {
   if (!visibleStatus) return null
   if (visibleStatus === 'awaiting_connection') return { kind: 'waiting_for_connector' }
-  const runtimeConfigured = runtimeIsConfigured(installStatus)
-  const installErrored = Boolean(installStatus?.error_code)
-  if (visibleStatus === 'connected_local' && !runtimeConfigured && !installErrored) {
+  const approvalReady = installIsReadyForApproval(installStatus)
+  if (visibleStatus === 'connected_local' && !approvalReady) {
     return { kind: 'finalizing_local' }
   }
-  const approvalReady =
-    (visibleStatus === 'connected_local' && (runtimeConfigured || installErrored)) ||
-    visibleStatus === 'awaiting_wallet_approval'
-  if (approvalReady) {
-    if (isDelegationAccount) {
-      // agent_id lands with the register step; polling is a beat behind at
-      // most. Never route the user away for it.
-      return agentId ? { kind: 'delegation_approval', agentId } : { kind: 'finalizing_local' }
-    }
-    return { kind: 'legacy_approval' }
+  if ((visibleStatus === 'connected_local' && approvalReady) || visibleStatus === 'awaiting_wallet_approval') {
+    // agent_id lands with the register step; polling is a beat behind at most.
+    // Never route the user away for it.
+    return agentId ? { kind: 'delegation_approval', agentId } : { kind: 'finalizing_local' }
   }
   switch (visibleStatus) {
-    case 'approval_in_progress':
-      return { kind: 'approval_in_progress' }
-    case 'proposed':
-      return { kind: 'proposed' }
     case 'active':
       return { kind: 'active' }
     case 'expired':
@@ -180,9 +155,9 @@ export function resolveConnectStepView({
 
 // ── Pure status helpers ────────────────────────────────────────────
 
-export function headerSubtitle(step: SetupStep, status: string | undefined, runtimeConfigured?: boolean): string {
+export function headerSubtitle(step: SetupStep, status: string | undefined, approvalReady?: boolean): string {
   if (step === 'connect') {
-    if (status === 'connected_local' && !runtimeConfigured) return 'Finishing local setup'
+    if (status === 'connected_local' && !approvalReady) return 'Finishing local setup'
     if (status === 'connected_local' || status === 'awaiting_wallet_approval') return 'Approve the agent budget'
     if (status === 'approval_in_progress' || status === 'proposed') return 'Waiting for approval to land'
     // #1394: NOT "Agent rules approved" — the shell ticker already reads
@@ -214,65 +189,16 @@ export function runtimeIsConfigured(
   return Boolean(install.hosted_mcp_configured && install.local_signer_configured)
 }
 
-export function approvalBlockReason(
-  gate: ReturnType<typeof useSafeOperationGate>,
-  safeDetailsLoading: boolean,
-  status: AgentConnectionSetupStatusResponse | null,
-  publicClientReady: boolean,
-  signerReady: boolean,
-  wrongChain = false,
-  approvalChainName = 'the required network',
-): string | null {
-  if (!status) return 'Haven is still loading local connection details.'
-  if (!status.delegate_address) return 'Haven is waiting for the public signing address from the local connection.'
-  if (safeDetailsLoading) return 'Haven is still loading wallet approval details.'
-  if (!publicClientReady) return 'Haven is still connecting to the wallet network.'
-  if (gate.kind === 'passkey_on_other_device') return 'Use the device with this Haven wallet passkey to approve the agent budget.'
-  // Wallet is connected but to the wrong chain — network mismatch, not a missing wallet.
-  if (gate.kind === 'no_signer' && wrongChain) {
-    return `Your wallet is connected to the wrong network. Switch to ${approvalChainName} to approve the agent budget.`
-  }
-  if (gate.kind === 'no_signer') return 'Connect a wallet or use a passkey on this device to approve the agent budget.'
-  // #2073: a wallet IS connected but it is not this account's owner —
-  // "connect a wallet" would send the user back to the wallet they already
-  // connected. Checked after the no_signer branches so the wrong-chain copy
-  // (which offers a one-click fix) keeps precedence for its own state.
-  if (gate.kind === 'wrong_wallet') {
-    return "The connected wallet is not this account's owner. Switch to the owner wallet to approve the agent budget."
-  }
-  if (!signerReady) return 'Connect a wallet or use a passkey on this device to approve the agent budget.'
-  return null
-}
-
-export function approvalErrorMessage(err: unknown, signerType?: string): string {
-  const message = errorMessage(err)
-  if (/user rejected|user denied/i.test(message)) {
-    return signerType === 'passkey'
-      ? 'The passkey prompt was cancelled.'
-      : 'Wallet approval was cancelled.'
-  }
-  if (message.includes('would revert on-chain')) {
-    return 'The wallet approval transaction would fail. Check the Haven wallet network and try again.'
-  }
-  if (message.includes('Could not verify the transaction')) {
-    return 'Network error while preparing wallet approval. Check your connection and try again.'
-  }
-  return message
-}
-
-export function errorMessage(err: unknown): string {
-  let message = 'Setup failed'
-  if (err instanceof Error) {
-    message = err.message
-    let cause = (err as { cause?: unknown }).cause
-    while (cause instanceof Error) {
-      if (cause.message) message = cause.message
-      cause = (cause as { cause?: unknown }).cause
-    }
-    const short = (err as { shortMessage?: string }).shortMessage
-    if (short) message = short
-  }
-  return message
+/**
+ * A manual credential is deliberately not reported as an automatically
+ * configured runtime. It does, however, have a verified public signing address
+ * and no connector process that can ever report additional setup state, so the
+ * owner can continue to the same budget-approval signature after saving it.
+ */
+export function installIsReadyForApproval(
+  install: AgentConnectionSetupStatusResponse['install_status'] | undefined,
+): boolean {
+  return Boolean(install?.manual_credential_fallback || install?.error_code || runtimeIsConfigured(install))
 }
 
 // ── Manual credential helpers ──────────────────────────────────────
@@ -320,6 +246,40 @@ export function connectorApiBaseUrl(connectorCommand?: string): string | null {
   return value ? value.replace(/\\'/g, "'").replace(/\/+$/, '') : null
 }
 
+/**
+ * The five `HAVEN_*` values a manual credential hands out — emitted verbatim
+ * by this ONE source and rendered by both the .env block and the prose
+ * prompt so the two representations of the credential cannot drift (#2482).
+ * These are the exact variable names the SDK reads server-side.
+ */
+export function manualCredentialEnvLines(input: {
+  apiKey: string
+  delegatePrivateKey: string
+  delegateAddress: string
+  apiBaseUrl: string
+  hostedMcpUrl: string
+}): string[] {
+  return [
+    `HAVEN_API_KEY=${input.apiKey}`,
+    `HAVEN_DELEGATE_KEY=${input.delegatePrivateKey}`,
+    `HAVEN_DELEGATE_ADDRESS=${input.delegateAddress}`,
+    `HAVEN_API_URL=${input.apiBaseUrl}`,
+    `HAVEN_MCP_URL=${input.hostedMcpUrl}`,
+  ]
+}
+
+/** The .env rendering of a manual credential (#2482): five `HAVEN_*` lines,
+ * pasteable straight into Lovable Secrets / Vercel / Railway. */
+export function buildManualCredentialEnv(input: {
+  apiKey: string
+  delegatePrivateKey: string
+  delegateAddress: string
+  apiBaseUrl: string
+  hostedMcpUrl: string
+}): string {
+  return manualCredentialEnvLines(input).join('\n')
+}
+
 export function buildManualCredentialPrompt(input: {
   agentName: string
   havenWallet: string
@@ -338,11 +298,7 @@ export function buildManualCredentialPrompt(input: {
     `Public signing address: ${input.delegateAddress}`,
     '',
     'Add these values only in the trusted agent workspace:',
-    `HAVEN_API_KEY=${input.apiKey}`,
-    `HAVEN_DELEGATE_KEY=${input.delegatePrivateKey}`,
-    `HAVEN_DELEGATE_ADDRESS=${input.delegateAddress}`,
-    `HAVEN_API_URL=${input.apiBaseUrl}`,
-    `HAVEN_MCP_URL=${input.hostedMcpUrl}`,
+    ...manualCredentialEnvLines(input),
     '',
     'Important:',
     '- The private signing key lets the agent sign payments within the approved agent budget.',
@@ -352,25 +308,6 @@ export function buildManualCredentialPrompt(input: {
     '',
     'After adding the values, return to Haven and approve the budget from the Haven wallet.',
   ].join('\n')
-}
-
-async function recordWalletApproval(
-  setupId: string,
-  payload: {
-    result: 'confirmed' | 'proposed'
-    tx_hash?: string
-    safe_tx_hash: string
-    chain_id: number
-    safe_address: string
-    allowance_module_address: string
-    delegate_address: string
-    confirmation_status?: 'confirmed' | 'receipt_timeout'
-  },
-): Promise<AgentConnectionSetupStatusResponse> {
-  return api.post<AgentConnectionSetupStatusResponse>(
-    `/agent-connection-setups/${encodeURIComponent(setupId)}/wallet-approval`,
-    payload,
-  )
 }
 
 // ── The flow hook ──────────────────────────────────────────────────
@@ -390,6 +327,7 @@ export function useAgentConnectionSetup({
   safeId: propSafeId,
   onSetupUpdated,
   starterAllowance = false,
+  resumeSetupId = null,
 }: UseAgentConnectionSetupOptions) {
   const { user, activeSafe } = useAuth()
   const userSafes = useMemo(() => user?.safes ?? [], [user?.safes])
@@ -412,12 +350,14 @@ export function useAgentConnectionSetup({
     null
 
   const [selectedSafeId, setSelectedSafeId] = useState<string | null>(initialSafeId)
-  const [step, setStep] = useState<SetupStep>('details')
+  // A resumed setup already exists, so the three authoring steps are behind
+  // the user and the flow opens on the connect step.
+  const [step, setStep] = useState<SetupStep>(resumeSetupId ? 'connect' : 'details')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [localMcp, setLocalMcp] = useState(false)
   const [issuePassport, setIssuePassport] = useState(false)
-  const [allowances, setAllowances] = useState<AllowanceEntry[]>([])
+  const [allowances, setBudgetEntries] = useState<AllowanceEntry[]>([])
   const [addAmount, setAddAmount] = useState('')
   const [addAmountError, setAddAmountError] = useState('')
   const [addReset, setAddReset] = useState(1440)
@@ -427,10 +367,6 @@ export function useAgentConnectionSetup({
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopyKind | null>(null)
   const [cancelled, setCancelled] = useState(false)
-  const [approving, setApproving] = useState(false)
-  const [approvalError, setApprovalError] = useState<string | null>(null)
-  const [manualPathRevealed, setManualPathRevealed] = useState(false)
-  const [manualFallbackConfirmed, setManualFallbackConfirmed] = useState(false)
   const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
   const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
   const [manualCreating, setManualCreating] = useState(false)
@@ -441,40 +377,23 @@ export function useAgentConnectionSetup({
   const safeId = selectedSafe?.id ?? propSafeId ?? null
   const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
-  // isDelegationRailAccount.
-  const isDelegationAccount = isDelegationRailAccount(selectedSafe, activeSafe)
   const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
-  const statusQuery = useAgentConnectionSetupStatus(setup?.setup_id ?? null, {
-    enabled: open && Boolean(setup),
+  // A setup created in THIS session wins over a resumed id: the user who just
+  // clicked through the wizard is looking at their own new setup, not at
+  // whatever id happened to be in the URL that opened the page.
+  const statusSetupId = setup?.setup_id ?? resumeSetupId
+  const statusQuery = useAgentConnectionSetupStatus(statusSetupId, {
+    enabled: open && Boolean(statusSetupId),
   })
   const setupStatus = statusQuery.data
   const manualCredentialNeedsSave = Boolean(manualCredential && !manualCredentialAcknowledged)
   const rawVisibleStatus = cancelled ? 'cancelled' : setupStatus?.status ?? setup?.status
   const visibleStatus = manualCredentialNeedsSave ? 'awaiting_connection' : rawVisibleStatus
-  const approvalSafeAddress = setupStatus?.haven_wallet.address ?? safeAddress
   const approvalChainId = setupStatus?.haven_wallet.chain_id ?? chainId
   const approvalWalletLabel = setupStatus?.haven_wallet
     ? `${setupStatus.haven_wallet.name} on ${setupStatus.haven_wallet.network}`
     : walletName
-  const { details: safeDetails, loading: safeDetailsLoading } = useSafeDetails(approvalSafeAddress || null, {
-    chainId: approvalChainId,
-  })
-  const operationGate = useSafeOperationGate({
-    safeAddress: approvalSafeAddress ? (approvalSafeAddress as Address) : undefined,
-    chainId: approvalChainId,
-  })
-  const publicClient = usePublicClient({ chainId: approvalChainId })
-  const activeSigner = useActiveSigner({
-    safeAddress: approvalSafeAddress ? (approvalSafeAddress as Address) : undefined,
-    chainId: approvalChainId,
-  })
-  // #1079: this surface signs SAFE transactions; a delegator_passkey cannot.
-  // The narrowed view keeps every downstream call type-honest — on delegation
-  // accounts these controls are hidden, so null here renders the same
-  // no-signer state as before.
-  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
-
   // Detect when a wallet IS connected but to the wrong chain for this approval.
   // In that case `useWalletClient({ chainId: approvalChainId })` returns null, so
   // useSafeOperationGate falls through to `no_signer` — but the real problem is
@@ -482,7 +401,7 @@ export function useAgentConnectionSetup({
   const { address: walletAddress, chain: walletChain } = useAccount()
   const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
   const isWrongChain = Boolean(
-    walletAddress && walletChain && walletChain.id !== approvalChainId && !signer,
+    walletAddress && walletChain && walletChain.id !== approvalChainId,
   )
   let approvalChainName = 'the required network'
   try { approvalChainName = getChainConfig(approvalChainId).name } catch { /* keep default */ }
@@ -517,7 +436,7 @@ export function useAgentConnectionSetup({
   useEffect(() => {
     if (!open) return
     const validSymbols = new Set(tokenOptions.map((token) => token.symbol))
-    setAllowances((prev) => prev.filter((allowance) => validSymbols.has(allowance.tokenSymbol)))
+    setBudgetEntries((prev) => prev.filter((allowance) => validSymbols.has(allowance.tokenSymbol)))
   }, [open, tokenOptions])
 
   // #1377 B: the flow takes exactly ONE budget, in USDC — the token select and
@@ -536,7 +455,7 @@ export function useAgentConnectionSetup({
     const parsed = addAmount
       ? validateMoneyInput(addAmount, budgetToken.decimals, { tokenSymbol: budgetToken.symbol })
       : null
-    setAllowances(
+    setBudgetEntries(
       parsed?.ok
         ? [{
             tokenSymbol: budgetToken.symbol,
@@ -565,7 +484,7 @@ export function useAgentConnectionSetup({
     setDescription('')
     setLocalMcp(false)
     setIssuePassport(false)
-    setAllowances([])
+    setBudgetEntries([])
     setAddAmount('')
     setAddAmountError('')
     setAddReset(1440)
@@ -574,10 +493,6 @@ export function useAgentConnectionSetup({
     setCreateError(null)
     setCopied(null)
     setCancelled(false)
-    setApproving(false)
-    setApprovalError(null)
-    setManualPathRevealed(false)
-    setManualFallbackConfirmed(false)
     setManualCredential(null)
     setManualCredentialAcknowledged(false)
     setManualCreating(false)
@@ -595,12 +510,12 @@ export function useAgentConnectionSetup({
     onClose()
   }, [manualCredentialNeedsSave, onClose, resetForm])
 
-  useEscapeToClose(open, handleClose, { enabled: !creating && !approving && !manualCreating })
+  useEscapeToClose(open, handleClose, { enabled: !creating && !manualCreating })
 
   const hasMultipleSafes = userSafes.length > 1
   const setupSteps: SetupStep[] = ['details', 'policy', 'review', 'connect']
   const currentStepIndex = setupSteps.indexOf(step)
-  const { resetPeriodOptions } = railBudgetRules(isDelegationAccount, allowances.length)
+  const { resetPeriodOptions } = railBudgetRules(allowances.length)
   const addAmountValidation =
     addAmount && budgetToken
       ? validateMoneyInput(addAmount, budgetToken.decimals, { tokenSymbol: budgetToken.symbol })
@@ -672,7 +587,7 @@ export function useAgentConnectionSetup({
   }
 
   async function handleCancelSetup() {
-    if (approving || manualCreating) return
+    if (manualCreating) return
     if (!setup) {
       handleClose()
       return
@@ -687,73 +602,6 @@ export function useAgentConnectionSetup({
     }
   }
 
-  async function handleApproveAgentRules() {
-    if (!setup || !setupStatus) return
-    const delegateAddress = setupStatus.delegate_address
-    const approvalWallet = setupStatus.haven_wallet.address
-    const approvalNetwork = setupStatus.haven_wallet.chain_id
-    if (!publicClient || !signer || !safeDetails || !delegateAddress) {
-      setApprovalError('Haven is still loading the wallet approval details.')
-      return
-    }
-
-    setApproving(true)
-    setApprovalError(null)
-    try {
-      const setupAllowances: AllowanceSetup[] = setupStatus.agent_budget.map((budget) => ({
-        token: budget.token_address as Address,
-        tokenSymbol: budget.token_symbol,
-        amount: BigInt(budget.allowance_amount),
-        resetTimeMin: budget.reset_period_min,
-      }))
-
-      const result = await executeAgentSetup({
-        signer,
-        publicClient,
-        safeAddress: approvalWallet as Address,
-        delegateAddress: delegateAddress as Address,
-        allowances: setupAllowances,
-        chainId: approvalNetwork,
-        threshold: safeDetails.threshold ?? 1,
-      })
-
-      const baseApproval = {
-        safe_tx_hash: result.safeTxHash,
-        chain_id: approvalNetwork,
-        safe_address: approvalWallet,
-        allowance_module_address: allowanceModuleFor(approvalNetwork),
-        delegate_address: delegateAddress,
-      }
-
-      if (result.status === 'proposed') {
-        await recordWalletApproval(setup.setup_id, { result: 'proposed', ...baseApproval })
-      } else {
-        // confirmed or receipt_timeout — both submitted the tx; record the
-        // confirmation state so Haven keeps checking on a timeout.
-        await recordWalletApproval(setup.setup_id, {
-          result: 'confirmed',
-          tx_hash: result.txHash,
-          confirmation_status: result.status === 'receipt_timeout' ? 'receipt_timeout' : 'confirmed',
-          ...baseApproval,
-        })
-        if (result.status === 'receipt_timeout') {
-          setApprovalError(
-            `The transaction was submitted but is still confirming. Haven will keep checking ${getExplorerUrl(approvalNetwork, 'tx', result.txHash)}.`,
-          )
-        }
-      }
-      await statusQuery.refetch()
-      // Pass the delegate so the agents page can suppress the brief
-      // "Unmanaged Delegate" window between on-chain landing and the
-      // backend status flipping from `pending_approval` → `active`.
-      onSetupUpdated?.({ delegateAddress: setupStatus.delegate_address ?? null })
-    } catch (err) {
-      setApprovalError(approvalErrorMessage(err, signer?.type))
-    } finally {
-      setApproving(false)
-    }
-  }
-
   async function handleDelegationApproved() {
     if (!setupStatus) return
     await statusQuery.refetch()
@@ -761,7 +609,7 @@ export function useAgentConnectionSetup({
   }
 
   async function handleCreateManualCredential() {
-    if (!setup || !manualFallbackConfirmed) return
+    if (!setup) return
     setManualCreating(true)
     setManualError(null)
     try {
@@ -807,6 +655,13 @@ export function useAgentConnectionSetup({
           apiBaseUrl: manualApiBaseUrl(setup.connector_command),
           hostedMcpUrl: registration.hosted_mcp_url || resolved.hosted_mcp_url,
         }),
+        env: buildManualCredentialEnv({
+          apiKey,
+          delegatePrivateKey,
+          delegateAddress: registration.delegate_address,
+          apiBaseUrl: manualApiBaseUrl(setup.connector_command),
+          hostedMcpUrl: registration.hosted_mcp_url || resolved.hosted_mcp_url,
+        }),
       })
       setManualCredentialAcknowledged(false)
       onSetupUpdated?.()
@@ -838,8 +693,8 @@ export function useAgentConnectionSetup({
     setStep,
     setupStepCount: setupSteps.length,
     currentStepIndex,
-    headerSubtitleText: headerSubtitle(step, visibleStatus, runtimeIsConfigured(setupStatus?.install_status)),
-    busy: creating || approving || manualCreating,
+    headerSubtitleText: headerSubtitle(step, visibleStatus, installIsReadyForApproval(setupStatus?.install_status)),
+    busy: creating || manualCreating,
     handleClose,
     // Details step
     name,
@@ -873,10 +728,16 @@ export function useAgentConnectionSetup({
     createError,
     handleCreateSetup,
     // Rail awareness (#1069/#1070)
-    isDelegationAccount,
     // Connect step
     setup,
     setupStatus,
+    /**
+     * #2522: this flow is showing a setup it did not create, so there is no
+     * setup token and nothing to copy. A foreign or unknown id surfaces as
+     * `statusError` — the route answers 404 and the modal shows not-found
+     * rather than an empty waiting screen.
+     */
+    resumed: Boolean(resumeSetupId && !setup),
     statusLoading: statusQuery.loading,
     statusError: statusQuery.error,
     awaitingConnectionStage: statusQuery.awaitingConnectionStage,
@@ -884,15 +745,10 @@ export function useAgentConnectionSetup({
     connectView: resolveConnectStepView({
       visibleStatus,
       installStatus: setupStatus?.install_status,
-      isDelegationAccount,
       agentId: setupStatus?.agent_id ?? null,
     }),
     copied,
     copyText,
-    manualPathRevealed,
-    setManualPathRevealed,
-    manualFallbackConfirmed,
-    setManualFallbackConfirmed,
     manualCredential,
     manualCredentialAcknowledged,
     manualCreating,
@@ -901,18 +757,9 @@ export function useAgentConnectionSetup({
     handleContinueAfterManualCredential,
     handleCancelSetup,
     restartFromReview,
-    // Approval (legacy rail)
+    // Approval context for the live delegation rail.
     approvalWalletLabel,
     approvalChainId,
-    safeDetailsLoading,
-    safeThreshold: safeDetails?.threshold ?? 1,
-    safeOwnerCount: safeDetails?.owners?.length ?? 1,
-    operationGate,
-    publicClientReady: Boolean(publicClient),
-    signerReady: Boolean(signer),
-    approving,
-    approvalError,
-    handleApproveAgentRules,
     // Approval (delegation rail)
     handleDelegationApproved,
     // Wrong-chain recovery (#1070)

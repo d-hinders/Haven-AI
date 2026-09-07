@@ -15,7 +15,7 @@
  * fires, the new code belongs in the consumer, not here.
  */
 
-export { ETH_ADDRESS_RE, isAddress } from './address.js'
+export { ETH_ADDRESS_RE, UUID_RE, isAddress } from './address.js'
 
 // Pure atomic<->decimal token amount conversion (#994) — the shared
 // definition ethers.formatUnits/parseUnits usage in routes substitutes to.
@@ -38,7 +38,9 @@ export {
   REGISTRY_CHAIN_IDS,
   DEFAULT_CHAIN_ID,
   getChainData,
+  getFaucetUrl,
   isRegisteredChain,
+  minimumUsefulTokens,
   resolveToken,
   buildExplorerUrl,
   type CoreChainConfig,

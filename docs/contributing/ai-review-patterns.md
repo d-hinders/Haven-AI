@@ -12,7 +12,8 @@ covers:
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/components/NetworkGate.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
-last-verified: "2026-08-31" # #2313: the cross-surface consistency bullet listed `approvals` among the screens to keep aligned after a shared-presentation change; that screen and its route were deleted by #1989/#2055, so the line sent a reviewer to a 404. Removed with the reason recorded inline. Verified rather than inferred: no approvals route or component exists under `packages/frontend/src`. Scope: that one bullet. NOT re-verified: the design-token patterns, the pattern-absorption rule, the generated-artifacts section, or this doc's `covers:` files — note the neighbouring generated-artifacts bullet ALREADY carries the correct #2063 no-queue wording and needed nothing. Prior: #2295: § "Numeric Formatters" gains two entries. The existing "one shared formatter owns both input shapes" bullet is correct for DISPLAY and was being read as general, so it licensed shape-sniffing in arithmetic — the exact defect in #2283 and again in #2295, where the catalog budget badge answered `null` for every delegation-rail agent. Added: shape tolerance does not transfer to comparison (the caller states the shape), and `try { BigInt(x) } catch` is a type test rather than an error handler. ONLY § "Numeric Formatters" was re-read; the wallet/signer, shared-UI, recipient-form, generated-artifact and counter sections were NOT re-verified. Prior: #2063: the Generated-Artifacts bullet told artifacts to "explain queued approval behavior" — instructing reviewers to preserve the exact framing #2063 removes (the delegation rail declines out-of-policy payments at prepare; nothing queues). Restated as declined-payment behavior. ONLY that bullet re-read. Prior: #1945: § "Shared UI And Cross-Surface Consistency" gains the bare-`var()`-in-an-arbitrary-value entry. Added because #1945 was the THIRD instance of one failure mode (#1708 focus-ring colour, #1818 the generalisation from shape to output, #1945 the four elevation tokens) and this doc — whose whole charter is pattern-based shared memory — catalogued none of them, so each was re-derived from scratch. The entry states the mechanism, all three instances, why `design:lint` is structurally blind to it, and the two things that generalise: promote the token into the Tailwind theme, and guard it with a compiled-CSS test carrying a positive control rather than a regex over class strings. ONLY that § was re-read in this pass; the wallet/signer, recipient-form, generated-artifact, formatter and counter sections were NOT re-verified. Prior: weekly #1248 audit: every covers: claim re-verified (incl. the #1077 Green-Gate Evidence section); in sync with the Captain Preflight and the reviewer role trap list
+  - docs/contributing/session-retrospective-2026-09-06.md
+last-verified: "2026-09-06" # session-retrospective-2026-09-06: NEW section § *Instrument Self-Reference And Staleness*, added because one session produced four instrument lies whose common shape is not covered by § *Green-Gate Evidence* — that section is about a gate reporting on an empty candidate list, and these are about a correctly-running instrument answering an adjacent question. Two of the four bullets are reproduced rather than asserted: the worktree grep was run at `f8a7311c` (on one machine, `git worktree list | grep -c review` = 2 against `git worktree list | awk '{print $1}' | grep -c '/review'` = 0, both hits branch names), and the self-echoing probe is stated as the mechanism it is. `covers:` gained the new retrospective, which is the only file this section makes a claim about. Scope: that ONE new section and the `covers:` line. NOT re-derived in this pass: any other section, the Numeric Formatters tolerance below, or the three-list sync claim in the lead paragraph. Prior: #2408: the § *Numeric Formatters* shape-tolerance bullet illustrated the runtime ambiguity with `"250"` — "250 USDC as a human amount and 0.00025 USDC as an atomic one". This change tightens the `allowanceHumanAmount` pattern to `^(0|[0-9]+\.[0-9]{2,6})$`, which rejects a bare `"250"`, so the example was false against the contract while the RULE it supports is unchanged. Re-illustrated with `'0'` (the one genuinely shared value) and the catch-vs-sniff distinction spelled out. Found by haven-doc-reviewer, not by me: this file `covers:` `allowance-format.ts`, which this diff edits. Scope: that ONE bullet. The `try { BigInt(x) } catch` bullet below it and the rest of the file were NOT re-verified beyond placing this edit. Prior: #2313: the cross-surface consistency bullet listed `approvals` among the screens to keep aligned after a shared-presentation change; that screen and its route were deleted by #1989/#2055, so the line sent a reviewer to a 404. Removed with the reason recorded inline. Verified rather than inferred: no approvals route or component exists under `packages/frontend/src`. Scope: that one bullet. NOT re-verified: the design-token patterns, the pattern-absorption rule, the generated-artifacts section, or this doc's `covers:` files — note the neighbouring generated-artifacts bullet ALREADY carries the correct #2063 no-queue wording and needed nothing. Prior: #2295: § "Numeric Formatters" gains two entries. The existing "one shared formatter owns both input shapes" bullet is correct for DISPLAY and was being read as general, so it licensed shape-sniffing in arithmetic — the exact defect in #2283 and again in #2295, where the catalog budget badge answered `null` for every delegation-rail agent. Added: shape tolerance does not transfer to comparison (the caller states the shape), and `try { BigInt(x) } catch` is a type test rather than an error handler. ONLY § "Numeric Formatters" was re-read; the wallet/signer, shared-UI, recipient-form, generated-artifact and counter sections were NOT re-verified. Prior: #2063: the Generated-Artifacts bullet told artifacts to "explain queued approval behavior" — instructing reviewers to preserve the exact framing #2063 removes (the delegation rail declines out-of-policy payments at prepare; nothing queues). Restated as declined-payment behavior. ONLY that bullet re-read. Prior: #1945: § "Shared UI And Cross-Surface Consistency" gains the bare-`var()`-in-an-arbitrary-value entry. Added because #1945 was the THIRD instance of one failure mode (#1708 focus-ring colour, #1818 the generalisation from shape to output, #1945 the four elevation tokens) and this doc — whose whole charter is pattern-based shared memory — catalogued none of them, so each was re-derived from scratch. The entry states the mechanism, all three instances, why `design:lint` is structurally blind to it, and the two things that generalise: promote the token into the Tailwind theme, and guard it with a compiled-CSS test carrying a positive control rather than a regex over class strings. ONLY that § was re-read in this pass; the wallet/signer, recipient-form, generated-artifact, formatter and counter sections were NOT re-verified. Prior: weekly #1248 audit: every covers: claim re-verified (incl. the #1077 Green-Gate Evidence section); in sync with the Captain Preflight and the reviewer role trap list
 ---
 
 # AI Review Patterns
@@ -54,7 +55,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 ## Signer Readiness Gates
 
 - A connected wallet address is not the same as a ready signer. EOA signing paths that use `useActiveSigner` require both `address` and `walletClient`; gates must stay aligned with the signer hook instead of checking `address` or `isConnected` alone.
-- If wallet or passkey readiness is incomplete, the UI must keep the recovery action visible. A warning such as "Wallet approval unavailable" must be paired with `WalletButton`, passkey guidance, or an equivalent next action.
+- If wallet or passkey readiness is incomplete, a live delegation UI must keep the recovery action visible. A warning such as "Wallet approval unavailable" must be paired with `WalletButton`, passkey guidance, or an equivalent next action. The intentional retired-rail exception is a read-only legacy notice: it has no Haven recovery/action CTA, and it must not promise Safe's interface unless owner access is known.
 - Tests for wallet-gated money or authority actions should cover the intermediate state where a wallet address is present but `walletClient` is not ready. That state should remain blocked and recoverable, not visually ready or silently disabled.
 
 ## Recipient And Form Behavior
@@ -68,7 +69,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - If the same movement, transaction row, status badge, contact row, or money summary appears in multiple places, prefer one shared component or utility.
 - **Pattern absorption (2nd occurrence, not the 12th).** When a diff writes the same markup shape a *second* time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a `ui/`/`haven/` primitive already covers, extract it into a primitive and add a `/design-system` entry in that same PR. Catching the second occurrence is what prevents the debt clusters #859 cleaned retroactively; the new primitive trips the design-system coupling gate (#898) by design. Flag a diff that duplicates a shape instead of absorbing it — unless the author states the two uses will genuinely diverge.
 - **A bare `var()` inside a Tailwind arbitrary value compiles to the wrong thing, silently.** Tailwind cannot infer what a variable holds, so `shadow-[var(--v2-shadow-card)]` takes the *colour* branch and emits `--tw-shadow: var(--tw-shadow-colored)` against a variable nothing sets — computed `box-shadow: none`. The same shape drops an opacity modifier it cannot re-compose (`ring-[var(--v2-brand)]/30`, `ring-current/30`). **Three instances, all found by looking at rendered output rather than at source:** #1708 (68 focus rings falling back to preflight blue), #1818 (the generalisation — the defect is the OUTPUT, not the arbitrary-value *shape*, so `currentColor` and an off-scale numeric modifier fail identically), #1945 (four elevation tokens, 67 call sites, every Card/Modal panel/popover flat). Flag the spelling on sight, and note what makes this class expensive: **it lints clean and reads correctly.** `design:lint` exists to catch a *bypassed* token, and here the token is referenced exactly as convention says. The fix in all three cases is to promote the token into `tailwind.config.js`'s theme and use the named utility (`ring-brand/80`, `shadow-card`), and the guard is a compiled-CSS test with a positive control — never a regex over class strings, which #1818 measured as too narrow the first time.
-- Keep dashboard, account detail, agent detail, transaction history, and design-system examples aligned after changing shared presentation. (This list named `approvals` until #1989/#2055 deleted that screen and its route; a cross-surface consistency list that names a deleted surface sends a reviewer looking for a 404.)
+- Keep dashboard, account detail, agent detail, transaction history, live delegation actions, and design-system examples aligned after changing shared presentation. Treat approval-queue examples as historical unless they are explicitly marked retired.
 - If a temporary frontend shim or preview backfill is added, label it clearly and avoid letting it redefine backend-owned totals or durable semantics.
 
 ## Generated Artifacts And Developer Handoffs
@@ -90,11 +91,26 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
   arithmetic (#2295).** The bullet above is right for rendering: both shapes of
   `allowance_amount` format to the same string, so one shared formatter can own
   both paths. A *comparison* cannot borrow that. The two shapes are not
-  distinguishable at runtime — `"250"` is 250 USDC as a human amount and
-  0.00025 USDC as an atomic one — so any helper that infers the shape in order
-  to do maths on it is guessing, and guessing silently. Make the caller state
-  the shape it holds (`humanAmountToAtomic(amount, decimals)`), and let the
-  wire contract be what tells the caller which shape that is. Two instances of
+  distinguishable at runtime — `"0"` is the same zero budget in both, and any
+  other value's shape is a fact about which emitter produced it, not something
+  the string carries — so any helper that infers the shape in order to do maths
+  on it is guessing, and guessing silently. Make the caller state the shape it
+  holds (`humanAmountToAtomic(amount, decimals)`), and let the wire contract be
+  what tells the caller which shape that is.
+
+  **What #2408 changed here, and what it did not.** This bullet used to
+  illustrate the ambiguity with `"250"` — "250 USDC as a human amount and
+  0.00025 USDC as an atomic one". That example no longer holds *against the
+  contract*: because `formatTokenValue` is the sole emitter of the human shape
+  and produces only `'0'` or `<integer>.<2-6 fraction digits>`, the
+  `allowanceHumanAmount` pattern is now `^(0|[0-9]+\.[0-9]{2,6})$` and rejects
+  a bare `"250"` outright. The reviewing rule is unchanged, and this is the
+  distinction to hold onto: the contract can now CATCH an emitter that drifts
+  to atomic units, but a consumer still must not SNIFF, because the narrowness
+  is a property of one known emitter rather than of the value in front of it —
+  and `'0'` stays genuinely shared. A helper that started inferring the shape
+  from the text would be trusting a server-side invariant it cannot see, which
+  is the same defect as the `catch` below wearing a better disguise. Two instances of
   the same field, three years of one name: #2283 rendered a raw
   `"250.000000 USDC per week"` on `/agents`, and #2295 found the catalog's
   "within budget" badge answering `null` on every delegation-rail agent.
@@ -185,6 +201,38 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - A gate that reports on a file list can report success on an **empty** list, and that reads identically to a clean pass. Before recording a check as green in the PR body, confirm the run actually saw the candidate diff.
 - Flag a PR whose Local Checks quote a gate's success message when the gate's default range could not have included the change — a committed-only range run before the commit, a `paths`-filtered job on a non-matching PR, a check run in the wrong worktree.
 - Run the **CI-equivalent** form, not the convenient one. `node scripts/docs/coupling-gate.mjs` is advisory and always exits 0; `npm run docs:coupling` is what CI runs. A local invocation that cannot fail is not evidence that CI will pass (#1076 → #1077).
+
+## Instrument Self-Reference And Staleness
+
+A gate that could not fail is one failure mode; an instrument that runs
+correctly and answers an **adjacent** question is another, and it is harder to
+catch because the answer is well-formed. Four of these fired in a single
+session (see [`session-retrospective-2026-09-06.md`](session-retrospective-2026-09-06.md)).
+
+- **Does the instrument echo its own input?** A command that prints the value
+  it was invoked with makes a grep of its output match the invocation, not the
+  thing you are looking for. Never conclude "the value appears in the output"
+  from a probe you passed the value to — pass it a control value the code path
+  cannot produce, or read the output rather than grepping it.
+- **Is it counting the column you mean?** `git worktree list | grep -c review`
+  counts branch names as well as paths. On one machine at `f8a7311c` it
+  answered `2` while `git worktree list | awk '{print $1}' | grep -c '/review'`
+  answered `0` — the numbers are machine-local, the disagreement is the point.
+  Any count over a multi-column listing states which column it counted, or it
+  filters to that column first.
+- **Is the tree current?** A `grep` over a stale checkout is a measurement of
+  the past, and its "not found" is indistinguishable from a real absence.
+  `git fetch` and state the SHA before any absence claim about the codebase.
+- **Did you read the result, or the result you expected?** A search that
+  returns a hit you skim past is the one failure mode no positive control
+  catches. When a search decides whether work exists, quote the hits — an
+  empty quote is a claim a reviewer can check, "none found" is not.
+
+**Correcting a false claim is itself a measurement.** The replacement sentence
+is verified against its instrument, never against the sentence it replaces:
+rewriting text you have just read carried the confidence of the original into
+five wrong claims in that same session, and the most dangerous of them was
+copied out of the very `--help` output the work existed to fix.
 
 ## Test Gaps Worth Catching
 

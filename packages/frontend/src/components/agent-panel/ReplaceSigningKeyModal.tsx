@@ -126,7 +126,6 @@ export function ReplaceSigningKeyModal({
   agentId,
   agentName,
   chainId,
-  isDelegationAgent,
   currentDelegateAddress,
   recentPayments,
   hasAnchoredPassport,
@@ -142,7 +141,6 @@ export function ReplaceSigningKeyModal({
    * authority is a set of per-token allowances rather than a signed
    * delegation, so there is no key to replace and re-onboarding is the path.
    */
-  isDelegationAgent: boolean
   currentDelegateAddress: string | null
   /** Feeds the compromised path's damage assessment. */
   recentPayments: PaymentActivityItem[]
@@ -380,33 +378,6 @@ export function ReplaceSigningKeyModal({
    */
   const gateOnScreen = !residual && rekey.resumeMode === 'full'
 
-  // The rail refusal is terminal — there is no flow to show behind it, so it
-  // replaces the modal body rather than sitting on top of one.
-  if (!isDelegationAgent) {
-    return (
-      <Modal
-        open={open}
-        onClose={handleClose}
-        title="Replace signing key"
-        subtitle={agentName}
-        width="lg"
-        showCloseButton
-        footer={<Button onClick={handleClose}>Close</Button>}
-      >
-        <ApprovalRequiredBanner title="Not available for this agent" tone="neutral">
-          <p className="text-sm leading-relaxed">
-            {agentName} was set up on an older kind of account, where you approve each token
-            individually instead of granting the agent one signed budget. There is no signing key
-            to replace, so this cannot be done here.
-          </p>
-          <p className="mt-2 text-sm leading-relaxed">
-            To move it across, connect the agent again from the agents page. It will come back on
-            the current setup with a fresh key, and you can remove this one afterwards.
-          </p>
-        </ApprovalRequiredBanner>
-      </Modal>
-    )
-  }
 
   return (
     <Modal

@@ -87,4 +87,26 @@ describe('DELETE /user/safes/:safeId', () => {
     // No transaction should have started.
     expect(mockClientQuery).not.toHaveBeenCalled()
   })
+
+  it('returns 409 and leaves the Safe linked while a delegation is pending or active', async () => {
+    mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: false }] })
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (/SELECT EXISTS\s*\(/i.test(sql) && /agent_delegations/i.test(sql)) {
+        return { rows: [{ live: true }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/user/safes/${SAFE_ID}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toMatch(/pending or active budget delegation/)
+    const sqls = mockClientQuery.mock.calls.map(([sql]) => String(sql))
+    expect(sqls.some((sql) => /UPDATE\s+agents\s+SET\s+safe_id\s*=\s*NULL/i.test(sql))).toBe(false)
+    expect(sqls.some((sql) => /DELETE\s+FROM\s+user_safes/i.test(sql))).toBe(false)
+  })
 })

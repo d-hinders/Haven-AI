@@ -108,6 +108,32 @@ Add `--yes` to skip the interactive confirmation prompt (useful in automated con
 npm run release:bump -- prerelease --yes
 ```
 
+#### `--snapshot` — the dev channel, and why it is not a release
+
+`--snapshot` marks a **dev-channel snapshot** run ([#2421](https://github.com/d-hinders/Haven-AI/issues/2421), epic [#2420](https://github.com/d-hinders/Haven-AI/issues/2420)). It is used in exactly one place — `.github/workflows/publish.yml`, on a push to `dev` — and it is not a thing to run by hand:
+
+```sh
+# What CI runs, in a checkout it then throws away. Nothing is committed.
+node scripts/release-bump.mjs "$(node scripts/release-snapshot-version.mjs "$(git rev-parse --short=7 HEAD)")" --yes --snapshot
+```
+
+Everything that makes the bump atomic runs identically in both modes — the versions, the cross-package pins, the source constants, the runtime manifest, the ordered rebuild and the bundle verification. That is the whole reason the snapshot job reuses this script instead of setting versions by hand: the version lattice is not a list of numbers, and hand-setting it breaks the pins that make an installed snapshot internally consistent. What `--snapshot` changes is only the sign-off, which otherwise tells the operator to write a CASP shard and open a release PR — instructions with no tree to apply them to.
+
+The **version-shape check is bidirectional**, and the second half is the one that protects production:
+
+| Invocation | Version | Result |
+|---|---|---|
+| `--snapshot` | `0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>` | proceeds |
+| `--snapshot` | anything else | **refused** — CI would publish a real version out of an unreviewed `dev` commit |
+| no `--snapshot` | `0.0.0-dev.*` | **refused** — a snapshot committed to a release branch would ride the `dev → main` promotion onto the production channel |
+| no `--snapshot` | anything else | proceeds |
+
+The shape and both halves of the check live in `scripts/release-snapshot-version.mjs`, so the workflow that *produces* the version and the script that *validates* it cannot drift apart. `0.0.0-` sorts below every real version, so no `^0.1.x` range resolves to a snapshot by accident.
+
+The check here is the third of three enforcement points for one invariant: **a snapshot must never be able to land on `alpha` or `latest`, and the `main` path must never publish a `0.0.0-dev.*` version.** The other two are in `publish.yml` — a ref/channel mismatch refusal, and an assertion immediately before every publish. See that file's header comment; it is written once there rather than restated here.
+
+The developer loop that *consumes* a snapshot — merge, wait for the run, poll `npm view` past the registry's replication lag, install against the dev backend, `--doctor` — and the owner steps that make the dev dashboard hand out `@dev` are in [`docs/operations/package-dev-channel.md`](../docs/operations/package-dev-channel.md). This section stays about the script.
+
 ### What the script does (in order)
 
 1. **Read** current version from `packages/sdk/package.json`.
@@ -117,12 +143,13 @@ npm run release:bump -- prerelease --yes
 5. **Update** cross-package dep pins: `mcp → @haven_ai/sdk`, `connect → @haven_ai/sdk / @haven_ai/mcp / @haven_ai/signer`.
 6. **Update** `packages/mcp/src/server.ts` — the `MCP_VERSION` constant.
 7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals, then re-pin the *Supported Runtime Manifest* table in `docs/operations/mcp-runtime-compatibility.md` to match ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)). The table is verified in step 11 against the constants themselves, never against the value this run wrote — see *The manifest table writes itself*.
+7a. **Update** `packages/sdk/src/connector-channel.ts` — the `HAVEN_CONNECTOR_CHANNEL` constant ([#2423](https://github.com/d-hinders/Haven-AI/issues/2423)). Unlike every other constant here it does **not** carry the version: it carries the npm dist-tag *derived* from it, by the same rule `.github/workflows/publish.yml` uses to choose `npm publish --tag` (prerelease → its own label, so `0.1.34-alpha.0` → `alpha` and `0.0.0-dev.<ts>.<sha>` → `dev`; stable → `latest`). It is what every published package's "re-run `npx @haven_ai/connect@<tag>`" hint renders from, so a build published under one channel cannot tell its user to reinstall from another. The rule lives once, in `scripts/release-channel.mjs`; `npm run release:bump:test` **executes** publish.yml's own `case` block in `bash` and fails if the two ever disagree, and separately compares the constant on disk against `packages/sdk/package.json`'s version on every pull request — which is what catches a bump that stopped writing it.
 8. **Wipe** all `packages/*/dist` directories — required to prevent tsup from bundling a stale constant from the previous build's output.
 9. **`npm install` + deterministic lockfile rewrite** ([#1663](https://github.com/d-hinders/Haven-AI/issues/1663)) — the install keeps `node_modules` consistent for the builds below, but its lockfile output is **not taken**: on three consecutive cuts (0.1.26 → 0.1.28) the local npm also inserted `"dev"`/`"peer"` metadata on unrelated entries, and each release hand-repaired the diff back to its 11 version lines. Instead the version substitution is replayed **structurally** onto the pre-install lockfile (`scripts/release-lockfile.mjs` — structural rather than textual so a third-party dep coincidentally at the old version is never touched), and the bump then **fails loudly** if the final `package-lock.json` diff contains any line that is not a workspace `version` field or an `@haven_ai/*` pin. The guard reads the file on disk, so removing the rewrite makes the guard see npm's polluted output and fail. Self-tested: `npm run release:bump:test`.
 10. **Build** in dependency order: `sdk → signer → mcp → connect`.
     - Connect is built directly with tsup (skipping its internal pre-build of mcp/signer) so the already-built dist from the previous step is used — the exact scenario that surfaces the build-order bug.
     - **`cli` is deliberately absent here, and this is not the count drift fixed above — do not "correct" it.** These builds exist to *verify the connect bundle*, which is the one artifact that inlines version literals at build time; `cli` inlines nothing connect depends on and nothing this step checks. Publishing does not rely on it either: `publish.yml` rebuilds every published package from a clean checkout at publish time, so a `cli` dist produced here would be discarded. Whether the bump should build `cli` anyway — as a cheap "does it still compile at the new version" signal — is a real question, but it is a **behaviour change** and belongs in its own issue rather than in a doc edit.
-11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, that `server.ts` has the correct `MCP_VERSION`, and that the *Supported Runtime Manifest* table matches every constant it mirrors.
+11. **Verify** the built `packages/connect/dist/cli.cjs` contains the new version literal, that `server.ts` has the correct `MCP_VERSION`, that the *Supported Runtime Manifest* table matches every constant it mirrors, and — by **calling** the built SDK's own helper rather than matching source text — that `packages/sdk/dist` renders its re-run hint for the channel this version publishes under (a stale SDK dist would otherwise ship hints for the previous channel).
 
 ### Why the dist-wipe is mandatory
 
@@ -165,8 +192,13 @@ git commit -m "chore(release): bump all published packages to <new-version>"
 git push -u origin release/<new-version>
 gh pr create --base dev --fill
 
-# 4. Merge to `dev`. NOTHING PUBLISHES HERE. Publishing happens on the later
-#    `dev → main` promotion (a separate, human step).
+# 4. Merge to `dev`. NO RELEASE PUBLISHES HERE. The release goes out on the
+#    later `dev → main` promotion (a separate, human step).
+#
+#    Since #2421 this merge DOES publish a dev-channel snapshot under the
+#    `dev` dist-tag, at a 0.0.0-dev.* version built in a throwaway tree. It is
+#    not this release, it cannot become this release, and it moves neither
+#    `alpha` nor `latest` -- see `--snapshot` above.
 
 # 5. Promote `dev → main`. On push to main, the Publish packages workflow
 #    rebuilds dist in dependency order and publishes only the packages whose

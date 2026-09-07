@@ -103,6 +103,7 @@ import {
   markRevoked,
   nextDelegationVersion,
   openRekey,
+  RekeyOpenConflictError,
   type AgentRekeyRow,
   type CarrySnapshotEntry,
   type RekeyAgentRow,
@@ -136,6 +137,15 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
     required_stage: err.required,
     detail: err.message,
   })
+}
+
+function isPgUniqueViolation(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      (err as { code?: unknown }).code === '23505',
+  )
 }
 
 /**
@@ -330,15 +340,34 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       }
     }
 
-    const rekey = await openRekey({
-      agentId: request.params.id,
-      userId: sub,
-      oldDelegateAddress: agent.delegate_address,
-      newDelegateAddress: new_delegate_address,
-      residualAtomic: residualAtomic.toString(),
-      residualTokenAddress: residualAtomic > 0n ? (residualToken as string) : null,
-      residualDisposition: residualAtomic > 0n ? (disposition as string) : 'none',
-    })
+    let rekey: AgentRekeyRow
+    try {
+      rekey = await openRekey({
+        agentId: request.params.id,
+        userId: sub,
+        oldDelegateAddress: agent.delegate_address,
+        newDelegateAddress: new_delegate_address,
+        residualAtomic: residualAtomic.toString(),
+        residualTokenAddress: residualAtomic > 0n ? (residualToken as string) : null,
+        residualDisposition: residualAtomic > 0n ? (disposition as string) : 'none',
+      })
+    } catch (err) {
+      if (!(err instanceof RekeyOpenConflictError) && !isPgUniqueViolation(err)) throw err
+      const existing = await findInFlightRekey(request.params.id)
+      if (existing) {
+        return reply.code(409).send({
+          error: 'rekey_already_in_flight',
+          rekey_id: existing.id,
+          stage: existing.stage,
+          new_delegate_address: existing.new_delegate_address,
+          detail: 'A re-key is already in progress for this agent. Finish or abandon it first.',
+        })
+      }
+      return reply.code(409).send({
+        error: 'rekey_unavailable',
+        detail: 'The agent account changed while this re-key was starting. Refresh and try again.',
+      })
+    }
 
     const targets = await listNonRevokedDelegationsForAgent(request.params.id)
     return reply.code(201).send({
@@ -667,6 +696,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       const loaded = await loadStep(request, reply)
       if (!loaded) return reply
       const { agent, rekey } = loaded
+      const { sub } = request.user as { sub: string }
       // THE ordering guard. `metered` is only reachable through `revoked`, so
       // requiring it here forbids issue-before-revoke structurally rather
       // than by convention.
@@ -809,8 +839,9 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
               .send({ error: 'Could not build the replacement delegation', details: safeDetails(err) })
           }
           const hash = delegationIdentity(delegation)
-          await insertRekeyDelegation({
+          const inserted = await insertRekeyDelegation({
             agentId: request.params.id,
+            userId: sub,
             chainId: agent.chain_id,
             tokenAddress: entry.token_address,
             recipientAddress: entry.recipient_address,
@@ -824,6 +855,9 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
             rekeyId: rekey.id,
             carryRole: piece.role,
           })
+          if (inserted === false) {
+            return reply.code(409).send({ error: 'Unlinked agents cannot receive new budget delegations' })
+          }
           built.push({
             delegation_hash: hash,
             carry_role: piece.role,

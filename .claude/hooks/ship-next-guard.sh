@@ -109,8 +109,10 @@ checks either way. What you take on is the judgement layer no check performs:
    too. Nothing in CI does this, and nothing will tell you it was skipped.
 
 2. DOC-REVIEWER — run: node scripts/docs/coupling-gate.mjs
-   If the diff touches code that any docs `covers:` front-matter maps to,
-   review those docs. CI only BLOCKS on docs marked `contract: true`; the rest
+   Run it after implementation. Docs whose `covers:` front-matter maps to the
+   changed code are the FLOOR of what it reviews, not the scope (#2499): the
+   pass derives scope from the claims in the diff and sweeps files that no
+   `covers:` map reaches. CI only BLOCKS on docs marked `contract: true`; the rest
    are advisory, so this one is on you. Editing the doc yourself is not the
    same as reviewing it.
 

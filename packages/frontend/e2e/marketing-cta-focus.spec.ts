@@ -65,9 +65,12 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
  * **The band is part of the locator because the name alone is ambiguous, and
  * that was measured rather than anticipated.** The first draft used
  * `getByRole('link', { name })` page-wide and `toHaveCount(1)` failed on all
- * three: the landing page's hero carries its own `<Button href="/signup">Get
- * early access</Button>`, and `investor-briefing` reaches `CONTACT_TEAM_HREF`
- * from three controls. Two of those extras are real `Button`s with the ordinary
+ * three: the landing page's hero carries its own `<Button href="/signup">Create
+ * your account</Button>` (both strings said "Get early access" until #2524
+ * renamed them — the collision is the same one, under a new name). The landing
+ * page's CTA names are unique within its band, so the locator stays scoped to
+ * the band. Two of those controls are real
+ * `Button`s with the ordinary
  * light-surface `ring-brand/80`, so a page-wide locator that happened to match
  * one of them would have asserted a WHITE ring on a control that correctly has
  * a brand one — a test failing for the right-looking wrong reason.
@@ -79,7 +82,7 @@ const BAND_CTAS = [
   {
     route: '/',
     heading: 'Ready to put your agents to work?',
-    name: 'Get early access',
+    name: 'Create your account',
     variant: 'solid',
   },
   {
@@ -87,12 +90,6 @@ const BAND_CTAS = [
     heading: 'Ready to put your agents to work?',
     name: 'Read the technical overview',
     variant: 'translucent',
-  },
-  {
-    route: '/investor-briefing',
-    heading: 'Haven is building the account layer for agents that pay.',
-    name: 'Contact the team',
-    variant: 'solid',
   },
 ] as const
 

@@ -1421,3 +1421,114 @@ describe('a directory holding ONLY rekey-pending.json is inventoried (#1915)', (
     expect(by(orphanDir)).toBe('orphaned')
   })
 })
+
+// ── #2424: runtime-spec override is a doctor finding ───────────────────────
+
+describe('runtime_spec_override (#2424)', () => {
+  it('a healthy pinned install with no variable set has NO runtime_spec_override check at all', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps(), env: {} })
+    expect(report.ok).toBe(true)
+    expect(report.checks.map((c) => c.id)).not.toContain('runtime_spec_override')
+  })
+
+  it('a sidecar written under an override is reported as a finding, and signer_runtime is judged against the sidecar', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-doctor-override-'))
+    const dir = await seedCredentials(homeDir)
+    // Override layout: hash-keyed directory, non-pinned signer version.
+    const runtimeDirectory = join(homeDir, '.haven', 'signer-runtime', 'override-0123456789ab')
+    const cliPath = join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js')
+    await mkdir(join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist'), { recursive: true })
+    await writeFile(cliPath, '// cli')
+    for (const [pkg, version] of [['signer', '0.0.0-local'], ['sdk', MCP_RUNTIME_MANIFEST.sdkVersion]] as const) {
+      const pkgDir = join(runtimeDirectory, 'node_modules', '@haven_ai', pkg)
+      await mkdir(pkgDir, { recursive: true })
+      await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version }))
+    }
+    const wrapperPath = join(dir, 'bin', 'haven-signer.mjs')
+    await mkdir(join(dir, 'bin'), { recursive: true })
+    await writeFile(wrapperPath, '// wrapper')
+    await writeFile(join(dir, 'signer-runtime.json'), JSON.stringify({
+      signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
+      signer_version: '0.0.0-local',
+      sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,
+      sdk_version: MCP_RUNTIME_MANIFEST.sdkVersion,
+      wrapper_path: wrapperPath,
+      runtime_directory: runtimeDirectory,
+      npm_cache_directory: join(homeDir, '.haven', 'npm-cache'),
+      cli_path: cliPath,
+      runtime_spec_override: {
+        specs: { signer: 'file:/abs/path/packages/signer' },
+        resolved_specs: ['file:/abs/path/packages/signer', `@haven_ai/sdk@${MCP_RUNTIME_MANIFEST.sdkVersion}`],
+        directory_key: 'override-0123456789ab',
+      },
+    }))
+    await seedCodexConfig(homeDir, wrapperPath)
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps(), env: {} })
+
+    const override = report.checks.find((c) => c.id === 'runtime_spec_override')
+    expect(override).toBeDefined()
+    expect(override!.ok).toBe(false)
+    expect(override!.detail).toContain('runtime spec overridden — not the pinned manifest')
+    expect(override!.detail).toContain('HAVEN_SIGNER_SPEC=file:/abs/path/packages/signer')
+    expect(override!.detail).toContain('override-0123456789ab')
+    expect(override!.repair).toContain('unset HAVEN_SIGNER_SPEC / HAVEN_SDK_SPEC / HAVEN_MCP_SPEC')
+    // The install itself is healthy BY THE SIDECAR'S OWN RECORD — not by the
+    // manifest, which is what the developer chose not to install.
+    const signerRuntime = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(signerRuntime!.ok).toBe(true)
+    expect(signerRuntime!.detail).toContain('override install')
+    // And the report as a whole is not green: the override is a finding.
+    expect(report.ok).toBe(false)
+    expect(report.checks.filter((c) => !c.ok).map((c) => c.id)).toEqual(['runtime_spec_override'])
+  })
+
+  it('a variable set in the doctor\'s own shell is a finding even on a pinned install — a --repair would use it', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor(
+      { runtime: 'codex-cli' },
+      { homeDir, ...healthyDeps(), env: { HAVEN_SDK_SPEC: '/abs/haven_ai-sdk-0.0.0.tgz' } },
+    )
+    const override = report.checks.find((c) => c.id === 'runtime_spec_override')
+    expect(override?.ok).toBe(false)
+    expect(override?.detail).toContain('set in this shell: HAVEN_SDK_SPEC=/abs/haven_ai-sdk-0.0.0.tgz')
+    expect(report.ok).toBe(false)
+  })
+
+  it('a malformed variable in the shell is reported as refused, not swallowed', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor(
+      { runtime: 'codex-cli' },
+      { homeDir, ...healthyDeps(), env: { HAVEN_SIGNER_SPEC: 'file:/abs;rm' } },
+    )
+    const override = report.checks.find((c) => c.id === 'runtime_spec_override')
+    expect(override?.ok).toBe(false)
+    expect(override?.detail).toContain('REFUSED')
+    expect(override?.detail).toContain('HAVEN_SIGNER_SPEC')
+  })
+
+  it('--repair threads the doctor env into the signer reinstall', async () => {
+    const { homeDir } = await healthyHome()
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      if (_command !== 'npm') return
+      const prefix = args[args.indexOf('--prefix') + 1]!
+      const cliDir = join(prefix, 'node_modules', '@haven_ai', 'signer', 'dist')
+      await mkdir(cliDir, { recursive: true })
+      await writeFile(join(cliDir, 'cli.js'), '// cli')
+      for (const [pkg, version] of [['signer', '0.0.0-local'], ['sdk', MCP_RUNTIME_MANIFEST.sdkVersion]] as const) {
+        const pkgDir = join(prefix, 'node_modules', '@haven_ai', pkg)
+        await mkdir(pkgDir, { recursive: true })
+        await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version }))
+      }
+    })
+    const repair = await runRepair(
+      { runtime: 'codex-cli' },
+      { homeDir, runCommand, env: { HAVEN_SIGNER_SPEC: 'file:/abs/path/packages/signer' } },
+    )
+    expect(repair.ok).toBe(true)
+    const npmCall = runCommand.mock.calls.find(([command]) => command === 'npm')
+    expect(npmCall![1]).toContain('file:/abs/path/packages/signer')
+    expect(repair.messages.join('\n')).toContain('RUNTIME SPEC OVERRIDE ACTIVE')
+  })
+})

@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
 
 /**
- * A copied setup command normally registers within a few seconds. A FIRST run
+ * A copied connector command normally registers within a few seconds. A FIRST run
  * has to download the connector first, which on a slow network can take a
  * minute or more — so at this bound Haven only acknowledges that it is taking
  * a while. Nothing is wrong yet, and the wording must not suggest otherwise

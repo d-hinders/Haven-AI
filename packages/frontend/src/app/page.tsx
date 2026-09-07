@@ -34,7 +34,7 @@ const HAVEN_MODEL = [
   },
   {
     title: 'A policy engine',
-    body: 'Every payment is checked against your rules before it moves. Spending limits, approved currencies, approval thresholds. Your policies, enforced before the transaction is sent.',
+    body: 'Every payment is checked against your rules before it moves. Spending limits, approved currencies, allowed recipients. Your policies, enforced before the transaction is sent.',
   },
   {
     title: 'A scoped agent credential',
@@ -82,7 +82,7 @@ const DIFFERENTIATORS = [
   },
   {
     title: 'Layered security',
-    body: 'Five independent layers protect your account: your rules, your agent credentials, your approval flows, and a full audit trail. No single point of failure.',
+    body: 'Five independent layers protect your account: the account itself, your rules, your agent credentials, on-chain refusal of anything outside them, and a full audit trail. No single point of failure.',
   },
   {
     title: 'Live today',
@@ -134,11 +134,28 @@ export default function Home() {
               </p>
 
               <div className="flex flex-wrap items-center gap-3 mb-10">
-                <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+                <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
                 <Button href="/how-it-works" variant="ghost" size="lg">
                   See how it works
                 </Button>
               </div>
+
+              {/*
+                Addressed to agents, server-rendered, and real page content —
+                a curl of this page sees it (#2521). The 2026-09-04 cold test
+                had to guess that /llms.txt existed.
+              */}
+              <p className="text-[13px] text-[var(--v2-ink-3)] mb-6 max-w-[520px]">
+                Haven gives an agent a budget instead of a wallet, enforced on-chain.
+                If you are an AI agent reading this for your user, start at{' '}
+                <a
+                  href="/llms.txt"
+                  className="underline underline-offset-2 text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+                >
+                  /llms.txt
+                </a>
+                .
+              </p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                 <span className="text-[12px] text-[var(--v2-ink-3)] mr-1">Integrates with</span>
@@ -354,7 +371,7 @@ export default function Home() {
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <BrandBandButton href="/signup" trailingArrow>
-              Get early access
+              Create your account
             </BrandBandButton>
             <BrandBandButton href="/how-it-works" variant="translucent">
               Read the technical overview

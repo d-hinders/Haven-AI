@@ -1,0 +1,106 @@
+'use client'
+
+import { useMemo } from 'react'
+import { Card } from '../ui/Card'
+import { CopyBlock } from './CopyBlock'
+import { useCopyTimeout } from '@/hooks/useCopyTimeout'
+import { buildAgentOnboardingPrompt } from '@/lib/agent-onboarding-prompt'
+
+/**
+ * "Set up with your AI agent" — the whole-onboarding prompt, offered on the
+ * `/agents` empty state (#2535, epic #2519).
+ *
+ * ## Why `/agents` only, when the issue asked for the dashboard too
+ *
+ * #2534 merged a first-run onboarding checklist onto the dashboard while this
+ * was in review. Rendered together, a signed-in user with no agents met THREE
+ * affordances for one job — the checklist's "Connect your first agent" step, the
+ * "No agents connected yet" empty state, and this card — and this card drew into
+ * a half-width column where the prompt wraps too narrowly to read. The dashboard
+ * placement was dropped on the owner's decision (2026-09-06); the checklist owns
+ * first-run agent guidance there, and this owns the agent-driven alternative on
+ * `/agents`, where the "or" divider states the relationship.
+ *
+ * ## Why this exists next to the connect modal rather than inside it
+ *
+ * The modal's prompt covers ONE step (run the connector) and only exists once a
+ * setup does. A user who arrives at Haven first and wants their agent to do the
+ * rest has nothing to paste until they get there. This card is what they paste
+ * before that point.
+ *
+ * ## It is the onboarding prompt, not the "setup prompt"
+ *
+ * `setup prompt` is canonical for the modal's token-carrying text
+ * (`docs/product/copy-guidelines.md` § Agent-facing vocabulary). Naming this
+ * one the same thing would undo the disambiguation #2533 and #2576 paid for, so
+ * every string here says "prompt" or "onboarding prompt" and never that term.
+ *
+ * ## Safe to render before any setup exists
+ *
+ * It carries no setup token and no credential — asserted, not assumed, by
+ * `src/lib/__tests__/agent-onboarding-prompt.test.ts`. That is what makes it
+ * showable on an empty state, where the modal's prompt would have nothing to say.
+ */
+export function AgentOnboardingPromptCard({ className }: { className?: string }) {
+  const { copied, markCopied } = useCopyTimeout()
+
+  // The host the user is actually signed in to, so the links in the prompt
+  // resolve on dev, on a preview deploy and in production from one committed
+  // string. Read in the browser rather than baked at build time for the same
+  // reason the SDK constant carries a placeholder at all.
+  const prompt = useMemo(
+    () => buildAgentOnboardingPrompt(typeof window === 'undefined' ? '' : window.location.origin),
+    [],
+  )
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      markCopied()
+    } catch {
+      /* clipboard unavailable — the prompt is still on screen to select by hand */
+    }
+  }
+
+  return (
+    // `overflow-hidden` is required by Card.Header, whose band must clip to the
+    // card's rounded corners (design-system page, § Card.Header). Without it the
+    // header's background renders square inside a rounded card.
+    <Card hover={false} className={`overflow-hidden ${className ?? ''}`.trim()}>
+      <Card.Header
+        title="Set up with your AI agent"
+        description="Paste this to an agent with a terminal and it can do the setup. You still approve the budget and fund the account — nothing spends without your signature."
+      />
+      {/* A padded body, NOT a Card.Section: Card.Header already draws the
+          separating band, and Card.Section would add a second hairline border
+          under it. Its negative margins also assume a `p-5 md:p-6` parent Card,
+          which this one deliberately is not — the header owns the top region and
+          only the body below it is padded. */}
+      <div className="p-5 md:p-6">
+        {/* `nested`: this card IS the Card, so CopyBlock must not bring its own
+            (#2535, haven-design-reviewer — the default shell made this
+            Card > Card.Section > Card). */}
+        <CopyBlock
+          label="Prompt for your agent"
+          value={prompt}
+          copied={copied}
+          onCopy={handleCopy}
+          primary
+          nested
+        />
+        <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+          Want to read what your agent will do first?{' '}
+          <a
+            href="/for-agents.md"
+            className="underline underline-offset-2 hover:text-[var(--v2-ink)]"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Read the agent guide
+          </a>
+          .
+        </p>
+      </div>
+    </Card>
+  )
+}

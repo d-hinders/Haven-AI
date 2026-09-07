@@ -9,7 +9,7 @@ import { TrailingArrow } from '@/components/marketing/TrailingArrow'
  *
  * The White-on-brand treatment was hand-rolled markup that copied `Button`'s
  * base class string, at three call sites: `app/page.tsx`'s two closing CTAs and
- * `investor-briefing/page.tsx`'s "Contact the team". Only the investor-briefing
+ * the retired investor-briefing page's "Contact the team". Only that retired
  * one declared a focus ring; the other two carried **no `focus-visible:`
  * classes at all** and fell back to the UA outline — an indicator, so not a
  * WCAG 2.4.7 failure, but not this system's ring either.
@@ -112,9 +112,8 @@ export function BrandBandButton({
   )
 
   // An external/mailto target cannot go through `next/link`'s router, and
-  // `investor-briefing`'s "Contact the team" is exactly that — so the element
-  // follows the href rather than being fixed, and both spellings carry the
-  // identical class string.
+  // External/mailto targets follow the href rather than being fixed, and both
+  // element spellings carry the identical class string.
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) {
     return (
       <a href={href} className={classes}>

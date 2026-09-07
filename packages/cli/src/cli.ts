@@ -1,56 +1,36 @@
 #!/usr/bin/env node
 
-import { emitKeypressEvents } from 'node:readline'
 import { run } from './commands.js'
+import { promptPasswordWith } from './prompt.js'
 
 /**
- * Read a password from the TTY without echoing it. Falls back to a plain line
- * read when stdin isn't a TTY (so piping `HAVEN_PASSWORD` or a heredoc still
- * works, though the env var is the documented non-interactive path).
+ * The bin entry, and deliberately nothing else.
+ *
+ * It used to also define `promptPasswordWith`, which meant importing this file
+ * to test that function EXECUTED the CLI — `run(process.argv.slice(2))` against
+ * vitest's own argv, ending in `process.exit(1)`. The suite still reported 102
+ * passing tests with one unhandled error beside them, which is exactly the
+ * shape of failure a `grep` for "Tests" hides (#2525 review round 3, caught by
+ * CI). An entry point that self-executes must not also be an import target, so
+ * the prompt lives in `prompt.ts` and this file only wires and runs.
  */
 function promptPassword(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const { stdin, stdout } = process
-    if (!stdin.isTTY) {
-      let data = ''
-      stdin.setEncoding('utf8')
-      stdin.on('data', (chunk) => (data += chunk))
-      stdin.on('end', () => resolve(data.trim()))
-      stdin.on('error', reject)
-      return
-    }
-    stdout.write('Password: ')
-    emitKeypressEvents(stdin)
-    stdin.setRawMode(true)
-    let value = ''
-    const onKey = (char: string, key: { name?: string; ctrl?: boolean }) => {
-      if (key.name === 'return' || key.name === 'enter') {
-        cleanup()
-        stdout.write('\n')
-        resolve(value)
-      } else if (key.ctrl && key.name === 'c') {
-        cleanup()
-        stdout.write('\n')
-        reject(new Error('Cancelled'))
-      } else if (key.name === 'backspace') {
-        value = value.slice(0, -1)
-      } else if (char && !key.ctrl) {
-        value += char
-      }
-    }
-    function cleanup() {
-      stdin.setRawMode(false)
-      stdin.pause()
-      stdin.off('keypress', onKey)
-    }
-    stdin.resume()
-    stdin.on('keypress', onKey)
-  })
+  return promptPasswordWith({ stdin: process.stdin, stdout: process.stdout, stderr: process.stderr })
 }
 
 run(process.argv.slice(2), { promptPassword })
   .then((code) => process.exit(code))
   .catch((err) => {
-    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
+    // The last resort: anything that escaped run()'s own handling. It should be
+    // unreachable — run() catches around both parseArgs and dispatch — but if
+    // it is ever reached under `--json`, a bare sentence on stderr with exit 1
+    // would be the one refusal a machine caller cannot parse. So it emits the
+    // same failure shape as everything else (#2525 review, finding 2).
+    const message = err instanceof Error ? err.message : String(err)
+    if (process.argv.includes('--json')) {
+      process.stdout.write(`${JSON.stringify({ ok: false, error: { code: 'failed', message } }, null, 2)}\n`)
+    } else {
+      process.stderr.write(`${message}\n`)
+    }
     process.exit(1)
   })

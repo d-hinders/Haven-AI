@@ -30,10 +30,12 @@ vi.mock('@/app/onboarding/HybridEnrollFlow', () => ({
     onComplete,
     onError,
     onCreatingChange,
+    onBlockedChange,
   }: {
     onComplete: (args: { accountAddress: string }) => void
     onError: (message: string) => void
     onCreatingChange?: (creating: boolean) => void
+    onBlockedChange?: (blocked: boolean) => void
   }) => (
     <div data-testid="hybrid-enroll-flow">
       <button
@@ -47,6 +49,11 @@ vi.mock('@/app/onboarding/HybridEnrollFlow', () => ({
       </button>
       <button type="button" onClick={() => onError(PASSKEY_REQUIRED_MESSAGE)}>
         fail-unsupported
+      </button>
+      {/* #2524: the third outcome the host screen owns — this browser cannot
+          create a passkey at all, so the screen stops being a create flow. */}
+      <button type="button" onClick={() => onBlockedChange?.(true)}>
+        report-blocked
       </button>
     </div>
   ),
@@ -267,5 +274,27 @@ describe('OnboardingClient (#1162)', () => {
     expect(screen.getByText(/You're in/)).toBeTruthy()
     expect(screen.queryByText('Add a backup soon')).toBeNull()
     expect(screen.queryByText(/a lost device never means a lost account/i)).toBeNull()
+  })
+  /**
+   * #2524, found by reading the RENDER rather than the source: on a browser
+   * that cannot create a passkey, this screen kept its "Create your Haven
+   * account" heading, its Face-ID promise and a live Network selector directly
+   * above a message saying none of it was possible. Picking a network for an
+   * account that cannot be created is a control that does nothing.
+   */
+  it('stops presenting itself as a create flow once the browser reports it cannot', async () => {
+    render(<OnboardingClient />)
+
+    // Precondition — without it the assertions below could pass vacuously.
+    expect(screen.getByLabelText('Network')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Create your Haven account' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'report-blocked' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Finish on another device' })).toBeTruthy(),
+    )
+    expect(screen.queryByLabelText('Network')).toBeNull()
+    expect(screen.queryByText(/Your face or fingerprint approves everything/)).toBeNull()
   })
 })

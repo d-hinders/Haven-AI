@@ -35,12 +35,11 @@
  *   `Sidebar`'s kebab opens a menu, `Table`'s header sorts, `Address`' link
  *   navigates. A toggle there would fire alongside the real action and leave a
  *   bubble hanging over whatever the tap just opened;
- * - and it refuses the same job by ancestry. `AgentCard` is a card-wide
- *   composite `role="link"`, so `McpServerName`'s trigger inside it cannot be
- *   tapped without navigating and cannot take focus without nesting a tab stop
- *   inside a single control. **That call site therefore stays hover-only, and
- *   the honest conclusion is #2017's: its copy explains an absence and belongs
- *   in visible text, not behind a tooltip this primitive cannot rescue.**
+ * - and it refuses the same job by ancestry. A trigger inside another
+ *   interactive control cannot be tapped without firing that control and
+ *   cannot take focus without nesting a second tab stop. **That is why the
+ *   essential null-name copy belongs in visible text, while a standalone
+ *   recorded-name elaboration can remain reachable.**
  *
  * `Address`' copy affordance is safe by construction and worth naming: its
  * `CopyButton` is a *sibling* of the `Tooltip`, not a child, so tapping the
@@ -92,11 +91,8 @@ const FOCUSABLE =
 /**
  * A control the trigger sits INSIDE, which owns the tap by ancestry.
  *
- * Measured, not defensive: `AgentCard` makes the whole card a composite
- * `role="link"` with `tabIndex={0}` and an `onClick`, and `McpServerName`
- * renders inside it. A tap-toggle there fires and then the card navigates
- * away; a `tabIndex` there nests a second tab stop inside a single composite
- * control. Both are worse than the defect.
+ * This is intentionally ancestry-based: a nested trigger must not add a
+ * second tab stop or tap action to a control that already owns the interaction.
  */
 const INTERACTIVE_ANCESTOR = `${FOCUSABLE}, [role="link"], [role="button"], [role="menuitem"], [role="tab"], [role="option"], label`
 

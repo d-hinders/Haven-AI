@@ -17,6 +17,7 @@ import {
 } from '../modules/passport/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
+import { config } from '../config.js'
 import {
   agentExistsForUser,
   createAgent,
@@ -164,6 +165,10 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       usdc: formatTokenValue(usdcAtomic.toString(), 6),
       usdc_atomic: usdcAtomic.toString(),
       usdc_address: usdcConfig?.address ?? null,
+      // The UI uses the same configured floor as haven_sweep_delegate. Keep it
+      // on the balance response so recovery eligibility cannot drift between
+      // the read surface and the paid sweep path.
+      sweep_min_usdc: config.sweepMinUsdc,
     }
   })
 
@@ -325,14 +330,17 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.delete<{ Params: { id: string } }>('/:id', async (_request, reply) => {
     return reply.code(410).send({
       error:
-        'Deleting agents is retired: removal is an archive, and history is kept. Use POST /agents/:id/archive on a revoked agent instead.',
+        'Deleting agents is retired: removal is an archive, and history is kept. Use POST /agents/:id/archive to remove a legacy record or after revoking a delegation agent.',
     })
   })
 
-  // POST /agents/:id/archive — soft-archive a REVOKED agent (#1401). A filing
-  // action only: requires status='revoked' so archiving is never the thing
-  // that stops spending, keeps every dependent audit row, and is idempotent
-  // (re-archiving keeps the original archived_at, no timestamp churn).
+  // POST /agents/:id/archive — soft-archive an agent (#1401). Delegation
+  // agents require status='revoked' and no live budgets so archiving is never
+  // the thing that stops spending. Linked legacy Safe records may be unlinked
+  // at any status because this only removes the Haven-side record and leaves
+  // the old Safe permission untouched. An already-unlinked record is eligible
+  // when it has no live delegation. Both paths keep every dependent audit row
+  // and are idempotent (re-archiving keeps the original archived_at).
   //
   // #1436: it also requires DEAD BUDGETS. Revoking only flips the agent's
   // status, so revoke+archive without revoke-all used to file an agent under
@@ -366,8 +374,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // POST /agents/:id/unarchive — return the agent to the primary list. The
-  // status stays exactly as it was (revoked): un-archiving restores no
-  // authority of any kind.
+  // status stays exactly as it was: un-archiving restores no authority of any
+  // kind.
   app.post<{ Params: { id: string } }>('/:id/unarchive', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params

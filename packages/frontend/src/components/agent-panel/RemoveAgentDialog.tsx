@@ -8,6 +8,7 @@ import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import Link from 'next/link'
 import ConfirmDialog from '../ConfirmDialog'
 import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
+import { InlineAlert } from '../ui/InlineAlert'
 
 /**
  * #1402: "Remove agent" — ONE action with three effects, in an order that is
@@ -43,13 +44,12 @@ export function RemoveAgentDialog({
   onArchive: () => Promise<void>
   onClose: () => void
 }) {
-  const isDelegation = agent.account_type === 'delegator_hybrid'
   const { revokeAll, ready, busy } = useDelegationBudget(agent.id, chainId)
   const { balance, hasRecoverableUsdc } = useDelegateBalance(agent.id)
   const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many'>('confirm')
   const [error, setError] = useState<string | null>(null)
 
-  const needsSignature = isDelegation && agent.status !== 'revoked'
+  const needsSignature = agent.status !== 'revoked'
 
   async function handleRemove() {
     setError(null)
@@ -108,24 +108,26 @@ export function RemoveAgentDialog({
       title={`Remove ${agent.name}?`}
       body={
         <div className="space-y-3">
-          <p>Removing this agent does three things, in one step:</p>
-          <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-            <li>
-              <span className="font-medium text-[var(--v2-ink)]">It stops being able to spend.</span>{' '}
-              {needsSignature
-                ? 'You sign once and every budget it holds ends — no matter how many.'
-                : 'Its spending authority is already ended.'}
-            </li>
-            <li>
-              <span className="font-medium text-[var(--v2-ink)]">Its credential stops working</span>{' '}
-              immediately — tools and API access end with it.
-            </li>
-            <li>
-              <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> The agent
-              moves to Removed, where every payment and record remains readable. You can restore it
-              to the list later, but restoring never brings back its ability to spend.
-            </li>
-          </ul>
+          <>
+              <p>Removing this agent does three things, in one step:</p>
+              <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                <li>
+                  <span className="font-medium text-[var(--v2-ink)]">It stops being able to spend.</span>{' '}
+                  {needsSignature
+                    ? 'You sign once and every budget it holds ends — no matter how many.'
+                    : 'Its spending authority is already ended.'}
+                </li>
+                <li>
+                  <span className="font-medium text-[var(--v2-ink)]">Its credential stops working</span>{' '}
+                  immediately — tools and API access end with it.
+                </li>
+                <li>
+                  <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> The agent
+                  moves to Removed, where every payment and record remains readable. You can restore it
+                  to the list later, but restoring never brings back its ability to spend.
+                </li>
+              </ul>
+          </>
           {hasRecoverableUsdc && balance && (
             <ApprovalRequiredBanner
               title="This agent's wallet still holds funds"
@@ -148,21 +150,19 @@ export function RemoveAgentDialog({
             </p>
           )}
           {error && (
-            <p className="text-xs text-[var(--v2-danger)]" role="alert">
-              {error}
-            </p>
+            <InlineAlert>{error}</InlineAlert>
           )}
           {phase === 'filing_failed' && (
-            <p className="text-xs text-[var(--v2-danger)]" role="alert">
-              The agent can no longer spend, but it could not be moved to Removed. Choose Finish
-              removal to retry.
-            </p>
+            <InlineAlert>
+              The agent can no longer spend, but it could not be moved to Removed. Choose
+              Finish removal to retry.
+            </InlineAlert>
           )}
           {/* #1437: the backend refuses an oversized batch by naming the
               remedy; repeating "the budget could not be stopped" would leave
               the user pressing the same button forever. */}
           {phase === 'too_many' && (
-            <p className="text-xs text-[var(--v2-danger)]" role="alert">
+            <InlineAlert>
               This agent holds too many budgets to stop in one signature. Stop them individually
               on the{' '}
               <Link
@@ -172,11 +172,13 @@ export function RemoveAgentDialog({
                 agent&apos;s budget card
               </Link>
               , then remove it. Nothing changed — it can still spend until you do.
-            </p>
+            </InlineAlert>
           )}
         </div>
       }
-      confirmLabel={phase === 'filing_failed' ? 'Finish removal' : 'Remove agent'}
+      confirmLabel={
+        phase === 'filing_failed' ? 'Finish removal' : 'Remove agent'
+      }
       tone="danger"
       loading={phase === 'working' || busy}
       confirmDisabled={needsSignature && !ready}

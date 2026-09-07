@@ -80,7 +80,6 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           // WHICH period-session the intent was pinned to — makes the #769
           // lazy rollover observable to the owner without DB access.
           execution_rail: p.execution_rail,
-          session_permission_id: p.session_permission_id,
           // #829: which delegation authorized a delegation-rail payment.
           delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,
@@ -214,7 +213,6 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           // WHICH period-session the intent was pinned to — makes the #769
           // lazy rollover observable to the owner without DB access.
           execution_rail: p.execution_rail,
-          session_permission_id: p.session_permission_id,
           // #829: which delegation authorized a delegation-rail payment.
           delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,

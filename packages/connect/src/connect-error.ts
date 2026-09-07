@@ -37,6 +37,19 @@ export interface ConnectErrorDetails {
    */
   installedClients?: readonly string[]
   suggestedRuntime?: string
+  /**
+   * #2551: the agents a bare-pair setup would displace, when the refusal is
+   * `wiring_collision`. Carried structurally for the same reason as
+   * `allowedRuntimes`: a `--json` caller discards prose, and the ids are what
+   * the human it relays to needs in order to decide.
+   */
+  supersededAgentIds?: readonly string[]
+  /**
+   * #2551: a valid, collision-checked `--name` the run could be re-issued
+   * with to install alongside. A proposal the human may take, never a
+   * selection the connector acts on.
+   */
+  suggestedServerName?: string
 }
 
 export class ConnectError extends Error {

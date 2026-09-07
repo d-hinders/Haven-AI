@@ -26,6 +26,40 @@ export interface CoreTokenConfig {
   coingeckoId: string
 }
 
+/**
+ * The smallest amount worth moving for this token (#2534) — a documented
+ * CONSTANT per token, not a policy.
+ *
+ * `GET /user/safes/:id/funding` and the CLI's `haven wallets funding` both
+ * project it into the instruction a human acts on ("Send at least 5 USDC on
+ * Base to 0x…"). The number exists so the agent's hand-off and the dashboard's
+ * funding card say the same thing from one source: enough for one small x402
+ * payment (those start at a fraction of a USDC) plus headroom for the second
+ * one, so a top-up does not leave the wallet stranded at zero between payments.
+ *
+ * What it is NOT: a spend limit, a minimum balance the account is checked
+ * against, or anything an agent computes on — the on-chain budget is the only
+ * limit, and it is signed by the human. Funding below this still works; the
+ * instruction just stops saying "at least".
+ *
+ * There is deliberately no entry for a chain-native token: gas is
+ * relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI
+ * — the endpoint reports `native.needed: false` rather than a minimum.
+ */
+const MINIMUM_USEFUL_TOKENS: Record<string, string> = {
+  // USDC (6 decimals) — one x402 payment plus headroom.
+  USDC: '5',
+  // USDC.e (bridged, 6 decimals) on Gnosis — same reasoning as USDC.
+  'USDC.e': '5',
+  // EURe (18 decimals) on Gnosis — euro equivalent headroom.
+  EURe: '5',
+}
+
+/** The constant above, for `symbol` on any chain, or undefined when unset. */
+export function minimumUsefulTokens(symbol: string): string | undefined {
+  return MINIMUM_USEFUL_TOKENS[symbol]
+}
+
 export interface CoreChainConfig {
   chainId: number
   name: string
@@ -37,7 +71,6 @@ export interface CoreChainConfig {
     safeProxyFactory: string
     safeSingletonL2: string
     fallbackHandler: string
-    allowanceModule: string
     multiSendCallOnly: string
   }
   passkey: {
@@ -48,6 +81,15 @@ export interface CoreChainConfig {
   }
   /** Token data in the backend's canonical order (native first). */
   tokens: CoreTokenConfig[]
+  /**
+   * Faucet for dev/QA top-ups — TESTNETS ONLY (#2534).
+   *
+   * Served verbatim by `GET /user/safes/:id/funding`'s `faucet_url` so an
+   * agent can point its human at where to get test funds. A mainnet carries
+   * no entry: there is no faucet, and the field's absence (not a null) is the
+   * signal. HavEN NEVER CALLS a faucet itself — this is a link for the human.
+   */
+  faucetUrl?: string
 }
 
 // ── Gnosis Chain (100) ────────────────────────────────────────────
@@ -63,7 +105,6 @@ const GNOSIS: CoreChainConfig = {
     safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
     safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
     fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   },
   passkey: {
@@ -92,8 +133,6 @@ const BASE: CoreChainConfig = {
     safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
     safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
     fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    // These are at the same CREATE2 addresses on Base
-    allowanceModule: '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   },
   passkey: {
@@ -109,9 +148,7 @@ const BASE: CoreChainConfig = {
 // ── Base Sepolia (84532) — testnet for dev / QA ───────────────────
 //
 // All addresses verified deployed on Base Sepolia via eth_getCode across three
-// RPCs. The only delta from Base mainnet is the AllowanceModule: v0.1.0's
-// 0xCFbF… address is NOT deployed on Base Sepolia, so this uses the v0.1.1
-// deployment (0xAA46…). v0.1.1's ABI is identical to v0.1.0's.
+// RPCs.
 
 const BASE_SEPOLIA: CoreChainConfig = {
   chainId: 84532,
@@ -124,9 +161,6 @@ const BASE_SEPOLIA: CoreChainConfig = {
     safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
     safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
     fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    // AllowanceModule v0.1.1 (identical ABI to v0.1.0; v0.1.0's address is not
-    // on Base Sepolia). Verified via eth_getCode.
-    allowanceModule: '0xAA46724893dedD72658219405185Fb0Fc91e091C',
     multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
   },
   passkey: {
@@ -138,6 +172,9 @@ const BASE_SEPOLIA: CoreChainConfig = {
     // Circle's canonical Base Sepolia testnet USDC.
     { symbol: 'USDC', decimals: 6, address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', coingeckoId: 'usd-coin' },
   ],
+  // Testnet-only (#2534): the Circle-faucet page for Base Sepolia USDC. A
+  // human opens this; nothing in Haven ever does.
+  faucetUrl: 'https://faucet.circle.com',
 }
 
 // ── Registry + pure lookups ───────────────────────────────────────
@@ -193,6 +230,14 @@ export function isRegisteredChain(chainId: number): boolean {
 /** Token data for a symbol on a chain, or undefined. */
 export function resolveToken(chainId: number, symbol: string): CoreTokenConfig | undefined {
   return getChainData(chainId).tokens.find((t) => t.symbol === symbol)
+}
+
+/**
+ * Where a HUMAN gets dev funds on a testnet chain (#2534), or undefined on a
+ * mainnet — mainnets have no faucet and the endpoint omits the field entirely.
+ */
+export function getFaucetUrl(chainId: number): string | undefined {
+  return getChainData(chainId).faucetUrl
 }
 
 export function buildExplorerUrl(

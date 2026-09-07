@@ -13,6 +13,10 @@
 import pool from '../../db.js'
 import { withTransaction, type Executor } from '../transaction.js'
 import type { RekeyStage } from '../../modules/agents/index.js'
+import {
+  lockOwnedAgentForRekeyDelegation,
+  lockOwnedAgentForRekeyOpening,
+} from './agents.js'
 
 export interface AgentRekeyRow {
   id: string
@@ -167,6 +171,7 @@ export const INSERT_REKEY_DELEGATION_SQL = `INSERT INTO agent_delegations (
 export async function insertRekeyDelegation(
   row: {
     agentId: string
+    userId: string
     chainId: number
     tokenAddress: string
     recipientAddress: string | null
@@ -181,22 +186,30 @@ export async function insertRekeyDelegation(
     carryRole: string
   },
   db: Executor = pool,
-): Promise<void> {
-  await db.query(INSERT_REKEY_DELEGATION_SQL, [
-    row.agentId,
-    row.chainId,
-    row.tokenAddress,
-    row.recipientAddress ? row.recipientAddress.toLowerCase() : null,
-    row.delegationHash,
-    row.delegationJson,
-    row.version,
-    row.budgetAtomic,
-    row.periodSeconds,
-    row.startDate,
-    row.expiresAt,
-    row.rekeyId,
-    row.carryRole,
-  ])
+): Promise<boolean> {
+  return withTransaction(db, async (tx) => {
+    // Safe unlink locks this same agent row before orphaning it. Holding the
+    // lock through the insert makes the race deterministic: either the
+    // pending replacement exists and unlink refuses, or the unlinked agent
+    // fails the delegation-rail eligibility check and no row is created.
+    if (!(await lockOwnedAgentForRekeyDelegation(row.agentId, row.userId, tx))) return false
+    await tx.query(INSERT_REKEY_DELEGATION_SQL, [
+      row.agentId,
+      row.chainId,
+      row.tokenAddress,
+      row.recipientAddress ? row.recipientAddress.toLowerCase() : null,
+      row.delegationHash,
+      row.delegationJson,
+      row.version,
+      row.budgetAtomic,
+      row.periodSeconds,
+      row.startDate,
+      row.expiresAt,
+      row.rekeyId,
+      row.carryRole,
+    ])
+    return true
+  })
 }
 
 export const LIST_PENDING_REKEY_DELEGATIONS_SQL = `SELECT id, delegation_hash, delegation_json FROM agent_delegations
@@ -216,14 +229,16 @@ export async function listPendingRekeyDelegations(
 
 export const ACTIVATE_REKEY_DELEGATION_SQL = `UPDATE agent_delegations
           SET status = 'active', delegation_json = $1, updated_at = NOW()
-        WHERE id = $2`
+        WHERE id = $2 AND status = 'pending'
+        RETURNING id`
 
 export async function activateRekeyDelegation(
   delegationId: string,
   signedDelegationJson: string,
   db: Executor = pool,
-): Promise<void> {
-  await db.query(ACTIVATE_REKEY_DELEGATION_SQL, [signedDelegationJson, delegationId])
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(ACTIVATE_REKEY_DELEGATION_SQL, [signedDelegationJson, delegationId])
+  return result.rows.length === 1
 }
 
 export const INSERT_REKEY_SQL = `INSERT INTO agent_rekeys
@@ -232,10 +247,18 @@ export const INSERT_REKEY_SQL = `INSERT INTO agent_rekeys
    VALUES ($1, $2, LOWER($3), LOWER($4), $5, LOWER($6), $7)
    RETURNING *`
 
+export class RekeyOpenConflictError extends Error {
+  constructor() {
+    super('The agent is no longer eligible to open a re-key')
+    this.name = 'RekeyOpenConflictError'
+  }
+}
+
 /**
- * Open a re-key. The partial unique index on the in-flight stages is what
- * makes "at most one re-key per agent" true rather than merely checked — a
- * second concurrent open raises a unique violation instead of racing.
+ * Open a re-key. The agent-row lock serializes this insert with new-grant
+ * admission, while the partial unique index makes "at most one re-key per
+ * agent" true rather than merely checked — a second concurrent open still
+ * raises a unique violation instead of racing.
  */
 export async function openRekey(
   input: {
@@ -249,16 +272,21 @@ export async function openRekey(
   },
   db: Executor = pool,
 ): Promise<AgentRekeyRow> {
-  const result = await db.query<AgentRekeyRow>(INSERT_REKEY_SQL, [
-    input.agentId,
-    input.userId,
-    input.oldDelegateAddress,
-    input.newDelegateAddress,
-    input.residualAtomic,
-    input.residualTokenAddress,
-    input.residualDisposition,
-  ])
-  return result.rows[0]
+  return withTransaction(db, async (tx) => {
+    if (!(await lockOwnedAgentForRekeyOpening(input.agentId, input.userId, tx))) {
+      throw new RekeyOpenConflictError()
+    }
+    const result = await tx.query<AgentRekeyRow>(INSERT_REKEY_SQL, [
+      input.agentId,
+      input.userId,
+      input.oldDelegateAddress,
+      input.newDelegateAddress,
+      input.residualAtomic,
+      input.residualTokenAddress,
+      input.residualDisposition,
+    ])
+    return result.rows[0]
+  })
 }
 
 export const FIND_REKEY_SQL = `SELECT * FROM agent_rekeys WHERE id = $1 AND agent_id = $2`
@@ -597,13 +625,19 @@ export async function completeRekey(
   db: Executor = pool,
 ): Promise<{ superseded: string[]; invalidatedIntents: string[] }> {
   return withTransaction(db, async (tx) => {
+    if (!(await lockOwnedAgentForRekeyDelegation(input.agentId, input.userId, tx))) {
+      throw new Error('re-key agent is no longer linked to a delegation account')
+    }
+
     // Retire any grant still ACTIVE in a slot this re-key is about to fill,
     // excluding this re-key's OWN rows — a carry and its steady partner share
     // a slot by construction and must not retire each other (#1698 review).
     const superseded = await replaceSupersededSiblings(input.agentId, input.rekeyId, tx)
 
     for (const row of input.signedDelegations) {
-      await activateRekeyDelegation(row.id, row.delegationJson, tx)
+      if (!(await activateRekeyDelegation(row.id, row.delegationJson, tx))) {
+        throw new Error('replacement delegation is no longer pending')
+      }
     }
 
     // Both halves of the credential set retire together (#1694): the delegate

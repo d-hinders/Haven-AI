@@ -90,9 +90,9 @@ describe('unsupportedNodeVersionMessage', () => {
     const message = unsupportedNodeVersionMessage({
       subject: 'Haven setup',
       nodeVersion: '20.0.0',
-      retryHint: 'Then re-run the connect command from Haven.',
+      retryHint: 'Then re-run the connector command from Haven.',
     })
-    expect(message.trimEnd().endsWith('Then re-run the connect command from Haven.')).toBe(true)
+    expect(message.trimEnd().endsWith('Then re-run the connector command from Haven.')).toBe(true)
   })
 })
 

@@ -27,7 +27,10 @@
 // ## The two sets, and why both must be explicit
 //
 // Every `packages/**/*.md` must appear in exactly one of `GOVERNED_PACKAGE_DOCS`
-// or `EXEMPT_PACKAGE_DOCS`. A file in neither is a HARD ERROR naming the file —
+// or `EXEMPT_PACKAGE_DOCS` — except a path under `GENERATED_MARKDOWN_PREFIXES`
+// (#2532), which is excluded from the enumeration before this check runs
+// because a generated file has no decision for anyone to make.
+// A file in neither is a HARD ERROR naming the file —
 // that is the whole point. Making the enforced set bigger was never the fix;
 // making the BOUNDARY visible is, so that a new package README cannot land
 // silently outside both sets the way these thirteen did.
@@ -94,6 +97,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**'],
+    // #2515: EDITED, scope = the one connector command example. `@alpha` became
+    // `<channel>`, with the sentence beside it still naming `@alpha` as what
+    // production hands out. Same reason as the connect README: this file ships in
+    // every channel's tarball. Nothing else re-verified. Prior:
     // #2330: re-verified and EDITED (every merchant-header mention). This was
     // the most out-of-date surface found: six spots named X-PAYMENT alone,
     // including two "agent: retry merchant with X-PAYMENT" lines in the
@@ -104,8 +111,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #2243: first real verification pass since #2088 seeded this date. Every
     // claim in the body re-read against `packages/signer/src/**` and rewritten
     // where it had drifted: the tool table (two tools -> the four in
-    // `SignerToolName`), `haven_x402_authorize` (a deprecated alias for
-    // `haven_pay_x402_quote`, `mcp-server/src/tools.ts:81`), the
+    // `SignerToolName`), the hosted tool name the README used for the x402
+    // quote (at the time a never-registered alias for `haven_pay_x402_quote`
+    // in `mcp-server/src/tools.ts`; #2394 has since deleted the alias, so
+    // only the real name exists — #2395), the
     // `{ payment_id }`-only preferred call (#1263/#1355), the retired
     // `funds Safe -> delegate EOA` leg (#1440/#1986), the entirely absent
     // erc7710 scheme and its local caveat verification (#1455/#1476/#2041),
@@ -137,28 +146,145 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Nothing flagged this file: the coupling gate did not list it, because
     // the commit that broke it did not touch packages/signer/src. Found by
     // sweeping, not by tooling. Rest of the README NOT re-verified.
-    'last-verified': '2026-09-01',
+    // #2423: EDITED, two spots. The install block's `npx @haven_ai/connect@alpha`
+    // and the Custody paragraph's second copy of it both stated one channel as
+    // THE answer. Since #2423 every "rerun the connector" hint this package
+    // prints renders from `HAVEN_CONNECTOR_CHANNEL` (the channel the build was
+    // published under), so a snapshot build's README saying `@alpha` would
+    // contradict the package's own output. The install block keeps `@alpha` —
+    // it IS the production channel and this README is read on npm — and now
+    // says to run the command your dashboard shows you and what the package's
+    // own hints do; the Custody sentence points at that block instead of
+    // repeating the tag. No custody, network or signing claim moved. Rest of
+    // the README NOT re-verified.
+    'last-verified': '2026-09-04',
   },
   {
     doc: 'packages/mcp/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
-    'last-verified': '2026-08-28',
+    // #2366 (part 1): EDITED — one new subsection under § Tools recording the
+    // `idempotencyKey` -> `idempotency_key` deprecation window. This is a
+    // published package's landing page and the argument is the replay contract
+    // on a payment, so the page has to say three things rather than one: the
+    // new spelling, that the old one still works and warns, and that sending
+    // both with DIFFERENT values is refused with nothing spent. The refusal is
+    // the part worth the space — Haven will not guess which replay scope a
+    // caller meant, because a wrong guess is a second spend. Written against
+    // `packages/mcp/src/tools.ts` on this branch. Scope: that subsection. NOT
+    // re-verified: the credential-file section, the Claude Desktop wiring, the
+    // consent flow, the audit log, the manual sanity test, or the
+    // non-custodial invariant.
+    'last-verified': '2026-09-06',
   },
   {
     doc: 'packages/connect/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
-    'last-verified': '2026-08-28',
+    // #2515: EDITED, scope = the command examples only. Every
+    // `npx @haven_ai/connect@alpha` became `@haven_ai/connect@<channel>`, and the
+    // paragraph under the first example now defines `<channel>` as a placeholder
+    // like the `hv_setup_...` token beside it. This file is in the package's
+    // `files` array, so it is the npm landing page for EVERY channel's tarball —
+    // a `@dev` snapshot was telling its tester to install production. Behaviour,
+    // the doctor/repair text and the override section unchanged. Prior:
+    // #2425: EDITED, scope = one closing paragraph appended to the #2424 section,
+    // linking the repository runbook docs/operations/package-dev-channel.md (the
+    // merged-to-dev `@dev` loop and its owner steps) as the counterpart to the
+    // no-merge override loop. Absolute GitHub URL because this file ships to
+    // npm, where a relative repo path resolves to nothing. Nothing else
+    // re-verified. Prior:
+    // #2424: EDITED, scope = two places. (a) A new closing section, "Installing
+    // an unpublished signer / SDK / MCP build", written against the
+    // runtime-spec override this branch adds (the three variables, the
+    // hash-keyed directory, the loud setup line, the sidecar/wrapper records,
+    // the `runtime_spec_override` doctor finding, the malformed-value refusal,
+    // and the no-override byte-for-byte guarantee); (b) one parenthetical in
+    // the `--doctor` paragraph pointing at it. Nothing else re-verified.
+    // Prior: #2423: re-verified and EDITED (the `--rekey` phase-two instruction only).
+    // The page showed `npx @haven_ai/connect@alpha --rekey-finish` as the line
+    // to run, which is right for a production install and wrong for any other
+    // channel; since #2423 the connector derives that command from the npm
+    // dist-tag it was published under, so phase one prints the correct one and
+    // the page now says to prefer what the tool printed. The `--doctor` and
+    // `--setup` examples were left alone deliberately: they are entry points
+    // with no prior phase to quote, so they rely on the general caveat already
+    // stated once at the top of the file. Nothing else re-verified. Prior:
+    // '2026-09-01' carried no provenance note.
+    'last-verified': '2026-09-04',
   },
   {
     doc: 'packages/cli/README.md',
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/cli/src/**'],
-    'last-verified': '2026-06-26',
+    // #2525: re-verified and EDITED — a new § *For agents and scripts* records
+    // the `--json` contract (one JSON value on stdout, prose on stderr, on every
+    // command including refusals), the six exit codes with what a caller should
+    // do about each, why a 401 resolves to 3 rather than 4, and `haven guide`.
+    // Install, Config and Custody were re-read against the code and are
+    // unchanged. Usage was EDITED — two lines: `haven guide`, and a trailing
+    // comment on `haven whoami` naming what it now returns. (The first draft of
+    // this note said Usage was "re-read and unchanged", which was false of the
+    // one section it had edited — haven-doc-reviewer @ 514a2cc5.) The opening
+    // "companion to the dashboard" framing is #2536's to rewrite, not this
+    // issue's. Scope: those sections and this date.
+    // #2590: re-verified, NOT edited — and the re-verification IS the finding.
+    // This README already documents both things `--help` got wrong: `agents
+    // connect` with its four flags and `--run` (§ *`haven agents connect`*),
+    // and the browser-approved default login (§ *Signing in without a password
+    // (#2526)*, which states plainly that `haven login` starts a browser flow
+    // by default and never asks for a password). So #2526 and #2527 each
+    // updated this file and neither updated `helpText()` in
+    // `packages/cli/src/args.ts` — one surface of the same package, in the same
+    // PRs, silently left behind, and an agent found it before we did (#2538's
+    // cold run). Nothing here needed changing; the guard added under #2590 pins
+    // `helpText()` against `COMMANDS` so the two cannot diverge again. Scope:
+    // the login and `agents connect` sections, re-read against `commands.ts` on
+    // this branch. NOT re-verified: Install, Config, Custody, the `--json`
+    // contract, the exit-code table, or the SIE export section. Prior:
+    // '2026-09-04' — see the #2525 note above.
+    // #2536: EDITED — the opening framing and the section order. It said "a
+    // terminal-native, scriptable companion to the Haven dashboard — used
+    // alongside the web app, not instead of it", which stopped being true when
+    // C1/#2526 and C2/#2527 landed: an agent drives the setup end to end up to
+    // the steps needing a human signature. Restructured agent-first (a new
+    // § *Setting Haven up as an agent*; § *Usage* retitled as the full command
+    // surface), with the `--json` contract and exit codes POINTED AT rather
+    // than restated — § *For agents and scripts* owns them and a second copy is
+    // what drifts. Two corrections while there: the usage block showed
+    // `haven login --email` as the only form (bare `login` has been the device
+    // flow since #2526 — the same defect #2590 fixed in `--help`), and the
+    // `--api` note now says the default is Haven's hosted PRODUCTION backend,
+    // so an omitted flag connects somewhere real and wrong rather than failing.
+    // The npx path is recorded as measured, not asserted (clean directory,
+    // 2026-09-06): @alpha and the bare form both 0.1.34-alpha.0, @dev the
+    // snapshot — the bare form matching is the owner's `latest` decision
+    // working end to end. The byte-pinned agent-facing section (#2533) is
+    // untouched. Scope: the opening, § Install's npx paragraph, the new section
+    // and § Usage's title and auth block. NOT re-verified: § For agents and
+    // scripts' contract, the exit-code table, the SIE export section, Config or
+    // Custody.
+    //
+    // Follow-up in the same PR, on a haven-doc-reviewer finding: the CLI's own
+    // `--help` banner (`args.ts:117`) STILL said "terminal-native companion to
+    // the Haven dashboard" — the exact framing this entry calls retired. So the
+    // README was corrected and the line a user or agent actually sees first was
+    // left behind, which is the #2590 defect class reopening in the same file
+    // two edits later. Rewritten, and `commands.test.ts` now asserts the
+    // retired phrase is ABSENT as well as asserting the new one, so it cannot
+    // return quietly. `args.ts` is inside this doc's own `covers:` glob, which
+    // is how the gate reached it.
+    //
+    // Named rather than hidden: the `--api` default now has FOUR prose homes —
+    // `helpText()` (#2590), the SDK runbook (#2591), this README's new section,
+    // and § Config. All four agree today; a change to the real default would
+    // need all four. That is the shape #2590/#2591 exist to prevent, and it is
+    // recorded here rather than claimed solved. Prior: '2026-09-06' — see the
+    // #2590 note above.
+    'last-verified': '2026-09-06',
   },
   {
     doc: 'packages/mcp-server/README.md',
@@ -190,7 +316,29 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/demo-merchant-mcp/src/**'],
-    'last-verified': '2026-08-11',
+    // #2403: the § "Extensions echo" fixture paragraph re-verified and EDITED.
+    // It enumerated the echo-rule tests as a fixed list of four; #2401 made it
+    // five and #2403 adds more, so the sentence now names the BRANCHES pinned
+    // and points at the two describe blocks instead of carrying a count that
+    // goes stale on the next added test. The three refusal strings and the
+    // 402 shape the section quotes are now pinned by tests at the HTTP
+    // boundary (src/http.test.ts), so the section's claims are test-backed
+    // rather than capture-backed. Scope: that paragraph only; the rest of the
+    // section was re-read against assertExtensionsEchoed and is accurate.
+    // Same-day as #2383, so the date below does not move.
+    // #2383: re-verified and EDITED (new § "Extensions echo" plus one bullet
+    // under "What It Demonstrates"). #2361/#2364 made the merchant advertise a
+    // `haven-demo` extensions object in every 402 and refuse any payment that
+    // fails the x402 v2 echo rule (version cross-check first, then subset
+    // containment: append allowed, delete/overwrite refused) — and this README
+    // said nothing about it, so a fixture author learned the rule from the
+    // refusal. The section is written from `assertExtensionsEchoed` and
+    // `DEMO_MERCHANT_EXTENSIONS` in src/x402.ts, and the three refusal strings
+    // it quotes were captured from the running merchant, not transcribed from
+    // the issue. Nothing else in the README re-verified in this pass (the
+    // Products table, hosted URLs and Run sections were read only far enough
+    // to place the section).
+    'last-verified': '2026-09-02',
   },
 ]
 
@@ -213,9 +361,16 @@ export const EXEMPT_PACKAGE_DOCS = {
     'Explains why one CI job exists. It names its own test file and workflow inline; the ' +
     'thing that catches its drift is the job going red, not a doc gate.',
   'packages/frontend/public/402.md':
-    'Agent-readable public artifact, served verbatim at haven.xyz/402.md (GTM Agent Discovery ' +
+    'Agent-readable public artifact, served verbatim at /402.md on whatever host it is '+
+    'deployed to (GTM Agent Discovery ' +
     'track). It mirrors packages/frontend/public/402/index.html, which carries the sync note; ' +
     'its audience is a model mid-task, so front-matter would be noise it pays tokens for.',
+  'packages/frontend/public/for-agents.md':
+    'Agent-readable public artifact, served verbatim at /for-agents.md (#2523, epic #2519). It is '+
+    'NOT hand-maintained: the canonical string is `HAVEN_AGENT_RUNBOOK_MD` in '+
+    '`packages/sdk/src/agent-guidance.ts`, and a byte-equality test pins this file to it, so the '+
+    'thing that catches drift is that test rather than a doc gate. Its audience is a model '+
+    'mid-task, so front-matter would be tokens it pays for and cannot use.',
   'packages/frontend/src/lib/loop-harness/README.md':
     'Rationale note for a differential-testing harness. The harness IS its own proof — if the ' +
     'invariant it describes stops holding, the harness fails, not the prose.',
@@ -250,12 +405,38 @@ export function boundaryScopeNotes() {
   ]
 }
 
+/**
+ * Build output that happens to be Markdown, excluded from the boundary (#2532).
+ *
+ * The boundary asks a person to decide which side of the docs-quality system a
+ * file sits on. A GENERATED file has no such decision to make: it is not in
+ * git, it does not exist in a fresh checkout, and its SOURCE is already
+ * governed — so registering it would mean naming files that a clean tree does
+ * not contain, which the exemption map itself refuses (it errors on a path
+ * that does not exist).
+ *
+ * Only add a prefix here when the output is both generated on every build AND
+ * gitignored. Anything a human can edit belongs in the boundary.
+ */
+export const GENERATED_MARKDOWN_PREFIXES = [
+  // Product docs served to agents; regenerated by
+  // packages/frontend/scripts/serve-docs.mjs, from next.config.ts (#2532).
+  'packages/frontend/public/docs/',
+]
+
 /** Every `packages/**` Markdown path in a walked file list, sorted. */
 export function enumeratePackageDocs(allFiles) {
   // De-duplicated: a caller may hand in a list built from several sources, and
   // reporting the same file twice turns one decision into two error lines.
   return [
-    ...new Set(allFiles.filter((p) => p.startsWith('packages/') && p.endsWith('.md'))),
+    ...new Set(
+      allFiles.filter(
+        (p) =>
+          p.startsWith('packages/') &&
+          p.endsWith('.md') &&
+          !GENERATED_MARKDOWN_PREFIXES.some((prefix) => p.startsWith(prefix)),
+      ),
+    ),
   ].sort()
 }
 

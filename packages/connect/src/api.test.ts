@@ -73,6 +73,49 @@ describe('createConnectApiClient', () => {
     expect(String(calls[0].init.body)).toContain('activation_command_available')
   })
 
+  it('says nothing about superseded agents when it has nothing to say (#2561)', async () => {
+    // Four states, not three. A list, `[]` and `null` are all CLAIMS the report
+    // makes; ABSENT means "this report says nothing", which the backend's jsonb
+    // merge honours by leaving the key alone.
+    //
+    // The client collapsed `undefined` into `null`, so the early
+    // config-written ping — sent before the scan has even started — asserted
+    // "the scan could not run" on every connect run. Inert while the complete
+    // report overwrote it seconds later, and a landmine for the first caller
+    // that relied on absence meaning unchanged.
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }) as unknown as typeof fetch
+    const api = createConnectApiClient('https://api.haven.example/', fetchImpl)
+
+    const base = {
+      connectorVersion: '0.1.0',
+      hostedMcpConfigured: false,
+      localSignerConfigured: true,
+      restartRequired: false,
+      nextUserAction: 'return_to_haven_for_wallet_approval',
+    }
+
+    // Omitted → the key is absent from the wire entirely.
+    await api.updateInstallStatus('setup-1', 'sk_agent_secret', base)
+    expect(JSON.parse(String(calls[0].init.body))).not.toHaveProperty('superseded_agent_ids')
+
+    // Each of the three real states travels as itself.
+    await api.updateInstallStatus('setup-1', 'sk_agent_secret', { ...base, supersededAgentIds: null })
+    expect(JSON.parse(String(calls[1].init.body)).superseded_agent_ids).toBeNull()
+
+    await api.updateInstallStatus('setup-1', 'sk_agent_secret', { ...base, supersededAgentIds: [] })
+    expect(JSON.parse(String(calls[2].init.body)).superseded_agent_ids).toEqual([])
+
+    await api.updateInstallStatus('setup-1', 'sk_agent_secret', {
+      ...base,
+      supersededAgentIds: ['agt_old'],
+    })
+    expect(JSON.parse(String(calls[3].init.body)).superseded_agent_ids).toEqual(['agt_old'])
+  })
+
   it('#1878 serializes mcpServerName onto the wire as snake_case mcp_server_name', async () => {
     // The one seam the runtime tests cannot see: they assert what is handed to
     // a MOCKED api.registerSetup, which is the camelCase side. This asserts the

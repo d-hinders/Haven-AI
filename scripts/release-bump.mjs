@@ -18,6 +18,22 @@
  *   prerelease   0.1.9 → 0.1.10-alpha.0  |  0.1.9-alpha.0 → 0.1.9-alpha.1
  *   <version>    any explicit semver, e.g. 0.2.0-beta.1
  *
+ * Flags:
+ *   --yes        skip the interactive confirmation
+ *   --snapshot   CI ONLY (#2421). Marks this as a dev-channel snapshot run:
+ *                the version MUST be 0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>, and
+ *                the sign-off describes a throwaway tree instead of a release
+ *                branch. The check is bidirectional — WITHOUT this flag the
+ *                script refuses a 0.0.0-dev.* version outright, which is what
+ *                keeps a snapshot from being committed to a release branch,
+ *                riding the dev → main promotion and landing on alpha/latest.
+ *                Everything that makes the bump atomic — the five package
+ *                versions, the cross-package pins, the source constants,
+ *                connect's runtime-manifest, the ordered rebuild and the
+ *                bundle verification — runs identically in both modes. That
+ *                is the entire reason the snapshot job reuses this script
+ *                rather than setting five versions by hand.
+ *
  * See scripts/README.md for full documentation.
  */
 
@@ -28,10 +44,19 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { bumpLockfileText, lockfileDiffViolations } from './release-lockfile.mjs'
 import {
+  CONNECTOR_CHANNEL_CONSTANT,
+  CONNECTOR_CHANNEL_FILE,
+  channelForVersion,
+  readConnectorChannel,
+  rewriteConnectorChannel,
+} from './release-channel.mjs'
+import {
   MANIFEST_ROWS,
   manifestTableViolations,
   rewriteManifestTable,
 } from './release-manifest-doc.mjs'
+import { snapshotModeViolation } from './release-snapshot-version.mjs'
+import { backwardsVersionViolation, resolveSemver } from './release-version-order.mjs'
 
 const execAsync = promisify(execFile)
 
@@ -88,6 +113,14 @@ const RUNTIME_MANIFEST = join(ROOT, 'packages', 'connect', 'src', 'runtime-manif
 // owns both the write and the independent check.
 const MANIFEST_DOC = join(ROOT, 'docs', 'operations', 'mcp-runtime-compatibility.md')
 
+// The build-time connector channel (#2423). Not in SOURCE_VERSION_CONSTANTS
+// because it does not carry the version — it carries the npm dist-tag DERIVED
+// from the version, by the same rule `.github/workflows/publish.yml` uses to
+// pick `npm publish --tag`. Owned here for the same reason the version
+// constants are: it drifts on every release that changes channel, and a bump
+// is only atomic if the script writes it.
+const CONNECTOR_CHANNEL_TS = join(ROOT, ...CONNECTOR_CHANNEL_FILE.split('/'))
+
 // Source-level version constants that must stay in lockstep with the release.
 // Each is an `export const NAME = '...'` literal. They are self-reported
 // versions (MCP/server handshake `version` field, connector `--version`),
@@ -102,13 +135,21 @@ const SOURCE_VERSION_CONSTANTS = [
 
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
-/** Resolve the semver package from the workspace root node_modules. */
+/**
+ * Resolve the semver package from the workspace root node_modules.
+ *
+ * Delegates to `release-version-order.mjs` so a test can execute the same
+ * resolution and assert IDENTITY against a separately imported semver. It used
+ * to inline the import, which left only a source-text scan to prove production
+ * gets the real comparator — and `haven-reviewer` defeated two such scans in a
+ * row with fabricated comparators (#2580).
+ */
 async function getSemver() {
-  const semverPath = join(ROOT, 'node_modules', 'semver', 'index.js')
-  return (await import(semverPath)).default
+  return resolveSemver(ROOT)
 }
 
 const VALID_BUMP_TYPES = new Set(['patch', 'minor', 'major', 'prerelease'])
+
 
 /**
  * Compute the next version given the current version and a bump type.
@@ -194,6 +235,43 @@ async function verifySourceVersionConstants(newVersion) {
     }
     log(`  ✓ ${entry.name} = '${newVersion}' in ${entry.label}`)
   }
+}
+
+/**
+ * Write the connector channel derived from `newVersion` into the SDK constant.
+ */
+async function updateConnectorChannel(newVersion) {
+  const channel = channelForVersion(newVersion)
+  const source = await readFile(CONNECTOR_CHANNEL_TS, 'utf8')
+  const updated = rewriteConnectorChannel(source, channel)
+  if (updated === null) {
+    die(
+      `Could not find ${CONNECTOR_CHANNEL_CONSTANT} in ${CONNECTOR_CHANNEL_FILE}. ` +
+      `Pattern: export const ${CONNECTOR_CHANNEL_CONSTANT} = '...'`,
+    )
+  }
+  await writeFile(CONNECTOR_CHANNEL_TS, updated, 'utf8')
+  log(`  ${CONNECTOR_CHANNEL_CONSTANT} → '${channel}' in ${CONNECTOR_CHANNEL_FILE}`)
+}
+
+/**
+ * Verify the channel constant on DISK matches the channel this version
+ * publishes under.
+ *
+ * Re-derives from the version and re-reads the file rather than trusting what
+ * `updateConnectorChannel` returned, so deleting that function leaves this one
+ * failing rather than silently passing.
+ */
+async function verifyConnectorChannel(newVersion) {
+  const expected = channelForVersion(newVersion)
+  const actual = readConnectorChannel(await readFile(CONNECTOR_CHANNEL_TS, 'utf8'))
+  if (actual !== expected) {
+    die(
+      `Verification failed: ${CONNECTOR_CHANNEL_CONSTANT} in ${CONNECTOR_CHANNEL_FILE} is ` +
+      `'${actual ?? '<not found>'}' but ${newVersion} publishes under '${expected}'.`,
+    )
+  }
+  log(`  ✓ ${CONNECTOR_CHANNEL_CONSTANT} = '${expected}' in ${CONNECTOR_CHANNEL_FILE}`)
 }
 
 /**
@@ -467,8 +545,9 @@ async function main() {
   const bumpArg = process.argv[2]
   if (!bumpArg) {
     die(
-      'Usage: node scripts/release-bump.mjs <bump-type>\n' +
-      'Bump types: patch | minor | major | prerelease | <explicit-version>',
+      'Usage: node scripts/release-bump.mjs <bump-type> [--yes] [--snapshot]\n' +
+      'Bump types: patch | minor | major | prerelease | <explicit-version>\n' +
+      '--snapshot is CI-only and requires a 0.0.0-dev.<YYYYMMDDHHMM>.<shortsha> version.',
     )
   }
 
@@ -481,6 +560,21 @@ async function main() {
   const newVersion = await nextVersion(currentVersion, bumpArg)
   log(`  New version:         ${newVersion}  (${bumpArg})`)
 
+  // ── 1b. Snapshot-mode agreement (#2421) ───────────────────────────────────
+  // Runs BEFORE anything is written, so a mismatch leaves the tree untouched.
+  // Both directions are load-bearing; see release-snapshot-version.mjs.
+  const snapshot = process.argv.includes('--snapshot')
+  const modeViolation = snapshotModeViolation(newVersion, { snapshot })
+  if (modeViolation) die(modeViolation)
+
+  // #2580: forward-only, checked here because `snapshot` is not known until
+  // now and a snapshot is exempt. Still before anything is written.
+  const backwards = backwardsVersionViolation(currentVersion, newVersion, { snapshot }, await getSemver())
+  if (backwards) die(backwards)
+  if (snapshot) {
+    log('  Mode:                dev-channel SNAPSHOT (throwaway tree, nothing to commit)')
+  }
+
   // ── 2. Preview + confirm ──────────────────────────────────────────────────
   header('Changes to be applied')
   log(`  All published packages (${PUBLISHED_PACKAGES.join(', ')}): ${currentVersion} → ${newVersion}`)
@@ -489,6 +583,7 @@ async function main() {
   log(`  sdkVersion + signerVersion = '${newVersion}'  (packages/connect/src/runtime-manifest.ts)`)
   log(`  ${SOURCE_VERSION_CONSTANTS.map((c) => c.name).join(', ')} = '${newVersion}'`)
   log(`  Supported Runtime Manifest table = '${newVersion}'  (docs/operations/mcp-runtime-compatibility.md)`)
+  log(`  ${CONNECTOR_CHANNEL_CONSTANT} = '${channelForVersion(newVersion)}'  (${CONNECTOR_CHANNEL_FILE})`)
   // These two are CHECKS THIS RUN WILL PERFORM, not results — the guards run
   // after the pins are rewritten, further down. Saying "(verified)" here
   // printed a reassuring line immediately before the run died on that very
@@ -559,6 +654,7 @@ async function main() {
   header('Updating source-code version constants')
   await updateMcpVersionConstant(newVersion)
   await updateRuntimeManifest(newVersion)
+  await updateConnectorChannel(newVersion)
   for (const entry of SOURCE_VERSION_CONSTANTS) {
     await updateSourceVersionConstant(entry, newVersion)
   }
@@ -626,6 +722,7 @@ async function main() {
   header('Verifying connect bundle')
   await verifyConnectBundle(newVersion)
   await verifySourceVersionConstants(newVersion)
+  await verifyConnectorChannel(newVersion)
   // Takes no version argument, and that is deliberate (#1790): it compares the
   // contract doc's table against the source constants on disk, so it cannot be
   // satisfied by the write this run performed.
@@ -642,6 +739,28 @@ async function main() {
 
   // ── Done ──────────────────────────────────────────────────────────────────
   header('Done')
+
+  // A snapshot run is not a release and must not print a release's checklist
+  // (#2421). Everything in the block below — the contract doc, the CASP shard,
+  // the coupling gate, the release branch — describes work on a COMMITTED
+  // tree, and there is no commit here: the CI tree is discarded when the job
+  // ends. Printing it would be an instruction nobody can follow, in the logs
+  // of a job that already did the only thing it was asked to do.
+  if (snapshot) {
+    log(`\n  Built snapshot: ${newVersion}`)
+    log('')
+    log('  This tree is THROWAWAY. Nothing here is committed, and nothing here')
+    log('  should be: the version, the pins, the source constants and the contract-doc')
+    log('  table were all rewritten in place so the artifacts are internally consistent.')
+    log('')
+    log('  The workflow publishes the built artifacts under the `dev` dist-tag and then')
+    log('  discards the checkout. The prod channel is unaffected — a snapshot version can')
+    log('  reach neither `alpha` nor `latest`, and this script refuses to produce one at')
+    log('  all without --snapshot.')
+    log('')
+    return
+  }
+
   log(`\n  Released: ${newVersion}`)
   log('')
   // #1788: this block used to end with `npm publish` invocations — the one

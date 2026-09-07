@@ -9,11 +9,10 @@ import {
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
   ScenarioHttpError,
+  ScenarioHttpDelay,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 
-/** The account the harness makes active by default (`screenshot.mjs:1785`). */
-const DEFAULT_ACTIVE_SAFE_ID = 'safe-fixture'
 import {
   isMcpToolCallActivityItem,
   isPaymentActivityItem,
@@ -32,13 +31,10 @@ type ScenarioShape = {
 /**
  * Look a scenario up and assert it actually has an `api` hook.
  *
- * The harness treats `api` as OPTIONAL — `scenario?.api?.(api, req.method())`
- * (`screenshot.mjs:1917`) — and since #2202 one scenario genuinely has none:
- * `agents-legacy-rail` changes which ACCOUNT is active (`seed`) rather than
- * what the API answers. A blanket `SCENARIOS as Record<string, ScenarioShape>`
- * therefore states something false about the registry. This says what each
- * lookup actually needs, and fails by name if a scenario ever loses its hook
- * instead of throwing `undefined is not a function` several lines later.
+ * The harness treats `api` as optional — `scenario?.api?.(api, req.method())`
+ * — and some scenarios are seed-only or staged. A blanket registry cast would
+ * therefore state something false about the registry. This says what each
+ * lookup actually needs and fails by name if a scenario loses its hook.
  */
 const scenarioWithApi = (name: string): ScenarioShape => {
   const scenario = (SCENARIOS as Record<string, Partial<ScenarioShape>>)[name]
@@ -121,46 +117,14 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(pinned.delegations[0].status).toBe('active')
       expect(pinned.delegations[0].recipient_address).toMatch(/^0x/)
 
-      // The open-recipient budget sits on `agent-retired`, not `agent-ops`:
-      // `agent-ops` is `account_type: 'safe'` (the legacy Safe rail, #2202)
-      // and a legacy agent cannot hold a delegation at all. A fixture that
-      // gave it one would photograph a combination the product cannot produce.
+      // The open-recipient budget sits on `agent-retired`. #2413 removed the
+      // legacy `agent-ops` fixture entirely — the API cannot return a
+      // legacy-rail agent any more, so a fixture serving one would photograph
+      // a screen production cannot produce.
       const open = fx('/agents/agent-retired/delegations') as {
         delegations: { recipient_address: string | null }[]
       }
       expect(open.delegations[0].recipient_address).toBeNull()
-    })
-
-    it('seeds an ACTIVE account that exists, and the scenario switches to the legacy one (#2202)', () => {
-      // `haven-reviewer`'s finding, and it was right: `agents-legacy-rail` is
-      // the first scenario in the harness to use `seed`, and nothing checked
-      // the value. Mutating the seeded id to `FIXTURE_SAFE.id` — the wrong,
-      // DELEGATION-rail account — left the whole suite green. The scenario's
-      // own `run()` would have caught it, but no CI workflow executes the
-      // general screenshot harness, so it would merge and only surface when a
-      // human next took a capture: the "invisible until someone looks at the
-      // PNG" class this whole issue is about.
-      const safeIds = (FIXTURE_USER as unknown as { safes: { id: string }[] }).safes.map(
-        (s) => s.id,
-      )
-
-      // The harness's own default, seeded before any app code runs.
-      expect(safeIds).toContain(DEFAULT_ACTIVE_SAFE_ID)
-
-      const seeded = (
-        SCENARIOS as Record<string, { seed?: () => Record<string, string> }>
-      )['agents-legacy-rail'].seed!()
-      const activeId = seeded[ACTIVE_SAFE_STORAGE_KEY]
-
-      // It must name a REAL account…
-      expect(safeIds).toContain(activeId)
-      // …and specifically the LEGACY one, or the scenario photographs the
-      // delegation rendering under a name that promises the legacy rail.
-      const active = (
-        FIXTURE_USER as unknown as { safes: { id: string; account_type: string }[] }
-      ).safes.find((s) => s.id === activeId)
-      expect(active!.account_type).toBe('safe')
-      expect(activeId).not.toBe(DEFAULT_ACTIVE_SAFE_ID)
     })
 
     it('gives the user exactly ONE default account (#2202)', () => {
@@ -170,22 +134,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // single default — `CLEAR_DEFAULT_SAFES_FOR_USER_SQL` runs before
       // `SET_SAFE_DEFAULT_SQL` (`infra/repositories/user-safes.ts:160-163`) —
       // so a second `is_default: true` is a state no write path leaves behind.
-      const safes = (FIXTURE_USER as unknown as { safes: { is_default: boolean }[] }).safes
-      expect(safes.length).toBeGreaterThan(1) // non-vacuity: one safe cannot disagree
+      // #2413 removed the second (legacy) account, so the non-vacuity guard
+      // this had — "one safe cannot disagree" — is gone with it. What remains
+      // falsifiable is that the fixture never seeds a second default, which is
+      // what `CLEAR_DEFAULT_SAFES_FOR_USER_SQL` guarantees in production.
+      const safes = (FIXTURE_USER as unknown as { safes: { is_default: boolean; account_type: string }[] }).safes
       expect(safes.filter((s) => s.is_default)).toHaveLength(1)
-    })
-
-    it('never gives a legacy-rail agent a delegation', () => {
-      const legacy = FIXTURE_AGENTS.find((a) => a.id === 'agent-ops')
-      // #2202: `'safe'`, not `null`. `user_safes.account_type` is
-      // `NOT NULL DEFAULT 'safe'` under
-      // `CHECK (account_type IN ('safe','delegator_hybrid'))`
-      // (`041_hybrid_accounts.ts:29`, `:38`), so the legacy rail IS `'safe'` —
-      // `null` was a value the column could never hold, and it only looked
-      // right because `railOf` reads anything-but-`delegator_hybrid` as legacy
-      // (`lib/custody-rail.ts:37-38`).
-      expect(legacy?.account_type).toBe('safe')
-      expect(fx('/agents/agent-ops/delegations')).toEqual({ delegations: [] })
+      expect(safes.every((s) => s.account_type === 'delegator_hybrid')).toBe(true)
     })
 
     it('projects `allowances` from the delegation for every delegation-rail agent', () => {
@@ -466,8 +421,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // #2147 photographed the "Recoverable funds in agent wallet" banner's
       // unsettled-payment copy branch and reported, in the same PR, that the
       // capture did not prove what it looked like it proved: the banner is
-      // gated on `hasRecoverableUsdc` = `Boolean(balance && balance.usdc_atomic
-      // !== '0')` (`hooks/useDelegateBalance.ts:88`), and
+      // gated on `hasRecoverableUsdc`, which checks the configured sweep floor
+      // (`hooks/useDelegateBalance.ts:88-93`), and
       // `/agents/:id/delegate-balance` was UNKEYED — so it fell through to
       // `FIXTURE_EMPTY_FALLBACK`, which has no `usdc_atomic`, and `undefined
       // !== '0'` rendered the banner from a body with no balance in it.
@@ -496,45 +451,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('usdc_atomic')
       })
 
-      it('keys /safe/:address/details for every LEGACY-rail account it serves (#2202)', () => {
-        // The same fallback mechanism as the #2194 gap above, on the endpoint
-        // this issue's second account newly reaches. `SafeControlCard` reads
-        // its owners and threshold from here, and `/custody` renders that card
-        // for every non-`delegator_hybrid` account — so an unkeyed answer is
-        // not "no data", it is 200 with `owners`/`threshold` missing, which the
-        // card renders as **"Threshold: of 0"**: an owner-less Safe, which no
-        // deployed Safe can be.
-        //
-        // Keyed off the rail rather than off a hardcoded address, so a THIRD
-        // legacy account added later fails here instead of photographing the
-        // empty fallback the way this one did before it was caught.
-        const legacySafes = (
-          FIXTURE_USER as unknown as { safes: { safe_address: string; account_type: string }[] }
-        ).safes.filter((s) => s.account_type !== 'delegator_hybrid')
-        expect(legacySafes.length).toBeGreaterThan(0) // non-vacuity
-        for (const safe of legacySafes) {
-          const details = fixtureFor(`/safe/${safe.safe_address}/details`) as {
-            owners?: string[]
-            threshold?: number
-          } | null
-          expect([safe.safe_address, details]).not.toEqual([safe.safe_address, null])
-          expect(details!.owners!.length).toBeGreaterThan(0)
-          // A Safe cannot require more approvals than it has owners, and a
-          // zero threshold is the shape the fallback produced.
-          expect(details!.threshold).toBeGreaterThan(0)
-          expect(details!.threshold).toBeLessThanOrEqual(details!.owners!.length)
-        }
-        // WHY the gap was silent rather than loud, stated exactly — and it is
-        // worse than "the fields are missing", which is what this assertion
-        // first claimed before it was run. The fallback carries `owners: []`,
-        // a real array of the right type, so `owners.length` is 0 instead of
-        // throwing; and `threshold` is absent, so it renders as a blank. That
-        // is the combination that produced "Threshold: of 0" — a well-formed
-        // answer describing a Safe nobody controls.
-        expect(FIXTURE_EMPTY_FALLBACK).toHaveProperty('owners', [])
-        expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('threshold')
-      })
-
       it('answers 422 for exactly the agents the route would refuse', () => {
         // `routes/agents.ts:140-142` — `if (!agent.delegate_address) return
         // reply.code(422).send({ error: 'Agent has no delegate address' })`.
@@ -556,16 +472,23 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         }
       })
 
+      it('keeps the recovery loading capture pending instead of photographing the settled branch', () => {
+        const loading = scenarioWithApi('retired-rail-recovery-loading')
+        const response = loading.api('/agents/agent-research/delegate-balance', 'GET') as unknown
+        expect(response).toBeInstanceOf(ScenarioHttpDelay)
+        expect(response).toMatchObject({ delayMs: 2_000, body: undefined })
+      })
+
       it('serves the exact field set the route builds, and nothing else', () => {
-        // `routes/agents.ts:159-167` returns these eight keys; the named
-        // `DelegateBalance` schema (`openapi/spec.ts:6516-6528`) requires all
-        // eight. A missing one is how this bug worked — `usdc_atomic` absent
+        // `routes/agents.ts:159-172` returns these nine keys; the named
+        // `DelegateBalance` schema (`openapi/spec.ts:6516-6534`) requires all
+        // nine. A missing one is how this bug worked — `usdc_atomic` absent
         // reads as "not zero" — and an EXTRA one is a field the generated type
         // does not have, i.e. a shape the frontend could not have been written
         // against.
         const expected = [
           'chain_id', 'delegate_address', 'eth', 'eth_atomic',
-          'safe_address', 'usdc', 'usdc_address', 'usdc_atomic',
+          'safe_address', 'sweep_min_usdc', 'usdc', 'usdc_address', 'usdc_atomic',
         ]
         const served = agentIds()
           .map((id) => [id, balanceFor(id)] as const)
@@ -606,8 +529,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       })
 
       it('renders the AMOUNT-bearing sentence, not the degraded fallback', () => {
-        // `strandedSummary` (`AgentDetailClient.tsx:296-300`) needs
-        // `usdc_atomic !== '0'` AND a truthy `usdc`, or the banner degrades to
+        // `strandedSummary` (`AgentDetailClient.tsx:296-300`) needs a nonzero
+        // atomic amount AND a truthy `usdc`, or the banner degrades to
         // "Recover **it** to your Haven wallet" (#1098 made that deliberate:
         // "Recover undefined USDC" is worse). The real route always returns
         // both as strings, so the degraded branch is what a PARTIAL response
@@ -619,7 +542,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         for (const row of rows) {
           expect([row.id, typeof row.agent_id]).toEqual([row.id, 'string'])
           const body = balanceFor(row.agent_id as string) as { usdc_atomic: string; usdc: string }
-          expect([row.id, body.usdc_atomic !== '0']).toEqual([row.id, true]) // hasRecoverableUsdc
+          expect([row.id, BigInt(body.usdc_atomic) >= BigInt(10000)]).toEqual([row.id, true]) // configured 0.01 USDC floor
           expect([row.id, Boolean(body.usdc)]).toEqual([row.id, true]) // strandedSummary
         }
       })
@@ -736,7 +659,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
   describe('scenarios (#1409)', () => {
     const connect = scenarioWithApi('connect-agent')
     const approve = scenarioWithApi('connect-agent-approve')
-    const approveLegacy = scenarioWithApi('connect-agent-approve-legacy')
     const signerRemoval = scenarioWithApi('account-signer-removal')
     // Cast the ENTRY, not the registry: `Record<string, StagedScenarioShape>`
     // would claim every scenario is staged, and only this one is.
@@ -962,13 +884,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(connect.api('/auth/me', 'GET')).toBeUndefined()
     })
 
-    // #1684: the APPROVE screen — the one between the other two connect
+    // #1684/#2472: the APPROVE screen — the one between the other two connect
     // scenarios' pins, and the screen that actually grants spend authority.
-    describe('connect-agent-approve (#1684)', () => {
-      it('pins the setup at connected_local with the runtime already configured', () => {
-        // `resolveConnectStepView` only reaches the approval step when the
-        // runtime reports configured; without both flags the capture would
-        // silently shoot the "Finishing setup" state instead.
+    describe('connect-agent-approve (#1684/#2472)', () => {
+      it('pins the manual credential fallback at connected_local and approval-ready', () => {
+        // The fallback cannot truthfully report a configured runtime. Its
+        // explicit marker is what routes it to the same owner-signed approval
+        // screen instead of silently shooting "Finishing setup".
         const first = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET') as {
           status: string
           agent_id: string
@@ -977,8 +899,9 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         const second = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
         expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-fixture-1' })
         expect(first.install_status).toMatchObject({
-          local_mcp_configured: true,
-          local_mcp_acknowledged: true,
+          manual_credential_fallback: true,
+          local_mcp_configured: false,
+          local_mcp_acknowledged: false,
         })
         expect(second).toMatchObject({ status: 'connected_local' })
       })
@@ -994,28 +917,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(status.agent_budget[0].allowance_amount).toBe('25000000')
         // The collapsed verification row's whole point is showing this.
         expect(status.delegate_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
-      })
-
-      it('puts the LEGACY twin on the other rail, and ONLY by account_type', () => {
-        // The rail branch reads `account_type` off /auth/me. Without this
-        // override the legacy scenario would silently capture the DELEGATION
-        // screen under the legacy filename — the exact wrong-screen failure
-        // the scenario's own copy-based wait exists to catch.
-        const me = approveLegacy.api('/auth/me', 'GET') as {
-          safes: Array<{ account_type: string; id: string }>
-          email: string
-        }
-        expect(me.safes[0].account_type).toBe('safe')
-        // Same account otherwise — a scenario states only what is special.
-        expect(me.email).toBe('fixture@haven.test')
-        expect(me.safes[0].id).toBe(FIXTURE_SAFE_ID)
-        const safes = approveLegacy.api('/user/safes', 'GET') as {
-          safes: Array<{ account_type: string }>
-        }
-        // Both readers must agree: `useAgentConnectionSetup` resolves the rail
-        // from /auth/me, but a disagreeing /user/safes would make the capture
-        // depend on which hook won.
-        expect(safes.safes[0].account_type).toBe('safe')
       })
 
       it('serves a reachable signer so the Approve button renders, not the connect fallback', () => {
@@ -1066,8 +967,14 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(me.safes[0].is_default).toBe(true)
       })
 
-      it('leaves every other endpoint to the shared fixture', () => {
-        expect(legacy.api('/agents', 'GET')).toBeUndefined()
+      it('keeps legacy agent records readable without delegation budgets', () => {
+        const agents = legacy.api('/agents', 'GET') as {
+          agents: Array<{ safe_id: string; account_type: string; allowances: unknown[] }>
+        }
+        const sharedAgents = agents.agents.filter((agent) => agent.safe_id === FIXTURE_SAFE_ID)
+        expect(sharedAgents.length).toBeGreaterThan(0)
+        expect(sharedAgents.every((agent) => agent.account_type === 'safe')).toBe(true)
+        expect(sharedAgents.every((agent) => agent.allowances.length === 0)).toBe(true)
         expect(legacy.api(`/balances/${FIXTURE_SAFE_ADDRESS}`, 'GET')).toBeUndefined()
       })
     })

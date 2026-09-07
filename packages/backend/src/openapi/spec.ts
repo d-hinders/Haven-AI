@@ -36,7 +36,7 @@ const tokenSymbol = {
  * Both shapes are named schemas below so the split is readable from the spec
  * alone. The shapes themselves are DELIBERATELY unchanged — the human-decimal
  * projection is the historical `allowances` element shape that `GET /agents`,
- * `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /dashboard` and the CLI have
+ * `GET /agents/{id}`, `PUT /agents/{id}`, `GET /dashboard/overview` and the CLI have
  * always returned, so unifying it is a breaking wire change and a versioning
  * decision, not a cleanup (recorded on #2295).
  *
@@ -53,6 +53,12 @@ const tokenSymbol = {
  *     which builds the string with `formatTokenValue(row.budget_atomic,
  *     decimals)`. Since #2020 that view is the ONLY source of an `allowances`
  *     array — the `agent_allowances` mirror is read nowhere.
+ *
+ * Because that emitter is sole AND its output set is narrow, the human schema's
+ * pattern DISCRIMINATES the two shapes for every value except `'0'` (#2408).
+ * The shapes on the wire are still unchanged — what changed is that the
+ * contract can now REJECT an atomic value in a human field instead of only
+ * naming the two apart.
  */
 const allowanceAtomicAmount = {
   type: 'string',
@@ -65,16 +71,41 @@ const allowanceAtomicAmount = {
 } as const
 
 /**
- * The human-decimal counterpart. `formatTokenValue` emits `'0'` for a zero
- * budget and otherwise `<integer>.<2–6 fraction digits>`, hence the pattern:
- * a bare integer is legal here, which is precisely why no consumer can safely
- * sniff the shape at runtime — `'250'` is 250 USDC as a human amount and
- * 0.00025 USDC as an atomic one. The schema name is the discriminator.
+ * The human-decimal counterpart, and the pattern DISCRIMINATES (#2408).
+ *
+ * `domain/tokens.ts`'s `formatTokenValue(raw, decimals)` — lines 33-49 — is the
+ * sole emitter of this shape, and its output set is narrower than a bare
+ * integer. It returns `'0'` for `''`/`'0'` and otherwise
+ * `` `${intPart}.${capped}` ``, where `capped` is the fraction trailing-zero-
+ * trimmed, then `padEnd(2, '0')`, then `slice(0, 6)` — so exactly one `.`
+ * followed by 2-6 digits, for any `decimals >= 0`. The produced set is
+ * therefore `^(0|[0-9]+\.[0-9]{2,6})$`, which REJECTS `'500'`, `'1000000'` and
+ * every other atomic value except `'0'`.
+ *
+ * `'0'` is the one genuinely shared value, and it is genuinely identical in
+ * both shapes, so nothing is lost by admitting it.
+ *
+ * This comment previously said the opposite — "a bare integer is legal here" —
+ * and its own regex was looser still. That conflated "`'0'` is legal" with "any
+ * integer is legal", and it cost a real hole: #2392 measured a view emitting
+ * the atomic `budget_atomic` passing the `GET /dashboard/overview` round trip,
+ * caught only by a hand-asserted `'1.00'` literal. The schema now catches it.
+ *
+ * What has NOT changed: a consumer still must not sniff the shape at runtime.
+ * The discrimination here is a contract assertion over what one emitter is
+ * known to produce, not a property of the string — `'0'` remains ambiguous,
+ * and a future emitter that bypassed `formatTokenValue` would be a spec
+ * violation rather than a new legal shape. The schema name stays the
+ * discriminator; the pattern is now a guard that can catch the violation.
+ *
+ * The producing set is pinned in `openapi/spec.test.ts` against
+ * `formatTokenValue` itself, so this claim is measured on every run rather
+ * than trusted.
  */
 const allowanceHumanAmount = {
   type: 'string',
-  pattern: '^[0-9]+(\\.[0-9]+)?$',
-  description: 'HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent\'s active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals). Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token\'s decimals first (#2295).',
+  pattern: '^(0|[0-9]+\\.[0-9]{2,6})$',
+  description: 'HUMAN-DECIMAL token amount — whole token units, NOT the atomic integer (25 USDC is "25.00", a zero budget is "0"). Projected from the agent\'s active delegation by rails/delegation-budget-view.ts via formatTokenValue(budget_atomic, decimals), whose output is always "0" or <integer>.<2–6 fraction digits> — so this pattern REJECTS an atomic value such as "500" (#2408). "0" is the one value both shapes share. Do not BigInt() this value: it is the shape that made #2283 a production bug. To compare it against an atomic price, scale it by the token\'s decimals first (#2295).',
 } as const
 
 const allowanceResetPeriodMin = {
@@ -171,23 +202,27 @@ const preparedTreasuryOp = {
   oneOf: [
     {
       type: 'object',
-      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'instructions'],
+      required: ['signature_scheme', 'signing_payload', 'user_operation', 'treasury_address', 'instructions', 'revocation_url'],
       properties: {
         signature_scheme: { type: 'string', enum: ['eip712_userop'] },
         signing_payload: eip712Payload,
         user_operation: preparedUserOperation,
         treasury_address: address,
+        // #2539: the dashboard page the human signs from — built from
+        // FRONTEND_URL by the same helper as build's signing_url.
+        revocation_url: { type: 'string', format: 'uri' },
         instructions: { type: 'string' },
       },
     },
     {
       type: 'object',
-      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'instructions'],
+      required: ['signature_scheme', 'user_op_hash', 'user_operation', 'treasury_address', 'instructions', 'revocation_url'],
       properties: {
         signature_scheme: { type: 'string', enum: ['webauthn_userop'] },
         user_op_hash: { type: 'string' },
         user_operation: preparedUserOperation,
         treasury_address: address,
+        revocation_url: { type: 'string', format: 'uri' },
         instructions: { type: 'string' },
       },
     },
@@ -510,7 +545,6 @@ const activityPayment = {
     safe_name: { type: ['string', 'null'] },
     explorer_url: { type: ['string', 'null'], description: 'Null exactly when tx_hash is null.' },
     execution_rail: { type: ['string', 'null'], description: 'Which on-chain mechanism moved the money (#799).' },
-    session_permission_id: { type: ['string', 'null'] },
     delegation_hash: { type: ['string', 'null'], description: 'Which delegation authorized a delegation-rail payment (#829).' },
     confirmed_at: { type: ['string', 'null'] },
     created_at: { type: 'string' },
@@ -797,11 +831,218 @@ export const openapiSpec = {
         },
       },
     },
+    '/': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getApiRoot',
+        summary: 'What this service is, and where its machine-readable contract lives.',
+        description:
+          'Unauthenticated root document (#2530). An agent handed only a backend URL had ' +
+          'nothing to read and had to guess the spec path. Deliberately thin and ' +
+          'non-sensitive: names, paths, and which credential each door wants — no version ' +
+          'or build identifier, which would fingerprint the deployment and buy an agent nothing.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'The API root document.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiRootDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/discovery': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getDiscovery',
+        summary: 'Public, read-only facts an agent client needs to configure itself.',
+        description:
+          'The environment as data (#2531): which connector package this deployment hands ' +
+          'out, which hosted MCP it points at, which chains it serves, and where its spec ' +
+          'is. Every value is already public elsewhere — this route re-serves them together ' +
+          'so the frontend capability manifest does not restate the backend\'s env logic. ' +
+          'Never per-user or per-agent data, no relayer address, nothing from /health.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'Public deployment facts.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DiscoveryDocument' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/auth/device/start': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'startDeviceAuthorization',
+        summary: 'Begin a browser-approved CLI login (#2526).',
+        description:
+          'RFC 8628-shaped device authorization. Unauthenticated: this is where a CLI begins, ' +
+          'so that an agent driving it never has to hold its user\'s password. Returns a user ' +
+          'code the human types at `verification_url` and a device code the client polls with. ' +
+          'Both are stored hashed; the grant expires in 10 minutes.',
+        security: [],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  client_label: {
+                    type: 'string',
+                    maxLength: 80,
+                    description:
+                      'What the client calls itself, shown on the approval screen. Free text ' +
+                      'from an unauthenticated caller: bounded and stripped of control ' +
+                      'characters server-side, and rendered as text, never as markup.',
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'A pending grant.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DeviceAuthorizationStart' } },
+            },
+          },
+        },
+      },
+    },
+    '/auth/device/lookup': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'lookupDeviceAuthorization',
+        summary: 'Read what a pending CLI login is asking for, before deciding.',
+        description:
+          'Requires an ordinary owner session, like `approve`, and is likewise absent from ' +
+          'the owner-CLI allow-list. It exists so the approval screen can show the ' +
+          'requester\'s own `client_label` BEFORE the button rather than after it: every ' +
+          'code looks alike, so the label is the only thing that lets a human notice they ' +
+          'are being asked to approve somebody else\'s login. The label is attacker-' +
+          'controlled text — bounded and stripped of control characters on the way in, and ' +
+          'rendered as text, never as markup, on the way out. Wrong, expired and ' +
+          'already-decided codes all answer 404 alike, so this is not an enumeration oracle.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['user_code'],
+                properties: {
+                  user_code: { type: 'string', description: 'As shown to the human; case and dashes are ignored.' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The pending grant\'s label and expiry — deliberately nothing else.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    client_label: { type: 'string', nullable: true },
+                    expires_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'No pending approval for that code.' },
+        },
+      },
+    },
+    '/auth/device/approve': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'approveDeviceAuthorization',
+        summary: 'Approve or deny a pending CLI login (dashboard session only).',
+        description:
+          'Requires an ordinary owner session. An `owner_cli` token is deliberately NOT ' +
+          'accepted here — a CLI session approving further CLI sessions would turn one ' +
+          'human approval into an unbounded grant. A wrong, expired or already-decided code ' +
+          'all answer 404 alike, so codes cannot be enumerated by a signed-in caller.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['user_code'],
+                properties: {
+                  user_code: { type: 'string', description: 'As shown to the human; case and dashes are ignored.' },
+                  deny: { type: 'boolean', description: 'Deny instead of approving.' },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The grant\'s new state.' },
+          '404': { description: 'No pending approval for that code.' },
+        },
+      },
+    },
+    '/auth/device/token': {
+      post: {
+        tags: ['Auth'],
+        operationId: 'redeemDeviceAuthorization',
+        summary: 'Poll for the session token once a human has approved.',
+        description:
+          'Unauthenticated by design: the device code IS the credential. Answers ' +
+          '`authorization_pending` until approved, then the session token exactly once — ' +
+          'redemption is a single-use claim, so a poll loop that fires twice mints one ' +
+          'session, not two. The token carries `purpose: owner_cli`, which every ' +
+          'authenticated route refuses unless it is on the owner-CLI allow-list ' +
+          '(`middleware/owner-cli.ts`): agents, connect setups and read-only account ' +
+          'context — never signer changes, re-keying, credentials, provisioning, transfers, ' +
+          'or delegation build/activate/revoke. The human keeps every signature.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['device_code'],
+                properties: { device_code: { type: 'string' } },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The owner-CLI session token.' },
+          '400': {
+            description:
+              'authorization_pending | slow_down | expired_token | access_denied. An unknown ' +
+              'code and an expired one answer alike, so one cannot be used to probe the other.',
+          },
+        },
+      },
+    },
     '/health': {
       get: {
         tags: ['Health'],
         operationId: 'getHealth',
-        summary: 'Check backend and database health.',
+        summary: 'Check public backend and database health.',
         security: [],
         responses: {
           '200': {
@@ -820,6 +1061,35 @@ export const openapiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/health/ops': {
+      get: {
+        tags: ['Health'],
+        operationId: 'getOperationsHealth',
+        summary: 'Read operator-only backend diagnostics.',
+        description:
+          'Requires the deployment-configured `HAVEN_OPS_TOKEN` in `X-Haven-Ops-Token`. ' +
+          'Returns 404 when the token is not configured, so deployments do not expose diagnostics by default.',
+        security: [],
+        parameters: [
+          {
+            name: 'X-Haven-Ops-Token',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Operator diagnostics.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/HealthOpsResponse' } },
+            },
+          },
+          '401': { ...errorResponse, description: 'The operator token is missing or invalid.' },
+          '404': { ...errorResponse, description: 'Operator diagnostics are not configured on this deployment.' },
         },
       },
     },
@@ -927,8 +1197,12 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
+            // #2400: was `{ type: 'object', additionalProperties: true }`, an
+            // open envelope a round trip could only prove "is an object"
+            // against. The route returns `{ ...updated, allowances }` — the
+            // same shape as GET /agents/{id} — so it gets the same schema.
             description: 'The updated agent, with allowances.',
-            content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } },
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Agent' } } },
           },
           '400': errorResponse,
           '401': errorResponse,
@@ -981,9 +1255,9 @@ export const openapiSpec = {
       post: {
         tags: ['Agents'],
         operationId: 'archiveAgent',
-        summary: 'Archive a revoked agent (soft removal — history is kept).',
+        summary: 'Archive an agent (soft removal — history is kept).',
         description:
-          'Replaces agent deletion (#1401). Requires status=revoked — archiving is a filing action and never the thing that stops spending. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
+          'Replaces agent deletion (#1401). Delegation agents require status=revoked and no pending or active budget delegations because archiving is a filing action and never the thing that stops spending. Linked legacy Safe records may be archived at any status; that only removes the Haven-side record and leaves the old Safe permission untouched. An agent whose Safe was already unlinked is archivable when no live delegation remains. The agent row and every dependent audit row (payments, approvals, evidence, delegations, passports) remain; the agent leaves the primary list. Idempotent: re-archiving keeps the original archived_at.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -1018,7 +1292,7 @@ export const openapiSpec = {
         operationId: 'unarchiveAgent',
         summary: 'Return an archived agent to the primary list.',
         description:
-          'Clears archived_at and nothing else — the agent remains revoked; un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
+          'Clears archived_at and nothing else — the agent keeps the status it had when archived. For delegation agents, the archive contract requires revoked status and no live budgets; legacy Safe records can return with their prior active, paused, pending_approval, or revoked status. Un-archiving restores no authority of any kind. Idempotent on a non-archived agent.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -1110,7 +1384,7 @@ export const openapiSpec = {
         operationId: 'buildAgentDelegation',
         summary: 'Grant step 1: build an unsigned budget delegation for the owner to sign.',
         description:
-          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827).',
+          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -1140,20 +1414,33 @@ export const openapiSpec = {
         },
         responses: {
           '201': {
-            description: 'Pending delegation stored; the owner signs signing_payload next.',
+            description: 'Pending delegation stored (or an identical still-pending build reused); the owner signs next.',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['delegation_hash', 'version', 'delegate_account_address', 'signing_payload'],
+                  required: ['delegation_hash', 'version', 'delegate_account_address', 'signing_payload', 'build_id', 'typed_data_hash', 'signing_url'],
                   properties: {
                     delegation_hash: delegationHash,
-                    version: { type: 'integer', description: 'Fresh per (agent, token, recipient) slot — replacement identity (#827).' },
+                    version: { type: 'integer', description: 'Fresh per (agent, token, recipient) slot — replacement identity (#827). Repeated UNCHANGED when build reuses an identical still-pending row (#2539).' },
                     delegate_account_address: address,
                     signing_payload: {
                       type: 'object',
                       description: "EIP-712 typed data (primaryType 'Delegation') the owner signs verbatim.",
                       additionalProperties: true,
+                    },
+                    build_id: {
+                      ...delegationHash,
+                      description: 'The build identifier. It IS the delegation hash — there is no second id and no new column (#2539).',
+                    },
+                    typed_data_hash: {
+                      ...delegationHash,
+                      description: 'The hash of the EIP-712 typed data to sign — the delegation_hash, named for the issue\u2019s response shape (#2539).',
+                    },
+                    signing_url: {
+                      type: 'string',
+                      format: 'uri',
+                      description: 'Dashboard grant form for this agent with the pending build prefilled (?grant=<delegation hash>). Host from the backend\u2019s FRONTEND_URL, the same source buildApprovalUrl uses (#2539).',
                     },
                   },
                 },
@@ -2140,7 +2427,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserSafe',
         summary: 'Unlink a Safe from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one.',
+          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
         responses: {
@@ -2151,6 +2438,10 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description: 'The Safe remains linked while a delegation, recovery, or re-key is in progress.',
+          },
         },
       },
     },
@@ -2166,6 +2457,26 @@ export const openapiSpec = {
           '200': {
             description: 'Default updated.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/user/safes/{safeId}/funding': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getSafeFunding',
+        summary: 'Machine-readable funding facts for one Safe: what to fund, with what, where, and how much.',
+        description:
+          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id (the delegation-rail account).' }],
+        responses: {
+          '200': {
+            description: 'The funding picture for the linked Safe.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/FundingResponse' } } },
           },
           '400': errorResponse,
           '401': errorResponse,
@@ -3584,6 +3895,13 @@ export const openapiSpec = {
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to 30 days before `to`.' },
           { name: 'to', in: 'query', schema: { type: 'string' }, description: 'Date; defaults to now.' },
+          {
+            name: 'segment',
+            in: 'query',
+            schema: { type: 'string', enum: ['via', 'run_mode'] },
+            description:
+              "Split the same steps by one dimension (#2529), added as `segments` alongside the unsegmented `steps`. `via` is the agent hand-off marker — it reads the funnel metadata key `handoff_via`, NOT the key literally named `via`, which predates it and records which CODE PATH created the record ('connection_setup' from the connect flow). Segmenting on that one would answer 'connection_setup' for every connect-modal agent and look like a working metric. `run_mode` is how the connector was invoked ('json' | 'prose', #2528). Attribution is resolved once PER USER from the earliest event in the window carrying the key, then carried across every step: only `signed_up` and `agent_created` write these keys, so a per-event split would report zero agent-driven first payments and read as 'agents never convert'. A user with no value for the key lands in the `unattributed` group — for `run_mode` that means a connector predating #2528, which is NOT the same fact as a `prose` run; the same definition is repeated on `segments.value` so a consumer reading only one of the two fields still learns it. Omitting the parameter returns the unsegmented body unchanged; an unrecognised value is a 400 rather than a silent fall-back to unsegmented.",
+          },
         ],
         responses: {
           '200': {
@@ -3614,6 +3932,31 @@ export const openapiSpec = {
                     medianTtfpMs: { type: ['integer', 'null'], description: 'Median signup→first-settled-payment in ms. Null when nobody has completed it in the window.' },
                     from: { type: 'string', format: 'date-time', description: 'The resolved window start.' },
                     to: { type: 'string', format: 'date-time', description: 'The resolved window end.' },
+                    segment: { type: 'string', enum: ['via', 'run_mode'], description: 'Echoed back only when the request asked for a split. Absent otherwise, together with `segments`.' },
+                    segments: {
+                      type: 'array',
+                      description:
+                        "Present only when `segment` was requested. One entry per distinct value of that dimension, each carrying the SAME seven steps as the unsegmented `steps`, so a group reads exactly like a funnel. Sorted alphabetically with `unattributed` last — that bucket means the user has no value for the key at all, which for `run_mode` is a connector predating #2528 and is NOT the same fact as 'prose'. Summing a step across groups equals the unsegmented count for that step.",
+                      items: {
+                        type: 'object',
+                        required: ['value', 'steps'],
+                        properties: {
+                          value: { type: 'string', description: "The dimension's value for this group, or 'unattributed' when the user carries none." },
+                          steps: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['event', 'users', 'conversionFromPrev'],
+                              properties: {
+                                event: { type: 'string', enum: ['signed_up', 'safe_deployed', 'safe_imported', 'agent_created', 'allowance_granted', 'safe_funded', 'first_payment_settled'] },
+                                users: { type: 'integer', description: 'DISTINCT users in this group who reached this step.' },
+                                conversionFromPrev: { type: ['number', 'null'], description: 'Null when the predecessor step counted zero users in THIS group — which includes the three permanently-zero retired stages, so the step after each of them is null by construction rather than by absence of data.' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -4027,55 +4370,13 @@ export const openapiSpec = {
         },
       },
     },
-    '/agent-connection-setups/{setupId}/wallet-approval': {
-      post: {
-        tags: ['Connect Agent 2'],
-        operationId: 'recordAgentConnectionWalletApproval',
-        summary: 'Record wallet approval evidence for Connect Agent 2.',
-        description:
-          'Records user wallet approval or a Safe multisig proposal for a locally connected setup. Confirmed approvals activate the pending agent only after Haven verifies the live on-chain allowance state for the exact Haven wallet, public signing address, token budgets, and reset periods. Proposed approvals remain non-active until that on-chain authority is live.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ $ref: '#/components/parameters/SetupId' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/RecordAgentConnectionWalletApprovalRequest' },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Wallet approval was recorded and the setup status was returned.',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
-              },
-            },
-          },
-          '202': {
-            description: 'Confirmation evidence was recorded, but on-chain authority is not verified yet.',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/AgentConnectionSetupStatus' },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '409': errorResponse,
-          '410': errorResponse,
-        },
-      },
-    },
     '/agent-connection-setups/{setupId}/budget-approval': {
       post: {
         tags: ['Connect Agent 2'],
         operationId: 'recordAgentConnectionBudgetApproval',
         summary: 'Complete a delegation-rail Connect Agent 2 setup.',
         description:
-          'The delegation rail\'s counterpart to wallet-approval. Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a Safe / AllowanceModule wallet, which approves with a wallet transaction instead.',
+          'Activates the pending agent only after Haven confirms that every budget this setup promised exists as an active, owner-signed budget on the agent — the caller asserts nothing, so the request body is empty and the call is safe to retry. Rejected with 409 on a retired Safe / AllowanceModule account, which has no approval path in Haven since #2259 deleted the wallet-approval route.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/SetupId' }],
         responses: {
@@ -5696,6 +5997,71 @@ export const openapiSpec = {
         enum: Object.values(AgentPaymentRail),
         description: 'Stable rail identifier for Haven agent payment states.',
       },
+      ApiRootDocument: {
+        type: 'object',
+        required: ['name', 'openapi', 'auth', 'health'],
+        properties: {
+          name: { type: 'string', enum: ['haven-api'] },
+          description: { type: 'string' },
+          openapi: {
+            type: 'string',
+            format: 'uri',
+            description:
+              'Absolute URL of this document, derived from the request — so the dev backend ' +
+              'names the dev backend and a request through the frontend proxy names the proxy.',
+          },
+          docs: { type: 'string', format: 'uri', description: 'Agent-readable product docs.' },
+          auth: {
+            type: 'object',
+            required: ['agent', 'owner'],
+            properties: {
+              agent: { type: 'string', description: 'How an agent credential is presented.' },
+              owner: { type: 'string', description: 'How an owner session is obtained.' },
+            },
+            additionalProperties: false,
+          },
+          health: { type: 'string', format: 'uri' },
+        },
+        additionalProperties: false,
+      },
+      DiscoveryDocument: {
+        type: 'object',
+        required: ['hosted_mcp_url', 'connector_package', 'openapi_url', 'chains'],
+        properties: {
+          hosted_mcp_url: {
+            anyOf: [{ type: 'string', format: 'uri' }, { type: 'null' }],
+            description:
+              'Null when this deployment has none configured — a discovery document that ' +
+              'refuses is less useful than one that says so, so the connect handout\'s ' +
+              'configuration error is reported here rather than propagated as a 500.',
+          },
+          hosted_mcp_note: { type: 'string', description: 'Why the URL is null, when it is.' },
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
+          openapi_url: { type: 'string', format: 'uri' },
+          chains: {
+            type: 'object',
+            required: ['deployable', 'supported'],
+            properties: {
+              deployable: { type: 'array', items: { type: 'integer' } },
+              supported: { type: 'array', items: { type: 'integer' } },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      DeviceAuthorizationStart: {
+        type: 'object',
+        required: ['device_code', 'user_code', 'verification_url', 'expires_in', 'interval'],
+        properties: {
+          device_code: { type: 'string', description: 'The client\'s bearer credential for polling. Stored hashed.' },
+          user_code: { type: 'string', description: 'Typed by the human. 8 characters from an unambiguous alphabet.' },
+          verification_url: { type: 'string', format: 'uri' },
+          expires_in: { type: 'integer', description: 'Seconds. 600.' },
+          interval: { type: 'integer', description: 'Seconds between polls. 5.' },
+        },
+        additionalProperties: false,
+      },
       HealthResponse: {
         type: 'object',
         required: ['status', 'timestamp', 'db'],
@@ -5708,10 +6074,16 @@ export const openapiSpec = {
             properties: {
               status: { type: 'string', enum: ['ok', 'error'] },
               latencyMs: { type: 'integer' },
-              error: { type: 'string' },
             },
             additionalProperties: false,
           },
+        },
+        additionalProperties: false,
+      },
+      HealthOpsResponse: {
+        type: 'object',
+        required: ['relayer', 'passport', 'trustProxy'],
+        properties: {
           relayer: {
             type: 'array',
             description:
@@ -5865,6 +6237,12 @@ export const openapiSpec = {
           local_mcp_acknowledged: { type: 'boolean' },
           activation_command_available: { type: 'boolean' },
           /**
+           * True when the browser-hosted manual credential fallback created
+           * this setup. The user must still save the one-time credential and
+           * approve the normal owner-signed agent budget.
+           */
+          manual_credential_fallback: { type: 'boolean' },
+          /**
            * #1445: the connector reports this and the backend persists it
            * (`agent-connection-setup.ts`), but the schema omitted it — and this
            * schema is `additionalProperties: false`, so the spec actively
@@ -5877,6 +6255,31 @@ export const openapiSpec = {
           next_user_action: { type: 'string' },
           error_code: { type: ['string', 'null'] },
           environment_label: { type: 'string' },
+          /**
+           * #2561. The other agent directories the connector found on the
+           * machine, so the dashboard can offer the owner a one-click revoke
+           * of what this setup superseded. The connector never revokes:
+           * `POST /agents/:id/revoke` is owner-authenticated, and an agent
+           * credential retiring a sibling agent is the "agent editing its own
+           * authority" the re-key routes refuse.
+           *
+           * A TRI-STATE, and the null is the point. A list means the scan ran
+           * and found these; `[]` means it ran and found none; `null` means it
+           * could not run. Absent means this report said nothing about it and
+           * the jsonb merge left whatever an earlier report wrote. Collapsing
+           * null into `[]` would have the dashboard tell an owner "nothing to
+           * revoke" about a machine nobody managed to read.
+           *
+           * The ids are shaped, not trusted: the connector falls back to the
+           * directory name when an `identity.json` exists but will not parse,
+           * so an entry here is not necessarily an agent id at all. Ownership
+           * is resolved on read against the caller's own agents.
+           */
+          superseded_agent_ids: {
+            type: ['array', 'null'],
+            items: { type: 'string', maxLength: 120 },
+            maxItems: 50,
+          },
           last_probe_at: { anyOf: [isoDateTime, { type: 'string' }] },
         },
         additionalProperties: false,
@@ -5903,19 +6306,69 @@ export const openapiSpec = {
             description:
               'Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused.',
           },
+          via: {
+            type: 'string',
+            enum: ['agent'],
+            description:
+              'Agent hand-off marker (#2522). Present when the link the user followed was pasted by an agent. An ENUM, not a slug like `source`: it answers one closed question and the agent-driven funnel is segmented on it, so a free-text field would let a link author write anything into that metric. Sanitized server-side; any other value is stored as null rather than refused.',
+          },
         },
         additionalProperties: false,
       },
       CreateAgentConnectionSetupResponse: {
         type: 'object',
-        required: ['setup_id', 'status', 'setup_token', 'expires_at', 'connector_command', 'setup_prompt'],
+        required: [
+          'setup_id',
+          'status',
+          'setup_token',
+          'expires_at',
+          'connector_command',
+          'connector_package',
+          'setup_prompt',
+          'approval_url',
+        ],
         properties: {
           setup_id: uuid,
           status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
           setup_token: { type: 'string', pattern: '^hv_setup_' },
           expires_at: isoDateTime,
           connector_command: { type: 'string' },
+          /**
+           * #2422: the npm package spec named inside `connector_command`,
+           * exposed on its own so a client never has to parse the command or
+           * restate the literal. The dist-tag is deployment configuration
+           * (`HAVEN_CONNECTOR_CHANNEL`, default `alpha`), so a hard-coded
+           * client-side `@alpha` is wrong on the dev backend.
+           *
+           * REQUIRED, not optional, and deliberately so: the backend always
+           * emits it, and making it optional would push a fallback literal
+           * back into the client — the exact restatement this field removes.
+           *
+           * The generated type is therefore non-nullable `string`, while the
+           * frontend still handles its ABSENCE (`setup-copy.ts`'s optional
+           * `connectorPackage`). That mismatch is intentional and is not a
+           * type to loosen: the contract says every backend that speaks this
+           * spec sends the field, and the defensive branch exists only for the
+           * minutes of a rolling deploy in which a NEW frontend polls an OLD
+           * backend that predates it. Loosening the type would license a
+           * permanent client-side fallback; deleting the branch would render
+           * `undefined` into a command during that window.
+           */
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
           setup_prompt: { type: 'string' },
+          /**
+           * #2522: the link that lands a human on this setup's budget
+           * approval. ABSOLUTE, against the same-origin rule the discovery
+           * artifacts follow (#2520), because the connector prints it into a
+           * terminal and an agent pastes it into a chat — a bare path resolves
+           * against nothing there. The host is `FRONTEND_URL`, never a literal.
+           *
+           * REQUIRED for the same reason `connector_package` is: the backend
+           * always emits it, and an optional field pushes a URL-assembling
+           * fallback back into every client, which is the restatement this
+           * field exists to remove.
+           */
+          approval_url: { type: 'string', format: 'uri' },
         },
         additionalProperties: false,
       },
@@ -5981,6 +6434,12 @@ export const openapiSpec = {
           api_key_hash: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
           api_key_prefix: { type: 'string', pattern: '^sk_agent_[0-9a-f]{3}$' },
           runtime: { type: 'string' },
+          run_mode: {
+            type: 'string',
+            enum: ['json', 'prose'],
+            description:
+              "#2528: how the connector was invoked — 'json' when `--json` was passed, 'prose' otherwise. The connector is the only party that can report this: the request is identical over the wire either way. Optional, because a connector older than #2528 sends nothing and registers unchanged; an unrecognised value is refused with 400 rather than stored, since this dimension segments the onboarding funnel and a value nothing recognises must not enter it silently. Case and surrounding whitespace are normalised before storage.",
+          },
           connector_version: { type: 'string' },
           connector_context: { $ref: '#/components/schemas/AgentConnectionConnector' },
           install_capabilities: {
@@ -5996,7 +6455,7 @@ export const openapiSpec = {
       },
       RegisterAgentConnectionSetupResponse: {
         type: 'object',
-        required: ['setup_id', 'agent_id', 'status', 'agent_status', 'api_key_prefix', 'api_key_scope', 'delegate_address', 'hosted_mcp_url', 'next_action'],
+        required: ['setup_id', 'agent_id', 'status', 'agent_status', 'api_key_prefix', 'api_key_scope', 'delegate_address', 'hosted_mcp_url', 'next_action', 'approval_url'],
         properties: {
           setup_id: uuid,
           agent_id: uuid,
@@ -6007,6 +6466,15 @@ export const openapiSpec = {
           delegate_address: address,
           hosted_mcp_url: { type: 'string', format: 'uri' },
           next_action: { type: 'string', enum: ['return_to_haven_for_wallet_approval'] },
+          /**
+           * #2528: the same absolute link the create (201) and status
+           * responses already return for this setup, so the connector can
+           * print a destination instead of "return to Haven and approve" and
+           * an agent relays a link rather than a sentence. Carries no secret —
+           * the setup id is already in the connector's own outcome record, and
+           * the setup TOKEN never appears in it.
+           */
+          approval_url: { type: 'string', format: 'uri' },
           passport_requested: {
             type: 'boolean',
             description: 'True when the setup opted in and its chain issues L0 passports.',
@@ -6016,10 +6484,22 @@ export const openapiSpec = {
       },
       AgentConnectionSetupStatus: {
         type: 'object',
-        required: ['setup_id', 'status', 'agent', 'haven_wallet', 'agent_budget', 'install_status', 'approval'],
+        required: [
+          'setup_id',
+          'status',
+          'agent',
+          'haven_wallet',
+          'agent_budget',
+          'connector_package',
+          'install_status',
+          'approval',
+          'approval_url',
+        ],
         properties: {
           setup_id: uuid,
           agent_id: { anyOf: [uuid, { type: 'null' }] },
+          /** #2522: identical to the create response's, and stable across polls. */
+          approval_url: { type: 'string', format: 'uri' },
           status: { $ref: '#/components/schemas/AgentConnectionSetupState' },
           expires_at: isoDateTime,
           agent: {
@@ -6039,6 +6519,8 @@ export const openapiSpec = {
           delegate_address: { anyOf: [address, { type: 'null' }] },
           api_key_prefix: { type: ['string', 'null'] },
           runtime: { type: ['string', 'null'] },
+          /** #2422 — see CreateAgentConnectionSetupResponse.connector_package. */
+          connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
           connector: { $ref: '#/components/schemas/AgentConnectionConnector' },
           install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
           approval: {
@@ -6052,32 +6534,6 @@ export const openapiSpec = {
             additionalProperties: false,
           },
           failure_reason: { type: ['string', 'null'] },
-        },
-        additionalProperties: false,
-      },
-      RecordAgentConnectionWalletApprovalRequest: {
-        type: 'object',
-        required: [
-          'result',
-          'safe_tx_hash',
-          'chain_id',
-          'safe_address',
-          'allowance_module_address',
-          'delegate_address',
-        ],
-        properties: {
-          result: { type: 'string', enum: ['confirmed', 'proposed'] },
-          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          safe_tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          chain_id: { type: 'integer' },
-          safe_address: address,
-          allowance_module_address: address,
-          delegate_address: address,
-          confirmation_status: {
-            type: 'string',
-            enum: ['confirmed', 'receipt_timeout'],
-            description: 'Use receipt_timeout only when the wallet transaction was submitted but the local receipt wait timed out.',
-          },
         },
         additionalProperties: false,
       },
@@ -6142,7 +6598,7 @@ export const openapiSpec = {
       AgentAllowance: {
         type: 'object',
         description:
-          'One element of an agent\'s derived budget view (GET /agents, GET /agents/{id}, PATCH /agents/{id}). ' +
+          'One element of an agent\'s derived budget view (GET /agents, GET /agents/{id}, PUT /agents/{id}; POST /agents carries it as a literal empty array). ' +
           'Projected from the agent\'s ACTIVE delegations, never from stored allowance rows (#1090/#2020). ' +
           'Its `allowance_amount` is HUMAN-DECIMAL — the opposite shape to the identically named field on ' +
           'AgentConnectionAllowance, which is atomic (#2295).',
@@ -6233,13 +6689,13 @@ export const openapiSpec = {
       },
       /**
        * #1445: lifted out of the inline `/agents/{id}/delegate-balance`
-       * response so consumers can name it. An inline schema generates an
-       * anonymous type, which is why the frontend hand-wrote this one instead
-       * of importing it — identical shape, no behaviour change.
+       * response so consumers can name it. The frontend imports the generated
+       * `ApiSchema<'DelegateBalance'>` type from this component; keep this
+       * schema as the load-bearing source for the response shape.
        */
       DelegateBalance: {
         type: 'object',
-        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address'],
+        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address', 'sweep_min_usdc'],
         properties: {
           delegate_address: { type: 'string' },
           safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -6249,6 +6705,10 @@ export const openapiSpec = {
           usdc: { type: 'string' },
           usdc_atomic: { type: 'string' },
           usdc_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          sweep_min_usdc: {
+            type: 'string',
+            description: 'Minimum USDC balance eligible for gasless delegate recovery in human token units.',
+          },
         },
       },
       CreateAgentResponse: {
@@ -7081,6 +7541,52 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      FundingToken: {
+        type: 'object',
+        required: ['symbol', 'address', 'decimals', 'balance_human', 'minimum_useful_human'],
+        properties: {
+          symbol: { type: 'string' },
+          address: { ...address, description: "The token contract. (A funding token is always an ERC-20 — the chain-native asset is reported under `native`, not here.)" },
+          decimals: { type: 'integer' },
+          balance_human: { type: 'string', description: "Human-decimal balance via formatTokenValue — '0' or <int>.<2–6 fraction digits>; '0' on balance-RPC failure." },
+          minimum_useful_human: {
+            type: ['string', 'null'],
+            description: "Documented per-token constant from @haven_ai/core — the smallest amount worth moving for this token (one small x402 payment plus headroom). A CONSTANT, not a policy: not a spend limit, not a minimum balance check. null when no constant is documented for the symbol; then `funded` ignores the token.",
+          },
+        },
+        additionalProperties: false,
+      },
+      FundingResponse: {
+        type: 'object',
+        required: ['account_address', 'chain', 'tokens', 'native', 'funded'],
+        properties: {
+          account_address: { ...address, description: 'Where the human sends funds — the linked Safe address.' },
+          chain: {
+            type: 'object',
+            required: ['id', 'name', 'explorer_url'],
+            properties: {
+              id: { type: 'integer' },
+              name: { type: 'string' },
+              explorer_url: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+          tokens: { type: 'array', items: { $ref: '#/components/schemas/FundingToken' }, description: 'The chain\'s ERC-20s in registry order (native excluded — see `native`).' },
+          native: {
+            type: 'object',
+            required: ['symbol', 'balance_human', 'needed'],
+            properties: {
+              symbol: { type: 'string' },
+              balance_human: { type: 'string' },
+              needed: { type: 'boolean', description: 'Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI.' },
+            },
+            additionalProperties: false,
+          },
+          faucet_url: { type: 'string', description: 'Present ONLY on testnets, from the chain registry — where a HUMAN gets dev funds. Haven never calls a faucet. Absent (not null) on mainnets.' },
+          funded: { type: 'boolean', description: 'True when ANY token balance ≥ its `minimum_useful_human` constant. Native gas is not part of the question.' },
+        },
+        additionalProperties: false,
+      },
       PortfolioBreakdown: {
         type: 'object',
         required: ['symbol', 'balance', 'formatted', 'usdValue', 'eurValue'],
@@ -7160,7 +7666,22 @@ export const openapiSpec = {
         required: ['tokenSymbol', 'allowanceAmount', 'resetPeriodMin'],
         properties: {
           tokenSymbol: { type: 'string' },
-          allowanceAmount: { type: 'string' },
+          // #2400: was a bare `{ type: 'string' }`, while the identical value
+          // one route over is the named `allowanceHumanAmount` (#2295). Both
+          // come from the same `rails/delegation-budget-view.ts` projection, so
+          // a reader of the contract alone could not tell this one was HUMAN.
+          // This is about #2295's "readable from the OpenAPI spec alone"
+          // holding for this emitter too.
+          //
+          // #2408 corrected the sentence that stood here. It said naming the
+          // schema "does not DISCRIMINATE the shape — the pattern admits a bare
+          // integer by design", which is why the hand literal in
+          // `dashboard.test.ts` was the ONLY guard on this route's digits. The
+          // pattern now discriminates: `formatTokenValue` cannot emit a bare
+          // integer other than '0', so an atomic `budget_atomic` here fails the
+          // round trip. The literal STAYS, now as belt-and-braces rather than
+          // as the sole guard.
+          allowanceAmount: allowanceHumanAmount,
           resetPeriodMin: { type: 'integer' },
         },
         additionalProperties: false,

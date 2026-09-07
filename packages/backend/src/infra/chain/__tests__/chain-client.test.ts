@@ -1,8 +1,7 @@
 /**
  * `ChainClient` conformance (#1149).
  *
- * `viem-client.ts` had zero call sites and zero tests — every
- * `getChainClient()` caller hardcodes `'allowance_module'`, so the delegation
+ * `viem-client.ts` had zero call sites and zero tests — the delegation
  * rail's implementation would have bit-rotted silently until its first real
  * balance read. Worse, the two implementations had already drifted: viem's
  * `getTokenBalance` silently returned the NATIVE balance for a zero token
@@ -64,11 +63,11 @@ beforeEach(() => {
 })
 
 describe('the factory is a genuine two-SDK choice', () => {
-  it('routes delegation to viem and everything else to ethers', () => {
+  it('routes each impl literal to its own SDK-backed implementation', () => {
     // The reason viem-client exists at all: if this ever collapsed to one
     // implementation, the port would be ceremony around a single path.
-    expect(getChainClient('delegation')).toBe(viemChainClient)
-    expect(getChainClient('allowance_module')).toBe(ethersChainClient)
+    expect(getChainClient('viem')).toBe(viemChainClient)
+    expect(getChainClient('ethers')).toBe(ethersChainClient)
   })
 })
 

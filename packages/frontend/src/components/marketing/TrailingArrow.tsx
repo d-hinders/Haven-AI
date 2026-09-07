@@ -6,7 +6,8 @@
  * byte-identical rather than route it through `Icon` + a lucide arrow, because
  * unifying it would have moved rendered pixels. #1940 then added
  * `aria-hidden`/`focusable` to the two named definitions that existed
- * (`BrandBandButton`'s `TrailingArrow`, `investor-briefing`'s `ArrowIcon`) and
+ * (`BrandBandButton`'s `TrailingArrow` and the retired investor-briefing
+ * `ArrowIcon`) and
  * #1954 found three MORE raw copies inline in `app/page.tsx` that its inventory
  * had missed — which is precisely the failure mode a copied glyph has: the fix
  * lands on the copies someone happened to enumerate.
@@ -14,8 +15,8 @@
  * #1954 asks for this to be decided rather than defaulted, and records the case
  * against as "they live on different backgrounds and at different sizes". That
  * turns out to be **false**, and it was checked rather than assumed. All six
- * instances — two in `BrandBandButton`, three in `investor-briefing`'s
- * `InvestorButton`, three inline in `app/page.tsx` — render the identical
+ * instances — two in `BrandBandButton`, three in the retired `InvestorButton`,
+ * three inline in `app/page.tsx` — rendered the identical
  * markup: `w-3.5 h-3.5`, `viewBox="0 0 16 16"`, `strokeWidth={1.75}`, and the
  * byte-identical path `M3.5 8h9M9 4.5L12.5 8 9 11.5`. Background is irrelevant
  * because the stroke is `currentColor`, which is why the same glyph already

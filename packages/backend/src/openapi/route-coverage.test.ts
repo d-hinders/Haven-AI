@@ -72,6 +72,7 @@ describe('route coverage — the gate sees every registered module (#1443)', () 
     // vacuously pass — the failure mode this whole gate exists to prevent.
     expect(modules.length).toBeGreaterThan(20)
     expect(modules.some((m) => m.file === 'agents.ts' && m.prefix === '/agents')).toBe(true)
+    expect(modules.some((m) => m.file === 'health.ts' && m.prefix === '')).toBe(true)
     // Mounted at the root, i.e. the prefix-less registration form parses too.
     expect(modules.some((m) => m.prefix === '')).toBe(true)
   })

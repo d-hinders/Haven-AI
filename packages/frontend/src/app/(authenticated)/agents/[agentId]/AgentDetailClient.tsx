@@ -4,8 +4,6 @@ import { ArrowRight, EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { usePublicClient } from 'wagmi'
-import { type Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents } from '@/hooks/useAgents'
 import {
@@ -15,11 +13,8 @@ import {
   type PaymentActivityItem,
   type McpToolCallActivityItem,
 } from '@/hooks/useAgentActivity'
-import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
-import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
-import { useSafeDetails } from '@/hooks/useSafeDetails'
-import { RESET_PERIODS } from '@/lib/allowance-module'
+import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceAmount } from '@/lib/allowance-format'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
@@ -36,13 +31,10 @@ import {
   paymentStatusPresentation,
   failedOrRejectedStatus,
 } from '@/lib/payment-status'
-import { isUserRejectedError, revokeAgentOnChain } from '@/lib/revoke-agent'
-import { isSafeCapableSigner, useActiveSigner } from '@/lib/signer'
-import EditAgentModal, { type EditAgentModalMode } from '@/components/EditAgentModal'
+import EditAgentModal from '@/components/EditAgentModal'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
-import ConfirmDialog from '@/components/ConfirmDialog'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
 import { useAgentPassport } from '@/hooks/useAgentPassport'
@@ -53,8 +45,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
-import OnchainActionGate, { OnchainActionNotice, isOnchainActionBlocked } from '@/components/OnchainActionGate'
-import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -203,8 +193,8 @@ function McpToolCallsPanel({
       <div className="mb-4">
         <h2 className="text-base font-semibold text-[var(--v2-ink)]">MCP tool calls</h2>
         <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-          Tool invocations from an MCP-connected agent runtime. The on-chain
-          allowance is the real spend gate; this list is an audit trail.
+          Tool invocations from an MCP-connected agent runtime. This list is an
+          audit trail, not a spending control.
         </p>
       </div>
       <Card hover={false}>
@@ -287,20 +277,27 @@ interface Props {
  */
 const AGENT_ACTIVITY_SECTION_ID = 'agent-activity'
 
-type PendingAction = 'pause' | 'resume' | 'revoke' | 'restore' | null
-type ConfirmAction = 'revoke' | null
+type PendingAction = 'pause' | 'resume' | 'restore' | null
 
 export default function AgentDetailClient({ agentId }: Props) {
   const { user } = useAuth()
   const router = useRouter()
-  const { agents, loading, pauseAgent, resumeAgent, revokeAgent, archiveAgent, unarchiveAgent, refetch } =
-    useAgents()
+  const {
+    agents,
+    loading,
+    error: agentsError,
+    pauseAgent,
+    resumeAgent,
+    revokeAgent,
+    archiveAgent,
+    unarchiveAgent,
+    refetch,
+  } = useAgents()
   const agent = agents.find((item) => item.id === agentId) ?? null
   const safe = useMemo(
     () => user?.safes.find((item) => item.id === agent?.safe_id) ?? null,
     [agent?.safe_id, user?.safes],
   )
-  const safeAddress = safe?.safe_address ?? agent?.safe_address ?? null
   const chainId = safe?.chain_id ?? agent?.safe_chain_id ?? DEFAULT_CHAIN_ID
   const chainConfig = useMemo(() => {
     try {
@@ -309,7 +306,6 @@ export default function AgentDetailClient({ agentId }: Props) {
       return null
     }
   }, [chainId])
-  const { details: safeDetails } = useSafeDetails(safeAddress, { chainId })
   const { activity, stats, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
   const unsettledPayments = useMemo(
     () => activity
@@ -322,11 +318,11 @@ export default function AgentDetailClient({ agentId }: Props) {
   // specifically on USDC, since the gasless recovery path is USDC-only. #1403:
   // the read is status-agnostic now — revoked agents resolve too, and that is
   // the POINT: the sequence that strands delegate funds (agent misbehaving
-  // mid-x402 → revoke) is the one that needs the recovery banner. The hook's
-  // catch treats errors as "nothing to recover", so a failing read degrades
-  // silently rather than blocking.
-  const { balance: delegateBalance, hasRecoverableUsdc } = useDelegateBalance(
-    agent ? agentId : null,
+  // mid-x402 → revoke) is the one that needs the recovery banner. Legacy Safe
+  // records can also retain a delegate wallet, so the read stays available on
+  // every agent detail page; a missing/unsupported delegate degrades silently.
+  const { balance: delegateBalance, hasRecoverableUsdc, hasBelowMinimumUsdc } = useDelegateBalance(
+    agent?.id ?? null,
   )
   // #1098: the human field can be absent while atomic is set (a partial API
   // response mid-load) — "Recover undefined USDC" is worse than the generic
@@ -335,57 +331,16 @@ export default function AgentDetailClient({ agentId }: Props) {
     delegateBalance && delegateBalance.usdc_atomic !== '0' && delegateBalance.usdc
       ? `${delegateBalance.usdc} USDC`
       : null
-  const managedDelegates = useMemo(
-    () => (agent?.delegate_address && agent.status !== 'revoked' ? [agent.delegate_address] : []),
-    [agent?.delegate_address, agent?.status],
-  )
-  const { data: onChainData, refetch: refetchOnChain } = useOnChainAllowances(
-    safeAddress,
-    managedDelegates,
-    chainId,
-  )
-  const delegateKey = agent?.delegate_address?.toLowerCase() ?? ''
-  const existingOnChainAllowances = delegateKey
-    ? onChainData.get(delegateKey)?.allowances ?? null
-    : null
-
-  const publicClient = usePublicClient({ chainId })
-  const activeSigner = useActiveSigner({
-    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
-    chainId,
-  })
-  // Revoking here is a Safe transaction — only a Safe-capable signer applies.
-  // Delegation agents hide this path entirely (#1079).
-  const signer = isSafeCapableSigner(activeSigner) ? activeSigner : null
-  const operationGate = useSafeOperationGate({
-    safeAddress: safeAddress ? (safeAddress as Address) : undefined,
-    chainId,
-  })
-  const revokeBlockedByOtherDevice = operationGate.kind === 'passkey_on_other_device'
-  const revokeApprovalBlocked = isOnchainActionBlocked(operationGate)
-  const revokeNoSignerMessage = "Connect the account's owner wallet to revoke this agent budget."
-
   const [editOpen, setEditOpen] = useState(false)
-  const [editMode, setEditMode] = useState<EditAgentModalMode>('all')
   const [credentialsOpen, setCredentialsOpen] = useState(false)
   const [rotatedKeyPatch, setRotatedKeyPatch] = useState<{ api_key: string; api_key_prefix: string } | null>(null)
   const openEditAgent = () => {
-    setEditMode('agent')
     setEditOpen(true)
   }
-  const isDelegationAgent = agent?.account_type === 'delegator_hybrid'
   const openUpdateBudget = () => {
-    if (isDelegationAgent) {
-      // Routing fix (#1079): on the delegation rail the budget control is
-      // DelegationBudgetCard on this same page — EditAgentModal is the legacy
-      // AllowanceModule editor and can never succeed here. Scroll, don't open.
-      document
-        .getElementById(DELEGATION_BUDGET_CARD_ID)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      return
-    }
-    setEditMode('budget')
-    setEditOpen(true)
+    document
+      .getElementById(DELEGATION_BUDGET_CARD_ID)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   const closeEdit = () => {
     setEditOpen(false)
@@ -397,10 +352,10 @@ export default function AgentDetailClient({ agentId }: Props) {
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
-  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [replaceKeyOpen, setReplaceKeyOpen] = useState(false)
+
 
   // #1701/#1699: only an anchored attestation is retired and reissued. Pending
   // or failed issuance will read the new delegate if it anchors after re-key.
@@ -431,10 +386,19 @@ export default function AgentDetailClient({ agentId }: Props) {
     return (
       <div className="max-w-3xl">
         <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-card">
-          <h1 className="text-xl font-semibold text-[var(--v2-ink)]">Agent not found</h1>
+          <h1 className="text-xl font-semibold text-[var(--v2-ink)]">
+            {agentsError ? 'Agent could not load' : 'Agent not found'}
+          </h1>
           <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
-            This agent may have been removed or you may no longer have access to it.
+            {agentsError
+              ? 'Haven could not load this agent right now. Try again before assuming it was removed.'
+              : 'This agent may have been removed or you may no longer have access to it.'}
           </p>
+          {agentsError ? (
+            <Button className="mt-5" size="sm" onClick={() => void refetch()}>
+              Try again
+            </Button>
+          ) : null}
         </div>
       </div>
     )
@@ -460,20 +424,34 @@ export default function AgentDetailClient({ agentId }: Props) {
   })
   // #796/#804: recipients bind per token — the card gets EVERY configured
   // token (a picker appears only when there is more than one).
-  const recipientTokens = currentAgent.allowances.flatMap((allowance) => {
-    if (!chainConfig) return []
-    const cfg = Object.values(chainConfig.tokens).find((t) => t.symbol === allowance.token_symbol)
-    if (!cfg) return []
-    return [{
-      address: (cfg.address ?? allowance.token_address) as string,
-      symbol: cfg.symbol,
-      decimals: cfg.decimals,
-    }]
-  })
-  const approvalCopy =
-    budgetLines.length === 0
-      ? 'No automatic spending is configured for this agent.'
-      : 'Payments within budget can run automatically. Payments above it are declined before any money moves.'
+  // #2473: the token options a FIRST budget is granted from come from the
+  // chain, not from the agent's existing budgets. `allowances` is a view
+  // projected from ACTIVE delegation rows (#1090), so deriving the options
+  // from it meant a brand-new agent offered no tokens, the grant form never
+  // rendered, and the page's "Add budget" button scrolled to nothing.
+  //
+  // A budget delegation is metered per ERC-20 token, so native tokens (no
+  // token address in the registry) are not grantable and are left out.
+  // Existing budgets are then unioned in so a delegation on a token outside
+  // the chain registry still resolves its symbol and decimals in the list.
+  const budgetTokenOptions: Array<{ address: string; symbol: string; decimals: number }> = []
+  const seenBudgetTokens = new Set<string>()
+  for (const token of Object.values(chainConfig?.tokens ?? {})) {
+    if (!token.address) continue
+    budgetTokenOptions.push({ address: token.address, symbol: token.symbol, decimals: token.decimals })
+    seenBudgetTokens.add(token.address.toLowerCase())
+  }
+  for (const allowance of currentAgent.allowances) {
+    const address = allowance.token_address
+    if (!address || seenBudgetTokens.has(address.toLowerCase())) continue
+    const cfg = Object.values(chainConfig?.tokens ?? {}).find((t) => t.symbol === allowance.token_symbol)
+    // Only a token the registry knows can be sized correctly; without decimals
+    // the amount would be parsed at the wrong scale, so an unknown token is
+    // left out of the picker rather than guessed at.
+    if (!cfg) continue
+    budgetTokenOptions.push({ address, symbol: cfg.symbol, decimals: cfg.decimals })
+    seenBudgetTokens.add(address.toLowerCase())
+  }
   const agentStatus = agentStatusPresentation(currentAgent.status)
 
   async function handlePause() {
@@ -515,46 +493,6 @@ export default function AgentDetailClient({ agentId }: Props) {
     }
   }
 
-  async function handleRevoke() {
-    if (revokeBlockedByOtherDevice) {
-      setErrorMessage(null)
-      return
-    }
-
-    if (
-      !publicClient ||
-      !signer ||
-      !safeAddress ||
-      !safeDetails
-    ) {
-      setErrorMessage('Connect your wallet and reload account details before revoking this agent.')
-      return
-    }
-
-    setPendingAction('revoke')
-    setErrorMessage(null)
-    try {
-      await revokeAgentOnChain({
-        agent: currentAgent,
-        publicClient,
-        signer,
-        safeAddress: safeAddress as Address,
-        safeDetails,
-        chainId,
-      })
-      await revokeAgent(currentAgent.id)
-      await refetch()
-      await refetchOnChain()
-    } catch (err) {
-      if (!isUserRejectedError(err)) {
-        setErrorMessage(err instanceof Error ? err.message : 'Revoke failed')
-      }
-    } finally {
-      setPendingAction(null)
-      setConfirmAction(null)
-    }
-  }
-
   return (
     <div className="max-w-5xl">
       <PageHeader
@@ -571,26 +509,19 @@ export default function AgentDetailClient({ agentId }: Props) {
                 <DropdownMenuTrigger
                   aria-label="Agent options"
                   disabled={pendingAction !== null}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Icon icon={EllipsisVertical} className="h-4 w-4" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  <DropdownMenuItem onSelect={openEditAgent}>Edit agent</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={openEditAgent}>
+                    Edit agent
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
                     Payment credentials
                   </DropdownMenuItem>
-                  {/* #1701. Delegation rail only — re-key replaces a signed
-                      delegation, which an older account simply does not have.
-                      The entry stays reachable on BOTH rails and the modal
-                      carries the refusal, rather than being disabled here: an
-                      owner whose key is lost needs to learn that re-onboarding
-                      is the path, and neither a hidden item nor a greyed one
-                      can tell them. A disabled button would also put the
-                      reason in a hover tooltip, which a keyboard or touch user
-                      never sees. */}
                   <DropdownMenuItem onSelect={() => setReplaceKeyOpen(true)}>
                     Replace signing key
                   </DropdownMenuItem>
@@ -630,17 +561,12 @@ export default function AgentDetailClient({ agentId }: Props) {
         </dl>
       </Card>
 
-      {revokeBlockedByOtherDevice ? (
-        <PasskeyOtherDeviceNotice className="mt-4" />
-      ) : null}
-
-      {currentAgent.account_type === 'delegator_hybrid' ? (
-        <>
+      <>
           <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
             <DelegationBudgetCard
               agentId={agentId}
               chainId={chainId}
-              tokens={recipientTokens}
+              tokens={budgetTokenOptions}
               onBudgetChange={refetch}
             />
           </div>
@@ -657,10 +583,19 @@ export default function AgentDetailClient({ agentId }: Props) {
               />
             </Card>
           ) : null}
-        </>
+      </>
+
+      {agentsError ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
+        >
+          Agent data could not refresh. This page is showing the last loaded record.
+          <Button className="ml-2" size="sm" variant="ghost" onClick={() => void refetch()}>
+            Try again
+          </Button>
+        </div>
       ) : null}
-      {/* Session-rail banner + recipients card retired with the rail (#834);
-          legacy AllowanceModule accounts manage budgets via EditAgentModal. */}
 
       {isPaused ? (
         <div className="mt-4">
@@ -731,6 +666,14 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
+      {hasBelowMinimumUsdc && delegateBalance ? (
+        <div className="mt-4">
+          <ApprovalRequiredBanner title="Recovery minimum not met" tone="neutral" density="compact">
+            Your agent’s wallet is holding {strandedSummary ?? 'USDC'} below the {delegateBalance.sweep_min_usdc} USDC recovery minimum. More stranded funds can bring the balance up to the minimum.
+          </ApprovalRequiredBanner>
+        </div>
+      ) : null}
+
       {errorMessage ? (
         <div className="mt-4 rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
           <p className="text-sm font-medium text-[var(--v2-danger)]">Action failed</p>
@@ -760,7 +703,10 @@ export default function AgentDetailClient({ agentId }: Props) {
         />
       </div>
 
-      <AgentPassportCard agentId={agentId} agentRevoked={isRevoked} />
+      <AgentPassportCard
+        agentId={agentId}
+        agentRevoked={isRevoked}
+      />
 
       <div className="mt-6 space-y-6">
           <AgentRulesSummary
@@ -789,7 +735,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                   ) : (
                     'No budget set'
                 ),
-                helper: approvalCopy,
+                helper: 'Payments above this budget are declined before any money moves.',
               },
             ]}
             footer={
@@ -799,7 +745,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                     ? 'This agent no longer has access through Haven.'
                     : isPaused
                       ? 'Paused agents cannot start new payments through Haven.'
-                      : 'Pause the agent or revoke its budget if you need to stop access.'}
+                      : 'Pause the agent or remove its budget if you need to stop access.'}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {!isRevoked ? (
@@ -832,22 +778,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                       {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
                     </Button>
                   ) : null}
-                  {/* Safe revoke is an AllowanceModule teardown; on delegation
-                      agents the whole shutdown is Remove below (#1402), so the
-                      Safe control is hidden there. */}
-                  {!isRevoked && !isDelegationAgent ? (
-                    <Button
-                      onClick={() => setConfirmAction('revoke')}
-                      disabled={pendingAction !== null || revokeBlockedByOtherDevice}
-                      variant="danger"
-                      size="sm"
-                    >
-                      Revoke agent budget
-                    </Button>
-                  ) : null}
-                  {/* #1402: Remove — delegation agents any time while not yet
-                      archived; legacy agents once revoked (archive-only leg). */}
-                  {!isArchived && (isDelegationAgent || isRevoked) ? (
+                  {!isArchived ? (
                     <Button
                       onClick={() => setRemoveOpen(true)}
                       disabled={pendingAction !== null}
@@ -902,7 +833,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 columns={['direction', 'activity', 'fromTo', 'date', 'amount', 'link']}
                 emptyState={{
                   title: 'No activity yet',
-                  body: 'Payments, approvals, and confirmations for this agent will appear here.',
+                  body: 'Payments for this agent will appear here.',
                 }}
               />
             </Card>
@@ -914,39 +845,6 @@ export default function AgentDetailClient({ agentId }: Props) {
           />
 
       </div>
-
-      <ConfirmDialog
-        open={confirmAction === 'revoke'}
-        onCancel={() => setConfirmAction(null)}
-        onConfirm={handleRevoke}
-        title="Revoke this agent?"
-        body={(
-          <>
-            <p>
-              This removes the agent budget from the Haven wallet. The agent will need a new setup if you want to use it again.
-            </p>
-            <OnchainActionNotice
-              operationGate={operationGate}
-              noSignerMessage={revokeNoSignerMessage}
-              className="mt-4"
-            />
-          </>
-        )}
-        confirmLabel="Revoke agent"
-        loading={pendingAction === 'revoke'}
-        confirmDisabled={revokeApprovalBlocked}
-        confirmButtonWrapper={(button) => (
-          <OnchainActionGate
-            requiredChainId={chainId}
-            operationGate={operationGate}
-            noSignerMessage={revokeNoSignerMessage}
-            showNotice={false}
-            className="min-w-44"
-          >
-            {() => button}
-          </OnchainActionGate>
-        )}
-      />
 
       {removeOpen && currentAgent ? (
         <RemoveAgentDialog
@@ -967,16 +865,10 @@ export default function AgentDetailClient({ agentId }: Props) {
         <EditAgentModal
           open={editOpen}
           onClose={closeEdit}
-          mode={editMode}
           agent={currentAgent}
-          safeAddress={safeAddress ?? ''}
-          chainId={chainId}
-          safeDetails={safeDetails}
-          existingOnChainAllowances={existingOnChainAllowances}
           onUpdated={() => {
             refetch()
             setEditOpen(false)
-            void refetchOnChain()
           }}
         />
       ) : null}
@@ -987,7 +879,6 @@ export default function AgentDetailClient({ agentId }: Props) {
         agentId={agentId}
         agentName={currentAgent.name}
         chainId={chainId}
-        isDelegationAgent={isDelegationAgent}
         currentDelegateAddress={currentAgent.delegate_address}
         recentPayments={activity.filter(isPaymentActivityItem)}
         hasAnchoredPassport={passport?.status === 'anchored' && passport.attestation_uid !== null}

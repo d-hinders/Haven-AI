@@ -5,6 +5,7 @@ import {
   HavenError,
   HavenSigningError,
   HavenUnsupportedSignerVersionError,
+  connectorRerunCommand,
   type X402PaymentRequired,
 } from '@haven_ai/sdk'
 import { z } from 'zod/v3'
@@ -442,7 +443,7 @@ export function createToolHandlers(
     if (!identity) {
       throw new HavenSigningError(
         'payment_id signing needs the agent identity (identity.json next to the signer ' +
-          'credentials), which this signer could not load. Re-run `npx @haven_ai/connect@alpha` ' +
+          `credentials), which this signer could not load. Re-run \`${connectorRerunCommand()}\` ` +
           'to restore it, or pass typed_data_b64 from the quote result instead.',
       )
     }

@@ -2,32 +2,22 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const { budgetCardTokens } = vi.hoisted(() => ({
+  budgetCardTokens: [] as Array<Array<{ address: string; symbol: string; decimals: number }>>,
+}))
+
 const {
   mockUseAuth,
   mockUseAgents,
   mockUseAgentActivity,
-  mockUseOnChainAllowances,
-  mockUsePublicClient,
-  mockUseSafeDetails,
-  mockUseSafeOperationGate,
-  mockUseActiveSigner,
   mockUseDelegateBalance,
   mockUseAgentPassport,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUseAgentActivity: vi.fn(),
-  mockUseOnChainAllowances: vi.fn(),
-  mockUsePublicClient: vi.fn(),
-  mockUseSafeDetails: vi.fn(),
-  mockUseSafeOperationGate: vi.fn(),
-  mockUseActiveSigner: vi.fn(),
   mockUseDelegateBalance: vi.fn(),
   mockUseAgentPassport: vi.fn(),
-}))
-
-vi.mock('wagmi', () => ({
-  usePublicClient: (...args: unknown[]) => mockUsePublicClient(...args),
 }))
 
 // #1402: the component navigates to /agents after a completed remove.
@@ -51,30 +41,12 @@ vi.mock('@/hooks/useAgentActivity', async () => {
   }
 })
 
-vi.mock('@/hooks/useOnChainAllowances', () => ({
-  useOnChainAllowances: (...args: unknown[]) => mockUseOnChainAllowances(...args),
-}))
-
 vi.mock('@/hooks/useDelegateBalance', () => ({
   useDelegateBalance: (...args: unknown[]) => mockUseDelegateBalance(...args),
 }))
 
 vi.mock('@/hooks/useAgentPassport', () => ({
   useAgentPassport: (...args: unknown[]) => mockUseAgentPassport(...args),
-}))
-
-vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: (...args: unknown[]) => mockUseSafeDetails(...args),
-}))
-
-vi.mock('@/hooks/useSafeOperationGate', () => ({
-  useSafeOperationGate: (...args: unknown[]) => mockUseSafeOperationGate(...args),
-}))
-
-vi.mock('@/lib/signer', () => ({
-  useActiveSigner: (...args: unknown[]) => mockUseActiveSigner(...args),
-  // Real predicate shape (#1079): narrows away the delegator_passkey variant.
-  isSafeCapableSigner: (s: { type?: string } | null) => s !== null && s.type !== 'delegator_passkey',
 }))
 
 vi.mock('@/components/OnchainActionGate', () => ({
@@ -92,17 +64,26 @@ vi.mock('@/components/PasskeyOtherDeviceNotice', () => ({
 vi.mock('@/components/EditAgentModal', () => ({
   // Renders a marker when open so routing tests can assert the modal did /
   // did not open (#1079).
-  default: ({ open, mode }: { open: boolean; mode?: string }) =>
-    open ? <div data-testid="edit-agent-modal">{mode}</div> : null,
+  default: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="edit-agent-modal">Edit agent</div> : null,
 }))
 
 vi.mock('@/components/DelegationBudgetCard', () => ({
-  default: () => <div>DelegationBudgetCard</div>,
+  // #2473: records the token options it was handed, so the first-budget
+  // regression can be asserted without rendering the real card.
+  default: (props: { tokens: Array<{ address: string; symbol: string; decimals: number }> }) => {
+    budgetCardTokens.push(props.tokens)
+    return <div>DelegationBudgetCard</div>
+  },
   DELEGATION_BUDGET_CARD_ID: 'delegation-budget-card',
 }))
 
 vi.mock('@/components/PaymentCredentialsModal', () => ({
   default: () => null,
+}))
+
+vi.mock('@/components/agent-panel/ReplaceSigningKeyModal', () => ({
+  ReplaceSigningKeyModal: () => null,
 }))
 
 vi.mock('@/components/ConfirmDialog', () => ({
@@ -164,6 +145,7 @@ describe('AgentDetailClient last-activity metadata', () => {
           created_at: '2026-05-01T00:00:00Z',
           mcp_last_seen_at: '2026-06-01T10:00:00Z',
           allowances: [],
+          account_type: 'delegator_hybrid',
         },
       ],
       loading: false,
@@ -177,26 +159,12 @@ describe('AgentDetailClient last-activity metadata', () => {
       stats: null,
       loading: false,
     })
-    mockUseOnChainAllowances.mockReturnValue({
-      data: new Map(),
-      refetch: vi.fn(),
-    })
-    mockUsePublicClient.mockReturnValue({})
-    mockUseSafeDetails.mockReturnValue({
-      details: {
-        address: SAFE.safe_address,
-        owners: ['0x5555555555555555555555555555555555555555'],
-        threshold: 1,
-        nonce: 1,
-      },
-    })
-    mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
-    mockUseActiveSigner.mockReturnValue(null)
     // Default: delegate wallet is empty, so recovery UI stays hidden.
     mockUseDelegateBalance.mockReturnValue({
       balance: null,
       hasStranded: false,
       hasRecoverableUsdc: false,
+      hasBelowMinimumUsdc: false,
       loading: false,
       refetch: vi.fn(),
     })
@@ -286,6 +254,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc: '0.04',
         usdc_atomic: '40000',
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
       },
       hasStranded: true,
       hasRecoverableUsdc: true,
@@ -302,6 +271,33 @@ describe('AgentDetailClient last-activity metadata', () => {
     ).toHaveAttribute('href', '/agents/agent-1/sweep')
   })
 
+  it('explains when stranded USDC is below the recovery minimum without offering a sweep', () => {
+    mockUseDelegateBalance.mockReturnValue({
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        safe_address: SAFE.safe_address,
+        chain_id: 8453,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '0.005',
+        usdc_atomic: '5000',
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
+      },
+      hasStranded: true,
+      hasRecoverableUsdc: false,
+      hasBelowMinimumUsdc: true,
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.getByText('Recovery minimum not met')).toBeInTheDocument()
+    expect(screen.getByText(/0\.005 USDC below the 0\.01 USDC recovery minimum/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Recover funds to your Haven wallet' })).not.toBeInTheDocument()
+  })
+
   it('hides the recover-funds prompt for an ETH-only delegate (gasless path is USDC-only)', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: {
@@ -313,6 +309,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc: '0',
         usdc_atomic: '0',
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
       },
       hasStranded: true,
       hasRecoverableUsdc: false,
@@ -347,6 +344,7 @@ describe('AgentDetailClient last-activity metadata', () => {
         usdc,
         usdc_atomic: usdcAtomic,
         usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
       },
       hasStranded: true,
       hasRecoverableUsdc: true,
@@ -588,62 +586,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getAllByText('Haven wallet 0x4444…4444').length).toBeGreaterThan(0)
   })
 
-  it('uses stored agent wallet chain when the wallet is missing from auth state', () => {
-    const baseSafeAddress = '0x3333333333333333333333333333333333333333'
-    const delegateAddress = '0x4444444444444444444444444444444444444444'
-    mockUseAuth.mockReturnValue({
-      user: {
-        safes: [],
-      },
-    })
-    mockUseAgents.mockReturnValue({
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Base agent',
-          description: null,
-          delegate_address: delegateAddress,
-          safe_id: 'safe-base',
-          safe_address: baseSafeAddress,
-          safe_name: 'Base account',
-          safe_chain_id: 8453,
-          status: 'active',
-          created_at: '2026-05-01T00:00:00Z',
-          mcp_last_seen_at: null,
-          allowances: [{
-            id: 'allowance-base-usdc',
-            agent_id: 'agent-1',
-            token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-            token_symbol: 'USDC',
-            allowance_amount: '1000000',
-            reset_period_min: 1440,
-          }],
-        },
-      ],
-      loading: false,
-      pauseAgent: vi.fn(),
-      resumeAgent: vi.fn(),
-      revokeAgent: vi.fn(),
-      refetch: vi.fn(),
-    })
-
-    render(<AgentDetailClient agentId="agent-1" />)
-
-    expect(mockUseSafeDetails).toHaveBeenCalledWith(baseSafeAddress, { chainId: 8453 })
-    expect(mockUseOnChainAllowances).toHaveBeenCalledWith(baseSafeAddress, [delegateAddress], 8453)
-    expect(mockUsePublicClient).toHaveBeenCalledWith({ chainId: 8453 })
-    expect(mockUseActiveSigner).toHaveBeenCalledWith({
-      safeAddress: baseSafeAddress,
-      chainId: 8453,
-    })
-    expect(mockUseSafeOperationGate).toHaveBeenCalledWith({
-      safeAddress: baseSafeAddress,
-      chainId: 8453,
-    })
-    expect(screen.getByText('Base')).toBeInTheDocument()
-    expect(screen.getByText('1.00 USDC per day')).toBeInTheDocument()
-  })
-
   // ── Budget-affordance routing (#1079) ──────────────────────────────────
 
   function mockDelegationAgent() {
@@ -701,19 +643,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByRole('button', { name: /Add a backup/ })).not.toBeInTheDocument()
   })
 
-  it('hides the backup & recovery pointer on a legacy agent', () => {
-    render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('link', { name: /Backup & recovery/ })).not.toBeInTheDocument()
-  })
-
-  it('still opens EditAgentModal in budget mode on a legacy agent', () => {
-    render(<AgentDetailClient agentId="agent-1" />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Update budget' }))
-
-    expect(screen.getByTestId('edit-agent-modal')).toHaveTextContent('budget')
-  })
-
   it('reads the delegate balance for REVOKED agents too — the recovery banner must reach them (#1403)', () => {
     // The old gate skipped the read for revoked agents ("the endpoint 404s
     // anyway") — false since #1403, and exactly backwards: the sequence that
@@ -732,37 +661,48 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(calls[calls.length - 1][0]).toBe('agent-1')
   })
 
-  it('hides the Safe revoke control on a delegation agent, keeps it on a legacy agent', () => {
-    mockDelegationAgent()
-    const { unmount } = render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('button', { name: 'Revoke agent budget' })).not.toBeInTheDocument()
-    unmount()
-
-    // Legacy fixture from beforeEach.
+  it('reads delegate balance for a legacy agent so residual funds remain recoverable (#2258)', () => {
+    const base = mockUseAgents()
     mockUseAgents.mockReturnValue({
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'Research agent',
-          description: null,
-          delegate_address: '0x2222222222222222222222222222222222222222',
-          safe_id: 'safe-1',
-          safe_address: SAFE.safe_address,
-          safe_name: 'Main account',
-          status: 'active',
-          created_at: '2026-05-01T00:00:00Z',
-          mcp_last_seen_at: null,
-          allowances: [],
-        },
-      ],
+      ...base,
+      agents: base.agents.map((agent: { id: string }) => ({
+        ...agent,
+        account_type: 'safe',
+      })),
+    })
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    const calls = mockUseDelegateBalance.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls[calls.length - 1][0]).toBe('agent-1')
+  })
+
+  it('shows recovery for a legacy agent with a residual USDC balance (#2258)', () => {
+    mockAgentWith({ account_type: 'safe' })
+    mockUseDelegateBalance.mockReturnValue({
+      balance: {
+        delegate_address: '0x2222222222222222222222222222222222222222',
+        safe_address: SAFE.safe_address,
+        chain_id: 8453,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '0.04',
+        usdc_atomic: '40000',
+        usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        sweep_min_usdc: '0.01',
+      },
+      hasStranded: true,
+      hasRecoverableUsdc: true,
       loading: false,
-      pauseAgent: vi.fn(),
-      resumeAgent: vi.fn(),
-      revokeAgent: vi.fn(),
       refetch: vi.fn(),
     })
+
     render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
+
+    expect(screen.getByText('Recoverable funds in agent wallet')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Recover funds to your Haven wallet' }))
+      .toHaveAttribute('href', '/agents/agent-1/sweep')
   })
 
   // #1402: the Remove/Restore visibility gates on the detail footer.
@@ -802,13 +742,6 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByRole('button', { name: 'Restore to list' })).not.toBeInTheDocument()
   })
 
-  it('hides Remove on an operational LEGACY agent — Revoke stays its shutdown (#1402)', () => {
-    mockAgentWith({ account_type: undefined })
-    render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Revoke agent budget' })).toBeInTheDocument()
-  })
-
   /**
    * #2230: this banner's sentence is the one BOTH surfaces render.
    *
@@ -828,17 +761,19 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByText(AGENT_PAUSED_BODY)).toBeInTheDocument()
   })
 
-  it('offers Remove (archive leg) on a revoked legacy agent (#1402)', () => {
-    mockAgentWith({ account_type: undefined, status: 'revoked' })
-    render(<AgentDetailClient agentId="agent-1" />)
-    expect(screen.getByRole('button', { name: 'Remove agent' })).toBeInTheDocument()
-  })
-
   it('an archived agent gets Restore to list and no Remove (#1402)', () => {
     mockAgentWith({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
+  })
+
+  it('offers Restore to list for an archived legacy record without adding authority (#2258)', () => {
+    mockAgentWith({ account_type: undefined, status: 'revoked', archived_at: '2026-06-01T00:00:00Z' })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('button', { name: 'Restore to list' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Unlink agent' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove agent' })).not.toBeInTheDocument()
   })
 
   it('double-clicking Restore fires unarchive ONCE — pendingAction guards it (#1402)', async () => {
@@ -855,5 +790,118 @@ describe('AgentDetailClient last-activity metadata', () => {
     release()
     await Promise.resolve()
     expect(unarchiveAgent).toHaveBeenCalledTimes(1)
+  })
+})
+
+// #2473: the token options for a FIRST budget grant must come from the chain,
+// not from `allowances` — which is a view over ACTIVE delegations (#1090) and
+// is therefore empty for exactly the agent that has no budget yet. Deriving
+// them from allowances left the grant form unrendered and "Add budget" inert.
+describe('AgentDetailClient first-budget token options (#2473)', () => {
+  beforeEach(() => {
+    budgetCardTokens.length = 0
+    mockUseAuth.mockReturnValue({
+      user: { safes: [{ ...SAFE, chain_id: 8453 }] },
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          safe_id: 'safe-1',
+          safe_address: SAFE.safe_address,
+          safe_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [],
+          account_type: 'delegator_hybrid',
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    mockUseAgentActivity.mockReturnValue({ activity: [], stats: null, loading: false })
+    mockUseDelegateBalance.mockReturnValue({
+      balance: null,
+      hasStranded: false,
+      hasRecoverableUsdc: false,
+      hasBelowMinimumUsdc: false,
+      loading: false,
+      refetch: vi.fn(),
+    })
+    mockUseAgentPassport.mockReturnValue({ passport: null, loading: false, refetch: vi.fn() })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('offers grantable tokens to an agent with no budget yet', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    const tokens = budgetCardTokens.at(-1)
+    expect(tokens).toBeDefined()
+    expect(tokens!.length).toBeGreaterThan(0)
+    expect(tokens!.map((t) => t.symbol)).toContain('USDC')
+  })
+
+  // Reviewer finding (#2473): an allowance token the chain registry does not
+  // know has no trustworthy `decimals`. Guessing one and handing it to
+  // BudgetRow makes `formatUnits` render a real on-chain amount at the wrong
+  // scale — a spend cap shown as ~0 or ~unlimited. Omitting it instead lets
+  // BudgetRow fall through to its raw-atomic fallback: ugly, never wrong.
+  it('omits an allowance token the chain registry does not know, rather than guessing its decimals', () => {
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          safe_id: 'safe-1',
+          safe_address: SAFE.safe_address,
+          safe_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [
+            {
+              token_symbol: 'MYSTERY',
+              token_address: '0x9999999999999999999999999999999999999999',
+              allowance_amount: '1.00',
+              reset_period_min: 1440,
+            },
+          ],
+          account_type: 'delegator_hybrid',
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    const tokens = budgetCardTokens.at(-1)!
+    expect(tokens.map((t) => t.symbol)).not.toContain('MYSTERY')
+    expect(
+      tokens.some((t) => t.address.toLowerCase() === '0x9999999999999999999999999999999999999999'),
+    ).toBe(false)
+    // The registry's own tokens are still offered.
+    expect(tokens.map((t) => t.symbol)).toContain('USDC')
+  })
+
+  it('offers only tokens a budget can be metered in — no native token', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    const tokens = budgetCardTokens.at(-1)!
+    // A budget delegation is per ERC-20 token; the chain's native token has
+    // no token address in the registry and cannot be granted.
+    expect(tokens.map((t) => t.symbol)).not.toContain('ETH')
+    expect(tokens.every((t) => /^0x[0-9a-fA-F]{40}$/.test(t.address))).toBe(true)
   })
 })

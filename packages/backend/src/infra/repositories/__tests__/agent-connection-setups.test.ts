@@ -56,6 +56,7 @@ function newSetup(userId: string, safeId: string, overrides: Partial<NewSetup> =
     challengeMessage: 'sign me',
     issuePassport: false,
     source: null,
+    via: null,
     ...overrides,
   }
 }
@@ -199,6 +200,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
           apiKeyPrefix: 'sk_agent_ab',
           connectorVersion: '1.2.3',
           runtime: 'node',
+          runMode: null,
           connectorContext: { host: 'mac' },
           installStatus: { step: 'registered' },
         },
@@ -211,6 +213,95 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     expect(row!.agent_id).toBe(agent.rows[0].id)
     expect(row!.setup_token_consumed_at).not.toBeNull()
     expect(row!.install_status).toEqual({ step: 'registered' })
+  })
+
+  /**
+   * #2528: `run_mode` on the real table, not a mock's argument list.
+   *
+   * The claim under test is the database's — that a column added by migration
+   * 077 is written by the register UPDATE and reads back — which is exactly
+   * the class `testing-strategy.md` (epic #1219) says belongs on the real-DB
+   * harness. A positional-mock route test can only prove the value reached
+   * `pg.query`; it cannot prove the column exists or that the SQL binds the
+   * parameter it thinks it does. The `$8`/`$9`/`$10` renumbering this change
+   * required is precisely the mistake that survives a mock and fails here.
+   */
+  it('markSetupRegistered persists run_mode (#2528)', async () => {
+    const { userId, safeId } = await seedUserAndSafe()
+    const setup = newSetup(userId, safeId)
+    await insertSetupWithAllowances(setup, [])
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, status) VALUES ($1, 'pending', 'pending_approval') RETURNING id`,
+      [userId],
+    )
+
+    await inTransaction(async (tx) => {
+      await markSetupRegistered(
+        {
+          setupId: setup.id,
+          agentId: agent.rows[0].id,
+          delegateAddress: ADDR('d7'),
+          proofSignature: '0xproof',
+          apiKeyPrefix: 'sk_agent_ab',
+          connectorVersion: '1.2.3',
+          runtime: 'claude-code',
+          runMode: 'json',
+          connectorContext: {},
+          installStatus: {},
+        },
+        tx,
+      )
+    })
+
+    const row = await db.query<{ run_mode: string | null; runtime: string | null }>(
+      `SELECT run_mode, runtime FROM agent_connection_setups WHERE id = $1`,
+      [setup.id],
+    )
+    expect(row.rows[0].run_mode).toBe('json')
+    // Asserted together on purpose: the two travel in adjacent bind positions,
+    // so a renumbering slip would show up as one landing in the other's column
+    // — which a single-column assertion reads as a pass.
+    expect(row.rows[0].runtime).toBe('claude-code')
+  })
+
+  /**
+   * The older-connector case, on the real table: a register that sends no
+   * `run_mode` must leave the column NULL rather than fail, and must not
+   * disturb `runtime` beside it.
+   */
+  it('markSetupRegistered leaves run_mode NULL when the connector does not send it (#2528)', async () => {
+    const { userId, safeId } = await seedUserAndSafe()
+    const setup = newSetup(userId, safeId)
+    await insertSetupWithAllowances(setup, [])
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, status) VALUES ($1, 'pending', 'pending_approval') RETURNING id`,
+      [userId],
+    )
+
+    await inTransaction(async (tx) => {
+      await markSetupRegistered(
+        {
+          setupId: setup.id,
+          agentId: agent.rows[0].id,
+          delegateAddress: ADDR('d8'),
+          proofSignature: '0xproof',
+          apiKeyPrefix: 'sk_agent_ab',
+          connectorVersion: '1.2.3',
+          runtime: 'node',
+          runMode: null,
+          connectorContext: {},
+          installStatus: {},
+        },
+        tx,
+      )
+    })
+
+    const row = await db.query<{ run_mode: string | null; runtime: string | null }>(
+      `SELECT run_mode, runtime FROM agent_connection_setups WHERE id = $1`,
+      [setup.id],
+    )
+    expect(row.rows[0].run_mode).toBeNull()
+    expect(row.rows[0].runtime).toBe('node')
   })
 
   it('mergeInstallStatus MERGES jsonb keys — later steps never erase earlier ones', async () => {

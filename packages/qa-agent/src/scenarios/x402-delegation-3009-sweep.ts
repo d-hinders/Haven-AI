@@ -35,7 +35,7 @@
 import { HavenClient, buildSweepTypedData } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
-import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, describeObserverRpc } from '../lib/chain.js'
 import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
@@ -139,7 +139,8 @@ export const x402Delegation3009Sweep: Scenario = {
     if (prep.nothing_stranded || !prep.authorization) {
       return fail(
         `backend reported nothing stranded, but the delegate held ${fmt(stranded)} USDC on ` +
-          `${BASE_SEPOLIA_RPC} — a backend↔harness RPC discrepancy, not a clean recovery`,
+          `the harness's observer node [${describeObserverRpc()}] — a backend↔harness RPC ` +
+          `discrepancy, not a clean recovery`,
       )
     }
 

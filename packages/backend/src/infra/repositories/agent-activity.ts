@@ -64,7 +64,6 @@ export interface ActivityPaymentRow {
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
   execution_rail: string | null
-  session_permission_id: string | null
   delegation_hash: string | null
   created_at: string
   confirmed_at: string | null
@@ -101,7 +100,6 @@ export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
               pi.payment_resource_url,
               pi.merchant_address,
               pi.execution_rail,
-              pi.session_permission_id,
               pi.delegation_hash,
               pi.created_at,
               pi.confirmed_at,
@@ -166,7 +164,6 @@ export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
               pi.payment_resource_url,
               pi.merchant_address,
               pi.execution_rail,
-              pi.session_permission_id,
               pi.delegation_hash,
               pi.created_at,
               pi.confirmed_at,

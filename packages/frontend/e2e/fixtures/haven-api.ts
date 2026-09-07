@@ -14,9 +14,12 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  * therefore pinning the pixel-and-DOM behaviour of a configuration that answers
  * HTTP 410 in production (#1986): green, and true about nobody.
  *
- * The default is now the live rail and a legacy spec opts DOWN explicitly, the
- * same inversion `scripts/screenshot.mjs` was corrected to across #2205/#2227/
- * #2233. `legacySafe` below is the sanctioned opt-down.
+ * The default is now the live rail and the shared fixture carries NO opt-down:
+ * #2264 made the legacy shape explicit, and #2459 deleted it — `legacySafe`
+ * and the opt-down page helper built on it — once #2413 removed the last
+ * caller and the list queries stopped serving legacy accounts altogether. A
+ * spec that wants a retired-rail page today has nothing to opt down TO — the
+ * state does not exist on the wire.
  *
  * The value is `'safe'` / `'delegator_hybrid'` and never `null` or absent:
  * migration `041_hybrid_accounts.ts` declares the column `VARCHAR(32) NOT NULL
@@ -32,17 +35,6 @@ export const testSafe = {
   account_type: 'delegator_hybrid',
   created_at: '2026-05-01T10:00:00.000Z',
 }
-
-/**
- * The explicit opt-DOWN to the retired AllowanceModule rail (#2264).
- *
- * Spread over `testSafe` (and mirrored onto the agent, whose `account_type` is
- * selected as `us.account_type` off the joined `user_safes` row — one account
- * answers one value, #2202) by a spec whose SUBJECT is legacy-rail rendering.
- * Anything that is merely rail-independent must NOT reach for this: the point
- * of the inversion is that the retired rail appears only where a spec says so.
- */
-export const legacySafe = { ...testSafe, account_type: 'safe' as const }
 
 export const testUser = {
   id: 'user-e2e',
@@ -68,8 +60,8 @@ export const testAgent = {
   // #2264: the agent's rail marker. It is not an `agents` column — every
   // agent-row read selects it as `us.account_type` off the joined `user_safes`
   // row (`infra/repositories/agents.ts`), so it must agree with `testSafe`,
-  // which this agent names via `safe_id`. A spec that opts DOWN to
-  // `legacySafe` has to move BOTH or it describes an account that cannot exist.
+  // which this agent names via `safe_id` — one account answers one value,
+  // and since #2459 there is no opt-down shape left to disagree with.
   account_type: 'delegator_hybrid',
   created_at: '2026-05-02T10:00:00.000Z',
   // #2264: the DERIVED delegation-budget projection, which is what fills this
@@ -258,20 +250,27 @@ export async function mockHavenApi(page: Page) {
         setup_prompt: [
           'Please connect this workspace to Haven.',
           '',
-          'I approve running this exact Haven setup command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
+          'I approve running this exact Haven connector command. It may download and execute the published npm package @haven_ai/connect@alpha, connect to Haven at https://api.haven.example, write local Haven credential files under ~/.haven, and update the local agent MCP config when supported.',
           '',
           'Run this exact command:',
           '',
           'npx -y @haven_ai/connect@alpha --setup hv_setup_e2e123 --api https://api.haven.example --ack-local-tools --runtime claude-code',
           '',
+          'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+          '',
           'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
           '',
           'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
           '',
-          'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr.',
+          'If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.',
+          "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
+          'If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.',
           'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
           '',
-          'When the connector finishes, tell me to return to Haven to approve the budget.',
+          // #2486: kept line-for-line equal to the backend's `buildSetupPrompt`
+          // by a parity test in packages/backend/src/routes/__tests__/
+          // agent-connection-setups.test.ts — edit the backend first.
+          "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — the approval link if those steps printed one, otherwise that you need to return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
         ].join('\n'),
       }, 201)
       return
@@ -520,58 +519,61 @@ export async function mockHavenApi(page: Page) {
 }
 
 /**
- * Opt this page DOWN to the retired AllowanceModule rail (#2264).
+ * Serve the shared account's signer set as OWNER-ONLY: one EOA owner, zero
+ * enrolled passkeys (#2284, the #2068 shape).
  *
- * Register it AFTER `mockHavenApi` — Playwright matches the most recently
- * registered handler first, and this one defers to the shared fixture for every
- * route it does not answer, via `route.fallback()`. Same layering as
- * `focus-visible.visual.spec.ts`'s `seedAgents`, for the same reason: the
- * shared fixture is read by a dozen specs, so a legacy account must not arrive
- * there.
+ * This is a LIVE-RAIL configuration, not a fixture invention — the rule
+ * `injected-wallet.ts` states (a fixture must not reach a state the product
+ * cannot) is met on three counts:
  *
- * BOTH sides move together. `account_type` is not an `agents` column — it is
- * selected as `us.account_type` off the joined `user_safes` row — so a legacy
- * account with a `delegator_hybrid` agent pointing at it is a row no query can
- * produce (#2202). The agent's `allowances` empties for a related reason:
- * `GET /agents` returns the derived delegation projection for a
- * `delegator_hybrid` agent and `[]` for every other, and the `agent_allowances`
- * read surface it used to mirror is retired (#1440/#2020), so a legacy agent
- * carrying budget rows is union-legal on the wire and emitted by nothing
- * (#2224).
+ *  1. `POST /accounts/hybrid { owner_address }` with no `passkeys` provisions
+ *     exactly this account (`routes/hybrid-accounts.ts` requires at least one
+ *     of the two, and #1153 made a single signer permitted); the delegation
+ *     pilot script `packages/qa-agent/src/pilot/provision-hybrid.ts` does so
+ *     as its first step, and `rails/hybrid-account-config.ts` treats an
+ *     owner-only set as a deployable signer config.
+ *  2. It is reachable from the dashboard's own passkey onboarding too:
+ *     `add_owner` then `remove_passkey` — the `remove_passkey` floor in
+ *     `rails/hybrid-signer-actions.ts` refuses only when the passkey is the
+ *     LAST signer (`passkeys.length === 1 && !ownerAddress`).
+ *  3. It is `account_type = 'delegator_hybrid'` / `execution_rail =
+ *     'delegation'`, so it SPENDS: the retired rail's 410s (#1986) do not
+ *     apply, and the owner EOA signs budget grants and revokes (#828).
  *
- * Use it only where the retired rail IS the subject, and say why at the call
- * site. Anything rail-independent stays on the default.
+ * What it does to `WalletButton`: with no passkey in the set, neither passkey
+ * branch can fire (`useActiveSigner` resolves `delegator_passkey` only for a
+ * non-empty set — signer.test.ts › "owner-only hybrid set: the connected OWNER
+ * wallet resolves as the EOA signer (#2068)"), so a connected wallet on a
+ * supported chain reaches the connected-EOA branch. WHICH label that branch
+ * carries is `useSafeOperationGate`'s call: the named owner connected renders
+ * the truncated address; any other wallet renders "Wrong wallet" (#2073).
+ * `ownerAddress` is therefore the caller's decision, made explicit.
+ *
+ * Both signer-set reads move together — the account-scoped one `AuthContext`
+ * hydrates from and the agent-scoped twin (#888) — for the reason the shared
+ * handlers give: same account, same answer. Register AFTER `mockHavenApi`
+ * (later-registered routes win); everything else falls back to the shared
+ * fixture. Two specs use it: `wallet-button-collapsed-states.visual.spec.ts`
+ * (the collapsed connected-EOA captures) and `wallet-signer-offering.spec.ts`
+ * (the owner-match / "Wrong wallet" pills, #2073) — one encoding of the shape,
+ * so the two cannot drift the way #2264 found two fixtures drifting.
  */
-export async function optDownToLegacyRail(page: Page) {
+export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: string) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
     if (request.method() !== 'GET') return route.fallback()
 
-    if (path === '/auth/me') {
-      await fulfillJson(route, { ...testUser, safes: [legacySafe] })
-      return
-    }
-    if (path === '/agents') {
-      await fulfillJson(route, {
-        agents: [{ ...testAgent, account_type: 'safe', allowances: [] }],
-      })
-      return
-    }
-    // The dashboard's own copy of the same projection, and it empties for the
-    // same reason: `routes/dashboard.ts` fills `allowancesByAgent` from the
-    // derived delegation view only for a `delegator_hybrid` account and hands
-    // every other agent `[]`. Left on the shared fixture, an opted-down page
-    // would serve a 250 USDC budget row for an account the backend would
-    // answer with none — the very shape this helper exists to keep out.
-    if (path === '/dashboard/overview') {
-      await fulfillJson(route, {
-        ...dashboardOverview,
-        agents: dashboardOverview.agents.map((agent) => ({ ...agent, allowances: [] })),
-      })
-      return
-    }
-    await route.fallback()
+    const isAccountRead = path.startsWith('/accounts/hybrid/') && path.endsWith('/signers')
+    const isAgentRead = path.startsWith('/agents/') && path.endsWith('/account-signers')
+    if (!isAccountRead && !isAgentRead) return route.fallback()
+
+    await fulfillJson(route, {
+      account_address: testSafeAddress,
+      chain_id: testSafe.chain_id,
+      owner_address: ownerAddress,
+      passkeys: [],
+    })
   })
 }
 
@@ -940,7 +942,7 @@ export async function expectNoHorizontalOverflow(page: Page) {
  * scroller inside one of these dialogs will fail these specs.** The exclusion
  * above is purely geometric and does nothing for a properly-sized
  * `overflow-x-auto` wrapper. None of the three dialogs contains one today —
- * verified, not assumed — but a `CodeBlock` showing a setup command, or an
+ * verified, not assumed — but a `CodeBlock` showing a connector command, or an
  * `overflow-x-auto` element holding a full delegate address or tx hash, is a
  * plausible next addition to any of them, and it is exactly the idiom the
  * playbook recommends for #1772-shaped defects. The next author to add one

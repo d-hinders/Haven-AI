@@ -5,7 +5,7 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-08-24" # #1984: step 3.1 told the operator to flip NEXT_PUBLIC_DELEGATION_ONBOARDING=1 on the prod Vercel scope as the launch switch. That flag is REMOVED — onboarding provisions Hybrid unconditionally — so the step is rewritten to name the backend DELEGATION_RAIL_CHAIN_IDS as the only remaining authority on where the rail serves. The rest of the runbook re-read; no other step referenced the flag. Prior: #1458: §4.2 added — the erc7710 merchant canary, prepared but NOT run; prod baseline measured (eip3009 only, chain 8453) and the pinned Base DelegationManager verified against the kit. The variable change and the mainnet payment are owner steps. Prior: §4.1 run log added — canary completed on the 0.1.20 train; §§1-3 re-read, probe guidance unchanged
+last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of the reconciliation command and health-probe source; prior notes remain in git history.
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)
@@ -25,8 +25,9 @@ order under [Widening](#widening), never before.
 
 ## 1. Pre-flight (before ANY mainnet payment)
 
-Run all of these from your laptop; none needs prod credentials beyond the
-prod API URL.
+Run all of these from your laptop. Only the reconciliation probe needs the
+operator-configured `HAVEN_OPS_TOKEN`, in addition to the prod API URL; it
+does not require any signing key or wallet credential.
 
 1. **Bundler credential targets 8453.**
    `DELEGATION_RAIL_BUNDLER_URL` is chain-scoped by its URL path
@@ -85,8 +86,15 @@ prod API URL.
 
 4. **Relayer funded + monitors alive + no reconciliation debt.**
 
+   Set a high-entropy `HAVEN_OPS_TOKEN` on the dev Railway backend and verify
+   this change there first. Set the production service's token before its next
+   production deployment — it does not need a standalone deployment for this
+   check. Export the production value only in the shell that runs this operator
+   probe; without it, the probe fails closed because it cannot read the private
+   relayer diagnostics.
+
    ```bash
-   HAVEN_API_URL=<prod backend URL> npm run ops:check-mainnet-reconciliation -w packages/backend
+   HAVEN_API_URL=<prod backend URL> HAVEN_OPS_TOKEN=<operator token> npm run ops:check-mainnet-reconciliation -w packages/backend
    ```
 
    This is the read-only reconciliation check (see §4). It must exit 0.
@@ -147,12 +155,13 @@ the `x402-erc7710-settle` QA leg's assertions, executed by hand on 8453.
 ## 4. The read-only reconciliation check
 
 ```bash
-HAVEN_API_URL=<prod backend URL> npm run ops:check-mainnet-reconciliation -w packages/backend
+HAVEN_API_URL=<prod backend URL> HAVEN_OPS_TOKEN=<operator token> npm run ops:check-mainnet-reconciliation -w packages/backend
 ```
 
-Read-only, keyless, moves nothing. It verifies:
+Read-only, requires no signing key, and moves nothing. It verifies:
 
-- `/health` is ok;
+- public `/health` is ok;
+- authenticated `/health/ops` returns the relayer-monitor state (the script requires `HAVEN_OPS_TOKEN`);
 - the **relayer-balance monitor is alive** (the cached 8453 entry's
   `checkedAt` is < 2 h old — the monitor is hourly, so staler means the
   monitor is dead even if the balance looked fine when it last ran);

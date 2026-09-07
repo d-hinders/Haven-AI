@@ -57,6 +57,102 @@ export function parseTrustProxyHops(raw: string | undefined): number {
   return hops
 }
 
+/**
+ * Boot warning for the public Base Sepolia RPC default (#2511).
+ *
+ * When `RPC_URL_BASE_SEPOLIA` is unset (or empty — `optionalEnv` semantics:
+ * Railway can store an empty string, and "the operator cleared it" must land
+ * on the same signal as "never configured"), this process is writing on-chain
+ * legs through the SHARED public endpoint, so a provider-side outage there
+ * surfaces as qa-dev failures (502s whose body carries
+ * `URL: https://sepolia.base.org`) even though no Haven code changed — the
+ * exact shape run 33796886018 produced, eight times. Logging ONCE at boot
+ * makes the default distinguishable from a configured value in the logs, the
+ * same way `parseTrustProxyHops` refuses to disarm silently.
+ *
+ * Branches on the RAW value, not the resolved one: a variable that is SET is
+ * a deliberate configuration even when it names the same public endpoint, and
+ * must stay silent (the issue's criterion — "silent when the variable is
+ * set"). This function also owns the resolution, replacing the plain
+ * `optionalEnv` call, so the default literal exists in exactly one place.
+ */
+export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
+  const resolved = raw?.trim() || 'https://sepolia.base.org'
+  if (raw?.trim()) return resolved
+  // eslint-disable-next-line no-console
+  console.warn(
+    'RPC_URL_BASE_SEPOLIA is not set — using the PUBLIC endpoint https://sepolia.base.org. ' +
+    'When that shared endpoint has an outage, qa-dev fails on it (502 bodies carrying ' +
+    '`URL: https://sepolia.base.org`) instead of on a Haven defect. Set RPC_URL_BASE_SEPOLIA ' +
+    'to a dedicated provider endpoint to decouple this deployment from those outages.',
+  )
+  return resolved
+}
+
+/**
+ * npm dist-tag the dashboard hands out in the connector command (#2422,
+ * epic #2420).
+ *
+ * Unset means `alpha`, and that default is the whole safety story here: the
+ * PRODUCTION service will never set this variable, so anything that changes
+ * what an unset environment returns changes what every real user is told to
+ * run. `connector-channel-characterization.test.ts` pins the resulting literal
+ * `@haven_ai/connect@alpha` rather than re-deriving it, so a drifted default
+ * reddens instead of shipping.
+ *
+ * Empty/whitespace is treated as unset. Railway (and every dashboard like it)
+ * can store a variable as the empty string, and "the operator cleared it"
+ * should land on the production-safe value, not on a refusal to boot.
+ *
+ * An invalid NON-empty value THROWS, which — because this module is imported
+ * for its side effects at startup — refuses the boot rather than the request.
+ * That direction was chosen deliberately over a silent fallback to `alpha`:
+ * a typo (`HAVEN_CONNECTOR_CHANNEL=dve`) would fall back to the production
+ * channel, the dev dashboard would keep handing out the prod connector, and
+ * the environment would look FIXED while reproducing the exact defect #2422
+ * exists to remove. A refusal at boot is loud, is attributable to one
+ * variable, and cannot be mistaken for success. It also cannot half-serve
+ * traffic: the process never accepts a request.
+ *
+ * The pattern is npm's dist-tag shape, narrowed: lowercase start, then
+ * lowercase alphanumerics and hyphens, 32 chars max. It deliberately excludes
+ * anything that could turn `@haven_ai/connect@<channel>` into a different
+ * argument once it reaches a shell — whitespace, quotes, `;`, `&`, `$`,
+ * backticks, `/`, `@`. The connector command is copied and pasted into a terminal
+ * by a human or executed by an agent, so a channel is an injection surface,
+ * not just a label. `shellQuote` in the route quotes the token and the API
+ * URL; the package spec is NOT quoted, so this validation is what stands in
+ * for it. A value that is merely a nonexistent-but-well-formed tag is left to
+ * fail at `npx`, where the error names the package.
+ */
+export const CONNECTOR_CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
+export const DEFAULT_CONNECTOR_CHANNEL = 'alpha'
+
+// `null` is accepted alongside `undefined` (#2423). a raw environment read is only ever
+// `string | undefined`, so this is unreachable from the sole call site below —
+// but `resolveConnectorChannel` in `@haven_ai/sdk` reads the same variable and
+// DOES accept `null`, and on `null` this function used to throw a raw
+// `TypeError: Cannot read properties of null (reading 'trim')` instead of the
+// designed refusal message. Two readers of one variable that disagree on an
+// input is the divergence the cross-package agreement test in
+// `__tests__/connector-channel.test.ts` exists to prevent, so the gap is closed
+// rather than documented: found by review, and that test now covers `null`.
+export function parseConnectorChannel(raw: string | undefined | null): string {
+  if (raw === undefined || raw === null) return DEFAULT_CONNECTOR_CHANNEL
+  const value = raw.trim()
+  if (value === '') return DEFAULT_CONNECTOR_CHANNEL
+  if (!CONNECTOR_CHANNEL_PATTERN.test(value)) {
+    throw new Error(
+      `HAVEN_CONNECTOR_CHANNEL is set to ${JSON.stringify(raw)}, which is not a valid npm ` +
+      'dist-tag: it must match /^[a-z][a-z0-9-]{0,31}$/ (e.g. "alpha", "dev"). ' +
+      'Refusing to start rather than falling back to "alpha", because a silent fallback ' +
+      'would hand out the PRODUCTION connector from a non-production environment and look ' +
+      'like success. Unset the variable to get "alpha" deliberately.',
+    )
+  }
+  return value
+}
+
 // Validate on import — fail fast at startup
 export const config = {
   // Required
@@ -68,6 +164,16 @@ export const config = {
   frontendUrl: optionalEnv('FRONTEND_URL', 'http://localhost:3000'),
   rpcUrl: optionalEnv('RPC_URL', 'https://rpc.gnosischain.com'),
   logLevel: optionalEnv('LOG_LEVEL', 'info'),
+
+  // #2422 (epic #2420): the npm dist-tag in the connector command the
+  // dashboard hands out. The dev Railway service is INTENDED to be set to
+  // `dev`, so a developer testing against the dev backend installs the dev
+  // package set — but that is an OPERATOR action, never an agent's, and it has
+  // NOT been performed: until it is, dev resolves to `alpha` like everywhere
+  // else. PRODUCTION LEAVES IT UNSET permanently and gets `alpha`,
+  // byte-for-byte as before. See parseConnectorChannel above for why an
+  // invalid value refuses the boot instead of falling back.
+  connectorChannel: parseConnectorChannel(process.env.HAVEN_CONNECTOR_CHANNEL),
 
   // #1670: how many proxy hops in front of this process are TRUSTED to have
   // appended the real client address to X-Forwarded-For. 0 (the default)
@@ -85,9 +191,13 @@ export const config = {
   // OPERATOR action, never an agent's.
   trustProxyHops: parseTrustProxyHops(process.env.TRUST_PROXY_HOPS),
 
+  // Optional operator-only health diagnostics. Unset keeps GET /health/ops
+  // indistinguishable from a route that does not exist.
+  opsToken: process.env.HAVEN_OPS_TOKEN ?? '',
+
   // Chain-specific RPC URLs
   rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
-  rpcUrlBaseSepolia: optionalEnv('RPC_URL_BASE_SEPOLIA', 'https://sepolia.base.org'),
+  rpcUrlBaseSepolia: warnPublicBaseSepoliaRpc(process.env.RPC_URL_BASE_SEPOLIA),
 
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',

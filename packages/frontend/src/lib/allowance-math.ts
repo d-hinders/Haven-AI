@@ -1,8 +1,8 @@
 /**
  * Pure allowance arithmetic, isolated from the viem-coupled contract I/O in
- * `./allowance-module`.
+ * the legacy on-chain budget shape.
  *
- * This is the off-chain mirror of the Safe AllowanceModule's reset logic used
+ * This is the off-chain mirror of the legacy on-chain reset logic used
  * by the dashboard to show "remaining" before the chain is poked. It is the
  * frontend twin of the backend's `computeEffectiveAllowance`, and like that one
  * it must key its reset decision off CHAIN time, never the user's device clock.
@@ -40,7 +40,7 @@ export interface EffectiveAllowance {
 }
 
 /**
- * Compute effective remaining allowance accounting for the AllowanceModule's
+ * Compute effective remaining allowance accounting for the legacy on-chain
  * reset logic.
  *
  * `nowSec` MUST be chain time — a block `timestamp` in seconds — NOT

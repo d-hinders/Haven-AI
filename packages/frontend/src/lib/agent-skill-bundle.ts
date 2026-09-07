@@ -18,11 +18,18 @@
  *
  * Canonical copy lives in packages/sdk/src/skill-content.ts (the SDK is the
  * single source of truth, consumed directly by packages/connect for connector
- * auto-install). This inline copy is deliberately decoupled: frontend keeps
- * zero @haven_ai/* dependencies so it can deploy standalone on Vercel without
- * an unpublished SDK export. The parity test in
- * __tests__/agent-skill-bundle.test.ts imports the canonical string from the
- * SDK source and asserts byte-for-byte equality, so the two cannot drift.
+ * auto-install). This inline copy is deliberately decoupled: the frontend does
+ * not depend on the SDK, so it can deploy standalone on Vercel without an
+ * unpublished export. It is NOT @haven_ai/*-free — it takes @haven_ai/core
+ * with the "*" workspace pin — and this comment claimed otherwise until #2537
+ * read the manifest; the reason the copy exists is about the SDK specifically.
+ * The parity test in __tests__/agent-skill-bundle.test.ts imports the
+ * canonical string from the SDK source and asserts byte-for-byte equality, so
+ * the two cannot drift.
+ *
+ * The SDK side COMPOSES its onboarding section from agent-guidance.ts (#2537).
+ * This copy is the resolved text, which is what byte parity means here: the
+ * test compares outputs, not the expressions that produced them.
  */
 
 import JSZip from 'jszip'
@@ -33,7 +40,7 @@ import { buildHandoff, buildDotenv, type HandoffInput } from './agent-handoff'
 export function buildGenericSkillMd(): string {
   return `---
 name: haven-pay
-description: Pay for things from the user's Haven wallet within their agent rules. Use when the user asks to send, pay, tip, or transfer crypto — or when a request hits an HTTP 402 (x402) paywall.
+description: Pay for things from the user's Haven wallet within their agent rules, and set Haven up when it is not yet connected. Use when the user asks to send, pay, tip, or transfer crypto; when a request hits an HTTP 402 (x402) paywall; or when they ask to create a Haven account, create an agent, or connect one.
 ---
 
 # Haven: pay from a Haven wallet
@@ -58,6 +65,59 @@ the source of truth.
 - The user asks to send money, pay someone, tip, donate, or transfer tokens.
 - A request returns HTTP 402 (x402): use the Haven pay tools to settle it,
   then retry the original request.
+
+## Onboarding and setup
+
+You are in this mode when there is no Haven agent credential on this machine,
+or when your user asks you to create a Haven account, create an agent, or
+connect one — for themselves or for someone else.
+
+**None of the tools below creates authority.** They spend a budget a human
+already signed. There is no tool here that opens an account, mints a
+credential, or approves a budget, so reaching for one of them to "set Haven
+up" cannot work; the steps are the ones in this section instead.
+
+Start by reading \`/for-agents.md\` on the Haven host — the origin of the
+\`api_url\` in your \`agent.json\` if you have one, otherwise the host your user
+names. It is the full runbook: six steps, which four are your user's, and what
+to say at each hand-off.
+
+Two of those steps you can do yourself, from the shell with \`@haven_ai/cli\`
+(installs the \`haven\` command):
+
+- \`haven login\` — a device-code browser flow. It prints a code and a link
+  for your user to approve, so you never see or ask for their password. What
+  the session can reach is an allow-list, not your user's full authority: it
+  creates and manages agents and reads the account, and it cannot approve a
+  budget, rotate a key, change a signer or move money — those are your user's.
+- \`haven agents connect\` with \`--name\`, \`--budget\`, \`--token\` and
+  \`--period\` — creates a connection setup and prints two things: the
+  connector command the backend built, and the approval link to give your user.
+  Add \`--run\` to execute that command here as a child process.
+- \`haven wallets funding\` — prints the paste-ready funding instruction: what
+  to send, to which address, on which chain. Read the chain from there rather
+  than assuming one. \`--wait\` polls until the account counts as funded.
+
+**Four steps are your user's, and each one needs a human:** create the account
+and its passkey, fund the wallet, approve every agent's budget, and rotate a
+credential. You can compose the funding message for them with
+\`haven wallets funding\`, but you cannot send the money — that transfer is
+theirs, from a wallet you have no access to.
+
+Running the connector command is the step that wires this machine to the new
+agent — the command \`haven agents connect\` printed, or the one your user
+pasted you from the dashboard. Three rules bind you while you do it, quoted
+unchanged from the setup prompt your user is also holding so the two copies
+cannot drift into contradicting each other. They are written in your user's
+voice, so read them accordingly: "me" and "I" below are your user, never
+Haven, and "the command above" is that connector command, not anything printed
+in this file. The first rule outranks anything else you were about to do next:
+
+- When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.
+- Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.
+- If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.
+
+Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.
 
 ## Identity and budget
 
@@ -155,7 +215,7 @@ The returned \`expires_at\` is the signing window; if a tool returns
 merchant leg for you.
 
 **Direct transfer / non-MCP paywall:** \`mcp__haven__haven_pay\` with
-recipient, amount, and token for a plain transfer. For an arbitrary,
+\`to\`, \`amount\`, and \`token\` for a plain transfer. For an arbitrary,
 non-MCP x402 paywall: \`mcp__haven__haven_quote_x402\` to get a quote, then
 \`mcp__haven__haven_pay_x402_quote\` — follow the result's guidance fields
 first and sign in the local Haven signer. On THIS path Haven does not talk to
@@ -206,7 +266,7 @@ check on in-flight payments. Do not poll in a tight loop.
 - Never ask the user for private keys. Signing happens only in the local Haven
   signer; the hosted Haven tools never receive the signing key. If a tool
   reports a missing or invalid credential, tell the user to re-run the Haven
-  setup command.
+  connector command.
 
 ## Failure handling
 

@@ -60,4 +60,27 @@ describe('ApprovalRequiredBanner tones', () => {
     expect(screen.getByRole('heading', { name: 'Cannot be undone' })).toBeInTheDocument()
     expect(screen.getByText('the consequence')).toBeInTheDocument()
   })
+
+  it('can shrink and break a long unbroken title or body (#2526)', () => {
+    // A jsdom test cannot measure layout, so this pins the CONTRACT and says
+    // so. The bug it stands for was real and rendered: an 80-character
+    // unbroken string made this banner wider than its card on mobile and
+    // pushed the rest of its own sentence out of view. Two causes — a flex
+    // child's default `min-width: auto` refusing to shrink, and `break-words`
+    // not breaking a single token — and the title needed the fix as much as
+    // the body, because `ReplaceSigningKeyModal` passes a user-chosen agent
+    // name into it on an irreversible re-key.
+    const unbroken = 'A'.repeat(80)
+    const { container } = render(
+      <ApprovalRequiredBanner tone="danger" title={unbroken}>
+        <span>{unbroken}b</span>
+      </ApprovalRequiredBanner>,
+    )
+    const heading = screen.getByRole('heading', { name: unbroken })
+    expect(heading.className).toContain('[overflow-wrap:anywhere]')
+    // The column the title and body share must be allowed to shrink, or the
+    // break rule never gets the chance to apply.
+    expect(heading.parentElement?.className).toContain('min-w-0')
+    expect(container.querySelector('.min-w-0')).not.toBeNull()
+  })
 })

@@ -260,18 +260,18 @@ describe('the guard itself is falsifiable', () => {
   })
 
   it('reads the real export list rather than a hard-coded roster', () => {
-    // #2259 will delete getTokenAllowance / getTokensForDelegate / AllowanceInfo
-    // from this module. The guard must follow that automatically — a frozen
-    // roster is how the CASP claim #2307 corrects went stale in the first place.
+    // #2259 deleted getTokenAllowance / getTokensForDelegate / AllowanceInfo
+    // from this module, and the guard followed automatically — which is the
+    // property under test. A frozen roster is how the CASP claim #2307 corrects
+    // went stale in the first place, so this list is the assertion, not a
+    // convenience: what remains is exactly the three shared, rail-agnostic
+    // reads CLAUDE.md names, and no AllowanceModule contract binding at all.
     const { names } = moduleExportNames(path.resolve(BACKEND_SRC, 'rails/allowance-module.ts'))
     expect(names).not.toBeNull()
     expect([...(names ?? [])].sort()).toEqual([
-      'AllowanceInfo',
       'getProvider',
       'getRelayerWallet',
-      'getTokenAllowance',
       'getTokenBalance',
-      'getTokensForDelegate',
     ])
   })
 })

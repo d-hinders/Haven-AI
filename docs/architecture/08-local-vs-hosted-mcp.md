@@ -15,7 +15,8 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
-last-verified: "2026-09-01" # #2348: re-verified and EDITED (Tool model section only). The section said the camelCase crossover tools were deliberately still permissive; they are not, as of #2348 — all four now refuse and each refusal names the local spelling. Added the per-tool measured-consequence table: the four were NOT equally silent, which the divergence table alone implies. haven_send lost idempotency ENTIRELY (POST /payments went out with no idempotency_key field at all); haven_pay_mcp_tool had its replay scope REPLACED by a 300 s bucketed hash of the merchant quote, not merely lost; haven_quote_x402 probed with an empty body; and haven_pay_x402_quote's headline `quote` crossover ALWAYS failed loudly, because payment_required is required — only idempotencyKey was silent there. Every row measured over a real client -> InMemoryTransport -> buildHostedMcpServer round trip against origin/dev c259d9ca, not inferred from the schemas. Convergence and the missing hosted `body` recorded as #2366 with the reason they are not taken here (published-package contract change). x402 comparison table, custody boundary, scheme/settle-shape sections and the decomposed-flow blocks NOT re-verified in this pass. Prior: #2353: re-verified and EDITED (Tool model section, the `haven_complete_mcp_tool` paragraph only). That paragraph said the shipped SKILL.md "tells" agents to pass an undeclared `payment_required`; as of this PR it no longer does, and a doc that still describes the live defect in the present tense is worse than one that never mentioned it. Records what replaced it (`payment_id` + `payment_header` only, with the not-taken field named) and, more importantly, that the tool stays PERMISSIVE on purpose: previously installed copies of the skill are still in the field, so the strictness switch is a separate behaviour change and not this PR. Names the two tests that pin the halves apart, because the pairing is not obvious from either file alone. Measured, not remembered: `haven_complete_mcp_tool` is absent from `STRICT_INPUT_TOOLS` on this branch and `packages/mcp-server/src/tools.ts` is byte-identical to origin/dev here. haven-doc-reviewer found the SAME present-tense staleness in that file's `STRICT_INPUT_TOOLS` comment; it is handed to the concurrent #2347 session (which owns that comment and this doc's sibling contract doc) rather than raced, so expect that one-word fix to arrive separately. Scope: that paragraph only. The x402 comparison table, the custody boundary, the scheme/settle-shape sections and the camelCase-crossover sentence NOT re-verified in this pass. Prior: #2312: re-verified and EDITED (Tool model section only). The section said the two tool surfaces are "not byte-for-byte identical" and then listed only CAPABILITY differences, which read as though the shared tools took the same arguments. They do not: idempotencyKey/idempotency_key, quote/payment_required, and a local-only `body` on haven_quote_x402 — read off both `toolSchemas` maps rather than remembered. Until #2312 the hosted side silently STRIPPED the local spelling, so an agent lost idempotency protection on a payment without any refusal; a first batch of four record-reading money-path tools now refuses. The strict set is pointed at, not copied, so this doc cannot drift from it. x402 comparison table, custody boundary and the scheme/settle-shape sections NOT re-verified in this pass. Prior: #2292: re-verified and EDITED (hosted decomposed-flow section only). The EIP-3009 branch of the hosted flow gained a final step, haven_report_x402_outcome, and this doc held the one remaining copy of that flow without it — the parallel diagram in 06-hosted-mcp-connect-flow.md was updated in the same PR. Added with the local/hosted reason, since that split is what this doc is for: in local mode the SDK makes the merchant retry and observes the outcome, in hosted plain-HTTP mode the agent does and Haven never contacts the merchant. erc7710 branch checked and deliberately unchanged — no funding leg, and isFundedX402AwaitingMerchantLeg is scoped to settlement_scheme eip3009 (agent-payment-status.ts). Scheme-comparison table and the rest of the doc NOT re-verified in this pass. Prior: #2041: the scheme-comparison table stated, in structured form, that erc7710 settles exclusively through `haven_settle_mcp_tool` -- the doc set's most direct version of "only the MCP-merchant tools can reach the preferred scheme". The settle column is now SPLIT by merchant transport, because the two settle differently and the distinction was invisible: an MCP merchant is called BY Haven so the tool delivers the header, a plain-HTTP merchant is retried by the AGENT so the tool hands it back. The plain-HTTP erc7710 cell was empty until #2041, which is the defect. Also qualified "the absence of `payment_header` is what selects erc7710" as true of `haven_settle_mcp_tool` specifically, and recorded the generic path's different mechanic (reported at quote, echoed at submit -- #1360 explicitness on a second entry point), and added the erc7710 shape to the decomposed-flow block. The two hosted-specific edge-signer properties (#1138 binding, #1455 child verification) and the rail-scope correction this doc made on 2026-08-25 re-read against the diff: both stand unchanged. Prior: Corrected a STALE refusal claim, not a behaviour change. The doc said the hosted keyless construct rejects typed-data funding intents, so delegation-rail x402 needed the local flow, and that #1986 therefore left hosted x402 "with no working rail at all". Both halves were overtaken: #1254 forwards signature_scheme + typed_data verbatim to the edge signer (delegationSignFields, packages/mcp-server/src/tools.ts), #1456 added the hosted erc7710 settle branch, and BOTH hosted schemes have green QA scenarios against the real deployed hosted MCP plus the real signer (x402-hosted-mcp-signer.ts #1154, x402-erc7710-hosted.ts #1457). The #1986 sentence was reasoning from a premise that had already stopped holding: the fail-close is rail-scoped and applies to both topologies equally, so it removed the legacy rail, never the hosted surface. Rewrote the section around what the two topologies now actually differ on — where the key lives and which party refuses — and added the scheme/payload/settle-shape table plus the two edge-signer checks (#1138 binding, #1455 child verification) the local flow does not exercise. No code changed and no other claim in this doc was re-tested beyond re-reading it for contradiction; the custody boundary and tool-model sections stand unchanged. Prior: #1986: the rail split re-read — the hosted keyless x402 construct now has NO working rail, because the allowance rail it served fails closed. Added; the local-vs-hosted signing/relay distinction itself is unchanged and re-verified. Prior: #1672: the local-MCP example command drops --runtime claude-code — runtime selection is detection-first now (see mcp-runtime-compatibility.md); everything else re-read and unchanged. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
+  - packages/backend/src/modules/agents/agent-connection-setup.ts
+last-verified: "2026-09-06" # #2366 (decision): EDITED, scope = the `quote`/`payment_required` paragraph, which gains the two schemas side by side, the recorded owner decision that the divergence STANDS, and the reason not to converge it. This closes the issue's first acceptance criterion by its own second branch — "a written owner decision that the divergence stands with the refusal as the permanent mitigation" — rather than by converging a pair that is not a spelling pair. Re-derived from both schemas on this branch before writing: hosted `payment_required` is `z.record(z.string(), z.unknown())`, the parsed 402 itself; local `quote` is `z.unknown()`, the whole `X402Quote`, and the handler reads `quote.paymentRequired` off it (`tools.ts:316`) before passing the wrapper to `payX402Quote` (`:324`). The local field holds the object the hosted field is a member of. The not-converging argument is recorded because it is the question a later reader asks: accepting a quote on the hosted side loosens #2348's strictness, and accepting `payment_required` locally buys a second deprecation for no behavioural change. Scope: that paragraph. NOT re-verified: the x402 comparison table, the custody boundary, the scheme/settle-shape sections, the decomposed-flow blocks, or the topology tables. Prior: #2366 (part 1): EDITED, scope = the paragraph that said the spelling half was not done. It is now in its deprecation window (owner decision 2026-09-06): the local surface accepts `idempotency_key` beside `idempotencyKey`, warns on the legacy name, and REFUSES the pair when the values differ rather than resolving it — recorded because the refusal, not the alias, is the safety property on an argument whose loss turns a retry into a second spend. Written against `packages/mcp/src/tools.ts` on this branch and pinned over the real client -> InMemoryTransport -> server path. The same paragraph gains a correction to the issue's own list: `quote` vs `payment_required` is NOT a spelling difference — hosted takes the parsed 402 object, local takes the whole X402Quote — so converging them would change what a caller sends rather than what it is called, and it is scoped out with that reason rather than bundled. Scope: that paragraph. NOT re-verified: the x402 comparison table, the custody boundary, the scheme/settle-shape sections, the decomposed-flow blocks, or the hosted/local topology tables. Prior: #2366: EDITED, scope = the § Tool model divergence sentence, the crossover table's `haven_quote_x402` row, and the paragraph below it that said what was not yet done. Half of what that paragraph promised is now done and the doc said otherwise: the hosted `haven_quote_x402` takes a `body`, threaded verbatim and distinguished from no-body by `!== undefined`, so the divergence is GONE rather than mitigated. Written against `packages/mcp-server/src/tools.ts` on this branch and pinned by `hosted-quote-body.test.ts` over the real client -> InMemoryTransport -> server path, because the SDK strips undeclared keys before a handler runs and a handler-level test would prove nothing (#2312's lesson). The spelling half is explicitly recorded as still open and why — renaming `idempotencyKey` on a published package needs a deprecation window, which is an owner call. Also re-based rather than deleted: `strict-tool-input.test.ts`'s two crossover maps named `body` as this tool's local-only key, which stopped being true; they now name `idempotencyKey`, the divergence that remains, so the guard keeps guarding something real. The empty-vs-absent body distinction is stated with the mechanism the review measured — both send `Content-Length: 0` and what differs is `fetch`'s auto-added `Content-Type` on `body: ''` — because the first draft asserted the distinction without saying how it is observable, which is a claim a reader cannot check. A dangling half-sentence left by that same edit is removed (haven-reviewer). Scope: those three passages. NOT re-verified: the x402 comparison table, the custody boundary, the scheme/settle-shape sections, the decomposed-flow blocks, or the hosted/local topology tables. Prior: #2561: EDITED, scope = one new pair of paragraphs in § Custody boundary — who retires a superseded agent, and why it is the dashboard rather than the connector (the connector holds only agent API keys; the revoke route is owner-authenticated). Also records that the install-status report carries a tri-state and why `null` may not be collapsed into `[]`. Written against `packages/connect/src/runtime.ts` and `packages/backend/src/modules/agents/agent-connection-setup.ts` on this branch. Scope: that section only. NOT re-verified: the tool model, the x402 comparison, or the hosted/local topology tables. covers: widened on review (haven-doc-reviewer) by `packages/backend/src/modules/agents/agent-connection-setup.ts`: this entry named that file as one the new paragraphs were written against, while the list did not reach it — so a change to the sanitiser or the tri-state would never have re-implicated this doc. Prior: #2576: EDITED, scope = the one sentence under the channel placeholders — "setup command" → **connector command**. The local-vs-hosted topology comparison was not re-verified. Prior: #2466: EDITED, scope = the opt-in command block under "Opt in on a supported runtime" only. The `--setup … --api https://api.haven.example` line (tagged `@alpha` by PR #2462) is the shape #2422 fixed elsewhere — a command against a caller-supplied backend with a hand-pinned channel; the command is kept verbatim (it is the only place the `--ack-local-tools --local` opt-in is shown) and gains the same half-sentence the other copies carry: placeholders, and the package comes from that backend's `connector_package`. No deployment's channel is asserted. Nothing else in this file re-read. Prior: #2353 (switch): re-verified and EDITED (Tool model section, the `haven_complete_mcp_tool` paragraph + the two count sentences only). This PR moved the tool to STRICT_INPUT_TOOLS — the switch this doc recorded as deliberately pending — so the paragraph is rewritten to the state it produced: guidance fixed AND shipped to npm (0.1.34-alpha.0, 2026-09-01T19:21Z, alpha dist-tag), tool refuses, residual risk (pre-0.1.34 installed copies) stated, and the two pins described as what they now assert (refusal + corrected literals) rather than what they asserted when they pinned the strip. Counts re-derived from the live lists, not carried: STRICT_INPUT_TOOLS now holds 20 of 22 (was 19), PERMISSIVE_INPUT_TOOLS 2 (`haven_get_agent`, `haven_get_allowances`); measured via node on the branch's tools.ts. Scope: that paragraph and the two counts ONLY. The x402 comparison table, the custody boundary, the scheme/settle-shape sections and the camelCase-crossover sentence NOT re-verified in this pass. Prior: #2242: re-verified and EDITED — the one sentence in § *Key custody* calling hosted mode's signer a "dedicated, no-network signer" only. Same retired pre-#1263 property as the sibling copy corrected in `06-hosted-mcp-connect-flow.md` this pass; the sentence now names the single authenticated read-only sign-context fetch and keeps the claim that actually carries the custody argument — the fetch never carries the key. Re-derived from `packages/signer/src/sign-context.ts` (Bearer `api_key` is the only credential sent) and `core.ts` (network-free, never returns the key). The non-custody paragraph above it was re-read and is unchanged. Nothing else in this document re-verified in this pass. Prior: #2349: re-verified and EDITED (Tool model section only). The section said "the reason each remaining tool is deliberately still permissive" lives in STRICT_INPUT_TOOLS, which read as though the remainder were a standing exclusion; #2349 closed the list at 19 strict of 22, with the three permissive tools on their own explicit list (PERMISSIVE_INPUT_TOOLS) and a compile-time plus runtime guard so a new tool cannot skip the decision. Added what strictness measurably means on the two `{}` tools (absent arguments already refused, `{}` passes, only a decorated call differs — and Cursor is documented decorating exactly that call), and that the never-registered #314 legacy aliases are deleted. Custody boundary, x402 comparison table, scheme/settle-shape sections and the decomposed-flow blocks NOT re-verified in this pass. Prior: #2348: re-verified and EDITED (Tool model section only). The section said the camelCase crossover tools were deliberately still permissive; they are not, as of #2348 — all four now refuse and each refusal names the local spelling. Added the per-tool measured-consequence table: the four were NOT equally silent, which the divergence table alone implies. haven_send lost idempotency ENTIRELY (POST /payments went out with no idempotency_key field at all); haven_pay_mcp_tool had its replay scope REPLACED by a 300 s bucketed hash of the merchant quote, not merely lost; haven_quote_x402 probed with an empty body; and haven_pay_x402_quote's headline `quote` crossover ALWAYS failed loudly, because payment_required is required — only idempotencyKey was silent there. Every row measured over a real client -> InMemoryTransport -> buildHostedMcpServer round trip against origin/dev c259d9ca, not inferred from the schemas. Convergence and the missing hosted `body` recorded as #2366 with the reason they are not taken here (published-package contract change). x402 comparison table, custody boundary, scheme/settle-shape sections and the decomposed-flow blocks NOT re-verified in this pass. Prior: #2353: re-verified and EDITED (Tool model section, the `haven_complete_mcp_tool` paragraph only). That paragraph said the shipped SKILL.md "tells" agents to pass an undeclared `payment_required`; as of this PR it no longer does, and a doc that still describes the live defect in the present tense is worse than one that never mentioned it. Records what replaced it (`payment_id` + `payment_header` only, with the not-taken field named) and, more importantly, that the tool stays PERMISSIVE on purpose: previously installed copies of the skill are still in the field, so the strictness switch is a separate behaviour change and not this PR. Names the two tests that pin the halves apart, because the pairing is not obvious from either file alone. Measured, not remembered: `haven_complete_mcp_tool` is absent from `STRICT_INPUT_TOOLS` on this branch and `packages/mcp-server/src/tools.ts` is byte-identical to origin/dev here. haven-doc-reviewer found the SAME present-tense staleness in that file's `STRICT_INPUT_TOOLS` comment; it is handed to the concurrent #2347 session (which owns that comment and this doc's sibling contract doc) rather than raced, so expect that one-word fix to arrive separately. Scope: that paragraph only. The x402 comparison table, the custody boundary, the scheme/settle-shape sections and the camelCase-crossover sentence NOT re-verified in this pass. Prior: #2312: re-verified and EDITED (Tool model section only). The section said the two tool surfaces are "not byte-for-byte identical" and then listed only CAPABILITY differences, which read as though the shared tools took the same arguments. They do not: idempotencyKey/idempotency_key, quote/payment_required, and a local-only `body` on haven_quote_x402 — read off both `toolSchemas` maps rather than remembered. Until #2312 the hosted side silently STRIPPED the local spelling, so an agent lost idempotency protection on a payment without any refusal; a first batch of four record-reading money-path tools now refuses. The strict set is pointed at, not copied, so this doc cannot drift from it. x402 comparison table, custody boundary and the scheme/settle-shape sections NOT re-verified in this pass. Prior: #2292: re-verified and EDITED (hosted decomposed-flow section only). The EIP-3009 branch of the hosted flow gained a final step, haven_report_x402_outcome, and this doc held the one remaining copy of that flow without it — the parallel diagram in 06-hosted-mcp-connect-flow.md was updated in the same PR. Added with the local/hosted reason, since that split is what this doc is for: in local mode the SDK makes the merchant retry and observes the outcome, in hosted plain-HTTP mode the agent does and Haven never contacts the merchant. erc7710 branch checked and deliberately unchanged — no funding leg, and isFundedX402AwaitingMerchantLeg is scoped to settlement_scheme eip3009 (agent-payment-status.ts). Scheme-comparison table and the rest of the doc NOT re-verified in this pass. Prior: #2041: the scheme-comparison table stated, in structured form, that erc7710 settles exclusively through `haven_settle_mcp_tool` -- the doc set's most direct version of "only the MCP-merchant tools can reach the preferred scheme". The settle column is now SPLIT by merchant transport, because the two settle differently and the distinction was invisible: an MCP merchant is called BY Haven so the tool delivers the header, a plain-HTTP merchant is retried by the AGENT so the tool hands it back. The plain-HTTP erc7710 cell was empty until #2041, which is the defect. Also qualified "the absence of `payment_header` is what selects erc7710" as true of `haven_settle_mcp_tool` specifically, and recorded the generic path's different mechanic (reported at quote, echoed at submit -- #1360 explicitness on a second entry point), and added the erc7710 shape to the decomposed-flow block. The two hosted-specific edge-signer properties (#1138 binding, #1455 child verification) and the rail-scope correction this doc made on 2026-08-25 re-read against the diff: both stand unchanged. Prior: Corrected a STALE refusal claim, not a behaviour change. The doc said the hosted keyless construct rejects typed-data funding intents, so delegation-rail x402 needed the local flow, and that #1986 therefore left hosted x402 "with no working rail at all". Both halves were overtaken: #1254 forwards signature_scheme + typed_data verbatim to the edge signer (delegationSignFields, packages/mcp-server/src/tools.ts), #1456 added the hosted erc7710 settle branch, and BOTH hosted schemes have green QA scenarios against the real deployed hosted MCP plus the real signer (x402-hosted-mcp-signer.ts #1154, x402-erc7710-hosted.ts #1457). The #1986 sentence was reasoning from a premise that had already stopped holding: the fail-close is rail-scoped and applies to both topologies equally, so it removed the legacy rail, never the hosted surface. Rewrote the section around what the two topologies now actually differ on — where the key lives and which party refuses — and added the scheme/payload/settle-shape table plus the two edge-signer checks (#1138 binding, #1455 child verification) the local flow does not exercise. No code changed and no other claim in this doc was re-tested beyond re-reading it for contradiction; the custody boundary and tool-model sections stand unchanged. Prior: #1986: the rail split re-read — the hosted keyless x402 construct now has NO working rail, because the allowance rail it served fails closed. Added; the local-vs-hosted signing/relay distinction itself is unchanged and re-verified. Prior: #1672: the local-MCP example command drops --runtime claude-code — runtime selection is detection-first now (see mcp-runtime-compatibility.md); everything else re-read and unchanged. Prior: re-verified for #1352 (Node floor 24->22: engines/constant only; grep-checked: no numeric floor claim in this doc; floor prose lives in mcp-runtime-compatibility.md)
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -40,8 +41,15 @@ narrower than running the whole Haven stack locally.
 Opt in on a supported runtime:
 
 ```bash
-npx -y @haven_ai/connect --setup hv_setup_... --api https://api.haven.example --ack-local-tools --local
+npx -y @haven_ai/connect@<channel> --setup hv_setup_... --api https://api.haven.example --ack-local-tools --local
 ```
+
+`<channel>`, `hv_setup_...` and `https://api.haven.example` are all
+placeholders — production hands out `@alpha`. Run the connector command your dashboard hands you with
+`--ack-local-tools --local` appended: since #2422 the package in that command
+is per-deployment — the backend's setup response names it in
+`connector_package` — and a connector pinned by hand to another channel
+installs a signer that skews against that backend.
 
 ## Custody boundary
 
@@ -51,8 +59,24 @@ increase custody and CASP risk; any such change requires product and legal
 review. The regulatory guardrails are risk guidance, not a legal opinion.
 
 Local MCP keeps signing local but loads the key into the same process that
-performs orchestration. Hosted mode narrows that key surface to a dedicated,
-no-network signer.
+performs orchestration. Hosted mode narrows that key surface to a dedicated
+sign-only signer, whose entire network surface is one authenticated, read-only
+sign-context fetch from Haven (#1263) that never carries the key.
+
+The same boundary decides **who retires a superseded agent** (#2561). A
+connector run on a machine that already holds agents leaves those agents alive
+with their own keys, and it reports their ids so the DASHBOARD can offer the
+owner a one-click revoke. The connector never revokes: `POST /agents/:id/revoke`
+is owner-authenticated and the connector holds only agent API keys, so an agent
+credential retiring a sibling agent would be the "agent editing its own
+authority" that the re-key routes (#1694) already refuse. Nothing is automatic
+— the offer is rendered, the owner clicks, one agent at a time.
+
+The report distinguishes three states rather than two, and the third is why:
+a list of ids, `[]` when the credential scan ran and found none, and `null`
+when it could not run at all. Collapsing the last into the second would have
+the dashboard tell somebody their machine is clean when nobody managed to read
+it — the sort of claim this boundary exists to keep Haven from making.
 
 ## Tool model
 
@@ -70,7 +94,9 @@ semantics match. They are not byte-for-byte identical:
 #2312 the difference was invisible.** The local MCP takes `idempotencyKey`
 where the hosted surface takes `idempotency_key`; local
 `haven_pay_x402_quote` takes `quote` where hosted takes `payment_required`;
-local `haven_quote_x402` takes a `body` the hosted schema has no field for. An
+local `haven_quote_x402` took a `body` the hosted schema had no field for
+(closed by [#2366](https://github.com/d-hinders/Haven-AI/issues/2366) — `body`
+is now declared on both, spelled the same). An
 agent carrying the local spelling to the hosted server was **silently
 stripped** — the payment still went through, without the idempotency protection
 the caller believed it had set. Nothing said no, because a stripped key parses
@@ -82,23 +108,57 @@ rather than from arguments (`haven_report_x402_outcome`, `haven_submit`,
 `haven_settle_mcp_tool`). #2348 added the four crossover tools above —
 `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
 `haven_pay_x402_quote` — each with a refusal that NAMES the local spelling, so
-a caller holding `idempotencyKey` is told what to send instead. The declared
-list, and the reason each remaining tool is deliberately still permissive, is
-`STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools.ts` — not restated here,
-because a second copy drifts. `haven_complete_mcp_tool` is still permissive,
-for a different and sharper reason — Haven's own downloadable `SKILL.md` told
-agents to pass it a `payment_required` it has never declared, so the guidance is
-fixed before the tool refuses
-([#2353](https://github.com/d-hinders/Haven-AI/issues/2353)).
-That guidance **is now fixed**: the skill says `payment_id` +
-`payment_header` only, and names the field the tool does not take. The tool is
-still permissive, deliberately — an agent carrying a previously installed copy
-of the skill is still out there, and the switch is a separate, behaviour-changing
-change. What pins the two halves apart is
-`packages/mcp-server/src/strict-tool-input.test.ts`: its `#2312` control asserts
-the tool is absent from `STRICT_INPUT_TOOLS`, and its `#2353` block asserts the
-strip that absence produces over the real transport. Both go red on the day
-someone flips it, which is the point.
+a caller holding `idempotencyKey` is told what to send instead. #2349 closed
+the list: **20 of the 22 hosted tools refuse**, and the two that do not are
+on a second, equally explicit list — `PERMISSIVE_INPUT_TOOLS`, beside
+`STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools.ts`. Both lists carry
+the per-tool reason and neither is restated here, because a second copy
+drifts. Every hosted tool is on exactly one of them: a tool on neither fails
+to compile (a type-level exhaustiveness check in `tools.ts`) and fails
+`strict-tool-input.test.ts`, so a new tool cannot skip the decision. The
+principle that closed the list is the one #2312 opened it with — every hosted
+schema already advertised `additionalProperties: false`, so permissive
+behaviour was a contract mismatch, and the only reason to leave a tool
+permissive is a live caller that would break. The enumeration for the final
+twelve (SDK, `packages/mcp`, connect, the shipped skill text and its
+byte-pinned twin, the QA legs, e2e fixtures, docs, `.agents`) found none.
+
+Two of the permissive tools are `haven_get_agent` and
+`haven_get_allowances`, whose schema is `{}`. What `.strict()` would mean
+there was measured over the transport rather than argued: absent `arguments`
+is refused **today** under both forms, `{}` passes under both, and only a
+*decorated* no-argument call (`{ random_string: "dummy" }`) differs — and that
+is the call Cursor, a runtime `packages/connect` supports by name, is
+documented producing for parameterless tools, on the very verification step
+connect sends a new user to. The handlers read no input at all, so a stripped
+key there can neither change what is read nor let a caller believe it pinned
+something. Strictness would change one observable case and protect nothing.
+
+The "one release cycle" aliases `haven_x402_authorize` /
+`haven_list_transactions` are **deleted** rather than decided: defined in
+#314 and never registered — `server.ts` has iterated `toolSchemas` only since
+that commit — so a caller using either name has received "tool not found"
+since then, and `strict-tool-input.test.ts` now pins that what `tools/list`
+advertises is exactly `toolSchemas`.
+
+`haven_complete_mcp_tool` was the third permissive tool, for a different and
+sharper reason — Haven's own downloadable `SKILL.md` told agents to pass it a
+`payment_required` it has never declared, so the guidance was fixed before the
+tool refused
+([#2353](https://github.com/d-hinders/Haven-AI/issues/2353)). That guidance
+**is fixed**: the skill says `payment_id` + `payment_header` only, and names
+the field the tool does not take, and it has shipped to npm
+(`@haven_ai/sdk@0.1.34-alpha.0`, 2026-09-01T19:21Z, the `alpha` dist-tag
+`npx @haven_ai/connect@alpha` resolves). **As of #2353's switch PR
+(2026-09-03) the tool refuses**: it is on `STRICT_INPUT_TOOLS`, with a refusal
+that names `payment_required` and points at the rehydration by `payment_id`,
+and the residual risk — an agent still carrying a pre-0.1.34 auto-installed
+copy on disk — meets that refusal rather than the silent strip. The tests that
+used to pin the two halves apart now pin the switch:
+`packages/mcp-server/src/strict-tool-input.test.ts`'s former `#2353` strip
+block asserts the refusal over the real transport (with the same
+declared-arg-survives control), and #2363's block pins the corrected skill
+literals the refusal presumes.
 
 That is exactly the hazard the four crossover tools did **not** turn out to
 have. #2348 enumerated their callers before switching them — the SDK,
@@ -116,15 +176,69 @@ and the divergence table alone reads as though they were:
 |---|---|---|
 | `haven_send` | `idempotencyKey` | Total loss. `POST /payments` went out as `{token, amount, to}` with **no** `idempotency_key` field, so the backend's replay contract never engaged and a retry was a second spend. |
 | `haven_pay_mcp_tool` | `idempotencyKey` | Replay scope **replaced**, not merely lost: the SDK fell back to `buildX402IdempotencyKey`, a hash of the merchant quote over a 300 s bucket. It de-dupes two genuinely distinct purchases inside one bucket and fails to de-dupe a retry that crosses a bucket boundary. |
-| `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. |
+| `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. **`body` is converged since #2366**; `idempotencyKey` is the divergence that remains on this tool. |
 | `haven_pay_x402_quote` | `idempotencyKey` only | Its headline crossover, `quote` for `payment_required`, **always failed loudly** — `payment_required` is required, so the call was refused with `-32602 … Required` and made zero Haven calls. Only `idempotencyKey` was silent. |
 
-Refusing is the on-ramp, not the destination: the two surfaces should converge
-on one spelling, and `haven_quote_x402` should gain a hosted `body` rather than
-stay honestly unable to quote a body-bearing paywall. Both are
-[#2366](https://github.com/d-hinders/Haven-AI/issues/2366), held out of #2348
-because renaming an argument on the **published** `@haven_ai/mcp` package is a
-release-train decision with a deprecation window, not a parse decision.
+Refusing is the on-ramp, not the destination, and **#2366 has now walked half of
+it.** The hosted `haven_quote_x402` takes a `body`, threaded verbatim into the
+probe's `RequestInit` and distinguished from *no* body by `!== undefined` rather
+than truthiness — an empty-string body is a body, and a paywall that varies on a
+payloadless `POST` is a different request from one with no body at all. The two
+really are distinguishable on the wire, and the mechanism is worth naming
+because it is not the obvious one: both send `Content-Length: 0`, and what
+differs is that `fetch` adds `Content-Type: text/plain;charset=UTF-8` for
+`body: ''` and no such header for no body (measured against a real HTTP server
+during this change's review). The distinction is inherited from `fetch` and
+already held on the local surface; hosted now matches it rather than inventing
+it. Conflating the two would be the same class of error the refusal existed to
+avoid committing. That divergence is gone rather than mitigated: one field, one name,
+both surfaces.
+
+**The spelling half is now IN its window** (owner decision 2026-09-06). The local
+surface accepts `idempotency_key` alongside `idempotencyKey`, warns on the legacy
+name in an additive `warnings` field, and **refuses the pair when they disagree**
+rather than resolving it — choosing either would be Haven deciding which replay
+scope the caller meant, and on this argument a wrong choice is a second spend.
+Equal values are not ambiguous and are accepted. The legacy name still works,
+because a published package cannot break installed callers on the release that
+renames an argument; removing it is a later, separate release.
+
+**And one item on that list turned out not to belong on it.** `quote` (local)
+versus `payment_required` (hosted) is **not a spelling difference**, and the two
+schemas say so:
+
+| Surface | Field | Type | What the handler does with it |
+|---|---|---|---|
+| hosted | `payment_required` | `z.record(z.string(), z.unknown())` | the parsed HTTP 402 object itself |
+| local | `quote` | `z.unknown()` | reads `quote.paymentRequired`, then passes the whole `X402Quote` to `payX402Quote` |
+
+The local field holds the object the hosted field is a **member of**. Renaming
+either would change *what a caller must send*, not what it is called — silently,
+and in the direction that looks correct: an installed caller passing its
+`X402Quote` under the new name would be passing the wrong shape with no error to
+read, on a tool that funds a payment.
+
+> **Owner decision (2026-09-06):** the `quote` / `payment_required` divergence
+> **stands**. It is a difference in the value each surface takes, not in what
+> that value is called, and it exists because the flows differ: the local flow
+> has built the quote and holds it, while the hosted flow is handed a 402 by an
+> agent that may never have built one. #2348's refusal is the permanent
+> mitigation — neither surface accepts the other's field name, so a caller that
+> sends the wrong one is told, rather than having its argument silently dropped.
+> Recorded here so the pairing is not re-proposed as an obvious convergence.
+
+**Why not converge it anyway**, since that is the question a later reader will
+ask. Making hosted accept a `quote` means the hosted surface starts accepting a
+shape it currently refuses, which loosens #2348's strictness — the property that
+stopped a caller believing it had set a replay scope it had not. Making local
+accept `payment_required` means the caller must know which field of its own
+quote to send, and gains a second deprecation to run for no behavioural benefit.
+Both trade a real guard for a cosmetic symmetry.
+
+**Nothing schedules the removal.** The window is open; its closing is a
+release-train decision and has not been taken. Until it is, `idempotencyKey`
+keeps working and keeps warning — which is a window only for as long as someone
+means to shut it.
 
 Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools.ts`, and `packages/signer/src/tools.ts` as the

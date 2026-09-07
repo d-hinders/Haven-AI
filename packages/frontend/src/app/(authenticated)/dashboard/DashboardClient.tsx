@@ -13,9 +13,9 @@ import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useCountUp } from '@/hooks/useCountUp'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
-import { useSafeDetails } from '@/hooks/useSafeDetails'
+import { useSafeFunding } from '@/hooks/useSafeFunding'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
-import { RESET_PERIODS } from '@/lib/allowance-module'
+import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { timeAgo } from '@/lib/format'
 import {
@@ -105,6 +105,7 @@ function ConnectedAgentsSection({
   agents,
   hasAnyAgents,
   hasAccounts,
+  canConnectAgents,
   loading,
   unavailable,
   onRetry,
@@ -113,6 +114,7 @@ function ConnectedAgentsSection({
   agents: DashboardAgentPreview[]
   hasAnyAgents: boolean
   hasAccounts: boolean
+  canConnectAgents: boolean
   loading: boolean
   unavailable: boolean
   onRetry: () => void
@@ -159,6 +161,8 @@ function ConnectedAgentsSection({
             body={
               !hasAccounts
                 ? 'Create a Haven account before connecting agents.'
+                : !canConnectAgents
+                ? 'Agent connections are retired for older Safe accounts. Existing agents remain readable.'
                 : hasAnyAgents
                 ? 'Reconnect or create an agent to bring automated spending back online.'
                 : 'Create your first agent to give it payment credentials and spend limits.'
@@ -167,9 +171,11 @@ function ConnectedAgentsSection({
               <div className="flex items-center justify-center gap-3">
                 {hasAccounts ? (
                   <>
-                    <Button onClick={onConnectAgent} size="sm">
-                      Connect agent
-                    </Button>
+                    {canConnectAgents ? (
+                      <Button onClick={onConnectAgent} size="sm">
+                        Connect agent
+                      </Button>
+                    ) : null}
                     <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
                       Go to Agents
                     </Link>
@@ -666,7 +672,9 @@ export default function DashboardClient() {
   // safe on login. A plain synchronous read, so no extra request and no
   // signing-provider context — a dashboard banner has no business requiring
   // the wallet machinery `useAccountSigners` pulls in.
-  const delegationSafe = safes.find((safe) => safe.account_type === 'delegator_hybrid')
+  // #2413: the account list is delegation-only, so "the first delegation
+  // account" is just the first account.
+  const delegationSafe = safes[0]
   const recoverySigners = getStoredHybridSigners({
     safeAddress: delegationSafe?.safe_address as Address | undefined,
     chainId: delegationSafe?.chain_id,
@@ -704,6 +712,16 @@ export default function DashboardClient() {
   // The DELEGATION-rail nudge above is untouched — `Backup & recovery` is live
   // and this is still the rail where new accounts land.
   const hasAgents = dataReady && agents.length > 0
+  // #2534: the funding facts for the onboarding card's step 1, read from the
+  // same endpoint `haven wallets funding` prints — one source for the
+  // instruction copy (address, chain, the minimum `@haven_ai/core` owns).
+  // Fetched only while the account is unfunded: a funded account has no
+  // instruction to show, and the hero/`hasFunds` state already settles the
+  // checklist. The hook surfaces errors instead of throwing so the card keeps
+  // its general copy when the read fails, exactly as the balance read does.
+  const { funding: safeFunding } = useSafeFunding(
+    !fundingStateKnown || hasFunds ? undefined : delegationSafe?.id,
+  )
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
   const hasFirstAgentPayment = Boolean(
@@ -717,6 +735,12 @@ export default function DashboardClient() {
 
   const defaultSafe = useMemo(
     () => activeSafe ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
+    [activeSafe, safes],
+  )
+  const hasDelegationAccounts = safes.length > 0
+  const agentSafe = useMemo(
+    () =>
+      activeSafe ?? safes[0] ?? null,
     [activeSafe, safes],
   )
 
@@ -852,6 +876,7 @@ export default function DashboardClient() {
   // (b) they've just finished all three steps and haven't dismissed the celebration.
   const showOnboardingGuide =
     setupProgressReady &&
+    hasDelegationAccounts &&
     completeDismissalReady &&
     !requiresOtherDevice &&
     (allOnboardingComplete ? !completeDismissed : !inProgressDismissed)
@@ -865,6 +890,7 @@ export default function DashboardClient() {
   }
 
   function openConnectAgent() {
+    if (!hasDelegationAccounts) return
     setConnectAgentOpen(true)
   }
 
@@ -984,6 +1010,7 @@ export default function DashboardClient() {
         agents={overview?.agents ?? []}
         hasAnyAgents={agents.length > 0}
         hasAccounts={safes.length > 0}
+        canConnectAgents={hasDelegationAccounts}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
@@ -1021,6 +1048,8 @@ export default function DashboardClient() {
             hasFunds={hasFunds}
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
+            canConnectAgents={hasDelegationAccounts}
+            funding={safeFunding}
             onReceiveFunds={openReceiveForDefaultSafe}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
@@ -1034,7 +1063,7 @@ export default function DashboardClient() {
         // Home for the backup-signer prompt (#1162, #1153). Onboarding used
         // to render it on its "You're in" screen, which #1162 removed and
         // relocated here; #1153 replaces the unconditional
-        // "any delegator_hybrid account" render with a funded-state trigger
+        // "any account" render with a funded-state trigger
         // — the owner does not want this in front of the user before they
         // have funds at risk. `hasFunds` is already fail-closed: it only
         // goes true once `fundingStateKnown` is true (safes loaded, balance
@@ -1080,7 +1109,7 @@ export default function DashboardClient() {
         onClose={() => {
           setConnectAgentOpen(false)
         }}
-        safeId={defaultSafe?.id ?? null}
+        safeId={agentSafe?.id ?? null}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}

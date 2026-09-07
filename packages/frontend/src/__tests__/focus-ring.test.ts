@@ -168,7 +168,7 @@ const BACKGROUNDS: Record<string, string[]> = {
   // Success toast only.
   success: ['success-soft'],
   // Every dark fill: the code block, the ink toast, the ink skip-link pill, and
-  // the brand-filled CTA on the investor briefing.
+  // the brand-filled marketing CTA.
   white: ['surface-code', 'ink', 'brand'],
 }
 
@@ -214,13 +214,18 @@ function ringUses(): RingUse[] {
 }
 
 /**
- * The single documented exemption from `focus-visible:`. `layout.tsx`'s skip
+ * The single documented exemption from `focus-visible:`. The skip
  * link is `sr-only` until focused, so it is only ever reachable by keyboard and
  * the two selectors coincide; a dozen sibling `focus:` utilities reveal the
  * pill, and splitting the ring onto a different selector would give one element
  * two focus states. Named here so it stays a decision rather than drift.
  */
-const FOCUS_SELECTOR_EXEMPT = ['src/app/(authenticated)/layout.tsx']
+// The skip-to-content link, which is `sr-only` until focused and so is only
+// ever reachable by keyboard — its two deliberate departures are argued in the
+// file itself. Repointed by #2521, which moved the authenticated chrome out of
+// `src/app/(authenticated)/layout.tsx` so that layout could become a server
+// component and emit the `haven:auth` marker. The link did not change.
+const FOCUS_SELECTOR_EXEMPT = ['src/components/AuthenticatedShell.tsx']
 
 async function compileCss(classes: string[]): Promise<string> {
   const result = await postcss([
@@ -486,12 +491,6 @@ describe('destructive controls focus in their own tone (#1792)', () => {
     ).not.toMatch(/focus-visible:ring-[a-z]+\/\d+/)
   })
 
-  it('the sibling that was already right stays right', () => {
-    // EditAgentModal's "Remove budget" is the reference call-site #1792 was
-    // measured against. Named so a future sweep cannot quietly flip it back.
-    const modal = readFileSync(join(FRONTEND, 'src/components/EditAgentModal.tsx'), 'utf8')
-    expect(modal).toMatch(/hover:bg-\[var\(--v2-danger-soft\)\][^"'`]*focus-visible:ring-danger\/\d+/)
-  })
 })
 
 /**
@@ -628,7 +627,7 @@ describe('destructive controls have a focus indicator at all (#1819)', () => {
  * noisier problem it was deliberately not opening. #1867 is one instance of
  * that problem — the White-on-brand CTA pattern, whose three hand-copies
  * disagreed about focus for as long as it had three: only
- * `investor-briefing/page.tsx:438` declared a ring, and the two on `app/page.tsx`
+ * the retired `InvestorButton` declared a ring, and the two on `app/page.tsx`
  * (the highest-traffic buttons in the product) declared nothing and fell back to
  * the UA outline.
  *
@@ -730,16 +729,15 @@ describe('hand-copies of Button declare a focus treatment (#1867)', () => {
   }, SCAN_TIMEOUT)
 
   it('the signature scan is looking at a real population', () => {
-    // Same anti-vacuity reasoning as every other scan in this file. Two members
-    // today: `marketing/BrandBandButton.tsx` (the White-on-brand band CTA, the
-    // primitive #1867 extracted from three hand-copies) and `InvestorButton` in
-    // `investor-briefing/page.tsx`. If this drops to zero the rule above is
-    // green over an empty list.
+    // The page-specific hand-copy was retired with the investor briefing. Keep
+    // this floor at one: `BrandBandButton` is now the sole intended member, and
+    // the assertion protects the scanner from silently losing the last live
+    // subject rather than preserving a historical count of two.
     const files = new Set(signatureStrings().map((s) => s.file))
     expect(
       files.size,
       'the base-signature scan matched nothing — the rule above is passing vacuously',
-    ).toBeGreaterThanOrEqual(2)
+    ).toBeGreaterThanOrEqual(1)
   }, SCAN_TIMEOUT)
 
   it('a ring that lands on the brand band is white, never brand', () => {

@@ -6,10 +6,12 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
+import { nextPathFromSearch, postAuthDestination, viaMarkerFromSearch } from '@/lib/discovery'
 import { ApiRequestError } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { HavenMark } from '@/components/brand/HavenMark'
+import { AgentHandoffNote } from '@/components/onboarding/AgentHandoffNote'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MAX_EMAIL_LENGTH = 255
@@ -100,12 +102,20 @@ export default function SignupPage() {
 
     setSubmitting(true)
     try {
-      const u = await signup(validation.name, validation.email, password)
-      if (u.safe_address) {
-        router.push('/dashboard')
-      } else {
-        router.push('/onboarding')
-      }
+      // #2522: read from `window.location.search` rather than
+      // `useSearchParams`, matching `useAgentConnectionSetup`'s existing use of
+      // the same source. This page has no Suspense boundary (login does), and
+      // both reads happen inside a submit handler — client-only, after
+      // hydration — so the hook would buy a restructure and nothing else.
+      const search = window.location.search
+      const next = nextPathFromSearch(search)
+      const u = await signup(
+        validation.name,
+        validation.email,
+        password,
+        viaMarkerFromSearch(search),
+      )
+      router.push(postAuthDestination(Boolean(u.safe_address), next))
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message)
@@ -301,6 +311,12 @@ export default function SignupPage() {
                 Log in
               </Link>
             </p>
+
+            {/* #2524: the sidebar says an account is created "with a passkey or
+                your existing wallet" but never that a human has to be the one
+                doing it. An agent reading this page needs the hand-off, not the
+                feature list. */}
+            <AgentHandoffNote path="/signup" />
           </div>
 
           <div

@@ -16,6 +16,15 @@ RUN npm run build -w packages/core
 
 COPY packages/frontend ./packages/frontend
 
+# The four product docs the frontend serves as Markdown under /docs/ (#2532).
+# `next.config.ts` generates them at build time by READING these sources, so a
+# build context without them fails hard with ENOENT — not a soft 404. Build
+# stage only: the runtime image copies `.next/standalone`, `.next/static` and
+# `public/`, so the sources are discarded with the rest of this stage and the
+# generated copies travel inside `public/`.
+# `served-docs.test.ts` asserts this COPY covers every allowlisted source.
+COPY docs ./docs
+
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build -w packages/frontend

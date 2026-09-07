@@ -408,9 +408,21 @@ export interface SettlementReadiness {
   costPerSettlementWei: bigint
   /** `balanceWei / costPerSettlementWei`, floored. Zero means the next one fails. */
   settlementsRemaining: number
-  /** False once `settlementsRemaining` is below {@link MIN_SETTLEMENT_HEADROOM}. */
-  ok: boolean
+  /**
+   * #2490: which band the wallet is in — `usable` (at or above the warn
+   * floor), `warn` (below the warn floor: a slow drain, top up soon, the run
+   * still proceeds) or `fail` (below the fail floor: a run cannot complete,
+   * refuse it — the #1530 class).
+   */
+  status: SettlementBand
+  /** The warn floor {@link SettlementReadiness.status} was measured against. Shipped so the harness renders the band instead of restating it (#2490). */
+  warnFloor: number
+  /** The fail floor {@link SettlementReadiness.status} was measured against. Shipped so the harness renders the band instead of restating it (#2490). */
+  failFloor: number
 }
+
+/** #2490: the three bands the settlement wallet's gas headroom can occupy. */
+export type SettlementBand = 'usable' | 'warn' | 'fail'
 
 /**
  * Observed cost of one settlement, measured from the 2026-08-17 Basescan fee
@@ -420,15 +432,38 @@ export interface SettlementReadiness {
 export const SETTLEMENT_COST_WEI = 2_500_000_000_000n
 
 /**
- * How many settlements of headroom the wallet must hold to report `ok`.
+ * #2490: below this many settlements of headroom a QA run is REFUSED.
  *
- * Not 1: a floor of one reports healthy on the run that then exhausts it. This
- * is a warning threshold for a slow drain, so it is set where a top-up is
- * still a routine action rather than an incident.
+ * Anchored on what one full run consumes: seven 0.001-USDC settling merchant
+ * legs plus the 0.010 direct settle — the same derivation
+ * `TREASURY_RUN_COST_ATOMIC` documents in the QA harness — which is ~8
+ * settlements. Not 8: that would admit a run that spends the wallet to zero
+ * with no margin for a retry leg or a fee drift. Not 16: at 24 the old single
+ * floor produced #2485 (three qa-dev failures while ~3 runs of real capacity
+ * sat unused), so a fail floor anywhere near that re-creates the same
+ * incident at a smaller scale. 12 is one full run plus half a run of
+ * headroom: a run admitted at the floor still ends with >= 4 settlements
+ * left. Must still catch the condition #1530 was built for — at the
+ * 2026-08-17 outage balance (255 gwei) the wallet holds 0 settlements, far
+ * below this floor, exactly as the fail band requires.
  */
-export const MIN_SETTLEMENT_HEADROOM = 25
+export const MIN_SETTLEMENT_HEADROOM_FAIL = 12
 
-/** Pure, so the threshold logic is testable without a chain. */
+/**
+ * How many settlements of headroom the wallet must hold to stay out of the
+ * warn band.
+ *
+ * A warning threshold for a slow drain, NOT an incident: below it the
+ * merchant reports the band on every read and the QA harness prints a
+ * top-up line on every run, but the run proceeds (#2490). Kept at 25 — the
+ * pre-#2490 single-floor value. #2485 (three consecutive qa-dev failures at
+ * 24 settlements, one below this number) is precisely the cost of this
+ * threshold acting as a block; as a warning it occupies its documented role:
+ * ~3 runs of headroom, where a top-up is still a routine action.
+ */
+export const MIN_SETTLEMENT_HEADROOM_WARN = 25
+
+/** Pure, so the band logic is testable without a chain. */
 export function settlementReadiness(
   address: Address,
   balanceWei: bigint,
@@ -436,12 +471,20 @@ export function settlementReadiness(
 ): SettlementReadiness {
   const settlementsRemaining =
     costPerSettlementWei > 0n ? Number(balanceWei / costPerSettlementWei) : 0
+  const status: SettlementBand =
+    settlementsRemaining < MIN_SETTLEMENT_HEADROOM_FAIL
+      ? 'fail'
+      : settlementsRemaining < MIN_SETTLEMENT_HEADROOM_WARN
+        ? 'warn'
+        : 'usable'
   return {
     address,
     balanceWei,
     costPerSettlementWei,
     settlementsRemaining,
-    ok: settlementsRemaining >= MIN_SETTLEMENT_HEADROOM,
+    status,
+    warnFloor: MIN_SETTLEMENT_HEADROOM_WARN,
+    failFloor: MIN_SETTLEMENT_HEADROOM_FAIL,
   }
 }
 

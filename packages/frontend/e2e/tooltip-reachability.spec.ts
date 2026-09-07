@@ -22,8 +22,7 @@
  * This test used to hover `McpServerName`'s null branch, whose 169-character
  * sentence was the longest label any caller passed. **#2043 deleted that
  * tooltip**: the copy explained an absence, it was essential rather than
- * elaboration, and `AgentCard`'s composite `role="link"` meant no keyboard or
- * touch user could ever reach it. It is visible text above the agent list now.
+ * elaboration, and it belongs as visible text above the agent list now.
  *
  * The primitive's width contract did not change with it, so the test moves to
  * the longest label the product **can** pass rather than disappearing. That is

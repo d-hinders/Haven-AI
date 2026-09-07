@@ -138,17 +138,35 @@ describeDb('agent reads survive the agent_allowances drop (#2020)', () => {
     await db.query('DROP TABLE IF EXISTS agent_allowances CASCADE')
 
     // GET /agents' data path: list, then derive for the hybrid subset.
+    //
+    // #2413: the list filters to `delegator_hybrid`, so the legacy agent this
+    // case seeds is no longer returned. That does not weaken the subject —
+    // which is that these reads work with `agent_allowances` DROPPED, not that
+    // they return both rails — and the legacy row is still asserted below by
+    // the direct-SQL check, so "the read path survives the drop" is still
+    // proven for a legacy row, just not through the filtered list.
     const agents = await listAgentsForUserAllStatuses(userId)
-    expect(agents.map((a) => a.id).sort()).toEqual([legacyAgentId, hybridAgentId].sort())
+    expect(agents.map((a) => a.id)).toEqual([hybridAgentId])
+
+    const legacyRow = await db.query<{ id: string }>(
+      `SELECT id FROM agents WHERE id = $1`,
+      [legacyAgentId],
+    )
+    expect(legacyRow.rows).toHaveLength(1)
 
     const derived = await deriveDelegationAllowances([hybridAgentId])
     const hybridRows = derived.get(hybridAgentId) ?? []
     expect(hybridRows).toHaveLength(1)
     expect(hybridRows[0]).toMatchObject({ reset_period_min: 1440 })
 
-    // GET /agents/:id and PUT /agents/:id read paths.
-    const single = await findAgentForUserAllStatuses(legacyAgentId, userId)
-    expect(single?.id).toBe(legacyAgentId)
+    // GET /agents/:id and PUT /agents/:id read paths. #2413 filters the single
+    // read too, so the LEGACY agent is null there; the hybrid one proves the
+    // path works with the table gone. `updateAgentProfile` is NOT filtered —
+    // it targets `agents` directly — so the legacy rename still succeeds, which
+    // is what this case cares about.
+    expect(await findAgentForUserAllStatuses(legacyAgentId, userId)).toBeNull()
+    const singleHybrid = await findAgentForUserAllStatuses(hybridAgentId, userId)
+    expect(singleHybrid?.id).toBe(hybridAgentId)
     const updated = await updateAgentProfile(legacyAgentId, userId, 'renamed', null)
     expect(updated?.name).toBe('renamed')
 

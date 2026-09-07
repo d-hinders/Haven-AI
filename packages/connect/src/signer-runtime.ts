@@ -4,6 +4,15 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { MCP_RUNTIME_MANIFEST, sdkPackageSpec, signerPackageSpec } from './runtime-manifest.js'
+import {
+  describeRuntimeSpecOverride,
+  overrideApplies,
+  resolveRuntimeSpecOverride,
+  runtimeSpecOverrideDirectoryKey,
+  runtimeSpecOverrideNotice,
+  type RuntimeSpecOverride,
+  type RuntimeSpecOverrideRecord,
+} from './runtime-spec-override.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -25,12 +34,20 @@ export interface PreparedSignerRuntime {
   npmCacheDirectory: string
   cliPath: string
   messages: string[]
+  /** #2424: present only when the install ran under a runtime-spec override. */
+  runtimeSpecOverride?: RuntimeSpecOverrideRecord
 }
 
 export interface SignerRuntimeDeps {
   runCommand?: (command: string, args: string[]) => Promise<void>
   /** Heartbeats during the (possibly minutes-long) npm install (#1586). */
   onProgress?: (message: string) => void
+  /**
+   * #2424: where `HAVEN_SIGNER_SPEC` / `HAVEN_SDK_SPEC` are read from.
+   * Defaults to `process.env`; injected so tests can prove both that an
+   * override is honoured and that its absence changes nothing.
+   */
+  env?: NodeJS.ProcessEnv
 }
 
 /**
@@ -64,30 +81,67 @@ export async function prepareSignerRuntime(
   deps: SignerRuntimeDeps = {},
 ): Promise<PreparedSignerRuntime> {
   const homeDir = input.homeDir ?? homedir()
-  const runtimeDirectory = resolve(homeDir, '.haven', 'signer-runtime', MCP_RUNTIME_MANIFEST.signerVersion)
+  // #2424: resolved BEFORE any directory is created or npm is invoked, so a
+  // malformed variable is refused with nothing on disk to clean up.
+  const override = resolveSignerRuntimeOverride(deps.env ?? process.env)
+  const signerSpec = override?.signer ?? signerPackageSpec()
+  const sdkSpec = override?.sdk ?? sdkPackageSpec()
+  const resolvedSpecs = [signerSpec, sdkSpec]
+  const overrideRecord: RuntimeSpecOverrideRecord | undefined = override
+    ? { specs: override, resolved_specs: resolvedSpecs, directory_key: runtimeSpecOverrideDirectoryKey(resolvedSpecs) }
+    : undefined
+  const runtimeDirectory = resolve(
+    homeDir,
+    '.haven',
+    'signer-runtime',
+    overrideRecord ? overrideRecord.directory_key : MCP_RUNTIME_MANIFEST.signerVersion,
+  )
   const npmCacheDirectory = resolve(homeDir, '.haven', 'npm-cache')
   const cliPath = join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js')
   const messages: string[] = []
+
+  if (override) {
+    messages.push(...runtimeSpecOverrideNotice(
+      'signer runtime',
+      override,
+      { signer: signerPackageSpec(), sdk: sdkPackageSpec() },
+      runtimeDirectory,
+    ))
+  }
 
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
   await chmod(runtimeDirectory, 0o700).catch(() => undefined)
   await mkdir(npmCacheDirectory, { recursive: true, mode: 0o700 })
   await chmod(npmCacheDirectory, 0o700).catch(() => undefined)
 
-  if (await installedRuntimeMatches(runtimeDirectory, cliPath)) {
+  if (override) {
+    // Never reused: a rebuilt `file:` package must not be shadowed by a
+    // version check that cannot tell two local builds apart.
+    await installRuntimePackages(runtimeDirectory, npmCacheDirectory, resolvedSpecs, deps)
+    messages.push(`Installed local Haven signer runtime from override (${resolvedSpecs.join(' ')}).`)
+  } else if (await installedRuntimeMatches(runtimeDirectory, cliPath)) {
     messages.push(`Using existing local Haven signer runtime ${signerPackageSpec()}.`)
   } else {
-    await installRuntimePackages(runtimeDirectory, npmCacheDirectory, deps)
+    await installRuntimePackages(runtimeDirectory, npmCacheDirectory, resolvedSpecs, deps)
     messages.push(`Installed local Haven signer runtime ${signerPackageSpec()}.`)
   }
 
   await assertFileExists(cliPath, 'local Haven signer CLI')
+  // Under an override the manifest is not the truth about what is installed;
+  // the sidecar records what npm actually laid down so `--doctor` can compare
+  // the directory against the run that wrote it.
+  const installedVersions = override ? await readInstalledVersions(runtimeDirectory) : undefined
 
   // .mjs so the wrapper is unambiguously ESM when the runtime exec's it via the
   // shebang — Node < 20.10 has no automatic module detection, and there is no
   // package.json with "type":"module" under ~/.haven to disambiguate otherwise.
   const wrapperPath = join(input.credentialDirectory, 'bin', 'haven-signer.mjs')
-  await writeWrapper({ wrapperPath, cliPath, signerPath: input.signerPath })
+  await writeWrapper({
+    wrapperPath,
+    cliPath,
+    signerPath: input.signerPath,
+    overrideComment: override ? describeRuntimeSpecOverride(override) : undefined,
+  })
 
   await writeRuntimeSidecar({
     path: join(input.credentialDirectory, 'signer-runtime.json'),
@@ -96,6 +150,8 @@ export async function prepareSignerRuntime(
     npmCacheDirectory,
     cliPath,
     serverName: input.serverName,
+    override: overrideRecord,
+    installedVersions,
   })
 
   messages.push(`Prepared stable local Haven signer wrapper: ${wrapperPath}`)
@@ -108,12 +164,26 @@ export async function prepareSignerRuntime(
     npmCacheDirectory,
     cliPath,
     messages,
+    ...(overrideRecord ? { runtimeSpecOverride: overrideRecord } : {}),
   }
+}
+
+/**
+ * The signer runtime's slice of the override: `signer` and `sdk`. A lone
+ * `HAVEN_MCP_SPEC` belongs to the `--local` MCP runtime and must not turn this
+ * install into an override one.
+ */
+function resolveSignerRuntimeOverride(env: NodeJS.ProcessEnv): RuntimeSpecOverride | undefined {
+  const override = resolveRuntimeSpecOverride(env)
+  if (!overrideApplies(override, ['signer', 'sdk'])) return undefined
+  const { signer, sdk } = override
+  return { ...(signer !== undefined ? { signer } : {}), ...(sdk !== undefined ? { sdk } : {}) }
 }
 
 async function installRuntimePackages(
   runtimeDirectory: string,
   npmCacheDirectory: string,
+  packageSpecs: readonly string[],
   deps: SignerRuntimeDeps,
 ): Promise<void> {
   const { runCommand, onProgress } = deps
@@ -130,8 +200,7 @@ async function installRuntimePackages(
     '--no-fund',
     '--omit=dev',
     '--prefer-offline',
-    signerPackageSpec(),
-    sdkPackageSpec(),
+    ...packageSpecs,
   ]
   const run = async (args: string[]): Promise<void> => {
     // Heartbeat while npm works: a cold install can legitimately take
@@ -162,24 +231,44 @@ async function installRuntimePackages(
       await run([...baseArgs, '--cache', npmCacheDirectory])
     } catch (err) {
       throw new Error(
-        `Could not install local Haven signer runtime ${signerPackageSpec()}: ${err instanceof Error ? err.message : String(err)}`,
+        `Could not install local Haven signer runtime ${packageSpecs.join(' ')}: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
   }
 }
 
 export async function installedRuntimeMatches(runtimeDirectory: string, cliPath: string): Promise<boolean> {
+  return installedRuntimeMatchesVersions(runtimeDirectory, cliPath, {
+    signerVersion: MCP_RUNTIME_MANIFEST.signerVersion,
+    sdkVersion: MCP_RUNTIME_MANIFEST.sdkVersion,
+  })
+}
+
+/**
+ * #2424: the same check against an explicit pair of versions. `--doctor`
+ * uses it for an override install, where the reference is the sidecar's
+ * record of what npm laid down rather than the manifest pin.
+ */
+export async function installedRuntimeMatchesVersions(
+  runtimeDirectory: string,
+  cliPath: string,
+  expected: { signerVersion: string; sdkVersion: string },
+): Promise<boolean> {
   try {
     await assertFileExists(cliPath, 'local Haven signer CLI')
-    const [signerPackage, sdkPackage] = await Promise.all([
-      readPackageJson(join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'package.json')),
-      readPackageJson(join(runtimeDirectory, 'node_modules', '@haven_ai', 'sdk', 'package.json')),
-    ])
-    return signerPackage.version === MCP_RUNTIME_MANIFEST.signerVersion &&
-      sdkPackage.version === MCP_RUNTIME_MANIFEST.sdkVersion
+    const installed = await readInstalledVersions(runtimeDirectory)
+    return installed.signerVersion === expected.signerVersion && installed.sdkVersion === expected.sdkVersion
   } catch {
     return false
   }
+}
+
+async function readInstalledVersions(runtimeDirectory: string): Promise<{ signerVersion: string; sdkVersion: string }> {
+  const [signerPackage, sdkPackage] = await Promise.all([
+    readPackageJson(join(runtimeDirectory, 'node_modules', '@haven_ai', 'signer', 'package.json')),
+    readPackageJson(join(runtimeDirectory, 'node_modules', '@haven_ai', 'sdk', 'package.json')),
+  ])
+  return { signerVersion: signerPackage.version ?? '', sdkVersion: sdkPackage.version ?? '' }
 }
 
 async function readPackageJson(path: string): Promise<{ version?: string }> {
@@ -190,11 +279,16 @@ async function writeWrapper(input: {
   wrapperPath: string
   cliPath: string
   signerPath: string
+  /** #2424: present only under an override; the wrapper says so to whoever opens it. */
+  overrideComment?: string
 }): Promise<void> {
   await mkdir(dirname(input.wrapperPath), { recursive: true, mode: 0o700 })
   await chmod(dirname(input.wrapperPath), 0o700).catch(() => undefined)
   const source = [
     '#!/usr/bin/env node',
+    ...(input.overrideComment
+      ? [`// HAVEN RUNTIME SPEC OVERRIDE (#2424): ${input.overrideComment} — this wrapper launches a NON-pinned signer build.`]
+      : []),
     "import { spawn } from 'node:child_process'",
     '',
     `const cliPath = ${JSON.stringify(input.cliPath)}`,
@@ -226,6 +320,13 @@ export interface SignerRuntimeSidecar {
   runtime_directory: string
   npm_cache_directory: string
   cli_path: string
+  /**
+   * #2424: present ONLY when the install ran under `HAVEN_SIGNER_SPEC` /
+   * `HAVEN_SDK_SPEC`. Then `signer_version` / `sdk_version` above are what
+   * npm actually installed (read back from the package.json files), not the
+   * manifest pins, and `--doctor` reports the override as a finding.
+   */
+  runtime_spec_override?: RuntimeSpecOverrideRecord
 }
 
 export async function readRuntimeSidecar(credentialDirectory: string): Promise<SignerRuntimeSidecar | null> {
@@ -245,17 +346,20 @@ async function writeRuntimeSidecar(input: {
   npmCacheDirectory: string
   cliPath: string
   serverName?: string
+  override?: RuntimeSpecOverrideRecord
+  installedVersions?: { signerVersion: string; sdkVersion: string }
 }): Promise<void> {
   const value = {
     ...(input.serverName ? { server_name: input.serverName } : {}),
     signer_package: MCP_RUNTIME_MANIFEST.signerPackage,
-    signer_version: MCP_RUNTIME_MANIFEST.signerVersion,
+    signer_version: input.installedVersions?.signerVersion ?? MCP_RUNTIME_MANIFEST.signerVersion,
     sdk_package: MCP_RUNTIME_MANIFEST.sdkPackage,
-    sdk_version: MCP_RUNTIME_MANIFEST.sdkVersion,
+    sdk_version: input.installedVersions?.sdkVersion ?? MCP_RUNTIME_MANIFEST.sdkVersion,
     wrapper_path: input.wrapperPath,
     runtime_directory: input.runtimeDirectory,
     npm_cache_directory: input.npmCacheDirectory,
     cli_path: input.cliPath,
+    ...(input.override ? { runtime_spec_override: input.override } : {}),
   }
   await writeFile(input.path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
   await chmod(input.path, 0o600).catch(() => undefined)

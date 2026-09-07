@@ -21,7 +21,8 @@ covers:
   - .github/workflows/qa-live.yml
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
-last-verified: "2026-08-31" # #2313: the Agent Connection table's `Wallet approval` row told a QA agent to accept "correct multi-approval waiting state appears" as a pass. No such state can appear: `multi-approval` exists in no frontend or backend source, and since #1984 every onboarded account is a delegation-rail account whose grant is a single in-modal signature. Renamed to `Budget approval` and re-based on that signature. Worth recording: this file is in `scripts/ci/queue-framing-census.test.mjs`'s GUARDED_FILES and passed it the whole time — the census matches banned PHRASES, and `multi-approval waiting state` is not one, which is the ungated-claim gap that file's own comment block names. Scope: that one table row. NOT re-verified: the money-flow scenario tables, the sweep/x402 rows, or this doc's `covers:` targets. Prior: #2097: a file this template `covers:` by exact path (`docs/operations/e2e-qa-runbook.md`) was re-verified — the CSV export row notes the new `initiator` column; the run template itself is unchanged. Scope: that covered-file relationship only. Prior: #2103: the Cleanup And Residual State checklist asked a run to confirm "Pending approvals were rejected, completed, or explicitly recorded" — residual state that cannot exist, so the item was unanswerable-or-n/a on every run. Removed. The money-flow scenario rows are untouched (they were corrected for #2082 in this same file and are accurate). Scope: that one checkbox. Prior: #2082: the x402 over-budget row's parenthetical asserted that erc7710 does NOT refuse at authorize and is enforced only at merchant redemption — true when #2016 wrote it, false now: the erc7710 branch refuses 403 `delegation_budget_exceeded` pre-funding. The clause is dropped and a row for the new thirteenth leg (`x402-erc7710-over-budget-rejected`) is added, with the evidence column naming `error_code`/`remaining_atomic` because a bare 403 is also what a MISSING delegation returns. Scope: those two rows only; nothing else in this file was re-verified. Prior: #2016: the money-flow scenario rows named an approval QUEUE for over-budget. That queue was legacy-rail-only and no longer exists anywhere (#1986/#1989) — over-budget now REVERTS on-chain during gas estimation, so a tester following the old row would have recorded a correct refusal as a failure. Both over-budget rows rewritten, and each now asks for the ENFORCER named in the revert reason: a bare 502 is also what a bundler outage looks like. Scope: those two rows only; the rest of the template was NOT re-verified. Prior: #1768: canonical commands re-read against `packages/frontend/package.json` — `test:e2e:gate` replaces the desktop/full pair, `test:e2e:mobile` added. Prior: re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
+  - .claude/commands/qa-explore-agent-onboarding.md
+last-verified: "2026-09-06" # #2538: re-verified, NOT edited apart from one `covers:` entry. The cadence gains a second scenario whose reports use this template, so `.claude/commands/qa-explore-agent-onboarding.md` joins `qa-explore-ui.md` in `covers:`. The template body needs no change: the agent-onboarding report adds a scores table above the findings table rather than replacing it, and the secret-review step it mandates was performed on the first run. Scope: that one `covers:` addition. NOT re-verified: the template sections themselves or the other reports that use it. Prior: #2313: the Agent Connection table's `Wallet approval` row told a QA agent to accept "correct multi-approval waiting state appears" as a pass. No such state can appear: `multi-approval` exists in no frontend or backend source, and since #1984 every onboarded account is a delegation-rail account whose grant is a single in-modal signature. Renamed to `Budget approval` and re-based on that signature. Worth recording: this file is in `scripts/ci/queue-framing-census.test.mjs`'s GUARDED_FILES and passed it the whole time — the census matches banned PHRASES, and `multi-approval waiting state` is not one, which is the ungated-claim gap that file's own comment block names. Scope: that one table row. NOT re-verified: the money-flow scenario tables, the sweep/x402 rows, or this doc's `covers:` targets. Prior: #2097: a file this template `covers:` by exact path (`docs/operations/e2e-qa-runbook.md`) was re-verified — the CSV export row notes the new `initiator` column; the run template itself is unchanged. Scope: that covered-file relationship only. Prior: #2103: the Cleanup And Residual State checklist asked a run to confirm "Pending approvals were rejected, completed, or explicitly recorded" — residual state that cannot exist, so the item was unanswerable-or-n/a on every run. Removed. The money-flow scenario rows are untouched (they were corrected for #2082 in this same file and are accurate). Scope: that one checkbox. Prior: #2082: the x402 over-budget row's parenthetical asserted that erc7710 does NOT refuse at authorize and is enforced only at merchant redemption — true when #2016 wrote it, false now: the erc7710 branch refuses 403 `delegation_budget_exceeded` pre-funding. The clause is dropped and a row for the new thirteenth leg (`x402-erc7710-over-budget-rejected`) is added, with the evidence column naming `error_code`/`remaining_atomic` because a bare 403 is also what a MISSING delegation returns. Scope: those two rows only; nothing else in this file was re-verified. Prior: #2016: the money-flow scenario rows named an approval QUEUE for over-budget. That queue was legacy-rail-only and no longer exists anywhere (#1986/#1989) — over-budget now REVERTS on-chain during gas estimation, so a tester following the old row would have recorded a correct refusal as a failure. Both over-budget rows rewritten, and each now asks for the ENFORCER named in the revert reason: a bare 502 is also what a bundler outage looks like. Scope: those two rows only; the rest of the template was NOT re-verified. Prior: #1768: canonical commands re-read against `packages/frontend/package.json` — `test:e2e:gate` replaces the desktop/full pair, `test:e2e:mobile` added. Prior: re-verified for #1227 (db-mock ratchet joins the gates) — no claim here affected
 ---
 
 <!--
@@ -72,7 +73,8 @@ does not require funded wallets, relayer gas, or live credentials.
 
 - [ ] Dev/testnet only; no production credentials, RPCs, or real funds.
 - [ ] Correct frontend, backend, hosted MCP, and merchant targets confirmed.
-- [ ] Safe test-token balance and remaining allowance recorded.
+- [ ] Haven wallet test-token balance and remaining live delegation budget recorded;
+      legacy Safe authority is marked n/a.
 - [ ] Relayer has testnet gas.
 - [ ] Delegate balance recorded when testing x402/recovery.
 - [ ] Required local/CI secret names are present without printing values.
@@ -111,7 +113,7 @@ npm run qa:dev -w packages/qa-agent
 | Setup prompt | Default flow shows one prompt/command and no private key or API key | pass / fail / skip | |
 | Local credentials | Connector creates API and signing credentials locally; backend receives public signing address/proof and API-key hash/prefix | pass / fail / skip | Sanitized paths/registration evidence |
 | Runtime wiring | Hosted MCP and local signer entries load, with correct restart/readiness behavior | pass / fail / skip | Runtime/config evidence |
-| Budget approval | Correct Haven wallet/network/rules shown; the in-modal budget signature executes and activates the agent. There is no multi-approval waiting state to look for — `multi-approval` exists in no frontend or backend source, and every account onboarded since #1984 is a delegation-rail account whose grant is one signature | pass / fail / skip | Approval state/transaction |
+| Delegation budget signature | Correct Haven wallet/network/rules shown; the signed delegation budget executes or the device-signature step is recorded | pass / fail / skip | Signature state/transaction; legacy retired rail = n/a |
 | Agent readiness | `haven_get_agent` shows expected readiness and live remaining budget | pass / fail / skip | Readiness/allowance values |
 | Named action | Record exact amount/action and expected terminal or approval state | pass / fail / skip | Action/payment ID/status |
 | Manual fallback | If tested, one-time warning, explicit acknowledgement, trusted-runtime transfer, and close/reload loss behavior are correct | pass / fail / skip | |
@@ -135,7 +137,8 @@ For a manual live merchant also record:
   address.
 - Whether merchant settlement occurred.
 - Receipt/status evidence and public explorer links.
-- Before/after Safe and delegate balances and remaining allowance when relevant.
+- Before/after Haven wallet and delegate balances and remaining live delegation
+  budget when relevant; legacy Safe authority and AllowanceModule reads are n/a.
 
 UI transaction-detail verification is a separate check. The Playwright
 transaction-detail spec uses mocked API data and does not prove a live payment
@@ -156,7 +159,8 @@ Mark cleanup items `n/a` when the run mode created no live state.
 
 - [ ] Stranded delegate funds were swept or explicitly recorded with owner and
   follow-up.
-- [ ] Post-run Safe/delegate balances and remaining allowance were captured.
+- [ ] Post-run Haven wallet/delegate balances and remaining live delegation
+      budget were captured; legacy Safe authority is marked n/a.
 - [ ] Seed/reset requirements for the next run were recorded.
 - [ ] Secret review passed; no secrets remain in committed text or artifacts.
 

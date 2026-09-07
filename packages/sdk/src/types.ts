@@ -1,3 +1,5 @@
+import { HAVEN_CONNECTOR_CHANNEL, connectorRerunCommand } from './connector-channel.js'
+
 // ── Client Configuration ─────────────────────────────────────────
 
 export interface HavenClientConfig {
@@ -707,7 +709,8 @@ export interface HavenAgentSummary extends HavenAgent {
    * Spend-authority readiness: hosted identity + on-chain remaining spend
    * authority. Deliberately named for what it covers — the LOCAL signer's
    * availability is NOT included and must be verified separately (a signer
-   * tool call, or `npx @haven_ai/connect@alpha --doctor`).
+   * tool call, or the connector's `--doctor`, whose exact command this build
+   * renders from `HAVEN_CONNECTOR_CHANNEL` — see `connector-channel.ts`).
    */
   spend_authority_readiness: HavenAgentReadiness
   allowances: HavenAgentAllowanceSummary[]
@@ -1129,8 +1132,34 @@ export interface AgentPaymentWarning {
  */
 export interface AgentNextStep {
   next_action: AgentPaymentNextAction
-  /** Fully-qualified tool name for the next call, when one exists. */
+  /**
+   * Claude-family namespaced tool name for the next call
+   * (`mcp__<server>__<tool>`), when one exists.
+   *
+   * **Namespaced with the DEFAULT server names**, which is the most the hosted
+   * server can know: local server names are the client's own config and never
+   * reach Haven. Two runtimes are already not the default — Codex names servers
+   * by config key (`haven`, `haven_signer`), and a connector run with
+   * `--name <slug>` wires `haven-<slug>` / `haven-signer-<slug>` (#1694). On
+   * either, this field and `next_tool_server` name a server the client does not
+   * have. Prefer {@link AgentNextStep.next_tool_server_role} plus
+   * {@link AgentNextStep.next_tool_name} whenever your servers are not the
+   * default pair; see #2550.
+   */
   next_tool?: string
+  /**
+   * The server half of `next_tool`, unprefixed — `haven` or `haven-signer`.
+   * Carries the same default-name caveat as `next_tool` (#1588, #2550).
+   */
+  next_tool_server?: string
+  /** The bare tool name, callable on whichever server plays the role below. */
+  next_tool_name?: string
+  /**
+   * Which of the CLIENT'S OWN servers to call (#2550). Runtime-neutral, and
+   * the field to resolve against when your server names are not the defaults —
+   * it names a role rather than a name the hosted server had to guess.
+   */
+  next_tool_server_role?: 'hosted' | 'signer'
   /** Small literal arguments for next_tool. Bulky fields are referenced by reason. */
   next_arguments?: Record<string, unknown>
   /** False when the agent should stop and involve the user before continuing. */
@@ -1801,10 +1830,24 @@ export type SignerRefusalCode = (typeof SignerRefusalCode)[keyof typeof SignerRe
  * this sentence is exactly how the two surfaces could start disagreeing about
  * what to do.
  */
-export const SIGNER_UPDATE_FALLBACK =
-  'Update @haven_ai/signer by rerunning `npx @haven_ai/connect@alpha`, which reinstalls the ' +
-  'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
-  'quote or payment this version came from is unaffected and does not need to be re-quoted.'
+export function signerUpdateFallback(channel: string = HAVEN_CONNECTOR_CHANNEL): string {
+  return (
+    `Update @haven_ai/signer by rerunning \`${connectorRerunCommand(undefined, { channel })}\`, which reinstalls the ` +
+    'pinned MCP runtime, then retry the same signing call. Nothing was signed or spent — the ' +
+    'quote or payment this version came from is unaffected and does not need to be re-quoted.'
+  )
+}
+
+/**
+ * The same sentence rendered for THIS build's channel (#2423). Every existing
+ * consumer keeps importing this constant and keeps getting a string; the only
+ * thing that moved is that `alpha` is no longer typed into it.
+ *
+ * The hosted MCP server is the one caller that does NOT use this constant: it
+ * is deployed rather than published, so it renders `signerUpdateFallback()`
+ * with the channel its own environment names.
+ */
+export const SIGNER_UPDATE_FALLBACK = signerUpdateFallback()
 
 /**
  * Thrown by the local signer when a Haven-signed binding (x402 expected

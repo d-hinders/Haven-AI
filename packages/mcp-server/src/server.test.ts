@@ -182,6 +182,12 @@ describe('buildHostedMcpServer', () => {
     expect(HOSTED_INSTRUCTIONS).toContain('mcp__<server>__<tool>')
     expect(HOSTED_INSTRUCTIONS).toContain('next_tool_server')
     expect(HOSTED_INSTRUCTIONS).toContain('next_tool_name')
+    // #2550: the field alone is inert — an agent only reaches for the role if
+    // the instructions tell it to, and until this landed they told it to
+    // resolve via next_tool_server, which is the field that is WRONG on a
+    // `--name <slug>` install. Cheap literal guards; nothing interprets prose.
+    expect(HOSTED_INSTRUCTIONS).toContain('next_tool_server_role')
+    expect(HOSTED_INSTRUCTIONS).toContain('--name <slug>')
 
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const server = buildHostedMcpServer(haven)

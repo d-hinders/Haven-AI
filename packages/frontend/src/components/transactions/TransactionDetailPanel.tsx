@@ -159,7 +159,13 @@ export default function TransactionDetailPanel({
       </div>
 
       {kind === 'x402' ? (
-        <Section title="Payment">
+        // #2357: the protocol name moved OFF the primary row title and onto
+        // this heading, rather than out of the product. The detail drawer is
+        // the advanced surface `docs/product/copy-guidelines.md` allows
+        // technical vocabulary on — the same reason the "Settlement" row below
+        // may say "ERC-7710" — and this heading now matches the `mpp` section's
+        // long-standing shape ("Machine payment") one block down.
+        <Section title="x402 payment">
           {tx.x402ResourceUrl ? (
             <DetailRow label="Resource" value={parseX402Hostname(tx.x402ResourceUrl) ?? tx.x402ResourceUrl} />
           ) : null}

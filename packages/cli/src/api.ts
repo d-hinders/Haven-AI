@@ -1,9 +1,19 @@
 export class CliApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /**
+   * The parsed response body, when there was one (#2526).
+   *
+   * The message is built FROM `body.error` for humans, and the device flow
+   * needs the same value as DATA: `authorization_pending` and `slow_down` are
+   * control signals in a poll loop, and branching on them by matching the
+   * message string would make the loop depend on prose that is free to change.
+   */
+  body?: unknown
+  constructor(message: string, status: number, body?: unknown) {
     super(message)
     this.name = 'CliApiError'
     this.status = status
+    this.body = body
   }
 }
 
@@ -61,7 +71,7 @@ export function createCliApi({ baseUrl, token, fetchImpl = fetch }: CreateCliApi
         (payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
           ? payload.error
           : null) ?? `Request failed (HTTP ${res.status}).`
-      throw new CliApiError(message, res.status)
+      throw new CliApiError(message, res.status, payload)
     }
 
     return payload as T

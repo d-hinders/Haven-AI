@@ -53,14 +53,23 @@ also records a third — disposition upkeep — owned by
   check instead of a reconstruction. The only prior finding that could be
   re-measured cheaply was the one a ratchet happened to exist for — and the
   db-mock ratchet's own history shows ad-hoc recounting goes wrong (it once
-  counted the pattern's name inside a comment). A finding whose number no
-  ratchet or script reproduces gets a small script under `scripts/quality/`.
+  counted the pattern's name inside a comment). Name an existing instrument
+  first (`scripts/ci/*`, `scripts/docs/*`, a ratchet); a new script only when
+  none exists, and then it lives with its kind under `scripts/ci/` or
+  `scripts/docs/` — there is no `scripts/quality/`.
 - **Probed clean.** Every entry ends with a `Probed clean:` section —
   `dimension → command → number` for each dimension probed that produced no
   qualifying finding. These are the baselines the next run diffs against, and
   together they map which dimensions are exhausted (where the next run should
   dig deeper rather than re-probe from zero). The 2026-08-18 entry did this
   informally; it is required from now on.
+- **Wave-dimension coverage (#2501).** `Probed clean:` names every block in
+  [`references/dimensions.md`](references/dimensions.md) by its number, each as
+  `block N → command → number`, including the blocks whose number was a
+  finding elsewhere in the entry. A block absent from the section means the
+  run did not take it, and the next reader must be able to tell that from
+  "took it and found nothing" — the distinction the 600-issue wave's
+  instruments kept collapsing (a green gate that had looked at nothing).
 
 ## The bar (the core of the skill — say no to small things)
 
@@ -90,19 +99,40 @@ scan would otherwise be empty, so the emptiness is explained.
    source-vs-test ratios.
 3. Probe the dimensions where structural problems live: test architecture and
    what is mocked away; validation and contract enforcement; data-layer
-   coverage; cross-package duplication; fat controllers; `any` density; CI
-   gate coverage vs. what is actually exercised; **guard effectiveness** —
-   sample guards and regression tests per layer, mutate what each one claims
-   to pin, and report the survival rate (a test that stays green under the
-   mutation it exists to catch is the one weakness class no comment ever
-   names: the #1586 heartbeat was dead code in production behind a green
-   unit test); **incident clustering** — group the recent issue history by
-   failure class and count recurrence over time (the method the 2026-08-18
-   outbound finding used by hand: 6 issues in the class in 7 weeks); and
-   **workflow archaeology** — rerun frequency per CI check, rerun/flake
-   mentions in commits and PR comments, checks that pass only on retry.
-   Runtime-UX stays out of scope: that class surfaces through external
-   testing (epic #1585's origin), not repo scanning.
+   coverage; cross-package duplication; fat controllers; `any` density;
+   **incident clustering** — group the recent issue history by failure class
+   and count recurrence over time (the method the 2026-08-18 outbound finding
+   used by hand: 6 issues in the class in 7 weeks); and **workflow
+   archaeology** — rerun frequency per CI check, rerun/flake mentions in
+   commits and PR comments, checks that pass only on retry. Runtime-UX stays
+   out of scope: that class surfaces through external testing (epic #1585's
+   origin), not repo scanning. Then take the seven **wave dimensions** — the
+   classes the 600-issue wave was measured to consist of — each as its
+   numbered block in [`references/dimensions.md`](references/dimensions.md),
+   which states the command, the sample and what clean looks like, so the
+   number is quotable as evidence or as a `Probed clean` baseline:
+   1. **Guard falsifiability by execution** — mutate what a sampled guard
+      claims to pin and run it; report survivors with one of three diagnoses
+      (weak test / dead code / not load-bearing at the tested condition). This
+      is the #1602 *guard effectiveness* dimension made executable, under its
+      ledger name (#2307, #2044, #2444).
+   2. **Contract-doc `covers:` completeness** — paths the body cites vs the
+      declared `covers:`, both directions (#2425).
+   3. **Stale numbers in prose** — re-derive every quoted figure from its
+      instrument; a figure without a command is the finding (#2421, #2423).
+   4. **Retired-vocabulary residue** — the last removal epic's terms and its
+      dead exports, with a positive control and a live/historical partition
+      (#1440, #1993, #2107).
+   5. **Merge-method drift on `dev`** — first-parent landings by subject
+      shape and head prefix, sync-backs apart; remedy is a one-line ruleset
+      edit, so this yields a baseline or a `new-task`, never an epic (#2165).
+   6. **Nets with holes** — each gate's allowlist vs the content class it
+      checks, and each gate's green-without-running exit branches. This is
+      the *CI gate coverage vs. what is actually exercised* dimension made
+      concrete (#2317, #2088, #2300, #1044).
+   7. **Chain health** — `last-verified` line length against
+      `chain-integrity.mjs`'s ceiling, in the guard's unit, and duplicate
+      entries (#2477).
 4. Read the comment archaeology: `TODO`s, issue-number references, and
    repeated warning comments are where a codebase names its own recurring
    pain. A warning copy-pasted across files is a structural finding announcing

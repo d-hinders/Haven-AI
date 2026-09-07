@@ -33,7 +33,11 @@ async function seedSafe(
       userId,
       `0x${String(++n).padStart(40, '0')}`,
       fields.chainId ?? 8453,
-      fields.accountType ?? 'safe',
+      // #2413: the default is the DELEGATION rail, because the query now
+      // filters retired-rail rows out. These cases are about the passkey-count
+      // projection and tenant scoping, not the rail — seeding 'safe' here
+      // would make them assert the filter rather than their own subject.
+      fields.accountType ?? 'delegator_hybrid',
       fields.ownerAddress ?? null,
     ],
   )

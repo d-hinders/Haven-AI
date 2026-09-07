@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadMoneyPathGlobs, loadMoneyPathControlGlobs, matchesGlob } from './qa-freshness.mjs'
+import { loadMoneyPathGlobs, loadMoneyPathControlGlobs, matchesGlob, moneyPathFiles } from './qa-freshness.mjs'
 import { parseFrontMatter, globToRegExp } from '../docs/validate-frontmatter.mjs'
 import {
   allGlobs,
@@ -295,6 +295,39 @@ describe('money-path list stays in one piece', () => {
       trips,
       [],
       'non-money fixtures matched by the money-path list: ' + trips.join(', '),
+    )
+  })
+
+  test('the hosted MCP decision surface is RUNTIME money-path — a change to it gates promotion (#2300)', () => {
+    // The positive twin of the over-read sweep above, for the one addition
+    // that was argued rather than derived. packages/mcp-server/src/tools.ts
+    // decides whether a funding userop is relayed and in what order (#2282),
+    // and four money defects shipped from it with no money-path label by the
+    // file half. It must match a RUNTIME glob — not merely the union — because
+    // qa-freshness.mjs reasons about `globs` alone: a control-glob entry would
+    // label the PR and still let a tools.ts change promote on a green run that
+    // never exercised it. Mutation: remove packages/mcp-server/src/** from the
+    // JSON and this fails by name, before the labeler-union test does.
+    const runtime = loadMoneyPathGlobs()
+    for (const f of ['packages/mcp-server/src/tools.ts', 'packages/mcp-server/src/server.ts']) {
+      assert.ok(
+        moneyPathFiles([f], runtime).length === 1,
+        `${f} must be matched by a RUNTIME money-path glob — it is the hosted MCP ` +
+          'decision surface the deployed money-flow harness exercises (#2300)',
+      )
+    }
+
+    // The scoping half: the package's build and prose plumbing stays OUT.
+    // Measured before choosing src/** over the whole package: 3 of 113 first-parent
+    // commits in 90 days (git log --first-parent --since=2026-06-04 -- packages/mcp-server)
+    // touched only these files, and a whole-package glob would have
+    // forced casp-risk-guardrails.md's `covers:` to widen to a Dockerfile.
+    const plumbing = ['packages/mcp-server/README.md', 'packages/mcp-server/Dockerfile', 'packages/mcp-server/package.json']
+    const all = [...runtime, ...loadMoneyPathControlGlobs()]
+    assert.deepEqual(
+      moneyPathFiles(plumbing, all),
+      [],
+      'mcp-server build/prose plumbing must stay off the perimeter — the glob is src/**, not the package (#2300)',
     )
   })
 

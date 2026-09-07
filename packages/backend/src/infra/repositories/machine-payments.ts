@@ -27,7 +27,7 @@
  */
 
 import pool from '../../db.js'
-import { type Executor, type QueryRow } from '../transaction.js'
+import { type Executor, type QueryRow, withTransaction } from '../transaction.js'
 
 export type { Executor }
 
@@ -651,6 +651,30 @@ export interface NewPreparedSweep {
   nonce: string
 }
 
+export interface AgentSafeBindingRow {
+  safe_address: string | null
+}
+
+/** The same agent-row lock used by Safe unlink, so recovery cannot use stale binding data. */
+export const LOCK_AGENT_SAFE_BINDING_SQL = `SELECT us.safe_address
+       FROM agents a
+       LEFT JOIN user_safes us ON us.id = a.safe_id
+       WHERE a.id = $1 AND a.user_id = $2
+       FOR UPDATE OF a`
+
+async function lockAgentSafeBinding(
+  agentId: string,
+  userId: string,
+  db: Executor,
+): Promise<AgentSafeBindingRow | null> {
+  const result = await db.query<AgentSafeBindingRow>(LOCK_AGENT_SAFE_BINDING_SQL, [agentId, userId])
+  return result.rows[0] ?? null
+}
+
+function matchesSafeAddress(current: string | null, expected: string): boolean {
+  return Boolean(current && current.toLowerCase() === expected.toLowerCase())
+}
+
 export async function insertPreparedSweep(
   input: NewPreparedSweep,
   db: Executor = pool,
@@ -667,6 +691,30 @@ export async function insertPreparedSweep(
     input.validBefore,
     input.nonce,
   ])
+}
+
+/** Insert only while the agent still points at the authorization destination. */
+export async function insertPreparedSweepForBoundAgent(
+  input: NewPreparedSweep,
+  db: Executor = pool,
+): Promise<boolean> {
+  return withTransaction(db, async (tx) => {
+    const binding = await lockAgentSafeBinding(input.agentId, input.userId, tx)
+    if (!matchesSafeAddress(binding?.safe_address ?? null, input.toAddress)) return false
+    await tx.query(INSERT_PREPARED_SWEEP_SQL, [
+      input.agentId,
+      input.userId,
+      input.chainId,
+      input.tokenAddress,
+      input.fromAddress,
+      input.toAddress,
+      input.valueAtomic,
+      input.validAfter,
+      input.validBefore,
+      input.nonce,
+    ])
+    return true
+  })
 }
 
 export const FIND_SWEEP_BY_NONCE_SQL = `SELECT id, chain_id, token_address, from_address, to_address, value_atomic,
@@ -715,6 +763,28 @@ export const CLAIM_PREPARED_SWEEP_SQL = `UPDATE delegate_sweeps SET status = 'su
 export async function claimPreparedSweep(sweepId: string, db: Executor = pool): Promise<boolean> {
   const result = await db.query<{ id: string }>(CLAIM_PREPARED_SWEEP_SQL, [sweepId])
   return result.rows.length > 0
+}
+
+export type BoundSweepClaim = 'claimed' | 'already_claimed' | 'not_bound'
+
+/**
+ * Revalidate the live Safe binding and claim in one transaction. Safe unlink
+ * takes the same agent-row lock and refuses while a prepared/submitting sweep
+ * exists, closing both sides of the race.
+ */
+export async function claimPreparedSweepForBoundAgent(
+  sweepId: string,
+  agentId: string,
+  userId: string,
+  safeAddress: string,
+  db: Executor = pool,
+): Promise<BoundSweepClaim> {
+  return withTransaction(db, async (tx) => {
+    const binding = await lockAgentSafeBinding(agentId, userId, tx)
+    if (!matchesSafeAddress(binding?.safe_address ?? null, safeAddress)) return 'not_bound'
+    const result = await tx.query<{ id: string }>(CLAIM_PREPARED_SWEEP_SQL, [sweepId])
+    return result.rows.length > 0 ? 'claimed' : 'already_claimed'
+  })
 }
 
 export const RELEASE_SWEEP_CLAIM_SQL = `UPDATE delegate_sweeps SET status = 'prepared' WHERE id = $1 AND status = 'submitting'`

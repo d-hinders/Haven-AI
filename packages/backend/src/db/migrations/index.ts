@@ -73,6 +73,10 @@ import * as dropAllowanceNonceWatermarks from './071_drop_allowance_nonce_waterm
 import * as paymentIntentsSettlementIndexes from './072_payment_intents_settlement_indexes.js'
 import * as dropX402ResourceTables from './073_drop_x402_resource_tables.js'
 import * as agentConnectionSetupSource from './074_agent_connection_setup_source.js'
+import * as dropInertSafeRailSchema from './075_drop_inert_safe_rail_schema.js'
+import * as viaMarker from './076_via_marker.js'
+import * as setupRunMode from './077_setup_run_mode.js'
+import * as deviceAuthorizations from './078_device_authorizations.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -205,4 +209,8 @@ export const migrations: Migration[] = [
   paymentIntentsSettlementIndexes,
   dropX402ResourceTables,
   agentConnectionSetupSource,
+  dropInertSafeRailSchema,
+  viaMarker,
+  setupRunMode,
+  deviceAuthorizations,
 ]

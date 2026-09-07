@@ -27,6 +27,7 @@ import {
   HavenUnsupportedSignerVersionError,
   SignerRefusalCode,
   SIGNER_UPDATE_FALLBACK,
+  connectorRerunCommand,
   type SweepAuthorization,
   type SweepExpectedAuth,
   type X402ExpectedAuth,
@@ -118,9 +119,20 @@ export interface X402ExpectedPayment {
    * signing path allowed for this intent.
    */
   typedDataHash?: string
-  /** Resource URL that was funded by hosted haven_x402_authorize. */
+  /**
+   * Resource URL of the x402 payment Haven prepared. On the hosted surface
+   * that is `haven_pay_x402_quote` — `buildX402SigningContext` in
+   * `mcp-server/src/tools.ts` relays `intent.resourceUrl` here, and
+   * `haven_resume_x402_payment` re-emits the same context. Checked against
+   * the merchant header's resource in `assertX402MatchesExpected`.
+   */
   resourceUrl: string
-  /** Merchant recipient that was funded by hosted haven_x402_authorize. */
+  /**
+   * Merchant recipient of that same prepared payment (`intent.merchantTo`,
+   * same source). Checked against the header's `payTo` in
+   * `assertX402MatchesExpected` and, for an erc7710 settlement child,
+   * against the child's payee caveat in `verifySettlementChild`.
+   */
   merchantTo: string
   /** Atomic amount funded for the merchant header. */
   amount: string
@@ -611,7 +623,7 @@ export function assertSupportedBindingVersion(
   const ceiling = outOfDate
     ? `This signer is out of date: it supports ${context} versions up to ${highest}, ` +
       `and Haven sent version ${received}. Update @haven_ai/signer — rerun the Haven ` +
-      'connector (`npx @haven_ai/connect@alpha`), which reinstalls the pinned MCP runtime.'
+      `connector (\`${connectorRerunCommand()}\`), which reinstalls the pinned MCP runtime.`
     : `Unsupported ${context} version ${received}: this signer supports ` +
       `${supported.join(', ')}.`
   // Below-floor is the opposite skew (this signer is NEWER than what sent the

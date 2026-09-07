@@ -16,10 +16,14 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
+  delegationBuildSlotKey,
+  findReusablePendingDelegation,
   listActiveDelegations,
   listDelegationJsonByIds,
   selectDelegationForPayment,
+  withDelegationBuildSlotLock,
 } from '../delegation-budgets.js'
+import { insertPendingDelegationForOwnedNonRevokedAgent } from '../agents.js'
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const RECIPIENT = '0x00000000000000000000000000000000000000aa'
@@ -293,5 +297,288 @@ describeDb('batch revocation (#1400, real DB)', () => {
     const hashes = (await listNonRevokedDelegationsForAgent(agentId)).map((t) => t.delegation_hash)
     expect(await revokeDelegationsByHashes(agentId, hashes)).toHaveLength(1)
     expect(await revokeDelegationsByHashes(agentId, hashes)).toHaveLength(0)
+  })
+})
+
+/**
+ * #2411 real-DB proof of the activation sequence. #2331 reordered the
+ * route's transaction so the "retire the slot's active grants" sweep ran
+ * AFTER the pending row was flipped active — and the sweep had no `id <>`
+ * exclusion, so it retired the row it had just activated. Every activation
+ * committed with ZERO active rows in the slot; the first payment 403ed on
+ * `SELECT_DELEGATION_FOR_PAYMENT_SQL`. The mocked route test could not see
+ * it: a stateless mock cannot observe that a sweep matched the row a previous
+ * statement wrote. Only Postgres can, so this is where the invariant lives.
+ */
+import { withTransaction } from '../../transaction.js'
+import {
+  activatePendingDelegationInSlot,
+  replaceOtherActiveDelegationsInSlot,
+} from '../delegation-budgets.js'
+
+const SIGNED_JSON = '{"signed":"capability","signature":"0xowner"}'
+
+async function statusOf(id: string): Promise<string> {
+  const row = await db.query<{ status: string }>(
+    `SELECT status FROM agent_delegations WHERE id = $1`,
+    [id],
+  )
+  return row.rows[0].status
+}
+
+describeDb('activation replace sweep (#2411, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('activating a pending grant over an older active one leaves EXACTLY ONE active row in the slot — the new one — and the payment selector returns it', async () => {
+    const agent = await seedUserAndAgent('Activation agent')
+    const older = await seedDelegation({
+      agentId: agent,
+      status: 'active',
+      recipientAddress: null,
+      createdAt: '2026-08-01T00:00:00Z',
+    })
+    const fresh = await seedDelegation({
+      agentId: agent,
+      status: 'pending',
+      recipientAddress: null,
+      delegationJson: '{"signed":"not yet"}',
+    })
+    // Neighbours the sweep must NOT reach: a recipient-pinned grant is a
+    // different slot (#829 relies on both coexisting), another token is
+    // another slot, and another agent's open grant is another agent's.
+    const pinned = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: RECIPIENT })
+    const otherToken = await seedDelegation({ agentId: agent, status: 'active', tokenAddress: '0x' + '11'.repeat(20) })
+    const otherAgent = await seedUserAndAgent('Bystander agent')
+    const foreign = await seedDelegation({ agentId: otherAgent, status: 'active', recipientAddress: null })
+
+    // The route's sequence: lock, sweep-then-activate, commit.
+    const activated = await withTransaction(db, (tx) =>
+      activatePendingDelegationInSlot(
+        {
+          agentId: agent,
+          delegationId: fresh,
+          tokenAddress: USDC,
+          recipientAddress: null,
+          signedDelegationJson: SIGNED_JSON,
+        },
+        tx,
+      ),
+    )
+    expect(activated).toBe(true)
+
+    const slot = await db.query<{ id: string; status: string }>(
+      `SELECT id, status FROM agent_delegations
+       WHERE agent_id = $1 AND token_address = $2 AND recipient_address IS NULL`,
+      [agent, USDC],
+    )
+    const active = slot.rows.filter((r) => r.status === 'active')
+    expect(active.map((r) => r.id)).toEqual([fresh])
+    expect(slot.rows.find((r) => r.id === older)?.status).toBe('replaced')
+
+    // What the 403 bottomed out in: the payment selector must find the NEW
+    // grant (a recipient the pinned grant does not cover, so the open slot
+    // answers).
+    const other = '0x00000000000000000000000000000000000000bb'
+    const selected = await selectDelegationForPayment(agent, USDC, other)
+    const freshRow = await db.query<{ delegation_hash: string }>(
+      `SELECT delegation_hash FROM agent_delegations WHERE id = $1`,
+      [fresh],
+    )
+    expect(selected).not.toBeNull()
+    expect(selected!.delegation_hash).toBe(freshRow.rows[0].delegation_hash)
+    expect(selected!.delegation_json).toBe(SIGNED_JSON)
+
+    for (const untouched of [pinned, otherToken, foreign]) {
+      expect(await statusOf(untouched)).toBe('active')
+    }
+  })
+
+  it('the sweep excludes the row being activated BY ID — correct whichever order a caller runs the two statements in', async () => {
+    // Isolates the `AND id <> $4` half from the ordering half: with the
+    // exception row ALREADY active (the #2331 order, activate-then-sweep),
+    // the sweep must leave it alone and retire only its sibling.
+    const agent = await seedUserAndAgent('Exclusion agent')
+    const sibling = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: null })
+    const kept = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: null })
+
+    const retired = await replaceOtherActiveDelegationsInSlot(agent, USDC, null, kept)
+    expect(retired).toEqual([sibling])
+    expect(await statusOf(kept)).toBe('active')
+    expect(await statusOf(sibling)).toBe('replaced')
+  })
+
+  it('a row that is no longer pending activates nothing, and the caller\'s rollback undoes the sweep', async () => {
+    const agent = await seedUserAndAgent('Stale agent')
+    const older = await seedDelegation({ agentId: agent, status: 'active', recipientAddress: null })
+    const revoked = await seedDelegation({ agentId: agent, status: 'revoked', recipientAddress: null })
+
+    const abandon = new Error('abandon')
+    await expect(
+      withTransaction(db, async (tx) => {
+        const activated = await activatePendingDelegationInSlot(
+          { agentId: agent, delegationId: revoked, tokenAddress: USDC, recipientAddress: null, signedDelegationJson: SIGNED_JSON },
+          tx,
+        )
+        expect(activated).toBe(false)
+        // The documented contract: by now the sweep HAS run on this client…
+        const mid = await tx.query<{ status: string }>(`SELECT status FROM agent_delegations WHERE id = $1`, [older])
+        expect(mid.rows[0].status).toBe('replaced')
+        throw abandon
+      }),
+    ).rejects.toBe(abandon)
+    // …and only the caller's ROLLBACK (the route's 409 path) restores it.
+    expect(await statusOf(older)).toBe('active')
+    expect(await statusOf(revoked)).toBe('revoked')
+  })
+})
+
+// ── #2613: the build slot is serialized ─────────────────────────────────────
+//
+// `POST /:id/delegations/build` reads for a reusable pending row, reads
+// `MAX(version) + 1`, and inserts. Unsynchronized, two concurrent identical
+// builds each miss the reuse read (neither has committed) and each insert:
+// `startDate` is `nowSec - 60`, so a pair straddling a second boundary
+// produces two different `delegation_hash` values and the unique index never
+// collides. One slot, two pending version-1 rows, both unsigned.
+//
+// These are claims about POSTGRES under concurrency, which is why they cannot
+// live in the mocked route suite. The first test is the POSITIVE CONTROL: it
+// runs the same sequence WITHOUT the lock and shows the second row appearing.
+// Without it, the locked test passing would be uninformative — it would not
+// prove the harness can observe the defect at all.
+describeDb('delegation build slot lock (#2613)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  const SLOT = { token: USDC, recipient: null as string | null }
+
+  /**
+   * An agent the insert's own predicate accepts: owned, not revoked, with a
+   * `delegator_hybrid` account and a delegate address. Seeding less makes
+   * `insertPendingDelegationForOwnedNonRevokedAgent` return false and every
+   * count below read zero — a green suite proving nothing.
+   */
+  async function seedOwnedAgent(): Promise<{ agentId: string; userId: string }> {
+    const n = ++hashCounter
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`slot-u${n}-${Date.now()}@test.example`],
+    )
+    const userId = user.rows[0].id
+    const safe = await db.query<{ id: string }>(
+      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+       VALUES ($1, $2, 'Delegation account', true, 'delegator_hybrid') RETURNING id`,
+      [userId, `0x${n.toString(16).padStart(40, '0')}`],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, safe_id, name, status, delegate_address)
+       VALUES ($1, $2, 'Slot agent', 'active', $3) RETURNING id`,
+      [userId, safe.rows[0].id, `0x${(n + 1000).toString(16).padStart(40, '0')}`],
+    )
+    return { agentId: agent.rows[0].id, userId }
+  }
+
+  /**
+   * One build attempt, faithful to the route's sequence: look for a reusable
+   * pending row, and insert a fresh one when there is none. `hashSeed` stands
+   * in for the wall-clock second that makes two concurrent hashes differ —
+   * passing distinct seeds is exactly the straddled-second case.
+   */
+  async function buildAttempt(
+    agentId: string,
+    userId: string,
+    hashSeed: number,
+    tx?: Parameters<typeof findReusablePendingDelegation>[6],
+  ): Promise<{ reused: boolean; hash: string }> {
+    const existing = await findReusablePendingDelegation(
+      agentId, SLOT.token, SLOT.recipient, '5000000', 86400, 9_999_999_999, tx,
+    )
+    if (existing) return { reused: true, hash: existing.delegation_hash }
+    const hash = `0x${String(hashSeed).padStart(64, '0')}`
+    await insertPendingDelegationForOwnedNonRevokedAgent({
+      agentId, userId, chainId: 84532,
+      tokenAddress: SLOT.token, recipientAddress: SLOT.recipient,
+      delegationHash: hash, delegationJson: '{"unsigned":"build"}',
+      version: 1, budgetAtomic: '5000000', periodSeconds: 86400,
+      startDate: 0, expiresAt: 9_999_999_999,
+    }, tx)
+    return { reused: false, hash }
+  }
+
+  async function pendingCount(agentId: string): Promise<number> {
+    const r = await db.query<{ n: string }>(
+      `SELECT COUNT(*) AS n FROM agent_delegations WHERE agent_id = $1 AND status = 'pending'`,
+      [agentId],
+    )
+    return Number(r.rows[0].n)
+  }
+
+  it('POSITIVE CONTROL: without the lock, two concurrent builds leave TWO pending rows', async () => {
+    const { agentId, userId } = await seedOwnedAgent()
+    await Promise.all([
+      buildAttempt(agentId, userId, 1),
+      buildAttempt(agentId, userId, 2),
+    ])
+    // This is the defect #2613 reports, reproduced. If this ever drops to 1,
+    // the test below has stopped proving anything and this comment is the
+    // place to start.
+    expect(await pendingCount(agentId)).toBe(2)
+  })
+
+  it('under the slot lock, two concurrent builds leave ONE pending row and the second REUSES it', async () => {
+    const { agentId, userId } = await seedOwnedAgent()
+    const results = await Promise.all([
+      withDelegationBuildSlotLock(agentId, SLOT.token, SLOT.recipient,
+        (tx) => buildAttempt(agentId, userId, 1, tx)),
+      withDelegationBuildSlotLock(agentId, SLOT.token, SLOT.recipient,
+        (tx) => buildAttempt(agentId, userId, 2, tx)),
+    ])
+
+    expect(await pendingCount(agentId)).toBe(1)
+    // One built, one reused — and both callers were handed the SAME hash,
+    // which is the property #2539's `--wait` poller depends on.
+    expect(results.filter((r) => r.reused).length).toBe(1)
+    expect(results[0].hash).toBe(results[1].hash)
+  })
+
+  it('the lock is per slot: a different token builds concurrently rather than queueing behind it', async () => {
+    const { agentId, userId } = await seedOwnedAgent()
+    const OTHER = '0x0000000000000000000000000000000000000abc'
+    await Promise.all([
+      withDelegationBuildSlotLock(agentId, SLOT.token, null, (tx) => buildAttempt(agentId, userId, 1, tx)),
+      withDelegationBuildSlotLock(agentId, OTHER, null, async (tx) => {
+        const existing = await findReusablePendingDelegation(
+          agentId, OTHER, null, '5000000', 86400, 9_999_999_999, tx,
+        )
+        expect(existing).toBeNull()
+        await insertPendingDelegationForOwnedNonRevokedAgent({
+          agentId, userId, chainId: 84532, tokenAddress: OTHER, recipientAddress: null,
+          delegationHash: `0x${'b'.repeat(64)}`, delegationJson: '{"unsigned":"other"}',
+          version: 1, budgetAtomic: '5000000', periodSeconds: 86400,
+          startDate: 0, expiresAt: 9_999_999_999,
+        }, tx)
+      }),
+    ])
+    expect(await pendingCount(agentId)).toBe(2)
+  })
+
+  it('the slot key separates open from pinned, and is case-insensitive on addresses', () => {
+    const open = delegationBuildSlotKey('a1', USDC, null)
+    expect(open).toBe(delegationBuildSlotKey('a1', USDC.toUpperCase(), null))
+    expect(open).not.toBe(delegationBuildSlotKey('a1', USDC, RECIPIENT))
+    expect(delegationBuildSlotKey('a1', USDC, RECIPIENT))
+      .toBe(delegationBuildSlotKey('a1', USDC, RECIPIENT.toUpperCase()))
+    // Two agents never share a slot even on identical parameters.
+    expect(open).not.toBe(delegationBuildSlotKey('a2', USDC, null))
   })
 })

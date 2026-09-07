@@ -44,14 +44,10 @@ function renderCard(agent: Agent, { canUseWalletActions = true } = {}) {
   const { container } = render(
     <AgentCard
       agent={agent}
-      onChainAllowances={null}
-      onChainLoading={false}
-      chainTimeSec={null}
       onViewDetails={vi.fn()}
       onEdit={vi.fn()}
       onPause={vi.fn()}
       onResume={vi.fn()}
-      onRevoke={vi.fn()}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
       onRestore={onRestore}
@@ -103,6 +99,7 @@ describe('AgentCard stranded-funds notice (#2195)', () => {
     renderCard(agentFixture())
     expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
   })
+
 })
 
 /**
@@ -239,20 +236,44 @@ describe('AgentCard paused notice copy (#2230)', () => {
 describe('AgentCard action-row matrix (#1402)', () => {
   it('active delegation agent: Remove shown, Safe Revoke hidden', () => {
     renderCard(agentFixture())
-    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+    const actions = [
+      screen.getByRole('button', { name: 'Edit Research agent' }),
+      screen.getByRole('button', { name: 'Pause Research agent' }),
+      screen.getByRole('button', { name: 'Remove Research agent' }),
+    ]
+    for (const action of actions) {
+      // Hand-rolled text actions have their own non-overlapping 44px target.
+      expect(action.className).toContain('min-h-11')
+      expect(action.className).toContain('min-w-11')
+    }
     expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
   })
 
-  it('active legacy agent: Safe Revoke shown, Remove hidden while operational', () => {
-    renderCard(agentFixture({ account_type: 'safe' as Agent['account_type'] }))
-    expect(screen.getByRole('button', { name: 'Revoke Research agent' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
+  it('keeps the live delegation budget row and does not render the historical meter', () => {
+    const { container } = renderCard(
+      agentFixture({
+        allowances: [{
+          id: 'allowance-1',
+          agent_id: 'agent-1',
+          token_address: '0x' + '33'.repeat(20),
+          token_symbol: 'USDC',
+          allowance_amount: '1000000',
+          reset_period_min: 1440,
+        }],
+      } as Partial<Agent>),
+    )
+
+    expect(screen.getByText('Enforced on-chain')).toBeInTheDocument()
+    expect(container.querySelector('.allowance-fill')).toBeNull()
   })
 
-  it('revoked-not-archived agent (any rail): status note + Remove, no Restore', () => {
-    renderCard(agentFixture({ status: 'revoked', account_type: 'safe' as Agent['account_type'] }))
+  // #2413 collapsed the Remove/Unlink fork: no legacy agent is listed, so
+  // "Unlink" had no record left to name.
+  it('revoked-not-archived agent: Remove, no Restore', () => {
+    renderCard(agentFixture({ status: 'revoked' }))
     expect(screen.getByText('Network access already revoked')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Unlink/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull()
   })
 
@@ -265,6 +286,19 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(screen.getByText(/restoring never re-enables spending/i)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Restore Research agent to the list' }))
     expect(onRestore).toHaveBeenCalled()
+  })
+
+  it('archived active legacy agent: Restore only — archive state outranks lifecycle status', () => {
+    renderCard(
+      agentFixture({
+        status: 'active',
+        account_type: 'safe' as Agent['account_type'],
+        archived_at: '2026-06-01T00:00:00Z',
+      }),
+    )
+    expect(screen.queryByRole('button', { name: 'Unlink Research agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Restore Research agent to the list' })).toBeTruthy()
   })
 
   it('Remove opens the dialog; it is not mounted before that', () => {

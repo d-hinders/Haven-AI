@@ -384,7 +384,14 @@ describeDb('passive erc7710 settlement sweep (#2117)', () => {
     // against the constant's own text — the reviewer's finding — so renaming or
     // removing the route turns this red while the constant is untouched, which
     // is the only thing that makes naming a route in an alert worth anything.
-    const named = Object.keys(openapiSpec.paths).filter((p) => UNRESOLVED_REMEDY.includes(p))
+    // The root path is excluded from this SUBSTRING scan and its exclusion
+    // costs the guard nothing: `/` is a substring of every route, so once
+    // #2530 documented an API root document it matched here trivially and was
+    // never evidence that the remedy named anything. Every other path still
+    // has to appear literally.
+    const named = Object.keys(openapiSpec.paths)
+      .filter((p) => p !== '/')
+      .filter((p) => UNRESOLVED_REMEDY.includes(p))
     expect(named, 'the remedy must name a route the API actually serves').toEqual([
       '/machine-payments/evidence',
     ])

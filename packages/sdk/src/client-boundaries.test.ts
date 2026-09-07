@@ -372,10 +372,34 @@ function validateBoundary(shape: ClientShape, contract: ClientBoundary): void {
 describe('HavenClient structural boundary', () => {
   it('pins the package runtime export surface', () => {
     expect(Object.keys(sdk).sort()).toEqual([
+      // #2523: the agent-onboarding guidance. These eight sentences (#2528
+      // added the wiring-collision relay) are the
+      // rules the backend's setup prompt states to an agent AND the ones the
+      // `/for-agents.md` runbook repeats; exported so both read one string
+      // rather than two copies that can disagree in front of an agent.
+      // #2533 adds a ninth member of the same family for a different audience:
+      // AGENT_README_SECTION_MD is not a rule stated TO a connected agent but
+      // the entry that redirects one which has no account yet, carried
+      // verbatim by all five published READMEs and the repo README.
+      // #2535 adds AGENT_ONBOARDING_PROMPT: not a sentence but a whole prompt,
+      // and a THIRD audience again — the signed-in user's agent, before any
+      // setup exists. It reuses two of the sentences above verbatim rather than
+      // restating them, which is why it belongs in this family and not beside
+      // the runbook: same rules, different reader, one source.
+      'AGENT_APPROVAL_RELAY_JSON_SENTENCE',
+      'AGENT_APPROVAL_RELAY_PROSE_SENTENCE',
+      'AGENT_COMMAND_MODIFICATION_SENTENCE',
+      'AGENT_JSON_MODE_SENTENCE',
+      'AGENT_LOCAL_KEY_SENTENCE',
+      'AGENT_NETWORK_ACCESS_SENTENCE',
+      'AGENT_ONBOARDING_PROMPT',
       'AGENT_PAYMENT_FAILURE_CODE_VALUES',
       'AGENT_PAYMENT_NEXT_ACTION_VALUES',
       'AGENT_PAYMENT_PHASE_VALUES',
       'AGENT_PAYMENT_RAIL_VALUES',
+      'AGENT_README_SECTION_MD',
+      'AGENT_SECRET_HYGIENE_SENTENCE',
+      'AGENT_WIRING_COLLISION_RELAY_SENTENCE',
       'AgentPaymentFailureCode',
       'AgentPaymentFailureCodeDescriptions',
       'AgentPaymentFailureCodeSchema',
@@ -389,12 +413,15 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentRailDescriptions',
       'AgentPaymentRailSchema',
       'AgentPaymentWarningCode',
+      'CONNECTOR_PACKAGE_NAME',
       // #1756: the ONE confirmation deadline the payment poller and the
       // delegate sweep share. Public so a consumer reading `unconfirmed` can
       // see how long the SDK waited before saying so.
       'DEFAULT_CONFIRMATION_TIMEOUT_MS',
       'DISCOVERY_MAX_BYTES',
       'ERC7710_ASSET_TRANSFER_METHOD',
+      'HAVEN_AGENT_RUNBOOK_MD',
+      'HAVEN_CONNECTOR_CHANNEL',
       'HAVEN_MINIMUM_NODE_VERSION',
       'HAVEN_SKILL_BODY_MD',
       'HAVEN_SKILL_MD',
@@ -432,6 +459,8 @@ describe('HavenClient structural boundary', () => {
       'buildX402ExpectedMessage',
       'compareNodeVersions',
       'composeDescription',
+      'connectorRerunCommand',
+      'connectorSpec',
       'decodeBase64Json',
       'decodeBase64Utf8',
       'discoverMerchantMcpUrl',
@@ -439,12 +468,14 @@ describe('HavenClient structural boundary', () => {
       'encodeBase64Utf8',
       'encodePaymentProof',
       'havenTools',
+      'isConnectorChannel',
       'isErc7710Option',
       'isSupportedNodeVersion',
       'isSweepableChain',
       'normalizePaymentRequired',
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
+      'resolveConnectorChannel',
       'resolveTokenFromAddress',
       'sameUrl',
       'selectErc7710PaymentOption',
@@ -453,6 +484,7 @@ describe('HavenClient structural boundary', () => {
       'selectX402SettlementScheme',
       'signHash',
       'signUserOpTypedDataForDelegation',
+      'signerUpdateFallback',
       'sweepUsdcAddress',
       'sweepUsdcDomain',
       'toStandardPaymentRequirements',

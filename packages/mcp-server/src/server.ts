@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { HavenClient } from '@haven_ai/sdk'
+import { hostedConnectorRerunCommand } from './connector-channel.js'
 import {
   createToolHandlers,
   toolDescriptions,
@@ -10,7 +11,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.1.34-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.1.35-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -44,9 +45,13 @@ export const HOSTED_INSTRUCTIONS = [
   'Every payment tool response carries next_action,',
   'next_tool, and next_arguments — follow those fields first; description prose',
   'is fallback, not the source of truth. next_tool is Claude-family namespaced',
-  '(mcp__<server>__<tool>); if your runtime names servers differently (Codex',
-  'config keys: haven, haven_signer), resolve via the paired next_tool_server +',
-  'next_tool_name — the bare tool name on that logical server.',
+  '(mcp__<server>__<tool>) and names the DEFAULT server names, which is all this',
+  'server can know: your local server names are your config, not ours. If yours',
+  'differ — a connector run with --name <slug> wires haven-<slug> and',
+  'haven-signer-<slug>, and Codex uses config keys haven / haven_signer — then',
+  'next_tool and next_tool_server name a server you do not have. Use',
+  'next_tool_server_role (hosted | signer) with next_tool_name, and resolve the',
+  'role against your OWN configured servers.',
   '',
   'When YOU retry a merchant yourself (the plain-HTTP x402 path), always set',
   'PAYMENT-SIGNATURE (x402 v2) to the payment_header. A strict v2 merchant reads',
@@ -75,7 +80,7 @@ export const HOSTED_INSTRUCTIONS = [
   'idempotency_key before signing again. An out-of-date signer refuses to sign',
   'with a machine-readable version-mismatch error (code, supported_versions,',
   'received_version) — stop, tell the user to re-run',
-  'npx @haven_ai/connect@alpha; nothing has been spent at that point.',
+  `${hostedConnectorRerunCommand()}; nothing has been spent at that point.`,
   'If a merchant rejects AFTER funding, the delegate holds stranded funds —',
   'recover them with haven_sweep_delegate.',
   '',

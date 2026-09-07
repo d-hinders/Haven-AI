@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-08-31" # #2276: the queue-state table said a closed issue is done and implied every open issue is ready; an `operator-verify` issue is neither — merged code, open on purpose, not queueable. Added that one exception. Scope: the queue-state paragraph only; the issue-writing rigour section and the loop-template mapping were NOT re-verified. Prior: #1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination
+last-verified: "2026-09-02" # #2300: the "Money-path?" summary bullet names the hosted MCP tool surface (`packages/mcp-server/src/**`) beside the surfaces it already listed; the pointer to the authoritative JSON is unchanged. Scope: that bullet only. Prior: #2276: the queue-state table said a closed issue is done and implied every open issue is ready; an `operator-verify` issue is neither — merged code, open on purpose, not queueable. Added that one exception. Scope: the queue-state paragraph only; the issue-writing rigour section and the loop-template mapping were NOT re-verified. Prior: #1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination
 ---
 
 # Backlogs moved to GitHub Issues
@@ -49,8 +49,9 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Surface** — which `area:*` / `money-path` label(s) apply, so `ship-next`
   loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
 - **Money-path?** — whether it touches x402, machine-payments, payment-coverage,
-  allowances, the **delegation rail** or rail seam, the SDK signer, or
-  migrations. Don't work from this summary: the authoritative list is
+  allowances, the **delegation rail** or rail seam, the SDK signer, the hosted
+  MCP tool surface (`packages/mcp-server/src/**`, #2300), or migrations. Don't
+  work from this summary: the authoritative list is
   [`.github/money-path-globs.json`](../../.github/money-path-globs.json), which
   `labeler.yml` applies automatically and a test keeps in sync
   ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)) — a prose copy is

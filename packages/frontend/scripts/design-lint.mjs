@@ -58,7 +58,6 @@ const MARKETING_SURFACES = [
   'components/marketing/',
   'src/app/page.tsx',
   'src/app/protocols/',
-  'src/app/investor-briefing/',
   'src/app/how-it-works/',
 ]
 export function isMarketingSurface(file) {

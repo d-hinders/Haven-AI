@@ -166,15 +166,6 @@ describe('RemoveAgentDialog', () => {
     expect(onRevokeCredential).not.toHaveBeenCalled()
   })
 
-  it('a legacy (non-delegation) revoked agent archives without any signing machinery', async () => {
-    const { onClose } = renderDialog(
-      agentFixture({ status: 'revoked', account_type: 'safe' as Agent['account_type'] }),
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(mockRevokeAll).not.toHaveBeenCalled()
-  })
-
   it('no reachable signer disables Remove and says why — for agents that need a signature', () => {
     mockBudgetState.ready = false
     renderDialog(agentFixture())

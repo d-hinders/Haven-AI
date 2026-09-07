@@ -12,7 +12,7 @@ import { Textarea } from '../ui/Textarea'
  * Step 1: agent name, description, and the advanced local-MCP opt-in.
  *
  * #1720 removed the runtime picker. Every environment now gets a
- * byte-identical setup command and the connector resolves the runtime
+ * byte-identical connector command and the connector resolves the runtime
  * itself, so there is nothing left to ask here.
  *
  * #1411: no rhythm of its own — the vertical gap between fields comes from

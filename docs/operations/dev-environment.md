@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-08-31" # #2293: the sweep setting in `.env.dev.example` remains deliberately `SWEEP_MIN_USDC=0`, while the production default is now `0.01` so ordinary micropayment balances are recoverable; the dev value keeps the 0.0005-USDC QA stranding sweepable. The template and the operator boundary below were re-read against the current config and QA scenario. Prior: #2268 (follow-up): the qa-freshness paragraph called the dead `dev-deployed` trigger "a deploy-provider configuration matter and not a repo one" and pointed at "the operator fix" in `agent-qa.md`. The same-day correction to that doc establishes there is no such fix — Railway offers no supported place for the authenticated call — so this sentence contradicted the doc it cited. Corrected to say no operator fix is available today and that #2273 (`deployment_status`) is the replacement, still unbuilt. Scope: ONLY that sentence was re-read and edited; branch mapping, service URLs, secrets handling and the rest of this doc were not re-verified in this pass. Prior: #2268: the § "Branch -> deploy mapping" qa-freshness paragraph gains the reason promotions block LATE — `qa-dev.yml`'s `repository_dispatch` (`dev-deployed`) trigger has never fired (0 of 156 runs, 2026-06-30 -> 2026-08-31, counted against the Actions API), so freshness rests on the nightly cron alone and a busy day on `dev` outruns it. That paragraph was re-read end to end against `dev-gate.yml` and `scripts/ci/qa-freshness.mjs` on this branch and is otherwise accurate; the #1047 `haven_api_url` validation it describes is unchanged (this PR's `qa-dev.yml` diff is comment-only). Scope: that paragraph ONLY. NOT re-verified: the env/secret tables, the seeding sections, the scenario list, or the x402 scheme-dispatch note. Prior: chain-reset(#2159): compacted prior verification notes into git history. Re-verified the Base-Sepolia-only MERCHANT_REPORT_GRACE_MIN_OVERRIDE operator control: only a backend serving HAVEN_DEPLOY_CHAIN_IDS=84532 may set it, startup rejects every other deployment, and production retains the 15-minute default.
+last-verified: "2026-09-06" # #2511: EDITED, scope = ONE new bullet in § Configuration recording the two Base Sepolia RPC endpoints and why they must not be collapsed into one. The section listed `RPC_URL` and `RPC_URL_BASE` but neither `RPC_URL_BASE_SEPOLIA` nor the harness's `QA_RPC_URL_BASE_SEPOLIA`, so the one rule an operator can break by being helpful — pointing both at the same dedicated provider, which deletes the harness's independence from the node the backend wrote through — lived only in a code comment at `packages/qa-agent/src/lib/chain.ts`. Written against `packages/backend/src/config.ts` and that file on this branch. The bullet also names the secret-vs-variable choice (a provider URL embeds an API key, so it is a secret and not a repo variable, unlike its neighbours in `qa-dev.yml`) and the two things that make a misconfiguration visible: the backend's boot warning and the harness's endpoint-CLASS preamble. Scope: that bullet. NOT re-verified: the topology diagram, the branch-to-deploy mapping, the other isolation rules, or the inspection section. Prior: #2576: EDITED, scope = the one sentence describing what `HAVEN_CONNECTOR_CHANNEL` selects — "setup command" → **connector command**. Nothing about the dev environment, its services or its variables was re-verified. Prior: chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
 ---
 
 # Dev environment
@@ -35,6 +35,7 @@ how to configure it. For the branch workflow that feeds it, see
 | Hosted MCP server | **Railway** (dev project) | `dev` branch | Points at the dev backend via its own `HAVEN_API_URL`. ⚠️ Was found wired to `main` with a dead upstream on 2026-08-06 — [verify before trusting it](#verifying-a-dev-service-actually-works). |
 | Demo-merchant | **Railway** (dev project) | `dev` branch | For x402 demo flows against dev. Advertises EIP-3009 first by default; the ERC-7710 rail is off unless enabled — see [below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant). |
 | Postgres | **Railway** managed | — | A separate managed instance, isolated from prod. |
+| Packages (`@haven_ai/sdk`, `signer`, `mcp`, `connect`, `cli`) | **npm** | `dev` branch → the **`dev`** dist-tag | A `0.0.0-dev.<ts>.<sha>` snapshot of all five on every package-touching push to `dev` (`publish.yml`, [#2421](https://github.com/d-hinders/Haven-AI/issues/2421)). Not a release: `alpha`/`latest` are the `main` channel and a snapshot can reach neither. The loop and the owner steps: [`package-dev-channel.md`](package-dev-channel.md). |
 
 Production is the same shape deploying from `main`. The two never share a
 database or JWT secret. The **relayer key is the deliberate exception**: one
@@ -81,7 +82,7 @@ deployed that way today.
   the right hostname*.
   ⚠️ `haven-dev.vercel.app` is a *different* app
   ("HAVEN Project" Vite SPA), not Haven's dashboard.
-- Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public).
+- Backend (Railway): `https://havenbackend-dev-8b95.up.railway.app` (`/health` is public and carries only status, timestamp, and database health; `/health/ops` is operator-only).
   ⚠️ `dev-backend.up.railway.app` is a **stale duplicate** service (~24-day-old code) — do
   not use it; it caused real confusion (#585/#595).
 - Demo-merchant (Railway): `https://demo-merchant-dev-84e4.up.railway.app` (`/healthz`).
@@ -160,16 +161,27 @@ check all three:
   logged with the dispatching actor — the quiet arbitrary-endpoint path is
   gone, though Railway itself is multi-tenant; the full residual-risk
   statement lives in autonomous-pr-loop.md's safety model.
-  **What actually keeps that run fresh is the nightly cron, alone (#2268).**
-  `qa-dev.yml` also declares a `repository_dispatch` (`dev-deployed`) trigger
-  meant to fire on every dev deploy, and it has never fired once — nothing sends
-  the dispatch, and there is **no operator fix available today**: Railway offers
-  no supported place for the authenticated call the setup describes, so the
-  replacement route is #2273 (`deployment_status`), still unbuilt (evidence:
-  agent-qa.md § *Post-deploy trigger*). So on
-  a busy day the merges outrun the cron and this gate blocks the promotion PR
-  correctly but late, which is where the pressure to reach for `qa-override`
-  comes from. Its silence is now reported by `guard-freshness.yml`.
+  **What actually keeps that run fresh is the nightly cron, alone, until a
+  post-deploy run's `money-flow` job goes green at a promoted commit
+  (#2268 → #2273).** `qa-dev.yml`'s
+  old `repository_dispatch` (`dev-deployed`) trigger never fired once — nothing
+  sent it, and Railway offers no supported place to send it from — so #2273
+  replaced it with GitHub's own `deployment_status` event, fired when the
+  Railway integration marks the `Haven AI / dev` deployment `success`, gated
+  and de-duplicated in the workflow (evidence: agent-qa.md § *Post-deploy
+  trigger (`deployment_status`)*). It was first observed firing on 2026-09-02
+  (deployment 6218620498, `5d4e849c`; #2273 closed on it). #2404 (PR #2409)
+  changed this gate to select the green run by SHA ancestry and by the
+  `money-flow` job's conclusion instead of `--branch dev` — not because a
+  post-deploy run has no branch (all three runs on that deployment report
+  `headBranch = dev`, measured — #2427) but because a branch name says nothing
+  about which commit the harness exercised. Until a post-deploy run is green
+  at a promoted commit, a busy day's merges still outrun the cron and this
+  gate blocks the promotion PR correctly but late, which is where the pressure
+  to reach for `qa-override` comes from. The
+  trigger's silence is reported by `guard-freshness.yml`, which since #2273
+  counts only runs whose SHA Railway actually deployed — a manual dispatch
+  cannot clear it (#2271).
   A **money-path `hotfix/*`** blocks outright: the harness tests a *deployed* backend and a
   hotfix is deployed nowhere until it merges, so no automatic evidence about it
   can exist. Bypass in both cases: the `qa-override` label, with a comment
@@ -196,6 +208,17 @@ Isolation rules that are non-negotiable for a payments product:
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
   chain 100 is dead per above), `RPC_URL_BASE` → **Base Sepolia**. Swap to
   mainnet RPCs only if a test genuinely needs mainnet state.
+- **Two Base Sepolia RPCs, and they must stay two** (#2511). The backend
+  WRITES through `RPC_URL_BASE_SEPOLIA`; the QA harness OBSERVES through
+  `QA_RPC_URL_BASE_SEPOLIA` (a GitHub Actions **secret**, since a provider URL
+  embeds an API key). Both default to the shared public `https://sepolia.base.org`,
+  whose rate limits arrive as `qa-dev` scenario failures rather than as Haven
+  defects — that is what #2594 was. Point them at dedicated endpoints, but
+  **not the same one**: an on-chain assertion verified on the node the backend
+  wrote through proves only that the backend agrees with itself. The backend
+  logs a boot warning when its variable is unset, and the harness prints which
+  endpoint CLASS it is observing through (never the URL) in its run preamble.
+
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
@@ -203,6 +226,24 @@ Isolation rules that are non-negotiable for a payments product:
   (`RELAYER_PRIVATE_KEY_<chainId>`, #640/#678) — a mechanism that *permits*
   isolating testnet from mainnet keys, though the deployed posture shares one
   key (see above).
+- **Connector channel** — `HAVEN_CONNECTOR_CHANNEL` on the dev **backend**
+  selects the npm dist-tag the dashboard's connector command hands out (#2422, epic
+  #2420), and the same variable on the dev **hosted MCP** selects the tag its
+  own "re-run the connector" hints name (#2423). Unset or empty means `alpha`;
+  production leaves it unset, so the production handout is untouched by the
+  variable's existence. The value must match `/^[a-z][a-z0-9-]{0,31}$/` — an
+  invalid value makes the service refuse to start, naming the variable, rather
+  than fall back to `alpha`, because a silent fallback would hand out the
+  production connector from dev and look like it had worked. **This bullet
+  describes the mechanism, not the deployed posture**: whether the dev services
+  have it set is read from Railway, or from a fresh setup response's
+  `connector_package` field (the package the backend actually used) — never
+  assumed from prose. Setting it is owner-only and **ordered**: it must come
+  *after* the `dev` dist-tag exists on npm for all five packages, or the
+  dashboard hands out a tag `npx` cannot resolve (`ETARGET`; observed on
+  2026-09-03 when it was set one step early — #2420 thread). The ordered
+  checklist, and why the dev signer and dev backend must move together, are in
+  [`package-dev-channel.md`](package-dev-channel.md) § *Operator checklist*.
 - **Sweep recovery floor** — `SWEEP_MIN_USDC=0` in dev so the QA scenario's
   0.0005-USDC stranded balance exercises the real gasless recovery path. The
   production default is `0.01`; do not copy the dev override into production.

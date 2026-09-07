@@ -28,7 +28,7 @@
 import { RelayerBudgetExceededError } from '../infra/relayer-spend-guard.js'
 import { FastifyInstance } from 'fastify'
 import type { Hex, Address } from '../domain/chain-client.js'
-// dep-lint-exempt: 9 grant-lifecycle statements plus the activation transaction on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
+// dep-lint-exempt: 8 grant-lifecycle statements on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
@@ -41,6 +41,7 @@ import {
   loadOwnedDelegationAgent,
   insertPendingDelegationForOwnedNonRevokedAgent,
   lockOwnedNonRevokedDelegationAgent,
+  HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
 } from '../infra/repositories/agents.js'
 import type { HybridOwnerConfig } from '../rails/hybrid-provisioning.js'
 import {
@@ -50,12 +51,17 @@ import {
   delegationSigningPayload,
   type HavenBudgetPolicy,
 } from '../rails/delegation-policy.js'
+import { buildDelegationGrantUrl } from '../domain/handoff-links.js'
 import {
   createTreasuryOps,
   delegationRailBundlerUrl,
   readDisabledDelegationHashes,
+  type Delegation,
 } from '../rails/delegation-rail.js'
 import {
+  activatePendingDelegationInSlot,
+  findReusablePendingDelegation,
+  withDelegationBuildSlotLock,
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
 } from '../infra/repositories/delegation-budgets.js'
@@ -87,6 +93,53 @@ const MAX_REVOKE_ALL_BATCH = 25
 // on the reconciliation reads. Sits well above the batch cap so healed
 // orphans can never push a legitimately-sized batch into this refusal.
 const RECONCILE_READ_CEILING = 100
+
+export const REVOKED_AGENT_REFUSAL = 'Revoked agents cannot receive new budget delegations'
+export const NOT_DELEGATION_RAIL_REFUSAL = 'Agent account is not on the delegation rail'
+export const NO_DELEGATE_KEY_REFUSAL = 'Agent has no delegate key or treasury account'
+export const IN_FLIGHT_REKEY_REFUSAL =
+  'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget'
+export const UNAVAILABLE_AGENT_REFUSAL =
+  'Agent cannot receive a budget while its account or re-key is unavailable'
+/** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
+export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
+
+/**
+ * Name the reason a pending-grant insert was refused (#2416).
+ *
+ * `insertPendingDelegationForOwnedNonRevokedAgent` collapses FOUR distinct
+ * refusals into one boolean — revoked agent, account off the delegation rail,
+ * no delegate key, and (since #2331) an in-flight re-key. `build` reported all
+ * four as "Revoked agents cannot receive new budget delegations", so an owner
+ * who abandoned a re-key part-way was told their perfectly healthy `active`
+ * agent was revoked.
+ *
+ * This is PURELY diagnostic and runs only on the refusal path: the grant
+ * transaction has already concluded and the request is already refused. Note
+ * what that concluding is — `insertPendingDelegationForOwnedNonRevokedAgent`
+ * returns `false` from inside `withTransaction`'s callback, which is a NORMAL
+ * return, so the transaction COMMITs (an empty commit — the lock found no row
+ * and nothing was written). It is not a rollback; the refusal is carried by
+ * the boolean, not by an aborted transaction. Either way nothing was stored,
+ * and this re-read only decides which 409 body the owner sees. It can never
+ * turn a refusal into a grant — the set of refused requests is exactly what
+ * it was.
+ *
+ * The branch order mirrors `lockOwnedNonRevokedDelegationAgent`'s own SQL
+ * (status, then account_type, then delegate_address, then the re-key probe), so
+ * when more than one reason holds the message names the same one the lock
+ * stopped on.
+ */
+async function describeBuildRefusal(agentId: string, userId: string): Promise<string> {
+  const agent = await loadOwnedDelegationAgent(agentId, userId)
+  if (!agent) return UNAVAILABLE_AGENT_REFUSAL
+  if (agent.status === 'revoked') return REVOKED_AGENT_REFUSAL
+  if (agent.account_type !== 'delegator_hybrid') return NOT_DELEGATION_RAIL_REFUSAL
+  if (!agent.delegate_address) return NO_DELEGATE_KEY_REFUSAL
+  const rekey = await pool.query<{ in_flight: boolean }>(HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL, [agentId])
+  if (rekey.rows[0]?.in_flight === true) return IN_FLIGHT_REKEY_REFUSAL
+  return UNAVAILABLE_AGENT_REFUSAL
+}
 
 export default async function agentDelegationRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
@@ -225,13 +278,13 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
     if (agent.status === 'revoked') {
-      return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+      return reply.code(409).send({ error: REVOKED_AGENT_REFUSAL })
     }
     if (agent.account_type !== 'delegator_hybrid') {
-      return reply.code(409).send({ error: 'Agent account is not on the delegation rail' })
+      return reply.code(409).send({ error: NOT_DELEGATION_RAIL_REFUSAL })
     }
     if (!agent.delegate_address || !agent.treasury_address) {
-      return reply.code(409).send({ error: 'Agent has no delegate key or treasury account' })
+      return reply.code(409).send({ error: NO_DELEGATE_KEY_REFUSAL })
     }
     if (!DELEGATION_RAIL_CHAIN_IDS.has(agent.chain_id)) {
       return reply.code(409).send({ error: `Delegation rail not enabled on chain ${agent.chain_id}` })
@@ -257,58 +310,133 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return reply.code(400).send({ error: 'expires_at must be in the future' })
     }
 
-    // Version = next per (agent, token, recipient|open) — fresh identity per
-    // replacement (#827/#813).
-    const versionRow = await pool.query<{ next_version: number }>(
-      `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-       FROM agent_delegations
-       WHERE agent_id = $1 AND token_address = LOWER($2)
-         AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
-      [request.params.id, token_address, recipient_address ?? null],
-    )
-    const version = versionRow.rows[0].next_version
-
-    let delegation
+    // ── The delegate account address, derived BEFORE the slot lock (#2613) ──
+    // Both branches below need it, and it costs one RPC. Deriving it inside
+    // the lock would hold a slot open across a chain round trip, so a slow
+    // node would queue every concurrent build of that slot behind it.
     let delegateAccountAddress: Address
     try {
       delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
         ownerAddress: agent.delegate_address as Address,
       })
-      const policy: HavenBudgetPolicy = {
-        agentId: request.params.id,
-        chainId: agent.chain_id,
-        treasuryAddress: agent.treasury_address as Address,
-        delegateAccountAddress,
-        tokenAddress: token_address as Address,
-        budgetAtomic: BigInt(budget_atomic),
-        periodSeconds: period_seconds,
-        startDate: nowSec - 60, // chain-time skew anchor (#820 run 6)
-        recipient: (recipient_address ?? undefined) as Address | undefined,
-        expiresAt: expiry,
-        version,
-      }
-      delegation = buildBudgetDelegation(policy)
     } catch (err) {
       return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(err) })
     }
 
-    const hash = delegationIdentity(delegation)
-    const inserted = await insertPendingDelegationForOwnedNonRevokedAgent({
-      agentId: request.params.id,
-      userId: sub,
-      chainId: agent.chain_id,
-      tokenAddress: token_address,
-      recipientAddress: recipient_address ? recipient_address.toLowerCase() : null,
-      delegationHash: hash,
-      delegationJson: JSON.stringify(delegation),
-      version,
-      budgetAtomic: budget_atomic,
-      periodSeconds: period_seconds,
-      startDate: nowSec - 60,
-      expiresAt: expiry,
-    })
+    // ── Reuse an identical still-pending build (#2539), under the slot lock (#2613) ──
+    // The dashboard form calls build again on its own (re-render, retry),
+    // and the #2539 CLI points its --wait poller at a SPECIFIC hash: a
+    // second build minting a fresh version would strand that hash pending
+    // forever. An identical (agent, token, recipient, budget, period) slot
+    // with a still-pending, unexpired row therefore returns THAT row — same
+    // hash, same version, 201 shape unchanged — and inserts nothing.
+    //
+    // #2613: the read, the version counter and the insert run inside ONE
+    // advisory-locked transaction. Unsynchronized, two concurrent identical
+    // builds could each miss this read and each insert, because `startDate`
+    // is `nowSec - 60` and a pair straddling a second boundary hashes
+    // differently — so the unique index never collided and one slot ended up
+    // with two pending version-1 rows.
+    const outcome = await withDelegationBuildSlotLock(
+      request.params.id,
+      token_address,
+      recipient_address ? recipient_address.toLowerCase() : null,
+      async (tx) => {
+        const reusable = await findReusablePendingDelegation(
+          request.params.id,
+          token_address,
+          recipient_address ? recipient_address.toLowerCase() : null,
+          budget_atomic,
+          period_seconds,
+          expiry,
+          tx,
+        )
+        if (reusable) return { kind: 'reused' as const, reusable }
+
+        // Version = next per (agent, token, recipient|open) — fresh identity
+        // per replacement (#827/#813). Read under the same lock as the reuse
+        // check above, or two builds race to the same number.
+        const versionRow = await tx.query<{ next_version: number }>(
+          `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+           FROM agent_delegations
+           WHERE agent_id = $1 AND token_address = LOWER($2)
+             AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
+          [request.params.id, token_address, recipient_address ?? null],
+        )
+        const version = versionRow.rows[0].next_version
+
+        const policy: HavenBudgetPolicy = {
+          agentId: request.params.id,
+          chainId: agent.chain_id,
+          treasuryAddress: agent.treasury_address as Address,
+          delegateAccountAddress,
+          tokenAddress: token_address as Address,
+          budgetAtomic: BigInt(budget_atomic),
+          periodSeconds: period_seconds,
+          startDate: nowSec - 60, // chain-time skew anchor (#820 run 6)
+          recipient: (recipient_address ?? undefined) as Address | undefined,
+          expiresAt: expiry,
+          version,
+        }
+        // Only the CONSTRUCTION step is a 502. Everything else in this
+        // callback is Postgres, and a database fault is not a build fault:
+        // letting it throw sends it to the central error handler, which logs
+        // it and answers 500 without putting the driver's message on the
+        // wire. A catch-all around the whole transaction would relabel a lock
+        // timeout as "Could not build the delegation" and page nobody.
+        let delegation
+        try {
+          delegation = buildBudgetDelegation(policy)
+        } catch (err) {
+          return { kind: 'build_failed' as const, err }
+        }
+        const hash = delegationIdentity(delegation)
+        const inserted = await insertPendingDelegationForOwnedNonRevokedAgent({
+          agentId: request.params.id,
+          userId: sub,
+          chainId: agent.chain_id,
+          tokenAddress: token_address,
+          recipientAddress: recipient_address ? recipient_address.toLowerCase() : null,
+          delegationHash: hash,
+          delegationJson: JSON.stringify(delegation),
+          version,
+          budgetAtomic: budget_atomic,
+          periodSeconds: period_seconds,
+          startDate: nowSec - 60,
+          expiresAt: expiry,
+        }, tx)
+        return { kind: 'built' as const, delegation, hash, version, inserted }
+      },
+    )
+
+    if (outcome.kind === 'build_failed') {
+      return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(outcome.err) })
+    }
+
+    if (outcome.kind === 'reused') {
+      const reusable = outcome.reusable
+      const reused = JSON.parse(reusable.delegation_json) as Omit<Delegation, 'signature'>
+      return reply.code(201).send({
+        delegation_hash: reusable.delegation_hash,
+        version: reusable.version,
+        delegate_account_address: delegateAccountAddress,
+        signing_payload: delegationSigningPayload(reused, agent.chain_id),
+        // #2539: the construct-and-hand-off response. `build_id` IS the
+        // delegation hash — there is no second identifier and no new column;
+        // `signing_url` is the dashboard grant form with ?grant= prefill
+        // (B2's ?setup= pattern), whose host comes from the same
+        // config.frontendUrl buildApprovalUrl already uses. The CLI and the
+        // dashboard end up on the same page with the same fields filled.
+        build_id: reusable.delegation_hash,
+        typed_data_hash: reusable.delegation_hash,
+        signing_url: buildDelegationGrantUrl(request.params.id, reusable.delegation_hash),
+      })
+    }
+
+    const { delegation, hash, version, inserted } = outcome
     if (!inserted) {
-      return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+      // Same 409, same refused request set — only the reason reporting changes (#2416).
+      return reply.code(409).send({ error: await describeBuildRefusal(request.params.id, sub) })
     }
     return reply.code(201).send({
       delegation_hash: hash,
@@ -316,6 +444,16 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       delegate_account_address: delegateAccountAddress,
       // The OWNER signs this client-side (EIP-712). One signature, no tx.
       signing_payload: delegationSigningPayload(delegation, agent.chain_id),
+      // #2539: the construct-and-hand-off fields. `build_id` IS the delegation
+      // hash — there is no second identifier and no new column — and
+      // `signing_url` is the dashboard grant form with ?grant= prefill (B2's
+      // ?setup= pattern), whose host comes from the same config.frontendUrl
+      // buildApprovalUrl already uses. Present on EVERY 201, reused row or
+      // fresh: the #2539 CLI consumes the first build it makes, which by
+      // definition is not a reuse.
+      build_id: hash,
+      typed_data_hash: hash,
+      signing_url: buildDelegationGrantUrl(request.params.id, hash),
     })
   })
 
@@ -327,7 +465,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const agent = await loadOwnedDelegationAgent(request.params.id, sub)
       if (!agent) return reply.code(404).send({ error: 'Agent not found' })
       if (agent.status === 'revoked') {
-        return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+        return reply.code(409).send({ error: REVOKED_AGENT_REFUSAL })
       }
       const { signature } = request.body ?? {}
       // EOA signatures are 65 bytes (130 hex); a passkey account's delegation
@@ -397,6 +535,32 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       }
 
       const signed = { ...JSON.parse(pending.delegation_json), signature }
+
+      // ── Derive the delegate's account address BEFORE the transaction (#2415) ──
+      // #2331 put the "built for a previous delegate key" guard INSIDE the open
+      // transaction, where `computeHybridAccountAddress` costs one RPC
+      // (`rails/hybrid-provisioning.ts`) while the agent row lock and a pooled
+      // connection are both held. A slow or hanging RPC then blocked every
+      // other writer that lock serializes: Safe unlink, re-key open, re-key
+      // completion, and sibling activations for the same agent.
+      //
+      // The guard's guarantee survives without the network call, split in two.
+      // Derive here from `agent.delegate_address` — the pre-lock read — and
+      // under the lock assert the locked row still carries that exact key.
+      // Together those say the derived address IS the current delegate's
+      // account at commit time, which is what the guard needs; a re-key that
+      // committed in between changes the key and is refused exactly as before.
+      // Deliberately NOT a stored column: the delegate address computed at
+      // `build` time is by construction the `delegate` field already inside
+      // `delegation_json`, so comparing the two proves nothing about rotation.
+      if (!agent.delegate_address) {
+        return reply.code(409).send({ error: UNAVAILABLE_AGENT_REFUSAL })
+      }
+      const preLockDelegateKey = agent.delegate_address
+      const expectedDelegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+        ownerAddress: preLockDelegateKey as Address,
+      })
+
       // Activate the new grant and mark any previously ACTIVE grant for the
       // same (token, recipient) slot as replaced — the on-chain kill of the
       // old one is the revoke flow (compose for immediate replacement).
@@ -411,23 +575,47 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         // Lock the lifecycle row before changing delegation state. If a revoke
         // committed first, refuse; if it races us, it serializes after this
         // atomic activation and can still revoke the resulting authority.
-        if (!(await lockOwnedNonRevokedDelegationAgent(request.params.id, sub, client))) {
+        const lockedAgent = await lockOwnedNonRevokedDelegationAgent(request.params.id, sub, client)
+        if (!lockedAgent) {
           await client.query('ROLLBACK')
-          return reply.code(409).send({ error: 'Revoked agents cannot receive new budget delegations' })
+          return reply.code(409).send({ error: UNAVAILABLE_AGENT_REFUSAL })
         }
-        await client.query(
-          `UPDATE agent_delegations SET status = 'replaced', updated_at = NOW()
-           WHERE agent_id = $1 AND token_address = $2
-             AND recipient_address IS NOT DISTINCT FROM $3
-             AND status = 'active'`,
-          [request.params.id, pending.token_address, pending.recipient_address],
+        // #2415: this is what the lock now buys, in one refusal because it is
+        // one question — "is this delegation for the delegate key that is
+        // current at COMMIT time?" — answered by two halves that must both
+        // hold. The address was derived above from `preLockDelegateKey`, so
+        // the locked row still carrying that key is what makes the derivation
+        // current (a re-key that committed in between fails here); and the
+        // stored delegation's own `delegate` must be that derived account.
+        // Same refusal and wording as #2331's, with no RPC held across the
+        // lock. Kept as one `if` so the transaction gains no second ROLLBACK
+        // call site (`lint:deps` counts inline SQL per file, shrink-only).
+        if (
+          lockedAgent.delegate_address.toLowerCase() !== preLockDelegateKey.toLowerCase() ||
+          typeof signed.delegate !== 'string' ||
+          signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
+        ) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: ROTATED_DELEGATE_KEY_REFUSAL })
+        }
+        // Sweep the slot's OTHER active grants, then flip the pending row —
+        // one repository call that owns the order and excludes the new row by
+        // id (#2411: #2331 ran the sweep after the activation, without an
+        // exclusion, and every activation committed with zero active rows).
+        const activated = await activatePendingDelegationInSlot(
+          {
+            agentId: request.params.id,
+            delegationId: pending.id,
+            tokenAddress: pending.token_address,
+            recipientAddress: pending.recipient_address,
+            signedDelegationJson: JSON.stringify(signed),
+          },
+          client,
         )
-        await client.query(
-          `UPDATE agent_delegations
-           SET status = 'active', delegation_json = $1, updated_at = NOW()
-           WHERE id = $2`,
-          [JSON.stringify(signed), pending.id],
-        )
+        if (!activated) {
+          await client.query('ROLLBACK')
+          return reply.code(409).send({ error: 'Delegation is no longer pending' })
+        }
         // #1069: on the delegation rail the OWNER'S GRANT SIGNATURE is the
         // approval — there is no AllowanceModule wallet-approval step to flip
         // the agent, so a modal-created agent stayed 'pending_approval'
@@ -708,6 +896,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
             user_op_hash: prepared.userOpHash,
             user_operation,
             treasury_address: prepared.treasuryAddress,
+            // #2539: where the human signs. The CLI prints this link instead
+            // of guessing the dashboard's host — same source as signing_url.
+            revocation_url: buildDelegationGrantUrl(request.params.id, request.params.hash),
             instructions:
               'Sign user_op_hash with the account passkey (WebAuthn), then POST /revoke/submit',
           }
@@ -719,6 +910,10 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           signing_payload: prepared.signingTypedData,
           user_operation,
           treasury_address: prepared.treasuryAddress,
+          // #2539: where the human signs — the agent detail page carries the
+          // budget card and its Stop buttons. Built from FRONTEND_URL here so
+          // no client (the #2539 CLI among them) has to guess the host.
+          revocation_url: buildDelegationGrantUrl(request.params.id, request.params.hash),
           instructions: 'Sign signing_payload (EIP-712) with the treasury owner key, then POST /revoke/submit',
         }
       } catch (err) {

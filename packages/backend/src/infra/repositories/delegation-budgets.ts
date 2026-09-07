@@ -6,6 +6,7 @@
  */
 
 import pool from '../../db.js'
+import { withTransaction, type Executor } from '../transaction.js'
 
 export interface ActiveDelegationRow {
   id: string
@@ -50,6 +51,128 @@ export async function listActiveDelegations(
     [agentIds],
   )
   return result.rows
+}
+
+/**
+ * The still-pending build of a slot, when there is one (#2539).
+ *
+ * `build` used to be write-only: every call minted a fresh version and
+ * inserted a fresh pending row, so the dashboard form's own rebuild of the
+ * grant it was already showing left the older pending row behind forever. For
+ * the dashboard that was invisible (it signs whatever build just returned);
+ * for #2539's CLI it is fatal — the CLI prints a link to a pending row's hash
+ * and then polls `GET /agents/:id/delegations` for THAT hash to go active,
+ * which never converges if a second build bumped the version.
+ *
+ * So the same `(agent, token, recipient|open, budget, period)` slot with a
+ * still-pending, unexpired row now RETURNS that row instead of building a
+ * competitor to it: same hash, same version, 201 shape unchanged. The
+ * parameters must match exactly — budget included, so "raise my budget" builds
+ * a NEW version rather than silently re-handing the old amount — and the row
+ * must still be pending (an already-signed slot is a replacement, #827's fresh
+ * identity) and unexpired (an expired offer is dead; reuse would print a link
+ * whose signature the chain refuses at the timestamp caveat).
+ *
+ * `budget_atomic` is a decimal string (VARCHAR(78)) because amounts must
+ * survive above Number.MAX_SAFE_INTEGER; the comparison casts both sides to
+ * numeric, so '5000000' and '05000000' match and '5000001' does not.
+ */
+export const FIND_REUSABLE_PENDING_DELEGATION_SQL = `SELECT id, delegation_hash, version, delegation_json
+     FROM agent_delegations
+     WHERE agent_id = $1
+       AND token_address = LOWER($2)
+       AND recipient_address IS NOT DISTINCT FROM LOWER($3)
+       AND status = 'pending'
+       AND budget_atomic::numeric = $4::numeric
+       AND period_seconds = $5
+       AND expires_at >= $6
+     ORDER BY created_at ASC`
+
+export interface ReusablePendingDelegationRow {
+  id: string
+  delegation_hash: string
+  version: number
+  delegation_json: string
+}
+
+export async function findReusablePendingDelegation(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  budgetAtomic: string,
+  periodSeconds: number,
+  expiresAt: number,
+  db: Executor = pool,
+): Promise<ReusablePendingDelegationRow | null> {
+  const result = await db.query<ReusablePendingDelegationRow>(
+    FIND_REUSABLE_PENDING_DELEGATION_SQL,
+    [agentId, tokenAddress, recipientAddress, budgetAtomic, periodSeconds, expiresAt],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
+ * The slot key the build path serializes on (#2613).
+ *
+ * A slot is `(agent, token, recipient|open)` — the same tuple the version
+ * counter is per, and the same one `findReusablePendingDelegation` matches
+ * within. Budget and period are deliberately NOT in the key: two builds that
+ * differ only in budget are a replacement pair whose version numbers must not
+ * be computed concurrently either.
+ */
+export function delegationBuildSlotKey(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+): string {
+  return `delegation-build:${agentId}:${tokenAddress.toLowerCase()}:${recipientAddress?.toLowerCase() ?? 'open'}`
+}
+
+/**
+ * Serialize the read-decide-insert of one build slot (#2613).
+ *
+ * `build`'s reuse read, its `MAX(version) + 1` read and its insert were three
+ * unsynchronized statements. Two concurrent identical builds could each miss
+ * the reuse read (neither had committed), each compute the same version, and
+ * then insert SEPARATELY — because `startDate` is `nowSec - 60`, so a request
+ * pair straddling a second boundary produces two different `delegation_hash`
+ * values and the `ON CONFLICT (delegation_hash) DO NOTHING` never fires. The
+ * result was two pending version-1 rows for one slot, both unsigned, and a
+ * human left to guess which link to sign.
+ *
+ * `pg_advisory_xact_lock` on the slot key closes it: the second caller's reuse
+ * read now runs after the first has committed, finds the row, and returns it —
+ * which is the behaviour #2539 wanted in the first place, reached under
+ * concurrency instead of only in the sequential case.
+ *
+ * The lock is transaction-scoped, so it releases on COMMIT or ROLLBACK with no
+ * unlock path to forget. Keep RPC work OUT of `fn`: the caller derives the
+ * delegate account address before taking the lock, because holding a database
+ * lock across a chain round trip makes a slow node into a stalled slot.
+ *
+ * `fn` receives a QUERY-ONLY view of the transaction, and that is load-bearing.
+ * `withTransaction` decides whether to open a transaction by asking whether its
+ * executor has a `connect` method — and the pg client it hands out has one, so
+ * passing the raw client to a repository that wraps itself in `withTransaction`
+ * (`insertPendingDelegationForOwnedNonRevokedAgent` does) makes that repository
+ * try to reconnect an already-connected client and throw. Handing over a plain
+ * `{ query }` makes the nested `withTransaction` degrade to a direct call, which
+ * is what joining an outer transaction is supposed to mean.
+ */
+export async function withDelegationBuildSlotLock<T>(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  fn: (tx: Executor) => Promise<T>,
+  db: Executor = pool,
+): Promise<T> {
+  return withTransaction(db, async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      delegationBuildSlotKey(agentId, tokenAddress, recipientAddress),
+    ])
+    const joined: Executor = { query: (sql, values) => tx.query(sql, values) }
+    return fn(joined)
+  })
 }
 
 // ── Payment authorization selection (moved from rails/delegation-authorization.ts, #999)
@@ -139,6 +262,116 @@ export async function listNonRevokedDelegationsForAgent(
     [agentId],
   )
   return result.rows
+}
+
+/**
+ * Activate exactly the pending grant that the caller just authenticated.
+ * The conditional update is intentionally kept in the repository so the
+ * lifecycle route cannot add another inline write while preserving the
+ * transaction executor supplied by its dedicated client.
+ */
+export const ACTIVATE_PENDING_DELEGATION_SQL = `UPDATE agent_delegations
+       SET status = 'active', delegation_json = $1, updated_at = NOW()
+       WHERE id = $2 AND status = 'pending'
+       RETURNING id`
+
+export async function activatePendingDelegation(
+  delegationId: string,
+  signedDelegationJson: string,
+  executor: Executor = pool,
+): Promise<boolean> {
+  const result = await executor.query<{ id: string }>(ACTIVATE_PENDING_DELEGATION_SQL, [
+    signedDelegationJson,
+    delegationId,
+  ])
+  return result.rows.length === 1
+}
+
+/**
+ * Retire every OTHER active grant in the (agent, token, recipient) slot the
+ * new grant is about to occupy (#2411). The on-chain kill of the old grant is
+ * the revoke flow; this only stops Haven selecting it for payments.
+ *
+ * `AND id <> $4` is the load-bearing clause. #2331 reordered the activation
+ * transaction so this sweep ran AFTER `activatePendingDelegation`, and the
+ * sweep — then inlined in the route without an exclusion — flipped the row it
+ * had just activated: every activation committed with ZERO active rows in
+ * the slot and the first payment 403ed (qa-failure #2411, reproduced on real
+ * Postgres). Excluding the row being activated by id makes the sweep correct
+ * in EITHER order, so a future reorder cannot reintroduce the defect; the
+ * order is restored as well, in `activatePendingDelegationInSlot`, because
+ * both halves are cheap and the real-DB test proves each one separately.
+ *
+ * `recipient_address IS NOT DISTINCT FROM $3`: an open grant (NULL recipient)
+ * and a recipient-pinned grant are different slots — a pinned grant never
+ * retires the open one and vice versa (#829's selection order relies on both
+ * coexisting). Returns the retired ids so a caller can report honestly.
+ *
+ * The executor defaults to the pool per this directory's convention, but a
+ * sweep is only ever meaningful paired with an activation — call it through
+ * `activatePendingDelegationInSlot` on the caller's transaction client, not
+ * directly, or a failure after it leaves the slot with no active grant (the
+ * #1053 finding 4 outage) with nothing to roll back (haven-reviewer, #2411).
+ */
+export const REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL = `UPDATE agent_delegations
+       SET status = 'replaced', updated_at = NOW()
+       WHERE agent_id = $1
+         AND token_address = $2
+         AND recipient_address IS NOT DISTINCT FROM $3
+         AND status = 'active'
+         AND id <> $4
+       RETURNING id`
+
+export async function replaceOtherActiveDelegationsInSlot(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  exceptDelegationId: string,
+  executor: Executor = pool,
+): Promise<string[]> {
+  const result = await executor.query<{ id: string }>(
+    REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
+    [agentId, tokenAddress, recipientAddress, exceptDelegationId],
+  )
+  return result.rows.map((row) => row.id)
+}
+
+export interface ActivateDelegationInSlotInput {
+  agentId: string
+  /** The `agent_delegations.id` of the PENDING row being activated. */
+  delegationId: string
+  tokenAddress: string
+  recipientAddress: string | null
+  signedDelegationJson: string
+}
+
+/**
+ * The activation sequence as ONE repository call (#2411): retire the slot's
+ * other active grants FIRST, then flip exactly the pending row to active.
+ * Owning the order here — rather than as two calls a route makes in whatever
+ * order it happens to be edited into — is what lets the real-DB test in
+ * `__tests__/delegation-budgets.test.ts` pin it: the test runs this function
+ * and asserts the slot ends with exactly one active row, the new one.
+ *
+ * Returns `false` when the row is no longer pending (a concurrent revoke or a
+ * repeated activate). MUST run on the caller's transaction client: the sweep
+ * has already run by then, and only the caller's ROLLBACK undoes it — the
+ * route (#1053 finding 4) rolls back and answers 409. It does not open its
+ * own transaction because the route also locks the agent row and flips the
+ * agent to active inside the same one.
+ */
+export async function activatePendingDelegationInSlot(
+  input: ActivateDelegationInSlotInput,
+  executor: Executor,
+): Promise<boolean> {
+  await replaceOtherActiveDelegationsInSlot(
+    input.agentId,
+    input.tokenAddress,
+    input.recipientAddress,
+    input.delegationId,
+    executor,
+  )
+  return activatePendingDelegation(input.delegationId, input.signedDelegationJson, executor)
 }
 
 /**

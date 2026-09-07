@@ -50,7 +50,7 @@
  * different situations arrived at the same sentence ("update SCROLL_SHELL_ROOT"),
  * and two of them were not about the selector at all:
  *
- *   1. a MARKETING route (`/`, `/investor-briefing`) has no app shell and needs
+ *   1. a MARKETING route (for example `/`) has no app shell and needs
  *      no un-clipping — every such capture failed and was deleted (#1939);
  *   2. an AUTHENTICATED route whose shell has not mounted YET, because
  *      `ProtectedRoute` renders `null` while auth resolves (#1936, #1943);
@@ -242,9 +242,9 @@ export const MIN_CONTENT_ELEMENTS = 6
  *   chain still read   872 CSS px    886 chars   150 elements   → 1856px PNG
  *
  * 40 CSS px at `deviceScaleFactor: 2` is the 80 device px that was reported.
- * The missing content is the three `AllowanceBar` rows: `useOnChainAllowances`
- * had not answered, so every `AgentCard` was showing `AllowanceBarSkeleton`
- * ("USDC loading…") instead of its budget. 886/150 is 29x and 25x above the
+ * The missing content is the three budget rows: budget data had not answered,
+ * so every `AgentCard` was showing `AllowanceBarSkeleton` ("USDC loading…")
+ * instead of its budget. 886/150 is 29x and 25x above the
  * floors, so nothing above this line can see it — and #1971's chain-read guard
  * cannot either, because the reads *had* been issued, just not answered yet.
  *
@@ -280,7 +280,7 @@ export const MIN_CONTENT_ELEMENTS = 6
  * permanently `aria-busy="true"`, correctly. `BUSY_TOLERANT_CAPTURES` below
  * declares exactly that, `captureFullPage` derives it from the page's own URL
  * so no caller can forget it, and a declaration that stops being true FAILS the
- * run — the same self-expiring shape as #2197's `expectedSilentRoutes`.
+ * run — an exemption cannot silently become permanent.
  *
  * ── Refuse, do not retry ────────────────────────────────────────────────────
  *
@@ -303,9 +303,9 @@ export const CONTENT_BUSY_ALLOWED = false
  * loading states AS CONTENT — its skeleton showcase is permanently busy,
  * correctly, and always will be.
  *
- * Deliberately the same narrow shape as #2197's `expectedSilentRoutes`, for the
- * same reason — an exemption list is one edit away from being the way the guard
- * gets waved through:
+ * Deliberately this is a narrow per-route shape, for the same reason — an
+ * exemption list is one edit away from being the way the guard gets waved
+ * through:
  *
  *  - it is per ROUTE, never a global flag and never per run;
  *  - each entry carries a written `reason`, so the exemption is anchored to an
@@ -316,9 +316,7 @@ export const CONTENT_BUSY_ALLOWED = false
  *    skeleton this stops claiming it does. Review of #2204 caught the first
  *    draft reporting that to stdout and the manifest only, which expires
  *    nothing in a repo whose own playbook says the exit code does not survive a
- *    pipe. Its sibling `CHAIN_SILENT_CAPTURES` fails the run on the
- *    mirror-image staleness — a declared-silent route that DID read — so the
- *    two now cost the same to leave rotting.
+ *    pipe.
  *
  * It lives HERE, beside the guard, rather than in `screenshot.mjs` — and that
  * was a CI catch, not a preference. `captureFullPage` has two consumers, the
@@ -512,8 +510,8 @@ export const SHELL_MODE = {
   UNCLIPPED: 'unclipped',
   /**
    * The page has no scroll shell and does not need one — it scrolls natively
-   * and nothing is clipping content away. Marketing routes (`/`,
-   * `/investor-briefing`, …) live here: they are captured directly.
+   * and nothing is clipping content away. Marketing routes (for example `/`)
+   * live here: they are captured directly.
    */
   NO_SCROLL_SHELL: 'no-scroll-shell',
 }
@@ -612,8 +610,8 @@ async function probeShell(page, selector) {
  *
  * KNOWN LIMIT, stated rather than papered over: a marketing page that grew its
  * own scroller taller than a viewport (a long `overflow-y-auto` panel) would be
- * reported as a renamed scroll root. Neither `/` nor `/investor-briefing` has
- * one today — measured, both capture clean — and the failure is loud and names
+ * reported as a renamed scroll root. `/` has none today — measured, it captures
+ * clean — and the failure is loud and names
  * the offending box, which is the opposite of the silent deletion this change
  * exists to remove.
  */

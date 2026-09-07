@@ -7,6 +7,7 @@ import {
   HavenClient,
   MerchantTimeoutError,
   SIGNER_UPDATE_FALLBACK,
+  type AgentNextStep,
 } from '@haven_ai/sdk'
 import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
 
@@ -1097,11 +1098,14 @@ describe('haven_quote_mcp_tool', () => {
       payment_required?: unknown
       payment_id?: unknown
     }>(
+      // #2349: this call used to carry `max_amount: '2000000'`, which the
+      // quote tool has never declared — the #2312 `tools.test.ts:2399` shape
+      // again (a cap certified by a test while being discarded). The tool now
+      // refuses it, and the assertions below never depended on it.
       await handlers().haven_quote_mcp_tool({
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
         arguments: { prompt: 'Hello' },
-        max_amount: '2000000',
       }),
     )
 
@@ -1804,11 +1808,13 @@ describe('haven_prepare_catalog_purchase', () => {
       catalog_price_display: string
       catalog_price_is_indicative: boolean
       allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string }
-      next_action: string
-      next_tool: string
       next_arguments: Record<string, unknown>
       warnings: Array<{ code: string }>
-    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+      // #2557: the next-step fields come from the PUBLISHED contract rather
+      // than being restated here, so a field the SDK type forgets breaks this
+      // test instead of quietly needing a cast — which is how #1588's and
+      // #2550's fields both went missing.
+    } & AgentNextStep>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
 
     // The exact compact quote shape (#1272) — payment_id from the created intent.
     expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
@@ -1837,8 +1843,8 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
     expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
     // #1588: the runtime-neutral pair rides along; next_tool stays byte-identical.
-    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
-    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
+    expect(result.data.next_tool_server).toBe('haven-signer')
+    expect(result.data.next_tool_name).toBe('haven_sign_x402')
     expect(result.data.next_arguments).toEqual({ payment_id: X402_INTENT_RESPONSE.payment_id })
     // Catalog price matched the live quote — no CATALOG_PRICE_DIFFERS warning.
     expect(result.data.warnings.some((w) => w.code === 'CATALOG_PRICE_DIFFERS')).toBe(false)
@@ -1925,11 +1931,29 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('legacy rail: insufficient allowance still proceeds — the resulting funding intent queues for approval, like haven_pay_mcp_tool', async () => {
+  // #2259 re-based this test rather than deleting it. Its OLD framing —
+  // "legacy rail: insufficient allowance still proceeds … queues for approval"
+  // — asserts something unreachable: the legacy rail answers 410 at every
+  // payment entry point since #1986, so `POST /x402` cannot return 202
+  // `pending_approval` for a fresh intent on any rail.
+  //
+  // What IS reachable, and what the branch under test exists for, is a STORED
+  // row from before the retirement echoed back by the backend. `isPendingApproval`
+  // (tools.ts) documents that retention decision under #2101 and it still
+  // holds: the branch is fail-CLOSED — it stops with the payment_id and NO
+  // signable payload rather than falling through to a merchant header for
+  // funding that never confirmed. Deleting it would trade a defined stop for
+  // an undefined fall-through on exactly those rows, which epic #1440
+  // deliberately does not delete (see its deferred row-deletion decision).
+  //
+  // So this test keeps the guided-catalog pass-through coverage — the only
+  // exercise it has — and drops the false claim about how the status arises.
+  it('passes a stored pending_approval intent through as a defined stop, with no signable payload', async () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
       'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('7500') },
+      // A pre-retirement row, echoed back — not a queue this rail could create.
       'POST /x402': { status: 202, body: { payment_id: 'over_1', status: 'pending_approval' } },
     })
 
@@ -1938,8 +1962,8 @@ describe('haven_prepare_catalog_purchase', () => {
     )
 
     expect(result.data.status).toBe('pending_approval')
+    // The fail-closed half: a status the agent can act on, and nothing to sign.
     expect(result.data.payload_hash).toBeNull()
-    // The intent WAS attempted — legacy over-allowance queues, it does not refuse here.
     expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
@@ -2309,8 +2333,8 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(res.data.settlement.funding_leg).toBe(false)
       expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
-      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
-      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign')
+      expect(res.data.next_tool_server).toBe('haven-signer')
+      expect(res.data.next_tool_name).toBe('haven_sign')
       expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
       // The guided-path extras survive the scheme branch — this shape is the
       // SAME contract as the 3009 one, minus the funding leg.
@@ -2338,8 +2362,8 @@ describe('haven_prepare_catalog_purchase', () => {
       const res = await prepare(erc7710Header, AGENT_RESPONSE)
       expect(res.data.settlement_scheme).toBeUndefined()
       expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
-      expect((res.data as { next_tool_server?: string }).next_tool_server).toBe('haven-signer')
-      expect((res.data as { next_tool_name?: string }).next_tool_name).toBe('haven_sign_x402')
+      expect(res.data.next_tool_server).toBe('haven-signer')
+      expect(res.data.next_tool_name).toBe('haven_sign_x402')
       expect(xBody().settlementScheme).toBe('eip3009')
     })
 
@@ -4049,11 +4073,8 @@ describe('structured agent guidance (#1308)', () => {
     })
     const result = ok<{
       status: string
-      next_action: string
-      next_tool: string
-      safe_to_continue: boolean
       agent_summary: Record<string, unknown>
-    }>(await pay())
+    } & AgentNextStep>(await pay())
 
     // #2101: the authoritative field must say STOP, not wait. No live rail
     // mints this status (410 on the legacy rail per #1986; 403/502 at prepare
@@ -4063,8 +4084,12 @@ describe('structured agent guidance (#1308)', () => {
     expect(result.data.status).toBe('pending_approval')
     expect(result.data.next_action).toBe('stop_and_tell_user')
     expect(result.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
-    expect((result.data as { next_tool_server?: string }).next_tool_server).toBe('haven')
-    expect((result.data as { next_tool_name?: string }).next_tool_name).toBe('haven_get_payment_status')
+    expect(result.data.next_tool_server).toBe('haven')
+    expect(result.data.next_tool_name).toBe('haven_get_payment_status')
+    // #2550: both roles are emitted (haven-signer and haven), so the role field
+    // has to distinguish them. A field that only ever said "signer" would leave
+    // a client unable to tell "the other role" from "the field is missing".
+    expect(result.data.next_tool_server_role).toBe('hosted')
     expect(result.data.safe_to_continue).toBe(false)
   })
 })
@@ -6307,5 +6332,60 @@ describe('#2145: the hosted resume description gates on the live retry trigger',
     // as the next step. A revert to either earlier wording drops this literal.
     expect(description).toContain('Do NOT pass its x402_binding to')
     expect(description).toContain('haven_x402_sign_header')
+  })
+})
+
+/**
+ * #2550 — the next-step fields, pinned before and after adding a role.
+ *
+ * The defect: `next_tool` is a hardcoded literal naming the DEFAULT local
+ * server (`mcp__haven-signer__haven_sign`), and `next_tool_server` is parsed
+ * back out of that same literal. A connector run with `--name <slug>` wires
+ * `haven-signer-<slug>` instead, so both fields name a server that is not the
+ * one the user just set up — while the hosted instructions tell the agent to
+ * follow those fields FIRST. Observed on dev 2026-09-04 with `--name devtest`.
+ *
+ * The fix is deliberately ADDITIVE: `next_tool_server_role` is added, and the
+ * three existing fields are left byte-identical. The tests below are the two
+ * halves of that decision, and the first half is the one that matters most —
+ * an agent following `next_tool` on a default install must see exactly what it
+ * saw before, or fixing a named-install bug would have broken every default
+ * install to do it.
+ */
+describe('next-step fields (#2550)', () => {
+  it('CHARACTERIZATION: the three existing fields are unchanged on the signer path', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{
+      next_tool: string
+      next_tool_server: string
+      next_tool_name: string
+    }>(await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }))
+
+    // Byte-identical to pre-#2550. Do NOT "fix" these to the named form: the
+    // hosted server cannot know a client's slug, and changing them here would
+    // break every default install to serve the named minority.
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign_x402')
+    expect(result.data.next_tool_server).toBe('haven-signer')
+    expect(result.data.next_tool_name).toBe('haven_sign_x402')
+  })
+
+  it('adds next_tool_server_role so a named install can resolve the signer', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+
+    const result = ok<{ next_tool_server_role: string }>(
+      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+    )
+
+    // The role is what a `--name devtest` client resolves against: it looks
+    // for the signer among ITS OWN configured servers rather than trusting a
+    // name minted by a server that cannot see its config.
+    expect(result.data.next_tool_server_role).toBe('signer')
   })
 })

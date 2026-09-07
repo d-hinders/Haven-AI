@@ -103,6 +103,18 @@
       "jobs": ["backend", "sdk", "signer"],
       "runsVia": ["lint:network-pins"],
       "reason": "The network-map pin test (#1478) spans backend, SDK and signer sources, and all three jobs run it. Naming fewer would let a drift ship past the job that would have caught it."
+    },
+    {
+      "path": "scripts/ci/visual-baseline-inventory.mjs",
+      "jobs": ["frontend"],
+      "runsVia": ["visual:baselines"],
+      "reason": "The visual gate's honesty instrument (#2318): it names the baselines that were actually compared, and refuses an EMPTY baseline tree \u2014 the case where the pixel gate passes having compared nothing. It reads packages/frontend/e2e/__screenshots__ but lives under scripts/, and the job that reads it beside the tick (design_visual) is gated on the frontend surface, so a pull request touching only this file must be routed to frontend_checks to run it at all."
+    },
+    {
+      "path": "scripts/ci/visual-baseline-inventory.test.mjs",
+      "jobs": ["frontend"],
+      "runsVia": ["visual:baselines:test"],
+      "reason": "Its self-test. A report nobody tests can start answering vacuously, which is the exact defect the report exists to expose, so weakening the test must run it."
     }
   ]
 }

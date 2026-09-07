@@ -2,7 +2,10 @@
 // Run with: npm run docs:test
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { implicatedDocs, ageDays, isIncidentalPath } from './coupling-gate.mjs'
+import { mkdtempSync as mkdtempSync2457, readFileSync as readFileSync2457, rmSync as rmSync2457 } from 'node:fs'
+import { tmpdir as tmpdir2457 } from 'node:os'
+import { join as join2457 } from 'node:path'
+import { implicatedDocs, reverseImplications, ageDays, isIncidentalPath } from './coupling-gate.mjs'
 
 const DOCS = [
   { doc: 'docs/architecture/04-x402.md', covers: ['packages/backend/src/routes/x402.ts'], lastVerified: '2026-06-01' },
@@ -48,6 +51,49 @@ test('matches ** globs across directories', () => {
 
 test('returns nothing when no changed file is covered', () => {
   assert.equal(implicatedDocs(['packages/frontend/src/app/page.tsx'], DOCS).length, 0)
+})
+
+test('#2457: a changed governed doc names its declared covered code', () => {
+  assert.deepEqual(reverseImplications(['docs/architecture/04-x402.md'], DOCS), [{
+    doc: 'docs/architecture/04-x402.md',
+    covered: ['packages/backend/src/routes/x402.ts'],
+    direction: 'doc-to-code',
+  }])
+})
+
+test('#2457: reverse findings preserve declarations and skip narrative docs', () => {
+  assert.deepEqual(
+    reverseImplications(['docs/operations/hosted-mcp.md', 'docs/product/README.md'], DOCS),
+    [{ doc: 'docs/operations/hosted-mcp.md', covered: ['packages/mcp-server/**'], direction: 'doc-to-code' }],
+  )
+})
+
+test('#2457: reverse findings do not make strict mode block', () => {
+  const changed = ['docs/architecture/04-x402.md']
+  assert.equal(reverseImplications(changed, DOCS).length, 1)
+  assert.equal(implicatedDocs(changed, DOCS, { strict: true }).length, 0)
+})
+
+test('#2457: reverse-only findings are written and set the CI finding output', () => {
+  const dir = mkdtempSync2457(join2457(tmpdir2457(), 'coupling-2457-'))
+  const out = join2457(dir, 'comment.md')
+  const githubOutput = join2457(dir, 'github-output')
+  try {
+    const stdout = _exec(
+      process.execPath,
+      ['scripts/docs/coupling-gate.mjs', '--changed=docs/operations/mcp-runtime-compatibility.md', `--out=${out}`],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, BASE_SHA: undefined, HEAD_SHA: undefined, GITHUB_OUTPUT: githubOutput },
+        encoding: 'utf8',
+      },
+    )
+    assert.match(stdout, /doc-to-code/)
+    assert.match(readFileSync2457(out, 'utf8'), /Covered files in changed docs/)
+    assert.equal(readFileSync2457(githubOutput, 'utf8'), 'has_findings=true\n')
+  } finally {
+    rmSync2457(dir, { recursive: true, force: true })
+  }
 })
 
 test('ageDays computes whole-day differences', () => {

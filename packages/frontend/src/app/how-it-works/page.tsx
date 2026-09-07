@@ -150,7 +150,7 @@ function VisualCredentials() {
         ))}
       </dl>
       <div className="mt-4 pt-4 border-t border-[var(--v2-border)] flex items-center justify-between">
-        <code className="text-[12px] font-mono text-[var(--v2-ink-2)]">sk_live_••••9aF2</code>
+        <code className="text-[12px] font-mono text-[var(--v2-ink-2)]">sk_agent_••••9aF2</code>
         <button className="text-[12px] font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]">Copy</button>
       </div>
     </Card>
@@ -218,7 +218,7 @@ export default function HowItWorks() {
           Your agent pays for things on its own, and you stay in control of every dollar.
         </p>
         <div className="flex flex-wrap gap-3">
-          <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+          <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
           <Button href="/protocols/x402" variant="ghost" size="lg">See the protocols</Button>
         </div>
         </div>
@@ -289,7 +289,7 @@ export default function HowItWorks() {
             No credit card. No setup call. Live in minutes.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button href="/signup" size="lg" trailingIcon>Get early access</Button>
+            <Button href="/signup" size="lg" trailingIcon>Create your account</Button>
             <Button href="/protocols/x402" variant="ghost" size="lg">See the protocols</Button>
           </div>
         </div>

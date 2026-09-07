@@ -91,20 +91,70 @@ function agentRow(overrides: Record<string, unknown> = {}) {
 
 function mockDb(opts: {
   agent?: Record<string, unknown> | null
+  /**
+   * Successive `FROM agents` reads, in call order (#2416). The build path
+   * reads the agent up to three times: the route's pre-check, the lock inside
+   * `insertPendingDelegationForOwnedNonRevokedAgent`, and — only when that
+   * refuses — the refusal-reason re-read. `null` means "no row" (the shape a
+   * revoke or an account change committing mid-request produces). Falls back
+   * to `agent` once exhausted.
+   */
+  agentSequence?: Array<Record<string, unknown> | null>
+  /** `agent_rekeys` EXISTS probe — true = a re-key is in flight (#2331/#2416). */
+  inFlightRekey?: boolean
+  activated?: boolean
   version?: number
   stored?: Record<string, unknown> | null
   owner?: string | null
+  /**
+   * #2539: the row the build-reuse lookup finds. Unset means "nothing to
+   * reuse", which keeps every earlier test on its exact old path.
+   */
+  reusable?: { id: string; delegation_hash: string; version: number; delegation_json: string }
   passkeys?: Array<{ key_id: string; public_key_x: string; public_key_y: string; created_at?: Date | string | null }>
   waiverAt?: string | null
   list?: Array<Record<string, unknown>>
+  /**
+   * #2415: the delegate key the LOCKING `SELECT ... FOR UPDATE` sees, which is
+   * not always the one the pre-lock read saw — a re-key can commit in between.
+   * Opt-in: when unset, the locking read falls through to the ordinary agents
+   * branch exactly as before, so every other test is unchanged.
+   */
+  lockedDelegate?: string | null
 } = {}) {
+  let agentReads = 0
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
-    if (/FROM agents a/.test(s)) {
-      return Promise.resolve({ rows: opts.agent === null ? [] : [opts.agent ?? agentRow()] })
+    // #2415: the LOCKING read, opt-in only. It must precede the generic agents
+    // branch — same table — but it answers ONLY when a test asked for a
+    // divergent locked key, because the build path's own lock read is one of
+    // the steps #2416's `agentSequence` counts, and hijacking it here would
+    // silently desynchronise that sequence.
+    if (opts.lockedDelegate !== undefined && /FROM agents(?:\s|$)/.test(s) && /FOR UPDATE/.test(s)) {
+      return Promise.resolve({
+        rows: [{ id: AGENT_ID, delegate_address: opts.lockedDelegate }],
+      })
+    }
+    if (/FROM agent_rekeys/.test(s)) {
+      return Promise.resolve({ rows: [{ in_flight: opts.inFlightRekey === true }] })
+    }
+    if (/FROM agents(?:\s|$)/.test(s)) {
+      const seq = opts.agentSequence
+      const row = seq && agentReads < seq.length ? seq[agentReads] : (opts.agent === null ? null : opts.agent ?? agentRow())
+      agentReads += 1
+      return Promise.resolve({ rows: row === null ? [] : [row] })
+    }
+    if (/UPDATE agent_delegations/.test(s) && /status = 'active'/.test(s)) {
+      return Promise.resolve({ rows: opts.activated === false ? [] : [{ id: 'row-1' }] })
     }
     if (/COALESCE\(MAX\(version\)/.test(s)) {
       return Promise.resolve({ rows: [{ next_version: opts.version ?? 1 }] })
+    }
+    // #2539: the reuse lookup — a still-pending, unexpired row for the exact
+    // slot. `reusable` set hands back that one row; unset means "nothing to
+    // reuse" so every pre-#2539 test keeps its exact old path.
+    if (/budget_atomic::numeric/.test(s)) {
+      return Promise.resolve({ rows: opts.reusable ? [opts.reusable] : [] })
     }
     // loadHybridOwnerConfig (#885): the account row, then its passkey set.
     if (/SELECT id, owner_address, single_signer_waiver_at FROM user_safes/.test(s)) {
@@ -178,6 +228,48 @@ describe('delegation lifecycle API (#828)', () => {
       expect(String(insert[0])).toContain("'pending'")
     })
 
+    // #2613, found by independent review: the slot lock put the version read
+    // and the insert inside a transaction, and the first version of that change
+    // wrapped the WHOLE transaction in a catch that answered 502 "Could not
+    // build the delegation". That relabels a database fault as a build fault,
+    // keeps it out of the central handler's error log, and puts the driver's
+    // message on the wire. Only the construction step is a 502 now.
+    it('does NOT report a database failure as a build failure', async () => {
+      // Build the suite's own working mock first, then fail EXACTLY one
+      // statement inside the locked transaction. Hand-rolling the agent row
+      // here instead is how the first version of this test passed while
+      // asserting nothing: the route 404'd before it ever reached the version
+      // read, so the assertion held for the wrong reason and the mutation
+      // below did not redden it.
+      mockDb({})
+      const working = mockQuery.getMockImplementation()!
+      mockQuery.mockImplementation((sql: unknown) =>
+        /COALESCE\(MAX\(version\)/.test(String(sql))
+          ? Promise.reject(new Error('connection terminated unexpectedly'))
+          : working(sql as string),
+      )
+
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+        payload: { token_address: USDC, recipient_address: RECIPIENT, budget_atomic: '5000000', period_seconds: 86400 },
+      })
+
+      // It must have got far enough to ask for the version at all — otherwise
+      // this test proves nothing about the error path.
+      expect(mockQuery.mock.calls.some((c) => /COALESCE\(MAX\(version\)/.test(String(c[0])))).toBe(true)
+      // 500 through the default error path, not a 502 mislabelling a database
+      // fault as a construction fault.
+      expect(res.statusCode).toBe(500)
+      expect(JSON.stringify(res.json())).not.toContain('Could not build the delegation')
+      // The redaction half of this belongs to `infra/http-error-handler.ts`,
+      // which the real app installs via `app.setErrorHandler` and this test
+      // app does not register — so it is deliberately NOT asserted here.
+      // What this test owns is that the route lets the error PROPAGATE, which
+      // is the precondition that handler's own docstring names ("the claim
+      // holds for the default error path... PROVIDED the route lets errors
+      // propagate"). A route-level catch-all is exactly what would break it.
+    })
+
     it('the open-budget variant carries no recipient', async () => {
       mockDb({})
       const res = await app.inject({
@@ -227,6 +319,93 @@ describe('delegation lifecycle API (#828)', () => {
         payload: { token_address: USDC, budget_atomic: '1', period_seconds: 86400 },
       })
       expect(res.statusCode).toBe(code)
+    })
+
+    /**
+     * #2416 — the refusal REASON reporting. `build` refused every
+     * `insertPendingDelegationForOwnedNonRevokedAgent` false with "Revoked
+     * agents cannot receive new budget delegations". #2331 widened that helper
+     * to four reasons, the loudest of which reaches a healthy `active` agent
+     * whose owner abandoned a re-key part-way.
+     *
+     * Characterization first (money.md §2): which requests are REFUSED must not
+     * move — only which sentence they carry.
+     */
+    describe('refusal reasons (#2416)', () => {
+      const payload = { token_address: USDC, budget_atomic: '5000000', period_seconds: 86400 }
+      const insertRan = () =>
+        mockQuery.mock.calls.some((c) => /INSERT INTO agent_delegations/.test(String(c[0])))
+
+      it('CHARACTERIZATION: an in-flight re-key is still refused 409, with nothing stored', async () => {
+        mockDb({ inFlightRekey: true })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(insertRan()).toBe(false)
+      })
+
+      it('CHARACTERIZATION: a healthy agent with NO re-key in flight is still granted 201', async () => {
+        mockDb({ inFlightRekey: false })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(201)
+      })
+
+      it('names the in-flight re-key and how to clear it — NOT "revoked"', async () => {
+        mockDb({ inFlightRekey: true })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        const { error } = res.json() as { error: string }
+        expect(error).toBe(
+          'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget',
+        )
+        // The whole point: a healthy `active` agent is never told it is revoked.
+        expect(error).not.toMatch(/revoked agent/i)
+      })
+
+      it('a revoke that commits mid-request keeps the existing revoked wording and status', async () => {
+        // Pre-check sees `active`; the lock and the reason re-read see the revoke.
+        mockDb({ agentSequence: [agentRow(), null, agentRow({ status: 'revoked' })] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Revoked agents cannot receive new budget delegations' })
+      })
+
+      it('an account that leaves the delegation rail mid-request reuses the rail wording', async () => {
+        mockDb({ agentSequence: [agentRow(), null, agentRow({ account_type: 'safe' })] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Agent account is not on the delegation rail' })
+      })
+
+      it('a delegate key cleared mid-request names the missing key', async () => {
+        mockDb({ agentSequence: [agentRow(), null, agentRow({ delegate_address: null })] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Agent has no delegate key or treasury account' })
+      })
+
+      it('when BOTH a revoke and a re-key hold, reports the one the lock stopped on', async () => {
+        // `lockOwnedNonRevokedDelegationAgent` filters `status <> 'revoked'` in
+        // SQL and only then probes `agent_rekeys`, so the revoke is what refused
+        // — the reason re-read must mirror that order, not the reverse.
+        mockDb({
+          agentSequence: [agentRow(), null, agentRow({ status: 'revoked' })],
+          inFlightRekey: true,
+        })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Revoked agents cannot receive new budget delegations' })
+      })
+
+      it('falls back to the sibling activate wording when no reason still holds', async () => {
+        // The lock refused, but by the time the reason is re-read the agent looks
+        // healthy again — report the honest "unavailable", never "revoked".
+        mockDb({ agentSequence: [agentRow(), null, agentRow()] })
+        const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({
+          error: 'Agent cannot receive a budget while its account or re-key is unavailable',
+        })
+      })
     })
 
     it.each([
@@ -447,6 +626,16 @@ describe('delegation lifecycle API (#828)', () => {
       expect(String(flip![0])).toMatch(/status = 'pending_approval'/)
     })
 
+    it('refuses when the pending row was consumed before the conditional activation', async () => {
+      mockDb({ activated: false })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+        payload: { signature: '0x' + 'ab'.repeat(65) },
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'Delegation is no longer pending' })
+    })
+
     it('accepts a WebAuthn-length signature (ABI-encoded assertion, >65 bytes) (#887)', async () => {
       mockDb({
         owner: null,
@@ -618,10 +807,131 @@ describe('delegation lifecycle API (#828)', () => {
         payload: { signature: '0x' + 'ab'.repeat(65) },
       })
       expect(res.json()).toMatchObject({ activated: true })
-      const replaced = mockQuery.mock.calls.find((c) => /SET status = 'replaced'/.test(String(c[0])))
-      expect(replaced).toBeDefined()
-      const activated = mockQuery.mock.calls.find((c) => /SET\s+status = 'active'/.test(String(c[0])))!
-      expect(String(activated[1][0])).toContain('signature')
+      const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+      const sweepIdx = sqls.findIndex((q) => /SET status = 'replaced'/.test(q))
+      const activateIdx = sqls.findIndex((q) => /UPDATE agent_delegations/.test(q) && /SET status = 'active'/.test(q))
+      expect(sweepIdx).toBeGreaterThan(sqls.indexOf('BEGIN'))
+      expect(activateIdx).toBeLessThan(sqls.indexOf('COMMIT'))
+      // #2411 ORDER pin: the sweep retires the slot's other active grants
+      // BEFORE the pending row flips active. #2331 inverted this and the
+      // sweep retired the row it had just activated — invisible to a
+      // stateless mock, which is why the real-DB test in
+      // infra/repositories/__tests__/delegation-budgets.test.ts owns the
+      // invariant; this pin is the cheap early warning.
+      expect(sweepIdx).toBeLessThan(activateIdx)
+      // …and the sweep excludes the pending row BY ID, so it is correct in
+      // either order.
+      expect(mockQuery.mock.calls[sweepIdx][1]).toContain('row-1')
+      expect(String(mockQuery.mock.calls[activateIdx][1][0])).toContain('signature')
+    })
+
+    // ── #2415: the agent row lock must not span a network call ──────────
+    // #2331 derived the delegate's account address (one RPC) between BEGIN and
+    // COMMIT, so a slow RPC held the agent row lock and a pooled connection.
+    // These five pin the fix AND the guarantee it must not lose.
+    describe('#2415 lock scope: no RPC between BEGIN and COMMIT', () => {
+      /** Global invocation order, so query and derivation calls interleave truthfully. */
+      function timeline() {
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        const beginAt = mockQuery.mock.invocationCallOrder[sqls.indexOf('BEGIN')]
+        const endIdx = sqls.indexOf('COMMIT') === -1 ? sqls.indexOf('ROLLBACK') : sqls.indexOf('COMMIT')
+        const endAt = mockQuery.mock.invocationCallOrder[endIdx]
+        return { sqls, beginAt, endAt, derivations: mockCompute.mock.invocationCallOrder }
+      }
+
+      it('derives the delegate account BEFORE opening the transaction, never inside it', async () => {
+        mockDb({})
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(200)
+        const { sqls, beginAt, endAt, derivations } = timeline()
+        // The transaction really was opened and closed — otherwise "nothing
+        // ran inside it" would pass vacuously.
+        expect(sqls).toContain('BEGIN')
+        expect(sqls).toContain('COMMIT')
+        // The derivation happened exactly once, before BEGIN, and on the
+        // PRE-LOCK delegate key — the input is half of the guarantee, so it is
+        // asserted rather than left to the mock's argument-blind stub.
+        expect(derivations).toHaveLength(1)
+        expect(derivations[0]).toBeLessThan(beginAt)
+        expect(mockCompute).toHaveBeenCalledWith(84532, { ownerAddress: DELEGATE_KEY })
+        // Nothing derived while the lock was held. This is the assertion that
+        // goes red if the call is moved back under the lock.
+        expect(derivations.filter((at) => at > beginAt && at < endAt)).toEqual([])
+      })
+
+      it('still refuses a delegation built for a rotated delegate key, with the lock as the witness', async () => {
+        // The pre-lock read sees the old key; a re-key commits; the locking
+        // SELECT sees the new one. The activation must not commit.
+        mockDb({ lockedDelegate: '0x' + '77'.repeat(20) })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Delegation was built for a previous delegate key' })
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        expect(sqls).toContain('ROLLBACK')
+        expect(sqls).not.toContain('COMMIT')
+        expect(sqls.some((q) => /SET status = 'active'/.test(q))).toBe(false)
+        expect(sqls.some((q) => /SET status = 'replaced'/.test(q))).toBe(false)
+      })
+
+      it('still refuses when the STORED delegation names a delegate the current key does not derive', async () => {
+        // The second half of the guard: the row's own `delegate` field is
+        // compared against the derivation, so a delegation JSON that never
+        // matched this agent is refused even with the key unrotated.
+        mockDb({
+          stored: {
+            id: 'row-1',
+            delegation_json: JSON.stringify({ delegate: '0x' + '99'.repeat(20), delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1' }),
+            status: 'pending',
+            token_address: USDC.toLowerCase(),
+            recipient_address: RECIPIENT.toLowerCase(),
+          },
+        })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Delegation was built for a previous delegate key' })
+        expect(mockQuery.mock.calls.map((c) => String(c[0]))).not.toContain('COMMIT')
+      })
+
+      it('refuses an agent with no delegate key WITHOUT opening the transaction, same 409 and message', async () => {
+        // The derivation's input is `agent.delegate_address`, so this refusal
+        // moved ahead of BEGIN with it. Before #2415 it was reached inside the
+        // transaction, via lockOwnedNonRevokedDelegationAgent returning null
+        // for a row with no delegate key — same status, same message. Pinned
+        // because #2415 relocated it: nothing else in the file drives this
+        // route with a null delegate key.
+        mockDb({ agent: agentRow({ delegate_address: null }) })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(409)
+        expect(res.json()).toEqual({ error: 'Agent cannot receive a budget while its account or re-key is unavailable' })
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        expect(sqls).not.toContain('BEGIN')
+        expect(mockCompute).not.toHaveBeenCalled()
+      })
+
+      it('CHARACTERIZATION: the happy path still flips the agent inside the same transaction (#1069)', async () => {
+        mockDb({ agent: agentRow({ status: 'pending_approval' }) })
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`,
+          payload: { signature: '0x' + 'ab'.repeat(65) },
+        })
+        expect(res.statusCode).toBe(200)
+        const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+        const flipIdx = sqls.findIndex((q) => /UPDATE agents/.test(q) && /status = 'pending_approval'/.test(q))
+        expect(flipIdx).toBeGreaterThan(sqls.indexOf('BEGIN'))
+        expect(flipIdx).toBeLessThan(sqls.indexOf('COMMIT'))
+      })
     })
 
     it('rejects a malformed signature and a non-pending row', async () => {
@@ -770,6 +1080,203 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json()).toMatchObject({ revoked: true, tx_hash: '0xfeed' })
       expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/revoke/submit', res.json())
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(true)
+    })
+  })
+
+  // ── #2539 characterization (money.md §2): pin the surface the CLI's
+  // construct-and-hand-off slice rides on BEFORE anything changes. The CLI
+  // never signs and never calls activate — the properties pinned here are the
+  // ones that keep that true:
+  //   1. build stores a pending row and hands back typed data, never a
+  //      signature;
+  //   2. revoke PREPARES a signature request and returns it — nothing flips
+  //      without the /submit step and its owner signature;
+  //   3. activate still demands an owner signature.
+  describe('#2539 characterization — the surface the CLI hands off to', () => {
+    const grantBody = { token_address: USDC, budget_atomic: '5000000', period_seconds: 86_400 }
+
+    it('CHARACTERIZATION: build stores a pending row and reports the version', async () => {
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(res.statusCode).toBe(201)
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))!
+      expect(String(insert[0])).toContain("'pending'")
+      expect(res.json()).toMatchObject({ version: 1 })
+    })
+
+    it('CHARACTERIZATION: a rebuild of the same slot today mints a SECOND pending row, no reuse', async () => {
+      // Today the dashboard's own rebuild of the same (agent, token,
+      // recipient) budget bypasses any reuse: same body, fresh MAX(version)+1
+      // read, fresh insert. That duplicate pending row is exactly why #2539
+      // must add reuse — the CLI prints a link to a pending row, the form's
+      // own rebuild would otherwise leave that row behind and poll the CLI's
+      // --wait with a version that never goes active.
+      mockDb({})
+      const first = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(first.statusCode).toBe(201)
+      mockDb({})
+      const second = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(second.statusCode).toBe(201)
+      expect(
+        mockQuery.mock.calls.filter((c) => /INSERT INTO agent_delegations/.test(String(c[0]))).length,
+      ).toBe(2)
+    })
+
+    it('CHARACTERIZATION: revoke prepare returns the signature request and flips NOTHING', async () => {
+      // Same stored row the sibling tests use — a full signed delegation the
+      // revocation builder can encode.
+      mockDb({
+        stored: {
+          delegation_json: JSON.stringify({ delegate: DELEGATE_ACCOUNT, delegator: TREASURY, authority: `0x${'0'.repeat(64)}`, caveats: [], salt: '1', signature: '0x' + 'cd'.repeat(65) }),
+          status: 'active',
+        },
+      })
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn().mockResolvedValue({
+          userOperation: { sender: TREASURY, nonce: 1n, callData: '0xdead' },
+          userOpHash: '0x' + 'ee'.repeat(32),
+          signingTypedData: { domain: {}, types: {}, primaryType: 'PackedUserOperation', message: {} },
+        }),
+        submitCall: vi.fn(),
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke`,
+        payload: {},
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ signature_scheme: 'eip712_userop' })
+      expect(res.json().signing_payload).toBeTruthy()
+      // The row is untouched until /submit: no revoked UPDATE ran.
+      expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
+    })
+
+    it('CHARACTERIZATION: revoke on an already-revoked hash is a 409', async () => {
+      mockDb({ stored: { delegation_json: '{}', status: 'revoked' } })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke`, payload: {},
+      })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'Already revoked' })
+    })
+
+    it('CHARACTERIZATION: activate still demands an owner signature and writes nothing without one', async () => {
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/activate`, payload: {},
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/owner signature is required/)
+      expect(mockQuery.mock.calls.some((c) => /UPDATE agent_delegations/.test(String(c[0])))).toBe(false)
+    })
+
+    it('CHARACTERIZATION: the pending row is listed with the parameters a grant link prefill needs', async () => {
+      // The ?grant= prefill is built ONLY from what GET /:id/delegations
+      // already returns — no new backend read. This pins that the list really
+      // carries token, recipient, amount, period and expiry for a pending row.
+      mockDb({
+        list: [{
+          ...DELEGATION_ROW,
+          status: 'pending',
+          recipient_address: null,
+        }],
+      })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expect(res.statusCode).toBe(200)
+      const row = res.json().delegations[0]
+      expect(row.status).toBe('pending')
+      expect(row.token_address).toBe(USDC.toLowerCase())
+      expect(row.recipient_address).toBeNull()
+      expect(row.budget_atomic).toBe('5000000')
+      expect(row.period_seconds).toBe(86_400)
+      expect(row.expires_at).toBeTruthy()
+    })
+
+    // ── #2539 new behaviour: the build is idempotent within its expiry ──
+    // Same slot + still-pending + unexpired → THE SAME row comes back: same
+    // hash, same version, no second insert. This is what lets the CLI print a
+    // link to a hash and then poll for that hash to go active while the
+    // dashboard's own form rebuilds the same grant underneath it.
+
+    function reusableRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'row-reuse-1',
+        delegation_hash: '0x' + 'c1'.repeat(32),
+        version: 1,
+        delegation_json: JSON.stringify({
+          delegate: DELEGATE_ACCOUNT, delegator: TREASURY,
+          authority: `0x${'0'.repeat(64)}`, caveats: [], salt: 1n.toString(),
+        }),
+        ...overrides,
+      }
+    }
+
+    it('#2539: an identical still-pending build is REUSED — same hash and version, nothing inserted', async () => {
+      mockDb({ reusable: reusableRow() })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(res.statusCode).toBe(201)
+      const body = res.json()
+      expect(body.delegation_hash).toBe(reusableRow().delegation_hash)
+      expect(body.version).toBe(1)
+      expect(body.build_id).toBe(body.delegation_hash)
+      expect(body.typed_data_hash).toBe(body.delegation_hash)
+      expect(body.signing_url).toContain('/agents/')
+      expect(body.signing_url).toContain(`grant=${reusableRow().delegation_hash}`)
+      // Reuse, not a second offer: no insert ran, and the response still
+      // matches the documented 201 shape (checked against the real payload).
+      expect(mockQuery.mock.calls.some((c) => /INSERT INTO agent_delegations/.test(String(c[0])))).toBe(false)
+      expectMatchesSpec('POST', '/agents/{id}/delegations/build', body, '201')
+      expect(JSON.stringify(body)).not.toMatch(/"signature":\s*"0x[0-9a-f]{130}/i)
+    })
+
+    it('#2539: reuse keeps the 201 shape coherent with the reused row, not the request', async () => {
+      // The signing_payload is rebuilt from the STORED delegation, and the
+      // delegate account address is re-derived from the agent's CURRENT key —
+      // so what the owner is asked to sign is the thing that is actually
+      // pending, whatever arrived in the request body.
+      mockDb({ reusable: reusableRow({ version: 3 }) })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload: grantBody,
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().version).toBe(3)
+      expect(res.json().delegate_account_address).toBe(DELEGATE_ACCOUNT)
+      expect(res.json().signing_payload.primaryType).toBe('Delegation')
+    })
+
+    it('#2539: a DIFFERENT budget or recipient on the same slot still builds a fresh version', async () => {
+      // Reuse matches the full parameter set — budget included. A raise is a
+      // new offer (a new version), never a silent re-handing of the old one.
+      mockDb({})
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+        payload: { ...grantBody, budget_atomic: '9000000' },
+      })
+      expect(res.statusCode).toBe(201)
+      const insert = mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))!
+      expect(String(insert[0])).toContain("'pending'")
+      expect(res.json().version).toBe(1)
+    })
+
+    it('#2539: the reuse lookup is scoped to the exact slot', async () => {
+      mockDb({ reusable: reusableRow() })
+      await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+        payload: { ...grantBody, recipient_address: RECIPIENT },
+      })
+      const lookup = mockQuery.mock.calls.find((c) => /budget_atomic::numeric/.test(String(c[0])))!
+      // recipient goes in as a parameter and the lookup is per-agent — a
+      // pinned grant and an open grant on the same token are different slots.
+      expect(lookup[1]).toContain(AGENT_ID)
+      expect(lookup[1][2]).toBe(RECIPIENT.toLowerCase())
     })
   })
 

@@ -331,12 +331,23 @@ export async function runCli(
     const result = await runConnect(
       {
         ...parsed.options,
-        waitForApproval: !parsed.json,
+        // #1377 D / #2484: leave prose runs UNSPECIFIED (undefined) so
+        // runConnect's stdout-TTY narration gate decides whether there is a
+        // watching human to narrate to — an agent invoking prose as a tool
+        // call has none and must not sit opaque in the wait. --json stays an
+        // explicit false (skip, emit promptly).
+        waitForApproval: parsed.json ? false : undefined,
         // #1719: only a human-facing run may be asked which installed client to
         // configure. --json is the automation contract — it must fail with a
         // machine-readable code, never block on stdin. runConnect additionally
         // requires a real TTY before it prompts.
         interactive: !parsed.json,
+        // #2528: reported to the backend at register, so the funnel can tell a
+        // machine-readable run from a narrated one. Read from the SAME
+        // `parsed.json` the three flags above use, rather than inferred later
+        // from `waitForApproval` — that flag is already false for a prose run
+        // with no TTY (#2484), so inferring would mislabel real prose runs.
+        runMode: parsed.json ? 'json' : 'prose',
       },
       {
         log: (message) => (parsed.json ? io.stderr : io.stdout)(`${message}\n`),

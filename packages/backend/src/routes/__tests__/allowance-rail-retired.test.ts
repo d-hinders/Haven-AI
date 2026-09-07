@@ -115,7 +115,6 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, x402DelegationMoc
   () => ({
     mockQuery: vi.fn(),
     allowanceMocks: {
-      getTokenAllowance: vi.fn(),
       getTokenBalance: vi.fn(),
       getProvider: vi.fn(),
       getRelayerWallet: vi.fn(),
@@ -201,8 +200,6 @@ function intentRow(overrides: Record<string, unknown> = {}) {
     confirmed_at: null,
     expires_at: '2099-01-01T00:00:00.000Z',
     execution_rail: null,
-    session_permission_id: null,
-    session_user_op: null,
     payment_rail: null,
     source: 'direct',
     ...overrides,
@@ -251,8 +248,10 @@ const writes = () => sqlCalls().filter((sql) => /^\s*(INSERT|UPDATE|DELETE)\b/i.
  * #2307 removed two spies from this helper (`executeAllowanceTransfer`,
  * `generateTransferHash`). Neither is an export of the mocked module, so
  * neither could ever fail. Both remaining assertions are real: `writes()` reads
- * the query log the handler actually produced, and `getTokenAllowance` is a
- * genuine export of `rails/allowance-module.ts`.
+ * the query log the handler actually produced. The `getTokenAllowance` spy that
+ * sat beside it is gone with the export itself (#2259) — nothing can call a
+ * function that no longer exists, which is a stronger guarantee than the spy
+ * was, and a spy on a deleted export is the unfalsifiable shape #2307 removed.
  *
  * The "no spend happened" half of the old claim did not move to another spy —
  * it moved to a structural assertion (see "the spend machinery is GONE" below),
@@ -260,7 +259,6 @@ const writes = () => sqlCalls().filter((sql) => /^\s*(INSERT|UPDATE|DELETE)\b/i.
  */
 function expectNothingHappened() {
   expect(writes(), `a write reached the database: ${writes().join(' | ')}`).toEqual([])
-  expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
 }
 
 /**
@@ -914,9 +912,6 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
 
       expect(res.statusCode).toBe(410)
       expect(res.json().error).toBe(RETIRED_ACCOUNT)
-      // `getTokenAllowance` IS an export, so this one bites. (#2307 removed a
-      // `getLatestBlockTimeSec` spy alongside it, which was not.)
-      expect(allowanceMocks.getTokenAllowance).not.toHaveBeenCalled()
       expect(sqlCalls().some((sql) => /agent_allowances/.test(sql))).toBe(false)
     })
   })

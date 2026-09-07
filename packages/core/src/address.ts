@@ -16,6 +16,9 @@
 /** Canonical 40-hex Ethereum address pattern. No checksum validation. */
 export const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
+/** Canonical UUID v1-v5-ish pattern (8-4-4-4-12 hex) for id-shaped path params. */
+export const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+
 /** Type guard: `true` iff `value` is a string matching {@link ETH_ADDRESS_RE}. */
 export function isAddress(value: unknown): value is string {
   return typeof value === 'string' && ETH_ADDRESS_RE.test(value)

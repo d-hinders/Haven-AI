@@ -5,8 +5,14 @@
  *
  *   - a fixture that is not actually fresh proves nothing and must FAIL
  *     loudly rather than green-wash the counterfactual path;
- *   - authorize succeeding while the account still has no code is the exact
- *     #1667 regression signal, caught BEFORE settle would revert on-chain;
+ *   - authorize succeeding while the account still has no code stops the leg
+ *     BEFORE settle — and after #2445 it is POLLED to a deadline, so the two
+ *     halves worth pinning are that a late-appearing code still passes and
+ *     that a never-appearing one still FAILS (a poll that always succeeds is
+ *     not a guard);
+ *   - the failure text must not re-assert the cause #2445 removed: authorize
+ *     returning 200 means the backend's node saw the deploy mined, so "the
+ *     deploy did not run" is exactly what this read cannot conclude;
  *   - the happy path requires the code flip to happen at authorize.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -19,6 +25,8 @@ const TREASURY = '0x' + 'aa'.repeat(20)
 const DELEGATE_ACCOUNT = '0x' + 'bb'.repeat(20)
 const MERCHANT_URL = 'https://demo-merchant.example'
 const AMOUNT = 1500n
+const FACILITATOR = '0x' + 'fa'.repeat(20)
+const ASSET = '0x' + 'dd'.repeat(20)
 
 const { mockFetch, mockAuthorize, mockSettle, mockBalanceOf, mockGetCode, mockProvision, mockPay } =
   vi.hoisted(() => ({
@@ -61,7 +69,13 @@ vi.mock('ethers', async (importOriginal) => {
   }
 })
 
-const { x402Erc7710FreshAgent } = await import('./x402-erc7710-fresh-agent.js')
+const { x402Erc7710FreshAgent, TIMING } = await import('./x402-erc7710-fresh-agent.js')
+
+// Real waits are 30 s / 90 s. The cases that matter here are the ones that
+// never converge, so they would sit out both in full.
+TIMING.deployVisibleWaitMs = 60
+TIMING.settleWaitMs = 60
+TIMING.pollIntervalMs = 20
 
 const ctx = {
   cfg: {
@@ -88,21 +102,37 @@ function identity() {
   }
 }
 
+/**
+ * The decoded challenge — ONE object feeds the header AND the authorize-body
+ * pin below. Carries `extensions` in the dev demo merchant's shape
+ * (`DEMO_MERCHANT_EXTENSIONS`, packages/demo-merchant-mcp/src/x402.ts, #2361)
+ * so the pinned body is the post-#2364 challenge the settle-side echo is
+ * built from. Hand-copied, NOT imported (qa-agent does not depend on
+ * demo-merchant-mcp) and nothing re-syncs it — tolerable because the pin
+ * proves VERBATIM passthrough of whatever was decoded; the block's exact
+ * content is illustrative, not load-bearing.
+ */
+const CHALLENGE = {
+  x402Version: 2,
+  accepts: [{
+    scheme: 'exact',
+    amount: AMOUNT.toString(),
+    payTo: MERCHANT,
+    asset: ASSET,
+    network: 'base-sepolia',
+    maxTimeoutSeconds: 300,
+    extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+  }],
+  resource: { url: `${MERCHANT_URL}/mcp` },
+  extensions: {
+    'haven-demo': { version: '1', echoRule: 'x402 v2: clients must echo this extensions object in PaymentPayload' },
+  },
+}
+
 function challengeResponse() {
-  const challenge = {
-    accepts: [{
-      scheme: 'exact',
-      amount: AMOUNT.toString(),
-      payTo: MERCHANT,
-      asset: '0x' + 'dd'.repeat(20),
-      network: 'base-sepolia',
-      extra: { assetTransferMethod: 'erc7710' },
-    }],
-    resource: { url: `${MERCHANT_URL}/mcp` },
-  }
   return {
     status: 402,
-    headers: new Headers({ 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(challenge)).toString('base64') }),
+    headers: new Headers({ 'PAYMENT-REQUIRED': Buffer.from(JSON.stringify(CHALLENGE)).toString('base64') }),
     text: async () => '',
   }
 }
@@ -173,18 +203,78 @@ describe('the counterfactual precondition', () => {
   })
 })
 
-describe('the #1667 regression signal', () => {
-  it('FAILS when authorize succeeds but the account still has NO code', async () => {
-    // The exact prod defect: nothing deployed the delegator, so redemption
-    // would revert InvalidEOASignature. Caught here, before settle.
-    mockGetCode.mockResolvedValueOnce('0x').mockResolvedValueOnce('0x')
+describe('the post-authorize code read (#2445)', () => {
+  it('STILL FAILS when the code never appears — the poll must be able to lose', async () => {
+    // The guard's whole value: a poll that always converges asserts nothing.
+    // Every read returns 0x, so the loop must exhaust its deadline and fail.
+    mockGetCode.mockResolvedValue('0x')
 
     const result = await x402Erc7710FreshAgent.run(ctx)
 
     expect(result.pass).toBe(false)
-    expect(result.detail).toMatch(/still has no code/)
-    expect(result.detail).toMatch(/InvalidEOASignature/)
+    expect(result.detail).toMatch(/still reports no code/)
+    // It polled rather than reading once: the counterfactual precondition read
+    // plus at least two attempts inside the deadline.
+    expect(mockGetCode.mock.calls.length).toBeGreaterThan(2)
     expect(mockSettle).not.toHaveBeenCalled()
+  })
+
+  it('PASSES when the code appears on a later poll — the read lag #2445 is about', async () => {
+    // Pre-#2445 this exact sequence failed the run and blamed the deploy.
+    mockGetCode
+      .mockResolvedValueOnce('0x') // counterfactual precondition
+      .mockResolvedValueOnce('0x') // first post-authorize read: node behind
+      .mockResolvedValue('0x60016001') // caught up
+
+    const result = await x402Erc7710FreshAgent.run(ctx)
+
+    expect(result.pass).toBe(true)
+    expect(mockSettle).toHaveBeenCalled()
+  })
+
+  it('does NOT blame the deploy — authorize returning 200 rules that cause out', async () => {
+    // `ensureHybridDeployed` throws on an unconfirmed or reverted deploy and
+    // `delegation-authorize.ts` turns that into a 502, so a 200 means the
+    // backend's node saw the account deployed. The old text asserted the
+    // opposite and sent triage into #1667's code.
+    mockGetCode.mockResolvedValue('0x')
+
+    const result = await x402Erc7710FreshAgent.run(ctx)
+
+    expect(result.detail).not.toMatch(/deploy did not run/)
+    expect(result.detail).not.toMatch(/InvalidEOASignature/)
+    // What it says instead: the backend's node saw it, ours has not caught up.
+    expect(result.detail).toMatch(/backend's node saw/)
+    expect(result.detail).toMatch(/has not caught up/)
+    expect(result.detail).toMatch(/RPC_URL_BASE_SEPOLIA/)
+  })
+})
+
+describe('the authorize body (#2384)', () => {
+  it('sends the decoded challenge VERBATIM as paymentRequired, with the erc7710 entry\'s fields', async () => {
+    // #2373: same pin as x402-erc7710-settle — the stored copy of this
+    // challenge feeds the settle-side resource/extensions echo (#2361), and
+    // dropping the field was invisible to unit CI. Deep-equal on purpose.
+    mockGetCode.mockResolvedValueOnce('0x').mockResolvedValueOnce('0x60016001')
+
+    const result = await x402Erc7710FreshAgent.run(ctx)
+
+    expect(result.pass).toBe(true)
+    expect(mockAuthorize).toHaveBeenCalledTimes(1)
+    expect(mockAuthorize).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${MERCHANT_URL}/mcp`,
+      payTo: MERCHANT,
+      amount: AMOUNT.toString(),
+      asset: ASSET,
+      network: 'base-sepolia',
+      maxTimeoutSeconds: 300,
+      facilitatorAddresses: [FACILITATOR],
+      paymentRequired: CHALLENGE,
+    }))
+    // objectContaining is recursive-equal, not strict: pin the challenge
+    // strictly too, so an extra or undefined-valued key cannot slip past.
+    const [body] = mockAuthorize.mock.calls[0]
+    expect(body.paymentRequired).toStrictEqual(CHALLENGE)
   })
 })
 

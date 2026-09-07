@@ -95,7 +95,6 @@ function renderModal(overrides: Partial<React.ComponentProps<typeof ReplaceSigni
     agentId: 'agent-1',
     agentName: 'Research agent',
     chainId: 8453,
-    isDelegationAgent: true,
     currentDelegateAddress: CURRENT,
     recentPayments: [],
     hasAnchoredPassport: false,
@@ -350,18 +349,12 @@ describe('lost versus compromised', () => {
 })
 
 describe('rail refusal', () => {
-  it('explains re-onboarding instead of presenting a dead control', () => {
-    renderModal({ isDelegationAgent: false })
-    expect(screen.getByText(/not available for this agent/i)).toBeInTheDocument()
-    expect(screen.getByText(/connect the agent again/i)).toBeInTheDocument()
-    // No path into the destructive flow exists at all on this rail.
-    expect(screen.queryByRole('button', { name: /switch off the old key/i })).toBeNull()
-  })
-
-  // Paired: the delegation rail DOES reach the flow, so the absence above is
-  // suppression rather than the control never existing.
+  // #2413 deleted this modal's rail refusal along with its `isDelegationAgent`
+  // prop: every agent that can reach the modal is on the delegation rail, so
+  // the refusal had no reachable input. This case survives as the positive
+  // half — the flow is reachable — which is what the pair was really pinning.
   it('reaches the flow on the delegation rail', async () => {
-    renderModal({ isDelegationAgent: true })
+    renderModal({})
     await advanceToConsequences()
     expect(screen.getByRole('button', { name: /switch off the old key/i })).toBeInTheDocument()
   })

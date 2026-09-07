@@ -20,10 +20,21 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-08-31" # #2268 (operator findings): the *Post-deploy trigger (webhook setup)* section instructed operators to add a post-deploy hook in Railway, and Railway offers no such thing — so the instruction was unfollowable, which is the likeliest reason it was never done. Corrected against the live dashboard on 2026-08-31: Project Settings → Webhooks is URL-only with no header field (its own hint says it formats payloads for Discord and Slack), so it can never send `Authorization: Bearer` to `POST /repos/:o/:r/dispatches`; and `@haven/backend` → Settings → Deploy exposes a Custom Start Command plus `+ Add pre-deploy step`, i.e. PRE-deploy, which would start the harness against the previous deployment — the same headSha-vs-deployed false coverage this doc already refuses a `push` trigger for. The section now opens with a do-not-follow banner, gains *Why this cannot be configured in Railway*, and records the two rejected workarounds (backend-startup dispatch: fires on every restart AND puts an `Actions: write` token in an internet-facing runtime; start-command wrapper: both, plus fragility). The Status subsection's three-way "cannot be told apart from inside this repository" is resolved to **never configured** on the same dashboard evidence, and its "fixing it is an operator action" line is corrected, since the action it named does not exist. Scope: the Deploy panel was read from a screenshot not scrolled to its end — if a post-deploy hook exists further down, the Webhooks finding and the pre-deploy timing argument both still stand, and that limit is stated in the section itself. Verified nothing else in this doc: the trigger table, failure reporting, freshness gate, flake budget, live smoke and runbook sections were not re-read in this pass. Prior: #2268: the trigger table said all three `qa-dev.yml` triggers were live and one had never fired — `repository_dispatch` (`dev-deployed`) 0 times across 156 runs (2026-06-30 -> 2026-08-31) and 0 across every workflow in the repo, counted against the Actions API rather than taken from the issue. The table now says so, and the "Post-deploy trigger (webhook setup)" section gains a Status subsection: the RECEIVER is proven healthy (a manual dispatch started run 33370275124 three seconds later, event `repository_dispatch`, headBranch `dev`), which rules out the workflow file, the `types:` filter, the default branch and the enabled state; what is left is the sender, in a deploy-provider dashboard, and that is an operator action rather than a code change. Also records the freshness alarm that now watches its silence (`scripts/ci/guard-freshness.mjs`, counting ONLY `repository_dispatch` on `dev`, so the live nightly and manual triggers cannot vouch for the dead one) and re-states the `push`-trigger hazard the section already knew about. Scope: the "When the money-flow QA runs" table and the "Post-deploy trigger" section ONLY. NOT re-verified in this pass: the dev targets, scenario table, env/credential/secrets tables, funding table, the freshness-gate and flake-budget sections, or any Layer 2b/3 prose. Prior: #2164: § "Automation & gating" gains the version-only exemption — a money-path file whose entire diff is a release-bump version string is no longer treated as uncovered. Documented with its three permitted line shapes, the symbol-pairing rule that makes it a check for a version BUMP rather than for version-SHAPED lines (review found three behavioural edits — constant deletion, dependency identity swap, constant rename — that shape matching alone excused), and its fail-closed direction, because it NARROWS what the gate inspects, and the section's own standard is that an overstated net is worse than a known-partial one. Reason it exists: the bump rewrites SIGNER_VERSION into packages/signer/** after every green run, so every release promotion failed by construction and qa-override was the standing route past the gate. Scope: that one subsection; the dev targets, trigger table and setup steps were NOT re-verified in this pass. Prior: #2081: the preflight now reports — and blocks on — the delegation treasury's USDC balance, the account every payment scenario spends from (the #2074 empty-treasury outage was diagnosable only by hand-decoding UserOperation calldata). Re-verified in this pass: the preflight section (example block gains the treasury line; new paragraph records the block decision, the runtime address derivation via GET /machine-payments/agent, the skip-on-absent-key rule, and the run-cost floor derivation) against packages/qa-agent/src/lib/preflight.ts on this branch. Nothing else re-verified. Prior: #2140: FIVE stale sites, and the first two are the half #2103 missed. #2103 corrected the two Claude Code prompt copies (`.claude/commands/qa-dev.md`, `qa-explore-ui.md`) and the run-report template; this file carries a duplicate of each prompt for Codex/generic runtimes and neither was updated, so the same instruction was right in one place and wrong in another. (1) Layer 2b step 3 told a LIVE QA agent to expect an over-budget payment to "queue for approval" — a rail that cannot queue, so an agent following it recorded the CORRECT decline as a failure: the #1992 lesson inverted and automated. Rewritten to be ASSERTED on (no settlement, nothing queued, nothing silently spent) and to say the refusal IS the pass. (2) Layer 3 named **approvals** as a surface to explore, in both the brief bullet and the prompt — deleted by #1989, `/approvals` does not route, and #2103 records a run already navigating to the 404 (its own brief hunts "dead ends", so it reports the correct state as a finding). Repointed at the agent detail page and its budget card, matching #2103's wording and observe-only principle. (3)+(4) found by haven-reviewer on THIS pass, in the troubleshooting/funding prose rather than the prompts: the funding prerequisites said the dev relayer "submits the legacy allowance transfers" — `executeAllowanceTransfer` was deleted by #1987 and survives in production only as a decode ABI in `infra/chain/allowance-transfer-verifier.ts`, so the relayer cannot do it; and the same list hedged "for the surviving legacy legs, the Safe" when no scenario drives a legacy identity (#2011 removed the credentials, verified against `packages/qa-agent/src/scenarios/`). (5) the sentence under the funding table said the relayer "submits both constrained Safe transfers and the gasless EIP-3009 USDC sweep" — the table directly above it has no Safe row at all since #2007. Note the recurring shape: this file already documented the deterministic sibling correctly at the `over-budget-refused` scenario row (renamed from `over-budget-queue` by #2016), so several regions of one file disagreed. Scope: the Layer 2b prompt step, the Layer 3 brief bullet and prompt, the sentence under the funding table, and the two troubleshooting funding prerequisites. NOT re-verified: the scenario table itself, the env/credential/secrets tables, the funding table rows, the workflow and gating sections, Layer 1/2a prose, and the dated incident reports. No `/qa-dev` or `/qa-explore-ui` result changes — the harness asserts on `packages/qa-agent/` scenarios, never on this prose. Prior: #2011: the QA harness no longer reads the retired AllowanceModule `QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` credentials. The config, preflight, seed output, workflow, required-env table, local and Actions examples, and missing-env troubleshooting loop were re-read: every live scenario uses the delegation-rail identity, so a fresh seed produces a complete `qa:dev` environment. Prior: #2012: the QA seed now refuses a same-delegate agent unless its status is active or pending_approval; it names the agent and gives the rotate-or-deliberately-restore remedy, so re-seeding cannot silently restore disabled authority. Re-read the seed, the local-run steps, and the package README. Prior: #2007: the seed is re-based on the DELEGATION RAIL — it no longer deploys a Safe or calls `POST /user/safes` (410 since #1984; an `allowance_module` account also cannot pay since #1986), and instead provisions a Hybrid DeleGator via `POST /accounts/hybrid` plus an owner-signed budget delegation. Re-verified and corrected in this pass: the seed env block (`SEED_RPC_URL` removed — the seed opens no RPC connection), the funding table (owner EOA needs no ETH; "Safe" row becomes the Hybrid account), the "Run the seed locally" step list, the `could not decode result data` troubleshooting entry (replaced by a `410` entry), the operations table's seed row, the "Seeding the delegation-rail identity" section (the seed now produces `QA_DELEGATION_*` itself, so its manual steps are re-framed as a description plus a by-hand recipe), and the `insufficient funds` balance-by-role list (owner ETH no longer required). Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1515`. Same shape as `07-edge-signer.md`: the note at `b3627c15` (PR #1517, 2026-08-17) chained but compressed #1516's entry to "added the merchant-reason surfacing", and `#1515` was cited inside the prose it dropped. #1516's original entry is restored verbatim from `b3627c15^` at the chain tail. Nothing in the body was re-verified in this pass. Prior: #1674/#1667: x402-erc7710-fresh-agent is added; #1578: unknown MCP session ids fail closed; #1547/#1450: x402-catalog-guided-purchase is scheme-aware; #1531: out-of-reach documentation added; #1533/#1534: legacy x402 legs removed; #1530: preflight resource reporting added; #1519: merchant settled-purchase handling added; #1517/#1516: merchant fault and reason reporting added; #1457/#1456: hosted erc7710 variant added; #1312: guided catalog purchase QA leg added; #1515: lost-session troubleshooting added. Prior: #2097: a file this doc `covers:` by exact path (`docs/bug-reports/_run-report-template.md`) was re-verified for the CSV `initiator`-column note; the QA-harness config/commands this doc describes are unchanged. Scope: that covered-file relationship only.
+last-verified: "2026-09-06" # #2594: EDITED, scope = the `within-budget-settle` row's closing sentences only. The row described the leg's shape but not its precondition, and the precondition is what failed on 2026-09-06: four scenarios refused together because the backend reported `remaining_is_from_chain: false`, and this leg's line said it was "refusing to build an over-budget amount" — a use it never makes, since it checks a floor. The row now states which direction its budget read runs and why a fallback is unusable for it specifically. Written against `packages/qa-agent/src/lib/delegation-budget.ts` and `scenarios/within-budget-settle.ts` on this branch. Deliberately NOT recorded here: whether an unestablished precondition should fail or skip — that is an open owner decision on #2594 and this row would be the wrong place to pre-empt it. Scope: that one row. NOT re-verified: the other scenario rows, the QA identity/funding/secrets section, the layer map, the stable dev targets, or the troubleshooting entries. Prior: #2538: EDITED, scope = ONE new section, § "Layer 3b — the cold-agent onboarding scenario", placed after Layer 3 and before § Reading results. It records the second scenario on the qa-explore-ui cadence and links the rubric rather than restating it — the scoring bands live in `.claude/commands/qa-explore-agent-onboarding.md`, and a second copy of a rubric is how two copies start disagreeing about the same run. Names the scenario-specific reason it is owner-armed rather than a CI job: a cold agent cannot be cold inside this repository's own runner, so score 1 would stop meaning what it says. Scope: that section only. NOT re-verified: the layer map, the QA identity/funding/secrets section, the stable dev targets, the money-flow QA section, the automation and gating rules, or the troubleshooting entries. Prior: #2511: the troubleshooting section gains "A 502 whose body carries `URL: https://sepolia.base.org` is an RPC outage, not a regression" — the fingerprint (that literal inside a 502 error body, run 33796886018), the operator step that clears it (set `RPC_URL_BASE_SEPOLIA` on the dev backend to a dedicated provider endpoint), and the separate harness-side `QA_RPC_URL_BASE_SEPOLIA` with the two-nodes-stay-two rule spelled out. The scenario-table row for `x402-erc7710-fresh-agent` now names `QA_RPC_URL_BASE_SEPOLIA` (defaulting to the public endpoint, read in `packages/qa-agent/src/lib/chain.ts`) instead of bare public-URL prose. Read against `packages/qa-agent/src/lib/chain.ts` and `packages/backend/src/config.ts` as changed on this branch. Scope: THAT troubleshooting subsection and that ONE table row; the other scenario rows, preflight/funding/env tables, seeding, trigger/gating/freshness sections and remaining troubleshooting entries were NOT re-verified in this pass. Prior: #2551: EDITED — the Layer 2b Codex/generic pasteable prompt gains the same one-sentence `wiring_collision` relay guidance its `.claude/commands/qa-dev.md` sibling (in this doc's covers:) gained in the same PR; found by haven-doc-reviewer as exactly the two-copies drift this chain already records under #2140/#2422. Scope: that ONE line; nothing else in this doc was re-verified in this pass. Prior: #2490: the settlement wallet's preflight signal is a THREE-band warn/fail signal now, not a boolean. Re-verified in this pass: the preflight section — the example block's ✗ line is joined by a ⚠ warn example, the three "properties worth knowing" gain the warn/fail distinction, and the settlement-wallet paragraph records the new /healthz wire (status + warn_floor + fail_floor, ok kept additively as the fail-band signal), the fail floor (12: one full run ~8 settlements plus half a run of headroom, justified against the #1530 255-gwei condition and bounded above by the #2485 dead-wallet shape) and the warn floor (25, unchanged, its #2485 role now the documented one). Read against packages/demo-merchant-mcp/src/x402.ts (MIN_SETTLEMENT_HEADROOM_WARN/FAIL, SettlementBand) and packages/qa-agent/src/lib/preflight.ts (ResourceCheck.warn, checkMerchantSettlement's status branch) on this branch. Scope: THAT SECTION ONLY (the preflight section plus the settlement row's table context unchanged) — the scenario tables, seeding, credentials, env tables, trigger/gating/freshness sections and troubleshooting entries were NOT re-verified in this pass. Prior: #2422: the Codex/generic pasteable QA prompt AND its sibling copy in `.claude/commands/qa-dev.md` step 2 (inside this doc's own `covers:`) both hardcoded `npx @haven_ai/connect@alpha` for connecting against the DEV backend. With `HAVEN_CONNECTOR_CHANNEL` the dev backend can hand out another channel, and a tester following the literal would install a connector whose signer skews against it — the exact `x402_expected_context_version` mismatch this epic exists to make testable. The line now points at the setup response the dev backend actually returns. Both now name the package as a variable while KEEPING the full `--setup`/`--api` invocation shape — an earlier draft dropped the flags entirely and traded a wrong-but-usable instruction for a right-but-unusable one. Scope: those two instruction lines ONLY; the scenario table, seeding, credentials and every other section were NOT re-verified in this pass. Prior: #2445: the `x402-erc7710-fresh-agent` scenario-table row is corrected on two points, against `packages/qa-agent/src/scenarios/x402-erc7710-fresh-agent.ts` as changed on this branch. (1) The post-authorize `getCode` was a SINGLE UNPOLLED read and the row did not say so; it now polls to a 30 s deadline behind the same mutable `TIMING` seam the 3009 legs use. (2) The row said nothing about which node the harness reads. It reads `packages/qa-agent/src/lib/chain.ts`'s public `https://sepolia.base.org` while the backend writes through `RPC_URL_BASE_SEPOLIA` — two nodes, kept that way on purpose (the same property `x402-delegation-3009-sweep.ts` already names as "a backend↔harness RPC discrepancy"), so the row now states it and states what a timeout does and does not prove. Read against the backend to check the claim: `ensureHybridDeployed` (`rails/hybrid-provisioning.ts`) throws `HybridDeployUnconfirmedError` on an unobserved receipt and `modules/x402/delegation-authorize.ts` maps any throw to 502, so authorize returning 200 means the backend's node saw the deploy mined at one confirmation. Scope: THAT ONE TABLE ROW. Nothing else in this file was re-read in this pass — not the other scenario rows, not the preflight/funding/env tables, not the trigger, gating or freshness sections, and no `chain.ts` change was made, so the harness's RPC endpoint is unchanged. Prior: #2427: the "no branch label" premise that #2404 and #2273 wrote into § *Automation & gating* (the which-runs-count bullet) and § *Post-deploy trigger* → *Status* is corrected to the measurement: the three `deployment_status` runs on deployment 6218620498 (`5d4e849c`, 2026-09-02) — 33609807445, 33609836970, 33609965305 — all report `headBranch = dev` (`gh run view <id> --json headBranch,event,headSha`, re-run in this pass). The real reason the gate dropped `--branch dev` is now stated (a branch name says nothing about which commit the harness exercised; on that deployment the old query would have returned the gate-skipped decoy 33609836970). The Status subsection is re-titled observed, records the three runs and the red 2/14 result on #2411's cause, and says #2273 closed on it while #2268 stays operator-verify; the same measurement corrects the "not yet observed" clauses in the *Known limit* paragraph, the trigger table row and the blockquote under it. Scope: those passages only; nothing else in this doc was re-verified in this pass. Prior: #2273: the post-deploy trigger is rebuilt on GitHub's `deployment_status` event and the *When the money-flow QA runs* table plus the whole *Post-deploy trigger* section are rewritten against the change: Railway creates real Deployments (`railway-app[bot]` → `Haven AI / dev`, measured 28 of the newest 100 with `gh api repos/d-hinders/Haven-AI/deployments?per_page=100` on 2026-09-02, plus 2 → `Haven AI / production`, hence the environment filter), every dev deployment emits `success` twice (twelve consecutive `Haven AI / dev` deployments' status lists read on 2026-09-02), so `qa-dev.yml` gains a `gate` job (state/environment/creator refusals + newest-deployment de-duplication, fail-closed on API error) outside the money concurrency group, which moved to the money-flow job. `repository_dispatch` (`dev-deployed`) is REMOVED, not kept as a fallback, on #2268's dashboard evidence, and the section says why. Provenance (#2271): the qa-failure `Trigger:` line names the Railway deployment id/sha/creator or the dispatching actor, and `guard-freshness.mjs` counts only runs whose exact headSha has a Railway-created dev deployment behind it AND whose `money-flow` JOB concluded success (a gate-skipped run has run-level conclusion `success`, the shape #2404 measured) — mutation-proven. Status is stated as BUILT, NOT OBSERVED: the trigger runs only from the default branch, so #2268/#2273 stay operator-verify until the first real deploy fires it. Scope: that table and that section only; § *Automation & gating* is #2404's text (PR #2409) and was not re-read here. Prior: #2404: § *Automation & gating* re-read against `scripts/ci/qa-freshness.mjs` as changed on this branch: the "newest green run on `dev`" bullet now states the admitted-run rules (event allow-list, ancestry of the promotion head, `money-flow` JOB conclusion — a gate-skipped run is `success` at run level, measured on `ci.yml` runs with `skipped=7,success=7`), the "Known limit" sentence names which events carry it and which do not, and § *The dev → main freshness gate* no longer says "exists on `dev`". Stated as PREDICTED, not measured, that a `deployment_status` run carries no `headBranch`: no such run exists in the repository as of this date (#2273 unmerged; default-branch-only event). Scope: those three passages only. NOT re-verified: the money-flow scenario tables, the seed/funding sections, § *Post-deploy trigger* (owned by #2273, whose "until #2404 lands" sentence is for the rebase), the troubleshooting entries. Prior: #2300: § "Automation & gating" version-only subsection now names `HOSTED_SERVER_VERSION` beside `SIGNER_VERSION` — the allowlist is release-bump.mjs's constants intersected with the runtime globs, and the hosted constant joined when `packages/mcp-server/src/**` was added to the perimeter (release-bump writes it into packages/mcp-server/src/server.ts on every cut). Scope: that subsection only; nothing else in this doc was re-verified. Prior: #2268 (operator findings): the *Post-deploy trigger (webhook setup)* section instructed operators to add a post-deploy hook in Railway, and Railway offers no such thing — so the instruction was unfollowable, which is the likeliest reason it was never done. Corrected against the live dashboard on 2026-08-31: Project Settings → Webhooks is URL-only with no header field (its own hint says it formats payloads for Discord and Slack), so it can never send `Authorization: Bearer` to `POST /repos/:o/:r/dispatches`; and `@haven/backend` → Settings → Deploy exposes a Custom Start Command plus `+ Add pre-deploy step`, i.e. PRE-deploy, which would start the harness against the previous deployment — the same headSha-vs-deployed false coverage this doc already refuses a `push` trigger for. The section now opens with a do-not-follow banner, gains *Why this cannot be configured in Railway*, and records the two rejected workarounds (backend-startup dispatch: fires on every restart AND puts an `Actions: write` token in an internet-facing runtime; start-command wrapper: both, plus fragility). The Status subsection's three-way "cannot be told apart from inside this repository" is resolved to **never configured** on the same dashboard evidence, and its "fixing it is an operator action" line is corrected, since the action it named does not exist. Scope: the Deploy panel was read from a screenshot not scrolled to its end — if a post-deploy hook exists further down, the Webhooks finding and the pre-deploy timing argument both still stand, and that limit is stated in the section itself. Verified nothing else in this doc: the trigger table, failure reporting, freshness gate, flake budget, live smoke and runbook sections were not re-read in this pass. Prior: #2268: the trigger table said all three `qa-dev.yml` triggers were live and one had never fired — `repository_dispatch` (`dev-deployed`) 0 times across 156 runs (2026-06-30 -> 2026-08-31) and 0 across every workflow in the repo, counted against the Actions API rather than taken from the issue. The table now says so, and the "Post-deploy trigger (webhook setup)" section gains a Status subsection: the RECEIVER is proven healthy (a manual dispatch started run 33370275124 three seconds later, event `repository_dispatch`, headBranch `dev`), which rules out the workflow file, the `types:` filter, the default branch and the enabled state; what is left is the sender, in a deploy-provider dashboard, and that is an operator action rather than a code change. Also records the freshness alarm that now watches its silence (`scripts/ci/guard-freshness.mjs`, counting ONLY `repository_dispatch` on `dev`, so the live nightly and manual triggers cannot vouch for the dead one) and re-states the `push`-trigger hazard the section already knew about. Scope: the "When the money-flow QA runs" table and the "Post-deploy trigger" section ONLY. NOT re-verified in this pass: the dev targets, scenario table, env/credential/secrets tables, funding table, the freshness-gate and flake-budget sections, or any Layer 2b/3 prose. Prior: #2164: § "Automation & gating" gains the version-only exemption — a money-path file whose entire diff is a release-bump version string is no longer treated as uncovered. Documented with its three permitted line shapes, the symbol-pairing rule that makes it a check for a version BUMP rather than for version-SHAPED lines (review found three behavioural edits — constant deletion, dependency identity swap, constant rename — that shape matching alone excused), and its fail-closed direction, because it NARROWS what the gate inspects, and the section's own standard is that an overstated net is worse than a known-partial one. Reason it exists: the bump rewrites SIGNER_VERSION into packages/signer/** after every green run, so every release promotion failed by construction and qa-override was the standing route past the gate. Scope: that one subsection; the dev targets, trigger table and setup steps were NOT re-verified in this pass. Prior: #2081: the preflight now reports — and blocks on — the delegation treasury's USDC balance, the account every payment scenario spends from (the #2074 empty-treasury outage was diagnosable only by hand-decoding UserOperation calldata). Re-verified in this pass: the preflight section (example block gains the treasury line; new paragraph records the block decision, the runtime address derivation via GET /machine-payments/agent, the skip-on-absent-key rule, and the run-cost floor derivation) against packages/qa-agent/src/lib/preflight.ts on this branch. Nothing else re-verified. Prior: #2140: FIVE stale sites, and the first two are the half #2103 missed. #2103 corrected the two Claude Code prompt copies (`.claude/commands/qa-dev.md`, `qa-explore-ui.md`) and the run-report template; this file carries a duplicate of each prompt for Codex/generic runtimes and neither was updated, so the same instruction was right in one place and wrong in another. (1) Layer 2b step 3 told a LIVE QA agent to expect an over-budget payment to "queue for approval" — a rail that cannot queue, so an agent following it recorded the CORRECT decline as a failure: the #1992 lesson inverted and automated. Rewritten to be ASSERTED on (no settlement, nothing queued, nothing silently spent) and to say the refusal IS the pass. (2) Layer 3 named **approvals** as a surface to explore, in both the brief bullet and the prompt — deleted by #1989, `/approvals` does not route, and #2103 records a run already navigating to the 404 (its own brief hunts "dead ends", so it reports the correct state as a finding). Repointed at the agent detail page and its budget card, matching #2103's wording and observe-only principle. (3)+(4) found by haven-reviewer on THIS pass, in the troubleshooting/funding prose rather than the prompts: the funding prerequisites said the dev relayer "submits the legacy allowance transfers" — `executeAllowanceTransfer` was deleted by #1987 and survives in production only as a decode ABI in `infra/chain/allowance-transfer-verifier.ts`, so the relayer cannot do it; and the same list hedged "for the surviving legacy legs, the Safe" when no scenario drives a legacy identity (#2011 removed the credentials, verified against `packages/qa-agent/src/scenarios/`). (5) the sentence under the funding table said the relayer "submits both constrained Safe transfers and the gasless EIP-3009 USDC sweep" — the table directly above it has no Safe row at all since #2007. Note the recurring shape: this file already documented the deterministic sibling correctly at the `over-budget-refused` scenario row (renamed from `over-budget-queue` by #2016), so several regions of one file disagreed. Scope: the Layer 2b prompt step, the Layer 3 brief bullet and prompt, the sentence under the funding table, and the two troubleshooting funding prerequisites. NOT re-verified: the scenario table itself, the env/credential/secrets tables, the funding table rows, the workflow and gating sections, Layer 1/2a prose, and the dated incident reports. No `/qa-dev` or `/qa-explore-ui` result changes — the harness asserts on `packages/qa-agent/` scenarios, never on this prose. Prior: #2011: the QA harness no longer reads the retired AllowanceModule `QA_AGENT_API_KEY` / `QA_DELEGATE_PRIVATE_KEY` credentials. The config, preflight, seed output, workflow, required-env table, local and Actions examples, and missing-env troubleshooting loop were re-read: every live scenario uses the delegation-rail identity, so a fresh seed produces a complete `qa:dev` environment. Prior: #2012: the QA seed now refuses a same-delegate agent unless its status is active or pending_approval; it names the agent and gives the rotate-or-deliberately-restore remedy, so re-seeding cannot silently restore disabled authority. Re-read the seed, the local-run steps, and the package README. Prior: #2007: the seed is re-based on the DELEGATION RAIL — it no longer deploys a Safe or calls `POST /user/safes` (410 since #1984; an `allowance_module` account also cannot pay since #1986), and instead provisions a Hybrid DeleGator via `POST /accounts/hybrid` plus an owner-signed budget delegation. Re-verified and corrected in this pass: the seed env block (`SEED_RPC_URL` removed — the seed opens no RPC connection), the funding table (owner EOA needs no ETH; "Safe" row becomes the Hybrid account), the "Run the seed locally" step list, the `could not decode result data` troubleshooting entry (replaced by a `410` entry), the operations table's seed row, the "Seeding the delegation-rail identity" section (the seed now produces `QA_DELEGATION_*` itself, so its manual steps are re-framed as a description plus a by-hand recipe), and the `insufficient funds` balance-by-role list (owner ETH no longer required). Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1515`. Same shape as `07-edge-signer.md`: the note at `b3627c15` (PR #1517, 2026-08-17) chained but compressed #1516's entry to "added the merchant-reason surfacing", and `#1515` was cited inside the prose it dropped. #1516's original entry is restored verbatim from `b3627c15^` at the chain tail. Nothing in the body was re-verified in this pass. Prior: #1674/#1667: x402-erc7710-fresh-agent is added; #1578: unknown MCP session ids fail closed; #1547/#1450: x402-catalog-guided-purchase is scheme-aware; #1531: out-of-reach documentation added; #1533/#1534: legacy x402 legs removed; #1530: preflight resource reporting added; #1519: merchant settled-purchase handling added; #1517/#1516: merchant fault and reason reporting added; #1457/#1456: hosted erc7710 variant added; #1312: guided catalog purchase QA leg added; #1515: lost-session troubleshooting added. Prior: #2097: a file this doc `covers:` by exact path (`docs/bug-reports/_run-report-template.md`) was re-verified for the CSV `initiator`-column note; the QA-harness config/commands this doc describes are unchanged. Scope: that covered-file relationship only.
 # #2159: same-day verification adds the funded-but-undelivered EIP-3009
 # crash/resume scenario, its Base-Sepolia-only grace override, and the
 # corrected 0.027-USDC preflight floor.
+# #2444: the two `x402-delegation-3009` / `-grace-resume` rows in the
+# money-flow scenario table, and the § *Seeding the delegation-rail identity*
+# paragraph describing what the three EIP-3009 legs assert, were re-read
+# against the scenarios on this branch and corrected: the first scenario's
+# residual gate is no longer the sweep floor alone, and the second no longer
+# requires the delegate to be restored to its exact starting balance. The
+# § *Seeding the delegation-rail identity* change is an ADDED paragraph — the
+# existing paragraph there is unmodified — and it states the bound on the
+# drain subtraction that haven-reviewer established on this diff. Scope: the
+# two table rows and that added paragraph only; nothing else in this doc was
+# re-verified here.
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -163,20 +174,38 @@ to run when one is definitively below its floor:
 ```text
 preflight — resources this run consumes:
   ✗ merchant settlement wallet (gas) 0xC03F…22c1: 0.000000255 ETH (0 settlement(s))
-      only 0 settlement(s) of gas left — top this wallet up, or every x402 leg
-      needing a merchant-side settlement will fail with a merchant error that
-      does not name gas (the 2026-08-17 outage)
+      below the merchant's fail floor (warn 25/fail 12) — a run cannot
+      complete: 0 settlement(s) of gas left, ~8 per run. Top this wallet up,
+      or every x402 leg needing a merchant-side settlement will fail with a
+      merchant error that does not name gas (the 2026-08-17 outage)
+  ⚠ merchant settlement wallet (gas) 0xC03F…22c1: 0.00006 ETH (24 settlement(s))
+      below the merchant's warn floor (warn 25/fail 12) — a slow drain, not
+      an incident: the run proceeds. Top this wallet up soon, or every x402
+      leg needing a merchant-side settlement will fail with a merchant error
+      that does not name gas (the 2026-08-17 outage)
   ✓ delegation treasury (USDC) 0x27a9…41B3: 0.9 USDC (~900 leg(s))
   ✓ delegation delegate residual (USDC) 0x1a64…14F1: 0.0 USDC
 ```
 
-Three properties worth knowing, because each was a deliberate choice:
+(The ✗ and ⚠ lines are alternatives, not two wallets — the example shows both
+renderings. Until [#2490](https://github.com/d-hinders/Haven-AI/issues/2490)
+the settlement signal was one boolean, so the warn case could only block.)
+
+Four properties worth knowing, because each was a deliberate choice:
 
 - **It prints on every run, pass or fail.** A balance that is fine today and
   empty next week is visible only as a trend — and the number is most useful in
   the log of a run that was chasing something else.
 - **Headroom is stated in units of work**, not wei. `255 gwei` reads as a
   number; `0 settlements` reads as a cause.
+- **Warn and fail are different events
+  ([#2490](https://github.com/d-hinders/Haven-AI/issues/2490)).** Below the
+  merchant's warn floor the line prints loudly on every run with the top-up
+  action — rendered `⚠`, distinct from both `✓` and `✗` — but the run
+  proceeds; only below the fail floor does the run get refused. The single
+  boolean this replaced made the warning the incident: three consecutive
+  `qa-dev` failures at 24 settlements, one below the floor of 25, while ~3
+  runs of real capacity sat unused (#2485).
 - **Unknown is not failure.** An unreachable RPC, or a merchant deployed before
   the readiness endpoint, reports `?` and does not block. A preflight that
   failed the run on its own blind spots would be worse than the silence it
@@ -206,6 +235,36 @@ from `SETTLEMENT_PRIVATE_KEY` in the merchant's environment. Nothing is
 disclosed by reporting it — the address is already advertised as
 `redeemerAddress` in erc7710 challenges, and balances are public on-chain. The
 key is never exposed, and never needs to be.
+
+**The warn/fail bands are the merchant's own, not re-derived here
+([#2490](https://github.com/d-hinders/Haven-AI/issues/2490)).** `/healthz`'s
+settlement block carries `status` (`usable` | `warn` | `fail`) plus both
+floors it was measured against (`warn_floor`, `fail_floor`) beside the existing
+`settlements_remaining` and `cost_per_settlement_wei`; the harness renders the
+band and echoes the floors verbatim, per preflight design rule 1 (derive,
+never restate). The floors live in `packages/demo-merchant-mcp/src/x402.ts`:
+
+- **`MIN_SETTLEMENT_HEADROOM_FAIL = 12`** — below this the run is refused. The
+  anchor is what one full run consumes: seven 0.001-USDC settling merchant
+  legs plus the 0.010 direct settle (the same derivation as the treasury's
+  0.027-USDC floor above), i.e. ~8 settlements. Not 8 — that admits a run that
+  spends the wallet to zero with no margin for a retry leg or fee drift. Not
+  16 — a floor near the old single value re-creates #2485 at a smaller scale,
+  refusing runs while real capacity sits unused. 12 is one run plus half a
+  run of headroom: a run admitted at the floor still ends with ≥ 4
+  settlements left. It must keep catching the condition #1530 was built for —
+  at the 2026-08-17 outage balance (255 gwei) the wallet holds 0 settlements,
+  far below the floor, so that state still blocks.
+- **`MIN_SETTLEMENT_HEADROOM_WARN = 25`** — below this the check prints on
+  every run but does not block. Unchanged from the pre-#2490 single floor;
+  its docstring always said "a warning threshold for a slow drain", and it
+  now occupies exactly that role.
+
+`ok` stays on the wire for rollout: a merchant that predates the band reports
+no `status`, and the harness falls back to the old single-boolean behaviour
+(below the old floor blocks) rather than crashing or silently passing — and a
+merchant that predates the whole block still reports unknown and does not
+block, as before.
 
 ### 4. Run the seed locally
 
@@ -258,17 +317,17 @@ The deterministic harness runs fourteen scenarios in order:
 
 | Scenario | Expected result |
 |---|---|
-| `within-budget-settle` | A 0.01 USDC **delegation-rail** payment settles on-chain and has a receipt: `POST /payments` → sign the `eip712_userop` typed data → poll to `confirmed`. Re-based from the legacy raw-hash scheme by #2016. Doubles as the suite's **positive control** — the leg that proves the money path can still say YES, which is what makes the two refusals below mean anything. **Skips** without `QA_DELEGATION_*` |
+| `within-budget-settle` | A 0.01 USDC **delegation-rail** payment settles on-chain and has a receipt: `POST /payments` → sign the `eip712_userop` typed data → poll to `confirmed`. Re-based from the legacy raw-hash scheme by #2016. Doubles as the suite's **positive control** — the leg that proves the money path can still say YES, which is what makes the two refusals below mean anything. Its budget read is a **floor** check, not a ceiling one (#2594): it needs the remaining budget to be at least the amount, and it refuses a fallback read because the fallback reports the FULL configured budget and would clear a floor the real remaining might not — reporting budget exhaustion as a settlement defect. Until #2594 it was handed the over-budget legs' refusal text instead, so a run report said this leg builds an over-budget amount. It does not. **Skips** without `QA_DELEGATION_*` |
 | `over-budget-refused` | An over-budget payment is refused **before it becomes signable**, by the on-chain caveat enforcer — HTTP 502 with no intent row. Renamed from `over-budget-queue` by #2016: that leg asserted `pending_approval`, and the approval queue was legacy-rail-only and no longer exists anywhere (#1986/#1989). A bare 502 is NOT accepted as proof — the amount is derived from a **live** enforcer read (a fallback reading or an exhausted budget fails the leg rather than passing it), a within-budget request against the same account must still be offered, and the ABI-encoded revert reason must decode to a **named caveat enforcer** |
 | `x402-over-budget-rejected` | The same refusal on the x402 **EIP-3009 funding leg**, with the same three discriminators. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. Its erc7710 sibling below closes what used to be flagged here as a known gap (#2082) |
 | `x402-erc7710-over-budget-rejected` | The same refusal on the **preferred** scheme (#2082). Until then the case did not exist to assert: erc7710 authorize returned 201 `pending_signature` WITH `sign_data` for ANY amount, so the #420 invariant's own words ("refused before it becomes signable") were FALSE on the path most payments take — measured live against dev 2026-08-25 and handed to #1993 rather than asserted around. The fail-fast pre-check refuses **HTTP 403 `delegation_budget_exceeded`** with no settlement child, no intent row and no relayer-paid delegate deploy. The discriminators are different from its 3009 sibling's, because the vacuous pass this shape invites is a different one: a bare 403 is ALSO what a MISSING delegation returns, so the leg requires the `error_code` AND requires the refusal's `remaining_atomic` to equal the live budget it derived the over-budget amount from, with a within-budget erc7710 authorize offered first as the control (and its `signature_scheme` checked, so a dispatch regression onto the funding leg cannot pass as this one). **What it does not claim:** that the CHAIN refuses the redemption — the caveat stack was always the gate and #2082 did not touch it; proving the redemption-side revert still needs a merchant that attempts one, and no leg does. Needs `QA_DELEGATION_AGENT_API_KEY`; **skips** without it |
-| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and no residual may sit at or above the 0.01 USDC sweep floor. **Skips** without `QA_DELEGATION_*` |
-| `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount, restoring the delegate to its starting balance; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and the delegate must not still be holding this payment's own amount. Two thresholds, because they answer different questions (#2444): residue at or above the 0.01 USDC sweep floor is stranding, and residue reaching the amount just funded is the payment itself, undelivered — which the floor alone waved through, since `buy_vpn/basic` costs 0.001 USDC. The undelivered case is polled for 20s first, because the facilitator settles outside Haven's view, and its failure text names both possible causes — an unsettled merchant leg, or the harness's own node not having caught up, since it reads a different node from the one the backend writes through (#2445). **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount — counting only the merchant credit this scenario CAUSED, with any drain off the delegate's pre-existing balance subtracted out (#2444), since the delegate EOA and the merchant are shared with the scenario above — and must leave no unsettled funding of its own on the delegate; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
 | `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity, then abandoned) — grant → activate (relayer-deploys) → within-budget payment settles → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
-| `x402-erc7710-fresh-agent` | The COLD START (#1674, regression net for #1667): a per-run throwaway identity whose delegate hybrid account is asserted counterfactual on-chain (`getCode` = `0x` before any payment), then the agent's FIRST-EVER payment runs the erc7710 settlement — asserting authorize deployed the account (code exists between authorize and settle, pinning WHERE the deploy happens), the merchant redemption settles treasury→merchant exactly, and the delegate EOA is untouched. Funded per run from the standing identity; same env needs as `x402-erc7710-settle` |
+| `x402-erc7710-fresh-agent` | The COLD START (#1674, regression net for #1667): a per-run throwaway identity whose delegate hybrid account is asserted counterfactual on-chain (`getCode` = `0x` before any payment), then the agent's FIRST-EVER payment runs the erc7710 settlement — asserting authorize deployed the account (code exists between authorize and settle, pinning WHERE the deploy happens), the merchant redemption settles treasury→merchant exactly, and the delegate EOA is untouched. The between-authorize-and-settle `getCode` is **polled to a 30 s deadline** (#2445), because the harness reads `QA_RPC_URL_BASE_SEPOLIA` (defaulting to the public `https://sepolia.base.org`, `packages/qa-agent/src/lib/chain.ts`) while the backend writes through `RPC_URL_BASE_SEPOLIA` — deliberately a second node, which is what makes the money proofs independent rather than self-reported, and which therefore lags a deploy the backend confirmed at one confirmation. When that poll runs out the leg fails saying **this node has not caught up**, not that the deploy did not run: authorize is fail-closed on the deploy (an unconfirmed or reverted deploy 502s), so a 200 means the backend's node saw the account deployed. Funded per run from the standing identity; same env needs as `x402-erc7710-settle` |
 | `x402-erc7710-sdk` | The same settlement through **`HavenClient`** instead of the raw API (#1457). The leg above deliberately excludes the SDK, so it stays green whether or not Haven's own client works; this one drives `settleX402Erc7710()` end to end and asserts the same money proof — treasury −amount exactly, merchant +amount exactly, **delegate EOA unchanged**. That last assertion is the point: a silent reroute to the EIP-3009 bridge would still deliver the goods and still debit the treasury, and would only be visible in the delegate's balance. Needs `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (the SDK signs in-process, unlike the hosted topology). The hosted MCP + local signer variant waits on #1456 |
-| `x402-erc7710-hosted` | The same settlement through the **default topology** — hosted MCP + local edge signer, what `npx @haven_ai/connect` installs (#1457). The two legs above cover the raw API and the SDK; neither exercises the hosted boundary, where the server must never hold a delegate key and the signature has to come from the local signer. Asserts the hosted quote **reports** `settlement_scheme: erc7710` (a silent reroute to the 3009 bridge would still deliver the goods), that settle reports **no funding tx**, and that the delegate EOA is unchanged. Signs with `haven_sign` rather than `haven_sign_x402` — the latter builds an EIP-3009 header this scheme has no use for. Ordered right after `x402-hosted-mcp-signer` so a failure is diagnosable against a topology that leg has already shown healthy |
+| `x402-erc7710-hosted` | The same settlement through the **default topology** — hosted MCP + local edge signer, what `npx @haven_ai/connect@alpha` installs (#1457). The two legs above cover the raw API and the SDK; neither exercises the hosted boundary, where the server must never hold a delegate key and the signature has to come from the local signer. Asserts the hosted quote **reports** `settlement_scheme: erc7710` (a silent reroute to the 3009 bridge would still deliver the goods), that settle reports **no funding tx**, and that the delegate EOA is unchanged. Signs with `haven_sign` rather than `haven_sign_x402` — the latter builds an EIP-3009 header this scheme has no use for. Ordered right after `x402-hosted-mcp-signer` so a failure is diagnosable against a topology that leg has already shown healthy |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 | `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, and `x402-catalog-guided-purchase` is scheme-aware since #1547 (erc7710 expected on dev, the 3009 two-leg proof kept as its fallback shape; same topology, zero residual either way). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
 | `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**. Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy) |
@@ -356,6 +415,26 @@ merchant recorded separately from that funding address, and the treasury balance
 actually falling. A merchant round-trip alone would pass just as happily over
 erc7710, leaving the bridge uncovered — and the address checks alone would pass
 for a funding hop that never metered the budget.
+
+It also requires the payment to have been **delivered**, which is not the same
+question as whether the leftovers are negligible (#2444). Both scenarios read
+the delegate EOA against a baseline captured before they spend, so a neighbour's
+residue is never charged to them, and `-grace-resume` subtracts drain off that
+baseline from the merchant credit it claims.
+
+Be precise about what the subtraction does and does not guarantee. On a clean
+window the baseline is zero, the drain is zero, and both assertions are the
+strict ones they always were. But it nets a delegate DECREASE against a merchant
+EXCESS without proving the two are the same transfer, which no balance read can:
+if the resumed payment silently failed to reach the merchant while an equal
+amount independently drained off the delegate and landed at the merchant in the
+same window, the proof would read as settled. Every payment on this identity is
+the same 0.001 USDC, so that coincidence is more plausible here than it would be
+with varied amounts. The subtraction is therefore capped at ONE neighbour leg —
+a larger, unexplained drain fails the proof instead of being absorbed — and the
+one adjacency it exists for is closed at its source by the delivery check above.
+**Re-read that bound before adding a third scenario to this shared delegate
+identity.**
 
 `x402-delegation-3009-sweep` covers the other half, and needs two more settings
 on the dev stack: `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` on the
@@ -595,11 +674,33 @@ need the `QA_*` secrets in a PR-triggered workflow).
 **What the gate proves** ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)) —
 it is not just "a run happened recently":
 
-- the newest green `qa-dev` run on `dev` is inside `QA_FRESHNESS_HOURS`
-  (default 30h), **and** no money-path file changed between that run's commit
-  and the promotion head. Recency is not coverage: a run predating the
-  money-path commits never exercised them. The failure names the offending
-  files.
+- the newest green `qa-dev` run **on a commit in the promoted history** is
+  inside `QA_FRESHNESS_HOURS` (default 30h), **and** no money-path file changed
+  between that run's commit and the promotion head. Recency is not coverage: a
+  run predating the money-path commits never exercised them. The failure names
+  the offending files.
+- **which runs count** ([#2404](https://github.com/d-hinders/Haven-AI/issues/2404)):
+  a `deployment_status`, `schedule` or `workflow_dispatch` run whose `headSha`
+  is an ancestor of the promotion head (`git merge-base --is-ancestor`), whose
+  branch label — checked on `schedule` and `workflow_dispatch` only — is still
+  `dev`, and whose **`money-flow` job concluded `success`** according to the
+  jobs API. Newest wins; at the same commit a `deployment_status` run is
+  preferred over a `schedule` over a `workflow_dispatch`, as a tie-break only.
+  The query used to be `--branch dev`. #2404 dropped that filter predicting
+  that a post-deploy run would carry no branch label (Railway creates its
+  Deployments against a bare SHA, and GitHub documents `GITHUB_REF` as "empty
+  if commit" for that case); the prediction was measured false
+  ([#2427](https://github.com/d-hinders/Haven-AI/issues/2427)): on
+  deployment 6218620498 (`5d4e849c`, 2026-09-02): runs 33609807445, 33609836970 and 33609965305 all report `headBranch = dev`. The filter stays dropped for the real reason: a branch
+  name says nothing about which commit the harness exercised. Ancestry is what
+  "on dev" was trying to say, and the gate reads `headBranch` on no other
+  event than the two branch-triggered ones. The job
+  check exists because a run whose `gate` job skipped the harness (an
+  `in_progress` status, a re-stated `success`) has run-level conclusion
+  `success` — measured on `ci.yml` runs whose jobs were `skipped=7,success=7` —
+  so `--status success` alone would hand the gate a "green" run at the deployed
+  SHA in which nothing ran. Every candidate the gate passes over is printed
+  with its reason. A `repository_dispatch` run is refused outright (#2271).
 - a **money-path `hotfix/* → main` blocks**. `qa-dev.yml` is a black-box
   harness against a *deployed* backend, and a hotfix is deployed nowhere until
   it merges — so a green run on any branch exercised different code. Clearing
@@ -616,8 +717,12 @@ by `scripts/release-bump.mjs` does not count as uncovered. Two conditions, and
 the second is the one that matters:
 
 1. every added and removed line matches one of three shapes — `export const
-   SIGNER_VERSION = '<semver>'` (named literally, not `*_VERSION`), a package
-   `"version"` field, or an internal `"@haven_ai/*"` dep pin; **and**
+   SIGNER_VERSION = '<semver>'` or `export const HOSTED_SERVER_VERSION =
+   '<semver>'` (each named literally, not `*_VERSION`; the allowlist is the
+   intersection of `release-bump.mjs`'s constants with the runtime globs, and
+   the hosted constant joined it when #2300 put `packages/mcp-server/src/**` on
+   the perimeter), a package `"version"` field, or an internal `"@haven_ai/*"`
+   dep pin; **and**
 2. **within each hunk**, the symbols removed are exactly the symbols added. A
    bump rewrites a symbol in place, so it satisfies this by construction.
 
@@ -638,7 +743,9 @@ printed in the job log rather than silently dropped.
 This exists because the exemption's absence made the gate unusable in the one
 place it is most needed. Every release bump rewrites `SIGNER_VERSION` into
 `packages/signer/src/server.ts` and the version field in
-`packages/signer/package.json` — both money-path — and always *after* the last
+`packages/signer/package.json` — both money-path — and, since #2300 widened the
+perimeter to `packages/mcp-server/src/**`, `HOSTED_SERVER_VERSION` into
+`packages/mcp-server/src/server.ts` on the same footing; always *after* the last
 green run, so **every release promotion failed by construction** and the only
 way through was `qa-override`. An escape hatch reached for on every release is
 not an escape hatch; it is the route, and it would have left the gate off on
@@ -648,8 +755,12 @@ on **content**, never on path, author, branch or commit message, because
 excusing `packages/signer/**` wholesale would excuse the behavioural change too.
 
 Logic: [`scripts/ci/qa-freshness.mjs`](../../scripts/ci/qa-freshness.mjs), unit-tested.
-Known limit: the run's `headSha` is the branch tip when the run was *triggered*,
-which for the nightly cron may be ahead of what dev actually deployed.
+Known limit: for a `schedule` or `workflow_dispatch` run the `headSha` is the
+branch tip when the run was *triggered*, which may be ahead of what dev actually
+deployed. A `deployment_status` run has no such limit — its `headSha` *is* the
+deployed commit — which is why the gate admits it (#2404). First observed on
+2026-09-02 (deployment 6218620498, `5d4e849c`; see *Post-deploy trigger*), so
+that half is measured too.
 
 ### When the money-flow QA runs
 
@@ -657,149 +768,189 @@ which for the nightly cron may be ahead of what dev actually deployed.
 |---|---|
 | `workflow_dispatch` | Manual run / parity with the local `qa:dev` command. |
 | `schedule` (nightly, `17 3 * * *` UTC) | Always have a fresh green signal without anyone triggering it. |
-| `repository_dispatch` (`dev-deployed`) | Test exactly what the Railway/Vercel dev deploy just shipped. **Declared, but nothing sends it — see below.** |
+| `deployment_status` (Railway → `Haven AI / dev`, state `success`) | Test exactly what the Railway dev backend deploy just shipped, at the SHA it shipped. **Built by #2273; first observed firing 2026-09-02 — see below.** |
 
-> **Two of these three fire. The post-deploy one never has (#2268).** Across the
-> repository's entire history — 156 `qa-dev.yml` runs, 2026-06-30 → 2026-08-31 —
-> the event breakdown is `workflow_dispatch` 96, `schedule` 60,
-> `repository_dispatch` **0**; and `repos/…/actions/runs?event=repository_dispatch`
-> returns `total_count: 0` for *every* workflow in the repo. This table used to
-> present all three as live, which is what made the gap invisible: a trigger that
-> never fires looks exactly like one that fires and finds nothing, so there is no
-> red X to notice. Freshness has therefore rested on the nightly cron alone, and a
-> busy day on `dev` outruns it — which is how the `0.1.32-alpha.0` promotion
-> (#2255) hit `qa-freshness` with a 21h-old green run that predated ten money-path
-> files. **The cause is at the sender, not here:** see the next section.
+> **Two of these three have a long history; the post-deploy one has a history
+> of exactly one deploy (2026-09-02).** Its
+> predecessor, `repository_dispatch` (`dev-deployed`), fired **0** times across
+> the repository's entire history — 156 `qa-dev.yml` runs, 2026-06-30 →
+> 2026-08-31 (`workflow_dispatch` 96, `schedule` 60) — because nothing ever sent
+> it, and #2268 established on the Railway dashboard that nothing *could* (see
+> *Why `repository_dispatch` was removed* below). Freshness therefore rested on
+> the nightly cron alone, and a busy day on `dev` outruns it — which is how the
+> `0.1.32-alpha.0` promotion (#2255) hit `qa-freshness` with a 21h-old green run
+> that predated ten money-path files, and how the real regression behind
+> qa-failure #2340 was cleared only because somebody re-dispatched by hand after
+> the fixes landed. #2273 replaced the trigger with one GitHub fires itself,
+> and it became evidence only when the first real deploy produced a run
+> (deployment 6218620498, `5d4e849c`, 2026-09-02 — see *Status* below) — a
+> trigger that has never fired is the defect, and a new one that had also
+> never fired would not have been a fix.
 
 Runs are **serialized** (`concurrency: qa-dev-money-flow`, no cancel) so two
 money-moving runs never share the one QA delegate/allowance at once.
 
-### Post-deploy trigger (webhook setup)
+### Post-deploy trigger (`deployment_status`)
 
-> **This section describes a setup Railway does not offer, and is retained for
-> the mechanism only. Do not follow it as instructions** — see
-> *Why this cannot be configured in Railway* below, and #2273 for the route that
-> replaces it.
+Since #2273 the post-deploy run is fired by **GitHub's own `deployment_status`
+event**, not by anything a deploy provider has to send. Railway's GitHub
+integration creates a real GitHub *Deployment* for every dev backend deploy —
+creator `railway-app[bot]`, environment **`Haven AI / dev`**, statuses
+`in_progress` → `success` → (later) `inactive` — measured with
+`gh api repos/d-hinders/Haven-AI/deployments` on 2026-09-02: 28 of the newest
+100 deployments were Railway → `Haven AI / dev`, 2 were Railway →
+`Haven AI / production`, 70 were Vercel → `Preview`. So no PAT lives in a
+third-party dashboard, no token lives in the backend runtime, and the trigger's
+absence is visible in the workflow file rather than in a dashboard nobody can
+see. For this event `GITHUB_SHA` is *the deployed commit* (GitHub docs: "commit
+to be deployed"), so the checkout and the backend under test are the same SHA —
+the coverage the freshness gate was designed around.
 
-The intended design points the dev deploy at GitHub's `repository_dispatch` API
-so a deploy fires a QA run, by having the deploy run:
+**The `gate` job is the filter, and it runs before anything costs money.**
+`deployment_status` has no `types:` filter, so every status starts a run; the
+gate — cheap, no `npm ci`, and deliberately *outside* the `qa-dev-money-flow`
+concurrency group — decides in seconds whether the money-flow job runs at all:
+
+1. `state == success` — `in_progress` runs are skipped;
+2. `environment == Haven AI / dev` — the production environment is refused;
+3. `deployment.creator == railway-app[bot]` — a Deployment a human creates
+   through the API is refused (see provenance below);
+4. **de-duplication**: every dev deployment emits `success` **twice**
+   (sometimes three times) — once when it goes live and again the moment the
+   *next* deployment starts building, when Railway re-states "N is still the
+   live one"; measured on twelve consecutive deployments on 2026-09-02. The gate
+   asks the Deployments API whether this deployment is still the **newest** one
+   for the environment; when N's second `success` arrives, N+1 already exists,
+   so N is dropped. A naive trigger would have queued the money-moving harness
+   twice per deploy (`cancel-in-progress: false`). If the API cannot be read,
+   the gate fails **closed** (the run errors, nothing moves).
+
+The environment string and the creator login are Railway-side facts this repo
+does not control; they live once as constants in
+[`scripts/ci/guard-freshness.mjs`](../../scripts/ci/guard-freshness.mjs)
+(`RAILWAY_DEV_ENVIRONMENT`, `RAILWAY_DEPLOY_CREATOR`) and
+`scripts/ci/guard-freshness.test.mjs` pins the workflow's literals to them. If
+Railway renames the environment, the gate skips every run and the freshness
+guard goes red within its 4-day budget — the alarm working, not a false
+positive. Expect skipped runs in the history (two or three per deploy); the
+run title says which status fired it (`post-deploy <sha> → Haven AI / dev
+(in_progress)`), and the gate's log line says why it skipped. The concurrency
+group moved from the workflow to the **money-flow job** so those skipped runs
+never hold it.
+
+#### Provenance — why a curl can no longer mute the alarm (#2271)
+
+The old trigger's confirmation command (`gh api …/dispatches -f
+event_type=dev-deployed`) produced a run structurally identical to a real
+post-deploy one, so the freshness guard read `✓ last success 0.0d ago` for four
+days on the strength of a diagnostic dispatch while no hook existed. Three
+things now separate a real post-deploy run from a hand-started one, and none of
+them is a string a caller supplies:
+
+- **The event.** `repository_dispatch` is gone from the workflow (below), so a
+  run is `schedule`, `workflow_dispatch`, or `deployment_status` — and only
+  GitHub emits the third, on a Deployment status it recorded itself.
+- **The qa-failure issue body.** Its `Trigger:` line is no longer the bare event
+  name: a post-deploy run writes `deployment_status — Railway deployment <id>
+  of <sha> to 'Haven AI / dev', created by railway-app[bot]`, and a manual run
+  writes `workflow_dispatch — started by <actor>`.
+- **The freshness record.** `guard-freshness.mjs` counts a run as "the
+  post-deploy trigger fired" only when the Deployments API holds a deployment
+  of that run's exact `headSha` to `Haven AI / dev` created by
+  `railway-app[bot]` — which only Railway's GitHub App installation token can
+  write — **and** the run's `money-flow` **job** concluded `success` according
+  to the jobs API (`gh run view <id> --json jobs`, the same
+  `moneyFlowJobConclusion` the promotion gate uses since #2404). The job check
+  is not decoration: a run whose `gate` job refused the harness is reported by
+  GitHub with run-level conclusion **`success`** and the job `skipped`
+  (measured on `ci.yml` run 33604474457), and every deploy leaves two or three
+  such runs at a SHA that *is* in the Railway index. Judged at run level they
+  are fresh post-deploy greens in which nothing ran, and the newest of them
+  could mask a real harness failure at the same SHA. A `workflow_dispatch` at
+  the same SHA fails the event check; a Deployment created by hand fails the
+  creator check; an unreadable Deployments API or job list fails closed; a
+  gate-refused decoy fails the job check. All of it is mutation-proven in
+  `guard-freshness.test.mjs`, including the decoy-masks-a-failure case.
+
+**So the operator's confirmation command changes.** `gh workflow run
+qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`
+(a manual run against dev is legitimate coverage) — it just never clears the
+freshness guard's finding, by design. What confirms the *trigger* is only
+observation:
 
 ```bash
-curl -sf -X POST \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: Bearer $GH_DISPATCH_TOKEN" \
-  https://api.github.com/repos/d-hinders/Haven-AI/dispatches \
-  -d '{"event_type":"dev-deployed"}'
+gh run list --workflow qa-dev.yml --event deployment_status --limit 10 \
+  --json databaseId,displayTitle,conclusion,headBranch,headSha,createdAt
 ```
 
-`GH_DISPATCH_TOKEN` is a fine-grained PAT (or GitHub App token) with **Actions:
-write** on this repo only — store it as a deploy-provider secret, never in the
-repo. Firing `dev-deployed` starts the `money-flow` job against the stable dev
-targets above.
+#### Status: observed on 2026-09-02 (#2273 closed on it; #2268 stays operator-verify)
 
-#### Why this cannot be configured in Railway (#2268)
+`deployment_status`, like `repository_dispatch`, runs only the **default
+branch's** workflow file, so this trigger could not be seen firing from a pull
+request. The first real Railway deploy of `dev` after the #2273 merge was the
+evidence, read off the operator checklist on #2273. Two things were measured
+there rather than assumed here:
 
-The instruction above assumes the deploy provider can run an authenticated
-`curl` *after* a deployment goes live. Railway offers neither half of that, as
-observed in the `Haven AI / dev` project on 2026-08-31:
+1. **That it fires at all.** Deployment 6218620498 (`5d4e849c`, 08:38Z)
+   produced three runs: 33609807445 and 33609836970 (`in_progress` statuses,
+   gate skipped with its reason printed) and 33609965305 (`success`, gate
+   admitted, `money-flow` ran). The harness reported red — 2/14, the two
+   just-activated paths, on qa-failure #2411's known cause — and
+   `guard-freshness.mjs` reads it as red because it judges the job, not the
+   run.
+2. **What GitHub records as the run's `headBranch`: `dev`**
+   ([#2427](https://github.com/d-hinders/Haven-AI/issues/2427)). All three
+   runs report `headBranch = dev` (`gh run view <id> --json
+   headBranch,event,headSha`), although Railway creates its Deployments
+   against a bare commit SHA (`ref == sha` on every one observed) and GitHub
+   documents `GITHUB_REF` as **empty** for that case — the prediction #2404
+   and #2273 were written on did not hold on this repository. The promotion
+   gate does not use the field: since #2404 (PR #2409)
+   `scripts/ci/qa-freshness.mjs` selects the green run by SHA ancestry of the
+   promotion head and by the **`money-flow` job's** conclusion, not by
+   `--branch dev` — see *Automation & gating* above — because a branch name
+   says nothing about which commit the harness exercised. On this very
+   deployment the old `--branch dev --status success --limit 1` query would
+   have returned 33609836970, a run-level `success` whose `money-flow` job was
+   skipped; that decoy, not a missing label, is the defect the job rule closes.
 
-- **Project Settings → Webhooks exposes no header field**, on the evidence seen:
-  the *creation* form takes a Webhook URL and event types only, and its hint says
-  it "will automatically format the payload for Discord and Slack webhooks", i.e.
-  it POSTs *Railway's* payload to a URL. If that is the whole capability it cannot
-  send `Authorization: Bearer` and so cannot authenticate against
-  `POST /repos/:owner/:repo/dispatches`. **Not verified past the creation form** —
-  an edit view or a "custom payload" mode could expose headers; that hint naming
-  Discord and Slack specifically invites the question. Someone with the dashboard
-  open should settle it before this is quoted as settled.
-- **The service exposes a *pre*-deploy step, not a post-deploy one.**
-  `@haven/backend` → Settings → Deploy offers a Custom Start Command and
-  `+ Add pre-deploy step`. The label is what was observed; that a pre-deploy
-  command runs *before* the new version is live is standard PaaS semantics rather
-  than something the screenshot demonstrates. On that reading a dispatch fired
-  there starts the harness against the **previous** deployment — the same `headSha`-vs-deployed false coverage this document
-  refuses a `push` trigger for, and worse than the current gap for the same
-  reason.
+#2273 closed on that observation; #2268 stays open in operator-verify mode
+for its own checklist. The guard will file a `ci-health` issue on the very next push to `dev`
+after the merge (it reads `never-run` at that moment, before the deploy has
+finished) and close it on the push after the first post-deploy run succeeds —
+one round of noise, and an honest one.
 
-Two workarounds exist and both are rejected here so they are not re-derived:
-firing the dispatch from the backend's own startup fires on every restart, crash
-and scale event rather than on deploys, **and** requires a GitHub `Actions: write`
-token in the runtime environment of an internet-facing service; wrapping the
-Custom Start Command has both problems plus fragility.
+#### Why `repository_dispatch` was removed, not kept as a fallback (#2268)
 
-Scope of these observations, stated so they are not quoted past their evidence:
+The trigger this replaces needed the deploy provider to run an authenticated
+`curl` *after* the deploy went live. The owner read the Railway dashboard to its
+end (#2268, 2026-08-31 and 2026-09-01): **Project Settings → Webhooks is
+URL-only** — no header field, so it can never send `Authorization: Bearer` to
+`POST /repos/:owner/:repo/dispatches` — and the `@haven/backend` service's
+Deploy panel (Deploy, Teardown, Cron Schedule, Healthcheck Path, Serverless,
+Restart Policy, Config-as-code) offers **`+ Add pre-deploy step` and nothing
+after**; a pre-deploy command runs before the new version is live, so a
+dispatch fired there would test the *previous* deployment — the same
+`headSha`-vs-deployed false coverage this document refuses a `push` trigger for.
+Firing from the backend's own startup (every restart, crash and scale event;
+an `Actions: write` token in an internet-facing runtime), wrapping the start
+command (both, plus fragility), and a relay service in front of the URL-only
+webhook (more third-party infrastructure for a worse version of this section)
+were each considered and rejected there. Vercel was never checked and does not
+need to be: the harness is black-box against the deployed *backend*.
 
-- The Deploy settings panel was read from a screenshot not scrolled to its end.
-  If a post-deploy hook exists further down, the timing bullet changes and the
-  Webhooks one does not.
-- The Webhooks finding rests on a blank *creation* form. That is consistent with
-  "no webhook is configured", but a list with zero items above an add-form and an
-  add-form with empty fields are different observations, and only the second was
-  definitely seen.
-- **Vercel was never checked.** The original text offered the dev deploy hook in
-  "the Railway dev backend (and/or the Vercel dev project)", and only Railway was
-  investigated. Vercel is dropped from the instruction above because the harness
-  is black-box against the deployed *backend*, so a frontend deploy is the wrong
-  thing to trigger on — not because Vercel was found incapable. If that reasoning
-  is ever revisited, its deploy hooks remain untested.
+Kept "as a fallback", the trigger would have added nothing `workflow_dispatch`
+does not already give (a manual run) while keeping alive the one route a curl
+can use to produce a run that *looks* post-deploy — exactly the #2271 hole. It
+was removed, and `guard-freshness.mjs`'s registry entry was **repointed** at
+`deployment_status` rather than deleted, because an entry naming a trigger that
+no longer exists guards nothing. The guard also refuses `repository_dispatch`
+runs outright, so re-adding the trigger cannot quietly re-open the hole.
 
-**The route that replaces this is #2273** — trigger on GitHub's own
-`deployment_status` event, which needs no PAT in a third-party dashboard, puts no
-token in the backend runtime, and fires after the deploy succeeds. It is not
-built yet, and it carries its own open question (a deployment was observed
-emitting `success` more than once, and this workflow sets
-`cancel-in-progress: false`, so it needs a dedupe before it can drive a
-money-moving harness).
-
-#### Status: the hook is not in place (#2268)
-
-**The receiving half is proven healthy.** On 2026-08-31 a manual
-
-```bash
-gh api repos/d-hinders/Haven-AI/dispatches -f event_type=dev-deployed
-```
-
-started [run 33370275124](https://github.com/d-hinders/Haven-AI/actions/runs/33370275124)
-three seconds later — `event: repository_dispatch`, `headBranch: dev`, title
-`dev-deployed`. So the workflow file, its `types: [dev-deployed]` filter, the
-default branch (`dev`, which is the only branch `repository_dispatch` ever runs
-from) and the workflow's enabled state are all correct. Each of those was a
-candidate cause and each is ruled out by that one observation.
-
-**What is left is the sender, and the dashboard says nothing is sending.** That
-was three indistinguishable variants from inside this repository — never added,
-added with a `GH_DISPATCH_TOKEN` lacking `Actions: write` or expired, or added
-with a wrong `event_type` — until the Railway dashboard was opened on 2026-08-31
-(#2268). What was seen: Project Settings → Webhooks showing a blank creation form
-with no configured webhook, and `@haven/backend` Deploy settings invoking no
-`curl`. That points to **never added** and is consistent with "never once, for any
-event type, in the repo's whole history"; it does not strictly exclude a webhook
-configured somewhere not in view, which is why the scope note above distinguishes
-an empty list from a blank form. The distinction changes little in practice —
-per *Why this cannot be configured in Railway*, there is no supported place to
-put a working one either way.
-
-**Fixing it is not the operator action this section used to describe**, because
-Railway offers no place to put that hook — see *Why this cannot be configured in
-Railway* above. The replacement route is #2273. If a dispatch is ever sent by
-hand for diagnosis, confirm it with the `gh api … dispatches` command, which must
-start a `qa-dev.yml` run within seconds, and never paste the token value into an
-issue, a PR or a log — but note that a manual dispatch is indistinguishable from
-a real one to the freshness guard (#2271), so it is never evidence the trigger
-works.
-
-**Its silence is now watched.** `scripts/ci/guard-freshness.mjs` (the #2208
-registry, widened by #2268) registers this trigger and files a `ci-health` +
-`code-quality` issue when no `dev-deployed` dispatch has succeeded in four days.
-It counts **only** `repository_dispatch` runs on `dev`: the nightly and the manual
-dispatch run on this same workflow every day, and letting either vouch for the
-post-deploy trigger would rebuild the exact blind spot. So `gh workflow run
-qa-dev.yml` will *not* clear the finding — only a real dispatch does.
-
-**Do not replace this with a `push`-to-`dev` trigger.** The harness is black-box
-against the *deployed* backend, so firing on push races the deploy and yields a
-green run whose `headSha` claims coverage the deployed code never had — a visible
-block turned into a false pass, which is worse than the current gap.
+**Do not replace any of this with a `push`-to-`dev` trigger.** The harness is
+black-box against the *deployed* backend, so firing on push races the deploy
+and yields a green run whose `headSha` claims coverage the deployed code never
+had — a visible block turned into a false pass, which is worse than the gap.
 
 ### Automated failure reporting
 
@@ -813,9 +964,11 @@ re-dispatch to clear a transient testnet/RPC flake, or open a
 ### The dev → main freshness gate
 
 `dev-gate.yml` adds a **`qa-freshness`** job: a promotion PR (`dev → main`) passes
-only if a **successful** `qa-dev.yml` run exists on `dev` **within
-`QA_FRESHNESS_HOURS`** (default **30h** — covers one missed nightly). No recent
-green run → the gate fails with instructions to dispatch one. Only the
+only if a **successful** `qa-dev.yml` run exists on a commit in the promoted
+history **within `QA_FRESHNESS_HOURS`** (default **30h** — covers one missed
+nightly), and covered the money-path code being promoted (#1030, #2404 — the
+rules are in *Automation & gating* above). No recent green run → the gate fails
+with instructions to dispatch one. Only the
 deterministic money-flow harness gates; the LLM-agent layer (2b, #577) and browser
 exploration (Layer 3, #579) stay **non-gating**.
 
@@ -892,7 +1045,7 @@ exploratory.
 
 > You are running exploratory QA against Haven's **dev** environment (testnet / Base
 > Sepolia, capped QA delegate — never prod). Using the already-connected Haven MCP
-> (or connect with `npx @haven_ai/connect@alpha --setup <QA setup token> --api <dev backend URL>`):
+> (or connect with `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`, where `<connector_package>` is the `connector_package` value the dev backend's own setup response returns (the same package is named inside its `connector_command`, which is the whole `npx -y … --setup … --api …` string — do not paste that in here) — NOT necessarily `@alpha` since #2422; the token and URL are owner-provisioned, see "QA identity, funding & secrets" below). If the connector refuses with `wiring_collision` (#2551 — this machine already holds a spend-capable Haven agent on the bare `haven` / `haven-signer` pair), relay the refusal to the owner and stop; do not add `--replace` or `--name` on your own — on the dedicated QA runner the owner's usual answer is `--replace`, on a developer machine `--name`:
 > 1. `haven_get_agent` + `haven_get_allowances` — confirm the dev QA agent and note the live remaining budget.
 > 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402`) → expect settlement + a receipt.
 > 3. Use direct `haven_pay` for an amount **over** the remaining budget → expect it to be
@@ -952,6 +1105,34 @@ findings report under [`bug-reports/`](../bug-reports/).
 > Write a findings report from `docs/bug-reports/_run-report-template.md` (surfaces
 > visited + a Friction/Bugs table), run the secret review before committing, and file
 > concrete UI bugs as issues. This is non-gating exploratory coverage.
+
+## Layer 3b — the cold-agent onboarding scenario (`/qa-explore-agent-onboarding`, #2538)
+
+The same cadence, pointed the other way. Layer 3 explores Haven **signed in**; this
+scenario measures whether an agent that has **never seen Haven** can get its user set
+up — the path epic [#2519](https://github.com/d-hinders/Haven-AI/issues/2519) exists to
+make work, and the one whose only measurement is the
+[A0 cold test of 2026-09-04](../bug-reports/agent-first-cold-test-2026-09-04.md).
+
+A fresh agent is given a dev URL and "set it all up so my agent can pay for things",
+and nothing else — **the prompt names no path**, because score 1 asks whether it found
+`/for-agents.md` by following the hooks the HTML advertises rather than by guessing the
+convention, which is what A0 had to do. It scores four things (discovery, the human
+steps its first reply names, tool calls to the login wall, and whether it produced the
+`haven login` and `haven agents connect` commands correctly) and writes
+`docs/bug-reports/qa-explore-agent-onboarding-<date>.md` with each score beside the
+previous run's and A0's.
+
+- **When to run:** weekly on the cadence, owner-armed as a Routine — never as a CI job.
+  Beyond the cadence's own non-gating rule, **a cold agent cannot be cold inside this
+  repository's runner**: score 1 is only valid if the agent does not know the path.
+- **Guardrails:** never a password, a passkey, an approval or a payment. It stops at each
+  human step and writes the hand-off message it would have sent; those messages are the
+  report's most useful content.
+- **Scenario, rubric and scoring bands:**
+  [`qa-explore-agent-onboarding`](../../.claude/commands/qa-explore-agent-onboarding.md).
+  Cadence and how to read a moved score:
+  [`qa-explore-ui-cadence.md`](qa-explore-ui-cadence.md) § *Second scenario*.
 
 ## Reading results and filing bugs
 
@@ -1212,6 +1393,32 @@ before assuming Haven is at fault.
 
 This runner warning is not a harness failure. The repository uses Node 24 for
 project commands; update third-party action versions separately when supported.
+
+### A 502 whose body carries `URL: https://sepolia.base.org` is an RPC outage, not a regression (#2511)
+
+When several backend-side x402 legs (`authorize`, `activate`, `settleX402Erc7710`)
+fail in one run with 502s whose error bodies quote the public endpoint — the
+fingerprint is the line `URL: https://sepolia.base.org` inside the 502 body — the
+shared public Base Sepolia RPC was having an outage, not Haven. Run 33796886018
+produced eight failures of exactly this shape with no Haven change on the commits
+it ran: the backend writes its on-chain legs through `RPC_URL_BASE_SEPOLIA`,
+which defaults to the public endpoint, so a provider-side outage there breaks
+every leg at once. The backend logs a boot warning while that default is in use
+("RPC_URL_BASE_SEPOLIA is not set — using the PUBLIC endpoint …"); finding it in
+the deployment logs confirms the service never moved off the default.
+
+The step that clears it: set `RPC_URL_BASE_SEPOLIA` on the dev backend to a
+dedicated provider endpoint and let it redeploy. That is an owner action on the
+Railway environment, not a code change — until it is done, an outage of the
+public endpoint shows up in qa-dev as if it were a defect.
+
+The harness's own node is configured separately: `QA_RPC_URL_BASE_SEPOLIA`
+(read in `packages/qa-agent/src/lib/chain.ts`, default the same public endpoint)
+moves the observer node the scenarios assert through. Keep the two variables on
+DIFFERENT endpoints: the harness deliberately reads a second node, so an
+on-chain assertion is never verified against the very node the backend wrote
+through — pointing both at the same URL would reduce every on-chain proof to a
+check that the backend agrees with itself.
 
 ## Related documentation
 

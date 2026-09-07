@@ -26,9 +26,20 @@
 import { getPool } from '../src/db.js'
 import { selectDelegation } from '../src/rails/delegation-authorization.js'
 import { runMigrations } from '../src/db/migrate.js'
-import { SELECT_DELEGATION_FOR_PAYMENT_SQL } from '../src/infra/repositories/delegation-budgets.js'
+import {
+  HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
+  LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
+} from '../src/infra/repositories/agents.js'
+import {
+  ACTIVATE_PENDING_DELEGATION_SQL,
+  REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
+  SELECT_DELEGATION_FOR_PAYMENT_SQL,
+} from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
+import {
+  HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
+} from '../src/infra/repositories/user-safes.js'
 import {
   CLAIM_NEXT_OUTBOUND_TX_SQL,
   CLAIM_ORPHANED_OUTBOUND_TX_SQL,
@@ -171,7 +182,6 @@ import {
   GET_MAX_X402_PER_HOUR_SQL,
   MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL,
   RECORD_X402_SIGNATURE_SQL,
-  REFRESH_STALE_X402_INTENT_SQL,
 } from '../src/infra/repositories/x402-authorizations.js'
 import {
   ATTACH_EVIDENCE_FOR_INTENT_SQL,
@@ -188,6 +198,7 @@ import {
   GET_MERCHANT_RECEIPT_SQL,
   INSERT_MERCHANT_RECEIPT_SQL,
   INSERT_PREPARED_SWEEP_SQL,
+  LOCK_AGENT_SAFE_BINDING_SQL,
   INSERT_RESIDUE_EVENT_SQL,
   LIST_EVIDENCE_RECEIPTS_SQL,
   MARK_SWEEP_FAILED_SQL,
@@ -211,6 +222,9 @@ import {
   FIND_OLDEST_SAFE_FOR_USER_SQL,
   FIND_OWNED_SAFE_ADDRESS_SQL,
   FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
+  HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
+  HAS_OPEN_SWEEPS_FOR_SAFE_SQL,
+  LOCK_AGENTS_FOR_SAFE_SQL,
   LIST_SAFES_FOR_USER_SQL,
   LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_SAFE_SQL,
@@ -356,6 +370,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'user-safes: rename (tenant-scoped)', sql: RENAME_SAFE_FOR_USER_SQL },
   { name: 'user-safes: clear defaults in set-default tx', sql: CLEAR_DEFAULT_SAFES_FOR_USER_SQL },
   { name: 'user-safes: set default in set-default tx', sql: SET_SAFE_DEFAULT_SQL },
+  { name: 'user-safes: lock bound agents before unlink', sql: LOCK_AGENTS_FOR_SAFE_SQL },
+  { name: 'user-safes: live delegation guard before unlink', sql: HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL },
+  { name: 'user-safes: open recovery guard before unlink', sql: HAS_OPEN_SWEEPS_FOR_SAFE_SQL },
   { name: 'user-safes: orphan agents in delete tx', sql: ORPHAN_AGENTS_FOR_SAFE_SQL },
   { name: 'user-safes: orphan self-sign agents in delete tx (RESTRICT FK)', sql: ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL },
   { name: 'user-safes: delete row', sql: DELETE_USER_SAFE_SQL },
@@ -419,6 +436,7 @@ const QUERIES: SmokeQuery[] = [
     name: 'auth: agent lookup by API key (chain_id fallback, #990)',
     sql: AGENT_BY_API_KEY_SQL,
   },
+  { name: 'delegate-sweeps: lock agent binding before prepare/submit', sql: LOCK_AGENT_SAFE_BINDING_SQL },
   {
     // IMPORTED since #999 — the pasted copy had drifted (it still selected
     // `a.session_permission_id`, which the real query dropped), which is
@@ -519,6 +537,26 @@ const QUERIES: SmokeQuery[] = [
     // IMPORTED since #999 — was a pasted copy.
     name: 'delegations: authorization selection (pinned wins over open, #829)',
     sql: SELECT_DELEGATION_FOR_PAYMENT_SQL,
+  },
+  {
+    name: 'delegations: conditional activation (pending only)',
+    sql: ACTIVATE_PENDING_DELEGATION_SQL,
+  },
+  {
+    name: 'delegations: retire the slot\'s OTHER active grants, excluding the row being activated (#2411)',
+    sql: REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
+  },
+  {
+    name: 'agents: lock before opening re-key',
+    sql: LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
+  },
+  {
+    name: 'agents: re-check in-flight re-key after row lock',
+    sql: HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
+  },
+  {
+    name: 'safes: refuse unlink during in-flight re-key',
+    sql: HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
   },
   // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
   // Fortnox connection, reporting-feed dedup ledger, user passkeys, safe
@@ -652,7 +690,6 @@ const QUERIES: SmokeQuery[] = [
   { name: 'x402: hourly cap config read (#961)', sql: GET_MAX_X402_PER_HOUR_SQL },
   { name: 'x402: hourly cap usage count (#961)', sql: COUNT_RECENT_X402_INTENTS_SQL },
   { name: 'x402: post-conflict active-intent reload', sql: FIND_ACTIVE_X402_INTENT_BY_KEY_SQL },
-  { name: 'x402: stale-replay refresh (guarded, #961)', sql: REFRESH_STALE_X402_INTENT_SQL },
   { name: 'x402: one-shot signature record', sql: RECORD_X402_SIGNATURE_SQL },
   { name: 'x402: one-shot confirm', sql: CONFIRM_X402_INTENT_SQL },
   { name: 'x402: one-shot fail', sql: FAIL_X402_INTENT_SQL },

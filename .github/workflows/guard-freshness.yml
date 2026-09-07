@@ -38,6 +38,7 @@ on:
 permissions:
   contents: read
   actions: read # reads other workflows' run history
+  deployments: read # #2273: the qa-dev.yml entry proves provenance against the Deployments API
   issues: write
 
 concurrency:

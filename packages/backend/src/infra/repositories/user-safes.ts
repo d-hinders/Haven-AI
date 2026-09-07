@@ -14,6 +14,9 @@
  *   Nothing here grants or removes an owner.
  * - Deleting a Safe must orphan `self_sign_agents` rows BEFORE the delete —
  *   their RESTRICT foreign key otherwise blocks it (see the delete test).
+ * - Deleting a Safe must not orphan an agent with a pending or active budget
+ *   delegation or an in-flight sweep; the transaction locks bound agent rows
+ *   before checking this.
  * - The legacy `users.safe_address` column mirrors the default Safe; every
  *   default-pointer change keeps it in sync.
  *
@@ -49,9 +52,39 @@ export interface SafeWithAccountTypeRow {
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
+/**
+ * #2413: the dashboard stops rendering retired-rail accounts.
+ *
+ * Epic #1440's owner decision of 2026-09-02 is that retirement is DELETION,
+ * not accommodation — no effort goes into a legacy-Safe experience, because
+ * the population is zero (the census found 15 Base-mainnet Safes worth ~$0.12
+ * total). Rather than keep ~25 files branching on `account_type` to render
+ * those accounts nicely, the three account-list queries stop returning them
+ * and every branch behind them becomes unreachable and deletable.
+ *
+ * `= 'delegator_hybrid'` is an equality test, not a `<> 'safe'` one, and that
+ * is deliberate: it excludes any future value as well as `'safe'`. It does NOT
+ * exclude NULL, because there is no NULL to exclude — `041_hybrid_accounts.ts`
+ * added the column `NOT NULL DEFAULT 'safe'` under
+ * `CHECK (account_type IN ('safe','delegator_hybrid'))`, so pre-existing rows
+ * were backfilled to `'safe'` and the column's domain has exactly two values.
+ * (An earlier draft of this comment claimed legacy rows "carry NULL" and a
+ * test asserted it; the insert failed the not-null constraint in CI, which is
+ * where the claim was corrected.)
+ *
+ * Deliberately a FILTER, not a migration. The rows stay, so this is reversible
+ * by deleting one clause — the same reason `rails/execution-rail.ts` was kept.
+ * Deleting the rows outright is a separate, still-open decision on the epic,
+ * blocked on `payment_intents`' RESTRICT foreign key.
+ *
+ * This does NOT weaken tenant scoping: every query keeps `user_id = $1`, and
+ * this clause only ever narrows further.
+ */
+const DELEGATION_RAIL_ONLY = `AND account_type = 'delegator_hybrid'`
+
 export const LIST_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name, is_default, created_at
        FROM user_safes
-       WHERE user_id = $1
+       WHERE user_id = $1 ${DELEGATION_RAIL_ONLY}
        ORDER BY created_at ASC`
 
 /**
@@ -64,12 +97,43 @@ export const LIST_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name,
  */
 export const LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name, account_type
      FROM user_safes
-     WHERE user_id = $1
+     WHERE user_id = $1 ${DELEGATION_RAIL_ONLY}
      ORDER BY created_at ASC`
 
 export const FIND_OWNED_SAFE_ADDRESS_SQL = `SELECT id, safe_address FROM user_safes WHERE id = $1 AND user_id = $2`
 
 export const FIND_OWNED_SAFE_DEFAULT_FLAG_SQL = `SELECT id, is_default FROM user_safes WHERE id = $1 AND user_id = $2`
+
+/**
+ * The funding read's ownership check (#2534).
+ *
+ * `FIND_OWNED_SAFE_ADDRESS_SQL` kept no `account_type` filter because rename/
+ * default/unlink manage whatever the user once linked. The funding endpoint is
+ * a DELEGATION-rail surface — it tells a human how to fund the account their
+ * agent spends from — so it scopes like the surviving account lists
+ * (`DELEGATION_RAIL_ONLY`): a legacy Safe row answers 404 exactly as it does
+ * on `GET /user/safes`, rather than funding instructions for a rail nothing
+ * new joins. `chain_id` comes back with the row so the route runs ONE query
+ * instead of an ownership probe plus a list read.
+ */
+export const FIND_OWNED_SAFE_FOR_FUNDING_SQL = `SELECT id, safe_address, chain_id FROM user_safes
+       WHERE id = $1 AND user_id = $2 ${DELEGATION_RAIL_ONLY}`
+
+/**
+ * `userId` is REQUIRED — the funding route's ownership check runs before any
+ * chain read. Null when the id is unknown, another user's, or a legacy-Safe row.
+ */
+export async function findOwnedSafeForFunding(
+  safeId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<{ id: string; safe_address: string; chain_id: number } | null> {
+  const result = await db.query<{ id: string; safe_address: string; chain_id: number }>(
+    FIND_OWNED_SAFE_FOR_FUNDING_SQL,
+    [safeId, userId],
+  )
+  return result.rows[0] ?? null
+}
 
 /** `userId` is REQUIRED — tenant scope for the Safe list. */
 export async function listSafesForUser(
@@ -188,6 +252,35 @@ export const ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL = `UPDATE self_sign_agents SET
 
 export const DELETE_USER_SAFE_SQL = `DELETE FROM user_safes WHERE id = $1`
 
+/** Serialize Safe unlink with delegation creation/activation on its agents. */
+export const LOCK_AGENTS_FOR_SAFE_SQL = `SELECT id FROM agents
+       WHERE safe_id = $1 AND user_id = $2
+       FOR UPDATE`
+
+export const HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL = `SELECT EXISTS (
+         SELECT 1
+         FROM agent_delegations ad
+         JOIN agents a ON a.id = ad.agent_id
+         WHERE a.safe_id = $1 AND a.user_id = $2
+           AND ad.status IN ('pending', 'active')
+       ) AS live`
+
+export const HAS_OPEN_SWEEPS_FOR_SAFE_SQL = `SELECT EXISTS (
+         SELECT 1
+         FROM delegate_sweeps ds
+         JOIN agents a ON a.id = ds.agent_id
+         WHERE a.safe_id = $1 AND a.user_id = $2 AND ds.user_id = $2
+           AND ds.status IN ('prepared', 'submitting')
+       ) AS open`
+
+export const HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL = `SELECT EXISTS (
+         SELECT 1
+         FROM agent_rekeys ar
+         JOIN agents a ON a.id = ar.agent_id
+         WHERE a.safe_id = $1 AND a.user_id = $2
+           AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
+       ) AS in_flight`
+
 export const FIND_OLDEST_SAFE_FOR_USER_SQL = `SELECT id, safe_address FROM user_safes
              WHERE user_id = $1
              ORDER BY created_at ASC
@@ -199,19 +292,33 @@ export const CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL = `UPDATE users SET safe_address
 
 /**
  * Unlink a Safe — one transaction, exactly the route's BEGIN/COMMIT block:
- * orphan agents, orphan leftover self-sign agents (their RESTRICT FK would
- * otherwise block the delete), delete the row, then — when the deleted Safe
- * was the default (`wasDefault`, read by the caller's ownership check) —
- * promote the oldest remaining Safe and re-point the legacy mirror, or clear
- * the mirror when none remain.
+ * Lock bound agents and refuse when any still has live delegation authority;
+ * otherwise orphan agents, orphan leftover self-sign agents (their RESTRICT
+ * FK would otherwise block the delete), delete the row, then — when the
+ * deleted Safe was the default (`wasDefault`, read by the caller's ownership
+ * check) — promote the oldest remaining Safe and re-point the legacy mirror,
+ * or clear the mirror when none remain. Returning false means the Safe was
+ * kept intact because a delegation, recovery sweep, or re-key is still in
+ * flight.
  */
 export async function deleteSafeForUser(
   safeId: string,
   userId: string,
   wasDefault: boolean,
   db: Executor = pool,
-): Promise<void> {
-  await withTransaction(db, async (tx) => {
+): Promise<boolean> {
+  return withTransaction(db, async (tx) => {
+    await tx.query(LOCK_AGENTS_FOR_SAFE_SQL, [safeId, userId])
+    const live = await tx.query<{ live: boolean }>(HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL, [safeId, userId])
+    if (live.rows[0]?.live === true) return false
+    const openSweep = await tx.query<{ open: boolean }>(HAS_OPEN_SWEEPS_FOR_SAFE_SQL, [safeId, userId])
+    if (openSweep.rows[0]?.open === true) return false
+    const inFlightRekey = await tx.query<{ in_flight: boolean }>(HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL, [
+      safeId,
+      userId,
+    ])
+    if (inFlightRekey.rows[0]?.in_flight === true) return false
+
     await tx.query(ORPHAN_AGENTS_FOR_SAFE_SQL, [safeId])
     await tx.query(ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL, [safeId])
     await tx.query(DELETE_USER_SAFE_SQL, [safeId])
@@ -228,6 +335,7 @@ export async function deleteSafeForUser(
         await tx.query(CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL, [userId])
       }
     }
+    return true
   })
 }
 
@@ -360,7 +468,7 @@ export const LIST_SESSION_SAFES_FOR_USER_SQL = `SELECT us.id, us.safe_address, u
               COUNT(hap.id)::int AS passkey_count
        FROM user_safes us
        LEFT JOIN hybrid_account_passkeys hap ON hap.user_safe_id = us.id
-       WHERE us.user_id = $1
+       WHERE us.user_id = $1 AND us.account_type = 'delegator_hybrid'
        GROUP BY us.id
        ORDER BY us.created_at ASC`
 

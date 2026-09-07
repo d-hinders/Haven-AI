@@ -81,10 +81,6 @@ export interface PaymentIntentRow {
   expires_at: string
   /** Execution rail pinned at authorize time; null = legacy AllowanceModule (#745). */
   execution_rail?: string | null
-  /** Smart Sessions permissionId pinned at authorize time (retired rail, #834). */
-  session_permission_id?: string | null
-  /** Serialized prepared UserOperation for session-rail intents. */
-  session_user_op?: unknown
   /** Which delegation authorized a delegation-rail intent (#829). */
   delegation_hash?: string | null
   /** The metering budget, uniform across schemes (#1059). */
@@ -271,17 +267,17 @@ function machineIntentInsertSql(
       x402_merchant_address, x402_idempotency_key,
       payment_rail, payment_resource_url, merchant_address, machine_challenge_id,
       machine_idempotency_key, machine_metadata,
-      execution_rail, session_permission_id, session_user_op,
+      execution_rail,
       delegation_hash, budget_delegation_hash, prepared_user_op, expires_at
     ) VALUES (
       -- #2094: an explicit id when the caller needs the row's identity BEFORE
       -- the insert (the erc7710 settlement child is salted from it); NULL
       -- falls through to the column's own gen_random_uuid() default, which is
       -- what every other caller still gets.
-      COALESCE($30::uuid, gen_random_uuid()),
+      COALESCE($28::uuid, gen_random_uuid()),
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
       'pending_signature', $13, $14, $15, $16, $17,
-      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, NOW() + interval '10 minutes')
+      $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, NOW() + interval '10 minutes')
     ON CONFLICT (agent_id, ${conflictColumn})
       WHERE ${conflictColumn} IS NOT NULL
         AND status NOT IN ('failed', 'expired')
@@ -318,8 +314,6 @@ export interface NewMachineIntent {
   /** Plain object — serialised to JSON here; pass null to store SQL NULL. */
   metadata: unknown | null
   executionRail?: 'delegation'
-  sessionPermissionId?: string
-  sessionUserOp?: string
   delegationHash?: string
   budgetDelegationHash?: string
   preparedUserOp?: string
@@ -341,7 +335,7 @@ export async function insertMachineIntent(
     id, agent, rail, payTo, tokenSymbol, tokenAddress, amountRaw, amountHuman,
     allowanceNonce, signHash, resourceUrl, category, merchantAddress,
     challengeId, idempotencyKey, metadata,
-    executionRail, sessionPermissionId, sessionUserOp,
+    executionRail,
     delegationHash, budgetDelegationHash, preparedUserOp, conflictTarget,
   } = input
   const sql =
@@ -358,7 +352,7 @@ export async function insertMachineIntent(
     rail === 'x402' ? idempotencyKey ?? null : null,
     rail, resourceUrl, merchantAddress?.toLowerCase() ?? null, challengeId ?? null,
     idempotencyKey ?? null, metadata != null ? JSON.stringify(metadata) : null,
-    executionRail ?? null, sessionPermissionId ?? null, sessionUserOp ?? null,
+    executionRail ?? null,
     delegationHash ?? null, budgetDelegationHash ?? null, preparedUserOp ?? null,
     id ?? null,
   ])

@@ -27,7 +27,9 @@ test.describe('transaction history — x402 display + detail panel', () => {
 
     // History renders the row and the export affordance.
     await expect(page.getByRole('heading', { name: 'Transaction history' })).toBeVisible()
-    await expect(page.getByText('x402 payment').first()).toBeVisible()
+    // #2357: the row title is user-facing copy now — the protocol name moved
+    // to the detail drawer's section heading, asserted below.
+    await expect(page.getByText('Agent payment').first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeEnabled()
 
     // Clicking the row opens the per-type detail panel.
@@ -36,8 +38,9 @@ test.describe('transaction history — x402 display + detail panel', () => {
     const panel = page.getByRole('dialog')
     await expect(panel).toBeVisible()
     // x402-specific body: resource hostname (not the full URL) + merchant.
-    // `exact` avoids matching the "x402 payment …" heading.
-    await expect(panel.getByText('Payment', { exact: true })).toBeVisible()
+    // The section heading carries the protocol name since #2357; the panel's
+    // own title is the row's user-facing "Agent payment by …".
+    await expect(panel.getByText('x402 payment', { exact: true })).toBeVisible()
     await expect(panel.getByText('Resource', { exact: true })).toBeVisible()
     await expect(panel.getByText('research.example')).toBeVisible()
     await expect(panel.getByText('Merchant', { exact: true })).toBeVisible()

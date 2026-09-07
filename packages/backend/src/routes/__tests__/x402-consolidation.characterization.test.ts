@@ -31,7 +31,6 @@ import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
-    getTokenAllowance: vi.fn(),
     getTokenBalance: vi.fn(),
   },
   fiatMocks: { getFiatValuesForTokenAmount: vi.fn() },
@@ -93,7 +92,6 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
   })
 
   function queueOverAllowance() {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     // Delegate balance covers the shortfall, so the balance-aware pre-flight
     // passes and we fall into the over-allowance approval-queue branch.
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(20_000n)
@@ -163,7 +161,6 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
 
   // Drive the within-allowance execute path so the payment_intents INSERT runs.
   function executeWithinAllowance() {
-    allowanceMocks.getTokenAllowance.mockResolvedValueOnce({ nonce: 7 })
     mockQuery
       .mockResolvedValueOnce({ rows: [AGENT] }) // auth
       .mockResolvedValueOnce({ rows: [] }) // existing intent lookup

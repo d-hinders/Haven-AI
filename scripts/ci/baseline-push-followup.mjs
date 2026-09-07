@@ -51,8 +51,13 @@
 // leaves pushing again as the only escape. Because the runs EXIST and are merely
 // unapproved, the best recovery needs no push at all: a human clicks "Approve and
 // run" on runs this script enumerates by URL, and the PR's required checks
-// resolve. Approving needs the same write access that dispatching this workflow
-// already needed, so the person who hit this can normally clear it themselves.
+// resolve. Approving is write-gated and needs a real user: an App installation
+// token that dispatched the workflow can be refused `403 Resource not accessible
+// by integration` on the approve endpoint (#2598, observed), so the dispatcher
+// is not guaranteed the approver. Where approval is not available, re-running
+// each parked run (`POST .../actions/runs/:id/rerun`) re-attributes the attempt
+// to the caller and un-parks it — measured on PR #2598, five runs at
+// `run_attempt: 2` / `triggering_actor: d-hinders`, CI green with no push.
 //
 // Precisely: the script enumerates every run AWAITING APPROVAL on the commit,
 // which is a superset of "the required checks" in principle and equal to it on
@@ -205,6 +210,16 @@ gh api "repos/${repo}/actions/runs?head_sha=${sha}&status=action_required"   # t
 
 ${renderParkedSection({ repo, sha, parked })}
 
+**Cheaper than a push, and it works when approving does not: re-run each parked run.** A re-run is a fresh attempt attributed to whoever triggers it, which re-attributes the run away from the bot and un-parks it — no push, no rewritten history, no empty commit left behind. Against the run ids listed above:
+
+\`\`\`bash
+for id in <the run ids above>; do
+  gh api --method POST "repos/${repo}/actions/runs/$id/rerun"
+done
+\`\`\`
+
+(\`gh run rerun <run-id> -R ${repo}\` is the same call through the CLI.) Observed on #2598: all five \`action_required\` runs on the bot commit came back \`run_attempt: 2\`, \`triggering_actor: d-hinders\` after exactly this, and CI went green with no push at all (#2599). Where approving is not available to you — an App installation token is the case that bites — this is still the route that works.
+
 <details><summary>If you cannot approve them, push from your own credentials instead</summary>
 
 The approval gate keys on **who pushed**, not on what was pushed, so a second push *from this workflow* would park identically. It has to come from a real actor:
@@ -237,8 +252,11 @@ Regeneration defaults to \`--update-snapshots=changed\`, which rewrites only bas
  * push had genuinely NOT triggered anything, there would be nothing to name and
  * the only recovery would be another push. Because the runs exist and are
  * merely awaiting approval, a maintainer can approve them and the PR's required
- * checks resolve with NO push at all — and anyone who could dispatch this
- * workflow already has the write access that approving needs.
+ * checks resolve with NO push at all — and where approval itself is out of
+ * reach (an App installation token dispatching this workflow gets `403 Resource
+ * not accessible by integration` from the approve endpoint — #2598), the
+ * no-push recovery is still there: re-running a parked run re-attributes it to
+ * the caller, which is what cleared all five on PR #2598.
  */
 export function parkedRunsQueryArgs(repo, sha) {
   return ['api', `repos/${repo}/actions/runs?head_sha=${sha}&status=action_required&per_page=100`]
@@ -308,7 +326,7 @@ export async function pollParkedRuns({ fetchParked, sleep, attempts = 6, delayMs
 export function renderParkedSection({ repo, sha, parked }) {
   if (parked.length) {
     const rows = parked.map((r) => `- [${r.name}](${r.url}) — run \`${r.id}\``).join('\n')
-    return `**Approve these ${parked.length} parked runs** (one click each, "Approve and run" on the run page). Approving needs the same write access dispatching this workflow already needed, so if you dispatched it you can almost certainly do this yourself:
+    return `**Approve these ${parked.length} parked runs** (one click each, "Approve and run" on the run page). Approving needs write access and a real user: a human who dispatched this workflow normally has it. Dispatching does not imply approving, though — a GitHub App installation token that dispatched this very workflow was refused \`403 Resource not accessible by integration\` by the approve endpoint (#2599). Where approval is not available, the re-run below is the recovery that costs nothing:
 
 ${rows}
 
@@ -321,7 +339,7 @@ gh api "repos/${repo}/actions/runs?head_sha=${sha}&status=action_required" \\
   --jq '.workflow_runs[] | "\\(.name)\\t\\(.html_url)"'
 \`\`\`
 
-Open each and click **Approve and run**. That resolves this PR's required checks without any push.`
+Open each and click **Approve and run**, or re-run it (\`gh run rerun <id>\` — a re-run is attributed to you, so it un-parks itself). Either resolves this PR's required checks without any push.`
 }
 
 /**

@@ -29,9 +29,11 @@ import { describeDb, initDbHarness, resetDb, WORKER_SCHEMA } from '../db-harness
  * Every table the DATABASE says lives in this worker's schema, with its row
  * count — in ONE round trip.
  *
- * The obvious shape (a `COUNT(*)` query per table) is 38 round trips and
- * counting, which under the ordinary parallel load of a full backend run is
- * enough to push this test past vitest's 5 s default on its own. That would
+ * The obvious shape (a `COUNT(*)` query per table) is one round trip per
+ * table — 38 when this was written, 36 since migration 073 dropped two, and
+ * moving with every migration — which under the ordinary parallel load of a
+ * full backend run is enough to push this test past vitest's 5 s default on
+ * its own. That would
  * make the file a flake of exactly the kind #2211 exists to remove, and
  * "raise the timeout" is the answer this issue rejects — so the census is one
  * `UNION ALL` built from the catalog instead.
@@ -64,17 +66,21 @@ async function tableCensus(): Promise<Array<{ table: string; rows: number }>> {
  *
  * Two shapes, and the second is the one that makes the control SHARP:
  *
- * - `users` → `agents` → `agent_allowances` is a foreign-key chain, so it
- *   exercises the delete ORDER, not just the coverage.
+ * - `users` → `agents` → `agent_tool_invocations` is a foreign-key chain, so
+ *   it exercises the delete ORDER, not just the coverage. It was
+ *   `agent_allowances` until #2263's migration 075 dropped that table with
+ *   the rest of the inert Safe-rail schema; `agent_tool_invocations` is a
+ *   live `ON DELETE CASCADE` child of `agents` with the identical shape, so
+ *   the control keeps exactly the property it was chosen for.
  * - `rate_limit_counters` is deliberately a table that **no cascade can
  *   reach** — it has no foreign key at all, so nothing empties it as a side
  *   effect of emptying something else. Without it, dropping a table from the
  *   reset's coverage is invisible here: `ON DELETE CASCADE` cleans up the
  *   dropped child anyway, and the census still passes. (Measured — mutation
- *   M1 of #2211 removed `agent_allowances` from the reset's table list and
+ *   M1 of #2211 removed the FK-chain child from the reset's table list and
  *   survived the first version of this file for exactly that reason.)
  */
-const SEEDED_TABLES = ['users', 'agents', 'agent_allowances', 'rate_limit_counters'] as const
+const SEEDED_TABLES = ['users', 'agents', 'agent_tool_invocations', 'rate_limit_counters'] as const
 
 async function seed(): Promise<void> {
   const user = await db.query<{ id: string }>(
@@ -86,9 +92,9 @@ async function seed(): Promise<void> {
     [user.rows[0].id],
   )
   await db.query(
-    `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount)
-     VALUES ($1, '0x0000000000000000000000000000000000000001', 'USDC', '1')`,
-    [agent.rows[0].id],
+    `INSERT INTO agent_tool_invocations (agent_id, user_id, tool_name, result_status)
+     VALUES ($1, $2, 'reset_census', 'ok')`,
+    [agent.rows[0].id, user.rows[0].id],
   )
   await db.query(
     `INSERT INTO rate_limit_counters (key, count, expires_at)
@@ -185,13 +191,16 @@ describeDb('resetDb leaves the worker schema genuinely clean (#2211)', () => {
   })
 
   it('still cleans a schema whose foreign keys form a cycle (the TRUNCATE fallback)', async () => {
-    // `planDeleteOrder` returns null here, so resetDb takes the pre-#2211
-    // TRUNCATE path. Created and dropped inside this test: left behind, the
-    // cycle would put EVERY later reset in the run on the fallback path.
-    // Same self-healing drop, and here it matters more: a cycle left behind
-    // puts EVERY later reset in the worker on the TRUNCATE fallback — correct,
-    // but slow enough to time the rest of the file out. That happened once
-    // during #2211, from a test killed by an unrelated timeout.
+    // `planEmptying` cannot order these two, so resetDb takes the pre-#2211
+    // TRUNCATE path for them — and since #2354 ONLY for them: every other
+    // table is still emptied by DELETE, and the census below proves both
+    // halves at once. Before #2354 this test truncated the whole schema, the
+    // one reset shape that scales with both relations and concurrent workers,
+    // and it was the test that timed out under load (#2354's reproduction).
+    // Created and dropped inside this test: left behind, the cycle would put
+    // every later reset in the worker on the fallback path — correct, but
+    // that happened once during #2211, from a test killed by an unrelated
+    // timeout, hence the self-healing drop.
     await db.query(
       `DROP TABLE IF EXISTS ${WORKER_SCHEMA}.cycle_b, ${WORKER_SCHEMA}.cycle_a`,
     )

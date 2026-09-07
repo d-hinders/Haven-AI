@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-08-29" # #2150: the "Migration availability" bullet re-read against the migration runner on this branch — the hand-run out-of-band pre-build is no longer the only way to get `CREATE INDEX CONCURRENTLY` past the runner's `BEGIN`/`COMMIT`, so it is demoted to a fallback behind the in-repo `transactional = false` opt-out, and the deploy-verification step gains the one failure state the opt-out introduces (a migration left `status = 'running'`, which stops the backend booting until an operator acts). Scope: those two bullets only — QA, npm, rollback and the merge-commit rule were not re-verified. Prior: #2151: the migration checklist re-read for hot-table lock availability; adds the lock-duration question and its pre-build/low-traffic mitigations. Prior: re-verified for #1266 demo merchant x402 settlement selection/canary posture
+last-verified: "2026-09-02" # #2421: the **npm** checklist item re-read against `.github/workflows/publish.yml`, which this PR changes. It still holds as written for the promotion: the prod path is version-gated, derives the tag from the version (`alpha`/`latest`) and reports per-package outcomes (#1159). What the item did not say, and now does, is that the SAME workflow gained a second channel — a push to `dev` publishes `0.0.0-dev.*` snapshots under the `dev` dist-tag — which changes nothing about this checklist, because a snapshot can reach neither `alpha` nor `latest` and a promotion cannot publish one. Scope: that ONE checklist item; the migration, sweep-floor, env and QA items were NOT re-verified in this pass. Prior: #2150: the "Migration availability" bullet re-read against the migration runner on this branch — the hand-run out-of-band pre-build is no longer the only way to get `CREATE INDEX CONCURRENTLY` past the runner's `BEGIN`/`COMMIT`, so it is demoted to a fallback behind the in-repo `transactional = false` opt-out, and the deploy-verification step gains the one failure state the opt-out introduces (a migration left `status = 'running'`, which stops the backend booting until an operator acts). Scope: those two bullets only — QA, npm, rollback and the merge-commit rule were not re-verified. Prior: #2151: the migration checklist re-read for hot-table lock availability; adds the lock-duration question and its pre-build/low-traffic mitigations. Prior: re-verified for #1266 demo merchant x402 settlement selection/canary posture
 ---
 
 # Promoting `dev → main` (production release)
@@ -80,6 +80,11 @@ for how the environments are wired, see
       then read the run's **per-package summary table**: a package can fail while
       the others publish (#1159), so green-except-one is a real outcome, not a
       binary.
+      Since [#2421](https://github.com/d-hinders/Haven-AI/issues/2421) the same
+      workflow also publishes `0.0.0-dev.*` snapshots under a separate `dev`
+      dist-tag on pushes to `dev`. That is a different channel and changes
+      nothing in this checklist: a snapshot can reach neither `alpha` nor
+      `latest`, and this promotion cannot publish one.
 - [ ] Required checks are green, `dev-gate` passes, and a code-owner approval is
       present if the batch touches an owned path (migrations / release tooling /
       CODEOWNERS).

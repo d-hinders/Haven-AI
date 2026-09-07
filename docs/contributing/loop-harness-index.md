@@ -43,12 +43,12 @@ of the arithmetic lives on under LP-2.
 
 ### LP-2 · Frontend allowance display math
 
-- **Target:** `computeEffectiveAllowance` in `packages/frontend/src/lib/allowance-math.ts` — drives the dashboard `AllowanceBar`.
-- **Oracle:** reference model of the AllowanceModule reset/period-grid semantics (`packages/frontend/src/lib/loop-harness/reference-allowance-module.ts`). Same certification caveat as LP-1.
+- **Target:** `computeEffectiveAllowance` in `packages/frontend/src/lib/allowance-math.ts` — retained for the historical `AllowanceBar` renderer and its display-math tests; it has no live Safe data consumer.
+- **Oracle:** reference model of the retired AllowanceModule reset/period-grid semantics (`packages/frontend/src/lib/loop-harness/reference-allowance-module.ts`). Same certification caveat as LP-1; this is not the live delegation authority path.
 - **Harness:** `packages/frontend/src/lib/loop-harness/`
 - **Run:** `npm --prefix packages/frontend test -- src/lib/loop-harness`
 - **Status:** ✅ Converged (green ratchet, 0 open findings).
-- **Findings:** F-1/F-2 — reset prediction keyed off the user's *device* clock (phantom reset / hidden reset near a boundary). F-3 — `nextResetTime` hardcoded `lastReset + 2*period`, wrong for multi-period-idle allowances (observed: reset shown ~2 days early). Both *resolved* (PR #383): explicit chain `nowSec` threaded from `useOnChainAllowances`; next reset computed on the period grid.
+- **Findings:** F-1/F-2 — reset prediction keyed off the user's *device* clock (phantom reset / hidden reset near a boundary). F-3 — `nextResetTime` hardcoded `lastReset + 2*period`, wrong for multi-period-idle allowances (observed: reset shown ~2 days early). Both *resolved* (PR #383): explicit chain `nowSec` was threaded through the retired read path; next reset is computed on the period grid. The renderer remains test-only after #2258.
 
 ## Candidate next targets
 

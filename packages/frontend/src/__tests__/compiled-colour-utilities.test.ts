@@ -45,9 +45,10 @@ import { describe, expect, it } from 'vitest'
  *                                arbitrary form and does compile)
  *
  * The third was found BY this guard while it was being written, in
- * `investor-briefing/page.tsx` — a marketing surface that design-lint exempts,
- * carrying a shape no `var()`-oriented rule would ever have looked for. It is
- * the concrete evidence that shape-matching was the wrong altitude.
+ * the retired investor-briefing page — a marketing surface that design-lint
+ * exempted, carrying a shape no `var()`-oriented rule would ever have looked
+ * for. It remains as historical evidence that shape-matching was the wrong
+ * altitude.
  *
  * **Relationship to the two existing guards**, since all three now touch this
  * behaviour and it should be clear which one to edit:

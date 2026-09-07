@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
-import { decodePaymentRequiredHeader, encodePaymentSignatureHeader } from '@x402/core/http'
+import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
 import { formatUsdc } from './products.js'
@@ -13,8 +13,10 @@ import {
   PAYMENT_SIGNATURE_HEADER,
   AuthorizationAlreadyUsedError,
   SettlementRevertedError,
+  SETTLEMENT_COST_WEI,
   USDC_ADDRESS,
   createX402PaymentProcessor,
+  settlementReadiness,
   type Eip3009Authorization,
   type SettlementClient,
 } from './x402.js'
@@ -44,6 +46,11 @@ async function startServer(client: Partial<SettlementClient> = {}) {
     merchantAddress: MERCHANT,
     baseUrl: 'http://127.0.0.1:0',
     paymentProcessor: createX402PaymentProcessor(settlementClient),
+    // #2490: wire the readiness through so /healthz tests can stub it via the
+    // same partial client the payment path uses. Absent a readiness stub this
+    // is still a client whose `readiness` is undefined, so /healthz omits the
+    // settlement block exactly as before.
+    settlementClient,
   })
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -366,6 +373,85 @@ describe('demo merchant MCP x402 flow', () => {
     expect(submit).toHaveBeenCalledTimes(1)
   })
 
+  // #2403: the README (#2383) quotes the three echo-rule refusal strings and
+  // the 402 shape from a live capture. Pin them at the HTTP boundary, so a
+  // change to the refusal text, the re-sent challenge, or the header alias
+  // cannot make the README false silently. The rule's own branches are
+  // pinned in x402.test.ts; this is the wire contract on top of them.
+  describe('extensions echo refusals over HTTP (#2403)', () => {
+    async function challenge(url: string) {
+      const unpaid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      })
+      expect(unpaid.status).toBe(402)
+      return await unpaid.json() as PaymentRequired
+    }
+
+    async function retry(url: string, headers: Record<string, string>) {
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, headers)
+      const body = await paid.json() as PaymentRequired & { error?: string }
+      return { paid, body }
+    }
+
+    it('answers a dropped echo with 402, the reason as the body error, and the challenge re-sent in PAYMENT-REQUIRED', async () => {
+      const { url, submit } = await startServer()
+      const paymentRequired = await challenge(url)
+      const payload = decodePaymentSignatureHeader(await signedHeader(paymentRequired)) as PaymentPayload
+      delete (payload as { extensions?: unknown }).extensions
+
+      const { paid, body } = await retry(url, { [PAYMENT_SIGNATURE_HEADER]: encodePaymentSignatureHeader(payload) })
+
+      expect(paid.status).toBe(402)
+      expect(body.error).toBe('Payment must echo the challenge\'s extensions object (x402 v2 extensions echo rule)')
+      // The same challenge again: the body carries it with the reason, and
+      // the PAYMENT-REQUIRED header carries exactly what the body does.
+      expect(body.accepts).toEqual(paymentRequired.accepts)
+      expect(body.extensions).toEqual(paymentRequired.extensions)
+      const resent = paid.headers.get(PAYMENT_REQUIRED_HEADER)
+      expect(resent).toBeTruthy()
+      expect(decodePaymentRequiredHeader(resent as string)).toEqual(body)
+      // Nothing settled, nothing delivered.
+      expect(paid.headers.get(PAYMENT_RESPONSE_HEADER)).toBeNull()
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('refuses an empty {} echo with the append-only reason', async () => {
+      const { url, submit } = await startServer()
+      const paymentRequired = await challenge(url)
+      const payload = decodePaymentSignatureHeader(await signedHeader(paymentRequired)) as PaymentPayload
+      ;(payload as { extensions?: Record<string, unknown> }).extensions = {}
+
+      const { paid, body } = await retry(url, { [PAYMENT_SIGNATURE_HEADER]: encodePaymentSignatureHeader(payload) })
+
+      expect(paid.status).toBe(402)
+      expect(body.error).toBe('Payment extensions must include the challenge\'s extensions unmodified (x402 v2: append-only, never delete or overwrite)')
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('enforces the same rule on the legacy X-PAYMENT alias — a version mismatch with a perfect echo is refused', async () => {
+      const { url, submit } = await startServer()
+      const paymentRequired = await challenge(url)
+      const payload = decodePaymentSignatureHeader(await signedHeader(paymentRequired)) as PaymentPayload
+      expect((payload as { extensions?: unknown }).extensions).toEqual(paymentRequired.extensions)
+      ;(payload as { x402Version: number }).x402Version = 1
+
+      const { paid, body } = await retry(url, { [LEGACY_PAYMENT_SIGNATURE_HEADER]: encodePaymentSignatureHeader(payload) })
+
+      expect(paid.status).toBe(402)
+      expect(body.error).toBe('Payment x402Version 1 does not match the challenge\'s 2')
+      expect(paid.headers.get(PAYMENT_RESPONSE_HEADER)).toBeNull()
+      expect(submit).not.toHaveBeenCalled()
+    })
+  })
+
   it('keeps settled payment state scoped to concurrent requests on the same MCP session', async () => {
     const submit = vi.fn<SettlementClient['submit']>()
       .mockImplementation(async (authorization) => {
@@ -437,6 +523,49 @@ describe('demo merchant MCP x402 flow', () => {
     expect(products.status).toBe(200)
     expect(products.headers.get('mcp-session-id')).toBeNull()
     expect(text).toContain('vpn_basic')
+  })
+
+  // #2490: /healthz must carry the BAND and both floors, not just a boolean,
+  // so the QA harness renders the merchant's own decision without restating
+  // the thresholds (preflight rule 1: derive, never restate — the merchant
+  // owns this resource). `ok` stays additive for a harness predating the
+  // band; on a banded merchant it means only "not in the fail band", which
+  // the warn case here proves: `ok: true` while `status: 'warn'`.
+  describe('/healthz settlement block (#2490 wire shape)', () => {
+    async function healthzFor(balance: bigint) {
+      const { url } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, balance)),
+      })
+      const res = await fetch(`${url.replace(/\/mcp$/, '')}/healthz`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { settlement: Record<string, unknown> }
+      return body.settlement
+    }
+
+    it('carries status plus both floors alongside the legacy ok boolean', async () => {
+      const settlement = await healthzFor(SETTLEMENT_COST_WEI * 30n)
+      expect(settlement['status']).toBe('usable')
+      expect(settlement['warn_floor']).toBe(25)
+      expect(settlement['fail_floor']).toBe(12)
+      expect(settlement['ok']).toBe(true)
+      expect(settlement['settlements_remaining']).toBe(30)
+      expect(settlement['cost_per_settlement_wei']).toBe(SETTLEMENT_COST_WEI.toString())
+    })
+
+    it('reports the warn band with ok: true — a warn must not fail the legacy boolean', async () => {
+      // The #2485 state: 24 settlements, one below the warn floor. The run
+      // proceeds, so the legacy `ok` boolean must stay true; only `status`
+      // says the drain is underway.
+      const settlement = await healthzFor(SETTLEMENT_COST_WEI * 24n)
+      expect(settlement['status']).toBe('warn')
+      expect(settlement['ok']).toBe(true)
+    })
+
+    it('reports the fail band with ok: false', async () => {
+      const settlement = await healthzFor(255_000_000_000n)
+      expect(settlement['status']).toBe('fail')
+      expect(settlement['ok']).toBe(false)
+    })
   })
 
   /**

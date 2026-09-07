@@ -18,12 +18,10 @@
  *    `useAgentConnectionSetup`, `agent-panel/agent-display` (and
  *    `EditAgentModal`). Nothing about it is AllowanceModule code.
  *  - `getSafeNonce` / `getSafeTxHash` / `signSafeTx` / `executeSafeTx` /
- *    `proposeSafeTx` / `SafeTxParams` / `SafeTxReceiptTimeoutError` — the
- *    OWNER-signed Safe execution path, still used by the agent lifecycle
- *    (`lib/agent-setup.ts`, `lib/revoke-agent.ts`, `EditAgentModal`,
- *    `lib/allowance-module.ts`, and `signSafeTx` from `lib/signer.ts`). Those
- *    surfaces are out of this slice's scope; the epic's residue sweep (#1993)
- *    owns whatever of them the retirement eventually reaches.
+ *    `proposeSafeTx` / `SafeTxParams` / `SafeTxReceiptTimeoutError` — retained
+ *    owner-signed Safe execution helpers for the compatibility route and its
+ *    tests. No dashboard agent surface calls these helpers after the legacy
+ *    agent lifecycle is retired.
  *
  * The #1229 approver-recovery consumer (`lib/approver-tx.ts`) is NOT in that
  * list any more: #1988 deleted all five `/user/safes/:id/approvers*` routes,

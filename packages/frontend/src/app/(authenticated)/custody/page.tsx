@@ -4,15 +4,12 @@
  * Custody proof, RAIL-BRANCHED (#2106, epic #1440).
  *
  * The page's job is to show what actually constrains an agent. Until #2106 it
- * showed one rail's answer to every account: it read the Safe AllowanceModule
- * and nothing else, so a DELEGATION-rail account — every account onboarded
- * since #1984 — was told "AllowanceModule not enabled" and "No on-chain agent
- * allowances", which is the inverse of the truth for an agent constrained by a
- * signed budget delegation. The owner's decision (issue #2106, 2026-08-27) was
- * to branch the page, not retire it: the non-custody evidence here is real and
- * this is the population that most needs it.
+ * showed one rail's answer to every account. It now branches so delegation
+ * budgets are shown as signed control, while legacy accounts remain readable
+ * without presenting an actionable Haven spending surface.
  *
- * `UserSafe.account_type === 'delegator_hybrid'` is the rail marker (#1069).
+ * #2413: no rail marker is read here any more — the account list is
+ * delegation-only, so every account this page renders is on the live rail.
  * Both rails live in the same `user.safes` list, so the branch is per ACCOUNT,
  * not per page — and there is no third state: an account is either on the
  * delegation rail or it is a legacy Safe.
@@ -28,8 +25,8 @@
  *    and enforced by the DelegationManager during redemption. The page shows
  *    the TERMS of the delegation the user signed and says so — it does not
  *    claim to have re-read them from the chain.
- *  - SAFE (legacy, retired rail): unchanged. Owners/threshold from
- *    `GET /safe/:address/details`, allowances from `useOnChainAllowances`.
+ *  - SAFE (legacy, retired rail): owners/threshold from
+ *    `GET /safe/:address/details`, plus the read-only retirement notice.
  *
  * Two claims that were rail-blind and are now branched, because they are FALSE
  * on the delegation rail:
@@ -50,15 +47,13 @@ import { type ReactNode } from 'react'
 import Link from 'next/link'
 import { useUserSafes } from '@/hooks/useUserSafes'
 import { useAgents, type Agent } from '@/hooks/useAgents'
-import { useSafeDetails } from '@/hooks/useSafeDetails'
-import { useOnChainAllowances } from '@/hooks/useOnChainAllowances'
 import { useDelegationCustodyProof } from '@/hooks/useDelegationCustodyProof'
 import { type DelegationBudget } from '@/hooks/useDelegationBudget'
 import { type UserSafe } from '@/context/AuthContext'
 // #2106: rail classification and the rail-correct claim list live in
 // `lib/`, NOT here — Next type-checks a page MODULE and refuses arbitrary
 // named exports from `page.tsx` (`next build` fails; `tsc --noEmit` does not).
-import { havenCannotLines, railOf } from '@/lib/custody-rail'
+import { havenCannotLines } from '@/lib/custody-rail'
 import { getChainConfig, getExplorerUrl, getTokensForChain } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
@@ -69,33 +64,17 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 
 /** EIP-3770 short names Safe{Wallet} uses in its deep links. */
-const SAFE_SHORT_NAME: Record<number, string> = { 100: 'gno', 8453: 'base' }
+const SAFE_SHORT_NAME: Record<number, string> = { 100: 'gno', 8453: 'base', 84532: 'basesep' }
 
 function safeWalletUrl(safe: UserSafe): string {
   const prefix = SAFE_SHORT_NAME[safe.chain_id] ?? ''
   return `https://app.safe.global/home?safe=${prefix}:${safe.safe_address}`
 }
 
-function resetLabel(mins: number): string {
-  if (mins === 0) return 'one-time'
-  if (mins === 1440) return 'daily'
-  if (mins === 10080) return 'weekly'
-  if (mins === 43200) return 'monthly'
-  return `every ${mins} min`
-}
-
 function OnChainBadge() {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-success-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-success)]">
       🔒 on-chain
-    </span>
-  )
-}
-
-function AdvisoryBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-3)]">
-      ⓘ not on-chain
     </span>
   )
 }
@@ -124,8 +103,8 @@ function AccountCardHeader({
   linkLabel,
 }: {
   safe: UserSafe
-  linkHref: string
-  linkLabel: ReactNode
+  linkHref?: string
+  linkLabel?: ReactNode
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -135,15 +114,17 @@ function AccountCardHeader({
           {truncate(safe.safe_address)} · {getChainConfig(safe.chain_id).name}
         </p>
       </div>
-      <a
-        href={linkHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
-      >
-        {linkLabel}
-        <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
-      </a>
+      {linkHref && linkLabel ? (
+        <a
+          href={linkHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-11 items-center gap-1 rounded-md text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
+        >
+          {linkLabel}
+          <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
+        </a>
+      ) : null}
     </div>
   )
 }
@@ -370,116 +351,6 @@ function DelegationRow({
   )
 }
 
-// ── Legacy Safe rail ────────────────────────────────────────────────────────
-
-function SafeControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) {
-  const { details, loading: detailsLoading } = useSafeDetails(safe.safe_address, { chainId: safe.chain_id })
-  const safeAgents = agents.filter((a) => a.safe_id === safe.id && a.delegate_address)
-  const managedDelegates = safeAgents.map((a) => (a.delegate_address as string).toLowerCase())
-  const { data, moduleEnabled, loading: allowancesLoading } = useOnChainAllowances(
-    safe.safe_address,
-    managedDelegates,
-    safe.chain_id,
-  )
-
-  const agentByDelegate = new Map(
-    safeAgents.map((a) => [(a.delegate_address as string).toLowerCase(), a]),
-  )
-
-  return (
-    <Card className="p-5" hover={false}>
-      <AccountCardHeader
-        safe={safe}
-        linkHref={safeWalletUrl(safe)}
-        linkLabel={<>Open in Safe&#123;Wallet&#125;</>}
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Stat label="Owners (control this Safe — Haven is not one)">
-          {detailsLoading ? (
-            <Skeleton variant="text" className="h-4 w-40" />
-          ) : details ? (
-            <div className="space-y-1">
-              {details.owners.map((o) => (
-                <p key={o} className="font-mono text-xs text-[var(--v2-ink-2)]">{truncate(o)}</p>
-              ))}
-              <p className="text-xs text-[var(--v2-ink-3)]">Threshold: {details.threshold} of {details.owners.length}</p>
-            </div>
-          ) : (
-            <span className="text-[var(--v2-ink-3)]">—</span>
-          )}
-        </Stat>
-
-        <Stat label="Spend control">
-          {allowancesLoading ? (
-            <Skeleton variant="text" className="h-4 w-32" />
-          ) : moduleEnabled ? (
-            <span className="inline-flex items-center gap-2">Safe AllowanceModule <OnChainBadge /></span>
-          ) : moduleEnabled === false ? (
-            <span className="text-[var(--v2-ink-3)]">AllowanceModule not enabled</span>
-          ) : (
-            <span className="text-[var(--v2-ink-3)]">—</span>
-          )}
-        </Stat>
-      </div>
-
-      <div className="mt-5">
-        <p className="mb-2 text-xs font-medium text-[var(--v2-ink-3)]">Agent spend authority (enforced on-chain)</p>
-        {allowancesLoading ? (
-          <Skeleton variant="text" className="h-4 w-48" />
-        ) : data.size === 0 ? (
-          <p className="text-sm text-[var(--v2-ink-3)]">No on-chain agent allowances on this Safe.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-[var(--v2-border)]">
-            {/* `collapseWhenNarrow={false}`: the dense admin shape that
-                SCROLLS inside its `overflow-x-auto` wrapper rather than
-                collapsing columns to fit — these rows carry no self-labelling
-                content. The primitive's inline-size container is present here
-                as everywhere and does not interfere with that scroll
-                (measured, #1999). No `revealAt` columns, so it queries
-                nothing. */}
-            <Table className="text-sm">
-              <Table.Head collapseWhenNarrow={false}>
-                <tr>
-                  <Table.HeaderCell align="left">Agent / delegate</Table.HeaderCell>
-                  <Table.HeaderCell align="left">Token</Table.HeaderCell>
-                  <Table.HeaderCell align="left">Limit</Table.HeaderCell>
-                  <Table.HeaderCell align="left">Spent</Table.HeaderCell>
-                  <Table.HeaderCell align="left">Resets</Table.HeaderCell>
-                </tr>
-              </Table.Head>
-              <Table.Body>
-                {[...data.entries()].flatMap(([delegate, info]) => {
-                  const agent = agentByDelegate.get(delegate)
-                  return info.allowances.map((al) => {
-                    const sym = tokenSymbol(al.token, safe.chain_id)
-                    return (
-                      <tr key={`${delegate}-${al.token}`}>
-                        <td className="px-4 py-3">
-                          <span className="text-[var(--v2-ink)]">{agent?.name ?? 'Unmanaged delegate'}</span>
-                          <span className="ml-1 font-mono text-xs text-[var(--v2-ink-3)]">{truncate(delegate)}</span>
-                        </td>
-                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{sym}</td>
-                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{formatAllowanceForToken(al.amount.toString(), safe.chain_id, sym)}</td>
-                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{formatAllowanceForToken(al.spent.toString(), safe.chain_id, sym)}</td>
-                        <td className="px-4 py-3 text-[var(--v2-ink-2)]">{resetLabel(al.resetTimeMin)}</td>
-                      </tr>
-                    )
-                  })
-                })}
-              </Table.Body>
-            </Table>
-          </div>
-        )}
-        <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
-          Token, limit and reset are <OnChainBadge /> enforced. Recipient is <AdvisoryBadge /> constrained today.{' '}
-          Revoke an agent — or an unmanaged delegate — on-chain from <Link href="/agents" className="text-[var(--v2-brand)] hover:underline">Agents</Link>.
-        </p>
-      </div>
-    </Card>
-  )
-}
-
 // ── "What Haven cannot do" ──────────────────────────────────────────────────
 
 export default function CustodyPage() {
@@ -496,7 +367,7 @@ export default function CustodyPage() {
       <Card className="mb-5 p-5" elevation="anchor" hover={false}>
         <p className="mb-2 text-sm font-medium text-[var(--v2-ink)]">What Haven cannot do</p>
         <ul className="space-y-1.5">
-          {havenCannotLines(safes).map((line) => (
+          {havenCannotLines().map((line) => (
             <li key={line} className="flex gap-2 text-sm text-[var(--v2-ink-2)]">
               <span className="text-[var(--v2-success)]">✓</span>
               <span>{line}</span>
@@ -511,13 +382,12 @@ export default function CustodyPage() {
         <p className="text-sm text-[var(--v2-ink-3)]">No accounts linked yet.</p>
       ) : (
         <div className="space-y-5">
-          {safes.map((safe) =>
-            railOf(safe) === 'delegation' ? (
-              <DelegationControlCard key={safe.id} safe={safe} agents={agents} />
-            ) : (
-              <SafeControlCard key={safe.id} safe={safe} agents={agents} />
-            ),
-          )}
+          {/* #2413: only delegation accounts reach this page — the account
+              list queries filter the retired rail out — so there is no rail
+              branch left to make. */}
+          {safes.map((safe) => (
+            <DelegationControlCard key={safe.id} safe={safe} agents={agents} />
+          ))}
         </div>
       )}
     </div>

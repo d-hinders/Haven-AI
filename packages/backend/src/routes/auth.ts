@@ -5,6 +5,19 @@ import { authMiddleware } from '../middleware/auth.js'
 import { authRateLimit } from '../middleware/rate-limit.js'
 import { config } from '../config.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import { normalizeViaMarker } from '../domain/handoff-links.js'
+import { OWNER_CLI_PURPOSE } from '../middleware/owner-cli.js'
+import {
+  DEVICE_CODE_TTL_MS,
+  approveDeviceAuthorization,
+  createDeviceAuthorization,
+  denyDeviceAuthorization,
+  findByDeviceCode,
+  findPendingByUserCode,
+  generateUserCode,
+  purgeExpired,
+  redeemDeviceAuthorization,
+} from '../infra/repositories/device-authorizations.js'
 import {
   findUserCredentialsByEmail,
   findUserIdByEmail,
@@ -44,6 +57,12 @@ interface SignupBody {
   name: string
   email: string
   password: string
+  /**
+   * Agent hand-off marker (#2522). `'agent'` when the signup link was pasted
+   * by an agent; every other value is dropped. Sanitized, never refused —
+   * attribution must never cost someone an account.
+   */
+  via?: string
 }
 
 interface LoginBody {
@@ -122,8 +141,14 @@ export default async function authRoutes(
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
 
-    const user = await insertUser(normalizedName, normalizedEmail, passwordHash)
-    emitFunnelEvent(user.id, 'signed_up')
+    // #2522: `via` is sanitized to the enum `agent` or null. It rides the
+    // `signed_up` event as `handoff_via`, NOT as `via` — that key is already
+    // used in this funnel's metadata to name which CODE PATH created a record
+    // (see the `agent_created` emission in routes/agent-connection-setups.ts),
+    // and giving one key two meanings would silently redefine historical rows.
+    const via = normalizeViaMarker(request.body.via)
+    const user = await insertUser(normalizedName, normalizedEmail, passwordHash, via)
+    emitFunnelEvent(user.id, 'signed_up', via ? { handoff_via: via } : undefined)
 
     const token = app.jwt.sign(
       { sub: user.id, email: user.email },
@@ -204,4 +229,156 @@ export default async function authRoutes(
 
     return { ...profile, safes }
   })
+  /**
+   * Device-authorization flow (#2526, RFC 8628 shaped).
+   *
+   * An agent must never hold its user's password, and until now that was the
+   * only way to get an owner token. These three routes let the agent ask the
+   * human to approve a CLI session in a browser instead.
+   *
+   * The token this mints carries `purpose: 'owner_cli'`, which every
+   * authenticated route refuses by default (#1640). A route accepts it only by
+   * opting in — see `middleware/owner-cli.ts` and the census test that proves
+   * the opt-in has not become an opt-out.
+   */
+
+  // POST /auth/device/start — unauthenticated: this is where a CLI begins.
+  app.post<{ Body: { client_label?: string } }>(
+    '/device/start',
+    { config: { ...authRateLimit(trustProxyHops, 'device_start') } },
+    async (request, reply) => {
+      // Opportunistic, not a cron: these rows are spent credentials rather
+      // than history, and the cheapest moment to drop them is when a new one
+      // is created.
+      void purgeExpired().catch(() => undefined)
+
+      const userCode = generateUserCode()
+      const deviceCode = randomBytes(32).toString('base64url')
+      const expiresAt = new Date(Date.now() + DEVICE_CODE_TTL_MS)
+
+      // The label is free text from an unauthenticated caller and is SHOWN to
+      // a human on the approval screen, so it is bounded and stripped of
+      // control characters here. The screen still renders it as text, never
+      // as markup — two independent reasons it cannot become a lure.
+      const rawLabel = typeof request.body?.client_label === 'string' ? request.body.client_label : ''
+      const clientLabel = rawLabel.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80) || null
+
+      await createDeviceAuthorization({ userCode, deviceCode, clientLabel, expiresAt })
+
+      return reply.code(201).send({
+        device_code: deviceCode,
+        user_code: userCode,
+        verification_url: `${config.frontendUrl.replace(/\/+$/, '')}/device?code=${encodeURIComponent(userCode)}`,
+        expires_in: Math.floor(DEVICE_CODE_TTL_MS / 1000),
+        interval: 5,
+      })
+    },
+  )
+
+  // POST /auth/device/lookup — what is this code asking for? Read-only, and
+  // the reason the approval screen can show a human anything at all about the
+  // requester before they decide. Same session requirement and same uniform
+  // 404 as `approve`: a preview that distinguished wrong from expired from
+  // already-decided would be an enumeration oracle wearing a different name.
+  //
+  // It is absent from the owner_cli allow-list for the same reason `approve`
+  // is — a CLI session must not be able to inspect pending grants either.
+  app.post<{ Body: { user_code?: string } }>(
+    '/device/lookup',
+    { preHandler: authMiddleware, config: { ...authRateLimit(trustProxyHops, 'device_lookup') } },
+    async (request, reply) => {
+      const userCode = typeof request.body?.user_code === 'string' ? request.body.user_code : ''
+      if (!userCode.trim()) {
+        return reply.code(400).send({ error: 'user_code is required' })
+      }
+
+      const row = await findPendingByUserCode(userCode)
+      if (!row) {
+        return reply.code(404).send({ error: 'No pending approval for that code' })
+      }
+      // Deliberately narrow: the label and how long they have to decide. The
+      // row's id, timestamps and eventual user_id are nothing the approver
+      // needs and nothing this screen should carry.
+      return { client_label: row.client_label, expires_at: row.expires_at }
+    },
+  )
+
+  // POST /auth/device/approve — dashboard session only. An owner_cli token
+  // must NOT reach this: a CLI session approving further CLI sessions would
+  // turn one approval into an unbounded grant. It is absent from the
+  // allow-list, so the default refusal covers it.
+  app.post<{ Body: { user_code?: string; deny?: boolean } }>(
+    '/device/approve',
+    { preHandler: authMiddleware },
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const userCode = typeof request.body?.user_code === 'string' ? request.body.user_code : ''
+      if (!userCode.trim()) {
+        return reply.code(400).send({ error: 'user_code is required' })
+      }
+
+      const row = request.body?.deny === true
+        ? await denyDeviceAuthorization(userCode)
+        : await approveDeviceAuthorization(userCode, sub)
+
+      if (!row) {
+        // 404 for a wrong, expired or already-decided code alike — telling the
+        // caller WHICH would make codes enumerable, and this endpoint is
+        // reachable by any signed-in user.
+        return reply.code(404).send({ error: 'No pending approval for that code' })
+      }
+      return { status: row.status, client_label: row.client_label }
+    },
+  )
+
+  // POST /auth/device/token — the CLI's poll. Unauthenticated by design: the
+  // device code IS the credential.
+  app.post<{ Body: { device_code?: string } }>(
+    '/device/token',
+    { config: { ...authRateLimit(trustProxyHops, 'device_token') } },
+    async (request, reply) => {
+      const deviceCode = typeof request.body?.device_code === 'string' ? request.body.device_code : ''
+      if (!deviceCode) {
+        return reply.code(400).send({ error: 'invalid_request' })
+      }
+
+      const row = await findByDeviceCode(deviceCode)
+      // An unknown code and an expired one answer the same way: a poll loop
+      // does not need to tell them apart, and a difference here would let one
+      // be used to probe for the other.
+      if (!row || new Date(row.expires_at).getTime() <= Date.now()) {
+        return reply.code(400).send({ error: 'expired_token' })
+      }
+      if (row.status === 'denied') {
+        return reply.code(400).send({ error: 'access_denied' })
+      }
+      if (row.status === 'pending') {
+        return reply.code(400).send({ error: 'authorization_pending' })
+      }
+
+      // `redeemed` and a lost race both land here: the claim below is the only
+      // place that decides, and it decides exactly once.
+      const claimed = await redeemDeviceAuthorization(deviceCode)
+      if (!claimed || !claimed.user_id) {
+        return reply.code(400).send({ error: 'expired_token' })
+      }
+
+      const user = await findUserProfileById(claimed.user_id)
+      if (!user) {
+        return reply.code(400).send({ error: 'expired_token' })
+      }
+
+      const token = app.jwt.sign(
+        // The JWT payload type is fixed at `{ sub, email }`; the purpose is
+        // carried at runtime, the same cast the Fortnox OAuth state uses.
+        { sub: user.id, email: user.email, purpose: OWNER_CLI_PURPOSE } as unknown as {
+          sub: string
+          email: string
+        },
+        { expiresIn: '7d' },
+      )
+      return { token, user: { id: user.id, name: user.name, email: user.email } }
+    },
+  )
+
 }

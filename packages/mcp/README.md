@@ -16,6 +16,17 @@ The server is intentionally local-only:
 - Haven's backend receives API identity plus signed payloads. It never receives
   the delegate key.
 
+## Are you an AI agent whose user has no Haven account yet?
+
+Read **`/for-agents.md`** on the Haven host your user gave you — or
+[the copy in this repository](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
+if you do not have that host yet.
+
+Your user creates the account and the passkey: those are theirs, they need a
+human, and you should never ask for their password. You can do everything else
+— including running the connector command from the setup prompt they paste you,
+and managing the account from the shell with `@haven_ai/cli`.
+
 ## Credential file
 
 Create a private JSON file from the values in the Haven agent handoff:
@@ -35,7 +46,7 @@ Create a private JSON file from the values in the Haven agent handoff:
 The Haven connector may also write split credentials:
 
 ```sh
-npx @haven_ai/mcp --identity ~/.haven/agents/<agent-id>/identity.json --signer ~/.haven/agents/<agent-id>/signer.json
+npx @haven_ai/mcp@alpha --identity ~/.haven/agents/<agent-id>/identity.json --signer ~/.haven/agents/<agent-id>/signer.json
 ```
 
 `identity.json` holds the local API key and setup metadata. `signer.json` holds
@@ -99,6 +110,22 @@ Environment variable form:
 - `haven_submit_catalog_entry`
 - `haven_list_receipts`
 
+### `idempotencyKey` is deprecated — send `idempotency_key`
+
+The tools that take an idempotency key (`haven_send`, `haven_pay_mcp_tool`,
+`haven_quote_x402`, `haven_pay_x402_quote`, `haven_pay_x402`) now accept
+**`idempotency_key`**, the spelling the hosted Haven MCP surface and every other
+Haven wire contract use. `idempotencyKey` still works and returns a deprecation
+warning; it will be removed in a future release.
+
+Send **one** of them. Sending both with different values is refused
+(`AMBIGUOUS_IDEMPOTENCY_KEY`) with nothing contacted or spent — the key decides
+whether a retry is the same payment or a second one, so Haven will not guess
+which scope you meant. Sending both with the same value is fine.
+
+The warning arrives in an optional `warnings` array on the success result. It is
+additive: a caller that ignores it sees the response it always saw.
+
 ## First-launch consent
 
 The first time the MCP server runs against a credential file it refuses to
@@ -137,7 +164,7 @@ Acknowledge in one of two ways:
 - **Sidecar file (recommended).** Re-run once with `--ack`:
 
   ```sh
-  npx @haven_ai/mcp --credentials /absolute/path/to/haven-agent.json --ack
+  npx @haven_ai/mcp@alpha --credentials /absolute/path/to/haven-agent.json --ack
   ```
 
   This writes `haven-agent.json.ack.json` next to your credential. Future
@@ -192,6 +219,6 @@ flow above instead.
 ## Non-custodial invariant
 
 Do not run this as a hosted multi-tenant signer. The expected deployment is
-`npx @haven_ai/mcp` running beside the agent runtime that owns the credential
+`npx @haven_ai/mcp@alpha` running beside the agent runtime that owns the credential
 file. Revoking the agent on-chain disables spending even if this MCP server is
 still running.

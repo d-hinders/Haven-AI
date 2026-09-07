@@ -85,7 +85,7 @@ export function SiteHeader() {
           >
             Sign in
           </Link>
-          <Button href="/signup" size="sm">Get early access</Button>
+          <Button href="/signup" size="sm">Create your account</Button>
         </div>
       </div>
     </header>

@@ -192,6 +192,7 @@ describe('GET /agents/:id/delegate-balance', () => {
     expect(body.chain_id).toBe(8453)
     expect(body.eth_atomic).toBe('1000000000000000000')
     expect(body.usdc_atomic).toBe('2000000')
+    expect(body.sweep_min_usdc).toBe('0.01')
     await app.close()
   })
 

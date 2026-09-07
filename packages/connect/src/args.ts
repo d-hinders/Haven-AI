@@ -44,6 +44,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   let tombstoneReplacedBy: string | undefined
   let unwire: { reason?: string; replacedBy?: string } | undefined
   let unwireDir: string | undefined
+  let replace = false
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -86,6 +87,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       options.runtimeForce = requireValue(argv, ++i, arg)
     } else if (arg === '--credentials-dir') {
       options.credentialsDir = requireValue(argv, ++i, arg)
+    } else if (arg === '--replace') {
+      // #2551: the unattended way to say "yes, replace the bare pair" — a
+      // non-interactive setup on a machine already wired to a different agent
+      // refuses without it, instead of overwriting by default (#1569) and
+      // warning afterwards (#1688).
+      replace = true
     } else if (arg === '--name') {
       // Validated HERE, before any credential or config write can happen —
       // the slug is immutable once wired (#1694 owner decision), so a bad one
@@ -116,6 +123,22 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
 
   if (help) {
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
+  }
+
+  if (replace) {
+    // #2551: refuse rather than silently discard (the #1681 finding-2 rule).
+    // --replace answers one question — "this bare-pair setup collides with an
+    // existing agent; overwrite?" — which only a --setup run ever asks.
+    if (rekeyPhase || tombstoneDir || unwire || doctor || repair) {
+      throw new Error('--replace belongs to a --setup run: it says what to do when the bare haven / haven-signer pair is already wired to another agent.')
+    }
+    if (options.serverName) {
+      throw new Error(
+        '--replace and --name contradict each other: --replace overwrites the bare haven / haven-signer wiring, ' +
+          '--name installs alongside it under its own pair. Pass one of them.',
+      )
+    }
+    options.replaceExistingWiring = true
   }
 
   if (rekey) {
@@ -219,6 +242,12 @@ export function helpText(): string {
     '  --runtime-force <name>     Escape hatch: use exactly this runtime, ignoring environment detection.',
     '  --credentials-dir <path>   Credential directory fallback. Defaults to ~/.haven/agents.',
     '  --environment-label <text> Non-sensitive label shown in Haven setup review.',
+    '  --replace                  When this machine is already wired to a different Haven agent on the bare',
+    '                             haven / haven-signer pair, re-point that pair at the new agent and retire the',
+    '                             previous agent directory locally (tombstoned, local key files removed).',
+    '                             Nothing is revoked — revoke the old agent on the Haven agent page. Without',
+    '                             this flag a non-interactive run REFUSES such a collision (wiring_collision)',
+    '                             and an interactive terminal is asked; --name installs alongside instead.',
     '  --name <slug>              Wiring slug for a NAMED agent: writes haven-<slug> / haven-signer-<slug>',
     '                             MCP entries and stores credentials at ~/.haven/agents/<slug>/, so several',
     '                             agents can run side by side in one runtime. 1-32 lowercase letters, digits,',

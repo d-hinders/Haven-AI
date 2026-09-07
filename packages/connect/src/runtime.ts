@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { createConnectApiClient, ConnectRequestError, type ConnectApiClient, type ResolvedSetup } from './api.js'
-import { resolveTokenFromAddress } from '@haven_ai/sdk'
+import { connectorRerunCommand, resolveTokenFromAddress } from '@haven_ai/sdk'
 import {
   agentApiKeyPrefix,
   generateAgentApiKey,
@@ -29,15 +29,23 @@ import {
 import { normalizeRuntime, resolveRuntimeSelection, runtimeProfile, runtimeVerificationInstruction, RUNTIME_FLAG_VALUES, RUNTIME_FLAG_VALUE_LIST, type RuntimeId, type RuntimeProfile } from './runtime-registry.js'
 import { ConnectError } from './connect-error.js'
 import {
+  defaultPromptIo,
   installedClientHint,
   resolveRuntimeByInstalledClientPrompt,
   scanInstalledClients,
   type InstalledClientHint,
 } from './installed-clients.js'
+import {
+  detectWiringCollision,
+  promptWiringCollisionResolution,
+  type WiringCollision,
+  type WiringCollisionResolution,
+} from './wiring-collision.js'
+import { readIdentityFile, teardownLocalKeyMaterial, tombstoneDirectoryIfAbsent } from './unwire.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.1.34-alpha.0'
+export const CONNECTOR_VERSION = '0.1.35-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string
@@ -62,18 +70,43 @@ export interface ConnectOptions {
   environmentLabel?: string
   /** #1696: wiring slug for a named MCP pair + slug-keyed credential dir. */
   serverName?: string
+  /**
+   * #2551: when the bare pair on this machine is already wired to a different
+   * agent with a live key, replace it — re-point `haven` / `haven-signer` at
+   * the new agent (the #1569 remove-first install) and retire the superseded
+   * directory locally afterwards. Without it, such a collision is put to a
+   * human at a TTY and REFUSED everywhere else (`wiring_collision`), before
+   * anything is minted or written. Contradicts `serverName`, which installs
+   * alongside instead; the CLI refuses the pair.
+   */
+  replaceExistingWiring?: boolean
   connectorVersion?: string
   ackSigner?: boolean
   ackLocalTools?: boolean
   localMcp?: boolean
   /**
    * #1377 D: keep the process alive after registering and poll for the
-   * user's budget approval (default). Set false for structured/automation
-   * runs (--json) where prompt output emission matters more than narration.
+   * user's budget approval. Set false for structured/automation runs (--json)
+   * where prompt output emission matters more than narration. #2484: when
+   * UNSPECIFIED (the default), the wait runs only when stdout is a TTY — the
+   * wait exists to narrate to a watching human, and a prose run whose stdout
+   * is not a TTY (an agent tool call) skips it. An explicit true waits
+   * regardless of TTY.
    */
   waitForApproval?: boolean
   /** Test/injection overrides for the approval poll cadence and clock. */
   approvalWait?: ApprovalWaitOptions
+  /**
+   * #2528: how this run was invoked, reported to the backend at register so
+   * the onboarding funnel can segment machine-readable runs from narrated
+   * ones (D1, #2529).
+   *
+   * An explicit option rather than an inference from `waitForApproval`: that
+   * flag is already false for a prose run with no TTY (#2484) and can be set
+   * false by hand, so reading `--json` off it would mislabel real prose runs.
+   * Defaults to `'prose'` — the mode a caller who says nothing is in.
+   */
+  runMode?: 'json' | 'prose'
 }
 
 /** The stable machine-readable result emitted by `haven-connect --json`. */
@@ -97,7 +130,16 @@ export interface ConnectOutcome {
     instruction: string
   }
   next_action: string
-  approval: { required: boolean; expires_at: string | null }
+  /**
+   * `url` is #2528, additive within schema_version 1 — the same convention
+   * #2173, #2174, #2551, #2091 and #2279 followed for this object. Present
+   * only when the backend returned one: a deployment older than #2528 sends
+   * nothing, and a key whose value is `undefined` disappears from
+   * `JSON.stringify` anyway, so a consumer must test for it rather than
+   * assume it. `required: false` runs carry no url — there is nothing to
+   * approve.
+   */
+  approval: { required: boolean; expires_at: string | null; url?: string }
   verification: {
     tools: readonly ['haven_get_agent', 'haven_get_allowances']
     instruction: string
@@ -128,6 +170,25 @@ export interface ConnectOutcome {
   hosted_mcp_url?: string
   superseded_agent_ids?: readonly string[]
   /**
+   * #2551, additive within schema_version 1. Present only on a run that
+   * REPLACED existing wiring (`--replace`, or "replace" chosen at the
+   * prompt): `true` when every superseded directory was retired locally —
+   * tombstoned and its local key files removed — and `false` when the
+   * runtime install ended with an errorCode and the retirement was therefore
+   * skipped, because the old wiring may still be the only working one. It
+   * says nothing about the backend: nothing is revoked by the connector.
+   *
+   * `retired_agent_ids` names exactly WHICH directories that retirement
+   * reached — the collision set, and only the members whose tombstone and
+   * teardown both succeeded. It is deliberately a separate list from
+   * `superseded_agent_ids`, which is every OTHER directory on the machine
+   * (#1688) and so also names NAMED agents that coexist with the replaced
+   * bare pair and were never touched; reading the boolean against that list
+   * would overclaim (review finding on #2551).
+   */
+  superseded_agents_retired_locally?: boolean
+  retired_agent_ids?: readonly string[]
+  /**
    * #2091, additive within schema_version 1: `message` is the redacted human
    * refusal (automation used to get code + next_action and nothing to act
    * on), and `allowed_runtimes` carries the valid `--runtime` retry values on
@@ -155,6 +216,15 @@ export interface ConnectOutcome {
      */
     installed_clients?: readonly string[]
     suggested_runtime?: string
+    /**
+     * #2551, additive within schema_version 1, on a `wiring_collision`
+     * refusal: the agents a bare-pair setup would have displaced, and a
+     * valid, collision-checked `--name` the run can be re-issued with. The
+     * refusal is a RELAY instruction — the human chooses replace-vs-alongside
+     * — so the record carries what that human needs, never a default.
+     */
+    superseded_agent_ids?: readonly string[]
+    suggested_name?: string
   }
 }
 
@@ -174,8 +244,22 @@ export interface ConnectDeps {
   env?: NodeJS.ProcessEnv
   /** Overridable so the #1719 TTY gate is testable without faking process.stdin. */
   isTty?: boolean
+  /**
+   * Overridable so the #2484 non-TTY narration gate is testable without
+   * faking process.stdout. Distinct from `isTty`: that gate decides whether
+   * the stdin prompt rung can run (INTERACTIVITY); this one decides whether
+   * the budget-approval wait has a watching human to narrate to, so it is
+   * keyed on STDOUT.
+   */
+  isStdoutTty?: boolean
   /** Overridable so the #1719 installed-client prompt is testable without readline. */
   promptRuntime?: () => Promise<RuntimeId>
+  /**
+   * Overridable so the #2551 replace-vs-alongside prompt is testable without
+   * readline. Reached only through the same `interactive` + TTY gate as
+   * `promptRuntime`; a `--json` or piped run never gets here.
+   */
+  promptWiringCollision?: (collision: WiringCollision, agentName: string) => Promise<WiringCollisionResolution>
   /**
    * Overridable so the #2173 recovery-record write is testable without a real
    * credential directory — and so a FAILING writer can be injected to prove
@@ -321,7 +405,7 @@ async function executeConnect(
   const generateKey = deps.generateKey ?? generateDelegateKey
   const generateLocalApiKey = deps.generateApiKey ?? generateAgentApiKey
   // #1672: detection-first runtime resolution, BEFORE any side effect — the
-  // setup command no longer carries --runtime, and a hint that contradicts a
+  // connector command no longer carries --runtime, and a hint that contradicts a
   // confident detection must not write another client's config. Refusing here
   // keeps the #1161 discipline: no half-created agent, no burned setup token.
   //
@@ -420,6 +504,39 @@ async function executeConnect(
   }
   log('Checked local credential storage — all clear.')
 
+  // #2551: resolve an existing-agent wiring collision HERE — after the local
+  // reads that can see it and BEFORE the key is minted or the agent is
+  // registered, so a declined or refused run leaves no orphaned
+  // `pending_approval` agent behind. A --name run displaces nothing (its own
+  // pair coexists with the bare one) and is never asked; the bare-pair run is
+  // what the #1569 remove-first install would otherwise resolve by silently
+  // overwriting, with the #1688 heads-up arriving after the fact.
+  let serverName = options.serverName
+  let replacing: WiringCollision | undefined
+  if (!serverName) {
+    const collision = await detectWiringCollision({
+      credentialsDir: options.credentialsDir,
+      agentName: setup.agent.name,
+    })
+    if (collision) {
+      const resolution = await resolveWiringCollision(collision, setup.agent.name, options, deps)
+      if (resolution.action === 'replace') {
+        replacing = collision
+        log(
+          `Replacing the existing haven / haven-signer wiring (previous agent(s): ${supersededIds(collision)}). ` +
+            'The previous directory is retired locally once the new wiring is written; nothing is revoked.',
+        )
+      } else {
+        serverName = resolution.serverName
+        // The same two refusals the CLI's --name path applies, because the
+        // slug came from a prompt (or a proposal) rather than from argv.
+        assertValidServerSlug(serverName)
+        await assertServerSlugAvailable(serverName, options.credentialsDir)
+        log(`Installing alongside the existing wiring as a named agent: ${serverNamesFor(serverName).hosted} / ${serverNamesFor(serverName).signer}.`)
+      }
+    }
+  }
+
   const localKey = generateKey()
   const localApiKey = generateLocalApiKey()
   log('Minting a fresh signing key and API key — both stay on this machine.')
@@ -441,7 +558,10 @@ async function executeConnect(
       // the dashboard can name it. Derived here rather than sent as the raw
       // slug — `serverNamesFor` is the one place the naming rule lives, and
       // the hosted name is what a user pastes into an MCP config.
-      mcpServerName: serverNamesFor(options.serverName).hosted,
+      mcpServerName: serverNamesFor(serverName).hosted,
+      // #2528: 'prose' is the default because it is what a caller who says
+      // nothing is doing — the library entry point is not a --json run.
+      runMode: options.runMode ?? 'prose',
       connectorContext: {
         environment_label: options.environmentLabel ?? 'Local workspace',
         config_target: installCapabilities.canWriteRuntimeConfig
@@ -459,7 +579,7 @@ async function executeConnect(
     if (dead) throw dead
     if (isExpiredSetupChallenge(err)) {
       throw new Error(
-        'The Haven setup challenge expired while connecting. Return to Haven, start a fresh connection, and run its new Connect command. Do not reuse or paste credentials.',
+        'The Haven setup challenge expired while connecting. Return to Haven, start a fresh connection, and run its new connector command. Do not reuse or paste credentials.',
       )
     }
     throw err
@@ -471,7 +591,7 @@ async function executeConnect(
   const credentialPaths = await writeCredentials({
     baseDir: options.credentialsDir,
     agentId: registration.agent_id,
-    serverName: options.serverName,
+    serverName,
     apiKey: localApiKey,
     delegateKey: localKey.privateKey,
     delegateAddress: localKey.address,
@@ -515,7 +635,7 @@ async function executeConnect(
     ackSigner: options.ackSigner,
     ackLocalTools: options.ackLocalTools,
     localMcp: options.localMcp,
-    serverName: options.serverName,
+    serverName,
   }, {
     onProgress: log,
     // #1543: report "runtime configured" the moment the config write settles,
@@ -560,7 +680,12 @@ async function executeConnect(
         // manual_runtime_setup_required. One name for the gate: the budget
         // (#1542).
         if (!early.errorCode || early.errorCode === 'manual_runtime_setup_required') {
-          log('→ Action needed: approve this agent\'s budget in the Haven dashboard — the approval button is live now. Setup continues here in the meantime.')
+          // #2484: the CTA carries the approval-relevant facts — budget
+          // amount/token/period and the wallet label + network — so an agent
+          // relaying it verbatim hands the user everything without a second
+          // call. No secrets: every value here is already in the
+          // printSetupSummary output; nothing in it is a key or an address.
+          log(approveBudgetCta(setup, registration.approval_url))
         }
       } catch {
         // ignore — the final report follows either way
@@ -581,15 +706,68 @@ async function executeConnect(
     log('Haven setup on this machine is complete.')
   }
 
+  // #2551: a REPLACE retires the superseded directory locally, but only once
+  // the new wiring is actually written — an install that ended with an
+  // errorCode may have left the old wiring as the only working one, and
+  // retiring its key behind that would fail open into "no agent works".
+  // Local retirement = tombstone (#1681) + the same key-material teardown
+  // --unwire performs (#2169), so --doctor reads `retired`, not `superseded`.
+  // Nothing is revoked: that stays the owner's action on the Haven agent page.
+  let supersededAgentsRetiredLocally: boolean | undefined
+  const retiredAgentIds: string[] = []
+  if (replacing) {
+    if (runtimeInstall.errorCode) {
+      supersededAgentsRetiredLocally = false
+      log(
+        `Previous agent(s) ${supersededIds(replacing)} were NOT retired: the runtime install did not complete, ` +
+          'so their wiring may still be the only working one. Resolve the install, then retire them with ' +
+          `${RERUN_HINT} --unwire <dir>.`,
+      )
+    } else {
+      supersededAgentsRetiredLocally = true
+      for (const entry of replacing.superseded) {
+        try {
+          await tombstoneDirectoryIfAbsent({
+            directory: entry.directory,
+            agentId: entry.agentId,
+            reason: 'replaced by a new setup (--replace)',
+            replacedBy: registration.agent_id,
+          })
+          await teardownLocalKeyMaterial(entry.directory, await readIdentityFile(entry.directory))
+          retiredAgentIds.push(entry.agentId)
+          log(`Retired previous agent ${entry.agentId} locally: tombstoned, local key files removed.`)
+        } catch (err) {
+          supersededAgentsRetiredLocally = false
+          log(`Could not retire previous agent ${entry.agentId} locally: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    }
+  }
+
   // #1688: a re-run minted a NEW agent, and nothing retires the old one — the
   // previous directory keeps an API key and a signing key, and any host that
   // started before this run keeps spending as that agent. Name the superseded
   // agents here, at the moment the user is watching, with the one action only
   // they can take. Connect never revokes or deletes credentials itself.
+  // `null` means the scan could not run — kept apart from `[]` all the way to
+  // the install-status report (#2561), even though the `--json` outcome below
+  // still flattens it to `[]` for compatibility.
+  let supersededScan: string[] | null = null
   let supersededAgentIds: string[] = []
   try {
-    supersededAgentIds = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
-    if (supersededAgentIds.length > 0) {
+    supersededScan = await listOtherAgentIds(options.credentialsDir, credentialPaths.directory)
+    supersededAgentIds = supersededScan ?? []
+    if (supersededAgentsRetiredLocally === true) {
+      // #2551: the local half is done; what remains is the owner's half, and
+      // the restart every long-lived host still needs (#1681).
+      log('')
+      log(
+        `Replaced: previous agent(s) ${supersededIds(replacing!)} are retired on this machine but NOT revoked — ` +
+          'revoke them on the Haven agent page, then restart EVERY long-lived host (gateways, TUI workers, ' +
+          'editors): each holds the MCP wiring snapshot from its own start time, and the tombstone speaks only ' +
+          'when a stale host next probes the old path.',
+      )
+    } else if (supersededAgentIds.length > 0) {
       log('')
       log(
         `Heads-up: this setup created a NEW agent. Your previous agent(s) — ${supersededAgentIds.join(', ')} — ` +
@@ -638,6 +816,10 @@ async function executeConnect(
       nextUserAction: runtimeInstall.nextUserAction,
       errorCode: runtimeInstall.errorCode,
       environmentLabel: options.environmentLabel ?? 'Local workspace',
+      // The raw scan result, `null` and all — NOT the flattened
+      // `supersededAgentIds` the outcome carries. Flattening here would hand
+      // the dashboard the same ambiguity this field exists to remove (#2561).
+      supersededAgentIds: supersededScan,
     })
   } catch (err) {
     log(`Could not report install status to Haven: ${err instanceof Error ? err.message : String(err)}`)
@@ -649,20 +831,36 @@ async function executeConnect(
   // the install itself needs manual completion first. The observed outcome
   // shapes the printed next steps (#1542): an approval the wait just
   // celebrated must not be requested again two lines later.
+  //
+  // #2484: a prose run whose STDOUT is not a TTY also skips the wait unless
+  // the caller explicitly demands it. The wait exists to narrate live to a
+  // watching human; an agent running the prose command as a tool call has no
+  // watching human, and before this it sat opaque for up to 3 minutes while
+  // the CTA it could have relayed was trapped inside the unfinished command's
+  // output. Keyed on STDOUT rather than STDIN on purpose: the #1719 prompt
+  // gate keys on stdin because it decides INTERACTIVITY; this gate decides
+  // NARRATION. An explicit waitForApproval: true from a library caller still
+  // waits regardless of TTY.
   let approval: BudgetApprovalOutcome | undefined
-  if (options.waitForApproval !== false && !runtimeInstall.errorCode) {
+  const narrateApprovalWait =
+    options.waitForApproval === true ||
+    (options.waitForApproval === undefined && (deps.isStdoutTty ?? Boolean(process.stdout.isTTY)))
+  if (narrateApprovalWait && !runtimeInstall.errorCode) {
     approval = await waitForBudgetApproval(api, registration.setup_id, localApiKey, log, options.approvalWait)
   }
 
-  printNextSteps(runtimeInstall, log, approval)
+  printNextSteps(runtimeInstall, log, approval, registration.approval_url)
 
   const outcome = completionOutcome({
     runtimeInstall,
     delegateAddress: registration.delegate_address,
     hostedMcpUrl: registration.hosted_mcp_url,
     supersededAgentIds,
+    supersededAgentsRetiredLocally,
+    ...(replacing ? { retiredAgentIds } : {}),
     setupChallengeExpiresAt: setup.challenge.expires_at,
     approvalRequired: registration.agent_status === 'pending_approval',
+    approvalUrl: registration.approval_url,
   })
 
   // #2173: park the verdict on disk before returning it. A harness whose watch
@@ -689,8 +887,12 @@ export function completionOutcome(input: {
   delegateAddress: string
   hostedMcpUrl?: string
   supersededAgentIds?: readonly string[]
+  /** #2551: only a replace run sets these; see the outcome fields' doc comments. */
+  supersededAgentsRetiredLocally?: boolean
+  retiredAgentIds?: readonly string[]
   setupChallengeExpiresAt?: string
   approvalRequired: boolean
+  approvalUrl?: string
 }): ConnectOutcome {
   const { runtimeInstall } = input
   const manualSetup = runtimeInstall.errorCode === 'manual_runtime_setup_required'
@@ -713,7 +915,16 @@ export function completionOutcome(input: {
         : runtimeProfile(runtimeInstall.runtime).activationInstruction,
     },
     next_action: nextAction,
-    approval: { required: input.approvalRequired, expires_at: null },
+    approval: {
+      required: input.approvalRequired,
+      expires_at: null,
+      // Only when there is something to approve AND the backend supplied a
+      // link. Never synthesised here: the connector does not know the
+      // dashboard's origin, and a guessed URL is worse than none — it is the
+      // "do not invent one" rule the agent runbook states, applied to the
+      // tool rather than the agent.
+      ...(input.approvalRequired && input.approvalUrl ? { url: input.approvalUrl } : {}),
+    },
     verification: {
       tools: ['haven_get_agent', 'haven_get_allowances'] as const,
       instruction: runtimeVerificationInstruction(runtimeInstall.runtime),
@@ -733,6 +944,10 @@ export function completionOutcome(input: {
     // agents" is a fact a caller needs, and an omitted key would be
     // indistinguishable from an older connector that never reported it.
     superseded_agent_ids: input.supersededAgentIds ?? [],
+    ...(input.supersededAgentsRetiredLocally !== undefined
+      ? { superseded_agents_retired_locally: input.supersededAgentsRetiredLocally }
+      : {}),
+    ...(input.retiredAgentIds ? { retired_agent_ids: input.retiredAgentIds } : {}),
     ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
     ...(runtimeInstall.errorCode
       ? { error: { code: runtimeInstall.errorCode, next_action: nextAction } }
@@ -793,12 +1008,77 @@ function runtimeSelectionPrompt(
   options: ConnectOptions,
   deps: ConnectDeps,
 ): (() => Promise<RuntimeId>) | undefined {
-  if (options.interactive !== true) return undefined
-  // The TTY gate is checked BEFORE the injected prompt, not after: an override
-  // that could skip it would make the gate untestable through the seam that
-  // exists to test it.
-  if (!(deps.isTty ?? Boolean(process.stdin.isTTY))) return undefined
+  if (!interactivePromptAllowed(options, deps)) return undefined
   return deps.promptRuntime ?? (() => resolveRuntimeByInstalledClientPrompt())
+}
+
+/**
+ * The ONE interactive gate (#1719), shared by every prompt rung so a second
+ * prompt cannot grow its own slightly different conditions (#2551 review):
+ * the caller opted in (`interactive`, which the CLI sets for a non-`--json`
+ * run) AND stdin is a terminal. The TTY gate is checked BEFORE any injected
+ * prompt, not after: an override that could skip it would make the gate
+ * untestable through the seam that exists to test it.
+ */
+function interactivePromptAllowed(options: ConnectOptions, deps: ConnectDeps): boolean {
+  if (options.interactive !== true) return false
+  return deps.isTty ?? Boolean(process.stdin.isTTY)
+}
+
+function supersededIds(collision: WiringCollision): string {
+  return collision.superseded.map((entry) => entry.agentId).join(', ')
+}
+
+/**
+ * #2551: the decision at the conflict. `--replace` answers it for an
+ * unattended run; a human at a TTY is asked; every other run is refused with
+ * a typed error that is itself a RELAY instruction — the dashboard's setup
+ * prompt permits an agent exactly two changes to the command (`--json`, and
+ * `--runtime` after a `runtime_undetermined` refusal), so the refusal tells
+ * the agent to hand the choice to its user rather than to add a flag it is
+ * not allowed to add. Never a default: replacing retires a working agent's
+ * local key material, and installing alongside changes the server names
+ * every host sees.
+ */
+async function resolveWiringCollision(
+  collision: WiringCollision,
+  agentName: string,
+  options: ConnectOptions,
+  deps: ConnectDeps,
+): Promise<Exclude<WiringCollisionResolution, { action: 'abort' }>> {
+  if (options.replaceExistingWiring) return { action: 'replace' }
+  if (interactivePromptAllowed(options, deps)) {
+    const prompt =
+      deps.promptWiringCollision ??
+      ((c: WiringCollision, name: string) => promptWiringCollisionResolution(c, name, defaultPromptIo()))
+    const resolution = await prompt(collision, agentName)
+    if (resolution.action === 'abort') {
+      throw new ConnectError(
+        'wiring_collision_declined',
+        `Setup stopped at your request: this machine is already wired to ${supersededIds(collision)} and you chose ` +
+          'neither to replace that wiring nor to install alongside it. Nothing was written: no agent was created, ' +
+          'no credentials were stored, and the Haven setup token is still unused. Run the connector command again with ' +
+          `--replace to re-point haven / haven-signer at the new agent, or with --name <slug> (e.g. --name ${collision.suggestedServerName}) ` +
+          'to install alongside.',
+        'rerun_connect_with_replace_or_name',
+        { supersededAgentIds: collision.superseded.map((e) => e.agentId), suggestedServerName: collision.suggestedServerName },
+      )
+    }
+    return resolution
+  }
+  throw new ConnectError(
+    'wiring_collision',
+    `This machine is already wired to a Haven agent with a live key (${supersededIds(collision)}), and setting up ` +
+      `"${agentName}" on the bare haven / haven-signer pair would replace that wiring. Nothing was written and the ` +
+      'Haven setup token is still unused. If you are an AI agent running this command: do NOT add a flag yourself — ' +
+      'relay this to your user and stop. Your user decides: REPLACE the existing wiring (re-run the same command with ' +
+      '--replace added, which re-points the pair at the new agent and retires the previous directory locally — they ' +
+      'still revoke the old agent on the Haven agent page), or install ALONGSIDE it (re-run with --name <slug> added, ' +
+      `e.g. --name ${collision.suggestedServerName}, which gives the new agent its own haven-<slug> / haven-signer-<slug> pair). ` +
+      'Re-run only with the flag your user chooses.',
+    'relay_wiring_collision_to_user',
+    { supersededAgentIds: collision.superseded.map((e) => e.agentId), suggestedServerName: collision.suggestedServerName },
+  )
 }
 
 /**
@@ -868,6 +1148,12 @@ export function failedConnectOutcome(runtimeHint: string | undefined, error: unk
       ...(error instanceof ConnectError && error.details.suggestedRuntime
         ? { suggested_runtime: error.details.suggestedRuntime }
         : {}),
+      ...(error instanceof ConnectError && error.details.supersededAgentIds
+        ? { superseded_agent_ids: error.details.supersededAgentIds }
+        : {}),
+      ...(error instanceof ConnectError && error.details.suggestedServerName
+        ? { suggested_name: error.details.suggestedServerName }
+        : {}),
     },
   }
 }
@@ -883,6 +1169,48 @@ function printSetupSummary(setup: ResolvedSetup, log: (message: string) => void)
     }
   }
   log(`Setup challenge expires at ${setup.challenge.expires_at}. If it expires, return to Haven for a fresh setup and rerun Connect — do not reuse or paste credentials.`)
+}
+
+/**
+ * #2484: the approve-budget CTA carries the facts an agent relaying it
+ * verbatim would otherwise have to go fetch — budget amount/token/period and
+ * the wallet label + network. No secrets: those exact values are already
+ * printed by `printSetupSummary` (atomic amounts, and the wallet label —
+ * nothing here is a key or an address). The budget phrase reuses the same
+ * formatter as the celebration line (`describeApprovedBudget` —
+ * `formatAtomicAmount` + `describeResetPeriod` + `resolveTokenFromAddress`,
+ * with the tokenless atomic-units fallback), so the CTA, the celebration,
+ * and the pending handoff can never phrase the same setup differently. A
+ * setup with no budget rows keeps today's plain phrasing. Multiple budget
+ * rows join with commas. One name for the gate throughout: the budget
+ * (#1542).
+ */
+function approveBudgetCta(setup: ResolvedSetup, approvalUrl?: string): string {
+  // #2528: the link replaces "in the Haven dashboard", which was a place the
+  // user had to go find. Falls back to the previous wording when the backend
+  // is older than #2528 and sent none — degrading to the old sentence is
+  // correct; printing `undefined` is not.
+  const where = approvalUrl ? `at ${approvalUrl}` : 'in the Haven dashboard'
+  const budgetPhrase =
+    setup.agent_budget.length > 0
+      ? setup.agent_budget.map((budget) => `up to ${describeSetupBudget(budget)}`).join(', ')
+      : undefined
+  if (budgetPhrase) {
+    return `→ Action needed: approve this agent's budget — ${budgetPhrase} from ${setup.haven_wallet.name} on ${setup.haven_wallet.network} — ${where}. The approval button is live now; setup continues here in the meantime.`
+  }
+  return `→ Action needed: approve this agent's budget ${where} — the approval button is live now. Setup continues here in the meantime.`
+}
+
+function describeSetupBudget(budget: ResolvedSetup['agent_budget'][number]): string {
+  // The celebration line's formatter takes the connector-status shape (atomic
+  // `amount`, token ident pair, reset period); the setup row carries the same
+  // fields under its own names, so adapt and reuse rather than fork.
+  return describeApprovedBudget({
+    token_symbol: budget.token_symbol,
+    token_address: budget.token_address,
+    amount: budget.allowance_amount,
+    reset_period_min: budget.reset_period_min,
+  })
 }
 
 function assertSetupChallengeIsUsable(expiresAt: string): void {
@@ -911,7 +1239,7 @@ function deadSetupTokenError(err: unknown): ConnectError | null {
     'setup_challenge_expired_or_invalid',
     'This Haven setup token is expired or invalid — tokens are single-use and expire 30 minutes after ' +
       'the dashboard issues them, and a mistyped token reads the same way. Return to Haven, start a ' +
-      'fresh connection, and run its new Connect command. No local credentials were written.',
+      'fresh connection, and run its new connector command. No local credentials were written.',
     'return_to_haven_for_fresh_setup',
   )
 }
@@ -1125,18 +1453,26 @@ export async function waitForBudgetApproval(
 export function completionHandoffLines(
   result: RuntimeInstallResult,
   approval?: BudgetApprovalOutcome,
+  approvalUrl?: string,
 ): string[] {
+  // #2528: "Return to Haven" is the sentence an agent had to translate into a
+  // place for its user. With a link it relays a destination instead. Optional
+  // throughout — a backend older than #2528 sends none and these lines read
+  // exactly as they did before.
+  const approveStep = approvalUrl
+    ? `Approve the budget at ${approvalUrl}. Approval — not restarting — unlocks Haven tools.`
+    : 'Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.'
   if (result.errorCode === 'manual_runtime_setup_required') {
     return [
       'Next steps:',
-      '1. Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.',
+      `1. ${approveStep}`,
       '2. Finish the manual MCP setup using the secret-free file references printed above, then start a fresh session in your runtime.',
       `3. ${runtimeVerificationInstruction(result.runtime)}`,
     ]
   }
   if (result.errorCode) {
     return [
-      'Recovery: runtime setup is not complete. Resolve the reported problem, then return to Haven for a fresh connection and run its new Connect command. Do not manually edit runtime config or paste credentials into prompts, logs, or config.',
+      'Recovery: runtime setup is not complete. Resolve the reported problem, then return to Haven for a fresh connection and run its new connector command. Do not manually edit runtime config or paste credentials into prompts, logs, or config.',
     ]
   }
 
@@ -1157,7 +1493,7 @@ export function completionHandoffLines(
   }
   return [
     'Next steps:',
-    '1. Return to Haven and approve the budget. Approval — not restarting — unlocks Haven tools.',
+    `1. ${approveStep}`,
     `2. ${activation}`,
     `3. ${runtimeVerificationInstruction(result.runtime)}`,
   ]
@@ -1181,21 +1517,43 @@ function activationInstructionWithWhy(profile: RuntimeProfile): string {
   return profile.activationInstruction
 }
 
-const RERUN_HINT = 'npx @haven_ai/connect@alpha'
+const RERUN_HINT = connectorRerunCommand()
 
 /**
- * Agent ids of every OTHER credential directory (#1688) — the agents this
- * run just superseded. Reads identity.json for the id; a directory that does
- * not parse is named by its directory name, because "I could not read it" is
- * still a directory the user should know exists.
+ * Agent ids of every OTHER credential directory (#1688) — the agents this run
+ * just superseded — or `null` when the scan could not run.
+ *
+ * Reads identity.json for the id; a directory that does not parse is named by
+ * its directory name, because "I could not read it" is still a directory the
+ * user should know exists.
+ *
+ * The `null` is the whole point of the signature (#2561). This used to return
+ * `[]` for both "the credential root holds no other agent" and "the credential
+ * root could not be read", and the outcome field's own doc comment had to warn
+ * readers that emptiness was not a guarantee. A warning in prose cannot reach
+ * a dashboard: rendering "nothing to revoke" for a machine nobody scanned
+ * states something Haven does not know. So the two cases are distinguishable
+ * at the source, where the difference is actually observed.
+ *
+ * What a NON-null return does and does not promise: the root was readable, not
+ * that every entry under it was. A per-entry `stat` or read that fails is
+ * skipped — correct for a `.DS_Store`, and it also silently drops a real agent
+ * directory that is merely unreadable (a permission error, say). So a list can
+ * UNDER-report. That direction is the safe one — fewer revoke offers, never a
+ * spurious one — but it is a limit of the success branch rather than a
+ * guarantee, and saying so here is cheaper than a reader inferring the
+ * opposite.
  */
-async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[]> {
+async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[] | null> {
   const root = defaultCredentialRoot(baseDir)
   let entries: string[] = []
   try {
     entries = await readdir(root)
   } catch {
-    return []
+    // The scan did not run. Callers that only want the heads-up treat this as
+    // empty; callers that report to Haven send `null` and let the dashboard
+    // stay silent rather than reassure.
+    return null
   }
   const ids: string[] = []
   for (const entry of entries) {
@@ -1230,6 +1588,7 @@ function printNextSteps(
   result: RuntimeInstallResult,
   log: (message: string) => void,
   approval?: BudgetApprovalOutcome,
+  approvalUrl?: string,
 ): void {
-  for (const line of completionHandoffLines(result, approval)) log(line)
+  for (const line of completionHandoffLines(result, approval, approvalUrl)) log(line)
 }

@@ -8,6 +8,7 @@ import type {
   UserSafeRow,
 } from '../infra/repositories/agent-connection-setups.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { config } from '../config.js'
 import { findAgentAuthRowByApiKeyHash } from '../infra/repositories/agents.js'
 import {
   SETUP_TOKEN_TTL_MINUTES,
@@ -24,9 +25,27 @@ import {
   verifySetupProof,
 } from '../modules/agents/index.js'
 import { normalizeAgentAllowances } from '../modules/agents/index.js'
-import { getTokenAllowance, getTokensForDelegate } from '../rails/allowance-module.js'
 import { getChain } from '../domain/chains.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import {
+  buildApprovalUrl,
+  isUnknownRunMode,
+  normalizeRunMode,
+  normalizeViaMarker,
+} from '../domain/handoff-links.js'
+import {
+  AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
+  AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_JSON_MODE_SENTENCE,
+  AGENT_LOCAL_KEY_SENTENCE,
+  AGENT_NETWORK_ACCESS_SENTENCE,
+  AGENT_SECRET_HYGIENE_SENTENCE,
+  AGENT_WIRING_COLLISION_RELAY_SENTENCE,
+} from '@haven_ai/sdk'
+// #2530: lifted to a shared helper — the root document and the OpenAPI
+// servers[] list need the identical answer.
+import { apiBaseUrl } from '../domain/request-origin.js'
 import {
   requestPassport,
   issuePassportBestEffort,
@@ -51,6 +70,12 @@ interface CreateSetupBody {
   local_mcp?: boolean
   /** Discovery-source slug for connect attribution (#2302); sanitized, never refused. */
   source?: string
+  /**
+   * Agent hand-off marker (#2522). `'agent'` when the link the user followed
+   * was pasted by an agent; anything else is dropped. Sanitized, never
+   * refused — attribution must not block a connect.
+   */
+  via?: string
   /**
    * Opt in to an L0 Agent Passport (#972), mirroring `POST /agents`'
    * `issue_passport`. Absent/false is the DEFAULT and normal case. Recorded on
@@ -79,6 +104,13 @@ interface RegisterSetupBody extends ResolveSetupBody {
    * rather than being guessed at.
    */
   mcp_server_name?: string
+  /**
+   * #2528: `'json'` when the connector ran with `--json`, `'prose'` otherwise.
+   * The connector is the only party that knows — the request is identical over
+   * the wire either way. Absent from connectors older than #2528; an
+   * unrecognised value is a 400, never a silent null.
+   */
+  run_mode?: string
   connector_context?: unknown
   install_capabilities?: {
     can_write_runtime_config?: boolean
@@ -103,18 +135,16 @@ interface InstallStatusBody {
   next_user_action?: string
   error_code?: string | null
   environment_label?: string
+  /**
+   * #2561. Tri-state: a list (scanned, found these), `[]` (scanned, none), or
+   * `null` (the scan could not run). Sanitised by `sanitizeInstallStatus`,
+   * which shapes the ids but does not believe them — the connector falls back
+   * to a directory name when an `identity.json` will not parse, so ownership
+   * is resolved against the caller's own agents when the status is read.
+   */
+  superseded_agent_ids?: string[] | null
 }
 
-interface WalletApprovalBody {
-  result?: 'confirmed' | 'proposed'
-  tx_hash?: string
-  safe_tx_hash?: string
-  chain_id?: number
-  safe_address?: string
-  allowance_module_address?: string
-  delegate_address?: string
-  confirmation_status?: 'confirmed' | 'receipt_timeout'
-}
 
 /**
  * The PRODUCTION hosted MCP. Served as a default ONLY when this backend IS
@@ -153,7 +183,24 @@ export function normalizeMcpServerName(value: unknown): string | null {
 
 const DEFAULT_HOSTED_MCP_URL = 'https://haven-ai-production-5953.up.railway.app/v1'
 const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
-export const CONNECTOR_PACKAGE = '@haven_ai/connect@alpha'
+/**
+ * The connector package spec the dashboard hands out (#2422, epic #2420).
+ *
+ * Channel-derived rather than literal so the DEV backend can hand out the dev
+ * connector: a developer testing against dev used to be told to install the
+ * PRODUCTION package, and the dev signer and dev backend have to move together
+ * — the signer refuses to sign when the backend emits an
+ * `x402_expected_context_version` it does not know, so a dev backend paired
+ * with a prod signer is exactly the skew this epic exists to make testable.
+ *
+ * `config.connectorChannel` is `alpha` unless `HAVEN_CONNECTOR_CHANNEL` is set,
+ * and production does not set it, so this constant is byte-identical to the
+ * literal it replaced in every production environment. It is resolved ONCE at
+ * import, like the channel itself: the channel is deployment configuration, so
+ * a per-request read would only add the ability for two requests in one process
+ * to disagree.
+ */
+export const CONNECTOR_PACKAGE = `@haven_ai/connect@${config.connectorChannel}`
 
 /**
  * Refuse a request from inside a transaction.
@@ -237,18 +284,29 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           challengeMessage,
           issuePassport: parsed.issuePassport,
           source: parsed.source,
+          via: parsed.via,
         },
         parsed.allowances,
       )
 
-      const apiUrl = apiBaseUrl(request)
+      const apiUrl = apiBaseUrl(request.headers)
       const command = buildConnectorCommand(setupToken, apiUrl, parsed.localMcp)
       return reply.code(201).send({
         setup_id: setupId,
         status: 'awaiting_connection',
+        // #2522: the same link the status response and the connector print, so
+        // dashboard, connector and agent all hand the human ONE URL.
+        approval_url: buildApprovalUrl(setupId),
         setup_token: setupToken,
         expires_at: expiresAt,
         connector_command: command,
+        // #2422: the spec on its own, not only embedded in the command string.
+        // The frontend renders a `--doctor --repair` hint that used to restate
+        // `@haven_ai/connect@alpha` as a literal; with the channel now a
+        // deployment variable, a client-side literal would be WRONG on dev and
+        // right only by coincidence on prod. Returning the value the backend
+        // actually used makes the hint import the fact instead of guessing it.
+        connector_package: CONNECTOR_PACKAGE,
         setup_prompt: buildSetupPrompt(command, apiUrl),
       })
     },
@@ -295,6 +353,14 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     if (!request.body?.setup_token || typeof request.body.setup_token !== 'string') {
       return reply.code(401).send({ error: 'Invalid setup token' })
     }
+    // #2528: refuse an unrecognised run_mode rather than storing it or
+    // coercing it to null. This dimension segments the onboarding funnel, so a
+    // value nothing recognises must not enter it silently — and a caller that
+    // sent one deserves to be told, not to have it dropped. Checked BEFORE the
+    // transaction, beside the other refusals that cost nothing.
+    if (isUnknownRunMode(request.body.run_mode)) {
+      return reply.code(400).send({ error: 'Unsupported run_mode' })
+    }
 
     // #1129: resolved BEFORE the transaction opens. A configuration error must
     // refuse the whole registration up front — never after the setup token has
@@ -312,6 +378,8 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let setupChainId = 0
     let setupUserId = ''
     let setupSource: string | null = null
+    let setupVia: string | null = null
+    const runMode = normalizeRunMode(request.body.run_mode)
     try {
       await setups.inTransaction(async (tx) => {
         const setup = await setups.lockSetupByTokenHash(
@@ -354,18 +422,28 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         apiKeyPrefix = request.body.api_key_prefix
         const mcpServerName = normalizeMcpServerName(request.body.mcp_server_name)
         const connectorContext = sanitizeConnectorContext(request.body.connector_context)
+        // The browser-hosted fallback creates the credential in the browser and
+        // hands it to the user to save in their agent workspace. It cannot run
+        // the local connector, so it will never PATCH ordinary runtime probes.
+        // This marker is presentation state only: the owner still must sign the
+        // existing budget delegation before the pending agent becomes active.
+        const manualCredentialFallback =
+          request.body.connector_version === 'browser-manual-fallback' &&
+          request.body.install_capabilities?.can_write_runtime_config === false
         const initialInstallStatus = {
           hosted_mcp_configured: false,
           local_signer_configured: false,
           local_mcp_configured: false,
           local_mcp_acknowledged: false,
           restart_required: Boolean(request.body.install_capabilities?.restart_required),
+          ...(manualCredentialFallback ? { manual_credential_fallback: true } : {}),
         }
         setupId = setup.id
         issuePassportForSetup = setup.issue_passport === true
         setupChainId = setup.safe_chain_id
         setupUserId = setup.user_id
         setupSource = setup.source ?? null
+        setupVia = setup.via ?? null
 
         agentId = await setups.insertPendingAgent(
           {
@@ -394,6 +472,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             apiKeyPrefix,
             connectorVersion: stringOrNull(request.body.connector_version),
             runtime: stringOrNull(request.body.runtime),
+            runMode,
             connectorContext,
             installStatus: initialInstallStatus,
           },
@@ -403,10 +482,23 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       // #2302: the discovery source recorded at CREATE rides the funnel event so
       // "attributed connects" and per-source time-to-first-payment are plain
       // SQL over onboarding_events — no join back to the setups table needed.
+      // #2522: the hand-off marker rides here as `handoff_via`, NOT as `via`.
+      // `via` is already taken and means something else — which CODE PATH
+      // created the agent (`'connection_setup'` here; absent from
+      // `POST /agents`' emission in routes/agents.ts, which is how the two are
+      // told apart today). Reusing it for "an agent pasted the link" would
+      // give one key two meanings and silently redefine every historical row.
       emitFunnelEvent(setupUserId, 'agent_created', {
         agent_id: agentId,
         via: 'connection_setup',
         ...(setupSource ? { source: setupSource } : {}),
+        ...(setupVia ? { handoff_via: setupVia } : {}),
+        // #2528: sits next to `source` so "share of agent-driven setups that
+        // ran machine-readable" is one query over onboarding_events, with no
+        // join back to the setups table. Omitted, not null, when the connector
+        // predates the field — an absent key and a null read differently in
+        // the metadata JSON, and absent is the honest one.
+        ...(runMode ? { run_mode: runMode } : {}),
       })
       emitFunnelEvent(setupUserId, 'allowance_granted', { agent_id: agentId, via: 'connection_setup' })
     } catch (err) {
@@ -451,6 +543,12 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       api_key_scope: 'setup_pending',
       delegate_address: delegateAddress,
       hosted_mcp_url: hostedMcpUrlValue,
+      // #2528: the same link create and status already return, so the
+      // connector can print a URL instead of "return to Haven and approve" —
+      // and the agent relays a link rather than a sentence. Built from
+      // `config.frontendUrl`, same-origin, carrying no secret: the setup id is
+      // already in the connector's own outcome record.
+      approval_url: buildApprovalUrl(setupId),
       next_action: 'return_to_haven_for_wallet_approval',
       passport_requested: passportChainId != null,
     })
@@ -470,10 +568,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
   // shared one.
   //
   // Deliberately cheap: this is polled, so it reads the setup row's OWN status
-  // — no RPC/on-chain reconciliation (contrast `maybeActivateFromLiveAuthority`
-  // on the dashboard GET below). The wallet-approval and budget-approval
-  // routes are what verify authority and flip the DB status to 'active'; this
-  // endpoint only ever reports what they already wrote.
+  // and issues no RPC. Since #2259 the dashboard GET does the same — the
+  // legacy on-chain reconciliation it used to contrast with is gone with the
+  // Safe rail. `POST /:setupId/budget-approval` is what verifies authority and
+  // flips the DB status to 'active'; this endpoint only reports what it wrote.
   app.get<{ Params: { setupId: string } }>(
     '/:setupId/connector-status',
     async (request, reply) => {
@@ -503,111 +601,20 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const setup = await loadSetupForUser(request.params.setupId, sub)
       if (!setup) return reply.code(404).send({ error: 'Setup not found' })
       const allowances = await loadSetupAllowances(setup.id)
-      const reconciled = await maybeActivateFromLiveAuthority(setup, allowances)
-      return buildUserSetupStatus(reconciled, allowances)
-    },
-  )
-
-  app.post<{ Params: { setupId: string }; Body: WalletApprovalBody }>(
-    '/:setupId/wallet-approval',
-    { preHandler: authMiddleware },
-    async (request, reply) => {
-      if (
-        containsForbiddenPrivateKeyField(request.body) ||
-        containsForbiddenInstallStatusField(request.body)
-      ) {
-        return reply.code(400).send({ error: 'Credential material is not accepted by Haven' })
-      }
-
-      const { sub } = request.user as { sub: string }
-      const setup = await loadSetupForUser(request.params.setupId, sub)
-      if (!setup) return reply.code(404).send({ error: 'Setup not found' })
-
-      const allowances = await loadSetupAllowances(setup.id)
-      const validation = validateWalletApprovalBody(setup, allowances, request.body)
-      if (!validation.ok) {
-        return reply.code(validation.statusCode).send({ error: validation.error })
-      }
-
-      if (setup.status === 'active') {
-        return buildUserSetupStatus(setup, allowances)
-      }
-
-      if (request.body.result === 'proposed') {
-        const live = await tryVerifySetupAuthority(setup, allowances)
-        if (live.ok) {
-          const active = await persistWalletApprovalState(setup, {
-            status: 'active',
-            approvalStatus: 'confirmed',
-            txHash: null,
-            safeTxHash: normalizeHash(request.body.safe_tx_hash),
-            failureReason: null,
-            activateAgent: true,
-          })
-          if (!active) {
-            return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-          }
-          return buildUserSetupStatus(active, allowances)
-        }
-
-        const proposed = await persistWalletApprovalState(setup, {
-          status: 'proposed',
-          approvalStatus: 'proposed',
-          txHash: null,
-          safeTxHash: normalizeHash(request.body.safe_tx_hash),
-          failureReason: null,
-          activateAgent: false,
-        })
-        if (!proposed) {
-          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-        }
-        return buildUserSetupStatus(proposed, allowances)
-      }
-
-      const verification = await tryVerifySetupAuthority(setup, allowances)
-      if (verification.ok) {
-        const active = await persistWalletApprovalState(setup, {
-          status: 'active',
-          approvalStatus: 'confirmed',
-          txHash: normalizeHash(request.body.tx_hash),
-          safeTxHash: normalizeHash(request.body.safe_tx_hash),
-          failureReason: null,
-          activateAgent: true,
-        })
-        if (!active) {
-          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-        }
-        return buildUserSetupStatus(active, allowances)
-      }
-
-      if (
-        request.body.confirmation_status === 'receipt_timeout' ||
-        isTransientSetupAuthorityVerification(verification.error)
-      ) {
-        const inProgress = await persistWalletApprovalState(setup, {
-          status: 'approval_in_progress',
-          approvalStatus: 'submitted',
-          txHash: normalizeHash(request.body.tx_hash),
-          safeTxHash: normalizeHash(request.body.safe_tx_hash),
-          failureReason: verification.error,
-          activateAgent: false,
-        })
-        if (!inProgress) {
-          return reply.code(409).send({ error: 'Setup state changed; refresh and try again' })
-        }
-        return reply.code(202).send(buildUserSetupStatus(inProgress, allowances))
-      }
-
-      return reply.code(409).send({ error: verification.error })
+      // #2259: this read used to reconcile a legacy setup to `active` from
+      // live AllowanceModule state — a WRITE hidden in a GET, and the last
+      // path by which a retired-rail agent could still be activated. It is
+      // gone with the rail (epic #1440); the read is now purely a read.
+      return buildUserSetupStatus(setup, allowances)
     },
   )
 
   // ── POST /:setupId/budget-approval — the DELEGATION rail's approval ──
   //
-  // The legacy rail proves authority by reading the Safe's AllowanceModule
-  // on-chain (`tryVerifySetupAuthority`). A delegation has nothing to read
-  // until it is redeemed — its enforcement is the caveat enforcers at payment
-  // time — so the analogue is the signed, activated delegation itself: a row
+  // The retired Safe rail proved authority by reading the AllowanceModule
+  // on-chain; #2259 deleted that half with the rail. A delegation has nothing
+  // to read until it is redeemed — its enforcement is the caveat enforcers at
+  // payment time — so the analogue is the signed, activated delegation: a row
   // only reaches `status='active'` after POST /agents/:id/delegations/:hash/
   // activate validated the OWNER's signature and deployed the account.
   //
@@ -770,6 +777,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
   localMcp: boolean
   issuePassport: boolean
   source: string | null
+  via: string | null
 } | null {
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name) {
@@ -807,6 +815,7 @@ function validateCreateBody(body: CreateSetupBody, reply: FastifyReply): {
     localMcp: body.local_mcp === true,
     issuePassport: body.issue_passport === true,
     source: normalizeDiscoverySource(body.source),
+    via: normalizeViaMarker(body.via),
   }
 }
 
@@ -822,6 +831,7 @@ export function normalizeDiscoverySource(value: unknown): string | null {
   const slug = value.trim().toLowerCase()
   return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(slug) ? slug : null
 }
+
 
 // The command-path runtimes: Claude Code, Codex, and Cowork (which runs
 // Claude Code's config). #1682 replaced #1672's collapsed 'agent' entry with
@@ -854,86 +864,11 @@ async function loadSetupAllowances(setupId: string): Promise<AllowanceRow[]> {
   return setups.listSetupAllowances(setupId)
 }
 
-function validateWalletApprovalBody(
-  setup: SetupRow,
-  allowances: AllowanceRow[],
-  body: WalletApprovalBody | undefined,
-): { ok: true } | { ok: false; statusCode: 400 | 409 | 410; error: string } {
-  if (!body || (body.result !== 'confirmed' && body.result !== 'proposed')) {
-    return { ok: false, statusCode: 400, error: 'Approval result must be confirmed or proposed' }
-  }
-  if (setup.status === 'cancelled' || setup.status === 'expired' || setup.status === 'failed') {
-    return { ok: false, statusCode: 409, error: 'Setup cannot be approved' }
-  }
-  if (!setups.WALLET_APPROVAL_STATES.has(setup.status)) {
-    const expired = setup.status === 'awaiting_connection' && isExpired(setup.setup_token_expires_at)
-    return {
-      ok: false,
-      statusCode: expired ? 410 : 409,
-      error: expired ? 'Setup token expired' : 'Local connection is required before wallet approval',
-    }
-  }
-  if (!setup.agent_id || !setup.delegate_address) {
-    return { ok: false, statusCode: 409, error: 'Public signing address is required before wallet approval' }
-  }
-  if (allowances.length === 0) {
-    return { ok: false, statusCode: 409, error: 'Agent budget is required before wallet approval' }
-  }
-  if (body.confirmation_status && !['confirmed', 'receipt_timeout'].includes(body.confirmation_status)) {
-    return { ok: false, statusCode: 400, error: 'Invalid confirmation status' }
-  }
-  if (!Number.isInteger(body.chain_id) || body.chain_id !== setup.safe_chain_id) {
-    return { ok: false, statusCode: 400, error: 'Wallet network does not match this setup' }
-  }
-  if (!isValidAddress(body.safe_address) || body.safe_address.toLowerCase() !== setup.safe_address.toLowerCase()) {
-    return { ok: false, statusCode: 400, error: 'Haven wallet does not match this setup' }
-  }
-  if (
-    !isValidAddress(body.delegate_address) ||
-    body.delegate_address.toLowerCase() !== setup.delegate_address.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 400, error: 'Public signing address does not match this setup' }
-  }
-  let allowanceModuleAddress = ''
-  try {
-    allowanceModuleAddress = getChain(setup.safe_chain_id).contracts.allowanceModule
-  } catch {
-    return { ok: false, statusCode: 400, error: 'Unsupported wallet network' }
-  }
-  if (
-    !isValidAddress(body.allowance_module_address) ||
-    body.allowance_module_address.toLowerCase() !== allowanceModuleAddress.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 400, error: 'Wallet approval module does not match this setup' }
-  }
-  if (!isValidHexHash(body.safe_tx_hash)) {
-    return { ok: false, statusCode: 400, error: 'Valid safe_tx_hash is required' }
-  }
-  if (body.result === 'confirmed' && !isValidHexHash(body.tx_hash)) {
-    return { ok: false, statusCode: 400, error: 'Valid tx_hash is required' }
-  }
-  if (
-    setup.safe_tx_hash &&
-    body.safe_tx_hash &&
-    setup.safe_tx_hash.toLowerCase() !== body.safe_tx_hash.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 409, error: 'Wallet approval is already tied to a different Safe transaction' }
-  }
-  if (
-    setup.tx_hash &&
-    body.tx_hash &&
-    setup.tx_hash.toLowerCase() !== body.tx_hash.toLowerCase()
-  ) {
-    return { ok: false, statusCode: 409, error: 'Wallet approval is already tied to a different transaction' }
-  }
-  return { ok: true }
-}
-
 /**
- * The rail-agnostic preconditions the legacy `validateWalletApprovalBody`
- * checks before it starts on its Safe-shaped body fields. The delegation rail
- * has no body to validate, so it needs exactly this subset — kept separate
- * rather than branching inside the legacy validator, which stays untouched.
+ * The rail-agnostic preconditions a setup must satisfy before its budget can
+ * approve it. Originally the subset of the legacy `validateWalletApprovalBody`
+ * that was not Safe-shaped, kept separate rather than branching inside it;
+ * #2259 deleted that validator with the rail, and this is what survives.
  */
 function validateBudgetApprovalPreconditions(
   setup: SetupRow,
@@ -996,84 +931,6 @@ async function verifyDelegationSetupAuthority(
     appLogSafeError(err)
     return { ok: false, error: 'Haven could not confirm the agent budget yet' }
   }
-}
-
-async function maybeActivateFromLiveAuthority(
-  setup: SetupRow,
-  allowances: AllowanceRow[],
-): Promise<SetupRow> {
-  if (!['approval_in_progress', 'proposed'].includes(setup.status)) {
-    return setup
-  }
-  const verification = await tryVerifySetupAuthority(setup, allowances)
-  if (!verification.ok) return setup
-  return (await persistWalletApprovalState(setup, {
-    status: 'active',
-    approvalStatus: 'confirmed',
-    txHash: setup.tx_hash,
-    safeTxHash: setup.safe_tx_hash,
-    failureReason: null,
-    activateAgent: true,
-  })) ?? setup
-}
-
-async function tryVerifySetupAuthority(
-  setup: SetupRow,
-  allowances: AllowanceRow[],
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    if (!setup.delegate_address) {
-      return { ok: false, error: 'Public signing address is missing' }
-    }
-    if (allowances.length === 0) {
-      return { ok: false, error: 'Agent budget is missing' }
-    }
-
-    const expectedTokens = new Set(allowances.map((allowance) => allowance.token_address.toLowerCase()))
-    const actualTokens = (await getTokensForDelegate(
-      setup.safe_chain_id,
-      setup.safe_address,
-      setup.delegate_address,
-    )).map((token) => token.toLowerCase())
-    const actualTokenSet = new Set(actualTokens)
-    for (const expected of expectedTokens) {
-      if (!actualTokenSet.has(expected)) {
-        return { ok: false, error: 'On-chain agent budget is not active yet' }
-      }
-    }
-    for (const actual of actualTokenSet) {
-      if (!expectedTokens.has(actual)) {
-        return { ok: false, error: 'On-chain agent budget contains an unexpected token' }
-      }
-    }
-
-    for (const allowance of allowances) {
-      const info = await getTokenAllowance(
-        setup.safe_chain_id,
-        setup.safe_address,
-        setup.delegate_address,
-        allowance.token_address,
-      )
-      const expectedAmount = BigInt(allowance.allowance_amount)
-      if (info.amount !== expectedAmount) {
-        return { ok: false, error: `${allowance.token_symbol} budget does not match this setup` }
-      }
-      if (info.resetTimeMin !== allowance.reset_period_min) {
-        return { ok: false, error: `${allowance.token_symbol} reset period does not match this setup` }
-      }
-    }
-    return { ok: true }
-  } catch (err) {
-    appLogSafeError(err)
-    return { ok: false, error: 'Haven could not verify the on-chain agent rules yet' }
-  }
-}
-
-function isTransientSetupAuthorityVerification(error: string): boolean {
-  return (
-    error === 'On-chain agent budget is not active yet' ||
-    error === 'Haven could not verify the on-chain agent rules yet'
-  )
 }
 
 async function persistWalletApprovalState(
@@ -1217,6 +1074,9 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
   return {
     setup_id: setup.id,
     agent_id: setup.agent_id,
+    // #2522: stable across polls and identical to the create response's, so a
+    // link an agent pasted an hour ago still lands on the right step.
+    approval_url: buildApprovalUrl(setup.id),
     status: effectiveStatus(setup),
     expires_at: setup.setup_token_expires_at,
     agent: {
@@ -1240,6 +1100,10 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
     delegate_address: setup.delegate_address,
     api_key_prefix: setup.api_key_prefix,
     runtime: setup.runtime,
+    // #2422: same value as the create response, on the status response too —
+    // this is the shape the connect modal's repair hint actually reads, since
+    // it renders from the POLLED status, not from the one-shot create result.
+    connector_package: CONNECTOR_PACKAGE,
     connector: {
       connector_version: setup.connector_version,
       ...(setup.connector_context ?? {}),
@@ -1264,7 +1128,12 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
 // "does this picked id need the flag spelled out?" — and with no picked id and
 // no flag, nothing asked it. LOCAL_MCP_RUNTIMES stays because it still has a
 // live caller in validateCreateBody.
-function buildConnectorCommand(setupToken: string, apiUrl: string, localMcp = false): string {
+// Exported for the parity test (#2527). `haven agents connect` prints the
+// `connector_command` this returns rather than composing its own, so the CLI's
+// command and the dashboard's are the same string from the same builder — not
+// two constructions that would have to be kept in agreement. The test asserts
+// that shared origin; exporting is what lets it.
+export function buildConnectorCommand(setupToken: string, apiUrl: string, localMcp = false): string {
   const args = [
     `npx -y ${CONNECTOR_PACKAGE}`,
     `--setup ${shellQuote(setupToken)}`,
@@ -1278,6 +1147,15 @@ function buildConnectorCommand(setupToken: string, apiUrl: string, localMcp = fa
   return args.join(' ')
 }
 
+/**
+ * The setup prompt the dashboard hands the user to paste to their agent.
+ *
+ * #2523: the rule sentences are NOT written here any more — they live once, in
+ * `@haven_ai/sdk`'s `agent-guidance.ts`, because the `/for-agents.md` runbook
+ * states the same rules to the same reader. The comments below stay with the
+ * call sites they explain; the strings themselves are imported so the prompt and
+ * the runbook cannot say two different things about the same command.
+ */
 function buildSetupPrompt(command: string, apiUrl: string): string {
   const approvedActions = [
     `download and execute the published npm package ${CONNECTOR_PACKAGE}`,
@@ -1289,48 +1167,76 @@ function buildSetupPrompt(command: string, apiUrl: string): string {
   return [
     'Please connect this workspace to Haven.',
     '',
-    `I approve running this exact Haven setup command. It may ${joinApprovedActions(approvedActions)}.`,
+    `I approve running this exact Haven connector command. It may ${joinApprovedActions(approvedActions)}.`,
     '',
     'Run this exact command:',
     '',
     command,
     '',
-    'Network access is expected: this command downloads the npm package and contacts the Haven API, so if your environment is sandboxed, run it with network access enabled or request network access escalation; that changes the execution environment, not the command, and is not a third command modification.',
+    AGENT_NETWORK_ACCESS_SENTENCE,
     '',
-    'Do not print private keys, API keys, credential file contents, or config secrets in chat or logs.',
+    AGENT_SECRET_HYGIENE_SENTENCE,
     '',
-    'The Haven connector generates the signing key locally and sends Haven only the public signing address plus proof.',
+    AGENT_LOCAL_KEY_SENTENCE,
     '',
-    // #1545: one sentence of discoverability for agent operators — the flag is
-    // opt-in and the pasted command stays the prose-mode default, so the
-    // relay-to-human narration keeps working when the operator ignores this.
-    'If you are orchestrating this setup programmatically, the connector also supports a --json mode: one machine-readable, secret-free result object on stdout, progress on stderr.',
+    // #1545 introduced this as one sentence of *discoverability* — the flag was
+    // opt-in and the pasted command stayed the prose-mode default. #2483 turns
+    // it into a recommendation, because "supports" was read as "optional" by
+    // the agent in the 2026-09 Codex field test: it ran the setup in prose mode
+    // as one blocking tool call, so the connector's approve-budget CTA sat
+    // inside the running command's output and did not reach the user's chat
+    // until the command returned — after the 3-minute approval wait. --json
+    // returns promptly with approval.required instead of blocking, which is
+    // what hands the agent control back in time to say something. The prose
+    // mode stays correct for a human pasting the command, so this is a SHOULD
+    // addressed to agents, not a change to the command's default behaviour.
+    AGENT_JSON_MODE_SENTENCE,
+    // #2483: one gate at a time (the #1542 discipline) — the approval relay is
+    // the FIRST thing the agent owes the user when the outcome says approval is
+    // required, and any restart the outcome asks for is a separate, later
+    // instruction. Merging the two hands the user two actions at once, and the
+    // one they can actually do now is the approval.
+    AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+    // #2551, via #2567 → #2528: the third relay case. The prompt already names
+    // the other two occasions an agent must hand a decision back rather than
+    // act (approval required; the runtime refusal's one bounded retry), so a
+    // collision left unnamed is the one an agent resolves by guessing — and
+    // both guesses available to it, --replace and --name, change which agent
+    // holds spend authority on this machine.
+    AGENT_WIRING_COLLISION_RELAY_SENTENCE,
     // #1719: the old sentence said appending --json was the ONLY permitted
     // change, which forbade the one retry the connector now asks an agent for
     // by name. Exactly two changes are permitted, and the second is bounded to
     // a value the refusal itself listed — an agent must never invent a runtime
     // name, because the name selects which app gets an API key and a signing
     // key written into it.
-    'Only two changes to the command above are permitted, and no others: appending --json, and — only if the connector refuses because it could not determine the agent runtime — re-running it once with --runtime <name> added, naming the harness you are running in, using one of the values that refusal lists. Never invent a runtime name and never change anything else.',
+    AGENT_COMMAND_MODIFICATION_SENTENCE,
     '',
     // #1545: "budget" is the connect flow's one name for the approval gate —
     // the same word the connector's own wait loop and celebration use (#1542).
-    'When the connector finishes, tell me to return to Haven to approve the budget.',
+    // #2486: this is the PROSE-MODE fallback, and it is scoped to that mode.
+    // Its predecessor ("When the connector finishes, tell me to return to
+    // Haven to approve the budget.") was unconditional, which was wrong in
+    // both modes at once: under --json "the connector finishes" and "the
+    // outcome reports approval.required" are ONE event, so an agent obeying
+    // both sentences relayed the same ask twice in one reply; and where no
+    // approval is needed at finish — a re-run against an already-approved
+    // agent, or a re-key — it still demanded one. Without --json the
+    // connector blocks through the approval wait itself and prints next steps
+    // shaped by what that wait saw (`completionHandoffLines` in
+    // packages/connect/src/runtime.ts): "Return to Haven and approve the
+    // budget" while it is still pending, or a confirmation that it is already
+    // approved. The agent has no outcome object to read in that mode, so the
+    // connector's printed next steps are the condition. Each mode now carries
+    // its relay instruction exactly once — the --json sentence above, this
+    // one here — and neither fires on an approval that is not needed.
+    AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
   ].join('\n')
 }
 
 function joinApprovedActions(actions: string[]): string {
   if (actions.length <= 1) return actions[0] ?? ''
   return `${actions.slice(0, -1).join(', ')}, and ${actions[actions.length - 1]}`
-}
-
-function apiBaseUrl(request: FastifyRequest): string {
-  const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
-  if (env) return env.replace(/\/+$/, '')
-  const host = request.headers.host ?? `localhost:${process.env.PORT ?? 3001}`
-  const proto = request.headers['x-forwarded-proto']
-  const scheme = typeof proto === 'string' && proto ? proto.split(',')[0] : 'http'
-  return `${scheme}://${host}`.replace(/\/+$/, '')
 }
 
 /**
@@ -1344,7 +1250,7 @@ function apiBaseUrl(request: FastifyRequest): string {
 export function hostedMcpUrl(request: FastifyRequest): string {
   const explicit = process.env.HAVEN_HOSTED_MCP_URL ?? process.env.NEXT_PUBLIC_HAVEN_MCP_URL
   if (explicit) return explicit.replace(/\/+$/, '')
-  const self = apiBaseUrl(request)
+  const self = apiBaseUrl(request.headers)
   // A malformed self-URL (scheme-less HAVEN_API_URL, weird Host header) must
   // yield the ACTIONABLE config error, not a masked TypeError-500 (#1136
   // review) — treat unparseable as not-production.
@@ -1422,9 +1328,6 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function normalizeHash(value: string | null | undefined): string | null {
-  return value ? value.toLowerCase() : null
-}
 
 function isValidApiKeyPrefix(value: unknown): value is string {
   return typeof value === 'string' && /^sk_agent_[0-9a-f]{3}$/.test(value)

@@ -207,7 +207,7 @@ export interface RuntimeResolutionOptions {
 /**
  * Runtime resolution, detection-first (#1672) and self-resolving (#1719).
  *
- * The setup command carries no `--runtime`; the connector works out the
+ * The connector command carries no `--runtime`; the connector works out the
  * runtime it is executing inside. Precedence:
  *
  * 1. `--runtime-force <name>` — always wins (unknown name refuses).

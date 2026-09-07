@@ -89,29 +89,28 @@ describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
     expect(rows[0].execution_rail).toBe('delegation')
   })
 
-  // #2055 (epic #1440 slice, migration 070): was "KEEPS the two tables split
-  // out to #2020 and #2021 — the shrink guard", asserting BOTH
-  // `agent_allowances` AND `approval_requests` still existed after 069's
-  // up(). `approval_requests` has since graduated from "split out, kept" to
-  // "actually dropped" — migration 070 (#2021's own migration, guarded by
-  // the CAPTAIN-owned `070_drop_approval_requests.test.ts`, not this file)
-  // drops it, and `initDbHarness()` runs the FULL migration set, so the
-  // table is already gone by the time THIS test's `up()` call runs — before
-  // 069 does anything at all. That is not a 069 regression: 069's own up()
-  // never touched `approval_requests`, only `safe_approver_metadata`. The
-  // shrink guard this test still owns is `agent_allowances` alone.
-  it('KEEPS agent_allowances, split out to #2020 — the shrink guard', async () => {
+  // #2263 (epic #1440 slice, migration 075): this guard has now inverted
+  // twice, and the reason is the same both times. It began as "KEEPS the two
+  // tables split out to #2020 and #2021 — the shrink guard", asserting that
+  // 069 deliberately left `agent_allowances` and `approval_requests` alone
+  // because each still had live readers. Both have since graduated from
+  // "split out, kept" to "actually dropped" by their own migrations —
+  // `approval_requests` by 070 (#2021), `agent_allowances` by 075 (#2263),
+  // once #2020 deleted its last writer and #1090 moved the agent `allowances`
+  // projection onto `agent_delegations`.
+  //
+  // `initDbHarness()` runs the FULL migration set, so both tables are gone
+  // before THIS test's `up()` call runs — before 069 does anything at all.
+  // That is not a 069 regression: 069's own `up()` never touched either
+  // table, only `safe_approver_metadata`. What survives here is the narrower
+  // and still useful claim — that 069 is not the migration that dropped
+  // them, and that its scope has stayed exactly as narrow as it was written.
+  // Each drop is proven where it happens: `070_drop_approval_requests.test.ts`
+  // and `075_drop_inert_safe_rail_schema.test.ts`.
+  it('does not itself drop the two tables split out to #2020 and #2021', async () => {
     await up(db as never)
 
-    // agent_allowances: `routes/agents.ts:95` reads it for ALL agent ids
-    // BEFORE the account_type branch, so it is on the hot path for pure
-    // delegation-rail users. Dropping it here would 500 `GET /agents` for
-    // every user of the product. → #2020.
-    expect(await tableExists('agent_allowances')).toBe(true)
-
-    // approval_requests: split out to #2021 as of 069, but #2021's own
-    // migration 070 has since dropped it for real — proven where it
-    // happens, in `070_drop_approval_requests.test.ts`, not here.
+    expect(await tableExists('agent_allowances')).toBe(false)
     expect(await tableExists('approval_requests')).toBe(false)
   })
 

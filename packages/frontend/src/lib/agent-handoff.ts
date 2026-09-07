@@ -2,7 +2,7 @@
  * Agent credential handoff generator.
  *
  * Produces a single Markdown file containing everything an external developer
- * needs to make the agent "payment ready": identity, policy summary, secrets,
+ * needs to make a live delegation agent "payment ready": identity, policy summary, secrets,
  * env-var block, SDK quickstart, and revocation link.
  *
  * All data is assembled client-side from values already available on the
@@ -19,7 +19,7 @@ export interface HandoffAllowance {
   tokenSymbol: string
   /** Human-readable amount (e.g. "10", not parsed units) */
   amount: string
-  /** Reset period in minutes — matches the allowance-module encoding */
+  /** Reset period in minutes — matches the budget-period encoding */
   resetPeriodMin: number
 }
 
@@ -331,15 +331,16 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `})"`,
     '```',
     ``,
-    `## Revoke`,
+    `## Stop the live delegation agent`,
     ``,
-    `If this file leaks or the agent misbehaves, pause or revoke it from the Haven dashboard:`,
+    `If this file leaks or the agent misbehaves, pause or revoke this live delegation agent from the Haven dashboard:`,
     ``,
     `${revokeUrl}`,
     ``,
-    `Revoking the agent stops new Haven requests for this credential. Haven may`,
-    `also ask you to approve a network update to remove the agent budget from`,
-    `your wallet. Create a new agent to restore payments.`,
+    `Revoking the agent stops new Haven requests for this credential. Archive`,
+    `the agent separately if it should leave the main Haven agent list. This`,
+    `handoff does not manage permissions from a retired Safe rail; those remain`,
+    `outside Haven.`,
     ``,
     apiBaseUrl ? `---` : null,
     apiBaseUrl ? `` : null,

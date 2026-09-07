@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet } from 'ethers'
@@ -5,17 +7,21 @@ import agentConnectionSetupRoutes, {
   CONNECTOR_PACKAGE,
   normalizeMcpServerName,
 } from '../agent-connection-setups.js'
+import {
+  AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+  AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
+  AGENT_COMMAND_MODIFICATION_SENTENCE,
+  AGENT_JSON_MODE_SENTENCE,
+  AGENT_LOCAL_KEY_SENTENCE,
+  AGENT_NETWORK_ACCESS_SENTENCE,
+  AGENT_SECRET_HYGIENE_SENTENCE,
+} from '@haven_ai/sdk'
 
 const { mockQuery, mockConnect, mockClientQuery, mockClientRelease } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockConnect: vi.fn(),
   mockClientQuery: vi.fn(),
   mockClientRelease: vi.fn(),
-}))
-
-const { mockGetTokenAllowance, mockGetTokensForDelegate } = vi.hoisted(() => ({
-  mockGetTokenAllowance: vi.fn(),
-  mockGetTokensForDelegate: vi.fn(),
 }))
 
 vi.mock('../../db.js', () => ({
@@ -29,11 +35,6 @@ vi.mock('../../middleware/auth.js', () => ({
   authMiddleware: async (request: { user?: { sub: string } }) => {
     request.user = { sub: 'user-1' }
   },
-}))
-
-vi.mock('../../rails/allowance-module.js', () => ({
-  getTokenAllowance: (...args: unknown[]) => mockGetTokenAllowance(...args),
-  getTokensForDelegate: (...args: unknown[]) => mockGetTokensForDelegate(...args),
 }))
 
 // Mirrors agents.test.ts: the passport module is mocked so the register-path
@@ -106,7 +107,6 @@ const API_KEY_PREFIX = 'sk_agent_abc'
 const DELEGATE_ADDRESS = '0x3333333333333333333333333333333333333333'
 const TX_HASH = `0x${'a'.repeat(64)}`
 const SAFE_TX_HASH = `0x${'b'.repeat(64)}`
-const ALLOWANCE_MODULE_ADDRESS = '0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134'
 
 /** Suite-wide hosted MCP URL (#1129) — see the root beforeEach note. */
 const TEST_HOSTED_MCP_URL = 'https://hosted-mcp.test.haven/v1'
@@ -162,6 +162,13 @@ type SetupFixture = Omit<
   proof_signature: string | null
   api_key_prefix: string | null
   connector_version: string | null
+  /**
+   * #2528: written by the register UPDATE, NULL for a connector older than
+   * it. Optional in the fixture because most cases here never reach the
+   * register UPDATE and should not have to declare a column they do not
+   * exercise.
+   */
+  run_mode?: string | null
   approval_status: string
   safe_tx_hash: string | null
   tx_hash: string | null
@@ -172,18 +179,6 @@ async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   await app.register(agentConnectionSetupRoutes, { prefix: '/agent-connection-setups' })
   return app
-}
-
-function approvalPayload(result: 'confirmed' | 'proposed') {
-  return {
-    result,
-    tx_hash: result === 'confirmed' ? TX_HASH : undefined,
-    safe_tx_hash: SAFE_TX_HASH,
-    chain_id: SAFE.chain_id,
-    safe_address: SAFE.safe_address,
-    allowance_module_address: ALLOWANCE_MODULE_ADDRESS,
-    delegate_address: DELEGATE_ADDRESS,
-  }
 }
 
 function mockWalletApprovalPersist(setup: SetupFixture = CONNECTED_SETUP) {
@@ -246,7 +241,7 @@ const setupByAgentApiKey = (row: Record<string, unknown> | null): DbRoute => [
   /a\.api_key_hash = \$2/,
   () => ({ rows: row ? [row] : [] }),
 ]
-/** findSetupForUser (GET /:setupId, wallet-approval, budget-approval). */
+/** findSetupForUser (GET /:setupId, budget-approval). */
 const setupForUser = (row: Record<string, unknown> | null): DbRoute => [
   /s\.id = \$1 AND s\.user_id = \$2/,
   () => ({ rows: row ? [row] : [] }),
@@ -283,8 +278,6 @@ describe('agent connection setup routes', () => {
       query: (...args: unknown[]) => mockClientQuery(...args),
       release: mockClientRelease,
     })
-    mockGetTokenAllowance.mockReset()
-    mockGetTokensForDelegate.mockReset()
     mockRequestPassport.mockReset().mockResolvedValue(true)
     mockIssueBestEffort.mockReset()
     // Env vars (HAVEN_API_URL, HAVEN_HOSTED_MCP_URL, …) are pinned by the
@@ -313,7 +306,7 @@ describe('agent connection setup routes', () => {
     expect(body.setup_token).toMatch(/^hv_setup_[0-9a-f]+$/)
     expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
     expect(body.connector_command).toContain('--ack-local-tools')
-    expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
+    expect(body.setup_prompt).toContain('I approve running this exact Haven connector command')
     expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
     expect(body.setup_prompt).toContain('connect to Haven at http://localhost:80')
     expect(body.setup_prompt).toContain('write local Haven credential files under ~/.haven')
@@ -333,7 +326,56 @@ describe('agent connection setup routes', () => {
     expect(body.setup_prompt).toContain('Only two changes to the command above are permitted, and no others: appending --json')
     expect(body.setup_prompt).toContain('could not determine the agent runtime')
     expect(body.setup_prompt).toContain('Never invent a runtime name')
-    expect(body.setup_prompt).toContain('return to Haven to approve the budget')
+    // #2523: the rule sentences are imported from @haven_ai/sdk, so the prompt
+    // and the /for-agents.md runbook cannot say two different things about the
+    // same command. The literals above still pin the wording; these pin the
+    // wiring — they fail if the route reverts to its own inline copy.
+    for (const sentence of [
+      AGENT_JSON_MODE_SENTENCE,
+      AGENT_APPROVAL_RELAY_JSON_SENTENCE,
+      AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
+      AGENT_COMMAND_MODIFICATION_SENTENCE,
+      AGENT_SECRET_HYGIENE_SENTENCE,
+      AGENT_LOCAL_KEY_SENTENCE,
+      AGENT_NETWORK_ACCESS_SENTENCE,
+    ]) {
+      expect(body.setup_prompt).toContain(sentence)
+    }
+    // #2486: the closing sentence is the prose-mode fallback and says so —
+    // the unconditional "When the connector finishes, tell me to return to
+    // Haven to approve the budget." is gone (see the single-ask test below).
+    expect(body.setup_prompt).toContain(
+      "If you ran the command without --json, the connector waits for the approval itself and prints its next steps when it finishes: relay the budget-approval instruction to me — the approval link if those steps printed one, otherwise that you need to return to Haven and approve this agent's budget — only if those printed next steps still ask for it. If they report the budget as already approved, there is nothing for me to approve.",
+    )
+    // #2483: the --json guidance is a SHOULD addressed to agents, and the
+    // approval relay is the first thing it owes the user. Both sentences are
+    // pinned literally because the backend is the source of truth for the
+    // prompt, and the field-test failure was the *wording* ("also supports")
+    // being read as optional — so the negative assertion below guards the
+    // regression directly. The prompt has no other legitimate use of that
+    // phrase.
+    expect(body.setup_prompt).toContain(
+      'If you are an AI agent running this command yourself rather than a human pasting it, you should append --json: the connector then emits one machine-readable, secret-free result object on stdout with progress on stderr, and returns promptly instead of blocking while it waits for the budget approval.',
+    )
+    expect(body.setup_prompt).toContain(
+      "When a --json outcome reports approval.required: true, your first action must be to relay the approval instruction to me in your own reply — if the outcome carries approval.url, give me that link; otherwise tell me to return to Haven and approve this agent's budget — before verifying the connection, restarting anything, or any other step. Never build that link yourself: relay the one the outcome gave you or none at all. Any restart the outcome asks for is a separate instruction to give me afterwards, once the approval is done.",
+    )
+    // #2551 via #2567 → #2528: the THIRD relay case. Pinned literally for the
+    // same reason as the two above — the prompt is the source of truth, and an
+    // unnamed collision case is one an agent resolves by guessing, where both
+    // guesses available to it (--replace, --name) change which agent holds
+    // spend authority on this machine.
+    expect(body.setup_prompt).toContain(
+      'If the connector refuses with wiring_collision, this machine is already wired to a different agent: relay that refusal to me with the superseded_agent_ids and suggested_name it carries, and let me choose whether to replace the existing wiring or add this agent alongside it. Never pick for me by adding --replace or --name yourself.',
+    )
+    expect(body.setup_prompt).not.toContain('the connector also supports a --json mode')
+    // AC: the --json relay instruction and the prose-mode fallback stay
+    // separate prompt lines, never merged into one multi-action ask (#1542).
+    const promptLines = String(body.setup_prompt).split('\n')
+    const relayLineIndex = promptLines.findIndex((line: string) => line.startsWith('When a --json outcome reports'))
+    const proseLineIndex = promptLines.findIndex((line: string) => line.startsWith('If you ran the command without --json'))
+    expect(relayLineIndex).toBeGreaterThanOrEqual(0)
+    expect(proseLineIndex).toBeGreaterThan(relayLineIndex)
     expect(body.setup_prompt).not.toContain('agent rules')
     expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
 
@@ -639,7 +681,7 @@ describe('agent connection setup routes', () => {
       expect(body.connector_command).toContain(`npx -y ${CONNECTOR_PACKAGE}`)
       expect(body.connector_command).toContain('--ack-local-tools')
       expect(body.connector_command).not.toContain('--runtime')
-      expect(body.setup_prompt).toContain('I approve running this exact Haven setup command')
+      expect(body.setup_prompt).toContain('I approve running this exact Haven connector command')
       expect(body.setup_prompt).toContain(`download and execute the published npm package ${CONNECTOR_PACKAGE}`)
       expect(body.setup_prompt).toContain('Do not print private keys, API keys, credential file contents, or config secrets')
       expect(body.setup_prompt).not.toMatch(/delegate_key|private_key|sk_agent_/)
@@ -834,7 +876,150 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
-  it('exercises the Connect Agent 2 setup spine from pending setup through active wallet approval', async () => {
+  // ── #2486: the budget-approval relay is asked for ONCE per mode ──
+  //
+  // The prompt serves two run modes with one text. Under --json the connector
+  // returns promptly with `approval.required`; without it the connector blocks
+  // through the approval wait and prints its own next steps. Each mode owns
+  // exactly one relay instruction, scoped by a leading condition, and there is
+  // no unconditional "when the connector finishes, tell me to approve" line —
+  // that line fired twice under --json (finish and outcome are one event) and
+  // fired on approvals that were not needed (re-run, re-key). The guards here
+  // are literal, not sentence-interpreting (#2163 rework cap 1): every line
+  // that carries the relay phrase must begin with one of the two mode
+  // conditions, and there must be exactly one of each.
+  it('tells the agent to relay the budget-approval ask exactly once per mode, and never unconditionally', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      payload: { name: 'Research Agent', safe_id: SAFE.id, allowances: [ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+    const promptLines = String(response.json().setup_prompt).split('\n')
+
+    const JSON_MODE_PREFIX = 'When a --json outcome reports approval.required: true, '
+    const PROSE_MODE_PREFIX = 'If you ran the command without --json, '
+    const RELAY_PHRASE = "return to Haven and approve this agent's budget"
+
+    const jsonModeLines = promptLines.filter((line) => line.startsWith(JSON_MODE_PREFIX))
+    const proseModeLines = promptLines.filter((line) => line.startsWith(PROSE_MODE_PREFIX))
+    expect(jsonModeLines).toHaveLength(1)
+    expect(proseModeLines).toHaveLength(1)
+
+    // The relay phrase appears on exactly those two lines and nowhere else —
+    // an unscoped third occurrence is the duplicate this issue removed.
+    const relayLines = promptLines.filter((line) => line.includes(RELAY_PHRASE))
+    expect(relayLines).toEqual([...jsonModeLines, ...proseModeLines])
+
+    // The literal predecessor, and its two halves, are gone. The prompt has
+    // no other legitimate use of either phrase.
+    const prompt = promptLines.join('\n')
+    expect(prompt).not.toContain('When the connector finishes')
+    expect(prompt).not.toContain('return to Haven to approve the budget')
+
+    // The prose-mode line is conditional on the connector's printed next
+    // steps, and names the no-approval-needed case explicitly.
+    expect(proseModeLines[0]).toContain('only if those printed next steps still ask for it')
+    expect(proseModeLines[0]).toContain('If they report the budget as already approved, there is nothing for me to approve.')
+
+    await app.close()
+  })
+
+  // The e2e fixture's `setup_prompt` is a hand-maintained mirror of this
+  // builder's output, and it drifted twice without anything noticing (#2483
+  // caught the relay sentence missing; #2486 found the network-access line
+  // missing too). This pins the mirror to the source: the fixture's literal is
+  // parsed out of the TypeScript file and compared, line for line, against the
+  // prompt the route emits for the fixture's own API URL. The one legitimate
+  // difference — the pasted command, which carries a per-setup token — is
+  // normalised out on both sides.
+  it('matches the e2e fixture setup_prompt mirror line for line (packages/frontend/e2e/fixtures/haven-api.ts)', async () => {
+    const fixtureUrl = new URL('../../../../frontend/e2e/fixtures/haven-api.ts', import.meta.url)
+    const fixtureSource = readFileSync(fixtureUrl, 'utf8')
+    const match = fixtureSource.match(/setup_prompt: \[\n([\s\S]*?)\n\s*\]\.join\('\\n'\)/)
+    expect(match, 'fixture setup_prompt array literal not found').toBeTruthy()
+    // The captured block is an array of plain string literals; evaluate it in
+    // an empty context rather than re-implementing a string-literal parser.
+    const fixtureLines = runInNewContext(`[${match![1]}]`, {}) as string[]
+    expect(Array.isArray(fixtureLines)).toBe(true)
+
+    const app = await buildApp()
+    primeDb(safeLookup())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { host: 'api.haven.example', 'x-forwarded-proto': 'https' },
+      payload: { name: 'Research Agent', safe_id: SAFE.id, allowances: [ALLOWANCE] },
+    })
+    expect(response.statusCode).toBe(201)
+    const body = response.json()
+    const routeLines = String(body.setup_prompt).split('\n')
+
+    const normaliseCommandLine = (lines: string[]) =>
+      lines.map((line) => (line.startsWith('npx -y ') ? '<connector command>' : line))
+    expect(normaliseCommandLine(fixtureLines)).toEqual(normaliseCommandLine(routeLines))
+
+    await app.close()
+  })
+
+  // ── #2259: the legacy connect-approval half is DELETED, not tombstoned ──
+  //
+  // These two pin a deliberate CAPABILITY REMOVAL, not dead-code cleanup.
+  // `POST /agent-connection-setups` has no rail gate, so a surviving legacy
+  // Safe account could create a setup and reach `active` by two routes: the
+  // wallet-approval route itself, and — quietly — the dashboard status GET,
+  // which reconciled from live AllowanceModule state and wrote through
+  // `persistWalletApprovalState(..., activateAgent: true)`. Both are gone
+  // under the owner decision on epic #1440 (retirement is deletion, not
+  // accommodation). The first test below fails against the pre-#2259 file;
+  // the second guards a property rather than reproducing the old path — see
+  // its own note for why that distinction is not a formality here.
+  it('has no wallet-approval route at all — the legacy approval path is unregistered', async () => {
+    const app = await buildApp()
+    mockQuery.mockResolvedValue({ rows: [CONNECTED_SETUP] })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/agent-connection-setups/${CONNECTED_SETUP.id}/wallet-approval`,
+      payload: { result: 'confirmed' },
+    })
+
+    // 404, not 410: nothing calls this, so there is no integrator to tell.
+    expect(response.statusCode).toBe(404)
+    await app.close()
+  })
+
+  it('does not activate a legacy setup from the status read — the GET is a read', async () => {
+    const app = await buildApp()
+    const proposed = { ...CONNECTED_SETUP, status: 'proposed', approval_status: 'proposed' }
+    mockQuery.mockResolvedValue({ rows: [proposed] })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/agent-connection-setups/${proposed.id}`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ status: 'proposed' })
+    // Scope of this assertion, stated because it is narrower than it looks:
+    // it pins the PROPERTY "this GET writes nothing", and is falsifiable —
+    // injecting any `UPDATE` into the handler fails it (verified). It does NOT
+    // reproduce the old behaviour, and cannot: that path needed the
+    // AllowanceModule readers, which no longer exist to mock, so against the
+    // pre-#2259 file this test passes vacuously. It is a forward guard against
+    // a write returning to this read, not a regression test for the one
+    // removed.
+    const writes = mockQuery.mock.calls.filter(([sql]) =>
+      /UPDATE agent_connection_setups|UPDATE agents/i.test(String(sql)),
+    )
+    expect(writes).toEqual([])
+    await app.close()
+  })
+
+  it('records the manual credential fallback as approval-ready without activating the agent', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
     const setupRows: SetupFixture[] = []
@@ -915,8 +1100,15 @@ describe('agent connection setup routes', () => {
           api_key_prefix: String(params[4]),
           connector_version: params[5] as string | null,
           runtime: params[6] as string | null,
-          connector_context: JSON.parse(String(params[7])) as Record<string, unknown>,
-          install_status: JSON.parse(String(params[8])) as Record<string, unknown>,
+          // #2528 inserted `run_mode` at $8, shifting the two JSON columns
+          // along. This fake decodes the UPDATE by POSITION, so it silently
+          // mis-read them until these indices moved too — the exact failure
+          // the real-DB test in
+          // `infra/repositories/__tests__/agent-connection-setups.test.ts`
+          // exists to catch, since a mock cannot know the SQL renumbered.
+          run_mode: params[7] as string | null,
+          connector_context: JSON.parse(String(params[8])) as Record<string, unknown>,
+          install_status: JSON.parse(String(params[9])) as Record<string, unknown>,
           setup_token_consumed_at: '2026-06-03T12:00:00.000Z',
         }
         return { rows: [] }
@@ -996,12 +1188,13 @@ describe('agent connection setup routes', () => {
         proof_signature: proof,
         api_key_hash: API_KEY_HASH,
         api_key_prefix: 'sk_agent_fed',
-        runtime: 'claude-code',
-        connector_version: '0.1.0',
+        runtime: 'browser-manual-fallback',
+        connector_version: 'browser-manual-fallback',
         connector_context: {
-          environment_label: 'Local workspace',
-          runtime_version: 'claude-code 1.2.3',
+          environment_label: 'Manual browser fallback',
+          config_target: 'paste-to-agent',
         },
+        install_capabilities: { can_write_runtime_config: false, restart_required: true },
       },
     })
     expect(registerResponse.statusCode).toBe(201)
@@ -1013,6 +1206,16 @@ describe('agent connection setup routes', () => {
     })
     expect(registerResponse.json()).not.toHaveProperty('api_key')
     expect(JSON.stringify(mockClientQuery.mock.calls)).not.toContain(wallet.privateKey)
+    expect(setupRows[0].install_status).toMatchObject({
+      manual_credential_fallback: true,
+      hosted_mcp_configured: false,
+      local_signer_configured: false,
+      local_mcp_configured: false,
+      local_mcp_acknowledged: false,
+    })
+    // The marker is UI state only; registration still leaves the API key
+    // pending until the owner signs the existing budget delegation.
+    expect(agentStatus).toBe('pending_approval')
 
     const statusResponse = await app.inject({
       method: 'GET',
@@ -1025,42 +1228,6 @@ describe('agent connection setup routes', () => {
       delegate_address: wallet.address.toLowerCase(),
       approval: { status: 'not_started' },
     })
-
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    const approvalResponse = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${created.setup_id}/wallet-approval`,
-      payload: {
-        ...approvalPayload('confirmed'),
-        delegate_address: wallet.address,
-      },
-    })
-
-    expect(approvalResponse.statusCode).toBe(200)
-    expect(approvalResponse.json()).toMatchObject({
-      setup_id: created.setup_id,
-      status: 'active',
-      delegate_address: wallet.address.toLowerCase(),
-      approval: {
-        status: 'confirmed',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(agentStatus).toBe('active')
-    expect(mockGetTokenAllowance).toHaveBeenCalledWith(
-      SAFE.chain_id,
-      SAFE.safe_address,
-      wallet.address.toLowerCase(),
-      ALLOWANCE.token_address.toLowerCase(),
-    )
 
     await app.close()
   })
@@ -1145,6 +1312,239 @@ describe('agent connection setup routes', () => {
     expect(mockClientQuery).toHaveBeenCalledWith('COMMIT')
 
     await app.close()
+  })
+
+  /**
+   * CHARACTERIZATION, written BEFORE the #2528 change (money-path rule).
+   *
+   * Pins what `/register` answers and stores TODAY, so the additions can be
+   * read as additions. Three facts the change must not disturb:
+   *
+   *   1. `approval_url` — asserted ABSENT against unchanged code (green), then
+   *      flipped to present once the field landed and this test went red. The
+   *      red run is the evidence; the assertion below is its record;
+   *   2. `runtime` is ALREADY accepted and already persisted through
+   *      `markSetupRegistered` (migration 017's column). The issue body asks
+   *      for a migration adding `run_mode text` AND `runtime text`; half of
+   *      that already exists, and adding a second `runtime` column would be
+   *      the bug this test exists to prevent;
+   *   3. a body with neither field registers fine — the older-connector case.
+   */
+  it('characterized /register for #2528: approval_url added, runtime already persisted', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const proof = await wallet.signMessage(SETUP.challenge_message)
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      if (String(sql).includes('SELECT id FROM agents')) return { rows: [] }
+      if (String(sql).includes('INSERT INTO agents')) return { rows: [{ id: 'agent-1' }] }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+        runtime: 'claude-code',
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    // (1) Written as `not.toHaveProperty` against unchanged code and green
+    // there; it went red on the commit that added the field, which is what
+    // makes `approval_url` an ADDITION rather than something assumed to have
+    // been missing. Flipped to the shipped behaviour once that was shown.
+    expect(response.json()).toHaveProperty('approval_url')
+
+    // (2) `runtime` already reaches the UPDATE, in migration 017's column.
+    const markRegistered = mockClientQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE agent_connection_setups'),
+    )
+    expect(markRegistered?.[1]).toContain('claude-code')
+
+    await app.close()
+  })
+
+  it('characterizes /register before #2528: registers with no runtime and no run_mode', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const proof = await wallet.signMessage(SETUP.challenge_message)
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+      if (String(sql).includes('SELECT id FROM agents')) return { rows: [] }
+      if (String(sql).includes('INSERT INTO agents')) return { rows: [{ id: 'agent-1' }] }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: SETUP.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    // An older connector sends neither field and must keep working unchanged.
+    expect(response.statusCode).toBe(201)
+    expect(response.json().agent_status).toBe('pending_approval')
+
+    await app.close()
+  })
+
+  /**
+   * #2528, the additions. Written after the two characterization tests above,
+   * which pin what these change.
+   */
+  describe('#2528: approval link and run_mode on /register', () => {
+    async function register(payloadExtra: Record<string, unknown>) {
+      const app = await buildApp()
+      const wallet = new Wallet(
+        '0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38',
+      )
+      const proof = await wallet.signMessage(SETUP.challenge_message)
+
+      mockClientQuery.mockImplementation(async (sql: string) => {
+        if (String(sql).includes('FROM agent_connection_setups')) return { rows: [SETUP] }
+        if (String(sql).includes('SELECT id FROM agents')) return { rows: [] }
+        if (String(sql).includes('INSERT INTO agents')) return { rows: [{ id: 'agent-1' }] }
+        return { rows: [] }
+      })
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent-connection-setups/register',
+        payload: {
+          setup_token: 'hv_setup_test',
+          challenge_id: SETUP.challenge_id,
+          delegate_address: wallet.address,
+          proof_signature: proof,
+          api_key_hash: API_KEY_HASH,
+          api_key_prefix: API_KEY_PREFIX,
+          ...payloadExtra,
+        },
+      })
+      return { app, response }
+    }
+
+    it('returns the same absolute approval link create and status already return', async () => {
+      const { app, response } = await register({ run_mode: 'json' })
+
+      expect(response.statusCode).toBe(201)
+      const url = response.json().approval_url
+      // Asserted as a shape, not a literal host: the host comes from
+      // `config.frontendUrl`, and pinning it here would make this test a
+      // second, quieter copy of that configuration.
+      expect(url).toMatch(/^https?:\/\/[^/]+\/agents\?setup=/)
+      expect(url).toContain(encodeURIComponent(SETUP.id))
+      // It is a link, not a credential: the setup TOKEN must never ride in it.
+      expect(url).not.toContain('hv_setup_test')
+
+      await app.close()
+    })
+
+    it('persists an accepted run_mode through the register UPDATE', async () => {
+      const { app } = await register({ run_mode: 'json' })
+
+      const markRegistered = mockClientQuery.mock.calls.find(([sql]) =>
+        String(sql).includes('UPDATE agent_connection_setups'),
+      )
+      expect(markRegistered?.[1]).toContain('json')
+
+      await app.close()
+    })
+
+    it('normalizes case and surrounding whitespace before storing', async () => {
+      const { app } = await register({ run_mode: '  PROSE ' })
+
+      const markRegistered = mockClientQuery.mock.calls.find(([sql]) =>
+        String(sql).includes('UPDATE agent_connection_setups'),
+      )
+      expect(markRegistered?.[1]).toContain('prose')
+      expect(markRegistered?.[1]).not.toContain('  PROSE ')
+
+      await app.close()
+    })
+
+    /**
+     * The refusal is the point of the enum. A value nothing recognises must
+     * not enter a dimension the funnel segments on — and it must be refused
+     * BEFORE the transaction, so a bad request cannot burn the one-shot setup
+     * token. The second assertion is what makes that a fact rather than a
+     * hope: no agent row is inserted.
+     */
+    it('refuses an unrecognised run_mode with 400 and writes nothing', async () => {
+      const { app, response } = await register({ run_mode: 'telepathy' })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('Unsupported run_mode')
+      expect(
+        mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO agents')),
+      ).toBe(false)
+
+      await app.close()
+    })
+
+    it('accepts a register with no run_mode at all — the older-connector case', async () => {
+      const { app, response } = await register({})
+
+      expect(response.statusCode).toBe(201)
+      expect(response.json()).toHaveProperty('approval_url')
+
+      await app.close()
+    })
+
+    /**
+     * `run_mode` rides the `agent_created` funnel event next to `source` and
+     * `handoff_via`, so D1 (#2529) can segment without joining back to the
+     * setups table. Read off the pool mock (the funnel writes there, not to
+     * the transaction client) after a tick, because `emitFunnelEvent` is
+     * deliberately fire-and-forget.
+     */
+    it('carries run_mode into the agent_created funnel metadata', async () => {
+      const { app } = await register({ run_mode: 'json' })
+      await new Promise((r) => setImmediate(r))
+
+      const funnelInsert = mockQuery.mock.calls.find(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO onboarding_events') &&
+          Array.isArray(params) &&
+          params[1] === 'agent_created',
+      )
+      expect(funnelInsert).toBeDefined()
+      expect(JSON.parse(String(funnelInsert?.[1][2]))).toMatchObject({ run_mode: 'json' })
+
+      await app.close()
+    })
+
+    it('omits run_mode from the funnel metadata when the connector did not send it', async () => {
+      const { app } = await register({})
+      await new Promise((r) => setImmediate(r))
+
+      const funnelInsert = mockQuery.mock.calls.find(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO onboarding_events') &&
+          Array.isArray(params) &&
+          params[1] === 'agent_created',
+      )
+      // Absent, not null — an absent key and a null read differently in the
+      // metadata JSON, and absent is the honest one for "never reported".
+      expect(JSON.parse(String(funnelInsert?.[1][2]))).not.toHaveProperty('run_mode')
+
+      await app.close()
+    })
   })
 
   /**
@@ -1375,311 +1775,6 @@ describe('agent connection setup routes', () => {
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toMatch(/signing address/)
     expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK')
-
-    await app.close()
-  })
-
-  it('records confirmed wallet approval and activates only after on-chain allowance reconciliation', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      setup_id: SETUP.id,
-      status: 'active',
-      delegate_address: DELEGATE_ADDRESS,
-      approval: {
-        status: 'confirmed',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(mockGetTokenAllowance).toHaveBeenCalledWith(
-      SAFE.chain_id,
-      SAFE.safe_address,
-      DELEGATE_ADDRESS,
-      ALLOWANCE.token_address,
-    )
-    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agent_connection_setups'),
-    )
-    expect(setupUpdate?.[1]).toEqual([
-      SETUP.id,
-      'user-1',
-      'active',
-      'confirmed',
-      TX_HASH,
-      SAFE_TX_HASH,
-      null,
-    ])
-    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agents'),
-    )
-    expect(String(agentUpdate?.[0])).toContain("status = 'active'")
-
-    await app.close()
-  })
-
-  it('keeps multisig wallet approval proposals non-active', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([])
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('proposed'),
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      setup_id: SETUP.id,
-      status: 'proposed',
-      approval: {
-        status: 'proposed',
-        tx_hash: null,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    const agentUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agents'),
-    )
-    expect(agentUpdate).toBeUndefined()
-
-    await app.close()
-  })
-
-  it('does not activate when the live allowance does not match the pending setup', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: 1n,
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/budget does not match/)
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agent_connection_setups'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('records submitted confirmation evidence after a receipt timeout without activating', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([])
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: {
-        ...approvalPayload('confirmed'),
-        confirmation_status: 'receipt_timeout',
-      },
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      status: 'approval_in_progress',
-      approval: {
-        status: 'submitted',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('keeps confirmed wallet approval in progress when on-chain budget is not visible yet', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([])
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      status: 'approval_in_progress',
-      approval: {
-        status: 'submitted',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-      failure_reason: 'On-chain agent budget is not active yet',
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-    const setupUpdate = mockClientQuery.mock.calls.find(([sql]) =>
-      String(sql).includes('UPDATE agent_connection_setups'),
-    )
-    expect(setupUpdate?.[1]).toEqual([
-      SETUP.id,
-      'user-1',
-      'approval_in_progress',
-      'submitted',
-      TX_HASH,
-      SAFE_TX_HASH,
-      'On-chain agent budget is not active yet',
-    ])
-
-    await app.close()
-  })
-
-  it('keeps confirmed wallet approval in progress when on-chain verification is temporarily unavailable', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockRejectedValue(new Error('rpc unavailable'))
-    mockWalletApprovalPersist()
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(202)
-    expect(response.json()).toMatchObject({
-      status: 'approval_in_progress',
-      approval: {
-        status: 'submitted',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-      failure_reason: 'Haven could not verify the on-chain agent rules yet',
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('does not persist wallet approval if setup was cancelled after the initial read', async () => {
-    const app = await buildApp()
-    primeDb(setupForUser(CONNECTED_SETUP), setupAllowances([ALLOWANCE]))
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    mockWalletApprovalPersist({ ...CONNECTED_SETUP, status: 'cancelled' })
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(409)
-    expect(response.json().error).toMatch(/state changed/)
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes('UPDATE agents'))).toBe(false)
-
-    await app.close()
-  })
-
-  it('treats repeated confirmed wallet approval evidence as idempotent', async () => {
-    const app = await buildApp()
-    primeDb(
-      setupForUser({
-        ...CONNECTED_SETUP,
-        status: 'active',
-        approval_status: 'confirmed',
-        tx_hash: TX_HASH,
-        safe_tx_hash: SAFE_TX_HASH,
-      }),
-      setupAllowances([ALLOWANCE]),
-    )
-
-    const response = await app.inject({
-      method: 'POST',
-      url: `/agent-connection-setups/${SETUP.id}/wallet-approval`,
-      payload: approvalPayload('confirmed'),
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json().status).toBe('active')
-    expect(mockGetTokensForDelegate).not.toHaveBeenCalled()
-    expect(mockClientQuery).not.toHaveBeenCalled()
-
-    await app.close()
-  })
-
-  it('recovers a proposed setup to active when status read sees live on-chain authority', async () => {
-    const app = await buildApp()
-    primeDb(
-      setupForUser({
-        ...CONNECTED_SETUP,
-        status: 'proposed',
-        approval_status: 'proposed',
-        safe_tx_hash: SAFE_TX_HASH,
-      }),
-      setupAllowances([ALLOWANCE]),
-    )
-    mockGetTokensForDelegate.mockResolvedValue([ALLOWANCE.token_address])
-    mockGetTokenAllowance.mockResolvedValue({
-      amount: BigInt(ALLOWANCE.allowance_amount),
-      spent: 0n,
-      resetTimeMin: ALLOWANCE.reset_period_min,
-      lastResetMin: 0,
-      nonce: 0,
-    })
-    mockWalletApprovalPersist({
-      ...CONNECTED_SETUP,
-      status: 'proposed',
-      approval_status: 'proposed',
-      safe_tx_hash: SAFE_TX_HASH,
-    })
-
-    const response = await app.inject({
-      method: 'GET',
-      url: `/agent-connection-setups/${SETUP.id}`,
-    })
-
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({
-      setup_id: SETUP.id,
-      status: 'active',
-      approval: {
-        status: 'confirmed',
-        safe_tx_hash: SAFE_TX_HASH,
-      },
-    })
-    expect(mockClientQuery.mock.calls.some(([sql]) => String(sql).includes("status = 'active'"))).toBe(true)
 
     await app.close()
   })
@@ -2305,8 +2400,6 @@ describe('data access characterization (#985)', () => {
       query: (...args: unknown[]) => mockClientQuery(...args),
       release: mockClientRelease,
     })
-    mockGetTokenAllowance.mockReset()
-    mockGetTokensForDelegate.mockReset()
     mockRequestPassport.mockReset().mockResolvedValue(true)
     mockIssueBestEffort.mockReset()
   })

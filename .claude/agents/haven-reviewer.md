@@ -2,7 +2,7 @@
 name: haven-reviewer
 description: Use after implementation to review Haven product, UX, security, regression, and test risks. Prefer read-only review with findings first.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
 color: purple
 ---
 

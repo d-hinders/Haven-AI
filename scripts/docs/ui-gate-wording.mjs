@@ -1,0 +1,522 @@
+#!/usr/bin/env node
+// Retired UI merge-gate wording guard (#2657, guarding the rules #2636 retired).
+//
+// ## The defect this exists for
+//
+// #2636 retired two rules and had to correct them in TEN live documentation
+// sites. Those ten were found across FIVE review rounds, each round finding
+// sites the previous ones had missed — and the site that survived longest was
+// `.agents/skills/ship-next/SKILL.md` § *Merge Gate*, the canonical definition
+// every other doc links to as the source of truth.
+//
+// The root cause was mechanical, not attentional. Every failed sweep was
+// **line-bound** (`grep`), and this repo's Markdown is **hard-wrapped**, so the
+// sentence splits across lines:
+//
+//     - **Frontend UI:** a UX, copy, or design-system finding from either
+//       review pass pauses auto-merge.
+//
+// No `grep 'finding.*pauses'` matches that. Round 5 found it only by reading
+// whole files and running a regex over the raw text.
+//
+// So this check is **sentence-scoped over file contents, never line-bound**:
+// it segments each file's body into sentences that may span any number of
+// newlines, flattens each sentence's whitespace, and only then matches. A guard
+// that could only see the single-line form would ship green while missing
+// exactly the case it was built for — which is why `ui-gate-wording.test.mjs`
+// asserts the hard-wrapped case explicitly.
+//
+// ## The two retired rules
+//
+//  1. `blanket-merge-pause` — "a finding from either pass pauses auto-merge",
+//     with no severity qualifier. The rule since #2636 is that `blocking` and
+//     `should-fix` pause and `nit` does not, so a sentence that names either
+//     severity is the CORRECTED form and is excluded.
+//  2. `retired-rendered-evidence-trigger` — "any diff touching a rendered route
+//     or a shared primitive". Rendered evidence now keys on three named
+//     triggers (new route, changed shared primitive, a diff that changes what a
+//     screen shows).
+//
+// ## What it deliberately does not read
+//
+// **Front-matter.** A `last-verified` chain records what a past PR changed, so
+// it quotes the retired wording by design and forever — `frontend.md`'s chain
+// alone carries several such quotes. The chain is stripped before scanning
+// (newline-for-newline, so reported line numbers still point at the real line),
+// which is strictly more reliable than the substring filter the issue's
+// prototype sweep used: that filter is sentence-scoped too, so it misses a
+// chain entry whose own sentence happens not to contain the words
+// `last-verified` or `Prior:` — the residue that prototype printed.
+// In-body quotations of a chain are still filtered by substring.
+//
+// ## Residue
+//
+// Ratcheting, shrink-only baseline in the house style of
+// `copy-lint-baseline.json` / `design-lint-baseline.json`: file → rule id →
+// count. Counts may fall, never rise. `--update` rewrites it, and is for a
+// reviewed, intentional change only.
+//
+// Usage:
+//   node scripts/docs/ui-gate-wording.mjs            # check (runs in docs:check)
+//   node scripts/docs/ui-gate-wording.mjs --update   # rewrite the baseline
+//
+// See docs/contributing/docs-quality-system.md.
+import { readFile, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'docs', 'ui-gate-wording-baseline.json')
+
+/**
+ * The retired rules, as term sets rather than one long regex.
+ *
+ * `requires` are ALL matched against the sentence with its whitespace
+ * flattened, so word order does not matter and a hard wrap between any two
+ * words of a phrase is invisible to the match. `excludes` are the forms that
+ * are legitimate: the corrected `blocking`/`should-fix` wording, and text that
+ * is quoting a `last-verified` chain inside a doc body.
+ */
+export const RULES = [
+  {
+    id: 'blanket-merge-pause',
+    what: 'the blanket merge pause #2636 retired ("a finding from either pass pauses auto-merge")',
+    fix: 'name the severities: a `blocking` or `should-fix` finding pauses auto-merge; a `nit` does not (#2636).',
+    requires: [/\bfinding\b/i, /\bpauses\b/i],
+    excludes: [/\bblocking\b/i, /\bshould-fix\b/i],
+  },
+  {
+    id: 'retired-rendered-evidence-trigger',
+    what: 'the rendered-evidence trigger #2636 retired ("any diff touching a rendered route or a shared primitive")',
+    fix: 'name the three triggers: a new route, a changed shared primitive, or a diff that changes what a screen shows (#2636).',
+    // Two INDEPENDENT words, not one adjacency (review finding). `\brendered
+    // route\b` binds the pair, so any inline markup landing between them —
+    // `rendered **route**`, or a wrap onto a code span — slips through. That is
+    // the same defect one level down from the one this guard exists for: a hard
+    // wrap defeats grep, and a bolded word defeats a two-word regex. Both words
+    // must still appear in the SAME flattened sentence, which is what keeps
+    // this from firing on unrelated prose that happens to say "primitive".
+    // Matched against the MARKUP-STRIPPED sentence (see `stripMarkup`), so the
+    // rule can say what it means: the two words adjacent, separated by nothing
+    // but a space or a hyphen.
+    //
+    // Three attempts got here, and the two rejected ones bracket why a regex
+    // over raw text cannot do this. `\brendered route\b` was too tight — any
+    // inline markup between the words slipped through. Three independent words
+    // was too loose — it fired on `.github/pull_request_template.md`, whose
+    // checklist has no full stops, so the whole list flattens into one
+    // "sentence" holding all three words in unrelated bullets. A bounded
+    // character gap, `[^A-Za-z0-9]{0,12}`, was wrong on BOTH sides and an
+    // independent review reproduced each: it missed `rendered <!-- x --> route`
+    // (a comment is longer than the budget and contains letters), and it FIRED
+    // on `the rendered, route opens differently` — a clause boundary, not the
+    // retired phrase at all.
+    //
+    // Stripping markup first removes the guesswork: a comma survives stripping
+    // and still separates the words, while emphasis, code spans and comments do
+    // not survive and no longer hide the pair.
+    requires: [/\brendered[ -]route\b/i, /\bprimitive\b/i],
+    excludes: [],
+  },
+]
+
+/**
+ * Sentences that are quoting the `last-verified` chain from inside a doc BODY.
+ * Front-matter is stripped before this ever applies; this is for prose that
+ * pastes a chain entry as an example.
+ */
+const CHAIN_QUOTE = [/last-verified/i, /\bPrior:/]
+
+/**
+ * The escape for a sentence that QUOTES the retired wording in order to explain
+ * or forbid it (review finding).
+ *
+ * Without one, this guard cannot tell a violation from a citation of one — and
+ * the document most likely to quote the retired sentence verbatim is the one
+ * explaining why it is retired. Today no body prose does that, so nothing is
+ * broken; the next explanatory doc would have had no clean way out, because
+ * baselining is semantically wrong for a citation. It is residue the baseline
+ * describes, and a citation is not residue.
+ *
+ * Deliberately an explicit marker rather than heuristics on words like
+ * "retired" or "forbidden": a guard that tries to read intent will get it
+ * wrong in both directions, and the repo already uses this shape
+ * (`// design-system-exempt: <reason>`, `// ui-local: <reason>`).
+ *
+ *     <!-- ui-gate-wording-allow: quoting the retired form to forbid it -->
+ *
+ * It applies to the LINE it appears on, plus one line either side — enough for
+ * a hard wrap, and no further. It cannot silence a file, and it cannot excuse a
+ * violation in another paragraph. (An earlier draft of this comment said
+ * "sentence", describing a scope that was tried and rejected; the mechanism
+ * below is line-anchored and this sentence is the correction.)
+ *
+ * One limit, stated rather than discovered: the marker excuses EVERY violation
+ * on the lines it covers, not one specific occurrence. Two distinct retired
+ * phrases on one physical line cannot be excused separately.
+ */
+const ALLOW_MARKER = /<!--\s*ui-gate-wording-allow:[^>]*-->/i
+
+/** Markdown files under the doc surface, excluding archived docs. */
+export function listMarkdownFiles(root = REPO_ROOT) {
+  const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', '*.md'], {
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  })
+  return out.split('\0').filter(Boolean)
+}
+
+/**
+ * Blank out the leading front-matter block, preserving byte offsets so that
+ * line numbers computed on the result still address the real file. Every
+ * non-newline character becomes a space; newlines are kept.
+ */
+export function blankFrontMatter(raw) {
+  const m = raw.match(/^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/)
+  if (!m) return raw
+  const blanked = m[0].replace(/[^\n]/g, ' ')
+  return blanked + raw.slice(m[0].length)
+}
+
+/**
+ * Segment text into sentences. A sentence ends at a period that is followed by
+ * whitespace or end-of-input — NOT at every bare period (#2671). Splitting on
+ * bare periods fragmented sentences at URL dots (`example.com/docs` split into
+ * two "sentences", each holding half of a retired phrase, so neither matched);
+ * a period glued to following text is a dot inside a URL, a filename, a
+ * version number or an ellipsis, none of which end a sentence. A period
+ * followed by a space or newline can still split mid-thought on an
+ * abbreviation ("e.g. "), which over-segments rather than under-segments: the
+ * cost is a rarer match, never a false one. `[^.]`-style spanning is kept:
+ * a sentence still covers however many lines it is wrapped over.
+ *
+ * Returns `{ text, index }` so a match can be located in the original file.
+ */
+export function sentences(text) {
+  const out = []
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '.') continue
+    const boundary = i + 1 >= text.length || /\s/.test(text[i + 1])
+    if (!boundary) continue
+    const chunk = text.slice(start, i + 1)
+    if (chunk.trim().length > 0) out.push({ text: chunk, index: start })
+    start = i + 1
+  }
+  const tail = text.slice(start)
+  if (tail.trim().length > 0) out.push({ text: tail, index: start })
+  return out
+}
+
+/**
+ * Remove inline markup so a rule can talk about WORDS rather than about the
+ * characters that happen to sit between them — AND report where each surviving
+ * character came from (#2671).
+ *
+ * HTML comments go first, then tags. A TAG is `<` + optional `!`/`/` + a
+ * letter or digit + anything up to `>`: the old `<[^>]*>` also blanked
+ * comparison prose like `< shared primitive >`, deleting one of the very words
+ * the guard exists to find and hiding the deletion from the report. Emphasis,
+ * code-span backticks and link brackets are deleted outright; a comment or tag
+ * span becomes ONE space (so `a<!--x-->b` stays two words). Clause punctuation
+ * — commas, semicolons, dashes — is deliberately KEPT: it is what separates
+ * `the rendered, route opens differently` from the retired phrase.
+ *
+ * `idx[j]` is the index within the INPUT of `plain[j]`, which is what lets a
+ * match found on the stripped text be reported at a true source position.
+ */
+export function stripMarkupWithMap(s) {
+  const chars = []
+  const idx = []
+  let i = 0
+  const lastIsWs = () => chars.length > 0 && /\s/.test(chars[chars.length - 1])
+  while (i < s.length) {
+    const rest = s.slice(i)
+    const comment = /^<!--[\s\S]*?-->/.exec(rest)
+    const tag = /^<[/!]?[A-Za-z0-9][^>]*>/.exec(rest)
+    if (comment || tag) {
+      const span = comment || tag
+      if (!lastIsWs()) {
+        chars.push(' ')
+        idx.push(i)
+      }
+      i += span[0].length
+      continue
+    }
+    const ch = s[i]
+    if (/[*_`~[\]]/.test(ch)) {
+      i++
+      continue
+    }
+    if (/\s/.test(ch)) {
+      if (!lastIsWs()) {
+        chars.push(' ')
+        idx.push(i)
+      }
+      i++
+      continue
+    }
+    chars.push(ch)
+    idx.push(i)
+    i++
+  }
+  let a = 0
+  let b = chars.length
+  while (a < b && /\s/.test(chars[a])) a++
+  while (b > a && /\s/.test(chars[b - 1])) b--
+  return { plain: chars.slice(a, b).join(''), idx: idx.slice(a, b) }
+}
+
+/** `stripMarkupWithMap(...).plain` — one implementation, no drift. */
+export function stripMarkup(s) {
+  return stripMarkupWithMap(s).plain
+}
+
+/**
+ * Blank fenced code blocks newline-for-newline (#2671): every non-newline
+ * character becomes a space, so line numbers and offsets stay true to the real
+ * file. Illustrative "before" text inside a fence is a citation of the retired
+ * form, not live prose — the same distinction front-matter already gets. The
+ * block's fence lines themselves are blanked too; a fence line carries no
+ * rule-bearing words, so nothing is lost.
+ *
+ * The opening fence line's last character is rewritten to a period, making the
+ * fence a hard SENTENCE boundary: without it, a fully blanked interior would
+ * weld the prose before and after the fence into one flattened "sentence", and
+ * a retired phrase could straddle the fence and co-occur into a false positive
+ * — including through a period-less interior (the common case: a list item
+ * ending without a full stop, then an install-command block). Interior periods
+ * are also preserved, so an illustrative sentence inside the fence does not
+ * weld with surrounding prose either. A 1:1 character swap throughout:
+ * offsets, line numbers and newline counts are untouched.
+ */
+export function blankFences(raw) {
+  return raw.replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[^\n]*$/gm, (block) => {
+    const blanked = block.replace(/[^\n.]/g, ' ')
+    // Terminate the sentence AT the fence: the opening fence line's last
+    // character becomes a period, so prose before the fence can never weld
+    // with prose after it — including through a PERIOD-LESS interior, which
+    // period-preservation alone cannot separate. A 1:1 character swap, so
+    // offsets, line numbers and newline counts are untouched.
+    const nl = blanked.indexOf('\n')
+    return nl > 0 ? blanked.slice(0, nl - 1) + '.' + blanked.slice(nl) : blanked
+  })
+}
+
+/** Collapse every whitespace run — including hard wraps — to one space. */
+export function flatten(s) {
+  return s.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * `flatten`, plus the index map back into the source string.
+ *
+ * The map is what lets the report name a real LINE. Matching happens on the
+ * flattened sentence — that is the whole point, since a hard wrap may fall
+ * between any two words of a phrase — but a reader needs the file position of
+ * the phrase, not of the sentence, which in a hard-wrapped doc can start
+ * several lines earlier (and, once front-matter is blanked, at the top of the
+ * file). `map[i]` is the source index of `flat[i]`.
+ */
+export function flattenWithMap(s) {
+  let flat = ''
+  const map = []
+  let i = 0
+  while (i < s.length && /\s/.test(s[i])) i++
+  for (; i < s.length; i++) {
+    if (/\s/.test(s[i])) {
+      if (flat.length > 0 && !flat.endsWith(' ')) {
+        flat += ' '
+        map.push(i)
+      }
+      continue
+    }
+    flat += s[i]
+    map.push(i)
+  }
+  while (flat.endsWith(' ')) {
+    flat = flat.slice(0, -1)
+    map.pop()
+  }
+  return { flat, map }
+}
+
+/** 1-based line number of `index` within `text`. */
+export function lineOf(text, index) {
+  let line = 1
+  for (let i = 0; i < index && i < text.length; i++) if (text[i] === '\n') line++
+  return line
+}
+
+/**
+ * Scan one file's raw contents. Pure — takes the text, returns violations.
+ * `{ file, rule, line, sentence }[]`
+ */
+export function scanText(file, raw) {
+  const body = blankFences(blankFrontMatter(raw))
+  const hits = []
+  // The citation escape is LINE-scoped: the marker excuses the line it sits on
+  // and the line either side of it.
+  //
+  // Paragraph scope was tried first and cannot work here, for a reason worth
+  // recording. `sentences()` splits on sentence-ending periods, and a marker
+  // line has none — so the "sentence" beginning at the marker ran straight
+  // through the blank line into the next paragraph, and a marker anywhere
+  // above a violation excused it. The failure was invisible until a test put
+  // the marker in a DIFFERENT paragraph and expected the hit to survive.
+  //
+  // Lines are what an author can see. Same line, the line before, or the line
+  // after — enough for a hard wrap, and no further.
+  const allowedLines = new Set()
+  body.split('\n').forEach((line, i) => {
+    if (!ALLOW_MARKER.test(line)) return
+    allowedLines.add(i).add(i - 1).add(i + 1)
+  })
+
+  for (const s of sentences(body)) {
+    const { flat, map } = flattenWithMap(s.text)
+    if (flat.length === 0) continue
+    if (CHAIN_QUOTE.some((re) => re.test(flat))) continue
+    for (const rule of RULES) {
+      // Rules match the MARKUP-STRIPPED sentence, and the reported position is
+      // mapped from THAT SAME text (#2671). The previous code searched the
+      // UNstripped `flat` for the rule's terms and fell back to a bare
+      // first-word search on miss: stripped-away markup shifted every index,
+      // an earlier unrelated word stole the report (a violation on line 10 was
+      // reported on line 8), and the fallback's last resort landed on offset
+      // 0 — the sentence start, lines above the phrase.
+      const { plain, idx } = stripMarkupWithMap(flat)
+      if (rule.requires.some((re) => !re.test(plain))) continue
+      if (rule.excludes.some((re) => re.test(plain))) continue
+      // Every required term is known to match `plain` (checked above); report
+      // the FIRST one, not the sentence start — the sentence may open several
+      // hard-wrapped lines above the phrase.
+      const at = Math.min(
+        ...rule.requires.map((re) => {
+          const m = re.exec(plain)
+          return m ? m.index : plain.length
+        }),
+      )
+      const offset = map[idx[at]] ?? map[0] ?? 0
+      const line = lineOf(body, s.index + offset)
+      // The citation escape is anchored to the line the VIOLATING PHRASE is
+      // on, not to where its sentence starts. (History: two earlier anchors —
+      // the sentence and its paragraph — excused violations several paragraphs
+      // away, which is precisely what the escape must not do. The phrase's own
+      // line is the only anchor that means what an author reading the file
+      // would expect.)
+      if (allowedLines.has(line - 1)) continue
+      hits.push({
+        file,
+        rule: rule.id,
+        line,
+        sentence: flat.length > 220 ? `${flat.slice(0, 220)}…` : flat,
+      })
+    }
+  }
+  return hits
+}
+
+/** `{ file: { ruleId: count } }` from a flat violation list. */
+export function countByFile(hits) {
+  const counts = {}
+  for (const h of hits) {
+    counts[h.file] ??= {}
+    counts[h.file][h.rule] = (counts[h.file][h.rule] ?? 0) + 1
+  }
+  return counts
+}
+
+/** Occurrences beyond what the baseline allows. */
+export function newViolations(counts, baseline) {
+  const failures = []
+  for (const [file, rules] of Object.entries(counts)) {
+    for (const [rule, count] of Object.entries(rules)) {
+      const allowed = baseline?.[file]?.[rule] ?? 0
+      if (count > allowed) failures.push({ file, rule, count, allowed })
+    }
+  }
+  return failures.sort((a, b) => a.file.localeCompare(b.file) || a.rule.localeCompare(b.rule))
+}
+
+/** True when any baselined count has fallen — the ratchet can be tightened. */
+export function hasShrunk(counts, baseline) {
+  for (const [file, rules] of Object.entries(baseline ?? {})) {
+    for (const [rule, allowed] of Object.entries(rules)) {
+      if ((counts?.[file]?.[rule] ?? 0) < allowed) return true
+    }
+  }
+  return false
+}
+
+async function readBaseline() {
+  try {
+    return JSON.parse(await readFile(BASELINE_PATH, 'utf8'))
+  } catch (err) {
+    if (err.code === 'ENOENT') return {}
+    throw err
+  }
+}
+
+async function main() {
+  const update = process.argv.includes('--update')
+  const files = listMarkdownFiles()
+  const hits = []
+  for (const file of files) {
+    hits.push(...scanText(file, await readFile(join(REPO_ROOT, file), 'utf8')))
+  }
+  const counts = countByFile(hits)
+
+  if (update) {
+    const sorted = Object.fromEntries(
+      Object.entries(counts)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([f, r]) => [f, Object.fromEntries(Object.entries(r).sort(([a], [b]) => a.localeCompare(b)))]),
+    )
+    await writeFile(BASELINE_PATH, `${JSON.stringify(sorted, null, 2)}\n`)
+    console.log(`ui-gate-wording: baseline written (${hits.length} existing occurrence(s) ratcheted).`)
+    return
+  }
+
+  const baseline = await readBaseline()
+  const failures = newViolations(counts, baseline)
+
+  if (failures.length > 0) {
+    console.error('✗ Retired UI merge-gate wording found in live documentation:\n')
+    for (const f of failures) {
+      const rule = RULES.find((r) => r.id === f.rule)
+      console.error(`  ${f.file} — ${f.rule}: ${f.count} found, baseline allows ${f.allowed}`)
+      console.error(`    states ${rule.what}`)
+      for (const h of hits.filter((h) => h.file === f.file && h.rule === f.rule)) {
+        console.error(`    ${f.file}:${h.line}: ${h.sentence}`)
+      }
+      console.error(`    → ${rule.fix}\n`)
+    }
+    console.error(
+      'These two rules were retired by #2636 and corrected in ten places across five ' +
+        'review rounds, because every sweep before this check was line-bound and the docs ' +
+        'are hard-wrapped (#2657). Correct the sentence rather than baselining it; ' +
+        '`node scripts/docs/ui-gate-wording.mjs --update` is for a reviewed, intentional ' +
+        'change only, and a `last-verified` chain entry never needs one — front-matter is ' +
+        'not scanned.\n',
+    )
+    process.exit(1)
+  }
+
+  console.log(
+    `✓ No retired UI merge-gate wording in ${files.length} Markdown file(s) ` +
+      `(${hits.length} baselined occurrence(s) remain).` +
+      (hasShrunk(counts, baseline)
+        ? ' Residue shrank — run `node scripts/docs/ui-gate-wording.mjs --update` to tighten the ratchet.'
+        : ''),
+  )
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => {
+    // Fail closed: a broken gate that passes is the defect one layer up.
+    console.error('ui-gate-wording error:', err)
+    process.exit(1)
+  })
+}

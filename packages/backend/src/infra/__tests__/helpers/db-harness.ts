@@ -134,7 +134,7 @@
  * repository test files that need them (and get promoted only when a second
  * file needs the same one).
  */
-import { describe } from 'vitest'
+import { afterAll, describe } from 'vitest'
 import db from '../../../db.js'
 import {
   acquireAdvisoryLockByPolling,
@@ -200,6 +200,47 @@ if (!dbAvailable) {
 export const describeDb: typeof describe = dbAvailable
   ? describe
   : (describe.skip as typeof describe)
+
+/**
+ * Root-level backstop for `assertWorkerSchemaAtHead()` (#2625).
+ *
+ * Every real-DB test file that reaches this point imports this module, so
+ * this line runs — once, at module load, during that file's OWN collection
+ * phase — regardless of what the file's test bodies declare afterwards.
+ * Registered here, at the FILE's root suite, it occupies a different failure
+ * boundary than any hook a nested `describe` inside that file registers.
+ *
+ * That boundary is the fix for the second #2625 gap: vitest runs sibling
+ * `afterAll` hooks within ONE suite in LIFO order, and when an
+ * earlier-executing one throws, it does not run the hooks still queued
+ * behind it in THAT SAME suite — proven by reproduction (see the PR body).
+ * A file that also calls `afterAll(assertWorkerSchemaAtHead)` itself inside a
+ * nested `describe`, the existing convention this harness still supports,
+ * can lose that inner call exactly that way if a sibling repair hook throws.
+ * This root-level call cannot be skipped by a THROW inside a nested
+ * `describe`'s hook chain, because it belongs to a different suite: vitest
+ * still runs the file's root-level teardown after a child suite's hooks
+ * finish, whether they finished by completing or by throwing. Reproduced
+ * directly: a nested `describe` with a throwing sibling `afterAll` still
+ * lets a root-level `afterAll` registered by an imported module run
+ * afterwards, with and without a top-level `await` ahead of the
+ * registration (this module has one, for `probeDatabase()` above).
+ *
+ * What this DOES guarantee: the guard records drift for THIS run even when
+ * a sibling hook throws partway through cleanup, closing exactly the
+ * attribution loss #2625 named — no later run inherits an unrecorded drift
+ * from this cause. What it does NOT guarantee: it does not make a throwing
+ * repair hook succeed, and it does not run if `headShape` was never
+ * captured (real-DB mode off, or a file that never reaches
+ * `initDbHarness()`/`resetDb()`) — the same limits `assertWorkerSchemaAtHead()`
+ * always had. It also does not replace the inner registration some files
+ * still carry: that copy still gives the earliest possible failure in the
+ * ordinary (non-throwing) case, this one is the backstop for the case it
+ * cannot cover. Running the check twice in that case is harmless — it is a
+ * pure read-and-diff, and a second call that finds no drift returns
+ * immediately (see the cost measurement on `assertWorkerSchemaAtHead()`).
+ */
+afterAll(assertWorkerSchemaAtHead)
 
 /**
  * The global lock that serialises migration runs across vitest workers.
@@ -446,26 +487,43 @@ function ensureMigrated(): Promise<void> {
     } finally {
       lockHolder.release()
     }
-    // #2616: the shape at migration head, captured the one moment it is
+    // #2616/#2625: the shape at migration head, captured the one moment it is
     // known-good — after the runner finishes and before any test body runs.
-    // `assertWorkerSchemaAtHead()` below diffs against it.
-    headTables = (await readSchemaShape()).tables
+    // `assertWorkerSchemaAtHead()` below diffs against it. A column/index
+    // FINGERPRINT, not just table names (#2625) — see `readSchemaFingerprint()`
+    // for why a name-only list let a shape change through, and why this extra
+    // round trip is paid HERE, once per worker, rather than in `readSchemaShape()`
+    // below, which every `resetDb()` call already pays.
+    headShape = await readSchemaFingerprint()
   })()
   return ready
 }
 
 /**
- * The worker schema's table list at migration head, captured once by
- * `ensureMigrated()`. `null` until the first migration run completes.
+ * One table's column and index shape, as captured by `readSchemaFingerprint()`.
+ * Both lists are ordered by the database (`ORDER BY column_name` /
+ * `ORDER BY indexname`), so two fingerprints of the same shape serialise
+ * identically regardless of catalog insertion order.
  */
-let headTables: string[] | null = null
+type TableFingerprint = {
+  table: string
+  columns: { name: string; type: string; nullable: string; default: string | null }[]
+  indexes: string[]
+}
+
+/**
+ * The worker schema's per-table column/index fingerprint at migration head,
+ * captured once by `ensureMigrated()`. `null` until the first migration run
+ * completes.
+ */
+let headShape: TableFingerprint[] | null = null
 
 /**
  * Fail if the worker schema is no longer the shape the migration runner left
- * (#2616). Call in `afterAll` from any file that changes SCHEMA — a migration's
- * `up()`/`down()` driven by hand, or an ordinary test creating or dropping a
- * table in a hook. The leak that caused #2616 was the second kind, so scoping
- * this to migration tests would have missed it.
+ * (#2616, widened by #2625). Call in `afterAll` from any file that changes
+ * SCHEMA — a migration's `up()`/`down()` driven by hand, or an ordinary test
+ * creating or dropping a table in a hook. The leak that caused #2616 was the
+ * second kind, so scoping this to migration tests would have missed it.
  *
  * ## Why this exists, and why it is not in `resetDb()`
  *
@@ -484,6 +542,36 @@ let headTables: string[] | null = null
  * that caused it. This check fails in the file that did the damage, names the
  * tables, and says which direction they moved.
  *
+ * ## Table NAMES are not enough (#2625)
+ *
+ * The original #2616 diff compared `readSchemaShape().tables` — a table-name
+ * list. A repair that recreates a table with the wrong columns, indexes or
+ * constraints passed that check silently: reproduced directly by adding
+ * `ALTER TABLE agents ADD COLUMN __scratch_leak text` in a terminal
+ * `afterAll` and observing the name-only guard report clean. Not hypothetical
+ * for a real caller either — `agents-allowances-retired.test.ts` recreates
+ * `agent_allowances` from a DDL block hand-copied from a migration file, so a
+ * later migration that adds a column to that table leaves the copy off head
+ * in SHAPE while still matching in NAME.
+ *
+ * So the captured snapshot and the live comparison are both a per-table
+ * COLUMN and INDEX fingerprint (`readSchemaFingerprint()`), not a name list.
+ * "A file that repairs its own drift has leaked nothing" is now true of the
+ * shape this guard inspects, not merely of the table's existence.
+ *
+ * The cost of that widening is paid where the doc above says it should be:
+ * the fingerprint query runs once per worker (the head capture in
+ * `ensureMigrated()`) and once per call to this function — never inside
+ * `resetDb()`'s `beforeEach` path, which keeps the cheaper name-only
+ * `readSchemaShape()` it already needs for the delete/truncate plan. Measured
+ * on this branch, native Postgres 16, 78 migrations / 34 tables in the worker
+ * schema, 30 calls each after a warm-up call: `readSchemaFingerprint()` (this
+ * function) had a median of ~31 ms (27-34 ms), against a ~15 ms (10-21 ms)
+ * median for the plain `readSchemaShape()` `resetDb()` already pays on every
+ * reset — roughly double, but still tens of milliseconds, paid only at the
+ * two call sites named above (once per worker, and once per file that calls
+ * this function), never on the hot per-test path `resetDb()` runs.
+ *
  * ## Register it FIRST
  *
  * Vitest runs sibling `afterAll` hooks in REVERSE registration order, so
@@ -497,19 +585,40 @@ let headTables: string[] | null = null
  * two tests of such a file the schema is *supposed* to carry an extra table.
  * A check there would either fire on them or need an allowlist that drifts.
  * `afterAll` is where the rule is unambiguous.
+ *
+ * That registration-order reasoning has one hole (#2625): when an
+ * earlier-executing sibling `afterAll` in the SAME suite throws, vitest never
+ * runs the hooks still queued behind it in that suite, so a call registered
+ * here — inside a nested `describe`, first, so it runs last — can be skipped
+ * outright rather than merely delayed. This module now ALSO registers this
+ * function as a root-level `afterAll` (see the call site above `describeDb`),
+ * which is immune to that specific failure because it belongs to a different
+ * suite. Read that call site's docstring for what the two registrations
+ * together guarantee and do not.
  */
 export async function assertWorkerSchemaAtHead(): Promise<void> {
-  if (headTables === null) return // real-DB mode off, or migrations never ran
-  const current = (await readSchemaShape()).tables
-  const head = new Set(headTables)
-  const now = new Set(current)
-  const restored = current.filter((t) => !head.has(t))
-  const missing = headTables.filter((t) => !now.has(t))
-  if (restored.length === 0 && missing.length === 0) return
+  if (headShape === null) return // real-DB mode off, or migrations never ran
+  const current = await readSchemaFingerprint()
+  const head = new Map(headShape.map((t) => [t.table, t]))
+  const now = new Map(current.map((t) => [t.table, t]))
+  const restored = current.filter((t) => !head.has(t.table)).map((t) => t.table)
+  const missing = headShape.filter((t) => !now.has(t.table)).map((t) => t.table)
+  const changed = headShape
+    .filter((t) => {
+      const nowT = now.get(t.table)
+      if (!nowT) return false
+      return (
+        JSON.stringify(t.columns) !== JSON.stringify(nowT.columns) ||
+        JSON.stringify(t.indexes) !== JSON.stringify(nowT.indexes)
+      )
+    })
+    .map((t) => t.table)
+  if (restored.length === 0 && missing.length === 0 && changed.length === 0) return
   throw new Error(
-    `db-harness: this file left ${WORKER_SCHEMA} off migration head (#2616).` +
+    `db-harness: this file left ${WORKER_SCHEMA} off migration head (#2616, #2625).` +
       (restored.length ? ` Tables present that head does not have: ${restored.join(', ')} — a down() or a CREATE was not undone.` : '') +
       (missing.length ? ` Tables head has that are gone: ${missing.join(', ')} — an up()/DROP was not followed by its down().` : '') +
+      (changed.length ? ` Tables present in both but with a different column/index shape: ${changed.join(', ')} — a column, index or constraint was added, dropped or changed without restoring it.` : '') +
       ' The schema outlives this run (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
       ' so the next file on this worker would have inherited it as a mystery failure. Restore in a `finally`.',
   )
@@ -642,6 +751,50 @@ async function readSchemaShape(): Promise<SchemaShape> {
     [WORKER_SCHEMA],
   )
   return rows[0]
+}
+
+/**
+ * The worker schema's per-table column and index shape (#2625) — what
+ * `assertWorkerSchemaAtHead()` diffs, deliberately SEPARATE from
+ * `readSchemaShape()` above. `readSchemaShape()` runs on every `resetDb()`
+ * because the emptying plan needs it every test; this function runs only at
+ * migration head (once per worker) and inside `assertWorkerSchemaAtHead()`
+ * itself, so the extra catalog work of fingerprinting every column and index
+ * never lands on the per-test reset path. See the cost measurement in
+ * `assertWorkerSchemaAtHead()`'s docstring.
+ *
+ * One round trip: for every table, a `json_build_object` of its columns
+ * (name, type, nullability, default) ordered by column name, and its index
+ * names ordered alphabetically — both orderings make two fingerprints of an
+ * identical shape serialise byte-for-byte equal regardless of catalog
+ * insertion order, which is what makes a plain `JSON.stringify` comparison in
+ * the caller correct.
+ */
+async function readSchemaFingerprint(): Promise<TableFingerprint[]> {
+  const { rows } = await db.query<{ shape: TableFingerprint[] }>(
+    `SELECT coalesce(json_agg(json_build_object(
+         'table', t.tablename,
+         'columns', (
+           SELECT coalesce(json_agg(json_build_object(
+               'name', c.column_name,
+               'type', c.data_type,
+               'nullable', c.is_nullable,
+               'default', c.column_default
+             ) ORDER BY c.column_name), '[]'::json)
+             FROM information_schema.columns c
+            WHERE c.table_schema = $1 AND c.table_name = t.tablename
+         ),
+         'indexes', (
+           SELECT coalesce(json_agg(i.indexname ORDER BY i.indexname), '[]'::json)
+             FROM pg_indexes i
+            WHERE i.schemaname = $1 AND i.tablename = t.tablename
+         )
+       ) ORDER BY t.tablename), '[]'::json) AS shape
+       FROM pg_tables t
+      WHERE t.schemaname = $1 AND t.tablename <> 'schema_migrations'`,
+    [WORKER_SCHEMA],
+  )
+  return rows[0].shape
 }
 
 /**

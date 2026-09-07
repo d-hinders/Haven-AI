@@ -104,10 +104,9 @@
  * Auth: an `haven_token` + `haven_active_safe_id` are seeded in localStorage
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
- * are answered by a route-keyed POPULATED dataset (a funded account, three
- * two agents, both on the delegation rail, transactions, contacts, activity + spend
- * stats) so
- * lists, tables and amounts render realistically — that's what the
+ * are answered by a route-keyed POPULATED dataset (a funded account, two
+ * agents both on the delegation rail, transactions, contacts, agent activity +
+ * spend stats) so lists, tables and amounts render realistically — that's what the
  * design-reviewer pass judges. Anything not explicitly keyed falls back to a
  * benign empty shape — which carries every collection key the hooks read, so
  * an unkeyed endpoint degrades to "empty" instead of crashing the route
@@ -1992,9 +1991,8 @@ export const SCENARIOS = {
    * | `status` | `'paused'` | pausing is a Haven-side status flip; it neither writes nor clears `mcp_server_name` (`infra/repositories/agents.ts:472-481` — "This UPDATE never touches mcp_server_name"). |
    * | `delegate_address` | `null` | orthogonal: a pre-column legacy artefact on this agent, unrelated to the wiring label. Unchanged from the shared fixture. |
    *
-   * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` and
-   * `agent-ops` already carry recorded names, which is why they are not
-   * overridden here.
+   * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` already
+   * carries a recorded name, which is why it is not overridden here.
    */
   'mcp-name-all-recorded': {
     description:
@@ -2014,13 +2012,19 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
 
       // Wait for EVERY card, not the first: the claim is about the whole list,
-      // so a capture that raced the third card would be evidence of nothing —
+      // so a capture that raced the second card would be evidence of nothing —
       // and "no note" is exactly what a half-rendered list also looks like.
-      for (const name of ['Research agent', 'Ops agent', 'Data-feed agent']) {
+      // #2687: 'Ops agent' was in this list and is not an agent — it is a
+      // transaction's `agentName` (`:396`). `getByText(exact)` on /agents could
+      // never match it, so this loop was a guaranteed 20s timeout. Removing it
+      // does NOT make this scenario pass: it fails earlier, rendering 33 chars
+      // with no `#main-content`, measured against a warm server that captured
+      // `agents` cleanly in the same session. Tracked as #2689.
+      for (const name of ['Research agent', 'Data-feed agent']) {
         await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
       }
-      // Positive control for the absence: the three recorded names are on
-      // screen, so the list really did render its MCP row.
+      // Positive control for the absence: both recorded names are on screen,
+      // so the list really did render its MCP row.
       await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'list')

@@ -18,8 +18,9 @@
  * would not be read as "the sidebar is covered"; this file is where that
  * sentence points.
  *
- * The eleven indicators are PR #1831's, on `Sidebar`'s kebab user menu and
- * `AgentCard`'s footer action row. Until this file they were protected by a
+ * The indicators are PR #1831's, on `Sidebar`'s kebab user menu and
+ * `AgentCard`'s footer action row — eleven when #1831 wrote them, TEN today,
+ * since #2258 deleted the card's `Revoke` control (#2687). Until this file they were protected by a
  * STRUCTURAL guard (`src/__tests__/focus-ring.test.ts`, which reads class
  * strings out of source) and by nothing rendered. A ring that compiles to the
  * wrong colour, is occluded, or sits behind an overlay passed every gate we
@@ -48,14 +49,17 @@
  * run. Separate tests make every capture's verdict independent and make a
  * mutation's blast radius a measurement instead of an inference.
  *
- * ── Which of the eleven this file reaches (#1873: all eleven) ────────────────
+ * ── Which of the ten this file reaches (#1873: all of them) ─────────────────
  *
- * #1863 reached six, and said why the other five were out of reach:
+ * #1863 reached six, and said why the other five were out of reach. The
+ * inventory was eleven then and is TEN now: #2258 deleted `Revoke`, so the
+ * card contributes seven controls, not eight (#2687 re-derived it from the
+ * seven `aria-label`s in `AgentCard.tsx`).
  *
  *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
- *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured
+ *   AgentCard action row    Edit · Pause (Revoke, until #2258)    3/7  captured
  *
- * `AgentCard`'s footer NEVER renders all eight at once — `isOperational`,
+ * `AgentCard`'s footer NEVER renders all seven at once — `isOperational`,
  * `isRevoked` and `isArchived` are mutually exclusive, and `canUseWalletActions`
  * split the operational branch further (as did `isDelegationAgent`, until #2413
  * deleted it with the legacy branch) (the design pass on
@@ -68,13 +72,14 @@
  * Safe and the row was Edit · Pause · **Revoke** — the AllowanceModule teardown,
  * on a rail that answers HTTP 410 in production (#1986). The default is now the
  * live delegation rail, where the row is Edit · Pause · **Remove** (#1402).
- * `Revoke` keeps its capture, seeded with an explicit legacy opt-down below;
- * since #2413 no account in the dashboard renders that row any more (the
- * account list is delegation-only), so the capture is fixture-only evidence
- * of a retired rail's render, kept for the ring-geometry inventory.
+ * `Revoke` has NO capture here any more, and there is nothing left to seed it
+ * with: #2258 deleted the control (`rowControls` below is Edit + Pause), #2413
+ * removed the legacy branch that rendered it, and #2459 deleted the legacy
+ * opt-down itself — `e2e/fixtures/haven-api.ts` records that "a spec that wants
+ * a retired-rail page today has nothing to opt down TO".
  *
  * So this was never a scoping choice: reaching the other five is FIXTURE work,
- * not capture work. #1873 does it, and the eleven are now eleven.
+ * not capture work. #1873 does it, and all of them are reached.
  *
  *   control              needs                                    rendered by
  *   Details              canUseWalletActions === false            a different safe_id
@@ -128,7 +133,7 @@
  * ── Tab traversal, and why the count is never hard-coded ─────────────────────
  *
  * The driver is real keyboard `Tab`, because that is the path the user whose
- * bug this is actually takes. **All eleven controls are reachable by
+ * bug this is actually takes. **All ten controls are reachable by
  * traversal**, so the `.focus()` fallback the issue allows is never used and
  * nothing is silently substituted. A control reachable by script and not by tab
  * order would itself be a WCAG 2.4.3 finding, so the two are not
@@ -486,7 +491,7 @@ function shadowPaints(boxShadow: string) {
  *
  *  - focus actually landed on this node;
  *  - `:focus-visible` matches — the ring's own CSS condition. Focus alone is not
- *    enough; `:focus-visible` is what all eleven indicators are gated on;
+ *    enough; `:focus-visible` is what all ten indicators are gated on;
  *  - the computed style PAINTS something — i.e. the class string compiled to a
  *    visible indicator rather than merely being present in source. This is the
  *    gap the structural guard cannot see at all: `focus-ring.test.ts` reads
@@ -807,8 +812,9 @@ test.describe('driven focus-state visual regression', () => {
       }),
       control: 'Open details for Ledger agent',
       // #2264: `Remove` joins the row. `canUseWalletActions: false` hides Edit
-      // and Revoke, but Remove is not gated at all — it renders unconditionally
-      // inside `isOperational` (#2413 deleted `isDelegationAgent`) — so on
+      // (and nothing else — `Revoke` is gone since #2258), but Remove is not
+      // gated at all: it renders unconditionally inside `isOperational`
+      // (#2413 deleted `isDelegationAgent`) — so on
       // the live rail this branch is three controls, not two. It read as two
       // only because the shared fixture was legacy by omission.
       rowControls: [
@@ -885,7 +891,7 @@ test.describe('driven focus-state visual regression', () => {
       rowControls: ['Restore Archived agent to the list'],
       tone: 'brand',
       label: 'Restore to list',
-      // The only control of the eleven that is not on screen at load.
+      // The only control of the ten that is not on screen at load.
       behindRemovedDisclosure: true,
     },
   ] as const

@@ -269,8 +269,10 @@ export default function AccountDetailClient() {
                     back off the legacy Safe rail: that path signed a Safe
                     transaction through `SendModal`, which is deleted with the
                     rail. Delegation accounts keep the sponsored owner-send.
-                    Hidden rather than disabled, per #1079 — a legacy account
-                    stays fully readable and simply offers no spend action. */}
+                    Hidden rather than disabled, per #1079. #2413 then made
+                    the legacy case unreachable here entirely: the account
+                    list is delegation-only, so no legacy account renders
+                    this page and nothing below is rail-gated. */}
                 <Button onClick={() => setSendOpen(true)}>
                   Send
                 </Button>

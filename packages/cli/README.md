@@ -27,12 +27,16 @@ npm i -g @haven_ai/cli@alpha   # or run ad hoc: npx @haven_ai/cli@alpha <command
 haven --help
 ```
 
-A bare `npx @haven_ai/cli` resolves to the **same version** as `@alpha`: the
-`latest` dist-tag now tracks the newest published release (owner decision
-2026-09-04, mechanism in `publish.yml` since #2536). Verified on 2026-09-06 from
-a clean directory — `@alpha` and the bare form both `0.1.34-alpha.0`, `@dev` the
-snapshot `0.0.0-dev.202609061037.7cf43bb`. The pinned `@alpha` stays in the
-one-liner above because every generated artifact quotes that string verbatim.
+A bare `npx @haven_ai/cli` resolves to the `latest` dist-tag, which may be an
+**older build** than the one your deployment's docs describe — `latest` tracks
+the newest *published* release and nothing guarantees it matches the channel a
+given deployment serves (owner decision 2026-09-04 put the mechanism behind a
+release; issue [#2617](https://github.com/d-hinders/Haven-AI/issues/2617) is
+the reason the runbook and the manifest now name the channel explicitly). The
+runbook (`/for-agents.md`, printed by `haven guide`) and the manifest
+(`/.well-known/haven.json`, field `packages.cli.channel`) name the channel the
+deployment serves as `@<channel>`: read the tag from there, never pick one.
+`<channel>` below is that tag; `@alpha` is only a concrete example.
 
 The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 `--api <url>` or `HAVEN_API_URL` (e.g. a local backend at
@@ -52,7 +56,8 @@ are your user's; these are the two that are yours.
 
 ```bash
 # 1. Get a scoped session. Prints a code and a link for your user to approve in
-#    a browser — you never see or ask for their password.
+#    a browser — you never see or ask for their password. @alpha is an example:
+#    run the tag your deployment names (see "Install" above).
 npx -y @haven_ai/cli@alpha login --api <api-url>
 
 # 2. Create the agent and its budget. Prints the connector command the backend
@@ -332,7 +337,7 @@ describes how to get out of. The string is generated from
 `packages/sdk/src/agent-guidance.ts` by
 `node packages/cli/scripts/sync-agent-guidance.mjs` and byte-pinned to it by a
 test; the copy exists so this package keeps **zero runtime dependencies** and
-`npx @haven_ai/cli` stays a small install for an agent.
+`npx @haven_ai/cli@<channel>` stays a small install for an agent.
 
 ## Config
 

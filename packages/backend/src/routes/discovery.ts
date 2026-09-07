@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest } from 'fastify'
 import {
+  CLI_PACKAGE,
   CONNECTOR_PACKAGE,
   HostedMcpConfigError,
   hostedMcpUrl,
@@ -17,10 +18,11 @@ import { deployableChainIds, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
  * `llms.txt` is prose for a model. This is the same environment described as
  * data, and it exists so the frontend's `/.well-known/haven.json` manifest does
  * not duplicate the backend's env logic: which connector channel this
- * deployment hands out (#2422), which hosted MCP it points at, which chains it
- * serves. Duplicating that in the frontend would mean a channel change
- * propagating to one surface and not the other, which is the same class of
- * defect as a doc that stops being true.
+ * deployment hands out (#2422) — the CLI rides the same one (#2617), so
+ * `cli_package` is that channel under the cli name — which hosted MCP it
+ * points at, which chains it serves. Duplicating that in the frontend would
+ * mean a channel change propagating to one surface and not the other, which is
+ * the same class of defect as a doc that stops being true.
  *
  * ## What is deliberately NOT here
  *
@@ -36,6 +38,8 @@ export interface DiscoveryDocument {
   /** Why `hosted_mcp_url` is null, when it is. Absent otherwise. */
   hosted_mcp_note?: string
   connector_package: string
+  /** The CLI package spec this deployment's runbook and manifest name (#2617). */
+  cli_package: string
   openapi_url: string
   chains: { deployable: number[]; supported: readonly number[] }
 }
@@ -62,6 +66,7 @@ export function buildDiscoveryDocument(request: FastifyRequest): DiscoveryDocume
     hosted_mcp_url: hostedMcp,
     ...(note ? { hosted_mcp_note: note } : {}),
     connector_package: CONNECTOR_PACKAGE,
+    cli_package: CLI_PACKAGE,
     openapi_url: `${base}/openapi.json`,
     chains: { deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS },
   }

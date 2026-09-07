@@ -53,7 +53,7 @@ describe('the onboarding prompt (#2535)', () => {
   it('names only commands that exist, and never asks for a password', () => {
     // #2535 makes this blocking: the prompt may name `haven login` (#2526) and
     // `haven agents connect` (#2527) only because both landed first.
-    expect(AGENT_ONBOARDING_PROMPT).toContain('npx @haven_ai/cli login')
+    expect(AGENT_ONBOARDING_PROMPT).toContain('npx @haven_ai/cli@<channel> login')
     expect(AGENT_ONBOARDING_PROMPT).toContain('haven agents connect --name')
     expect(AGENT_ONBOARDING_PROMPT).toContain('haven_get_agent')
     // The epic invariant no slice may weaken.

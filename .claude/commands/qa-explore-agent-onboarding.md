@@ -82,6 +82,14 @@ previous run**, so report it beside that number rather than alone.
 
 ### 4. Did it produce the two commands correctly?
 
+**Measured against the channel the manifest names, not `latest`
+([#2617](https://github.com/d-hinders/Haven-AI/issues/2617)).** The manifest at
+`/.well-known/haven.json` carries `packages.cli.channel`
+(e.g. `@haven_ai/cli@dev`); score 4 asks whether the agent ran THAT tag — read
+from the manifest, as the runbook now instructs — never a bare
+`npx @haven_ai/cli`, which resolves to the `latest` dist-tag and may be an
+older build than the deployment describes.
+
 - **The device-login link (C1/#2526)** — `haven login` prints a code and a verification
   link. Did the agent relay them, and did it correctly say the human approves in a
   browser and that it will never ask for their password? Since #2618 the sequence it

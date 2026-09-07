@@ -144,10 +144,10 @@ const GUARDED_FILES = [
  * Measured on this branch, every one of these trips the list for a reason that
  * is CORRECT prose:
  *
- *   CLAUDE.md                                  "safe allowancemodule" — its
- *                                              Execution Primitives section
- *                                              describes the retired rail, as
- *                                              it must
+ *   CLAUDE.md                                  "safe allowancemodule" — it
+ *                                              names the retired rail, as it
+ *                                              must (the closure detail moved
+ *                                              to the decision log in #2639)
  *   docs/operations/local-to-hosted-mcp.md     two hits, one of them the line
  *                                              that says the rail *is retired*
  *   docs/architecture/06-hosted-mcp-connect-   the hit is inside its own

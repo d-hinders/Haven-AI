@@ -12,7 +12,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/loop-engineering.md
   - docs/contributing/loop-harness-index.md
-last-verified: "2026-09-01" # #2258: the coverage summary now distinguishes retired AllowanceModule work from live delegation-budget enforcement. The old summary presented allowance routing and owner-side allowance writes as current coverage even though the agent rail is retired. The unconditional haven-reviewer rule remains canonical in AGENTS.md. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected.
+last-verified: "2026-09-07" # #2639: EDITED, scope = ONE clause. It named `AGENTS.md` as canonical for the unconditional-reviewer rule; #2639 moved that rule's full statement into `CLAUDE.md` § *How shipping is governed* and left AGENTS.md a pointer, so the attribution follows it. The rule is unchanged. Scope: that ONE clause; nothing else in this file was re-verified. Prior: #2258: the coverage summary now distinguishes retired AllowanceModule work from live delegation-budget enforcement. The old summary presented allowance routing and owner-side allowance writes as current coverage even though the agent rail is retired. The unconditional haven-reviewer rule remains canonical in AGENTS.md. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected.
 ---
 
 # Haven Code Quality Loop
@@ -37,7 +37,7 @@ differential campaigns in [`loop-engineering.md`](loop-engineering.md).
    `git diff --check`.
 6. Run `haven-reviewer` — on every pull request, not only for money, authority,
    shared contracts, or primary UX. Unconditional since the 2026-08-21 owner
-   decision; `AGENTS.md` is canonical.
+   decision; `CLAUDE.md` § *How shipping is governed* is canonical since #2639.
 7. Record actionable follow-up as a GitHub Issue, not an in-document queue.
 
 Promote findings that need migrations, custody/signing changes, or coordinated

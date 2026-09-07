@@ -1,7 +1,7 @@
 ---
 owner: "@d-hinders"
 status: archived
-covers: []  # narrative — list the code paths this doc describes, one per line
+covers: []  # narrative — no direct code mirror
 last-verified: "2026-09-07"
 ---
 
@@ -10,13 +10,23 @@ last-verified: "2026-09-07"
 Append-only record of the decisions that produced Haven's current rules, newest
 first. It exists so [`CLAUDE.md`](../../CLAUDE.md) can state the rule and this
 file can carry the chain of issue numbers, superseded owner decisions and
-retirement closures behind it — nothing was deleted when that file was cut down
-to an operating manual (#2639), it moved here.
+retirement closures behind it. When that file was cut down to an operating
+manual (#2639), its history moved here rather than being deleted — with two
+deliberate exceptions, named under *Judged obsolete rather than relocated*
+below.
 
 Read this for *why a rule is what it is*, or to find a paragraph by issue
 number. Read `CLAUDE.md` for what the rule **is** today: where the two differ,
 `CLAUDE.md` and the code win. Entries are historical records; a superseded
 decision is kept, marked, and never silently rewritten.
+
+Two caveats a reader should carry. Some entries describe code in the present
+tense — the surviving `rails/allowance-module.ts` exports, the open routes — and
+because this doc is `archived` it is outside the coupling gate, so **nothing
+re-checks those sentences when the code moves**; verify against the code before
+relying on one. And the move out of `CLAUDE.md` was not perfectly lossless: two
+passages were judged obsolete rather than relocated, and are named where they
+belong below.
 
 ## Index
 
@@ -148,6 +158,10 @@ cannot spend.
   both deployers, the owner-change builders and the five approver routes
   (#1988); and every legacy Safe screen — Send modal, approval queue,
   Approvers, `/approvals` (#1989).
+- **#2259 closed the last activation path.** It deleted
+  `POST /agent-connection-setups/:id/wallet-approval` and the status-GET
+  reconciliation that also activated an agent from a live on-chain allowance, so
+  no Haven path activates a retired-rail agent any more.
 - **#2055 removed the approval queue outright.** `routes/approvals.ts` deleted
   and `/approvals` deregistered (404, superseding #1986's readable-and-rejectable
   410 interim); the INSERT helpers died with
@@ -159,7 +173,14 @@ cannot spend.
 This is the half a sweep gets wrong in the direction of overclaiming.
 
 - **`rails/allowance-module.ts`, trimmed to reads-only.** Its three surviving
-  exports are not AllowanceModule code at all and each has live consumers:
+  exports are not AllowanceModule code at all and each has live consumers —
+  the lists below are the ones the retirement enumerated, **not an exhaustive
+  census**, and more have been added since (`haven-reviewer` found four on
+  2026-09-07: `modules/x402/settlement-sweeper.ts`,
+  `infra/chain/redeemed-delegation-scanner.ts`,
+  `infra/chain/settlement-transfer-verifier.ts` and `routes/agents.ts`). The
+  authoritative roster is the assertion in
+  `packages/backend/src/testing/__tests__/mock-factory-exports.guard.test.ts`.
   `getRelayerWallet` → `rails/sweep.ts`; `getTokenBalance` →
   `infra/delegate-balance-monitor.ts`, `modules/mpp/sweep.ts`,
   `modules/mpp/evidence.ts` and `routes/agent-rekey.ts`'s residual-hot-balance
@@ -292,6 +313,25 @@ dropped in #880, dead after this retirement.
 
 Reference for the retired rail:
 [Rhinestone Smart Sessions](https://docs.rhinestone.dev/home/concepts/session-keys).
+
+## Judged obsolete rather than relocated (#2639)
+
+Two passages of the pre-#2639 `CLAUDE.md` were **not** carried into either file,
+recorded here so the omission is a decision rather than an accident.
+
+1. *"Legacy AllowanceModule records remain readable only; Haven offers no
+   re-onboard, pause/resume, re-key, or revoke controls for them. Owners manage
+   any remaining Safe permission outside Haven where they have access;
+   replacement agents use the live delegation flow."* Obsolete since #2413: no
+   Haven surface renders a legacy account or its agents at all, so a list of
+   controls Haven declines to offer for them describes a screen that does not
+   exist. The surviving half — an EOA owner manages their Safe at Safe's own
+   interfaces — is stated under #1440 above.
+2. The `private: true` workspace-pin rationale in full (the `mcp-server`
+   misclassification narrative and the npm-version-dependent `npm ci`
+   mechanism). The rule and its dividing line are in `CLAUDE.md`; the full
+   reasoning is in [`scripts/README.md`](../../scripts/README.md), which
+   `CLAUDE.md` links, and in `docs/regulatory/casp-changelog/2026-08-17-1526.md`.
 
 ## Approval-queue history readability waived (#2021 / #2055)
 

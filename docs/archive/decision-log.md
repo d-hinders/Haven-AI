@@ -11,9 +11,9 @@ Append-only record of the decisions that produced Haven's current rules, newest
 first. It exists so [`CLAUDE.md`](../../CLAUDE.md) can state the rule and this
 file can carry the chain of issue numbers, superseded owner decisions and
 retirement closures behind it. When that file was cut down to an operating
-manual (#2639), its history moved here rather than being deleted — with two
-deliberate exceptions — three, after review — named under *Judged obsolete
-rather than relocated* below.
+manual (#2639), its history moved here rather than being deleted — with three
+deliberate exceptions, named under *Judged obsolete rather than relocated*
+below.
 
 Read this for *why a rule is what it is*, or to find a paragraph by issue
 number. Read `CLAUDE.md` for what the rule **is** today: where the two differ,
@@ -26,7 +26,7 @@ because this doc is `archived` with `covers: []` it is outside **both** the
 coupling gate and the weekly staleness audit, so **nothing re-checks those
 sentences when the code moves**; verify against the code before relying on one.
 Closing that properly — citing the test behind each such claim, or dating it — is
-[#2670](https://github.com/d-hinders/Haven-AI/issues/2670). And the move out of `CLAUDE.md` was not perfectly lossless: two
+[#2670](https://github.com/d-hinders/Haven-AI/issues/2670). And the move out of `CLAUDE.md` was not perfectly lossless: three
 passages were judged obsolete rather than relocated, and are named where they
 belong below.
 
@@ -332,9 +332,15 @@ file, recorded here so each omission is a decision rather than an accident.
 2. The `## Architecture — Five Components` section — the component diagram, the
    *Haven Control Layer* responsibility list and the *Protocol Adapters* list.
    An operating manual states the live architecture, which the delegation-rail
-   paragraph does; the component model and its trust boundaries are maintained
-   in [`docs/architecture/01-system-context.md`](../architecture/01-system-context.md),
-   which `CLAUDE.md` now links. Named here because haven-reviewer found it
+   paragraph does. The nearest live equivalent is
+   [`docs/architecture/01-system-context.md`](../architecture/01-system-context.md),
+   which `CLAUDE.md` now links — but read it knowing what it is and is not: it
+   carries the **trust boundaries** well, its decomposition is by deployed
+   component (web app / hosted MCP / backend / relayer / local signer) rather
+   than by the *Haven Control Layer* / *Protocol Adapters* split this section
+   used, and its primary diagram is flagged in that doc as the RETIRED
+   baseline. Named by `haven-reviewer`, because "the component model is
+   maintained there" was more than the target supports. Named here because haven-reviewer found it
    dropped rather than declared, which is a different thing from dropped.
 3. The `private: true` workspace-pin rationale in full (the `mcp-server`
    misclassification narrative and the npm-version-dependent `npm ci`

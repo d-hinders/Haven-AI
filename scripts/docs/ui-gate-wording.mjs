@@ -97,17 +97,26 @@ export const RULES = [
     // wrap defeats grep, and a bolded word defeats a two-word regex. Both words
     // must still appear in the SAME flattened sentence, which is what keeps
     // this from firing on unrelated prose that happens to say "primitive".
-    // `rendered` and `route` must be ADJACENT — separated only by markup or
-    // whitespace, never by another word. Two earlier attempts bracket the right
-    // answer. `\brendered route\b` was too tight: any inline formatting between
-    // the words (`rendered **route**`, or a wrap onto a code span) slipped
-    // through, which is the same defect one level down from the hard wraps this
-    // guard exists for. Three independent words was too loose: it fired on
-    // `.github/pull_request_template.md`, whose checklist has no full stops, so
-    // the whole list flattens into one "sentence" containing all three words in
-    // unrelated bullets. The bounded gap admits the markup and refuses the
-    // distance.
-    requires: [/\brendered\b[^A-Za-z0-9]{0,12}\broute\b/i, /\bprimitive\b/i],
+    // Matched against the MARKUP-STRIPPED sentence (see `stripMarkup`), so the
+    // rule can say what it means: the two words adjacent, separated by nothing
+    // but a space or a hyphen.
+    //
+    // Three attempts got here, and the two rejected ones bracket why a regex
+    // over raw text cannot do this. `\brendered route\b` was too tight — any
+    // inline markup between the words slipped through. Three independent words
+    // was too loose — it fired on `.github/pull_request_template.md`, whose
+    // checklist has no full stops, so the whole list flattens into one
+    // "sentence" holding all three words in unrelated bullets. A bounded
+    // character gap, `[^A-Za-z0-9]{0,12}`, was wrong on BOTH sides and an
+    // independent review reproduced each: it missed `rendered <!-- x --> route`
+    // (a comment is longer than the budget and contains letters), and it FIRED
+    // on `the rendered, route opens differently` — a clause boundary, not the
+    // retired phrase at all.
+    //
+    // Stripping markup first removes the guesswork: a comma survives stripping
+    // and still separates the words, while emphasis, code spans and comments do
+    // not survive and no longer hide the pair.
+    requires: [/\brendered[ -]route\b/i, /\bprimitive\b/i],
     excludes: [],
   },
 ]
@@ -137,7 +146,15 @@ const CHAIN_QUOTE = [/last-verified/i, /\bPrior:/]
  *
  *     <!-- ui-gate-wording-allow: quoting the retired form to forbid it -->
  *
- * It applies to the sentence it appears in, so it cannot silence a file.
+ * It applies to the LINE it appears on, plus one line either side — enough for
+ * a hard wrap, and no further. It cannot silence a file, and it cannot excuse a
+ * violation in another paragraph. (An earlier draft of this comment said
+ * "sentence", describing a scope that was tried and rejected; the mechanism
+ * below is line-anchored and this sentence is the correction.)
+ *
+ * One limit, stated rather than discovered: the marker excuses EVERY violation
+ * on the lines it covers, not one specific occurrence. Two distinct retired
+ * phrases on one physical line cannot be excused separately.
  */
 const ALLOW_MARKER = /<!--\s*ui-gate-wording-allow:[^>]*-->/i
 
@@ -182,6 +199,26 @@ export function sentences(text) {
     if (m[0].trim().length > 0) out.push({ text: m[0], index: m.index })
   }
   return out
+}
+
+/**
+ * Remove inline markup so a rule can talk about WORDS rather than about the
+ * characters that happen to sit between them.
+ *
+ * HTML comments and tags go first (they can contain letters, so no character
+ * class can step over them), then emphasis, code-span backticks and link
+ * brackets. Clause punctuation — commas, semicolons, dashes — is deliberately
+ * KEPT: it is what separates `the rendered, route opens differently` from the
+ * retired phrase, and a strip that removed it would turn that sentence into a
+ * false positive. Whitespace is collapsed last so a hard wrap reads as a space.
+ */
+export function stripMarkup(s) {
+  return s
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[*_`~\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** Collapse every whitespace run — including hard wraps — to one space. */
@@ -259,9 +296,15 @@ export function scanText(file, raw) {
     if (flat.length === 0) continue
     if (CHAIN_QUOTE.some((re) => re.test(flat))) continue
     for (const rule of RULES) {
-      const at = rule.requires.map((re) => flat.search(re))
-      if (at.some((i) => i < 0)) continue
-      if (rule.excludes.some((re) => re.test(flat))) continue
+      // Rules match the MARKUP-STRIPPED sentence; the position is then taken
+      // from the flattened one so the reported line stays true.
+      const plain = stripMarkup(flat)
+      if (rule.requires.some((re) => !re.test(plain))) continue
+      if (rule.excludes.some((re) => re.test(plain))) continue
+      const at = rule.requires.map((re) => {
+        const i = flat.search(re)
+        return i < 0 ? flat.search(new RegExp(re.source.split(/\\b|\[/)[1] ?? 'a', 'i')) : i
+      })
       // Report the FIRST required term, not the sentence start: the sentence
       // may open several hard-wrapped lines above the phrase.
       const offset = map[Math.min(...at)] ?? 0

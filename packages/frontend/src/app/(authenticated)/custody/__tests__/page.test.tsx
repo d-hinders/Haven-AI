@@ -22,13 +22,11 @@ const {
   mockUseAgents,
   mockUseSafeDetails,
   mockUseDelegationCustodyProof,
-  mockUseRetiredRailOwnerAccess,
 } = vi.hoisted(() => ({
   mockUseUserSafes: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUseSafeDetails: vi.fn(),
   mockUseDelegationCustodyProof: vi.fn(),
-  mockUseRetiredRailOwnerAccess: vi.fn(),
 }))
 
 vi.mock('@/hooks/useUserSafes', () => ({ useUserSafes: () => mockUseUserSafes() }))
@@ -37,9 +35,9 @@ vi.mock('@/hooks/useSafeDetails', () => ({ useSafeDetails: () => mockUseSafeDeta
 vi.mock('@/hooks/useDelegationCustodyProof', () => ({
   useDelegationCustodyProof: () => mockUseDelegationCustodyProof(),
 }))
-vi.mock('@/hooks/useRetiredRailOwnerAccess', () => ({
-  useRetiredRailOwnerAccess: (...args: unknown[]) => mockUseRetiredRailOwnerAccess(...args),
-}))
+// The `useRetiredRailOwnerAccess` mock lived here; removed by #2673 with the
+// hook itself (#2413 deleted it) — it mocked a module that no longer exists,
+// so it propped nothing up.
 
 import CustodyPage from '../page'
 // Not from '../page': Next refuses arbitrary named exports from a page
@@ -92,10 +90,6 @@ beforeEach(() => {
     loading: false,
     error: null,
     refetch: vi.fn(),
-  })
-  mockUseRetiredRailOwnerAccess.mockReturnValue({
-    ...mockUseSafeDetails(),
-    ownerAccess: 'unknown',
   })
   mockUseDelegationCustodyProof.mockReturnValue({
     signers: {

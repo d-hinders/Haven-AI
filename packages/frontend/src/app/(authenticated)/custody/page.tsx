@@ -5,8 +5,10 @@
  *
  * The page's job is to show what actually constrains an agent. Until #2106 it
  * showed one rail's answer to every account. It now branches so delegation
- * budgets are shown as signed control, while legacy accounts remain readable
- * without presenting an actionable Haven spending surface.
+ * budgets are shown as signed control. (#2673 correction: the old text
+ * continued "while legacy accounts remain readable" — since #2413 the account
+ * list the page renders is delegation-only, so no legacy account reaches this
+ * page at all.)
  *
  * #2413: no rail marker is read here any more — the account list is
  * delegation-only, so every account this page renders is on the live rail.
@@ -27,6 +29,8 @@
  *    claim to have re-read them from the chain.
  *  - SAFE (legacy, retired rail): owners/threshold from
  *    `GET /safe/:address/details`, plus the read-only retirement notice.
+ *    (#2673 correction: this branch was removed with #2413 — no SAFE branch
+ *    renders below; the delegation-rail branch is the whole page.)
  *
  * Two claims that were rail-blind and are now branched, because they are FALSE
  * on the delegation rail:

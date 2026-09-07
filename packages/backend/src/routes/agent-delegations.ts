@@ -378,7 +378,18 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           expiresAt: expiry,
           version,
         }
-        const delegation = buildBudgetDelegation(policy)
+        // Only the CONSTRUCTION step is a 502. Everything else in this
+        // callback is Postgres, and a database fault is not a build fault:
+        // letting it throw sends it to the central error handler, which logs
+        // it and answers 500 without putting the driver's message on the
+        // wire. A catch-all around the whole transaction would relabel a lock
+        // timeout as "Could not build the delegation" and page nobody.
+        let delegation
+        try {
+          delegation = buildBudgetDelegation(policy)
+        } catch (err) {
+          return { kind: 'build_failed' as const, err }
+        }
         const hash = delegationIdentity(delegation)
         const inserted = await insertPendingDelegationForOwnedNonRevokedAgent({
           agentId: request.params.id,
@@ -396,7 +407,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         }, tx)
         return { kind: 'built' as const, delegation, hash, version, inserted }
       },
-    ).catch((err: unknown) => ({ kind: 'build_failed' as const, err }))
+    )
 
     if (outcome.kind === 'build_failed') {
       return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(outcome.err) })

@@ -228,6 +228,48 @@ describe('delegation lifecycle API (#828)', () => {
       expect(String(insert[0])).toContain("'pending'")
     })
 
+    // #2613, found by independent review: the slot lock put the version read
+    // and the insert inside a transaction, and the first version of that change
+    // wrapped the WHOLE transaction in a catch that answered 502 "Could not
+    // build the delegation". That relabels a database fault as a build fault,
+    // keeps it out of the central handler's error log, and puts the driver's
+    // message on the wire. Only the construction step is a 502 now.
+    it('does NOT report a database failure as a build failure', async () => {
+      // Build the suite's own working mock first, then fail EXACTLY one
+      // statement inside the locked transaction. Hand-rolling the agent row
+      // here instead is how the first version of this test passed while
+      // asserting nothing: the route 404'd before it ever reached the version
+      // read, so the assertion held for the wrong reason and the mutation
+      // below did not redden it.
+      mockDb({})
+      const working = mockQuery.getMockImplementation()!
+      mockQuery.mockImplementation((sql: unknown) =>
+        /COALESCE\(MAX\(version\)/.test(String(sql))
+          ? Promise.reject(new Error('connection terminated unexpectedly'))
+          : working(sql as string),
+      )
+
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+        payload: { token_address: USDC, recipient_address: RECIPIENT, budget_atomic: '5000000', period_seconds: 86400 },
+      })
+
+      // It must have got far enough to ask for the version at all — otherwise
+      // this test proves nothing about the error path.
+      expect(mockQuery.mock.calls.some((c) => /COALESCE\(MAX\(version\)/.test(String(c[0])))).toBe(true)
+      // 500 through the default error path, not a 502 mislabelling a database
+      // fault as a construction fault.
+      expect(res.statusCode).toBe(500)
+      expect(JSON.stringify(res.json())).not.toContain('Could not build the delegation')
+      // The redaction half of this belongs to `infra/http-error-handler.ts`,
+      // which the real app installs via `app.setErrorHandler` and this test
+      // app does not register — so it is deliberately NOT asserted here.
+      // What this test owns is that the route lets the error PROPAGATE, which
+      // is the precondition that handler's own docstring names ("the claim
+      // holds for the default error path... PROVIDED the route lets errors
+      // propagate"). A route-level catch-all is exactly what would break it.
+    })
+
     it('the open-budget variant carries no recipient', async () => {
       mockDb({})
       const res = await app.inject({

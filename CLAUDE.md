@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/domain/chains.ts
+  - packages/core/src/chains.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/openapi/spec.ts
   - packages/backend/src/rails/execution-rail.ts

@@ -22,9 +22,11 @@ decision is kept, marked, and never silently rewritten.
 
 Two caveats a reader should carry. Some entries describe code in the present
 tense — the surviving `rails/allowance-module.ts` exports, the open routes — and
-because this doc is `archived` it is outside the coupling gate, so **nothing
-re-checks those sentences when the code moves**; verify against the code before
-relying on one. And the move out of `CLAUDE.md` was not perfectly lossless: two
+because this doc is `archived` with `covers: []` it is outside **both** the
+coupling gate and the weekly staleness audit, so **nothing re-checks those
+sentences when the code moves**; verify against the code before relying on one.
+Closing that properly — citing the test behind each such claim, or dating it — is
+[#2670](https://github.com/d-hinders/Haven-AI/issues/2670). And the move out of `CLAUDE.md` was not perfectly lossless: two
 passages were judged obsolete rather than relocated, and are named where they
 belong below.
 

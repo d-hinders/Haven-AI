@@ -110,19 +110,50 @@ async function buildSchemaReference(url: string): Promise<void> {
   try {
     const { runMigrations } = await import('./src/db/migrate.js')
     await runMigrations()
+  } finally {
+    // In the `finally`, because `runMigrations()` calls `getPool()` itself:
+    // a throw would otherwise leave a live memoised pool in the main process,
+    // which is what the docstring above always claimed this line prevented
+    // (review finding — it was inside the `try`, after the throwing call).
     const { getPool } = await import('./src/db.js')
     await getPool().end()
-  } finally {
     process.env.DATABASE_URL = previousUrl
   }
 
-  const reader = new pg.Client({ connectionString: url })
+  // Read the reference through the SAME `search_path` shape the workers use
+  // (review finding, blocking). `information_schema.columns.column_default`
+  // renders `regclass` references RELATIVE TO THE READER'S search_path, so a
+  // plain connection reports `nextval('test_schema_reference.x_id_seq'::regclass)`
+  // where a worker bound to its own schema reports `nextval('x_id_seq'::regclass)`
+  // — two byte-identical schemas diffing as drifted. Measured directly on a
+  // scratch schema.
+  //
+  // Latent today only because every migration uses `uuid`/`gen_random_uuid()`
+  // (verified: zero `nextval` defaults in the reference). The first migration
+  // adding a `SERIAL`, a schema-local function default or an enum cast would
+  // turn EVERY real-DB file in every run red — with a message that is wrong and
+  // a repair (`DROP SCHEMA test_wN CASCADE`) that destroys work without helping,
+  // because the recreated schema renders the default the same way.
+  const reader = new pg.Client({ connectionString: scoped.toString() })
   await reader.connect()
   let fingerprint
   try {
     fingerprint = await readFingerprint(reader, REFERENCE_SCHEMA)
   } finally {
     await reader.end()
+  }
+  // A reference of zero tables is never right, and it is reachable: another
+  // session dropping `test_schema_reference` in the window between the
+  // migration run and this read leaves `readFingerprint` returning `[]` with no
+  // error, which would publish an empty reference and redden every real-DB file
+  // with "34 tables present that head does not have" — each advising a
+  // destructive `DROP SCHEMA`. Fail here instead (review finding).
+  if (fingerprint.length === 0) {
+    throw new Error(
+      `db-harness: the schema reference ${REFERENCE_SCHEMA} fingerprinted as EMPTY right after ` +
+        'its migration run. Something removed it concurrently — another session, or a manual ' +
+        'DROP. Re-run; if it repeats, the migration runner is not writing into that schema.',
+    )
   }
 
   const dir = await mkdtemp(path.join(tmpdir(), 'haven-schema-ref-'))

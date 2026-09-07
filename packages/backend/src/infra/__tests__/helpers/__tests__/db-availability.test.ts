@@ -121,15 +121,18 @@ describe('resolveTestDatabaseUrl', () => {
     // The value lives in exactly one place, and it gets there by import.
     expect(testEnv).toContain('DEFAULT_TEST_DATABASE_URL')
     // Both entry points reach it through that one place rather than their own.
-    // Weaker than the two assertions around it, and worth saying so: these are
-    // string-presence pins, and every mutation that removes the call also stops
-    // the run collecting at all (measured — global setup dies on a missing
-    // JWT_SECRET), so what actually protects the property is that breaking it
-    // is loud, not that this line is subtle. The tripwire below is the half
-    // that catches a SILENT regression, and it is mutation-proven: a literal
-    // added to vitest.global-setup.ts reddens it while the run stays healthy.
-    expect(setup).toContain('applyTestEnvDefaults')
-    expect(globalSetup).toContain('applyTestEnvDefaults')
+    // WITH the parentheses. Without them the pin matched the surviving IMPORT
+    // line, so deleting the call while leaving the import passed — measured by
+    // review under a CI-shaped env (JWT_SECRET and DATABASE_URL supplied), which
+    // is exactly where the "it breaks loudly anyway" defence does not apply,
+    // because CI sets all three values itself. An earlier version of this
+    // comment claimed every such mutation stops the run collecting; that was
+    // true locally and false in CI, which is the environment that matters.
+    // The tripwire below is the half that catches a SILENT regression, and it
+    // is mutation-proven: a literal added to vitest.global-setup.ts reddens it
+    // while the run stays healthy.
+    expect(setup).toContain('applyTestEnvDefaults()')
+    expect(globalSetup).toContain('applyTestEnvDefaults()')
     // No entry point may restate the literal — the original tripwire, now
     // applied to all three files rather than one.
     for (const source of [setup, globalSetup]) expect(source).not.toContain(DEFAULT_TEST_DATABASE_URL)

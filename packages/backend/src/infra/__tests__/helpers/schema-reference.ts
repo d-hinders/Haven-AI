@@ -26,8 +26,8 @@
  * worker schema, as "a full migration run per worker per run". That price is
  * wrong in the expensive direction: `test_w*` schemas are allocated **per
  * FILE**, not per worker — `VITEST_WORKER_ID` is the file's ordinal in the
- * run's spec list, and vitest gives each file its own process. At 63 real-DB
- * files that is 63 full migration runs per suite run against a cold init
+ * run's spec list, and vitest gives each file its own process. At 62 real-DB
+ * files that is 62 full migration runs per suite run against a cold init
  * measured at ~572 ms, which is the cost #2211 and #2354 exist to have
  * attacked. So: one pristine schema per RUN, fingerprinted once in
  * `vitest.global-setup.ts`, and a cheap catalog read per file to compare
@@ -171,7 +171,7 @@ export function driftMessage(schema: string, differences: string[]): string {
     'This is inherited drift, not something this run caused: `schema_migrations` records every ' +
     'migration as applied, so `ensureMigrated()` had nothing to do, and #2616\'s end-of-file guard ' +
     'cannot see it because it captures head AFTER the migration run — drift already present ' +
-    'BECOMES head and diffs clean forever. The usual cause is a run killed partway through a test ' +
+    'BECOMES head and diffs clean forever. Two common causes: an ordinary test whose hook creates or re-creates a table and does not remove it, and a run killed partway through a test ' +
     'that had reverted a migration; a `finally` does not run when the process is terminated.\n' +
     '\n' +
     `Repair (local test database only):  DROP SCHEMA ${schema} CASCADE;\n` +

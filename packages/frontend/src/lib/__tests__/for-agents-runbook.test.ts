@@ -111,6 +111,10 @@ describe('/for-agents.md (#2523)', () => {
     // flag-by-flag reference and the refusal shapes (CLI README's job, same
     // split #2527 recorded).
     //
+    // #2619 moved the page to 9810 bytes (the "At funding" script names the
+    // funding card's page, `<host>/dashboard`, instead of "the dashboard") —
+    // under the ceiling, so the bound is unchanged.
+    //
     // Deliberately NOT added, and the reason the number is not higher: the
     // well-known manifest's own shape. The page says to read the chain from
     // the command; enumerating `environment` and `chains.deployable` here

@@ -17,6 +17,12 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 const pkg = JSON.parse(readFileSync(`${repoRoot}package.json`, 'utf8'))
 const doc = readFileSync(`${repoRoot}docs/contributing/docs-quality-system.md`, 'utf8')
 
+// Count claims live in the body; front matter is unscanned, matching the
+// ui-gate-wording guard's precedent (#2657), so a `last-verified` chain entry
+// QUOTING a stale count sentence is history, not a finding.
+const fmMatch = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(doc)
+const body = fmMatch ? doc.slice(fmMatch[0].length) : doc
+
 // The chain script is the source of truth for what `docs:check` runs, in order.
 const docsCheck = pkg.scripts['docs:check']
 assert.ok(docsCheck, 'package.json defines a docs:check script')
@@ -53,7 +59,7 @@ const stepIndexOf = (name) => {
 }
 
 test('docs:check count: the doc states no stale total of blocking scripts', () => {
-  const m = /All (one|two|three|four|five|six|seven|eight) blocking scripts/.exec(doc)
+  const m = /All (one|two|three|four|five|six|seven|eight) blocking scripts/.exec(body)
   if (!m) return // sentence consciously reworded or removed; nothing to derive
   assert.equal(
     wordToNumber(m[1]),
@@ -67,7 +73,7 @@ test('docs:check count: the chain-integrity ordinal matches its derived position
   // Form 1: "the fourth docs:check step" (bare ordinal — #2533's stale shape).
   // The regex is backtick-free on purpose: the doc's code spans wrap
   // `docs:check` in backticks, which ".?" matches without quoting hazards.
-  const bare = new RegExp(`is the (first|second|third|fourth|fifth|sixth|seventh|eighth) .?docs:check.?( steps?)\\b`).exec(doc)
+  const bare = new RegExp(`is the (first|second|third|fourth|fifth|sixth|seventh|eighth) .?docs:check.?( steps?)\\b`).exec(body)
   if (bare) {
     assert.equal(
       wordToNumber(bare[1]),
@@ -79,14 +85,14 @@ test('docs:check count: the chain-integrity ordinal matches its derived position
   // Form 2: "the fourth of five docs:check steps" (#2657's shape).
   const of = new RegExp(
     `is the (first|second|third|fourth|fifth|sixth|seventh|eighth) of (one|two|three|four|five|six|seven|eight) .?docs:check.?( steps?)\\b`,
-  ).exec(doc)
+  ).exec(body)
   if (!of) return // sentence consciously reworded; nothing to derive
   assert.equal(wordToNumber(of[1]), idx, `ordinal vs derived position ${idx}`)
   assert.equal(wordToNumber(of[2]), steps.length, `"of ${of[2]}" vs ${steps.length} docs:check steps`)
 })
 
 test('docs:check count: every step appears in the check-inventory table', () => {
-  const rows = doc.split('\n').filter((l) => /^\|\s/.test(l))
+  const rows = body.split('\n').filter((l) => /^\|\s/.test(l))
   for (const s of steps) {
     const name = s.split('/').pop()
     assert.ok(

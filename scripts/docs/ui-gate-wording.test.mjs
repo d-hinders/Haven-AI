@@ -216,6 +216,14 @@ test('blankFences preserves byte offsets and newline counts', () => {
   assert.equal(blanked.split('\n')[4], 'tail')
 })
 
+test('a retired phrase cannot co-occur across a fence (#2671 review pass)', () => {
+  // Fence interiors keep their periods: if they were blanked whole, the
+  // period-less interior would weld the prose on both sides into ONE flattened
+  // sentence and let the two required terms straddle the fence co-occur.
+  const raw = `${FM}Evidence is required for any diff touching a rendered\n\`\`\`\n<routes>\n\`\`\`\nroute or a shared primitive, per the retired rule.\n`
+  assert.deepEqual(scanText('doc.md', raw), [])
+})
+
 test('lineOf is 1-based', () => {
   assert.equal(lineOf('a\nb\nc', 0), 1)
   assert.equal(lineOf('a\nb\nc', 4), 3)

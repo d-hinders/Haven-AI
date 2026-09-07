@@ -280,11 +280,28 @@ export function stripMarkup(s) {
  * form, not live prose — the same distinction front-matter already gets. The
  * block's fence lines themselves are blanked too; a fence line carries no
  * rule-bearing words, so nothing is lost.
+ *
+ * The opening fence line's last character is rewritten to a period, making the
+ * fence a hard SENTENCE boundary: without it, a fully blanked interior would
+ * weld the prose before and after the fence into one flattened "sentence", and
+ * a retired phrase could straddle the fence and co-occur into a false positive
+ * — including through a period-less interior (the common case: a list item
+ * ending without a full stop, then an install-command block). Interior periods
+ * are also preserved, so an illustrative sentence inside the fence does not
+ * weld with surrounding prose either. A 1:1 character swap throughout:
+ * offsets, line numbers and newline counts are untouched.
  */
 export function blankFences(raw) {
-  return raw.replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[^\n]*$/gm, (block) =>
-    block.replace(/[^\n]/g, ' '),
-  )
+  return raw.replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[^\n]*$/gm, (block) => {
+    const blanked = block.replace(/[^\n.]/g, ' ')
+    // Terminate the sentence AT the fence: the opening fence line's last
+    // character becomes a period, so prose before the fence can never weld
+    // with prose after it — including through a PERIOD-LESS interior, which
+    // period-preservation alone cannot separate. A 1:1 character swap, so
+    // offsets, line numbers and newline counts are untouched.
+    const nl = blanked.indexOf('\n')
+    return nl > 0 ? blanked.slice(0, nl - 1) + '.' + blanked.slice(nl) : blanked
+  })
 }
 
 /** Collapse every whitespace run — including hard wraps — to one space. */

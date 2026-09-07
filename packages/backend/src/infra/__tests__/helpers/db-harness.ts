@@ -482,12 +482,19 @@ let headTables: string[] | null = null
  * that caused it. This check fails in the file that did the damage, names the
  * tables, and says which direction they moved.
  *
- * It is not in `resetDb()` deliberately. Six test files legitimately CREATE
+ * ## Register it FIRST
+ *
+ * Vitest runs sibling `afterAll` hooks in REVERSE registration order, so
+ * registering this first makes it run LAST — after the file's own cleanup.
+ * That is the intended reading: the question is what the file LEAVES, not
+ * what it touched on the way. A file that reverts a migration and repairs it
+ * in its own `afterAll` has leaked nothing and must stay green.
+ *
+ * It is not in `resetDb()` deliberately. Some test files legitimately CREATE
  * tables in the worker schema, and `resetDb()` runs in `beforeEach` — between
  * two tests of such a file the schema is *supposed* to carry an extra table.
  * A check there would either fire on them or need an allowlist that drifts.
- * `afterAll` in the files that hand-drive migrations is where the rule is
- * unambiguous.
+ * `afterAll` is where the rule is unambiguous.
  */
 export async function assertWorkerSchemaAtHead(): Promise<void> {
   if (headTables === null) return // real-DB mode off, or migrations never ran
@@ -499,7 +506,7 @@ export async function assertWorkerSchemaAtHead(): Promise<void> {
   if (restored.length === 0 && missing.length === 0) return
   throw new Error(
     `db-harness: this file left ${WORKER_SCHEMA} off migration head (#2616).` +
-      (restored.length ? ` Tables present that head does not have: ${restored.join(', ')} — a down() was not followed by its up().` : '') +
+      (restored.length ? ` Tables present that head does not have: ${restored.join(', ')} — a down() or a CREATE was not undone.` : '') +
       (missing.length ? ` Tables head has that are gone: ${missing.join(', ')} — an up()/DROP was not followed by its down().` : '') +
       ' The schema outlives this run (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
       ' so the next file on this worker would have inherited it as a mystery failure. Restore in a `finally`.',

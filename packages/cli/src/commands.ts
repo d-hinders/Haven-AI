@@ -264,12 +264,16 @@ async function deviceLogin(args: ParsedArgs, d: ResolvedDeps, baseUrl: string): 
 
   const deadline = Date.now() + start.expires_in * 1000
   // Emitted first, not last: the whole point is that the agent can pass the
-  // link on while the poll runs.
+  // link on while the poll runs. `device_code` is #2618: without it, the
+  // `--no-wait` object had nothing an agent could feed to
+  // `haven login --poll` — the resume command existed on the flag parser and
+  // nowhere an agent could reach it.
   d.o.data(
     {
       ok: true,
       verification_url: start.verification_url,
       user_code: start.user_code,
+      device_code: start.device_code,
       expires_at: new Date(deadline).toISOString(),
     },
     () =>
@@ -279,12 +283,33 @@ async function deviceLogin(args: ParsedArgs, d: ResolvedDeps, baseUrl: string): 
 
   if (args.flags.noWait) return EXIT.ok
 
+  // #2618: under --json, ten minutes of polling defeats the point of the
+  // flag — an agent that expected to regain control sat out its whole turn.
+  // --json now defaults to a SHORT wait (30 s, the issue's figure): still
+  // long enough to catch a human who approves right away, short enough that
+  // the agent gets a pending object instead of a blocked turn. An explicit
+  // --no-wait keeps its documented immediate return, and human prose mode
+  // keeps the full wait the flow always had.
+  const jsonWaitMs = args.flags.json ? 30_000 : start.expires_in * 1000
+  const waitUntil = Date.now() + jsonWaitMs
+
   // The server names the interval; the client does not invent one. `slow_down`
   // widens it, which is the only backoff signal this flow has.
   let interval = start.interval * 1000
   for (;;) {
     if (Date.now() >= deadline) {
       throw new HavenCliError('The code expired before it was approved.', EXIT.notAuthenticated)
+    }
+    if (Date.now() >= waitUntil) {
+      // Time out at the CLIENT's deadline, not the code's: emit the pending
+      // object carrying the device code so `haven login --poll
+      // <device_code>` can pick the flow up — nothing is lost, exit 3
+      // (not_authenticated: "keep the flow, you are just not signed in yet").
+      d.o.data(
+        { status: 'pending', device_code: start.device_code, retry_after: Math.round(interval / 1000) },
+        () => 'Still waiting for approval — run the same command again to keep waiting.',
+      )
+      return EXIT.notAuthenticated
     }
     await d.sleep(interval)
     let res: { token: string; user: Session['user'] } | null = null
@@ -324,7 +349,88 @@ function deviceErrorCode(err: unknown): string | null {
   return typeof body?.error === 'string' ? body.error : null
 }
 
+/**
+ * #2618: the suggested gap between `haven login --poll` rounds, in seconds.
+ * Mirrors what the backend's device start has named in `interval` so far —
+ * the CLI never invents a different number, and one poll round per invocation
+ * keeps the request rate at whatever the caller's retry loop chooses.
+ */
+const POLL_RETRY_AFTER_SECONDS = 5
+
+/**
+ * ONE poll round of the device flow (#2618) — the second command of the
+ * non-blocking sequence `login --json --no-wait`, then `login --poll
+ * <device_code>`. The blocking loop cannot serve an agent that must return
+ * promptly, and killing it loses the code; this performs the poll the loop
+ * WOULD have done and hands the outcome straight back as an exit code:
+ * 0 approved (session saved, same success object as the blocking path),
+ * 3 pending (a `{ status, device_code, retry_after }` object — poll again),
+ * 4 denied. The server answers `expired_token` for an unknown code too, so
+ * that also exits 3: expired means start over, and 3 is "not signed in".
+ */
+async function devicePollOnce(
+  args: ParsedArgs,
+  d: ResolvedDeps,
+  baseUrl: string,
+  deviceCode: string,
+): Promise<number> {
+  const api = d.makeApi(baseUrl)
+  let res: { token: string; user: Session['user'] } | null = null
+  try {
+    res = await api.post<{ token: string; user: Session['user'] }>('/auth/device/token', {
+      device_code: deviceCode,
+    })
+  } catch (err) {
+    // Same slug mapping as the blocking loop above — one flow, one vocabulary.
+    const code = deviceErrorCode(err)
+    if (code === 'authorization_pending') {
+      d.o.data(
+        { status: 'pending', device_code: deviceCode, retry_after: POLL_RETRY_AFTER_SECONDS },
+        () => 'Not approved yet — poll again shortly.',
+      )
+      return EXIT.notAuthenticated
+    }
+    if (code === 'slow_down') {
+      // The server is saying the same thing the blocking loop's widening is:
+      // back off. The next round should wait LONGER than the named interval.
+      d.o.data(
+        {
+          status: 'pending',
+          device_code: deviceCode,
+          retry_after: POLL_RETRY_AFTER_SECONDS + 5,
+        },
+        () => 'Polling too fast — wait a moment longer, then poll again.',
+      )
+      return EXIT.notAuthenticated
+    }
+    if (code === 'access_denied') {
+      throw new HavenCliError('The request was denied.', EXIT.refused)
+    }
+    if (code === 'expired_token') {
+      throw new HavenCliError('The code expired before it was approved.', EXIT.notAuthenticated)
+    }
+    throw err
+  }
+  await d.sessionStore.save({ token: res.token, apiBaseUrl: baseUrl, user: res.user })
+  emit(
+    d,
+    args.flags.json,
+    { ok: true, email: res.user.email, expires_at: sessionExpiry(res.token), user: res.user, apiBaseUrl: baseUrl },
+    () => `Signed in as ${res!.user.email}.`,
+  )
+  return EXIT.ok
+}
+
 async function cmdLogin(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
+  // #2618: the resume step of the non-blocking sequence. `--poll` takes the
+  // device code the `--no-wait` (or timed-out `--json`) object carried and
+  // performs exactly ONE round against POST /auth/device/token — see
+  // `devicePollOnce`. It cannot be combined with the password path: a poll
+  // belongs to a started device flow, and silently starting a login instead
+  // would look like the flow was resumed when it was not.
+  if (args.flags.poll) {
+    return devicePollOnce(args, d, baseUrlFor(args, d, null), args.flags.poll)
+  }
   const email = args.flags.email ?? d.env.HAVEN_EMAIL
   // #2526: the browser flow is the DEFAULT. `--email` (or HAVEN_EMAIL) keeps
   // the password path for a human who wants it — it is not removed, it is no

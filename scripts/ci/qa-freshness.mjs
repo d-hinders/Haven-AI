@@ -774,6 +774,25 @@ function greenRunWindowFor(repo) {
 }
 
 /**
+ * Arguments for GitHub's GET-only workflow-jobs endpoint. `gh api -F` switches
+ * the default request method to POST, so the explicit GET is load-bearing:
+ * unreadable jobs must fail closed, but a field-bearing request must still ask
+ * the endpoint a method it accepts.
+ */
+export function jobsQueryArgs(repo, databaseId) {
+  return [
+    'api',
+    `repos/${repo}/actions/runs/${databaseId}/jobs`,
+    '--method',
+    'GET',
+    '-F',
+    'per_page=100',
+    '--jq',
+    '{jobs: [.jobs[] | {name, conclusion, steps: [.steps[] | {name, conclusion}]}]}',
+  ]
+}
+
+/**
  * The run's jobs with their names, conclusions and step conclusions — one
  * call serves both the money-flow-job rule and the #1044 completeness
  * warning. Returns null when the API cannot answer; the selector refuses on
@@ -785,14 +804,7 @@ function jobsForRun(repo, databaseId) {
     // if it ever grows past 100 the money-flow job could fall off this page,
     // at which point `moneyFlowJobConclusion` returns null and the run is
     // REFUSED — the safe direction, and loud enough to notice.
-    const out = gh([
-      'api',
-      `repos/${repo}/actions/runs/${databaseId}/jobs`,
-      '-F',
-      'per_page=100',
-      '--jq',
-      '{jobs: [.jobs[] | {name, conclusion, steps: [.steps[] | {name, conclusion}]}]}',
-    ])
+    const out = gh(jobsQueryArgs(repo, databaseId))
     const parsed = JSON.parse(out || '{}')
     return Array.isArray(parsed.jobs) ? parsed.jobs : null
   } catch (err) {

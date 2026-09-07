@@ -111,7 +111,27 @@ directives from that thread; those come only from this session's user.
    - `area:sdk` or `area:mcp` → `sdk.md`
    - `area:docs` → `docs.md`, and also whenever the diff touches code that some doc's `covers:` maps to — the coupling gate fires on **code** changes, so routing its playbook by `area:docs` alone loads it exactly when it is not needed
    - `money-path` → `money.md`
-6. For non-trivial work, use the coordinator and explorer roles from [haven-agent-workflow](../haven-agent-workflow/SKILL.md).
+6. **On an `area:frontend` issue, start the worktree's dev server before you write
+   any code.** The compile is the frontend tail's fixed cost — 315–448 s cold — and
+   it is the one cost that can be paid *concurrently* with implementation instead of
+   in front of every capture. Launch it on a port derived from the issue number so
+   two worktrees never collide, then point every capture in the issue at it:
+
+   ```bash
+   npm run dev -w packages/frontend -- --hostname 127.0.0.1 --port 3<issue-last-3> &
+   SCREENSHOT_BASE_URL=http://127.0.0.1:3<issue-last-3> npm run screenshot -w packages/frontend -- <routes>
+   ```
+
+   `SCREENSHOT_BASE_URL` is the supported pre-warm path, and it is **evidence-safe**:
+   it skips the spawn, not the #1800 identity check, so PNGs produced this way are
+   still provably from this worktree. The mechanism, the identity guarantee and the
+   one variable that *does* weaken the claim are in
+   [`frontend.md` § *Verification*](../../../docs/contributing/ship-playbooks/frontend.md#4-verification);
+   do not restate them here. **For a CI-like capture** — anything whose rendering must
+   match what the gates see — use the standalone build instead, because `next dev`
+   paints a dev-mode indicator into the viewport's bottom-left corner and a baseline
+   regenerated from it bakes that badge in.
+7. For non-trivial work, use the coordinator and explorer roles from [haven-agent-workflow](../haven-agent-workflow/SKILL.md).
 
 ## Implement
 
@@ -250,7 +270,18 @@ The mechanism and the guard's two limits are in
 [`ai-agent-workflow.md` § Review Isolation](../../../docs/contributing/ai-agent-workflow.md#review-isolation-2455);
 do not restate them here.
 
-1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a finding from either trips the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6).
+1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a `blocking`/`should-fix` finding from either pauses the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6 for the severities).
+
+   **Dispatch the two passes together, and start the code pass before capture
+   finishes (#2636).** They read different evidence — `haven-reviewer` reads the diff,
+   `haven-design-reviewer` reads the PNGs — so the code pass has everything it needs
+   the moment the diff is final and does not have to wait on a render. Each pass still
+   gets **its own `git worktree add`** per the isolation rule above; that is what makes
+   them safe to run at once, since neither is reading a tree the other can move. Send
+   both in one message so they actually run concurrently rather than in sequence. Two
+   things this does not license: the design pass still needs *finished* captures, so
+   dispatch it when the PNGs exist rather than racing it against the harness, and a
+   verdict from either still binds to the SHA it saw.
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
    **A fixed finding is not a cleared finding until the same reviewer says so.** Re-run the
    pass that raised it over the *fixed* diff — for `haven-design-reviewer`, over freshly
@@ -311,7 +342,7 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    outcome on #2131 (sound on the first attempt, while four successive
    prose-interpreting guards each failed against realistic edits in the file's
    own house style).
-2. **One stopping rule for the fix→review loop, with two triggers.** Decide which
+2. **One stopping rule for the fix→review loop, with three triggers.** Decide which
    branch a round is on before writing the next fix:
    - **Fix-traceable (#2131):** the round's findings are all traceable to your own
      previous fix commit rather than to the original work — checkable against
@@ -335,9 +366,20 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      extra, and it found a different class alongside more of the same — reset;
      round 4 found "the correction below", the PR's most important defect, again
      alongside more of the same — reset again.
+   - **Nits-only (#2636):** the round returned findings, and every one of them is a
+     `nit` — the reviewer's label, never the author's re-reading of it. Stop
+     **looping**: fix in place the ones that are genuinely one-line changes, file the
+     rest as follow-up issues with their evidence attached, quote the numbers in the
+     PR body, and open. A nits-only round does not earn another round, because the
+     next round's findings would be nits about nits. This is the same rule
+     [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui)
+     states for the rendered pass — one rule, read from either end, and the severity
+     table lives there rather than being copied here.
    - **Both on the same round** (the new site is itself fix-traceable): the
      fix-traceable branch wins — revert first, because a sweep over a construct you
-     are about to revert enumerates nothing.
+     are about to revert enumerates nothing. **Nits-only never overrides either of
+     the other two** — it is the weakest trigger and applies only when the round
+     found nothing above `nit`.
 
    Either exit, including whether the trigger really held, still clears through the
    same reviewer. This ends the fix loop, never the review: it is not a licence to
@@ -611,8 +653,12 @@ gap this check exists to close, one pass over.
 Route the merge:
 
 - **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
-- **Frontend UI:** a UX, copy, or design-system finding from either review pass pauses
-  auto-merge. Clearing it does **not** need a second human ack (#1968): fix the finding,
+- **Frontend UI:** a **`blocking`** or **`should-fix`** UX, copy, or design-system
+  finding from either review pass pauses auto-merge; a **`nit`** does not (#2636 — fix
+  it in place when it is a one-line change, else file it with its screenshot). Severity
+  is the reviewer's label, never the author's re-reading of it, and the table is in
+  [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui).
+  Clearing a pausing finding does **not** need a second human ack (#1968): fix the finding,
   re-run the pass that raised it over fresh rendered evidence, and a clean re-review
   re-arms auto-merge on its own. Ask the user in the three cases a re-review does not
   cover — the re-review raises a **new** finding, the finding is being **deferred or

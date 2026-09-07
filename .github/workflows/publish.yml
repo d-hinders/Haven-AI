@@ -51,11 +51,17 @@ name: Publish packages
 #      --snapshot — the other side of the same wall, keeping a snapshot version
 #      from being committed to a release branch and riding the dev → main
 #      promotion into alpha/latest.
-#   4. promote_latest() never calls `npm dist-tag add … latest` with a
-#      0.0.0-dev.* version (#2536). It examines the version shape before
-#      deciding anything, so the ARTIFACT is what the rule turns on; the
-#      channel then decides only whether an unexpected snapshot is a silent
-#      no-op (dev, where snapshots are ordinary) or a failure (anywhere else).
+#   4. record_latest_promotion() never NOMINATES a 0.0.0-dev.* version for the
+#      `latest` tag (#2536). It examines the version shape before deciding
+#      anything, so the ARTIFACT is what the rule turns on; the channel then
+#      decides only whether an unexpected snapshot is a silent no-op (dev,
+#      where snapshots are ordinary) or a failure (anywhere else). Since #2647
+#      it only records — the tag move itself happens in the `promote-tags` job.
+#   5. The `promote-tags` job is the ONLY place holding a long-lived npm
+#      credential, and it is `main`-only twice over: an `if:` on this job, and
+#      the `npm-production-tags` environment's deployment-branch policy. The
+#      second is the real control — an `if:` is one edit away from being wrong,
+#      whereas the environment withholds the secret itself.
 #
 # The committed contract doc docs/operations/mcp-runtime-compatibility.md stays
 # PROD-only. Its Supported Runtime Manifest table is rewritten by the bump
@@ -112,6 +118,14 @@ jobs:
     permissions:
       contents: read
       id-token: write   # required for npm Trusted Publishing (OIDC)
+
+    outputs:
+      # Space-separated `name@version` specs this run actually published and
+      # that still need `latest` moved onto them. Empty on the dev channel, and
+      # empty on a prod run where every version was already on npm — which is
+      # what keeps a re-run of an OLD workflow from moving `latest` backwards
+      # (#2536's property, preserved verbatim through the job split, #2647).
+      promote: ${{ steps.publish.outputs.promote }}
 
     steps:
       - uses: actions/checkout@v4
@@ -215,6 +229,7 @@ jobs:
           npm run build -w packages/cli
 
       - name: Publish packages whose version is not yet on npm
+        id: publish
         env:
           HAVEN_PUBLISH_CHANNEL: ${{ steps.channel.outputs.channel }}
         # One package's failure must not abort the rest (#1159): the loop
@@ -295,7 +310,11 @@ jobs:
           # deliberate rather than incidental: re-running an OLD workflow run
           # publishes nothing (every version is already on npm and skips), so
           # tying the move to a real publish is what stops a re-run dragging
-          # `latest` backwards to an older release. It still does NOT compare
+          # `latest` backwards to an older release. That property is why the
+          # #2647 job split RECORDS here and moves the tag in `promote-tags`,
+          # rather than letting that job decide for itself what to promote: the
+          # decision stays where the channel, version and tag are all in scope.
+          # It still does NOT compare
           # against the live `latest`, and that is deliberate: #2580 put the
           # forward-only rule in scripts/release-bump.mjs instead, where a
           # backwards version is refused at the release PR with a human already
@@ -304,7 +323,7 @@ jobs:
           # not semver (it orders 1.0.0 before 1.0.0-alpha.1) and `semver` is
           # only a hoisted transitive dep. The before-value is still printed
           # below, so a move remains visible in the run log either way.
-          promote_latest() {
+          record_latest_promotion() {
             pl_channel="$1"; pl_name="$2"; pl_version="$3"; pl_tag="$4"
 
             # The snapshot shape is examined FIRST, before anything decides
@@ -334,13 +353,14 @@ jobs:
             # Informational only, and deliberately unable to fail the job: a
             # transient registry read must not fail a publish that succeeded.
             pl_before="$(npm view "$pl_name" dist-tags.latest 2>/dev/null || echo unknown)"
-            echo "→ Moving latest for $pl_name: ${pl_before:-none} → $pl_version (published under $pl_tag, which stays)"
-            npm dist-tag add "$pl_name@$pl_version" latest
+            echo "→ Nominating $pl_name for latest: ${pl_before:-none} → $pl_version (published under $pl_tag, which stays)"
+            promote="$promote $pl_name@$pl_version"
           }
 
           published_any=false
           failed=""
-          tag_failed=""
+          refused=""
+          promote=""
           results=""
 
           for pkg in sdk signer mcp connect cli; do
@@ -381,15 +401,17 @@ jobs:
             echo "→ Publishing $name@$version with --tag $tag"
             if npm publish -w "packages/$pkg" --tag "$tag" --access public; then
               published_any=true
-              if promote_latest "$channel" "$name" "$version" "$tag"; then
+              if record_latest_promotion "$channel" "$name" "$version" "$tag"; then
                 results="$results| \`$name\` | $version | published under \`$tag\` |"$'\n'
               else
-                # The package IS live; only the tag move failed. Say exactly
-                # that, because "FAILED" next to a published version would send
-                # the next reader looking for a publish that did happen.
-                echo "✗ $name@$version published, but moving latest failed — continuing"
-                results="$results| \`$name\` | $version | published under \`$tag\`, **latest NOT moved** |"$'\n'
-                tag_failed="$tag_failed $name@$version"
+                # The package IS live; only the NOMINATION was refused, which on
+                # any channel but dev means a snapshot reached a prod publish —
+                # enforcement point 4 firing. Say exactly that, because "FAILED"
+                # next to a published version would send the next reader looking
+                # for a publish that did happen.
+                echo "✗ $name@$version published, but was refused for latest — continuing"
+                results="$results| \`$name\` | $version | published under \`$tag\`, **refused for latest** |"$'\n'
+                refused="$refused $name@$version"
               fi
             else
               echo "✗ $name@$version failed to publish — continuing with the remaining packages"
@@ -408,19 +430,160 @@ jobs:
             printf '%s' "$results"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # Handed to the `promote-tags` job, which holds the only credential
+          # able to move a dist-tag. Empty is the ordinary case on dev and on a
+          # prod re-run where nothing published; that job skips on empty rather
+          # than running with nothing to do.
+          #
+          # Written BEFORE the failure exits below, deliberately. #1159's rule
+          # is that one package's failure must not punish the others, and
+          # before #2647 each success had its tag moved inline, so a partial
+          # failure still left `latest` correct for everything that published.
+          # Writing the output after an `exit 1` would silently drop that: the
+          # published packages would sit under `alpha` with `latest` stale, and
+          # the only visible symptom would be the publish failure everyone was
+          # already looking at. `promote-tags` pairs this with `!cancelled()`.
+          echo "promote=$(echo $promote)" >> "$GITHUB_OUTPUT"
+
+          if [ -n "$refused" ]; then
+            echo "ERROR: published, but REFUSED for the latest tag:$refused"
+            echo "Those versions ARE live under their own tag. A refusal here means a"
+            echo "0.0.0-dev.* snapshot reached a prod publish — enforcement point 4."
+            exit 1
+          fi
+
           if [ -n "$failed" ]; then
             echo "ERROR: failed to publish:$failed"
             echo "Every other package was still attempted — anything not marked FAILED above is live or was already on npm."
             exit 1
           fi
 
-          if [ -n "$tag_failed" ]; then
-            echo "ERROR: published, but failed to move the latest dist-tag for:$tag_failed"
-            echo "Those versions ARE live under their own tag; only 'latest' still points elsewhere."
-            echo "Remedy, once per package: npm dist-tag add <name>@<version> latest"
+          if [ "$published_any" = "false" ]; then
+            echo "No package versions to publish — all up to date on npm."
+          fi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Move `latest` onto what the publish job just published (#2647).
+  #
+  # WHY THIS IS A SEPARATE JOB, and not four lines in the one above.
+  #
+  # npm Trusted Publishing (OIDC) authorises `npm publish` and nothing else.
+  # `npm dist-tag add` is a different registry mutation and the OIDC credential
+  # has no rights to it: the 0.1.35-alpha.0 release published all five packages
+  # under `alpha` and then failed every tag move with E401, leaving `latest`
+  # pointing at 0.1.34-alpha.0 while `alpha` was current — the exact defect
+  # #2536 exists to prevent, reintroduced by the mechanism meant to fix it.
+  #
+  # So a long-lived token is unavoidable. `environment:` is the only scoping
+  # GitHub offers that is JOB-level, so a separate job is the only way to keep
+  # that credential away from every `dev` snapshot run. A step-level `if:` in
+  # the publish job would leave the secret readable by any future step added to
+  # it; the environment's deployment-branch policy withholds it from `dev`
+  # entirely, regardless of what this file later says.
+  #
+  # ── THIS IS A BRIDGE, NOT THE ANSWER. Two dates ──────────────────────────
+  #   • The token expires 2026-12-06. npm caps write-enabled granular tokens at
+  #     90 days; there is no non-expiring option. When it lapses, releases
+  #     publish and `latest` silently stops moving — this defect, again.
+  #   • Around 2027-01, npm restricts bypass-2FA granular tokens from "package
+  #     management actions", which is plausibly this one. The renewal may not
+  #     restore the capability at all.
+  #
+  # The durable fix is to stop needing two dist-tags: `alpha` and `latest` have
+  # pointed at the same version since #2536 and always will, so publishing with
+  # `--tag latest` under OIDC would need no second mutation and no credential.
+  # That is a product decision, not a CI one — it freezes `@alpha` for anyone
+  # who has it pinned — and it is tracked separately. Decide it BEFORE the
+  # December expiry, not on the day a release breaks.
+  # ──────────────────────────────────────────────────────────────────────────
+  promote-tags:
+    name: Move the latest dist-tag onto the published release
+    needs: publish
+    # Empty means nothing published that wants promoting: every dev run, and any
+    # prod run where all versions were already on npm. Skipping on empty is what
+    # keeps a re-run of an old workflow from touching tags at all.
+    #
+    # `!cancelled()` rather than the default (which requires `needs` to have
+    # SUCCEEDED), because #1159 makes a partial publish a real outcome: four
+    # packages live and one failed must still move `latest` onto the four, which
+    # is what the inline call did before the job split. The nomination list is
+    # the authority on what to touch, not the publish job's exit code — a
+    # package that did not publish was never nominated.
+    if: ${{ !cancelled() && needs.publish.outputs.promote != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # The control. `npm-production-tags` restricts deployments to `main`, so a
+    # run on any other ref cannot obtain NPM_DIST_TAG_TOKEN even if it reaches
+    # this job. Do not replace this with a repository secret plus an `if:` —
+    # that is the arrangement this job exists to avoid.
+    environment: npm-production-tags
+
+    permissions:
+      contents: read   # no id-token: this job never publishes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          # Writes the .npmrc line that reads NODE_AUTH_TOKEN below. Without it
+          # the token is present in the environment and ignored by npm.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Move latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_DIST_TAG_TOKEN }}
+          PROMOTE: ${{ needs.publish.outputs.promote }}
+        run: |
+          set -euo pipefail
+
+          # Fail with the cause rather than the symptom. The 0.1.35-alpha.0
+          # incident cost a diagnosis cycle because a bare E401 says nothing
+          # about which credential, or that its 90-day life is the likeliest
+          # reason. An expired token and an absent one are the same fix.
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_DIST_TAG_TOKEN is not set on the npm-production-tags environment." >&2
+            echo "Every package IS published — only the 'latest' dist-tag was not moved." >&2
+            echo "Fix: add the secret to that environment (npm granular token, @haven_ai scope, read+write)." >&2
             exit 1
           fi
 
-          if [ "$published_any" = "false" ]; then
-            echo "No package versions to publish — all up to date on npm."
+          failed=""
+          results=""
+
+          for spec in $PROMOTE; do
+            # `##*@` takes everything after the LAST @, so a scoped name
+            # (@haven_ai/sdk@1.2.3) splits correctly at the version.
+            name="${spec%@*}"
+            version="${spec##*@}"
+
+            before="$(npm view "$name" dist-tags.latest 2>/dev/null || echo unknown)"
+            echo "→ $name: latest ${before:-none} → $version"
+
+            if npm dist-tag add "$spec" latest; then
+              results="$results| \`$name\` | $before | $version |"$'\n'
+            else
+              echo "✗ $name: dist-tag add failed" >&2
+              results="$results| \`$name\` | $before | **FAILED** |"$'\n'
+              failed="$failed $spec"
+            fi
+          done
+
+          {
+            echo "### latest dist-tag promotion"
+            echo ""
+            echo "| package | latest before | latest after |"
+            echo "|---|---|---|"
+            printf '%s' "$results"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$failed" ]; then
+            echo "::error::Failed to move the latest dist-tag for:$failed" >&2
+            echo "Those versions ARE live under their own tag; only 'latest' still points elsewhere." >&2
+            echo "Most likely cause: NPM_DIST_TAG_TOKEN expired. npm caps these at 90 days." >&2
+            echo "Regenerate at npmjs.com (granular, @haven_ai scope, read+write, bypass 2FA)," >&2
+            echo "update the secret on the npm-production-tags environment, and re-run this job." >&2
+            exit 1
           fi

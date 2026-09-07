@@ -92,7 +92,11 @@ older build than the deployment describes.
 
 - **The device-login link (C1/#2526)** — `haven login` prints a code and a verification
   link. Did the agent relay them, and did it correctly say the human approves in a
-  browser and that it will never ask for their password?
+  browser and that it will never ask for their password? Since #2618 the sequence it
+  should run is non-blocking: `login --json --no-wait` returns the link object at
+  once (it carries `device_code`), and `haven login --poll <device_code>` finishes
+  the flow one round per invocation — did the agent use it, or did it block on the
+  poll / kill the process and lose the code?
 - **The `agents connect` command (C2/#2527)** — did it get `--name`, `--budget`,
   `--token` and `--period` right, and did it relay the approval link rather than
   building one?

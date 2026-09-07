@@ -5,7 +5,13 @@ import assert from 'node:assert/strict'
 import { mkdtempSync as mkdtempSync2457, readFileSync as readFileSync2457, rmSync as rmSync2457 } from 'node:fs'
 import { tmpdir as tmpdir2457 } from 'node:os'
 import { join as join2457 } from 'node:path'
-import { implicatedDocs, reverseImplications, ageDays, isIncidentalPath } from './coupling-gate.mjs'
+import {
+  implicatedDocs,
+  reverseImplications,
+  ageDays,
+  isIncidentalPath,
+  isGoverned,
+} from './coupling-gate.mjs'
 
 const DOCS = [
   { doc: 'docs/architecture/04-x402.md', covers: ['packages/backend/src/routes/x402.ts'], lastVerified: '2026-06-01' },
@@ -891,4 +897,81 @@ test2323('MUTATION PROOF: the same test-only diff WITHOUT a shard still blocks (
   const { status, output } = runGate(['packages/backend/src/rails/sweep.test.ts'], [])
   assert2323.equal(status, 1, 'a contract doc must still see a test-only change under --strict')
   assert2323.match(output, /casp-risk-guardrails/)
+})
+
+// --- #2638: archived and research docs leave the governed set -----------------
+// The gate measures "the code this doc describes moved on". That is a defect
+// for a `current` doc, the defining condition of an `archived` one, and beside
+// the point for a `research` spike, which is a dated record of what was true
+// when it ran.
+
+const STATUS_DOCS = [
+  {
+    doc: 'docs/architecture/live.md',
+    covers: ['packages/backend/src/routes/x402.ts'],
+    lastVerified: '2026-06-01',
+    status: 'current',
+  },
+  {
+    doc: 'docs/archive/old-rail.md',
+    covers: ['packages/backend/src/routes/x402.ts'],
+    lastVerified: '2026-06-01',
+    status: 'archived',
+  },
+  {
+    doc: 'docs/research/spike.md',
+    covers: ['packages/backend/src/routes/x402.ts'],
+    lastVerified: '2026-06-01',
+    status: 'research',
+  },
+]
+
+test('#2638: implicatedDocs skips archived and research, keeps current', () => {
+  const f = implicatedDocs(['packages/backend/src/routes/x402.ts'], STATUS_DOCS)
+  assert.deepEqual(
+    f.map((x) => x.doc),
+    ['docs/architecture/live.md'],
+  )
+})
+
+test('#2638: a contract doc is still skipped when archived — status wins over contract', () => {
+  // Guards the ordering: the status check must precede the contract promotion,
+  // or an archived `contract: true` doc would BLOCK in --strict mode.
+  const docs = [
+    {
+      doc: 'docs/archive/old-contract.md',
+      covers: ['packages/backend/src/routes/x402.ts'],
+      lastVerified: '2020-01-01',
+      contract: true,
+      status: 'archived',
+    },
+  ]
+  assert.deepEqual(implicatedDocs(['packages/backend/src/routes/x402.ts'], docs, { strict: true }), [])
+})
+
+test('#2638: reverseImplications skips archived and research too', () => {
+  // Both directions, or editing an archived doc still asks a reviewer to
+  // re-check code the doc deliberately no longer tracks.
+  const changed = ['docs/architecture/live.md', 'docs/archive/old-rail.md', 'docs/research/spike.md']
+  assert.deepEqual(
+    reverseImplications(changed, STATUS_DOCS).map((x) => x.doc),
+    ['docs/architecture/live.md'],
+  )
+})
+
+test('#2638: a doc with NO status is governed — a broken front-matter is not an exemption', () => {
+  // Fail closed. `validate-frontmatter.mjs` requires `status`, so a missing one
+  // is a defect; treating it as an exemption would let a front-matter error
+  // silently drop a doc out of the gate.
+  const docs = [
+    { doc: 'docs/architecture/nostatus.md', covers: ['packages/backend/src/routes/x402.ts'], lastVerified: '2026-06-01' },
+  ]
+  assert.equal(implicatedDocs(['packages/backend/src/routes/x402.ts'], docs).length, 1)
+  assert.equal(isGoverned(undefined), true)
+})
+
+test('#2638: isGoverned covers exactly the two non-current statuses', () => {
+  assert.equal(isGoverned('current'), true)
+  assert.equal(isGoverned('archived'), false)
+  assert.equal(isGoverned('research'), false)
 })

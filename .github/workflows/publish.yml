@@ -89,16 +89,28 @@ name: Publish packages
 # move was never authenticated by anything.
 #
 # So `promote_latest()` carries its OWN, separate credential:
-# secrets.NPM_LATEST_TAG_TOKEN, a granular npm automation token scoped to
-# dist-tag only (an operator-provisioned secret — see the OPERATOR checklist
-# in the PR that added this). It is applied ONLY inside `promote_latest()`,
+# secrets.NPM_LATEST_TAG_TOKEN, an operator-provisioned granular npm token
+# with read-and-write on the five @haven_ai packages.
+#
+# READ THAT SCOPE LITERALLY — an earlier version of this comment said
+# "scoped to dist-tag only" and that scope DOES NOT EXIST (found by review).
+# npm's granular tokens are read-only or read-and-write over a package set;
+# there is no verb-level permission that allows `npm dist-tag add` while
+# denying `npm publish`. So this token CAN publish these packages, and must
+# be treated as publish-capable wherever it is stored, rotated or audited.
+# What the workflow guarantees is narrower and is a property of the WIRING,
+# not of the token: it never reaches a publish call HERE. It is applied ONLY
+# inside `promote_latest()`,
 # to the one `npm dist-tag add` invocation, via a throwaway `--userconfig`
 # file that exists for that single command and is deleted immediately after.
 # It is never written to the job's ambient `~/.npmrc` and never exported as
 # `NODE_AUTH_TOKEN`, so it cannot substitute for OIDC on the `npm publish`
 # calls above — those keep authenticating exactly as they did before this
-# secret existed. Two credentials, two blast radii: this token can move a
-# dist-tag and cannot publish a new version.
+# secret existed. Two credentials, two paths: OIDC is the only thing that
+# authorizes a publish IN THIS WORKFLOW, and this token is confined to the one
+# tag call. Its blast radius if LEAKED is wider than that confinement — see
+# the scope note above — which is the argument for rotating it like a publish
+# credential rather than like a tag helper.
 #
 # mcp-server, backend, and frontend are intentionally excluded: they are not
 # published to npm (mcp-server is Docker-deployed; backend/frontend deploy to
@@ -386,6 +398,33 @@ jobs:
             # Informational only, and deliberately unable to fail the job: a
             # transient registry read must not fail a publish that succeeded.
             pl_before="$(npm view "$pl_name" dist-tags.latest 2>/dev/null || echo unknown)"
+
+            # ── Refs #2647, found by independent review ────────────────────
+            # FORWARD-ONLY, checked against the REGISTRY and not against this
+            # checkout. Once promote_latest() also runs on the "already on
+            # npm" branch, clicking *Re-run failed jobs* on a SUPERSEDED run
+            # reaches here with that run's own pinned version — no bump
+            # happens, so `release-version-order.mjs`'s bump-time rule is
+            # never consulted, and `latest` would walk backwards onto the
+            # older release across all five packages. An ordinary click, with
+            # no warning that the run has been superseded.
+            #
+            # An unreadable registry is NOT a violation: refusing on a
+            # transient `npm view` failure would turn a network blip into a
+            # stuck tag, which is the failure this issue exists to fix.
+            pl_backwards="$(node -e '
+              const [{ backwardsLatestMove, resolveSemver }] = await Promise.all([
+                import("./scripts/release-version-order.mjs"),
+              ])
+              const semver = await resolveSemver(process.cwd())
+              const why = backwardsLatestMove(process.argv[1], process.argv[2], semver)
+              if (why) process.stdout.write(why)
+            ' --input-type=module "$pl_before" "$pl_version" 2>/dev/null || true)"
+            if [ -n "$pl_backwards" ]; then
+              echo "GUARD: $pl_name — $pl_backwards" >&2
+              return 1
+            fi
+
             echo "→ Moving latest for $pl_name: ${pl_before:-none} → $pl_version (published under $pl_tag, which stays)"
 
             # The token is applied ONLY to this one command, through a

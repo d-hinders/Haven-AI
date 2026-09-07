@@ -176,3 +176,45 @@ export async function resolveSemver(root) {
   const semverPath = join(root, 'node_modules', 'semver', 'index.js')
   return (await import(semverPath)).default
 }
+
+/**
+ * Is moving `latest` from `liveLatest` to `next` a BACKWARDS move? (#2647)
+ *
+ * ## Why this exists even though the rule above says it should not
+ *
+ * `backwardsVersionViolation` deliberately compares against the repo's own
+ * current version rather than the live `latest`, and its reasoning stands: a
+ * release bump is where a human is already looking, and failing there costs a
+ * retyped number instead of a manual dist-tag repair.
+ *
+ * That reasoning covers the BUMP. It does not cover a **re-run**, and an
+ * independent review of #2647 found the gap: once `promote_latest()` also runs
+ * on the "already on npm" branch, clicking *Re-run failed jobs* on an older,
+ * superseded workflow run reaches it with that run's own pinned version. No
+ * bump happens, so nothing consults the rule above, and `latest` walks
+ * backwards onto the older release. Ordinary click, no warning, five packages.
+ *
+ * So the workflow needs its own check against the registry, and it needs to be
+ * here — importable and unit-testable — rather than as shell arithmetic nobody
+ * can exercise.
+ *
+ * `unknown` and an empty string mean the registry read failed or the package
+ * has no `latest` yet. Both are NOT violations: refusing on a transient
+ * `npm view` failure would turn a network blip into a stuck tag, which is the
+ * failure this whole issue is about.
+ *
+ * @param {string} liveLatest what the registry currently serves as `latest`
+ * @param {string} next the version this run wants `latest` to point at
+ * @param {{lt: (a: string, b: string) => boolean, valid: (v: string) => unknown}} semver
+ */
+export function backwardsLatestMove(liveLatest, next, semver) {
+  if (!liveLatest || liveLatest === 'unknown') return null
+  if (!semver.valid(liveLatest) || !semver.valid(next)) return null
+  if (!semver.lt(next, liveLatest)) return null
+  return (
+    `refusing to move latest BACKWARDS from ${liveLatest} to ${next}. ` +
+    'This run is older than what the registry already serves — re-running a superseded ' +
+    'workflow run must not drag latest down (#2647). Re-run the NEWEST failed publish, ' +
+    'or move the tag by hand if the registry is genuinely wrong.'
+  )
+}

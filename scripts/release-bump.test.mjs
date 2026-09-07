@@ -2078,3 +2078,68 @@ test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag i
   assert.ok(snapshotParse !== -1 && snapshotParse < call, 'the call must come after --snapshot is parsed')
   assert.ok(call < firstWrite, 'the call must come before the run starts reporting changes')
 })
+
+// ── Refs #2647, found by independent review ─────────────────────────────────
+//
+// Once promote_latest() also runs on the "already on npm" branch, clicking
+// *Re-run failed jobs* on a SUPERSEDED run reaches it with that run's own
+// pinned version. No bump happens, so `backwardsVersionViolation`'s bump-time
+// rule is never consulted, and `latest` would walk backwards across all five
+// packages on an ordinary click. These pin the registry-side check that closes
+// it — and, deliberately, the two cases where refusing would be WORSE than
+// allowing.
+test('#2647: a backwards latest move is refused', async () => {
+  const { backwardsLatestMove, resolveSemver } = await import('./release-version-order.mjs')
+  const semver = await resolveSemver(ROOT)
+
+  const why = backwardsLatestMove('0.1.35-alpha.0', '0.1.34-alpha.0', semver)
+  assert.ok(why, 'a superseded re-run must not drag latest down')
+  assert.match(why, /BACKWARDS/)
+  assert.match(why, /0\.1\.35-alpha\.0/)
+  assert.match(why, /0\.1\.34-alpha\.0/)
+})
+
+test('#2647: forward and no-op moves are allowed', async () => {
+  const { backwardsLatestMove, resolveSemver } = await import('./release-version-order.mjs')
+  const semver = await resolveSemver(ROOT)
+
+  assert.equal(backwardsLatestMove('0.1.34-alpha.0', '0.1.35-alpha.0', semver), null)
+  // Re-promoting the version latest already points at is the healthy re-run.
+  assert.equal(backwardsLatestMove('0.1.35-alpha.0', '0.1.35-alpha.0', semver), null)
+})
+
+test('#2647: an unreadable registry is NOT a violation — a blip must not stick a tag', async () => {
+  const { backwardsLatestMove, resolveSemver } = await import('./release-version-order.mjs')
+  const semver = await resolveSemver(ROOT)
+
+  // `npm view` failure is reported as the literal `unknown` by the workflow.
+  assert.equal(backwardsLatestMove('unknown', '0.1.35-alpha.0', semver), null)
+  assert.equal(backwardsLatestMove('', '0.1.35-alpha.0', semver), null)
+  // A package with no latest yet, and an unparseable tag, both pass through.
+  assert.equal(backwardsLatestMove(undefined, '0.1.35-alpha.0', semver), null)
+  assert.equal(backwardsLatestMove('not-a-version', '0.1.35-alpha.0', semver), null)
+})
+
+test('#2647: the workflow actually CALLS the check on the tag path', async () => {
+  // The tests above prove the function. This proves the wiring — the same
+  // gap that made #2615's first pass green on a defect it had not fixed.
+  const workflow = await readFile(join(ROOT, '.github/workflows/publish.yml'), 'utf8')
+  // Slice from the DEFINITION, not the first mention: the header comment
+  // above discusses `promote_latest()` and `npm dist-tag add` in prose, and
+  // slicing from there put commentary inside the region and made this
+  // assertion read the wrong text. It failed honestly and this is the fix.
+  const fn = workflow.slice(workflow.indexOf('promote_latest() {'), workflow.indexOf('published_any=false'))
+  assert.match(fn, /backwardsLatestMove/, 'promote_latest must consult the registry-side check')
+  // Anchor on the COMMAND, not on any mention of it. The function's own
+  // comment explains the E401 by naming `npm dist-tag add` in prose, 2000
+  // characters before the real invocation — matching that made this
+  // assertion compare against commentary and fail against correct code.
+  // Third time in this change that a text match found prose instead of the
+  // thing it names; the anchor is the executed line and nothing else.
+  const command = 'NPM_CONFIG_USERCONFIG="$pl_userconfig" npm dist-tag add'
+  assert.ok(fn.includes(command), 'the tag move must run under the scoped userconfig')
+  assert.ok(
+    fn.indexOf('backwardsLatestMove') < fn.indexOf(command),
+    'the check must run BEFORE the tag is moved, not after',
+  )
+})

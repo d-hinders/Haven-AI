@@ -67,14 +67,6 @@ import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 
-/** EIP-3770 short names Safe{Wallet} uses in its deep links. */
-const SAFE_SHORT_NAME: Record<number, string> = { 100: 'gno', 8453: 'base', 84532: 'basesep' }
-
-function safeWalletUrl(safe: UserSafe): string {
-  const prefix = SAFE_SHORT_NAME[safe.chain_id] ?? ''
-  return `https://app.safe.global/home?safe=${prefix}:${safe.safe_address}`
-}
-
 function OnChainBadge() {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-[var(--v2-success-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-success)]">
@@ -253,7 +245,7 @@ function DelegationControlCard({ safe, agents }: { safe: UserSafe; agents: Agent
           </p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-[var(--v2-border)]">
-            {/* Same dense admin shape as the legacy table below: it SCROLLS
+            {/* Same dense admin shape the legacy table had: it SCROLLS
                 inside its `overflow-x-auto` wrapper rather than collapsing
                 columns, because these rows carry no self-labelling content
                 (#1999). No `revealAt` columns, so it queries nothing. */}

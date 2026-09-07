@@ -824,8 +824,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // #2202: the rail is now NAMED rather than expressed by absence. An
       // absent `account_type` is not a state the API can serve — the column is
       // `NOT NULL DEFAULT 'safe'` (`041_hybrid_accounts.ts:29`) — and `railOf`
-      // reads `'safe'` and `undefined` identically, so nothing rendered
-      // differently. What this still pins is that the override is the SAME on
+      // read `'safe'` and `undefined` identically at the time, so nothing
+      // rendered differently (`railOf` is deleted since #2413). What this still pins is that the override is the SAME on
       // both halves of the pair, which is what makes `chain_id` the sole
       // variable.
       expect(me.safes[0].account_type).toBe('safe')

@@ -14,7 +14,7 @@
  * PER-PAYMENT choice and a merchant sees a different address on each path:
  *
  * - `agentEoa` — REQUIRED. `agents.delegate_address`. Universal: every agent has
- *   one, including legacy/import-only agents that have nothing else. This is the
+ *   one, including retired-rail agents that have nothing else. This is the
  *   `from` a merchant sees in an **EIP-3009** header.
  * - `smartAccount` — OPTIONAL. The Hybrid delegator derived from the EOA; exists
  *   only on the delegation rail. This is the delegator in **erc7710** redemption.

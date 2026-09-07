@@ -57,7 +57,8 @@
  *
  * `AgentCard`'s footer NEVER renders all eight at once — `isOperational`,
  * `isRevoked` and `isArchived` are mutually exclusive, and `canUseWalletActions`
- * / `isDelegationAgent` split the operational branch further (the design pass on
+ * split the operational branch further (as did `isDelegationAgent`, until #2413
+ * deleted it with the legacy branch) (the design pass on
  * #1831 made the same correction to that PR's "eight rings in one row"
  * framing). Against the shared `mockHavenApi` fixture's one active agent
  * exactly three render.
@@ -78,7 +79,7 @@
  *   control              needs                                    rendered by
  *   Details              canUseWalletActions === false            a different safe_id
  *   Resume from pause    status: 'paused'                         the paused branch
- *   Remove (delegation)  account_type: 'delegator_hybrid', active the isDelegationAgent branch
+ *   Remove (delegation)  account_type: 'delegator_hybrid', active the operational branch
  *   Remove (revoked)     status: 'revoked', not archived          the isRevoked branch
  *   Restore to list      archived_at set                          the isArchived branch
  *
@@ -806,7 +807,8 @@ test.describe('driven focus-state visual regression', () => {
       }),
       control: 'Open details for Ledger agent',
       // #2264: `Remove` joins the row. `canUseWalletActions: false` hides Edit
-      // and Revoke, but Remove is gated on `isDelegationAgent` alone — so on
+      // and Revoke, but Remove is not gated at all — it renders unconditionally
+      // inside `isOperational` (#2413 deleted `isDelegationAgent`) — so on
       // the live rail this branch is three controls, not two. It read as two
       // only because the shared fixture was legacy by omission.
       rowControls: [

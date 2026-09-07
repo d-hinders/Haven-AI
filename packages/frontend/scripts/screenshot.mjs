@@ -105,7 +105,7 @@
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, three
- * agents on both rails, transactions, contacts, agent activity + spend
+ * two agents, both on the delegation rail, transactions, contacts, activity + spend
  * stats) so
  * lists, tables and amounts render realistically — that's what the
  * design-reviewer pass judges. Anything not explicitly keyed falls back to a
@@ -3170,7 +3170,8 @@ export const SCENARIOS = {
     // modal under capture changes.
     //
     // #2202: this used to DROP `account_type` rather than set it. `railOf`
-    // reads the two identically (`lib/custody-rail.ts:37-38`), so nothing
+    // read the two identically at the time (it is deleted since #2413, and
+    // `lib/custody-rail.ts` now only records its removal), so nothing
     // rendered differently — but an ABSENT `account_type` is not a state the
     // API can serve: the column is `NOT NULL DEFAULT 'safe'`
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field

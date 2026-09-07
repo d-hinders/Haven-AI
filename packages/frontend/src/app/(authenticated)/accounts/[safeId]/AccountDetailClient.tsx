@@ -643,8 +643,8 @@ export default function AccountDetailClient() {
         body={(
           <div className="space-y-3">
             <p>
-              This only removes the account from Haven. Funds on-chain are unaffected. Removing it
-              may permanently remove this read-only record from Haven.
+              This only removes the account from Haven. Funds on-chain are unaffected, and you
+              keep control of the account itself.
             </p>
             {removeError && (
               <InlineAlert>{removeError.message}</InlineAlert>

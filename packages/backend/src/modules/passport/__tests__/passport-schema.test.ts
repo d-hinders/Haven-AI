@@ -97,7 +97,7 @@ describe('schema UID resolution — fail-closed', () => {
 })
 
 describe('address binding', () => {
-  it('a legacy/import-only agent (EOA only) produces a valid passport', () => {
+  it('a retired-rail agent (EOA only) produces a valid passport', () => {
     // #971 acceptance: agents with nothing but a delegate address must work.
     const b = buildAddressBinding({ delegateAddress: EOA })
     expect(b.agentEoa).toBe(EOA)

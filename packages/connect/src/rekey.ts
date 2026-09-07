@@ -360,7 +360,8 @@ async function probeIdentity(
 /**
  * Refuse what the backend would refuse, before the owner starts anything.
  *
- * The legacy AllowanceModule rail is import-only and its authority is per-token
+ * The legacy AllowanceModule rail is retired — no account can enter it since
+ * #1984 and it cannot spend since #1986 — and its authority was per-token
  * allowances rather than a signed delegation, so there is no delegation to
  * revoke and re-issue — the backend answers a 409 naming re-onboarding as the
  * path (#1694). Finding that out here costs one read; finding it out from the

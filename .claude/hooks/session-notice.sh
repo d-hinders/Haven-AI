@@ -1,7 +1,7 @@
 #!/bin/sh
 # SessionStart notice: state the shipping rule where it will actually be read.
 #
-# CLAUDE.md already says this — on line 304 of 304. That placement is the
+# CLAUDE.md already says this — near the bottom of the file. That placement is the
 # problem: it arrives at the bottom of a long file, and a session that begins as
 # analysis or discussion drifts into shipping without ever passing a point that
 # forces a re-read. This puts it at the top, every time, in three lines.

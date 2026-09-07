@@ -340,12 +340,25 @@ nothing, which is exactly the problem. The release diff's whole safety argument
 is *"nothing here is anything but a version string"*, and the CASP shard asserts
 that in writing — so churn in it is where a real change would hide.
 
-The workflow authenticates with **npm Trusted Publishing (OIDC)** — there is no
-`NPM_TOKEN` secret to manage. It grants the job `id-token: write` and upgrades
-npm to ≥ 11.5.1 (the floor for OIDC support); npm exchanges the short-lived
-GitHub Actions OIDC token for publish rights against a *trusted publisher*
-configured per package on npm. OIDC publishes are also exempt from the 2FA
-one-time-password prompt that blocks token-based publishing in CI.
+The workflow authenticates **publishing** with **npm Trusted Publishing (OIDC)**
+— no long-lived credential on that path. It grants the publish job
+`id-token: write` and upgrades npm to ≥ 11.5.1 (the floor for OIDC support);
+npm exchanges the short-lived GitHub Actions OIDC token for publish rights
+against a *trusted publisher* configured per package on npm. OIDC publishes are
+also exempt from the 2FA one-time-password prompt that blocks token-based
+publishing in CI.
+
+**Moving the `latest` dist-tag is a different credential, in a different job**
+([#2647](https://github.com/d-hinders/Haven-AI/issues/2647)). OIDC authorises
+`npm publish` and nothing else, so `npm dist-tag add` cannot ride on it — it
+failed E401 for all five packages on the 0.1.35-alpha.0 release, leaving
+`latest` a release behind `alpha`. The `promote-tags` job holds a granular npm
+token in the `main`-only `npm-production-tags` GitHub Environment and carries no
+`id-token: write`, so it can move a tag and cannot publish. Two operational
+facts follow: a promotion can be **half green** (packages live under `alpha`,
+`latest` unmoved — check `npm view @haven_ai/<pkg> dist-tags` before calling a
+promotion done), and the token **expires 2026-12-06**, because npm caps
+write-enabled granular tokens at 90 days.
 
 Trusted Publishing additionally emits a signed **sigstore provenance**
 statement. npm validates it against `package.json` and rejects the upload with

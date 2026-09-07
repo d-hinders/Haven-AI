@@ -10,6 +10,7 @@ import {
   type DiscoveryFacts,
 } from '../capability-manifest'
 import { AUTH_MARKED_PREFIXES, PUBLIC_SURFACES } from '../discovery-surfaces'
+import { CHAIN_REGISTRY } from '@haven_ai/core'
 
 /**
  * The capability manifest at `/.well-known/haven.json` (#2531).
@@ -139,8 +140,74 @@ describe('capability manifest', () => {
     expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
     expect(manifest.packages.connect.one_liner).toBe('npx @haven_ai/connect@dev')
     expect(manifest.hosted_mcp.url).toBe('https://mcp.test')
-    expect(manifest.chains).toEqual(FACTS.chains)
+    // #2619: `supported` is now entries, not bare ids — asserted below against
+    // the core registry. `deployable` stays the bare-id array the backend sent.
+    expect(manifest.chains?.deployable).toEqual(FACTS.chains.deployable)
     expect(manifest.api.openapi).toBe('https://api.test/openapi.json')
+  })
+
+  it('chains.supported carries the registry facts for every supported id (#2619)', () => {
+    // The runbook forbids the agent from assuming which chain it is on; bare
+    // ids made it guess anyway. Every entry must be read FROM the registry —
+    // no literals in this test either, so the manifest and the chain facts
+    // cannot drift apart in one place while the other stays green.
+    const manifest = buildManifestFrom(ORIGIN, FACTS)
+    const supported = manifest.chains?.supported ?? []
+    expect(supported.map((entry) => entry.id)).toEqual(FACTS.chains.supported)
+    for (const entry of supported) {
+      const chain = CHAIN_REGISTRY[entry.id]
+      expect(chain, `${entry.id} must be a registered chain`).toBeDefined()
+      expect(entry.name).toBe(chain.name)
+      expect(entry.explorer_url).toBe(chain.explorerUrl)
+      // The chain's USDC-family token: USDC, or USDC.e (bridged) on Gnosis.
+      const usdc = chain.tokens.find((t) => t.symbol === 'USDC') ?? chain.tokens.find((t) => t.symbol === 'USDC.e')
+      expect(usdc?.address).toBeTruthy()
+      expect(entry.usdc_address).toBe(usdc!.address)
+    }
+    // The registry covers the three chains Haven serves; each carries all
+    // four facts. No literal ids here either — whatever the registry holds is
+    // what the manifest must report.
+    expect(Object.keys(CHAIN_REGISTRY).map(Number)).toEqual(
+      expect.arrayContaining([...FACTS.chains.supported]),
+    )
+    // Bare ids remain derivable, first field — the compatibility contract.
+    expect(supported.map((entry) => entry.id)).toEqual([8453, 84532, 100])
+  })
+
+  it('drops a supported id the registry does not know, rather than guessing facts (#2619)', () => {
+    // The backend is the source of `supported`, and the registry is the source
+    // of the FACTS. If they ever disagree, an entry naming unsourced facts is
+    // worse than a shorter list — and the static `deployable` half still
+    // reports the id.
+    const unknown = { ...FACTS, chains: { deployable: [999999], supported: [8453, 999999] } }
+    const manifest = buildManifestFrom(ORIGIN, unknown)
+    expect(manifest.chains?.deployable).toEqual([999999])
+    expect(manifest.chains?.supported.map((entry) => entry.id)).toEqual([8453])
+  })
+
+  it('dashboard.funding names the page the funding card answers on (#2619)', () => {
+    // The funding card (DashboardClient's onboarding card, #2534) lives on
+    // /dashboard — an authenticated surface, which the manifest may name
+    // because that IS where the human goes. The rule it must keep: a named
+    // path is a surface that actually answers, so /dashboard must stay in the
+    // authenticated list the guard pins to the route group.
+    const manifest = buildManifestFrom(ORIGIN, FACTS)
+    expect(manifest.dashboard.funding).toBe('/dashboard')
+    expect(AUTH_MARKED_PREFIXES).toContain('/dashboard')
+  })
+
+  it('attribution names the via=agent marker the runbook documents (#2619)', () => {
+    // The runbook's hand-off scripts append via=agent to the signup link; the
+    // manifest is the machine-readable half and never carried it. One query,
+    // one line of purpose — the #2522 hand-off shape, now readable in data.
+    const manifest = buildManifestFrom(ORIGIN, FACTS)
+    expect(manifest.attribution).toEqual({
+      query: 'via=agent',
+      purpose: 'tells Haven an agent drove this step',
+    })
+    // The runbook's own scripts are where the marker is used; both documents
+    // must name it (asserted over there by for-agents-runbook.test.ts).
+    expect(buildManifestFrom(ORIGIN, null).attribution).toEqual(manifest.attribution)
   })
 
   it('SSRF: the backend fetch target comes from configuration, never a request header', () => {

@@ -18,7 +18,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
+import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import * as agentsRepo from '../agents.js'
 import * as setupsRepo from '../agent-connection-setups.js'
 import * as dashboardRepo from '../dashboard.js'
@@ -62,15 +62,30 @@ async function seedAgent(userId: string, safeId: string, delegate: string): Prom
 }
 
 /**
- * Restore the table after the destructive proof below. The harness schema is
- * shared by every test FILE scheduled onto this vitest worker for the whole
- * run (db-harness.ts keeps one schema per worker; resetDb only TRUNCATEs
- * surviving tables), so a leaked DROP would non-deterministically break
- * sibling real-DB tests — concretely 069's shrink guard, which asserts
- * `agent_allowances` still EXISTS precisely so the migration cannot over-drop
- * it (review finding on this PR). DDL copied verbatim from
- * `db/migrations/000_initial.ts` (post-004 shape — `approval_threshold` never
- * existed in this CREATE).
+ * Create the table this file's destructive proof needs. DDL copied verbatim
+ * from `db/migrations/000_initial.ts` (post-004 shape — `approval_threshold`
+ * never existed in this CREATE).
+ *
+ * ## This used to run in `afterAll` too, and that was #2616 (2026-09-07)
+ *
+ * The rule it was written under has INVERTED. The original note said a leaked
+ * DROP would break "069's shrink guard, which asserts `agent_allowances` still
+ * EXISTS" — true when it was written, and false since migration **075**
+ * dropped the table for real: `069_drop_safe_approver_metadata.test.ts` now
+ * asserts the table is **absent**.
+ *
+ * So re-creating it at the end stopped being a repair and became the leak.
+ * The worker schema is shared by every later FILE on this vitest worker and
+ * OUTLIVES the run (`CREATE SCHEMA IF NOT EXISTS`), `resetDb()` empties rows
+ * and never drops a table, and `ensureMigrated()` reads `schema_migrations`,
+ * which says 075 is applied. Nothing repaired it, ever. 39 of 336 worker
+ * schemas on one machine carried this table with 075 recorded as applied, and
+ * 069 failed on whichever runs happened to land on one of them — the
+ * "order-dependent" failure of #2616, with no ordering in it at all.
+ *
+ * `afterAll` now restores the state migration 075 defines: the table is
+ * dropped. `assertWorkerSchemaAtHead()` runs after it and fails this file if
+ * it ever leaks again.
  */
 async function restoreAgentAllowancesTable(): Promise<void> {
   await db.query(`
@@ -96,8 +111,14 @@ describeDb('agent reads survive the agent_allowances drop (#2020)', () => {
     await restoreAgentAllowancesTable()
   })
 
+  // Registered FIRST so vitest's LIFO ordering runs it LAST — after the drop
+  // below, so it checks the state this file actually LEAVES (#2616).
+  afterAll(assertWorkerSchemaAtHead)
+
   afterAll(async () => {
-    await restoreAgentAllowancesTable()
+    // Back to migration head, which since 075 means GONE. Not `restore` —
+    // see the note on that function for why the direction reversed.
+    await db.query('DROP TABLE IF EXISTS agent_allowances CASCADE')
   })
 
   beforeEach(async () => {
@@ -133,8 +154,9 @@ describeDb('agent reads survive the agent_allowances drop (#2020)', () => {
     )
 
     // The point of the whole test: the table does not exist from here on.
-    // (IF EXISTS is belt-and-braces; afterAll restores the table so the drop
-    // never leaks past this file into the shared worker schema.)
+    // (IF EXISTS is belt-and-braces. The drop needs no undoing: since 075 the
+    // ABSENT table IS migration head, and `afterAll` drops it again to leave
+    // exactly that. It used to RESTORE here, which was #2616.)
     await db.query('DROP TABLE IF EXISTS agent_allowances CASCADE')
 
     // GET /agents' data path: list, then derive for the hybrid subset.

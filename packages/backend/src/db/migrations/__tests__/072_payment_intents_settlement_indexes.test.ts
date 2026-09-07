@@ -20,9 +20,9 @@
  *    the index present and again with it dropped, and the outcome must be
  *    identical.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import {
   confirmObservedSettlement,
   findSweepableErc7710Intents,
@@ -77,6 +77,12 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
+
+  // #2616: this file hand-drives up()/down(), which mutates SCHEMA — and
+  // nothing else in the harness undoes that. Fail HERE if the schema is left
+  // off head, rather than letting the next file on this worker inherit it as
+  // an unexplained table-existence failure.
+  afterAll(assertWorkerSchemaAtHead)
 
   beforeEach(async () => {
     await resetDb()

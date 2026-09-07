@@ -446,8 +446,73 @@ function ensureMigrated(): Promise<void> {
     } finally {
       lockHolder.release()
     }
+    // #2616: the shape at migration head, captured the one moment it is
+    // known-good — after the runner finishes and before any test body runs.
+    // `assertWorkerSchemaAtHead()` below diffs against it.
+    headTables = (await readSchemaShape()).tables
   })()
   return ready
+}
+
+/**
+ * The worker schema's table list at migration head, captured once by
+ * `ensureMigrated()`. `null` until the first migration run completes.
+ */
+let headTables: string[] | null = null
+
+/**
+ * Fail if the worker schema is no longer the shape the migration runner left
+ * (#2616). Call in `afterAll` from any file that changes SCHEMA — a migration's
+ * `up()`/`down()` driven by hand, or an ordinary test creating or dropping a
+ * table in a hook. The leak that caused #2616 was the second kind, so scoping
+ * this to migration tests would have missed it.
+ *
+ * ## Why this exists, and why it is not in `resetDb()`
+ *
+ * A migration test's `down()` mutates SCHEMA, and nothing in this harness
+ * undoes that. `resetDb()` empties ROWS; `ensureMigrated()` is memoised and
+ * reads `schema_migrations`, which still says the migration is applied while
+ * the table it dropped is sitting there restored. Worker schemas are created
+ * `IF NOT EXISTS`, so they outlive the run. So a `down()` that never reaches
+ * its `up()` — an assertion failing in between, a `-t` filter selecting the
+ * test that reverts but not the one that restores — leaves the schema off
+ * head for every later FILE on that worker, and for every later RUN.
+ *
+ * What made #2616 expensive was not the drift, it was the ATTRIBUTION: the
+ * drift surfaced as an unrelated migration test asserting that some table is
+ * gone, in a full suite, passing when run alone. Nothing pointed at the file
+ * that caused it. This check fails in the file that did the damage, names the
+ * tables, and says which direction they moved.
+ *
+ * ## Register it FIRST
+ *
+ * Vitest runs sibling `afterAll` hooks in REVERSE registration order, so
+ * registering this first makes it run LAST — after the file's own cleanup.
+ * That is the intended reading: the question is what the file LEAVES, not
+ * what it touched on the way. A file that reverts a migration and repairs it
+ * in its own `afterAll` has leaked nothing and must stay green.
+ *
+ * It is not in `resetDb()` deliberately. Some test files legitimately CREATE
+ * tables in the worker schema, and `resetDb()` runs in `beforeEach` — between
+ * two tests of such a file the schema is *supposed* to carry an extra table.
+ * A check there would either fire on them or need an allowlist that drifts.
+ * `afterAll` is where the rule is unambiguous.
+ */
+export async function assertWorkerSchemaAtHead(): Promise<void> {
+  if (headTables === null) return // real-DB mode off, or migrations never ran
+  const current = (await readSchemaShape()).tables
+  const head = new Set(headTables)
+  const now = new Set(current)
+  const restored = current.filter((t) => !head.has(t))
+  const missing = headTables.filter((t) => !now.has(t))
+  if (restored.length === 0 && missing.length === 0) return
+  throw new Error(
+    `db-harness: this file left ${WORKER_SCHEMA} off migration head (#2616).` +
+      (restored.length ? ` Tables present that head does not have: ${restored.join(', ')} — a down() or a CREATE was not undone.` : '') +
+      (missing.length ? ` Tables head has that are gone: ${missing.join(', ')} — an up()/DROP was not followed by its down().` : '') +
+      ' The schema outlives this run (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
+      ' so the next file on this worker would have inherited it as a mystery failure. Restore in a `finally`.',
+  )
 }
 
 /**

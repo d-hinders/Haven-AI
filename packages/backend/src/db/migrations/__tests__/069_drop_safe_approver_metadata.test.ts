@@ -17,9 +17,9 @@
  * original three would be a production outage, and the surviving-tables test
  * below is what makes that edit red instead of green.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../069_drop_safe_approver_metadata.js'
 
 async function tableExists(name: string): Promise<boolean> {
@@ -58,6 +58,12 @@ describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
+
+  // #2616: this file hand-drives up()/down(), which mutates SCHEMA — and
+  // nothing else in the harness undoes that. Fail HERE if the schema is left
+  // off head, rather than letting the next file on this worker inherit it as
+  // an unexplained table-existence failure.
+  afterAll(assertWorkerSchemaAtHead)
 
   beforeEach(async () => {
     await resetDb()
@@ -130,7 +136,13 @@ describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
   // ── Reversibility. ───────────────────────────────────────────────────────
 
   it('down() restores 024\'s exact shape, and up() drops it again', async () => {
+    // #2616: the restore is in `finally` because an assertion failing between
+    // here and the `up()` at the end would leave the table RESTORED — and the
+    // worker schema outlives the run, so the next run's first test ("the
+    // table is gone") fails and then heals itself with its own later up().
+    // That self-clearing single failure is exactly what #2616 reported.
     await down(db as never)
+    try {
 
     expect(await tableExists('safe_approver_metadata')).toBe(true)
     expect(await columnNames('safe_approver_metadata')).toEqual([
@@ -167,19 +179,23 @@ describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
       ),
     ).rejects.toThrow(/duplicate key/i)
 
-    await up(db as never)
+    } finally {
+      await up(db as never)
+    }
     expect(await tableExists('safe_approver_metadata')).toBe(false)
   })
 
   it('dropping the child leaves the user_safes PARENT untouched', async () => {
     const { safeId } = await seedUserSafe(3)
     await down(db as never)
-    await db.query(
-      `INSERT INTO safe_approver_metadata (safe_id, address) VALUES ($1, '0xcc')`,
-      [safeId],
-    )
-
-    await up(db as never)
+    try {
+      await db.query(
+        `INSERT INTO safe_approver_metadata (safe_id, address) VALUES ($1, '0xcc')`,
+        [safeId],
+      )
+    } finally {
+      await up(db as never)
+    }
 
     const { rows } = await db.query(`SELECT id FROM user_safes WHERE id = $1`, [safeId])
     expect(rows).toHaveLength(1)

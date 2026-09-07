@@ -641,8 +641,10 @@ let headShape: TableFingerprint[] | null = null
  * timings above were taken against an otherwise idle database; the real suite
  * runs these queries from many concurrent workers against the same catalog,
  * where they are slower. Read ~2 s as a floor, not as the observed cost. The
- * full backend suite (242 files, 3153 tests) runs green with this change in
- * ~180 s wall clock, which is the number that was actually observed.
+ * full backend suite (242 files, 3153 tests) runs green with this change, and
+ * that is the number actually observed. Its WALL CLOCK is not a stable figure
+ * to quote — measured 129 s and 179 s on the same machine minutes apart, and a
+ * cold vitest cache differs from a warm one — so it is not offered as one.
  *
  * ## What this guard does NOT catch
  *
@@ -668,6 +670,16 @@ let headShape: TableFingerprint[] | null = null
  *   KEY constraints, triggers, sequences, views, functions and enum types are
  *   all invisible to the fingerprint. A test that drops a constraint and
  *   leaves it dropped passes.
+ * - **An index REDEFINED under the same name.** Only `indexname` is captured,
+ *   never `indexdef`, so changing an index's columns, uniqueness or partial
+ *   predicate while keeping its name fingerprints identically.
+ * - **Width and precision.** `information_schema.columns.data_type` returns
+ *   `character varying` and `numeric` with no length or precision attached, so
+ *   widening or narrowing a column is invisible.
+ * - **Column ORDINAL position.** Columns are compared `ORDER BY column_name`,
+ *   so a drop-and-re-add that changes physical order fingerprints identically
+ *   — and physical order is exactly what breaks `SELECT *` consumers and
+ *   positional `INSERT`s.
  * - **Row data.** This is a SHAPE guard. Leaked rows are `resetDb()`'s job.
  * - **Any schema but this worker's.** Drift written into `public`, or into
  *   another worker's schema by a fully-qualified statement, is not looked at.
@@ -692,9 +704,18 @@ let headShape: TableFingerprint[] | null = null
  * here — inside a nested `describe`, first, so it runs last — can be skipped
  * outright rather than merely delayed. This module now ALSO registers this
  * function as a root-level `afterAll` (see the call site above `describeDb`),
- * which is immune to that specific failure because it belongs to a different
- * suite. Read that call site's docstring for what the two registrations
- * together guarantee and do not.
+ * which survives that specific failure because it belongs to a different
+ * suite. Note the boundary precisely: it is immune to a throw in a NESTED
+ * `describe`'s hooks, NOT to a throw in a sibling ROOT-level `afterAll`.
+ * Imports hoist, so this module's registration is always the first root-level
+ * one and therefore — by the same LIFO rule — the last to run among root-level
+ * siblings; a file that registers its own root-level `afterAll` and throws in
+ * it suppresses the guard exactly the way the nested case used to, because now
+ * they share a suite. No real-DB file does that today (checked: none of the 64
+ * files importing this module has a top-level `afterAll(`), so this is latent
+ * rather than active — written down because an unstated boundary reads as a
+ * closed guarantee. Read that call site's docstring for what the two
+ * registrations together guarantee and do not.
  */
 /**
  * The names present on one side and not the other, plus names whose attributes
@@ -752,7 +773,10 @@ export async function assertWorkerSchemaAtHead(): Promise<void> {
       (missing.length ? ` Tables head has that are gone: ${missing.join(', ')} — an up()/DROP was not followed by its down().` : '') +
       (changed.length ? ` Tables present in both but with a different COLUMN or INDEX shape: ${changed.join('; ')} — restore it. (This compares column and index NAMES plus a few column attributes; it does not see a CHECK or FK constraint, an index redefined under the same name, or a varchar/numeric width change. See the blind-spot list in testing-strategy.md before reading a pass as full coverage.)` : '') +
       ' The schema outlives this run (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
-      ' so the next file on this worker would have inherited it as a mystery failure. Restore in a `finally`.',
+      ' so a later run would have inherited it as a mystery failure. Restore in a `finally`.' +
+      ' (LATER RUN, not later file: `VITEST_WORKER_ID` is a per-run file ordinal, so no two' +
+      ' files in one run share a schema — the drift is inherited by whichever DIFFERENT file' +
+      ' draws this ordinal next time, which is why the attribution is so hard to trace.)',
   )
 }
 

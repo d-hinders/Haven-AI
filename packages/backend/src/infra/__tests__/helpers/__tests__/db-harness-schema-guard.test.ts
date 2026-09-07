@@ -45,6 +45,7 @@
  * `db-harness.js`, with no call site opting in.
  */
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -58,6 +59,39 @@ import {
 } from '../db-harness.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+/** The package root — the child's cwd, and the seed for its schema suffix. */
+const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..')
+
+/**
+ * The child's schema-name suffix: fixed within a checkout, distinct between
+ * checkouts.
+ *
+ * Both halves are load-bearing, and the design moved twice before this.
+ *
+ * FIXED, not per-run: a brand-new schema pays the full migration set and
+ * leaves an orphan behind (#2622), which blew the 60 s budget. So it cannot
+ * carry a pid or a timestamp.
+ *
+ * But a globally fixed name is not safe either (found by review). More than
+ * one agent session works this repo concurrently against the SAME local
+ * Postgres — `AGENTS.md` § *Cross-session agent coordination* — and the child
+ * is always worker 1, so every session would target `test_w1_guard2625` at
+ * once: two children migrating and fingerprinting one schema, and each
+ * session's cleanup dropping the column the other's child had just added.
+ * The victim sees no guard message and fails blaming the guard — the exact
+ * mis-attribution #2616 and #2625 exist to remove.
+ *
+ * Seeding from the checkout path gives both properties at once, because
+ * concurrent sessions are required to use separate worktrees.
+ */
+const SESSION_SUFFIX = `_guard2625_${createHash('sha256')
+  .update(PACKAGE_ROOT)
+  .digest('hex')
+  .slice(0, 8)}`
+
+/** The scratch column the child fixture leaks, named once. */
+const FIXTURE_COLUMN = '__scratch_2625_fixture_leak'
 
 describeDb('assertWorkerSchemaAtHead (#2625)', () => {
   beforeAll(async () => {
@@ -75,7 +109,7 @@ describeDb('assertWorkerSchemaAtHead (#2625)', () => {
       await db.query('ALTER TABLE agents ADD COLUMN __scratch_leak_2625 text')
       try {
         await expect(assertWorkerSchemaAtHead()).rejects.toThrow(
-          /different COLUMN or INDEX shape.*agents \(columns \+/s,
+          /different COLUMN or INDEX shape.*agents \(columns \+__scratch_leak_2625\)/s,
         )
       } finally {
         // Restore head so later tests/files on this worker are not poisoned
@@ -140,7 +174,7 @@ describeDb('fixture: a sibling afterAll throws with no explicit guard registrati
     // same reproduction could have left the column behind, and a plain ADD
     // COLUMN would then fail on a DIFFERENT error (duplicate_column) than the
     // one this fixture exists to cause.
-    await db.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS __scratch_2625_fixture_leak text')
+    await db.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS ${FIXTURE_COLUMN} text')
   })
 
   afterAll(() => {
@@ -158,15 +192,25 @@ describeDb('fixture: a sibling afterAll throws with no explicit guard registrati
  * this test can predict — and on the run that matters most it has no message
  * to read the name out of. Asking the catalog which schemas actually carry
  * the column needs neither prediction nor a successful assertion.
+ *
+ * SCOPED to this session's own schema family and to `agents`, not "every
+ * schema that has a column with this name" (found by review). The unscoped
+ * form would reach into a concurrent session's child schema and drop the
+ * drift that session's guard was about to read.
  */
-async function dropFixtureLeakEverywhere(): Promise<void> {
+async function dropFixtureLeak(): Promise<void> {
   const { rows } = await db.query<{ table_schema: string }>(
-    "SELECT table_schema FROM information_schema.columns WHERE column_name = '__scratch_2625_fixture_leak'",
+    `SELECT table_schema FROM information_schema.columns
+      WHERE column_name = $1 AND table_name = 'agents'`,
+    [FIXTURE_COLUMN],
   )
+  // Filtered here rather than in a `LIKE`: the suffix is full of underscores,
+  // every one of which is a LIKE wildcard, and getting that escaping subtly
+  // wrong would silently widen the drop back to every session's schema — the
+  // failure this scoping exists to prevent, reintroduced by the scoping.
   for (const { table_schema } of rows) {
-    await db.query(
-      `ALTER TABLE ${table_schema}.agents DROP COLUMN IF EXISTS __scratch_2625_fixture_leak`,
-    )
+    if (!table_schema.endsWith(SESSION_SUFFIX)) continue
+    await db.query(`ALTER TABLE ${table_schema}.agents DROP COLUMN IF EXISTS ${FIXTURE_COLUMN}`)
   }
 }
 
@@ -184,7 +228,7 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
       // the guard is correctly silent, and this test would fail claiming the
       // guard does not fire. That made the reproduction vacuous exactly once
       // it had succeeded. Cleaning first makes each run start from head.
-      await dropFixtureLeakEverywhere()
+      await dropFixtureLeak()
       let leakedSchema: string | null = null
       try {
         // The child MUST NOT drift a schema a parent worker is using
@@ -211,14 +255,14 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
             // DATABASE_URL — so the child died before collection and this
             // test failed on a missing guard message, blaming the guard for
             // a spawn defect.
-            cwd: path.resolve(__dirname, '..', '..', '..', '..', '..'),
+            cwd: PACKAGE_ROOT,
             encoding: 'utf-8',
-            // A FIXED suffix, not one per pid. Per-pid gave the child a brand
-            // new schema every run, so it paid a full migration set each time
-            // — slow enough to blow the 60 s budget — and left one orphaned
-            // schema behind per run, which is the accumulation #2622 is about.
-            // A fixed name is created once and reused.
-            env: { ...process.env, HAVEN_TEST_SCHEMA_SUFFIX: '_guard2625' },
+            // Fixed within this checkout, distinct between checkouts — see
+            // `SESSION_SUFFIX`, which carries the whole argument. Neither
+            // half is optional: per-run names blow the time budget and leak
+            // schemas, one global name collides with every concurrent agent
+            // session on this machine.
+            env: { ...process.env, HAVEN_TEST_SCHEMA_SUFFIX: SESSION_SUFFIX },
           },
         )
         const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
@@ -241,15 +285,30 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
         expect(attribution).not.toBeNull()
         leakedSchema = attribution?.[1] ?? null
         expect(output).toMatch(/different COLUMN or INDEX shape: agents \(columns \+__scratch/)
-        // And the child used ITS OWN schema, not the one THIS process is
-        // bound to — the whole point of the isolation suffix. Asserted
-        // against `WORKER_SCHEMA` rather than a name pattern: the pattern
-        // form was `/_guard2625_/`, with a trailing underscore that no
-        // schema name can ever have, so it could only fail. Comparing to the
-        // parent's actual schema states the property directly and cannot
-        // drift from how the name is spelled.
-        expect(leakedSchema).toBe(`${WORKER_SCHEMA}${'_guard2625'}`)
-        expect(leakedSchema).not.toBe(WORKER_SCHEMA)
+        // And the child used ITS OWN schema, not one a parent worker holds.
+        //
+        // This assertion has now been wrong twice, in opposite directions,
+        // and the second way is the instructive one. It was `/_guard2625_/`
+        // — a trailing underscore no schema name can have, so it could only
+        // FAIL. The fix compared against `` `${WORKER_SCHEMA}_guard2625` ``,
+        // which could only pass when this file happened to sort FIRST:
+        // `VITEST_WORKER_ID` is the file's ordinal in the run's spec list
+        // (vitest increments it once per `runFiles`, and `isolate: true`
+        // dispatches one call per file), so the spawned child — always a
+        // single-file run — is always worker 1, while the parent's id is
+        // whatever position this file landed in. Under the default cold-cache
+        // size ordering that is 53, and CI never has a warm cache. It passed
+        // locally only because vitest's sequencer runs previously-FAILED
+        // files first: one failure moved this file to position 1 and hid
+        // itself on every subsequent local run.
+        //
+        // So do not assert the child's id at all — it is not a property of
+        // isolation. Assert the two things that are: the child's schema
+        // carries the isolation suffix (the override actually took effect),
+        // and the parent's name family never does (so the two cannot collide,
+        // by construction, whatever ordinals either side draws).
+        expect(leakedSchema).toMatch(new RegExp(`^test_w\\d+${SESSION_SUFFIX}$`))
+        expect(WORKER_SCHEMA.endsWith(SESSION_SUFFIX)).toBe(false)
       } finally {
         fs.rmSync(fixturePath, { force: true })
         // The fixture's drift is never restored by the fixture (that is the
@@ -259,7 +318,7 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
         // the schema it had parsed out of the child's message, so the run that
         // needed cleaning most — the one where the guard did NOT report, and
         // there was no message to parse — was the one it skipped.
-        await dropFixtureLeakEverywhere()
+        await dropFixtureLeak()
       }
     },
     60_000,

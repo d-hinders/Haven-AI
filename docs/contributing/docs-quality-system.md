@@ -950,7 +950,7 @@ Two mechanisms, both live:
   the "Haven automerge rules" ruleset's required checks — without a paths
   filter (the #933 lesson).
 - **Weekly staleness audit.** `scripts/docs/audit-staleness.mjs` ranks every
-  covered, non-archived doc by commits touching its `covers:` paths since its
+  covered, non-archived, non-research doc by commits touching its `covers:` paths since its
   `last-verified` date. `docs-audit.yml` runs it Mondays 06:00 UTC and upserts
   the report into one tracking issue ("Docs staleness audit (weekly)") — a
   standing queue of which doc is most likely lying, never a spam of new

@@ -35,7 +35,7 @@ Mechanism and the guard's limits live in [`ai-agent-workflow.md` § Review Isola
 
 ```
 haven-doc-reviewer: docs in sync @ <sha> — no claims in diff
-  swept: numbers · versions/tags · env-var state · never/always/only · retired vocabulary · operator steps
+  swept: numbers · versions/tags · env-var state · never/always/only · defaults · paths · retired vocabulary · operator steps
 ```
 
 The `swept:` list is not decoration: it is the **positive control** step 3 already demands, stated as the thing that makes a zero readable. A verdict of "no claims" is only worth anything if a later reader can see which families were looked for and judge whether a claim of a seventh kind would have been caught. A bare "nothing found" is unfalsifiable and reads as more than it is.
@@ -89,6 +89,13 @@ node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{const fs=aw
 4. For each figure: command, result, matches/does not match.
 5. Verdict line: `haven-doc-reviewer: docs in sync @ <head>` or `haven-doc-reviewer: N doc update(s) needed @ <head>`, plus a `last-verified` recommendation per implicated doc (bump with passages named, or leave untouched and why).
 6. **Could not verify**, in your own words: suites not run (no `node_modules`), the **phrase families** the grep used — so a paraphrase using none of them is stated as unswept — files sampled rather than read, and the guard's caveats. A verdict without this list is unbounded and reads as more than it is.
+
+**The no-claims exit (§2b) replaces items 2–6, not item 5.** It is a self-contained
+return shape: the guard output, then the one verdict line, then the `swept:` families
+standing in for item 6's phrase-family list. It uses the same label and the same
+`@ <head>` binding as item 5 and the same `docs in sync` verdict string — it is the
+existing convention with a reason attached, not a second format. Everything above
+still applies the moment any of §2b's four carve-outs fires.
 
 This review is **advisory** in the current phase: it never blocks a merge. Be specific and conservative so it can be promoted to a gate later.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Docs staleness audit (Phase 4 of the docs-quality system, #646).
 //
-// For every non-archived doc with `covers:` front-matter, counts the commits
+// For every non-archived, non-research doc with `covers:` front-matter, counts the commits
 // that touched its covered paths SINCE the doc's `last-verified` date. A doc
 // with many covered-code commits and an old verification date is the one most
 // likely to be lying to its reader.

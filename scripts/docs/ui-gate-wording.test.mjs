@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url'
 import {
   RULES,
   blankFrontMatter,
+  blankFences,
   sentences,
   flatten,
   lineOf,
   flattenWithMap,
+  stripMarkupWithMap,
   scanText,
   countByFile,
   newViolations,
@@ -143,8 +145,75 @@ test('sentences terminate on trailing text with no final period', () => {
   assert.deepEqual(sentences('a. b').map((s) => flatten(s.text)), ['a.', 'b'])
 })
 
-test('sentences does not loop forever on consecutive periods', () => {
-  assert.deepEqual(sentences('...').length, 3)
+test('sentences terminates on consecutive periods — no loop, no zero-length segments', () => {
+  // Historical shape: the old regex splitter needed a lastIndex guard to
+  // survive zero-length matches. The index-walking scanner (#2671) cannot loop
+  // by construction; an ellipsis is ONE fragment, never three empty ones.
+  const segs = sentences('...')
+  assert.ok(segs.length >= 1 && segs.length <= 3)
+  for (const s of segs) assert.ok(s.text.trim().length > 0)
+})
+
+test('a URL dot does not end a sentence (#2671 defect 1)', () => {
+  // example.com's dot used to split the sentence, stranding the two required
+  // terms in different fragments — the retired phrase sailed through.
+  const segs = sentences('See https://example.com/docs for details. Next sentence.')
+  assert.deepEqual(segs.map((s) => flatten(s.text)), [
+    'See https://example.com/docs for details.',
+    'Next sentence.',
+  ])
+  const hits = scanText(
+    'doc.md',
+    'See [a rendered route](https://example.com/docs) for a shared primitive.',
+  )
+  assert.deepEqual(hits.map((h) => h.rule), ['retired-rendered-evidence-trigger'])
+})
+
+test('comparison prose in angle brackets is prose, not a tag (#2671 defect 2)', () => {
+  // `< shared primitive >` has no tag name; the old `<[^>]*>` blanked it whole
+  // and deleted the very word the guard looks for.
+  const { plain } = stripMarkupWithMap('a < shared primitive > b')
+  assert.equal(plain, 'a < shared primitive > b')
+  const hits = scanText('doc.md', 'a rendered route depends on < shared primitive > wiring today.')
+  assert.deepEqual(hits.map((h) => h.rule), ['retired-rendered-evidence-trigger'])
+})
+
+test('a real tag is still stripped, with its position mapped (#2671 defect 3)', () => {
+  const { plain, idx } = stripMarkupWithMap('a rendered <!-- x --> route or a shared primitive')
+  assert.equal(plain, 'a rendered route or a shared primitive')
+  // idx maps each surviving character back to its input index.
+  const at = plain.indexOf('route')
+  assert.equal('a rendered <!-- x --> route'.slice(idx[at], idx[at] + 5), 'route')
+})
+
+test('a violation is reported at the phrase, not at an earlier lookalike (#2671 defect 3)', () => {
+  // Markup between the terms defeats any adjacency match on the unstripped
+  // text; an unrelated earlier "rendered" used to steal the reported line.
+  const raw = `${FM}A rendered diagram was here.\n\nany diff touching a rendered <!-- x -->\nroute or a shared primitive needs evidence.\n`
+  const hits = scanText('doc.md', raw)
+  assert.equal(hits.length, 1)
+  const lineText = raw.split('\n')[hits[0].line - 1]
+  assert.match(lineText, /rendered <!-- x -->|route or a shared/)
+})
+
+test('fenced code blocks are citations, not prose (#2671 defect 4)', () => {
+  assert.deepEqual(scanText('doc.md', '```\na rendered route\n```\nfor a shared primitive.'), [])
+  // Line numbers stay true after blanking: a live violation AFTER a fence
+  // still reports its real line.
+  const raw = `${FM}\`\`\`\na rendered route\n\`\`\`\n\nThe retired form: any diff touching a rendered\nroute or a shared primitive.\n`
+  const hits = scanText('doc.md', raw)
+  assert.equal(hits.length, 1)
+  assert.match(raw.split('\n')[hits[0].line - 1], /rendered$/)
+})
+
+test('blankFences preserves byte offsets and newline counts', () => {
+  const raw = 'prose\n```js\nconst a = 1\n```\ntail\n'
+  const blanked = blankFences(raw)
+  assert.equal(blanked.length, raw.length)
+  assert.equal(blanked.split('\n').length, raw.split('\n').length)
+  assert.equal(blanked.split('\n')[2].trim(), '')
+  assert.equal(blanked.split('\n')[0], 'prose')
+  assert.equal(blanked.split('\n')[4], 'tail')
 })
 
 test('lineOf is 1-based', () => {

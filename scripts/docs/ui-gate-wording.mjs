@@ -180,45 +180,111 @@ export function blankFrontMatter(raw) {
 }
 
 /**
- * Segment text into sentences: a maximal run of non-period characters followed
- * by a period, plus any trailing remainder. `[^.]` matches newlines, so a
- * sentence spans however many lines it is wrapped over — this is the whole
- * point of the check and is why nothing here works line by line.
+ * Segment text into sentences. A sentence ends at a period that is followed by
+ * whitespace or end-of-input — NOT at every bare period (#2671). Splitting on
+ * bare periods fragmented sentences at URL dots (`example.com/docs` split into
+ * two "sentences", each holding half of a retired phrase, so neither matched);
+ * a period glued to following text is a dot inside a URL, a filename, a
+ * version number or an ellipsis, none of which end a sentence. A period
+ * followed by a space or newline can still split mid-thought on an
+ * abbreviation ("e.g. "), which over-segments rather than under-segments: the
+ * cost is a rarer match, never a false one. `[^.]`-style spanning is kept:
+ * a sentence still covers however many lines it is wrapped over.
  *
  * Returns `{ text, index }` so a match can be located in the original file.
  */
 export function sentences(text) {
   const out = []
-  const re = /[^.]*\.|[^.]+$/g
-  let m
-  while ((m = re.exec(text)) !== null) {
-    if (m[0].length === 0) {
-      re.lastIndex++
-      continue
-    }
-    if (m[0].trim().length > 0) out.push({ text: m[0], index: m.index })
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '.') continue
+    const boundary = i + 1 >= text.length || /\s/.test(text[i + 1])
+    if (!boundary) continue
+    const chunk = text.slice(start, i + 1)
+    if (chunk.trim().length > 0) out.push({ text: chunk, index: start })
+    start = i + 1
   }
+  const tail = text.slice(start)
+  if (tail.trim().length > 0) out.push({ text: tail, index: start })
   return out
 }
 
 /**
  * Remove inline markup so a rule can talk about WORDS rather than about the
- * characters that happen to sit between them.
+ * characters that happen to sit between them — AND report where each surviving
+ * character came from (#2671).
  *
- * HTML comments and tags go first (they can contain letters, so no character
- * class can step over them), then emphasis, code-span backticks and link
- * brackets. Clause punctuation — commas, semicolons, dashes — is deliberately
- * KEPT: it is what separates `the rendered, route opens differently` from the
- * retired phrase, and a strip that removed it would turn that sentence into a
- * false positive. Whitespace is collapsed last so a hard wrap reads as a space.
+ * HTML comments go first, then tags. A TAG is `<` + optional `!`/`/` + a
+ * letter or digit + anything up to `>`: the old `<[^>]*>` also blanked
+ * comparison prose like `< shared primitive >`, deleting one of the very words
+ * the guard exists to find and hiding the deletion from the report. Emphasis,
+ * code-span backticks and link brackets are deleted outright; a comment or tag
+ * span becomes ONE space (so `a<!--x-->b` stays two words). Clause punctuation
+ * — commas, semicolons, dashes — is deliberately KEPT: it is what separates
+ * `the rendered, route opens differently` from the retired phrase.
+ *
+ * `idx[j]` is the index within the INPUT of `plain[j]`, which is what lets a
+ * match found on the stripped text be reported at a true source position.
  */
+export function stripMarkupWithMap(s) {
+  const chars = []
+  const idx = []
+  let i = 0
+  const lastIsWs = () => chars.length > 0 && /\s/.test(chars[chars.length - 1])
+  while (i < s.length) {
+    const rest = s.slice(i)
+    const comment = /^<!--[\s\S]*?-->/.exec(rest)
+    const tag = /^<[/!]?[A-Za-z0-9][^>]*>/.exec(rest)
+    if (comment || tag) {
+      const span = comment || tag
+      if (!lastIsWs()) {
+        chars.push(' ')
+        idx.push(i)
+      }
+      i += span[0].length
+      continue
+    }
+    const ch = s[i]
+    if (/[*_`~[\]]/.test(ch)) {
+      i++
+      continue
+    }
+    if (/\s/.test(ch)) {
+      if (!lastIsWs()) {
+        chars.push(' ')
+        idx.push(i)
+      }
+      i++
+      continue
+    }
+    chars.push(ch)
+    idx.push(i)
+    i++
+  }
+  let a = 0
+  let b = chars.length
+  while (a < b && /\s/.test(chars[a])) a++
+  while (b > a && /\s/.test(chars[b - 1])) b--
+  return { plain: chars.slice(a, b).join(''), idx: idx.slice(a, b) }
+}
+
+/** `stripMarkupWithMap(...).plain` — one implementation, no drift. */
 export function stripMarkup(s) {
-  return s
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/[*_`~\[\]]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return stripMarkupWithMap(s).plain
+}
+
+/**
+ * Blank fenced code blocks newline-for-newline (#2671): every non-newline
+ * character becomes a space, so line numbers and offsets stay true to the real
+ * file. Illustrative "before" text inside a fence is a citation of the retired
+ * form, not live prose — the same distinction front-matter already gets. The
+ * block's fence lines themselves are blanked too; a fence line carries no
+ * rule-bearing words, so nothing is lost.
+ */
+export function blankFences(raw) {
+  return raw.replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[^\n]*$/gm, (block) =>
+    block.replace(/[^\n]/g, ' '),
+  )
 }
 
 /** Collapse every whitespace run — including hard wraps — to one space. */
@@ -271,20 +337,20 @@ export function lineOf(text, index) {
  * `{ file, rule, line, sentence }[]`
  */
 export function scanText(file, raw) {
-  const body = blankFrontMatter(raw)
+  const body = blankFences(blankFrontMatter(raw))
   const hits = []
   // The citation escape is LINE-scoped: the marker excuses the line it sits on
   // and the line either side of it.
   //
   // Paragraph scope was tried first and cannot work here, for a reason worth
-  // recording. `sentences()` splits on full stops, and a marker line has no
-  // full stop — so the "sentence" beginning at the marker runs straight
+  // recording. `sentences()` splits on sentence-ending periods, and a marker
+  // line has none — so the "sentence" beginning at the marker ran straight
   // through the blank line into the next paragraph, and a marker anywhere
   // above a violation excused it. The failure was invisible until a test put
   // the marker in a DIFFERENT paragraph and expected the hit to survive.
   //
   // Lines are what an author can see. Same line, the line before, or the line
-  // after — and nothing further.
+  // after — enough for a hard wrap, and no further.
   const allowedLines = new Set()
   body.split('\n').forEach((line, i) => {
     if (!ALLOW_MARKER.test(line)) return
@@ -296,28 +362,33 @@ export function scanText(file, raw) {
     if (flat.length === 0) continue
     if (CHAIN_QUOTE.some((re) => re.test(flat))) continue
     for (const rule of RULES) {
-      // Rules match the MARKUP-STRIPPED sentence; the position is then taken
-      // from the flattened one so the reported line stays true.
-      const plain = stripMarkup(flat)
+      // Rules match the MARKUP-STRIPPED sentence, and the reported position is
+      // mapped from THAT SAME text (#2671). The previous code searched the
+      // UNstripped `flat` for the rule's terms and fell back to a bare
+      // first-word search on miss: stripped-away markup shifted every index,
+      // an earlier unrelated word stole the report (a violation on line 10 was
+      // reported on line 8), and the fallback's last resort landed on offset
+      // 0 — the sentence start, lines above the phrase.
+      const { plain, idx } = stripMarkupWithMap(flat)
       if (rule.requires.some((re) => !re.test(plain))) continue
       if (rule.excludes.some((re) => re.test(plain))) continue
-      const at = rule.requires.map((re) => {
-        const i = flat.search(re)
-        return i < 0 ? flat.search(new RegExp(re.source.split(/\\b|\[/)[1] ?? 'a', 'i')) : i
-      })
-      // Report the FIRST required term, not the sentence start: the sentence
-      // may open several hard-wrapped lines above the phrase.
-      const offset = map[Math.min(...at)] ?? 0
+      // Every required term is known to match `plain` (checked above); report
+      // the FIRST one, not the sentence start — the sentence may open several
+      // hard-wrapped lines above the phrase.
+      const at = Math.min(
+        ...rule.requires.map((re) => {
+          const m = re.exec(plain)
+          return m ? m.index : plain.length
+        }),
+      )
+      const offset = map[idx[at]] ?? map[0] ?? 0
       const line = lineOf(body, s.index + offset)
       // The citation escape is anchored to the line the VIOLATING PHRASE is
-      // on, not to where its sentence starts. Two earlier anchors were wrong
-      // for the same underlying reason and are recorded so the third is not
-      // tried again: `sentences()` splits on full stops, and a marker line has
-      // none — so the sentence containing a violation BEGINS at the marker
-      // whenever one sits above it. Anchoring on the sentence (or on its
-      // paragraph) therefore excused violations several paragraphs away, which
-      // is precisely what the escape must not do. The phrase's own line is the
-      // only anchor that means what an author reading the file would expect.
+      // on, not to where its sentence starts. (History: two earlier anchors —
+      // the sentence and its paragraph — excused violations several paragraphs
+      // away, which is precisely what the escape must not do. The phrase's own
+      // line is the only anchor that means what an author reading the file
+      // would expect.)
       if (allowedLines.has(line - 1)) continue
       hits.push({
         file,

@@ -2088,11 +2088,65 @@ test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag i
 // packages on an ordinary click. These pin the registry-side check that closes
 // it — and, deliberately, the two cases where refusing would be WORSE than
 // allowing.
-test('#2647: a backwards latest move is refused', async () => {
-  const { backwardsLatestMove, resolveSemver } = await import('./release-version-order.mjs')
-  const semver = await resolveSemver(ROOT)
+//
+// The comparator is INJECTED, not resolved. `backwardsLatestMove` takes semver
+// as a parameter for exactly this reason, and this suite runs in the
+// dependency-free *Release-bump lockfile self-test* job — a first version of
+// these tests called `resolveSemver()` and died on
+// `ERR_MODULE_NOT_FOUND: node_modules/semver/index.js` in CI while passing
+// locally. The module's own docstring warns that this job is dependency-free;
+// I read past it. The stub below implements only what the function calls, and
+// says so, so a reader does not mistake it for semver.
+const SEMVER_STUB = {
+  valid: (v) => (/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v) ? v : null),
+  // Enough for the release line these packages actually use
+  // (`0.1.34-alpha.0` < `0.1.35-alpha.0`): numeric compare on major/minor/patch,
+  // then on the prerelease's trailing number. NOT a semver implementation.
+  lt: (a, b) => {
+    const parse = (v) => {
+      const [core, pre = ''] = v.split('-')
+      const nums = core.split('.').map(Number)
+      const preNum = Number((pre.match(/(\d+)$/) || [])[1] ?? -1)
+      return [...nums, pre ? 0 : 1, preNum]
+    }
+    const [x, y] = [parse(a), parse(b)]
+    for (let i = 0; i < Math.max(x.length, y.length); i += 1) {
+      const d = (x[i] ?? 0) - (y[i] ?? 0)
+      if (d !== 0) return d < 0
+    }
+    return false
+  },
+}
 
-  const why = backwardsLatestMove('0.1.35-alpha.0', '0.1.34-alpha.0', semver)
+test('#2647: the stub orders the release line the way semver does', async () => {
+  // A stub asserted against nothing is a second implementation nobody checked.
+  // When the real comparator IS available, prove they agree on the cases these
+  // tests rely on; when it is not (the dependency-free job), say so and skip.
+  let semver
+  try {
+    const mod = await import('./release-version-order.mjs')
+    semver = await mod.resolveSemver(ROOT)
+  } catch {
+    return // dependency-free job: nothing to compare against, by design
+  }
+  for (const [a, b] of [
+    ['0.1.34-alpha.0', '0.1.35-alpha.0'],
+    ['0.1.35-alpha.0', '0.1.35-alpha.1'],
+    ['0.1.35-alpha.0', '0.1.35'],
+    ['0.1.35', '0.2.0'],
+  ]) {
+    assert.equal(SEMVER_STUB.lt(a, b), semver.lt(a, b), `lt(${a}, ${b})`)
+    assert.equal(SEMVER_STUB.lt(b, a), semver.lt(b, a), `lt(${b}, ${a})`)
+  }
+  for (const v of ['0.1.35-alpha.0', '0.1.35', 'unknown', 'not-a-version']) {
+    assert.equal(Boolean(SEMVER_STUB.valid(v)), Boolean(semver.valid(v)), `valid(${v})`)
+  }
+})
+
+test('#2647: a backwards latest move is refused', async () => {
+  const { backwardsLatestMove } = await import('./release-version-order.mjs')
+
+  const why = backwardsLatestMove('0.1.35-alpha.0', '0.1.34-alpha.0', SEMVER_STUB)
   assert.ok(why, 'a superseded re-run must not drag latest down')
   assert.match(why, /BACKWARDS/)
   assert.match(why, /0\.1\.35-alpha\.0/)
@@ -2100,24 +2154,22 @@ test('#2647: a backwards latest move is refused', async () => {
 })
 
 test('#2647: forward and no-op moves are allowed', async () => {
-  const { backwardsLatestMove, resolveSemver } = await import('./release-version-order.mjs')
-  const semver = await resolveSemver(ROOT)
+  const { backwardsLatestMove } = await import('./release-version-order.mjs')
 
-  assert.equal(backwardsLatestMove('0.1.34-alpha.0', '0.1.35-alpha.0', semver), null)
+  assert.equal(backwardsLatestMove('0.1.34-alpha.0', '0.1.35-alpha.0', SEMVER_STUB), null)
   // Re-promoting the version latest already points at is the healthy re-run.
-  assert.equal(backwardsLatestMove('0.1.35-alpha.0', '0.1.35-alpha.0', semver), null)
+  assert.equal(backwardsLatestMove('0.1.35-alpha.0', '0.1.35-alpha.0', SEMVER_STUB), null)
 })
 
 test('#2647: an unreadable registry is NOT a violation — a blip must not stick a tag', async () => {
-  const { backwardsLatestMove, resolveSemver } = await import('./release-version-order.mjs')
-  const semver = await resolveSemver(ROOT)
+  const { backwardsLatestMove } = await import('./release-version-order.mjs')
 
   // `npm view` failure is reported as the literal `unknown` by the workflow.
-  assert.equal(backwardsLatestMove('unknown', '0.1.35-alpha.0', semver), null)
-  assert.equal(backwardsLatestMove('', '0.1.35-alpha.0', semver), null)
+  assert.equal(backwardsLatestMove('unknown', '0.1.35-alpha.0', SEMVER_STUB), null)
+  assert.equal(backwardsLatestMove('', '0.1.35-alpha.0', SEMVER_STUB), null)
   // A package with no latest yet, and an unparseable tag, both pass through.
-  assert.equal(backwardsLatestMove(undefined, '0.1.35-alpha.0', semver), null)
-  assert.equal(backwardsLatestMove('not-a-version', '0.1.35-alpha.0', semver), null)
+  assert.equal(backwardsLatestMove(undefined, '0.1.35-alpha.0', SEMVER_STUB), null)
+  assert.equal(backwardsLatestMove('not-a-version', '0.1.35-alpha.0', SEMVER_STUB), null)
 })
 
 test('#2647: the workflow actually CALLS the check on the tag path', async () => {
@@ -2134,8 +2186,6 @@ test('#2647: the workflow actually CALLS the check on the tag path', async () =>
   // comment explains the E401 by naming `npm dist-tag add` in prose, 2000
   // characters before the real invocation — matching that made this
   // assertion compare against commentary and fail against correct code.
-  // Third time in this change that a text match found prose instead of the
-  // thing it names; the anchor is the executed line and nothing else.
   const command = 'NPM_CONFIG_USERCONFIG="$pl_userconfig" npm dist-tag add'
   assert.ok(fn.includes(command), 'the tag move must run under the scoped userconfig')
   assert.ok(

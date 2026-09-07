@@ -251,15 +251,12 @@ fail without aborting the others, so a summary glance is not enough.
 
 **And read the SECOND job.** Since
 [#2647](https://github.com/d-hinders/Haven-AI/issues/2647) the `latest` move is
-`promote-tags`, not a step of the publish: npm Trusted Publishing authorises
-`npm publish` and nothing else, so the tag move needs its own credential and its
-own `main`-only job. A promotion can therefore be **half green** — every package
-live under `alpha`, `latest` unmoved — which is exactly what the 0.1.35-alpha.0
-release did before the split, failing all five tag moves with E401. If
-`promote-tags` is red: the versions ARE published, so the remedy is to repair
-the credential and re-run that one job, **never** to cut another version. The
-usual cause is its npm token, which expires 2026-12-06 (npm caps write-enabled
-granular tokens at 90 days).
+its own `main`-only job, `promote-tags`, so a promotion can be **half green** —
+every package live under `alpha`, `latest` unmoved. If it is red: the versions
+ARE published, so the remedy is to re-run that one job, **never** to cut another
+version. The job names its own likely cause in its error output; the mechanism
+and why it had to be a separate job are in `.github/workflows/publish.yml`'s
+header comment, which is where they stay current.
 
 Report what published, and name anything that did not.
 

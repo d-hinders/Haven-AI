@@ -29,6 +29,26 @@ Mechanism and the guard's limits live in [`ai-agent-workflow.md` § Review Isola
 4. Then take the coupling gate's list as the **floor**: `npm run docs:coupling` (strict, CI-equivalent; reads uncommitted work) or `node scripts/docs/coupling-gate.mjs --changed=<files>`. A ⚠️ `contract: true` finding is blocking; the rest are advisory. Read every implicated doc. The eight governed `packages/**` READMEs carry no front-matter — their `covers:` rows live in `scripts/docs/package-docs.mjs` (#2088); every other `packages/**/*.md` is in that manifest's exempt map by decision, so do not file it as missing front-matter. Mapping rules: [`docs-quality-system.md`](../../../../docs/contributing/docs-quality-system.md).
 5. For each implicated doc and each sweep hit, check the claim against the changed code: **now-wrong** (behaviour, value, path, default, flow step the diff changed), **now-required** (a capability, endpoint, env var or state the doc should mention), **broken-ref** (a file or symbol renamed or removed). Also sanity-check the gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) when the diff touches a surface they summarise.
 
+### 2b. The no-claims exit (#2638)
+
+**When step 1's sweep of `+` lines finds no claim at all, stop there and return one line.** Not a short pass — an *exit*:
+
+```
+haven-doc-reviewer: docs in sync @ <sha> — no claims in diff
+  swept: numbers · versions/tags · env-var state · never/always/only · retired vocabulary · operator steps
+```
+
+The `swept:` list is not decoration: it is the **positive control** step 3 already demands, stated as the thing that makes a zero readable. A verdict of "no claims" is only worth anything if a later reader can see which families were looked for and judge whether a claim of a seventh kind would have been caught. A bare "nothing found" is unfalsifiable and reads as more than it is.
+
+**This exit is unavailable — run the full pass — when any of these hold**, whatever the `+` lines look like:
+
+- the diff **removes or renames** anything (a deletion states no claim but invalidates every doc that named the thing; the retired-vocabulary sweep is the whole point);
+- it edits a **`contract: true`** doc;
+- it states a **figure** of any kind — a count, a version, a duration, a threshold;
+- the coupling gate reported a **contract-doc finding**, which blocks regardless.
+
+The exit exists because the default was costing a full claim-sweep on diffs with nothing to sweep — a formatting-only change, a test-only addition, a pure rename inside one file — and a pass that always reports "nothing" trains its reader to skip it. What it does **not** do is make the pass optional: deciding the exit applies IS the pass, and the four carve-outs above are where the misses actually live.
+
 ## 3. Contract docs: derive `covers:` from the body (#2425)
 
 Start from what the gate already derived: since PR #2478 `npm run docs:coupling` prints `[doc-to-code]` lines naming the covered code a changed doc's claims should be re-checked against — re-derive only what the gate missed. For any new or edited `contract: true` doc, walk its body and for each behavioural claim name the file that makes it true. The `covers:` list must contain that file. Report **derived vs declared** as two lists with the difference — #2425 was born with 5 entries while its body depended on 12, and a change to any of the other seven would never have re-implicated the doc.

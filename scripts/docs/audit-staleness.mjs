@@ -66,7 +66,11 @@ async function main() {
     const parsed = parseFrontMatter(await readFile(join(REPO_ROOT, rel), 'utf8'))
     if (!parsed.ok) continue
     const { status, covers, 'last-verified': lastVerified } = parsed.data
-    if (status === 'archived' || !covers?.length || !lastVerified) continue
+    // #2638: `research` leaves the audited set alongside `archived`, matching
+    // the coupling gate's isGoverned(). A spike or pilot report is a dated
+    // record of what was true when it ran; ranking it as stale asks for a
+    // re-verification that would destroy what makes it useful.
+    if (status === 'archived' || status === 'research' || !covers?.length || !lastVerified) continue
     const commits = commitsSince(covers, lastVerified)
     if (commits.length === 0) continue
     findings.push({
@@ -84,7 +88,7 @@ async function main() {
   // verification — and excluding them is what let a package README describe
   // three impossible QA legs for weeks (#1992).
   for (const entry of GOVERNED_PACKAGE_DOCS) {
-    if (entry.status === 'archived') continue
+    if (entry.status === 'archived' || entry.status === 'research') continue
     const lastVerified = entry['last-verified']
     if (!entry.covers?.length || !lastVerified) continue
     const commits = commitsSince(entry.covers, lastVerified)

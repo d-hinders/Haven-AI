@@ -266,8 +266,39 @@ export function isIncidentalPath(file) {
 export function reverseImplications(changed, docs) {
   const changedSet = new Set(changed)
   return docs
-    .filter(({ doc, covers }) => changedSet.has(doc) && covers?.length > 0)
+    .filter(({ doc, covers, status }) => isGoverned(status) && changedSet.has(doc) && covers?.length > 0)
     .map(({ doc, covers }) => ({ doc, covered: [...covers], direction: 'doc-to-code' }))
+}
+
+/**
+ * #2638: only `current` docs are governed by this gate.
+ *
+ * A doc's `status` is one of `current | research | archived`
+ * (`validate-frontmatter.mjs`). The other two cannot be stale in the sense this
+ * gate measures, and they mean different things:
+ *
+ * - **`archived`** — superseded. It describes how something USED to work, so
+ *   "the code moved on" is its condition, not its defect. `audit-staleness.mjs`
+ *   has skipped archived since it was written; this aligns the two.
+ * - **`research`** — a spike, a pilot report, a position paper. It is a dated
+ *   record of what was true when the investigation ran. Re-verifying it against
+ *   today's code would destroy the thing that makes it useful.
+ *
+ * Measured on the tree at the time this landed, the two halves are NOT
+ * symmetric, and the honest version is worth keeping: **no `archived` doc
+ * declares `covers:` at all**, so that half changes nothing today and exists so
+ * a future archived doc that keeps its `covers:` does not start firing. The
+ * work is in the **research** half — nine research docs declare 30 `covers:`
+ * globs between them, and every one of them was a potential finding on a diff
+ * that touched the covered code.
+ *
+ * A doc with no `status` is treated as governed. That is deliberate: the
+ * validator requires the field, so a missing one is a broken doc rather than an
+ * exemption, and failing open here would let a front-matter error silently
+ * remove a doc from the gate.
+ */
+export function isGoverned(status) {
+  return status !== 'archived' && status !== 'research'
 }
 
 /**
@@ -330,7 +361,8 @@ export function reverseImplications(changed, docs) {
 export function implicatedDocs(changed, docs, { strict = false, added = null } = {}) {
   const changedSet = new Set(changed)
   const findings = []
-  for (const { doc, covers, lastVerified, contract, satisfiedBy } of docs) {
+  for (const { doc, covers, lastVerified, contract, satisfiedBy, status } of docs) {
+    if (!isGoverned(status)) continue
     if (changedSet.has(doc)) continue
     // Per-iteration: a `var` here would leak the previous doc's near-miss into
     // this one's finding.
@@ -511,6 +543,8 @@ async function main() {
       contract: parsed.data.contract === 'true',
       // #1366: alternative satisfaction paths (changelog shards).
       satisfiedBy: parsed.data['satisfied-by'] || [],
+      // #2638: `archived` / `research` docs leave the governed set — see isGoverned().
+      status: parsed.data.status,
     })
   }
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { run, COMMANDS, DEFAULT_API, type RunDeps } from './commands.js'
+import { readFileSync } from 'node:fs'
+import { run, COMMANDS, DEFAULT_API, HASH_DISCOVERY_HINT, type RunDeps } from './commands.js'
 import { helpText } from './args.js'
 import type { Session, SessionStore } from './session.js'
 import { CliApiError, type CliApi } from './api.js'
@@ -431,6 +432,50 @@ describe('read commands', () => {
     expect(await run(['budget', 'show', 'a1'], deps)).toBe(0)
     expect(out.join('\n')).toContain('USDC')
     expect(out.join('\n')).toContain('daily')
+  })
+
+  // #2612: `budget revoke` takes a delegation hash, and until this flag existed
+  // NO haven command printed one — while the README and the revoke usage error
+  // both said `haven agents show` did. These three tests bind the instruction
+  // to the output: the named command must exist, must print a hash, and must
+  // be the same literal the README and the error message point at. Any one of
+  // them drifting reddens the pair.
+  it('budget show --hashes prints the delegation hashes budget revoke takes', async () => {
+    const delegations = [
+      { delegation_hash: `0x${'ab'.repeat(32)}`, version: 2, status: 'active' },
+      { delegation_hash: `0x${'cd'.repeat(32)}`, version: 1, status: 'replaced' },
+    ]
+    const api = fakeApi({ 'GET /agents/a1/delegations': { delegations } })
+    const { deps, out } = harness({ makeApi: () => api })
+
+    expect(await run(['budget', 'show', 'a1', '--hashes'], deps)).toBe(0)
+    const text = out.join('\n')
+    expect(text).toContain(`0x${'ab'.repeat(32)}`)
+    expect(text).toContain('active')
+    // It reads the delegations route, NOT the allowances projection — that
+    // response carries no hash field at all, which was the whole defect.
+    expect(api.calls).toEqual(['GET /agents/a1/delegations'])
+  })
+
+  it('leaves budget show --json as the allowances array it has always been', async () => {
+    const agent = { id: 'a1', name: 'Research', status: 'active', allowances: [{ token_symbol: 'USDC', allowance_amount: '50', reset_period_min: 1440 }] }
+    const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /agents/a1': agent }) })
+    await run(['budget', 'show', 'a1', '--json'], deps)
+    // A bare array since the first CLI scaffold. --hashes is a flag precisely
+    // so this shape does not become a union.
+    expect(Array.isArray(JSON.parse(out.join('\n')))).toBe(true)
+  })
+
+  it('points the revoke error and the README at a command that actually prints a hash', async () => {
+    const { deps, err } = harness({ makeApi: () => fakeApi({}) })
+    await run(['budget', 'revoke', 'a1', 'not-a-hash'], deps)
+    expect(err.join('\n')).toContain(HASH_DISCOVERY_HINT)
+
+    // The other end of the same claim: the README says it too, verbatim. A
+    // rename that updates one and not the other reddens here rather than
+    // stranding a user on a command that does not exist.
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+    expect(readme).toContain(HASH_DISCOVERY_HINT)
   })
 
   it('applies the client-side direction filter to activity', async () => {

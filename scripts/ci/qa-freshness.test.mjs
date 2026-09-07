@@ -12,7 +12,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs, greenRunQueryArgs, selectDiffBase, isVersionOnlyDiff, partitionVersionOnly, selectGreenRun, moneyFlowJobConclusion, EVIDENCE_EVENTS, MONEY_FLOW_JOB, GREEN_RUN_WINDOW } from './qa-freshness.mjs'
+import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs, greenRunQueryArgs, jobsQueryArgs, selectDiffBase, isVersionOnlyDiff, partitionVersionOnly, selectGreenRun, moneyFlowJobConclusion, EVIDENCE_EVENTS, MONEY_FLOW_JOB, GREEN_RUN_WINDOW } from './qa-freshness.mjs'
 
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-07-27T12:00:00Z')
@@ -284,6 +284,16 @@ describe('wiring — run-list filters (#1047, re-pinned by #2404)', () => {
     for (const field of ['headSha', 'createdAt', 'databaseId', 'event', 'headBranch']) {
       assert.match(arg('--json'), new RegExp(`(^|,)${field}(,|$)`), `--json must project ${field}`)
     }
+  })
+})
+
+describe('jobs query (#2642)', () => {
+  test('uses explicit GET when the per-page field would otherwise make gh api POST', () => {
+    const args = jobsQueryArgs('d-hinders/Haven-AI', 34111875451)
+    assert.equal(args[0], 'api')
+    assert.equal(args[1], 'repos/d-hinders/Haven-AI/actions/runs/34111875451/jobs')
+    assert.equal(args[args.indexOf('--method') + 1], 'GET')
+    assert.equal(args[args.indexOf('-F') + 1], 'per_page=100')
   })
 })
 

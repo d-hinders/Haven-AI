@@ -3,15 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ConnectAgentModal from '../ConnectAgentModal'
 
 const mockUseAgentConnectionSetup = vi.fn()
-const mockUseRetiredRailOwnerAccess = vi.fn()
 
 vi.mock('@/hooks/useAgentConnectionSetup', () => ({
   useAgentConnectionSetup: (...args: unknown[]) => mockUseAgentConnectionSetup(...args),
 }))
-
-vi.mock('@/hooks/useRetiredRailOwnerAccess', () => ({
-  useRetiredRailOwnerAccess: (...args: unknown[]) => mockUseRetiredRailOwnerAccess(...args),
-}))
+// The `useRetiredRailOwnerAccess` mock lived here; removed by #2673 with the
+// hook itself (#2413 deleted it) — it mocked a module that no longer exists,
+// so it propped nothing up (no assertion reads it, and no production import
+// can resolve it).
 
 vi.mock('@/components/connect-agent/DetailsStep', () => ({
   DetailsStep: () => <div>Agent details</div>,
@@ -47,7 +46,6 @@ function flow(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   mockUseAgentConnectionSetup.mockReturnValue(flow())
-  mockUseRetiredRailOwnerAccess.mockReturnValue({ ownerAccess: 'unknown' })
 })
 
 describe('ConnectAgentModal', () => {

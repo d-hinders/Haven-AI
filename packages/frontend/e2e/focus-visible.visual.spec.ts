@@ -67,9 +67,10 @@
  * Safe and the row was Edit · Pause · **Revoke** — the AllowanceModule teardown,
  * on a rail that answers HTTP 410 in production (#1986). The default is now the
  * live delegation rail, where the row is Edit · Pause · **Remove** (#1402).
- * `Revoke` keeps its capture, seeded with an explicit legacy opt-down below,
- * because it is still what a legacy account renders; what it no longer is, is
- * what an ordinary user sees.
+ * `Revoke` keeps its capture, seeded with an explicit legacy opt-down below;
+ * since #2413 no account in the dashboard renders that row any more (the
+ * account list is delegation-only), so the capture is fixture-only evidence
+ * of a retired rail's render, kept for the ring-geometry inventory.
  *
  * So this was never a scoping choice: reaching the other five is FIXTURE work,
  * not capture work. #1873 does it, and the eleven are now eleven.

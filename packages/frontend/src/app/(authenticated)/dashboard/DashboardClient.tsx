@@ -104,8 +104,6 @@ function buildSpendSummary(agent: DashboardAgentPreview): string {
 function ConnectedAgentsSection({
   agents,
   hasAnyAgents,
-  hasAccounts,
-  canConnectAgents,
   loading,
   unavailable,
   onRetry,
@@ -113,8 +111,6 @@ function ConnectedAgentsSection({
 }: {
   agents: DashboardAgentPreview[]
   hasAnyAgents: boolean
-  hasAccounts: boolean
-  canConnectAgents: boolean
   loading: boolean
   unavailable: boolean
   onRetry: () => void
@@ -159,32 +155,18 @@ function ConnectedAgentsSection({
             size="compact"
             title={hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
             body={
-              !hasAccounts
-                ? 'Create a Haven account before connecting agents.'
-                : !canConnectAgents
-                ? 'Agent connections are retired for older Safe accounts. Existing agents remain readable.'
-                : hasAnyAgents
+              hasAnyAgents
                 ? 'Reconnect or create an agent to bring automated spending back online.'
                 : 'Create your first agent to give it payment credentials and spend limits.'
             }
             action={
               <div className="flex items-center justify-center gap-3">
-                {hasAccounts ? (
-                  <>
-                    {canConnectAgents ? (
-                      <Button onClick={onConnectAgent} size="sm">
-                        Connect agent
-                      </Button>
-                    ) : null}
-                    <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                      Go to Agents
-                    </Link>
-                  </>
-                ) : (
-                  <Link href="/accounts" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
-                    Go to Accounts
-                  </Link>
-                )}
+                <Button onClick={onConnectAgent} size="sm">
+                  Connect agent
+                </Button>
+                <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
+                  Go to Agents
+                </Link>
               </div>
             }
           />
@@ -1009,8 +991,6 @@ export default function DashboardClient() {
       <ConnectedAgentsSection
         agents={overview?.agents ?? []}
         hasAnyAgents={agents.length > 0}
-        hasAccounts={safes.length > 0}
-        canConnectAgents={hasDelegationAccounts}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
@@ -1048,7 +1028,6 @@ export default function DashboardClient() {
             hasFunds={hasFunds}
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
-            canConnectAgents={hasDelegationAccounts}
             funding={safeFunding}
             onReceiveFunds={openReceiveForDefaultSafe}
             onAddAgent={openConnectAgent}

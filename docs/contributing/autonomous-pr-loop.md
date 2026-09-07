@@ -182,7 +182,9 @@ PR go through before handing it the whole queue.
   **`should-fix`** UX, copy, or design-system finding, the loop **pauses** even if
   CI is green. A **`nit`** does not pause since [#2636](https://github.com/d-hinders/Haven-AI/issues/2636)
   — it is fixed in place when it is a one-line change, or filed as a follow-up with
-  its screenshot; the severity table and the reasoning are in that playbook, not here. Clearing that pause is the reviewer's call, not the user's (#1968) —
+  its screenshot; the severity table and the reasoning are in that playbook, not here.
+
+  Clearing that pause is the reviewer's call, not the user's (#1968) —
   fix, re-capture the screenshots, re-run the pass that raised it, and a clean
   re-review re-arms auto-merge unattended. It escalates to the user only when
   the re-review raises a NEW finding, when the finding is deferred or disputed

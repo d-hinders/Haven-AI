@@ -239,6 +239,19 @@ jobs:
           npm run lint:db-mocks
           npm run lint:db-mocks:test
 
+      - name: Retired-rail prose ratchet (#2685)
+        # Blocking, shrink-only baseline over the retired-rail prose phrase
+        # family ("remain(s) readable", "both rails", "import-only", ...)
+        # across packages/**. Three manual sweeps (#2669, #2673, #2687) each
+        # found sites the previous grep was not pointed at; this makes the
+        # family shrink-only. Every baselined occurrence carries a
+        # justification in packages/retired-rail-prose-justifications.json,
+        # enforced in lockstep by the self-test. Self-tested for the same
+        # reason as lint:deps above.
+        run: |
+          npm run lint:retired-rail-prose
+          npm run lint:retired-rail-prose:test
+
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the
         # curated money-path queries so column/type drift fails here instead of

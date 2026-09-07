@@ -153,10 +153,17 @@ function ConnectedAgentsSection({
         <div className="p-6">
           <EmptyState
             size="compact"
-            title="No agents connected yet"
-            body="Create your first agent to give it payment credentials and spend limits."
+            title={hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
+            body={
+              hasAnyAgents
+                ? 'Reconnect or create an agent to bring automated spending back online.'
+                : 'Create your first agent to give it payment credentials and spend limits.'
+            }
             action={
               <div className="flex items-center justify-center gap-3">
+                <Button onClick={onConnectAgent} size="sm">
+                  Connect agent
+                </Button>
                 <Link href="/agents" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
                   Go to Agents
                 </Link>

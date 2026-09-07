@@ -2,7 +2,29 @@
  * /design-system visual regression (#897, epic #904) — the one UNIVERSAL
  * (CI-blocking, not ship-next-dependent) visual guard. The page renders
  * deterministic demo data for every shared primitive, so any unreviewed pixel
- * drift in ui/haven components fails the PR here with a visible diff.
+ * drift in the app shell (top bar, sidebar) fails the PR here with a visible
+ * diff.
+ *
+ * ── The whole-page capture is GONE (#2635) ───────────────────────────────────
+ *
+ * This spec used to also capture the full `/design-system` page — a
+ * 22.7M-pixel render against a 500-pixel budget — alongside the scoped shell
+ * clips below. That whole-page assertion produced every sampled CI failure in
+ * a 12-failure sample (5 of 12, all `toHaveScreenshot` timing out at the
+ * pixel-comparison step's 15s assertion timeout on the mobile viewport's
+ * 29,012px-tall render), none of them a real regression — the page is simply
+ * too tall to screenshot-compare reliably in the time budget. It bought little
+ * beyond what the scoped clips already cover: #1820 measured the whole-page
+ * budget PASSING a sidebar-confined regression the scoped sidebar capture
+ * failed at 3.66x its own budget, because one number cannot be both loose
+ * enough for page-wide churn and tight enough for a shell-sized change. Losing
+ * it does cost real coverage — no baseline anywhere now diffs primitives
+ * BELOW the shell on `/design-system` itself — and that gap is not closed
+ * here; `product-routes.visual.spec.ts`'s whole-page `/dashboard` and
+ * `/transactions` baselines remain the only whole-page pixel coverage in the
+ * suite. The scoped top-bar and sidebar clips below are what is left of this
+ * spec, and they are unaffected by the removal — they were never the flaky
+ * half.
  *
  * BASELINES ARE LINUX-RENDERED (committed under __screenshots__/linux/): CI is
  * the judge; macOS font rendering differs, so this spec is skipped locally
@@ -16,10 +38,6 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, so the
 // screenshot evidence (#896) and this pixel gate always render the same widths.
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — plain .mjs; shared with scripts/screenshot.mjs so both capture
-// paths un-clip the shell the same way and are held to the same guard (#1738).
-import { assertCaptureNotBlank, unclipScrollShell } from '../scripts/full-page-capture.mjs'
 
 const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
   name: string
@@ -94,21 +112,25 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  * This gate used `maxDiffPixelRatio: 0.005` and nothing else, with the comment
  * "tiny tolerance for AA jitter; real drift is orders of magnitude larger".
  * That reasoning was sound for a viewport-sized capture and stopped being sound
- * as `/design-system` grew, because a RATIO budget scales with page length
- * while the shell it protects does not:
+ * once this spec ALSO whole-page-captured `/design-system`, because a RATIO
+ * budget scales with page length while the shell it protects does not:
  *
  *   capture   dimensions       total px     0.5% budget   the 56px TopBar band
  *   mobile    390 x 29,012     11,314,680   56,573 px     21,840 px  (0.19%)
  *   desktop   1,280 x 17,746   22,714,880   113,574 px    58,240 px  (0.26%)
  *
  * (The desktop band is 1,040 wide, not 1,280 — the sidebar column sits beside
- * the header, not above it. #1805's table assumed the viewport width.)
+ * the header, not above it. #1805's table assumed the viewport width.) The
+ * whole-page capture these dimensions describe is gone (#2635, see the file
+ * header); the table is kept as the historical record of why a RATIO stays
+ * wrong even for the scoped clips below, whose own captures are small enough
+ * that the arithmetic is not otherwise obvious.
  *
- * Every pixel of the top bar could change on either viewport and this gate
- * would still pass. Not hypothetical: #1804 moved the mobile sidebar toggle 4px
- * and slid `NetworkSwitcher` from x=36 to x=68, went green here, and left the
- * mobile baseline 2,084 pixels stale — every one of them in rows 0..55, the
- * TopBar band. That is #1760.
+ * Every pixel of the top bar could change on either viewport and a
+ * ratio-only gate would still pass. Not hypothetical: #1804 moved the mobile
+ * sidebar toggle 4px and slid `NetworkSwitcher` from x=36 to x=68, went green
+ * under the old ratio-only gate, and left the mobile baseline 2,084 pixels
+ * stale — every one of them in rows 0..55, the TopBar band. That is #1760.
  *
  * ── The numbers, measured rather than chosen ─────────────────────────────────
  *
@@ -126,25 +148,21 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  *
  * So these sit just off the floor rather than "comfortably above jitter":
  *
- *   full page   500 px   113x tighter than the old mobile budget, 227x desktop.
- *                        0.0044% / 0.0022% of the captures. Catches #1804's
- *                        2,084px shell change by 4.2x.
  *   top bar     100 px   0.46% of the mobile band, 0.17% of the desktop one.
  *                        Catches #1804's change by 20x, and a 1px hairline
  *                        across the mobile bar (390px) by 3.9x.
  *
- * Neither is zero on purpose: a runner-image or Chromium bump can legitimately
+ * Not zero on purpose: a runner-image or Chromium bump can legitimately
  * nudge a few pixels, and a gate that goes flat red for every PR is a gate
- * someone disables. A few hundred pixels of slack costs nothing here — the
- * smallest real change we have a measurement for is 4x the full-page floor.
+ * someone disables.
  *
  * ── Why the ratio is gone rather than kept alongside ─────────────────────────
  *
  * Playwright applies `Math.min(maxDiffPixels, ratio x width x height)` when both
- * are given, so a 0.005 ratio next to a 500px floor is inert at any capture
- * above 100,000 pixels — which is every height this page will ever have. An
- * inert knob is worse than none: it reads as a second line of defence and is
- * not one.
+ * are given, so a 0.005 ratio next to a small absolute floor is inert at any
+ * capture above 100,000 pixels — which every capture in this spec, scoped or
+ * not, either is or was. An inert knob is worse than none: it reads as a
+ * second line of defence and is not one.
  *
  * ── The per-pixel threshold, a separate knob that was also wrong ─────────────
  *
@@ -170,7 +188,7 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  * #1760 asks whether a sub-threshold-but-nonzero diff should report itself
  * rather than look identical to no diff at all. The answer taken here is to
  * remove the gap instead of instrumenting it: with measured jitter at 0 and a
- * budget of 500, "tolerated but nonzero" is a 1..500 pixel window that nothing
+ * budget of 100, "tolerated but nonzero" is a 1..100 pixel window that nothing
  * real fits in. The companion half is in the regeneration workflow, which can
  * be dispatched with `--update-snapshots=all`: `changed` re-applies THIS
  * tolerance, so sub-budget drift is not merely un-failed but un-refreshable
@@ -181,10 +199,9 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  * so re-blessed a PASSING baseline on #2217 (max channel delta 1, 180 px). The
  * default is now `changed` and `all` is the declared exception — which is the
  * right shape for the paragraph above: the un-refreshable window is real, and
- * it is also a 1..500 pixel window that nothing real fits in, so it should cost
+ * it is also a small pixel window that nothing real fits in, so it should cost
  * a deliberate choice rather than be open on every dispatch.
  */
-const FULL_PAGE_MAX_DIFF_PIXELS = 500
 const TOP_BAR_MAX_DIFF_PIXELS = 100
 
 /**
@@ -195,8 +212,8 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * the whole-page capture is worse than the top bar's in a way its raw area
  * hides.
  *
- * Measured off the committed `design-system-desktop.png` (1,280 x 17,746) by
- * scanning the x=0..239 band row by row:
+ * Measured off the (since-deleted, #2635) `design-system-desktop.png`
+ * (1,280 x 17,746) by scanning the x=0..239 band row by row:
  *
  *   the sidebar's tint (--v2-surface #f6f9fc) and right border
  *   (--v2-border #e6ebf1) run from y=0 to y=663; every row below
@@ -211,14 +228,16 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * this out and tells reviewers not to file it). Structural, and it means the
  * sidebar contributes signal to only 663 of 17,746 rows.
  *
- * So the whole-page budget of 500 is not a second line of defence here in the
- * way its size suggests. It catches a change that repaints the sidebar wholesale
- * — 159,329 pixels is 318x the budget — but the drifts that actually happen are
- * small and local: an active-state highlight recoloured (one nav row, ~200px of
- * glyph and label), a group heading's weight or tracking, a nav label truncating
- * one character earlier, an icon swapped for a neighbour in the same lucide set.
- * Each of those is a few hundred pixels inside a 500-pixel page-wide allowance
- * that every other primitive on the page is also drawing against.
+ * The whole-page capture this comparison was originally measured against is
+ * gone (#2635) — it is kept here as the historical record of why the whole-page
+ * budget was never a second line of defence for the sidebar: it caught a
+ * change that repainted the sidebar wholesale — 159,329 pixels was 318x that
+ * budget — but the drifts that actually happen are small and local: an
+ * active-state highlight recoloured (one nav row, ~200px of glyph and label),
+ * a group heading's weight or tracking, a nav label truncating one character
+ * earlier, an icon swapped for a neighbour in the same lucide set. Each of
+ * those is a few hundred pixels, which is exactly the range this scoped
+ * capture's own 100px budget is sized to catch.
  *
  * ── The number, measured rather than chosen ──────────────────────────────────
  *
@@ -247,19 +266,21 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * Recolouring the three nav GROUP HEADINGS one token sideways — `--v2-ink-3`
  * #5d6c85 to `--v2-ink-2` #525f7f, both solid tokens, deliberately not the
  * `/85`-on-a-bare-`var()` shape that compiles to nothing on Tailwind v3.4 and
- * made #1811's first mutation inert (#1818). On CI, both halves RUN rather than
- * being argued from one number (the scoped assertion precedes the full-page one
- * and short-circuits it, so the counterfactual needed its own run with the
- * scoped block disabled):
+ * made #1811's first mutation inert (#1818). On CI (measured while the
+ * whole-page capture this spec has since dropped, #2635, was still present),
+ * both halves RAN rather than being argued from one number (the scoped
+ * assertion preceded the whole-page one and short-circuited it, so the
+ * counterfactual needed its own run with the scoped block disabled):
  *
  *   this scoped capture, budget 100:    366 px  ->  RED   (3.66x over)
  *   the whole-page capture, budget 500: same mutation ->  GREEN
  *   the mobile test:                    same mutation ->  GREEN
  *
  * The second line is the point of #1820: a real, sidebar-confined design
- * regression that the pre-existing gate passes. The third is the desktop-only
- * decision paying off in the same run — the mutated headings are not painted on
- * mobile at all, because the drawer is off-canvas there.
+ * regression that the whole-page gate passed at the time — now moot, since
+ * that capture no longer exists to pass anything. The third is the
+ * desktop-only decision paying off in the same run — the mutated headings are
+ * not painted on mobile at all, because the drawer is off-canvas there.
  *
  * Two things this measurement teaches that a single number would have hidden.
  * **Local counts are not the gate's counts:** the same mutation is 282 px
@@ -303,22 +324,12 @@ test.describe('design-system visual regression', () => {
       await page.evaluate(() => document.fonts.ready)
       await page.waitForLoadState('networkidle')
 
-      // ── The app shell, on its own, BEFORE un-clipping ──────────────────────
-      // A second capture of a region already inside the full-page one, because
-      // one number cannot serve both a whole-page budget and a shell-sized
-      // regression: the band is 0.19% (mobile) / 0.26% (desktop) of the
-      // capture, so any budget loose enough to survive page-wide churn is loose
-      // enough to swallow the entire chrome. Scoping the region is what makes
-      // "the shell is protected" a property rather than a coincidence of how
-      // quiet the rest of the page happens to be — and it makes an INTENDED
-      // shell change reviewable as a 390x56 image diff instead of a 29,012px
-      // one.
-      //
-      // Captured before `unclipScrollShell`, which rewrites height/overflow on
-      // the shell's ancestors: anything captured after it is a shape no user
-      // ever sees. The top bar happens to be unaffected either way — "capture
-      // the pristine state first" is what keeps that true when the shell
-      // changes.
+      // ── The app shell ───────────────────────────────────────────────────────
+      // Scoping the region is what makes "the shell is protected" a property
+      // rather than a coincidence of how quiet the rest of the page happens to
+      // be — and it makes an INTENDED shell change reviewable as a 390x56 image
+      // diff instead of a full-page one (#2635 dropped the whole-page capture
+      // this comment used to contrast against; see the file header).
       const topBar = page.locator(APP_TOP_BAR)
       // A locator matching nothing would make the screenshot below error, but
       // one matching TWO would silently capture the first — the failure shape
@@ -332,14 +343,8 @@ test.describe('design-system visual regression', () => {
       })
 
       // ── The sidebar, the other half of the same chrome (#1820) ────────────
-      // Desktop only, and BEFORE `unclipScrollShell` for a reason that is much
-      // sharper here than it was for the top bar. The top bar is unaffected by
-      // un-clipping either way; the sidebar is not. Un-clipping turns the shell
-      // row's definite `100vh` into `height: auto`, and `lg:h-full` against an
-      // auto-height parent resolves to `auto` — so a capture taken afterwards
-      // would be a 240 x 663 fragment ending wherever the nav happens to end,
-      // instead of the 240 x 800 column a user actually sees. That is not a
-      // stricter capture, it is a capture of a shape that does not exist.
+      // Desktop only — below `lg` it is an off-canvas drawer absent from the
+      // capture (see SIDEBAR_MIN_VIEWPORT_WIDTH above for the measurement).
       if (vp.width >= SIDEBAR_MIN_VIEWPORT_WIDTH) {
         const sidebar = page.locator(APP_SIDEBAR)
         await expect(sidebar).toHaveCount(1)
@@ -350,27 +355,6 @@ test.describe('design-system visual regression', () => {
           threshold: PIXEL_THRESHOLD,
         })
       }
-
-      // The app shell clips at h-screen/overflow-hidden, so a `fullPage`
-      // capture paints only the first viewport and leaves a very long white
-      // tail. Until #1738 these baselines were 95%+ blank, which made this
-      // gate pass vacuously for every primitive below the fold. Un-clip, then
-      // PROVE the capture is not blank before letting it stand as a baseline —
-      // a pixel gate whose baseline is empty compares white to white forever.
-      await unclipScrollShell(page)
-      const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
-      await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {
-        label: `/design-system · ${vp.name}`,
-        viewportDevicePx: vp.height * devicePixelRatio,
-      })
-
-      await expect(page).toHaveScreenshot(`design-system-${vp.name}.png`, {
-        fullPage: true,
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
     })
   }
 })

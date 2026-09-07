@@ -113,14 +113,21 @@ describe('/for-agents.md (#2523)', () => {
     //
     // #2619 moved the page to 9810 bytes (the "At funding" script names the
     // funding card's page, `<host>/dashboard`, instead of "the dashboard") —
-    // under the ceiling, so the bound is unchanged.
+    // under the ceiling, so the bound was unchanged.
+    //
+    // 9900 -> 10100 for #2618 (the page is 10059 bytes at this commit). The
+    // step-1 sentence now names the non-blocking login sequence — under
+    // `--json`, pass `--no-wait` and finish with `haven login --poll
+    // <device_code>` — because the cold run it fixes hung its whole turn on
+    // the ten-minute poll, then killed the process and lost the code. The
+    // ~250 bytes buy the way to run the flow an agent can actually keep.
     //
     // Deliberately NOT added, and the reason the number is not higher: the
     // well-known manifest's own shape. The page says to read the chain from
     // the command; enumerating `environment` and `chains.deployable` here
     // would duplicate a JSON document that is one fetch away and would go
     // stale the first time its shape changed.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(9900)
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10100)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {

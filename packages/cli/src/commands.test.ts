@@ -87,6 +87,31 @@ describe('run — auth gating', () => {
   })
 })
 
+describe('not_authenticated hint (#2618)', () => {
+  it('names the device flow FIRST and the password path as the human route only', async () => {
+    // The runbook's first rule is that an agent never holds its user's
+    // password, but the hint an agent actually saw on a 401 led with
+    // "set HAVEN_EMAIL and HAVEN_PASSWORD" — advice it must not follow. The
+    // device flow is the path an agent can run, so it is named first; the
+    // credentials are described as the human, non-interactive path.
+    const lines: string[] = []
+    await run(['agents', 'list', '--json'], {
+      ...harness({ sessionStore: memoryStore(null) }).deps,
+      out: (l) => lines.push(l),
+    })
+    const failure = JSON.parse(lines[0])
+    expect(failure.error.code).toBe('not_authenticated')
+    expect(failure.error.hint).toMatch(/^Run `haven login`/)
+    expect(failure.error.hint).toContain('--no-wait')
+    expect(failure.error.hint).toContain('login --poll <device_code>')
+    expect(failure.error.hint).toContain('never asks for a password')
+    expect(failure.error.hint).toMatch(/human/)
+    // The old wording offered the credentials as an equal alternative to
+    // login; it must not come back as a co-equal route for an agent.
+    expect(failure.error.hint).not.toBe('Run `haven login` (or set HAVEN_EMAIL and HAVEN_PASSWORD).')
+  })
+})
+
 describe('login', () => {
   it('posts credentials, saves the session, and never echoes the password', async () => {
     const store = memoryStore(null)
@@ -114,9 +139,33 @@ describe('login', () => {
     //
     // Recorded as a contract change rather than deleted, so a reader who
     // remembers the old behaviour finds out why it moved.
-    const { deps } = harness({ sessionStore: memoryStore(null), env: {} })
+    //
+    // #2618 (while landing the --poll work): this test ran the REAL device
+    // flow with no `makeApi` stub — it only passed where the hosted backend
+    // was reachable AND the flow had ten minutes to finish, which is an
+    // environment, not an assertion. The same contract is proved here
+    // deterministically instead: the device flow starts, completes, and
+    // exits 0 — which is precise about `not 2` rather than a timeout away
+    // from whatever the network did.
+    const api = {
+      get: async () => { throw new CliApiError('unused', 404) },
+      post: async (path: string) =>
+        path === '/auth/device/start'
+          ? {
+              device_code: 'dev-code-abc',
+              user_code: 'ABCD-2345',
+              verification_url: 'https://app.test/device?code=ABCD-2345',
+              expires_in: 600,
+              interval: 5,
+            }
+          : { token: 'jwt', user: USER },
+      put: async () => { throw new CliApiError('unused', 404) },
+      del: async () => { throw new CliApiError('unused', 404) },
+      getText: async () => { throw new CliApiError('unused', 404) },
+    } as unknown as CliApi
+    const { deps } = harness({ sessionStore: memoryStore(null), env: {}, makeApi: () => api, sleep: async () => {} })
     const code = await run(['login'], deps)
-    expect(code).not.toBe(2)
+    expect(code).toBe(0)
   })
 })
 
@@ -701,6 +750,71 @@ describe('haven login — device flow', () => {
     expect(api.calls).toEqual(['POST /auth/device/start'])
   })
 
+  it('--no-wait emits the device_code, so the flow can actually be resumed (#2618)', async () => {
+    // The pair only works if the first object carries the handle the second
+    // command takes. Before #2618 the emit had no device_code at all: an agent
+    // that killed the ten-minute poll lost the code with it.
+    const lines: string[] = []
+    const api = deviceApi([])
+    await run(['login', '--no-wait', '--json'], { ...deps(api), out: (l) => lines.push(l) })
+    expect(JSON.parse(lines[0]).device_code).toBe(START.device_code)
+  })
+
+  it('--poll performs ONE round and exits 0 when approved — the same success object as the blocking path (#2618)', async () => {
+    const store = memoryStore(null)
+    const api = deviceApi([{ token: 'jwt', user: USER }])
+    const lines: string[] = []
+    const code = await run(['login', '--poll', START.device_code, '--json'], {
+      ...deps(api, store),
+      out: (l) => lines.push(l),
+    })
+    expect(code).toBe(0)
+    // ONE round: no /auth/device/start, no loop.
+    expect(api.calls).toEqual(['POST /auth/device/token'])
+    expect(store.value?.token).toBe('jwt')
+    const emitted = JSON.parse(lines[0])
+    expect(emitted.ok).toBe(true)
+    expect(emitted.email).toBe(USER.email)
+    // The token is never echoed — the rule the blocking path already holds.
+    expect(lines.join('\n')).not.toContain('jwt')
+  })
+
+  it('--poll exits 3 with the pending object while the human has not approved (#2618)', async () => {
+    const api = deviceApi([pending()])
+    const lines: string[] = []
+    const code = await run(['login', '--poll', START.device_code, '--json'], {
+      ...deps(api),
+      out: (l) => lines.push(l),
+    })
+    expect(code).toBe(3)
+    expect(JSON.parse(lines[0])).toEqual({ status: 'pending', device_code: START.device_code, retry_after: 5 })
+  })
+
+  it('--poll widens retry_after on slow_down — the one backoff signal the flow has (#2618)', async () => {
+    const api = deviceApi([slowDown()])
+    const lines: string[] = []
+    const code = await run(['login', '--poll', START.device_code, '--json'], {
+      ...deps(api),
+      out: (l) => lines.push(l),
+    })
+    expect(code).toBe(3)
+    expect(JSON.parse(lines[0]).retry_after).toBe(10)
+  })
+
+  it('--poll exits 4 when the request was DENIED — stop asking (#2618)', async () => {
+    const api = deviceApi([denied()])
+    expect(await run(['login', '--poll', START.device_code], deps(api))).toBe(4)
+  })
+
+  it('--poll exits 3 on an expired code — the SAME answer the blocking flow gives (#2618)', async () => {
+    // The issue sketch grouped expired with denied at 4, but this flow already
+    // pins expired → 3 ("not signed in — start over", not a refusal), and the
+    // two halves of ONE flow must not answer the same server condition with
+    // different codes. The blocking path above asserts exactly that.
+    const api = deviceApi([expired()])
+    expect(await run(['login', '--poll', START.device_code], deps(api))).toBe(3)
+  })
+
   it('emits the link BEFORE polling under --json', async () => {
     const lines: string[] = []
     const api = deviceApi([pending(), { token: 'jwt', user: USER }])
@@ -710,6 +824,74 @@ describe('haven login — device flow', () => {
     expect(first.user_code).toBe('ABCD-2345')
     // The token is never echoed — not in the first object, not in the last.
     expect(lines.join('\n')).not.toContain('jwt')
+  })
+
+  it('--json defaults to a 30-SECOND wait, then emits the pending object (#2618)', async () => {
+    // The ten-minute loop is correct for a human watching a terminal and
+    // useless to an agent driving the CLI: it holds the agent's whole turn.
+    // Under --json the client now times out at its own short deadline and
+    // hands back the device code, so nothing is lost — `login --poll` picks
+    // the flow up. The clock is faked and advanced by the injected sleep, so
+    // the 30 s pass in no real time.
+    vi.useFakeTimers()
+    try {
+      let clock = Date.now()
+      const slept: number[] = []
+      const api = deviceApi([pending()])
+      const lines: string[] = []
+      const code = await run(['login', '--json'], {
+        ...deps(api),
+        sleep: async (ms: number) => {
+          slept.push(ms)
+          clock += ms
+          vi.setSystemTime(clock)
+        },
+        out: (l) => lines.push(l),
+      })
+      expect(code).toBe(3)
+      // lines[0] is the link object; the pending object is the second emission.
+      expect(JSON.parse(lines[1])).toEqual({
+        status: 'pending',
+        device_code: START.device_code,
+        retry_after: 5,
+      })
+      // Six rounds of the server's 5 s interval span the 30 s default — i.e.
+      // the client really did stop at 30 s, not at the code's ten minutes.
+      expect(slept.length).toBe(6)
+      expect(slept.every((ms) => ms === 5000)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('prose mode keeps the FULL wait — the 30 s default is a --json behaviour (#2618)', async () => {
+    // A human reading the terminal got a ten-minute approval window from this
+    // flow and still does; narrowing it for everyone would trade a real
+    // regression for the fix. Faked clock again: 600 s at the server's 5 s
+    // interval, then the code-expired answer (exit 3) — never the pending
+    // object, which is the machine contract.
+    vi.useFakeTimers()
+    try {
+      let clock = Date.now()
+      const slept: number[] = []
+      const lines: string[] = []
+      const api = deviceApi([pending()])
+      const code = await run(['login'], {
+        ...deps(api),
+        sleep: async (ms: number) => {
+          slept.push(ms)
+          clock += ms
+          vi.setSystemTime(clock)
+        },
+        out: (l) => lines.push(l),
+      })
+      expect(code).toBe(3)
+      expect(slept.length).toBe(120) // 600 s / 5 s — the code's whole window
+      expect(lines.join('\n')).not.toContain('"status":"pending"')
+      expect(lines.join('\n')).not.toContain('pending')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps polling on authorization_pending, at the interval the SERVER named', async () => {
@@ -1137,6 +1319,21 @@ describe('helpText covers every dispatchable command (#2590)', () => {
     expect(help).toContain('never asks for a password')
     // The password path still exists and is still findable.
     expect(help).toMatch(/login --email/)
+  })
+
+  it('lists --no-wait and --poll as the non-blocking sequence (#2618)', () => {
+    // #2590's lesson again, one level down: `--no-wait` was parsed and
+    // honoured for its whole life and hidden from help for exactly as long,
+    // so an agent reading --help concluded the only way back was killing the
+    // process — which loses the code. Named as usage lines, with the one
+    // sentence the issue asks for: under --json, pass --no-wait and finish
+    // with a second command.
+    expect(help).toMatch(/^ {2}login --no-wait\s+Print the link and exit instead of polling/m)
+    expect(help).toMatch(/^ {2}login --poll <code>\s+One poll round/m)
+    expect(help).toContain('finish with `login --poll <device_code>`')
+    expect(help).toContain('exit 0 approved')
+    expect(help).toContain('3 still pending')
+    expect(help).toContain('4 denied')
   })
 })
 

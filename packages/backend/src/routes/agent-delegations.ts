@@ -61,6 +61,7 @@ import {
 import {
   activatePendingDelegationInSlot,
   findReusablePendingDelegation,
+  withDelegationBuildSlotLock,
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
 } from '../infra/repositories/delegation-budgets.js'
@@ -309,29 +310,105 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return reply.code(400).send({ error: 'expires_at must be in the future' })
     }
 
-    // ── Reuse an identical still-pending build (#2539) ──
+    // ── The delegate account address, derived BEFORE the slot lock (#2613) ──
+    // Both branches below need it, and it costs one RPC. Deriving it inside
+    // the lock would hold a slot open across a chain round trip, so a slow
+    // node would queue every concurrent build of that slot behind it.
+    let delegateAccountAddress: Address
+    try {
+      delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+        ownerAddress: agent.delegate_address as Address,
+      })
+    } catch (err) {
+      return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(err) })
+    }
+
+    // ── Reuse an identical still-pending build (#2539), under the slot lock (#2613) ──
     // The dashboard form calls build again on its own (re-render, retry),
     // and the #2539 CLI points its --wait poller at a SPECIFIC hash: a
     // second build minting a fresh version would strand that hash pending
     // forever. An identical (agent, token, recipient, budget, period) slot
     // with a still-pending, unexpired row therefore returns THAT row — same
     // hash, same version, 201 shape unchanged — and inserts nothing.
-    const reusable = await findReusablePendingDelegation(
+    //
+    // #2613: the read, the version counter and the insert run inside ONE
+    // advisory-locked transaction. Unsynchronized, two concurrent identical
+    // builds could each miss this read and each insert, because `startDate`
+    // is `nowSec - 60` and a pair straddling a second boundary hashes
+    // differently — so the unique index never collided and one slot ended up
+    // with two pending version-1 rows.
+    const outcome = await withDelegationBuildSlotLock(
       request.params.id,
       token_address,
       recipient_address ? recipient_address.toLowerCase() : null,
-      budget_atomic,
-      period_seconds,
-      expiry,
-    )
-    if (reusable) {
+      async (tx) => {
+        const reusable = await findReusablePendingDelegation(
+          request.params.id,
+          token_address,
+          recipient_address ? recipient_address.toLowerCase() : null,
+          budget_atomic,
+          period_seconds,
+          expiry,
+          tx,
+        )
+        if (reusable) return { kind: 'reused' as const, reusable }
+
+        // Version = next per (agent, token, recipient|open) — fresh identity
+        // per replacement (#827/#813). Read under the same lock as the reuse
+        // check above, or two builds race to the same number.
+        const versionRow = await tx.query<{ next_version: number }>(
+          `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+           FROM agent_delegations
+           WHERE agent_id = $1 AND token_address = LOWER($2)
+             AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
+          [request.params.id, token_address, recipient_address ?? null],
+        )
+        const version = versionRow.rows[0].next_version
+
+        const policy: HavenBudgetPolicy = {
+          agentId: request.params.id,
+          chainId: agent.chain_id,
+          treasuryAddress: agent.treasury_address as Address,
+          delegateAccountAddress,
+          tokenAddress: token_address as Address,
+          budgetAtomic: BigInt(budget_atomic),
+          periodSeconds: period_seconds,
+          startDate: nowSec - 60, // chain-time skew anchor (#820 run 6)
+          recipient: (recipient_address ?? undefined) as Address | undefined,
+          expiresAt: expiry,
+          version,
+        }
+        const delegation = buildBudgetDelegation(policy)
+        const hash = delegationIdentity(delegation)
+        const inserted = await insertPendingDelegationForOwnedNonRevokedAgent({
+          agentId: request.params.id,
+          userId: sub,
+          chainId: agent.chain_id,
+          tokenAddress: token_address,
+          recipientAddress: recipient_address ? recipient_address.toLowerCase() : null,
+          delegationHash: hash,
+          delegationJson: JSON.stringify(delegation),
+          version,
+          budgetAtomic: budget_atomic,
+          periodSeconds: period_seconds,
+          startDate: nowSec - 60,
+          expiresAt: expiry,
+        }, tx)
+        return { kind: 'built' as const, delegation, hash, version, inserted }
+      },
+    ).catch((err: unknown) => ({ kind: 'build_failed' as const, err }))
+
+    if (outcome.kind === 'build_failed') {
+      return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(outcome.err) })
+    }
+
+    if (outcome.kind === 'reused') {
+      const reusable = outcome.reusable
       const reused = JSON.parse(reusable.delegation_json) as Omit<Delegation, 'signature'>
       return reply.code(201).send({
         delegation_hash: reusable.delegation_hash,
         version: reusable.version,
-        delegate_account_address: await computeHybridAccountAddress(agent.chain_id, {
-          ownerAddress: agent.delegate_address as Address,
-        }),
+        delegate_account_address: delegateAccountAddress,
         signing_payload: delegationSigningPayload(reused, agent.chain_id),
         // #2539: the construct-and-hand-off response. `build_id` IS the
         // delegation hash — there is no second identifier and no new column;
@@ -345,56 +422,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       })
     }
 
-    // Version = next per (agent, token, recipient|open) — fresh identity per
-    // replacement (#827/#813).
-    const versionRow = await pool.query<{ next_version: number }>(
-      `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-       FROM agent_delegations
-       WHERE agent_id = $1 AND token_address = LOWER($2)
-         AND recipient_address IS NOT DISTINCT FROM LOWER($3)`,
-      [request.params.id, token_address, recipient_address ?? null],
-    )
-    const version = versionRow.rows[0].next_version
-
-    let delegation
-    let delegateAccountAddress: Address
-    try {
-      delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
-        ownerAddress: agent.delegate_address as Address,
-      })
-      const policy: HavenBudgetPolicy = {
-        agentId: request.params.id,
-        chainId: agent.chain_id,
-        treasuryAddress: agent.treasury_address as Address,
-        delegateAccountAddress,
-        tokenAddress: token_address as Address,
-        budgetAtomic: BigInt(budget_atomic),
-        periodSeconds: period_seconds,
-        startDate: nowSec - 60, // chain-time skew anchor (#820 run 6)
-        recipient: (recipient_address ?? undefined) as Address | undefined,
-        expiresAt: expiry,
-        version,
-      }
-      delegation = buildBudgetDelegation(policy)
-    } catch (err) {
-      return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(err) })
-    }
-
-    const hash = delegationIdentity(delegation)
-    const inserted = await insertPendingDelegationForOwnedNonRevokedAgent({
-      agentId: request.params.id,
-      userId: sub,
-      chainId: agent.chain_id,
-      tokenAddress: token_address,
-      recipientAddress: recipient_address ? recipient_address.toLowerCase() : null,
-      delegationHash: hash,
-      delegationJson: JSON.stringify(delegation),
-      version,
-      budgetAtomic: budget_atomic,
-      periodSeconds: period_seconds,
-      startDate: nowSec - 60,
-      expiresAt: expiry,
-    })
+    const { delegation, hash, version, inserted } = outcome
     if (!inserted) {
       // Same 409, same refused request set — only the reason reporting changes (#2416).
       return reply.code(409).send({ error: await describeBuildRefusal(request.params.id, sub) })

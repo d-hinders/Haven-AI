@@ -6,7 +6,7 @@
  */
 
 import pool from '../../db.js'
-import type { Executor } from '../transaction.js'
+import { withTransaction, type Executor } from '../transaction.js'
 
 export interface ActiveDelegationRow {
   id: string
@@ -102,12 +102,77 @@ export async function findReusablePendingDelegation(
   budgetAtomic: string,
   periodSeconds: number,
   expiresAt: number,
+  db: Executor = pool,
 ): Promise<ReusablePendingDelegationRow | null> {
-  const result = await pool.query<ReusablePendingDelegationRow>(
+  const result = await db.query<ReusablePendingDelegationRow>(
     FIND_REUSABLE_PENDING_DELEGATION_SQL,
     [agentId, tokenAddress, recipientAddress, budgetAtomic, periodSeconds, expiresAt],
   )
   return result.rows[0] ?? null
+}
+
+/**
+ * The slot key the build path serializes on (#2613).
+ *
+ * A slot is `(agent, token, recipient|open)` — the same tuple the version
+ * counter is per, and the same one `findReusablePendingDelegation` matches
+ * within. Budget and period are deliberately NOT in the key: two builds that
+ * differ only in budget are a replacement pair whose version numbers must not
+ * be computed concurrently either.
+ */
+export function delegationBuildSlotKey(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+): string {
+  return `delegation-build:${agentId}:${tokenAddress.toLowerCase()}:${recipientAddress?.toLowerCase() ?? 'open'}`
+}
+
+/**
+ * Serialize the read-decide-insert of one build slot (#2613).
+ *
+ * `build`'s reuse read, its `MAX(version) + 1` read and its insert were three
+ * unsynchronized statements. Two concurrent identical builds could each miss
+ * the reuse read (neither had committed), each compute the same version, and
+ * then insert SEPARATELY — because `startDate` is `nowSec - 60`, so a request
+ * pair straddling a second boundary produces two different `delegation_hash`
+ * values and the `ON CONFLICT (delegation_hash) DO NOTHING` never fires. The
+ * result was two pending version-1 rows for one slot, both unsigned, and a
+ * human left to guess which link to sign.
+ *
+ * `pg_advisory_xact_lock` on the slot key closes it: the second caller's reuse
+ * read now runs after the first has committed, finds the row, and returns it —
+ * which is the behaviour #2539 wanted in the first place, reached under
+ * concurrency instead of only in the sequential case.
+ *
+ * The lock is transaction-scoped, so it releases on COMMIT or ROLLBACK with no
+ * unlock path to forget. Keep RPC work OUT of `fn`: the caller derives the
+ * delegate account address before taking the lock, because holding a database
+ * lock across a chain round trip makes a slow node into a stalled slot.
+ *
+ * `fn` receives a QUERY-ONLY view of the transaction, and that is load-bearing.
+ * `withTransaction` decides whether to open a transaction by asking whether its
+ * executor has a `connect` method — and the pg client it hands out has one, so
+ * passing the raw client to a repository that wraps itself in `withTransaction`
+ * (`insertPendingDelegationForOwnedNonRevokedAgent` does) makes that repository
+ * try to reconnect an already-connected client and throw. Handing over a plain
+ * `{ query }` makes the nested `withTransaction` degrade to a direct call, which
+ * is what joining an outer transaction is supposed to mean.
+ */
+export async function withDelegationBuildSlotLock<T>(
+  agentId: string,
+  tokenAddress: string,
+  recipientAddress: string | null,
+  fn: (tx: Executor) => Promise<T>,
+  db: Executor = pool,
+): Promise<T> {
+  return withTransaction(db, async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      delegationBuildSlotKey(agentId, tokenAddress, recipientAddress),
+    ])
+    const joined: Executor = { query: (sql, values) => tx.query(sql, values) }
+    return fn(joined)
+  })
 }
 
 // ── Payment authorization selection (moved from rails/delegation-authorization.ts, #999)

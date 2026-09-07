@@ -7,7 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-09-02" # #2421: the **npm** checklist item re-read against `.github/workflows/publish.yml`, which this PR changes. It still holds as written for the promotion: the prod path is version-gated, derives the tag from the version (`alpha`/`latest`) and reports per-package outcomes (#1159). What the item did not say, and now does, is that the SAME workflow gained a second channel — a push to `dev` publishes `0.0.0-dev.*` snapshots under the `dev` dist-tag — which changes nothing about this checklist, because a snapshot can reach neither `alpha` nor `latest` and a promotion cannot publish one. Scope: that ONE checklist item; the migration, sweep-floor, env and QA items were NOT re-verified in this pass. Prior: #2150: the "Migration availability" bullet re-read against the migration runner on this branch — the hand-run out-of-band pre-build is no longer the only way to get `CREATE INDEX CONCURRENTLY` past the runner's `BEGIN`/`COMMIT`, so it is demoted to a fallback behind the in-repo `transactional = false` opt-out, and the deploy-verification step gains the one failure state the opt-out introduces (a migration left `status = 'running'`, which stops the backend booting until an operator acts). Scope: those two bullets only — QA, npm, rollback and the merge-commit rule were not re-verified. Prior: #2151: the migration checklist re-read for hot-table lock availability; adds the lock-duration question and its pre-build/low-traffic mitigations. Prior: re-verified for #1266 demo merchant x402 settlement selection/canary posture
+last-verified: "2026-09-07" # #2615: EDITED, scope = ONE new checklist item in § *Merge, deploy, and verify prod*, naming the production RPC variable set and the trap that produced the issue — `RPC_URL` reads as "RPC is configured" in a variable list and covers Gnosis (100) only, which the delegation rail does not use. The evidence standard is stated as the ABSENCE of the new boot warning in the deploy log rather than the presence of a variable in the Railway dashboard, matching what #2511 used one environment over: a dashboard read is a name-level observation, the boot log is the process saying what it resolved. The defaults in the table are read off `packages/backend/src/config.ts` on this branch, where each literal now lives in exactly one place (the `warnPublicRpc` call sites). NOT a claim that the variable IS set in production — it was not on 2026-09-07, that is the open operator step on #2615, and this item is written as the check rather than as a state. Scope: that ONE item. NOT re-verified: the migration bullet, the npm checklist, the rollback item, the smoke-hostname section, or any `covers:` target. Prior: #2421: the **npm** checklist item re-read against `.github/workflows/publish.yml`, which this PR changes. It still holds as written for the promotion: the prod path is version-gated, derives the tag from the version (`alpha`/`latest`) and reports per-package outcomes (#1159). What the item did not say, and now does, is that the SAME workflow gained a second channel — a push to `dev` publishes `0.0.0-dev.*` snapshots under the `dev` dist-tag — which changes nothing about this checklist, because a snapshot can reach neither `alpha` nor `latest` and a promotion cannot publish one. Scope: that ONE checklist item; the migration, sweep-floor, env and QA items were NOT re-verified in this pass. Prior: #2150: the "Migration availability" bullet re-read against the migration runner on this branch — the hand-run out-of-band pre-build is no longer the only way to get `CREATE INDEX CONCURRENTLY` past the runner's `BEGIN`/`COMMIT`, so it is demoted to a fallback behind the in-repo `transactional = false` opt-out, and the deploy-verification step gains the one failure state the opt-out introduces (a migration left `status = 'running'`, which stops the backend booting until an operator acts). Scope: those two bullets only — QA, npm, rollback and the merge-commit rule were not re-verified. Prior: #2151: the migration checklist re-read for hot-table lock availability; adds the lock-duration question and its pre-build/low-traffic mitigations. Prior: re-verified for #1266 demo merchant x402 settlement selection/canary posture
 ---
 
 # Promoting `dev → main` (production release)
@@ -104,6 +104,31 @@ for how the environments are wired, see
       recovery statements. Do not restart hoping it clears — it will not, by
       design. Decide from the schema whether to finish it by hand or undo it,
       then run the matching statement.
+- [ ] **Read the boot log for RPC warnings (#2615).** The backend now warns once
+      per unset public-RPC default, and the evidence standard is the ABSENCE of
+      that line in the deploy log — not the presence of the variable in the
+      Railway dashboard. A dashboard read is a name-level observation; the boot
+      log is the process saying what it resolved.
+
+      The production variable set, and the trap in it:
+
+      | Variable | Chain | Unset means |
+      |---|---|---|
+      | `RPC_URL` | Gnosis (100) | shared public `https://rpc.gnosischain.com` |
+      | `RPC_URL_BASE` | Base **mainnet** (8453) | shared public `https://mainnet.base.org` — **real money** |
+      | `RPC_URL_BASE_SEPOLIA` | Base Sepolia (84532) | shared public `https://sepolia.base.org` |
+
+      **`RPC_URL` alone does not configure Base.** It reads like "RPC is
+      configured" in a variable list and covers Gnosis only — chain 100, which
+      the delegation rail does not use. That is the exact shape production was
+      found in on 2026-09-07 (#2615): `RPC_URL` present, `RPC_URL_BASE` absent,
+      every mainnet settlement, account deploy and caveat-enforcer read going
+      through a shared unauthenticated node with no signal of any kind. Dev had
+      the identical shape before #2511.
+
+      Use a key distinct from the dev/QA ones, so usage is attributable and
+      either can be rotated alone.
+
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.
 - [ ] Watch prod error logs for a few minutes. If anything is off, **roll back**

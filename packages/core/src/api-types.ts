@@ -2604,6 +2604,7 @@ export type components = {
             /** @description Why the URL is null, when it is. */
             hosted_mcp_note?: string;
             connector_package: string;
+            cli_package: string;
             /** Format: uri */
             openapi_url: string;
             chains: {

@@ -36,6 +36,16 @@ for how the environments are wired, see
       its Playwright artifact if it fails.
 - [ ] The change set has **soaked on `dev`** — exercise the key flows against the
       dev URL (login, balances, one x402 / payment happy path).
+- [ ] **Docs-visible CLI changes get a release, paired with the promotion.** When
+      the batch changes an agent-facing surface that names a CLI command only a
+      tagged build has — the runbook (`/for-agents.md`, `haven guide`) and the
+      well-known manifest naming CLI commands as `@<channel>`
+      ([#2617](https://github.com/d-hinders/Haven-AI/issues/2617)) — a
+      `release:bump` must follow (or be paired with) the `dev → main`
+      promotion, so the `alpha`/`latest` dist-tags catch up with what the docs
+      tell agents to run. Do **not** move `latest` by hand; the bump and the
+      publish workflow own it. Without this, an agent following the runbook to
+      the letter resolves the command to a dist-tag that predates the change.
 
 ## Open and review the PR (base `main`, head `dev`)
 

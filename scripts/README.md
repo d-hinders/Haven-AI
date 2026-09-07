@@ -397,9 +397,10 @@ It mirrors `publish.yml`'s build-and-publish step deliberately: the same five
 packages, the same dist-wipe, and the same build **order** — connect's tsup
 inlines `MCP_VERSION`, so building it before a fresh `mcp` bundles a stale one.
 
-Two things the workflow does that this path cannot, and one you must decide:
-you get no per-package summary table, no provenance, and **the tag is
-hardcoded below**. `publish.yml` derives it from the version (prerelease →
+Three things the workflow does that this path cannot, and one you must decide:
+you get no per-package summary table, no provenance, **no `latest` promotion**
+(that is `promote-tags`, a job of `publish.yml`, so hand-publishing skips it —
+see the verification step below), and **the tag is hardcoded below**. `publish.yml` derives it from the version (prerelease →
 `alpha`, stable → `latest`). Every release to date has been a prerelease, so
 `--tag alpha` is right today — but if you are hand-publishing the first
 **stable** release, change it to `--tag latest`, or `npm install` keeps
@@ -428,10 +429,35 @@ for pkg in sdk signer mcp connect cli; do
 done
 ```
 
-All five must show the new version on `alpha`, and `latest` must be unchanged
-for a prerelease. Anything missing is a partial publish — the state
-[#1159](https://github.com/d-hinders/Haven-AI/issues/1159) exists to surface,
-which this path cannot do for you.
+All five must show the new version on `alpha`. Anything missing is a partial
+publish — the state [#1159](https://github.com/d-hinders/Haven-AI/issues/1159)
+exists to surface, which this path cannot do for you.
+
+**`latest` will still be on the PREVIOUS release, and on this path that is your
+job to fix.** This sentence used to say `latest` "must be unchanged for a
+prerelease", which was the rule until
+[#2536](https://github.com/d-hinders/Haven-AI/issues/2536) and has been wrong
+since — it contradicted the section forty lines above in this same file. npm
+resolves a bare `npm install` / `npx` through the `latest` dist-tag and never
+through the highest version number, so a release that leaves it behind is
+invisible to every user who does not type `@alpha`. `publish.yml` moves it in
+`promote-tags`; hand-publishing never runs that job, so move it yourself, per
+package:
+
+```sh
+for pkg in sdk signer mcp connect cli; do
+  npm dist-tag add "@haven_ai/$pkg@<version>" latest
+done
+```
+
+This needs a credential that can mutate a dist-tag — an npm token, not the
+OIDC identity `publish.yml` uses, which authorises `npm publish` and nothing
+else. That distinction is the whole of
+[#2647](https://github.com/d-hinders/Haven-AI/issues/2647): assuming otherwise
+is what left `latest` a release behind on 0.1.35-alpha.0. The owner decision
+behind moving it at all is recorded in
+[`../docs/operations/agent-discovery-listings.md`](../docs/operations/agent-discovery-listings.md)
+§ *The `latest` dist-tag*.
 
 ### If verification fails
 

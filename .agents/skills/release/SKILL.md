@@ -233,10 +233,30 @@ A green workflow is not proof that five packages published. Verify both ends:
 for p in sdk signer mcp connect cli; do npm view @haven_ai/$p dist-tags --json; done
 ```
 
-Every package must show the new version on `alpha`, and `latest` must be
-unchanged for a prerelease. Also read the publish run's **per-package table** —
-since #1159 one package can fail without aborting the others, so a summary
-glance is not enough.
+Every package must show the new version on **both** `alpha` and `latest`.
+
+**`latest` moving onto a prerelease is correct, and this line used to say the
+opposite.** It read "`latest` must be unchanged for a prerelease", which was
+true until [#2536](https://github.com/d-hinders/Haven-AI/issues/2536) and has
+been wrong since: npm resolves a bare `npm install` / `npx` through the `latest`
+dist-tag and never through the highest version number, so leaving it behind is
+how `npx @haven_ai/connect` came to install a build 34 releases old. The
+prerelease tag stays as well, so `@alpha` keeps resolving. The owner decision
+and the mechanism are recorded in
+[`docs/operations/agent-discovery-listings.md`](../../../docs/operations/agent-discovery-listings.md)
+§ *The `latest` dist-tag*.
+
+Also read the publish run's **per-package table** — since #1159 one package can
+fail without aborting the others, so a summary glance is not enough.
+
+**And read the SECOND job.** Since
+[#2647](https://github.com/d-hinders/Haven-AI/issues/2647) the `latest` move is
+its own `main`-only job, `promote-tags`, so a promotion can be **half green** —
+every package live under `alpha`, `latest` unmoved. If it is red: the versions
+ARE published, so the remedy is to re-run that one job, **never** to cut another
+version. The job names its own likely cause in its error output; the mechanism
+and why it had to be a separate job are in `.github/workflows/publish.yml`'s
+header comment, which is where they stay current.
 
 Report what published, and name anything that did not.
 

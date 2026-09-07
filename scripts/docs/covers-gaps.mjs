@@ -88,8 +88,20 @@
 //   - **`status: archived` is an unguarded bypass.** Nothing constrains that
 //     value outside `docs/archive/` (`docs/operations/session-rail-vendor-ops.md`
 //     is a live precedent), so one word in a doc's front matter removes it and
-//     every gap it carries. Not silent: `departed()` names such docs and they
-//     are excluded from the shrink hint, so it is never reported as progress.
+//     every gap it carries. Not silent: `departed()` names any doc carrying
+//     that status outside the archive folders — baselined or not — and such
+//     docs are excluded from the shrink hint, so it is never reported as
+//     progress. An earlier version of this bullet read the BASELINE alone,
+//     which made the claim false for the 33 of 73 governed docs that have no
+//     baseline entry: for those the flip printed nothing at all.
+//   - **An over-broad `covers:` glob was the same bypass through a wider door,
+//     and it is now REFUSED** (`tooBroadCovers()`), not merely disclosed.
+//     `packages/**` + `scripts/**` + `.github/**` closes every gap a doc has
+//     or will ever have, and because closing gaps looks like progress the run
+//     reported "residue shrank" and invited an `--update` locking it in —
+//     strictly worse than the archived flip, which at least gets a line.
+//     Refusing was free: 0 of 73 governed docs declare one today, against 33
+//     that use some `**` glob. `packages/backend/**` stays legal.
 //   - **The governed set is THIS script's definition.** `validate-frontmatter.mjs`
 //     governs 97 docs and applies no status filter; the archived/research
 //     carve-out on `governedDocs()` below is ours, and is what makes it 73.
@@ -107,7 +119,14 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { REPO_ROOT, ROOT_DOCS, walk, parseFrontMatter, globToRegExp } from './validate-frontmatter.mjs'
 
-export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'docs', 'covers-gaps-baseline.json')
+// Overridable so the CLI's own guards can be tested against a throwaway file
+// (#2690 review): the `--update` rise refusal and the legacy-format error live
+// only in `main()`, and both survived mutation green because nothing invoked
+// it. A guard with no test is the defect this repo cares most about, and these
+// two were added BY a review that raised exactly that class.
+export const BASELINE_PATH =
+  process.env.HAVEN_COVERS_GAPS_BASELINE ??
+  join(REPO_ROOT, 'scripts', 'docs', 'covers-gaps-baseline.json')
 
 /** Extensions that make a path-like token a *code* path worth coupling to. */
 export const CODE_EXTENSIONS = [
@@ -124,8 +143,21 @@ export const CODE_EXTENSIONS = [
  * repo-relative path from the prefix onward. It IS anchored on the right by
  * `\b` after the extension, so `x402.tsx` is not read as `x402.ts`.
  */
+/**
+ * The three directory prefixes this check scans, as ONE definition.
+ *
+ * Used by the path regex below and by `tooBroadCovers()`. They were written
+ * out twice before and the second copy would have been the interesting one:
+ * a prefix added to the scan but not to the breadth guard is a new bypass
+ * that arrives silently. (#2625 spent a session on exactly that shape in the
+ * test harness — one schema name computed in two places, and the guard went
+ * quiet when they diverged.)
+ */
+export const SCAN_PREFIXES = ['packages/', 'scripts/', '.github/']
+
 export const PATH_TOKEN_RE = new RegExp(
-  `(?:packages|scripts|\\.github)/[A-Za-z0-9._/-]*\\.(?:${CODE_EXTENSIONS.join('|')})\\b`,
+  `(?:${SCAN_PREFIXES.map((p) => p.slice(0, -1).replace('.', '\\.')).join('|')})/` +
+    `[A-Za-z0-9._/-]*\\.(?:${CODE_EXTENSIONS.join('|')})\\b`,
   'g',
 )
 
@@ -197,6 +229,7 @@ export async function governedDocs(root = REPO_ROOT) {
   for (const r of ROOT_DOCS) files.push(r)
 
   const out = []
+  const dropped = []
   for (const rel of files.sort()) {
     const raw = await readFile(join(root, rel), 'utf8')
     const parsed = parseFrontMatter(raw)
@@ -204,10 +237,16 @@ export async function governedDocs(root = REPO_ROOT) {
     // the build on it, and reporting a bogus gap set on top of that is noise.
     if (!parsed.ok) continue
     const { status } = parsed.data
-    if (status === 'archived' || status === 'research') continue
+    // Recorded, not merely skipped (#2690 review): a doc that leaves the
+    // governed set has to be nameable even when it was never in the baseline,
+    // and 33 of the 73 governed docs are not.
+    if (status === 'archived' || status === 'research') {
+      dropped.push(rel)
+      continue
+    }
     out.push({ file: rel, raw, data: parsed.data })
   }
-  return out
+  return { governed: out, dropped }
 }
 
 /**
@@ -217,22 +256,39 @@ export async function governedDocs(root = REPO_ROOT) {
  */
 export async function scan(root = REPO_ROOT) {
   const tracked = trackedFiles(root)
-  const docs = await governedDocs(root)
+  const { governed: docs, dropped } = await governedDocs(root)
   const results = []
+  const tooBroad = []
   for (const doc of docs) {
+    const broad = tooBroadCovers(doc.data.covers)
+    if (broad.length > 0) tooBroad.push({ doc: doc.file, globs: broad })
     const gaps = uncovered(doc.raw, tracked, doc.data.covers)
     if (gaps.length > 0) results.push({ doc: doc.file, gaps, covers: doc.data.covers ?? [] })
   }
-  return { results, docCount: docs.length, governed: docs.map((d) => d.file) }
+  return {
+    results,
+    docCount: docs.length,
+    governed: docs.map((d) => d.file),
+    dropped,
+    tooBroad,
+  }
 }
 
 /**
  * `{ doc: [file, ...] }` from a scan — the baseline's shape.
  *
- * The gap FILES, sorted, duplicates kept (one doc can name the same file on
- * several lines, and each is its own claim). Line numbers are deliberately not
- * stored: moving a sentence is not a new claim, and a line-keyed baseline would
- * redden on every unrelated edit above it.
+ * The gap FILES, sorted. Line numbers are deliberately not stored: moving a
+ * sentence is not a new claim, and a line-keyed baseline would redden on every
+ * unrelated edit above it.
+ *
+ * In practice this is a SET, not a multiset: `namedFiles()` reports each file
+ * once, at its first mention, so a doc naming one file on three lines yields
+ * one entry. An earlier version of this comment claimed duplicates were kept
+ * because "each mention is its own claim" — that was a new false claim
+ * introduced while correcting another one, and the pipeline above discards
+ * exactly what it described. `surplus()` is still written multiset-safe, but
+ * as defensiveness against a future `namedFiles()` that reports every mention,
+ * not as a property this code has today.
  *
  * This was `{ doc: count }` until the review of #2690, and a count is not
  * enough. Gap identity was nowhere in the baseline, so a doc could CLOSE one
@@ -250,7 +306,35 @@ export function gapsByDoc(results) {
   )
 }
 
-/** Multiset difference `a - b`, so a file named twice needs two baseline slots. */
+/**
+ * `covers:` globs so broad they cover every path this check can extract.
+ *
+ * The second bypass, and strictly worse than `status: archived` (#2690
+ * review). Nothing constrains glob BREADTH, so adding `packages/**`,
+ * `scripts/**` and `.github/**` to a doc's `covers:` closes every gap it has
+ * or will ever have — and because closing gaps is what a shrink looks like,
+ * the run reported `exit 0`, "Residue shrank", and invited an `--update` that
+ * would lock the loss in. Reproduced with two brand-new false claims added in
+ * the same edit: both admitted, announced as a win.
+ *
+ * Refused rather than merely disclosed, because it is free: no governed doc
+ * declares one today (0 of 73, against 33 that use some `**` glob, so the
+ * measurement is not a broken instrument). `covers: packages/backend/**` stays
+ * perfectly legal — this catches only the bare scan prefixes, which are not a
+ * description of what a doc covers but an opt-out written as one.
+ */
+export function tooBroadCovers(covers) {
+  const bare = new Set(['**', '**/*', ...SCAN_PREFIXES.map((p) => `${p}**`)])
+  return (covers ?? []).map((c) => c.trim()).filter((c) => bare.has(c))
+}
+
+/**
+ * Multiset difference `a - b`.
+ *
+ * Multiset rather than set only so that a duplicate could never slip through
+ * if `namedFiles()` ever stopped deduping; today it dedupes, so no real input
+ * distinguishes the two. Do not read this as evidence that duplicates occur.
+ */
 function surplus(a, b) {
   const remaining = [...(b ?? [])]
   const extra = []
@@ -296,17 +380,36 @@ export function hasShrunk(current, baseline, governed) {
 }
 
 /**
- * Baselined docs that are no longer in the governed set — renamed, deleted, or
- * flipped to `status: archived`/`research`.
+ * Docs that are no longer in the governed set — renamed, deleted, or flipped
+ * to `status: archived`/`research`.
  *
  * Reported rather than silently forgiven: their gaps did not get fixed, they
  * stopped being looked at. Also clears the stale-entry nag, where a baseline
  * key for a deleted doc made the shrink hint print forever with nothing to
  * tighten.
+ *
+ * Takes `dropped` — the docs `governedDocs()` filtered out — as well as the
+ * baseline's keys, because the first version read the baseline ALONE and 33 of
+ * the 73 governed docs are not in it. For those, flipping `status: archived`
+ * printed nothing at all, so the disclosure saying the bypass "is not silent"
+ * was false for the larger half of the corpus (#2690 review). A doc that
+ * leaves is now named whether or not it ever had a baselined gap.
+ *
+ * `dropped` is narrowed to docs OUTSIDE `docs/archive/` and `docs/research/`.
+ * A doc living in those folders is archived by definition and always will be —
+ * naming all 24 of them on every clean run is noise, and a line printed
+ * unconditionally is a line nobody reads. What is left is exactly the anomaly:
+ * a doc carrying `status: archived` while sitting somewhere else, which is the
+ * bypass shape (`docs/operations/session-rail-vendor-ops.md` is the one
+ * standing instance). Baselined docs are still reported wherever they live,
+ * since a baselined doc leaving is a change by construction.
  */
-export function departed(baseline, governed) {
+export function departed(baseline, governed, dropped) {
   const stillGoverned = new Set(governed ?? [])
-  return Object.keys(baseline ?? {})
+  const unexpected = (dropped ?? []).filter(
+    (doc) => !doc.startsWith('docs/archive/') && !doc.startsWith('docs/research/'),
+  )
+  return [...new Set([...Object.keys(baseline ?? {}), ...unexpected])]
     .filter((doc) => !stillGoverned.has(doc))
     .sort()
 }
@@ -339,7 +442,7 @@ async function readBaseline() {
 async function main() {
   const update = process.argv.includes('--update')
   const list = process.argv.includes('--list')
-  const { results, docCount, governed } = await scan()
+  const { results, docCount, governed, dropped, tooBroad } = await scan()
   const current = gapsByDoc(results)
   const total = results.reduce((n, r) => n + r.gaps.length, 0)
 
@@ -390,6 +493,18 @@ async function main() {
     return
   }
 
+  if (tooBroad.length > 0) {
+    console.error('\u2717 A governed doc declares a `covers:` glob broad enough to cover everything:\n')
+    for (const t of tooBroad) console.error(`  ${t.doc} — ${t.globs.join(', ')}`)
+    console.error(
+      '\nThat is not a description of what the doc covers, it is an opt-out written as one:' +
+        ' it closes every gap the doc has or will ever have, and this check would report it as' +
+        ' RESIDUE SHRANK and invite an `--update` locking the loss in. Name the directories the' +
+        ' doc actually describes (`packages/backend/**` is fine), or delete the claims instead.\n',
+    )
+    process.exit(1)
+  }
+
   const failures = newGaps(current, baseline)
 
   if (failures.length > 0) {
@@ -424,7 +539,7 @@ async function main() {
     process.exit(1)
   }
 
-  const gone = departed(baseline, governed)
+  const gone = departed(baseline, governed, dropped)
   console.log(
     `✓ No new \`covers:\` gaps across ${docCount} governed doc(s) ` +
       `(${total} baselined pair(s) across ${results.length} doc(s) remain).` +
@@ -437,8 +552,9 @@ async function main() {
     // silent, and never counted as a shrink. Their gaps were not fixed; they
     // stopped being looked at.
     console.log(
-      `\n  ${gone.length} baselined doc(s) are no longer governed (renamed, deleted, or ` +
-        'flipped to `status: archived`/`research`). Their gaps are no longer checked:',
+      `\n  ${gone.length} doc(s) are outside the governed set (renamed, deleted, or ` +
+        'carrying `status: archived`/`research` outside the archive folders). ' +
+        'Their claims are no longer checked:',
     )
     for (const doc of gone) console.log(`    ${doc}`)
   }

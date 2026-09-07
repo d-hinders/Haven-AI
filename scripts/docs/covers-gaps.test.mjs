@@ -1,11 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   PATH_TOKEN_RE,
   blankFrontMatter,
   namedFiles,
   uncovered,
   departed,
+  SCAN_PREFIXES,
+  tooBroadCovers,
   gapsByDoc,
   newGaps,
   hasShrunk,
@@ -193,6 +199,16 @@ test('baseline: a doc leaving the governed set is NOT a shrink', () => {
   const baseline = { 'a.md': ['x'], 'gone.md': ['y'] }
   assert.equal(hasShrunk({ 'a.md': ['x'] }, baseline, ['a.md']), false)
   assert.deepEqual(departed(baseline, ['a.md']), ['gone.md'])
+  // And a doc that was NEVER baselined is still named when it leaves — 33 of
+  // the 73 governed docs have no baseline entry, and reading the baseline
+  // alone made the bypass completely silent for all of them.
+  assert.deepEqual(departed({}, [], ['docs/architecture/00-overview.md']), [
+    'docs/architecture/00-overview.md',
+  ])
+  // But the permanent archive is not "departed" — naming all 24 of those on
+  // every clean run is the noise that makes the line unreadable.
+  assert.deepEqual(departed({}, [], ['docs/archive/decision-log.md']), [])
+  assert.deepEqual(departed({}, [], ['docs/research/haven-cli.md']), [])
   // Still a shrink when the doc is governed and the gap genuinely went away.
   assert.equal(hasShrunk({}, baseline, ['a.md', 'gone.md']), true)
 })
@@ -212,4 +228,105 @@ test('lineOf and namedFiles agree on position', () => {
   assert.equal(lineOf('a\nb\nc', 4), 3)
   const raw = doc('owner: "@x"\nstatus: current', 'line one\nline two `scripts/docs/package-docs.mjs`')
   assert.equal(namedFiles(raw, TRACKED)[0].line, 7)
+})
+
+test('tooBroadCovers: bare scan prefixes are refused, real directories are not', () => {
+  // The second bypass (#2690 review): three globs close every gap a doc has or
+  // will ever have, and the run reports it as "residue shrank".
+  assert.deepEqual(tooBroadCovers(['packages/**', 'scripts/**', '.github/**']), [
+    'packages/**',
+    'scripts/**',
+    '.github/**',
+  ])
+  assert.deepEqual(tooBroadCovers(['**']), ['**'])
+  assert.deepEqual(tooBroadCovers(['**/*']), ['**/*'])
+  // A doc naming what it actually describes stays legal — the guard must not
+  // push authors away from declaring real coverage, which is remedy 1.
+  assert.deepEqual(tooBroadCovers(['packages/backend/**', 'scripts/docs/**']), [])
+  assert.deepEqual(tooBroadCovers([]), [])
+  assert.deepEqual(tooBroadCovers(undefined), [])
+  // Derived from SCAN_PREFIXES, not written out again: a prefix added to the
+  // scan but not to this guard would be a new bypass arriving silently.
+  assert.deepEqual(
+    tooBroadCovers(SCAN_PREFIXES.map((p) => `${p}**`)),
+    SCAN_PREFIXES.map((p) => `${p}**`),
+  )
+})
+
+// --- The CLI's own guards
+//
+// These two live only in `main()`, so the unit tests above cannot reach them —
+// and a review proved it: mutating each to `if (false)` left the suite 22/22
+// green and `docs:check` green, silently restoring the defect the guard was
+// added to close. Driven through the real CLI against a throwaway baseline
+// (`HAVEN_COVERS_GAPS_BASELINE`) rather than by re-implementing the decision,
+// because it is the WIRING that was untested, not the predicate.
+
+const CLI = new URL('./covers-gaps.mjs', import.meta.url).pathname
+
+function runCli(args, baselinePath) {
+  return spawnSync(process.execPath, [CLI, ...args], {
+    encoding: 'utf-8',
+    env: { ...process.env, HAVEN_COVERS_GAPS_BASELINE: baselinePath },
+  })
+}
+
+function withTempBaseline(contents, fn) {
+  const p = join(mkdtempSync(join(tmpdir(), 'covers-gaps-')), 'baseline.json')
+  writeFileSync(p, contents)
+  try {
+    return fn(p)
+  } finally {
+    rmSync(p, { force: true })
+  }
+}
+
+test('CLI: `--update` REFUSES a rise and leaves the baseline byte-unchanged', () => {
+  // An empty baseline means every real gap in the repo is "new", so this is a
+  // rise by construction and needs no doc mutation.
+  withTempBaseline('{}\n', (p) => {
+    const before = readFileSync(p, 'utf-8')
+    const res = runCli(['--update'], p)
+    assert.equal(res.status, 1)
+    assert.match(res.stderr, /would ACCEPT new gaps, not tighten the ratchet/)
+    assert.equal(readFileSync(p, 'utf-8'), before, 'baseline must not be written')
+  })
+})
+
+test('CLI: `--accept-new` is the override, and it writes', () => {
+  withTempBaseline('{}\n', (p) => {
+    const res = runCli(['--update', '--accept-new'], p)
+    assert.equal(res.status, 0)
+    assert.match(res.stdout, /baseline written/)
+    const written = JSON.parse(readFileSync(p, 'utf-8'))
+    assert.ok(Object.keys(written).length > 0)
+    // And what it wrote is the identity format, not a count.
+    assert.ok(Object.values(written).every((v) => Array.isArray(v)))
+  })
+})
+
+test('CLI: `--accept-new` WITHOUT `--update` is not a bypass', () => {
+  withTempBaseline('{}\n', (p) => {
+    const before = readFileSync(p, 'utf-8')
+    const res = runCli(['--accept-new'], p)
+    assert.equal(res.status, 1, 'a check run must still fail on new gaps')
+    assert.equal(readFileSync(p, 'utf-8'), before)
+  })
+})
+
+test('CLI: a legacy count-format baseline names the migration, not a TypeError', () => {
+  withTempBaseline('{\n  "CLAUDE.md": 3\n}\n', (p) => {
+    const res = runCli([], p)
+    assert.equal(res.status, 1)
+    const out = `${res.stdout}${res.stderr}`
+    assert.match(out, /old count-only format/)
+    assert.match(out, /--update --accept-new/)
+    // The failure this replaced. If it comes back, the sentence is gone.
+    assert.doesNotMatch(out, /is not iterable/)
+  })
+  // And the escape hatch works against a legacy file, which is the whole point
+  // of reading the baseline lazily under `--accept-new`.
+  withTempBaseline('{\n  "CLAUDE.md": 3\n}\n', (p) => {
+    assert.equal(runCli(['--update', '--accept-new'], p).status, 0)
+  })
 })

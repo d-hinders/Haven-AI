@@ -29,7 +29,8 @@
  * consumer (`GET /machine-payments/allowances` answers 410 on this rail).
  * What is left is exactly the three shared, rail-agnostic exports named above
  * — `getProvider`, `getRelayerWallet`, `getTokenBalance` — which is what
- * CLAUDE.md has claimed all along and what is now true. The module no longer
+ * `docs/archive/decision-log.md` records (moved out of CLAUDE.md by #2639) and
+ * what is now true. The module no longer
  * constructs the AllowanceModule contract at all, and
  * `contracts.allowanceModule` has been removed from the shared registry (#2260).
  *

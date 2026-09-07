@@ -161,3 +161,31 @@ describe('config wires the mainnet RPC through the warning (#2615)', () => {
     expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => /RPC_URL_BASE is not set/.test(m))).toHaveLength(0)
   })
 })
+
+/**
+ * The trim, pinned because it is a BEHAVIOUR CHANGE (#2615, found by review).
+ *
+ * `rpcUrlBase` used to resolve through `optionalEnv`, which is
+ * `process.env[k] || fallback` and never trims. Moving it onto `warnPublicRpc`
+ * changed two inputs, and the PR body originally claimed the only runtime
+ * effect was a log line — which was false. These tests make the change
+ * deliberate and guarded rather than incidental.
+ */
+describe('warnPublicRpc trims, and optionalEnv did not (#2615)', () => {
+  it('whitespace-only counts as UNSET — not as a literal whitespace RPC URL', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // optionalEnv would have returned '   ' here and built a provider from it.
+    expect(warnPublicBaseMainnetRpc('   ')).toBe('https://mainnet.base.org')
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it('a padded URL is trimmed and stays SILENT — the raw value is set', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // The dashboard paste artefact. optionalEnv kept the spaces.
+    expect(warnPublicBaseMainnetRpc('  https://base.provider.example/rpc  '))
+      .toBe('https://base.provider.example/rpc')
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})

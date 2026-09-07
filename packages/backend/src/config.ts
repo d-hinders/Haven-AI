@@ -86,10 +86,33 @@ export function parseTrustProxyHops(raw: string | undefined): number {
  * the only part that genuinely differs: on testnet a public-node outage costs
  * a red QA run, on mainnet it costs a paying user their payment.
  *
+ * ## It TRIMS, and `optionalEnv` did not (#2615, found by review)
+ *
+ * This is a real behaviour change on the mainnet path, so it is written down
+ * rather than left to be rediscovered. `optionalEnv` is `process.env[k] ||
+ * fallback` — no trimming, ever. Two inputs therefore resolve differently than
+ * they did before `rpcUrlBase` moved onto this function:
+ *
+ * - `"   "` (whitespace only) used to resolve to that literal whitespace
+ *   string; it now counts as UNSET — public endpoint, with the warning.
+ * - `"  https://provider.example/rpc  "` used to keep its padding; it is now
+ *   trimmed, and stays silent because the raw value is set.
+ *
+ * Both are kept deliberately. A padded URL is a dashboard paste artefact and
+ * trimming it makes a correctly-intended configuration work instead of
+ * constructing a provider from a string with spaces in it. Whitespace-only is
+ * the same case `parseConnectorChannel` below already decides the same way:
+ * "the operator cleared it" must land on the same signal as "never
+ * configured", not on a third state. Sepolia has behaved this way since #2511;
+ * this makes mainnet agree with it rather than with `optionalEnv`.
+ *
+ * The edge cases are pinned by tests, so the change stays deliberate.
+ *
  * What it deliberately does NOT do is refuse to boot. Whether a missing
  * mainnet RPC should be fail-closed the way `DELEGATION_RAIL_BUNDLER_URL` is
- * (`rails/delegation-rail.ts`) is an OWNER decision, open on #2615 item 3, and
- * taking it silently inside a warning change is exactly what that item forbids.
+ * (`rails/delegation-rail.ts`) is an OWNER decision — answered on #2615 item 3
+ * on 2026-09-07 as FAIL-OPEN, and taking it silently inside a warning change
+ * is exactly what that item forbade.
  */
 export function warnPublicRpc(input: {
   envVar: string

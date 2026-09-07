@@ -12,8 +12,8 @@ first. It exists so [`CLAUDE.md`](../../CLAUDE.md) can state the rule and this
 file can carry the chain of issue numbers, superseded owner decisions and
 retirement closures behind it. When that file was cut down to an operating
 manual (#2639), its history moved here rather than being deleted — with two
-deliberate exceptions, named under *Judged obsolete rather than relocated*
-below.
+deliberate exceptions — three, after review — named under *Judged obsolete
+rather than relocated* below.
 
 Read this for *why a rule is what it is*, or to find a paragraph by issue
 number. Read `CLAUDE.md` for what the rule **is** today: where the two differ,
@@ -316,8 +316,8 @@ Reference for the retired rail:
 
 ## Judged obsolete rather than relocated (#2639)
 
-Two passages of the pre-#2639 `CLAUDE.md` were **not** carried into either file,
-recorded here so the omission is a decision rather than an accident.
+Three passages of the pre-#2639 `CLAUDE.md` were **not** carried into either
+file, recorded here so each omission is a decision rather than an accident.
 
 1. *"Legacy AllowanceModule records remain readable only; Haven offers no
    re-onboard, pause/resume, re-key, or revoke controls for them. Owners manage
@@ -327,7 +327,14 @@ recorded here so the omission is a decision rather than an accident.
    controls Haven declines to offer for them describes a screen that does not
    exist. The surviving half — an EOA owner manages their Safe at Safe's own
    interfaces — is stated under #1440 above.
-2. The `private: true` workspace-pin rationale in full (the `mcp-server`
+2. The `## Architecture — Five Components` section — the component diagram, the
+   *Haven Control Layer* responsibility list and the *Protocol Adapters* list.
+   An operating manual states the live architecture, which the delegation-rail
+   paragraph does; the component model and its trust boundaries are maintained
+   in [`docs/architecture/01-system-context.md`](../architecture/01-system-context.md),
+   which `CLAUDE.md` now links. Named here because haven-reviewer found it
+   dropped rather than declared, which is a different thing from dropped.
+3. The `private: true` workspace-pin rationale in full (the `mcp-server`
    misclassification narrative and the npm-version-dependent `npm ci`
    mechanism). The rule and its dividing line are in `CLAUDE.md`; the full
    reasoning is in [`scripts/README.md`](../../scripts/README.md), which

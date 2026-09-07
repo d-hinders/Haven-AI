@@ -22,10 +22,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * swapping the two tests in place, which fails identically every run.
  *
  * `vi.resetModules()` + a per-test dynamic import gives each test its own module
- * instance and therefore its own empty cache. The first test below is the
- * POSITIVE CONTROL for that reset: it proves the cache is real (a second call
- * does NOT re-fetch) and the reset works (the next test fetches again), so a
- * reset that silently stopped resetting would redden rather than pass quietly.
+ * instance and therefore its own empty cache.
+ *
+ * The two tests below are a POSITIVE CONTROL **PAIR**, and it is the pair that
+ * does the work — a review finding on this change, worth keeping as a comment
+ * because the obvious reading is wrong. The FIRST one cannot detect a broken
+ * reset on its own: it runs first in file order, so nothing precedes it to have
+ * warmed the cache, and it passes even when the reset is a complete no-op. What
+ * it establishes is that there is something to reset at all (two reads, ONE
+ * network call). The SECOND is the one that catches a hollowed-out reset,
+ * because it can only see a cold cache if the previous test's entry was
+ * actually dropped. Neither half is sufficient; read them together.
  */
 
 function jsonResponse(body: unknown): Response {
@@ -44,7 +51,7 @@ beforeEach(() => vi.resetModules())
 afterEach(() => vi.restoreAllMocks())
 
 describe('the per-test cache reset itself (#2620)', () => {
-  it('POSITIVE CONTROL: the cache is real within a test, and empty at the start of one', async () => {
+  it('CONTROL 1 of 2: the cache is real — so there is something for the reset to do', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(GOOD))
     const { getTokenPrice } = await freshPrices()
 
@@ -55,7 +62,8 @@ describe('the per-test cache reset itself (#2620)', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('and the next test starts cold — the previous test\'s entry did not survive', async () => {
+  // This is the half that fails on a broken reset. Control 1 does not.
+  it('CONTROL 2 of 2: the next test starts cold — the previous entry did not survive', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(GOOD))
     const { getTokenPrice } = await freshPrices()
 

@@ -24,7 +24,7 @@
  * STRUCTURAL guard (`src/__tests__/focus-ring.test.ts`, which reads class
  * strings out of source) and by nothing rendered. A ring that compiles to the
  * wrong colour, is occluded, or sits behind an overlay passed every gate we
- * had — and `AgentCard`'s Revoke and `Sidebar`'s Log out are among the covered
+ * had — and `Sidebar`'s Log out is among the covered
  * controls, so the WCAG 2.4.7 failure being guarded lands on destructive
  * actions rather than cosmetic ones.
  *
@@ -36,8 +36,8 @@
  * controls focused" cannot be built at all. N indicators need N drives no
  * matter what. The real lever is how wide each capture is, and this file takes
  * the tight one, following #1811/#1820's scoped-region precedent: the 176x118
- * popover, and the 438x41 card action row. A ring recoloured on Revoke reddens
- * `…-revoke-…` and nothing else.
+ * popover, and the 438x41 card action row. A ring recoloured on Remove reddens
+ * `…-remove-delegation-…` and nothing else.
  *
  * **One Playwright `test()` per control is load-bearing, not tidiness.** Six
  * `toHaveScreenshot` calls in one test would short-circuit at the first
@@ -57,7 +57,7 @@
  * seven `aria-label`s in `AgentCard.tsx`).
  *
  *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
- *   AgentCard action row    Edit · Pause (Revoke, until #2258)    3/7  captured
+ *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured  (as #1863 measured it)
  *
  * `AgentCard`'s footer NEVER renders all seven at once — `isOperational`,
  * `isRevoked` and `isArchived` are mutually exclusive, and `canUseWalletActions`
@@ -127,7 +127,7 @@
  * asserts the row's FULL control set before it captures (`expectRowControls`).
  * `status: 'paused'` reaching the API mock proves nothing about which of
  * `AgentCard`'s five footer branches ran; "this row holds exactly Edit, Resume
- * from pause, Revoke" does. It is also what turns a future branch edit into a
+ * from pause, Remove" does. It is also what turns a future branch edit into a
  * named failure instead of a silently re-pointed baseline.
  *
  * ── Tab traversal, and why the count is never hard-coded ─────────────────────

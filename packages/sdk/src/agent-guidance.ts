@@ -211,7 +211,7 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 **At funding** (step 2):
 
-> Your Haven account needs USDC before I can pay for anything — USDC only, no ETH: Haven sponsors the gas. Before you send anything, let me get you the exact address **and network** — \`haven wallets funding\` prints both, and the dashboard shows the same. Please do not send to an address or a chain I have not confirmed with you; a small amount first is fine.
+> Your Haven account needs USDC before I can pay for anything — USDC only, no ETH: Haven sponsors the gas. Before you send anything, let me get you the exact address **and network** — \`haven wallets funding\` prints both, and the funding card on \`<host>/dashboard\` shows the same. Please do not send to an address or a chain I have not confirmed with you; a small amount first is fine.
 
 **At the budget** (step 3):
 

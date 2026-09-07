@@ -110,6 +110,7 @@ haven wallets funding [--safe <id|address>] [--wait]   # the paste-ready funding
 haven agents list
 haven agents show <id>
 haven budget show <agentId>
+haven budget show <agentId> --hashes
 haven activity list [--safe <id|address>] [--agent <id>] [--direction in|out] [--limit <n>] [--offset <n>]
 haven activity export [same filters] > activity.csv
 haven activity export --format sie [--from <ISO>] [--to <ISO>] [--company <name>] > books.si
@@ -154,7 +155,9 @@ never calls `activate` — that is the whole design.
   open budget); `--expires` takes unix seconds (default: 90 days).
 - `budget revoke <agentId> <delegationHash>` prepares the sponsored
   revocation (no gas, one signature). The hash comes from
-  `haven agents show` or the dashboard.
+  `haven budget show <agentId> --hashes` or the dashboard. (`agents show` does
+  NOT print hashes — it renders the allowances projection, which has no hash
+  field. #2612.)
 - `--wait` on either command polls until the human's signature lands (grant:
   the hash turns `active`; revoke: the row turns `revoked`), 5 s interval, 15
   minute ceiling. The build is idempotent for the same parameters while it is

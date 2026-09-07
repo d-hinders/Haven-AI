@@ -11,6 +11,14 @@ export interface ParsedArgs {
     run: boolean
     /** #2527: poll `agents connect --status` until it settles. */
     wait: boolean
+    /**
+     * #2612: list the delegation HASHES on `budget show`, which is the only
+     * thing `budget revoke` accepts as its second argument. Behind a flag
+     * because `budget show --json` has emitted a bare allowances array since
+     * the first CLI scaffold, and a second shape on the same command would
+     * break every existing consumer of it.
+     */
+    hashes: boolean
     version: boolean
     yes: boolean
     api?: string
@@ -78,7 +86,7 @@ const VALUE_FLAGS = new Set([
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = []
   const flags: ParsedArgs['flags'] = {
-    json: false, help: false, version: false, yes: false, noWait: false, run: false, wait: false,
+    json: false, help: false, version: false, yes: false, noWait: false, run: false, wait: false, hashes: false,
   }
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -90,6 +98,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === '--no-wait') flags.noWait = true
     else if (arg === '--run') flags.run = true
     else if (arg === '--wait') flags.wait = true
+    else if (arg === '--hashes') flags.hashes = true
     else if (VALUE_FLAGS.has(arg)) {
       const value = argv[++i]
       if (value === undefined || value.startsWith('--')) {
@@ -173,6 +182,8 @@ export function helpText(): string {
     '  agents list             List your agents',
     '  agents show <id>        Show one agent + its budget',
     '  budget show <agentId>   Show an agent\'s configured budget',
+    '  budget show <agentId> --hashes   Its delegation hashes — the second',
+    '                          argument `budget revoke` takes, printed nowhere else',
     '  activity list [--safe <id|address>] [--agent <id>] [--direction in|out] [--limit <n>] [--offset <n>]',
     '  activity export [filters]   Emit CSV to stdout (--format csv, default)',
     '  activity export --format sie [--from <ISO>] [--to <ISO>] [--company <name>]',

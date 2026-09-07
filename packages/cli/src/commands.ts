@@ -550,10 +550,41 @@ async function cmdAgentsShow(args: ParsedArgs, d: ResolvedDeps): Promise<number>
   return EXIT.ok
 }
 
+/**
+ * The one command that prints a delegation hash (#2612).
+ *
+ * `budget revoke` takes a hash as its second argument, and until this existed
+ * NO `haven` command printed one — while the README and the revoke usage error
+ * both said `haven agents show` did. It does not: that response carries the
+ * allowances projection and has no hash field at all. Both now point here, and
+ * a test asserts this literal appears in the README AND that running it emits
+ * a hash, so the instruction and the output cannot drift apart again.
+ */
+export const HASH_DISCOVERY_HINT = 'haven budget show <agentId> --hashes'
+
 async function cmdBudgetShow(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const id = args.positionals[0]
-  if (!id) throw new UsageError('Usage: haven budget show <agentId>')
+  if (!id) throw new UsageError('Usage: haven budget show <agentId> [--hashes]')
   const { api } = await authed(args, d)
+
+  // #2612: a DIFFERENT read, deliberately behind a flag. The hashes live on
+  // GET /agents/:id/delegations, not on the agent's allowances projection, and
+  // `budget show --json` has emitted a bare allowances array since the first
+  // CLI scaffold — adding a second shape to that array would break every
+  // existing consumer of it.
+  if (args.flags.hashes) {
+    const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
+    emit(d, args.flags.json, delegations, () =>
+      delegations.length === 0
+        ? `No delegations on agent ${id}.`
+        : table(
+            ['DELEGATION HASH', 'STATUS', 'VERSION'],
+            delegations.map((r) => [r.delegation_hash, r.status, String(r.version)]),
+          ),
+    )
+    return EXIT.ok
+  }
+
   const agent = await api.get<Agent>(`/agents/${id}`)
   const allowances = agent.allowances ?? []
   emit(d, args.flags.json, allowances, () =>
@@ -722,7 +753,7 @@ async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
   const [id, hash] = args.positionals
   if (!id || !hash) throw new UsageError('Usage: haven budget revoke <agentId> <delegationHash> [--wait]')
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-    throw new UsageError('The delegation hash must be 0x followed by 64 hex characters — `haven agents show` or the dashboard lists them.')
+    throw new UsageError(`The delegation hash must be 0x followed by 64 hex characters — \`${HASH_DISCOVERY_HINT}\` lists them, or the dashboard.`)
   }
 
   const { api } = await authed(args, d)

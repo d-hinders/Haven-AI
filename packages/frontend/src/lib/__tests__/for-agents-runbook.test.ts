@@ -111,14 +111,25 @@ describe('/for-agents.md (#2523)', () => {
     // flag-by-flag reference and the refusal shapes (CLI README's job, same
     // split #2527 recorded).
     //
-    // 9900 -> 10100 for #2617 (the page is 9951 bytes at this commit). Step 1
-    // told an agent to run a bare `npx @haven_ai/cli`, which resolves to the
-    // `latest` dist-tag — whatever that happens to be, deployment by
-    // deployment — while the connector command was already tagged. The ~166
-    // bytes name the channel (`@<channel>`, the connector's own placeholder)
-    // and say where the tag comes from: `/.well-known/haven.json`
-    // (`packages.cli.channel`), never a tag the agent picks. Deliberately NOT
-    // added: restating the manifest's other fields, which are one fetch away.
+    // #2619 moved the page to 9810 bytes (the "At funding" script names the
+    // funding card's page, `<host>/dashboard`, instead of "the dashboard") —
+    // under the ceiling, so the bound is unchanged.
+    //
+    // 9900 -> 10100 for #2617 (the page is 9976 bytes at this commit, on top
+    // of #2619's rewording). Step 1 told an agent to run a bare
+    // `npx @haven_ai/cli`, which resolves to the `latest` dist-tag — whatever
+    // that happens to be, deployment by deployment — while the connector
+    // command was already tagged. The ~166 bytes name the channel
+    // (`@<channel>`, the connector's own placeholder) and say where the tag
+    // comes from: `/.well-known/haven.json` (`packages.cli.channel`), never a
+    // tag the agent picks. Deliberately NOT added: restating the manifest's
+    // other fields, which are one fetch away.
+    //
+    // Deliberately NOT added, and the reason the number is not higher: the
+    // well-known manifest's own shape. The page says to read the chain from
+    // the command; enumerating `environment` and `chains.deployable` here
+    // would duplicate a JSON document that is one fetch away and would go
+    // stale the first time its shape changed.
     expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10100)
   })
 

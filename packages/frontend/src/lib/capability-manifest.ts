@@ -7,6 +7,8 @@
  * answers.
  */
 
+import { CHAIN_REGISTRY, getChainData, resolveToken } from '@haven_ai/core'
+
 /**
  * Bumped when a key is REMOVED or changes meaning. Adding a key is not a
  * breaking change, which is what lets the omissions below land later without
@@ -48,6 +50,29 @@ export interface DiscoveryFacts {
   chains: { deployable: number[]; supported: readonly number[] }
 }
 
+/**
+ * One supported chain as the manifest reports it (#2619).
+ *
+ * The runbook forbids the agent from assuming which chain it is on, and the
+ * bare-id array it used to read made every agent guess anyway. Each entry now
+ * carries the facts, read from `@haven_ai/core`'s CHAIN_REGISTRY — the same
+ * source the backend's own chain configuration derives from, so the manifest
+ * and the deployment cannot disagree.
+ */
+export interface ManifestChainEntry {
+  /**
+   * The bare chain id, FIRST. Compatibility decision: `supported` used to be
+   * `number[]`, and every bare-id reader keeps working — bare ids remain
+   * derivable as `supported.map((c) => c.id)`, and adding fields to an entry
+   * is not a breaking change (MANIFEST_SCHEMA_VERSION bumps only on removals).
+   */
+  id: number
+  name: string
+  explorer_url: string
+  /** The chain's USDC-family token contract (USDC, or USDC.e on Gnosis). */
+  usdc_address: string
+}
+
 export interface CapabilityManifest {
   schema_version: number
   name: string
@@ -57,7 +82,9 @@ export interface CapabilityManifest {
   api: { base: string | null; openapi: string | null; root: string | null }
   hosted_mcp: { url: string | null; note?: string; auth: string; signer: string }
   packages: Record<string, { name: string; channel?: string; one_liner?: string }>
-  chains: DiscoveryFacts['chains'] | null
+  chains: { deployable: number[]; supported: readonly ManifestChainEntry[] } | null
+  /** How an agent tags a hand-off link it drove, so the funnel can measure it. */
+  attribution: { query: string; purpose: string }
   docs: Record<string, string>
   environment: string
 }
@@ -68,6 +95,32 @@ export interface CapabilityManifest {
  * this epic is that the human keeps every signature.
  */
 export const HUMAN_ONLY_STEPS = ['signup_and_passkey', 'fund', 'approve_budget'] as const
+
+/**
+ * The chain entries the manifest serves (#2619).
+ *
+ * ALL chain facts come from `@haven_ai/core`'s CHAIN_REGISTRY — no chain
+ * literals here, so the manifest can never name a chain, explorer or token
+ * address the registry does not. The USDC address is the chain's USDC-family
+ * token from the registry: USDC on the Base chains, USDC.e (bridged) on
+ * Gnosis.
+ *
+ * Returns null if the chain is not in the registry — the static `deployable`
+ * half still reports the id, and a null is an honest answer rather than a
+ * guessed fact.
+ */
+function manifestChainEntry(chainId: number): ManifestChainEntry | null {
+  if (!(chainId in CHAIN_REGISTRY)) return null
+  const chain = getChainData(chainId)
+  const usdc = resolveToken(chainId, 'USDC') ?? resolveToken(chainId, 'USDC.e')
+  if (!usdc?.address) return null
+  return {
+    id: chainId,
+    name: chain.name,
+    explorer_url: chain.explorerUrl,
+    usdc_address: usdc.address,
+  }
+}
 
 /**
  * Own-origin fields are RELATIVE PATHS, not absolute URLs (#2531, review round).
@@ -99,7 +152,10 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
     human_only_steps: HUMAN_ONLY_STEPS,
     // #2526 landed: the page where a human approves a CLI session an agent
     // asked for. The one step in the whole flow an agent cannot do for itself.
-    dashboard: { signup: '/signup', login: '/login', device_approval: '/device' },
+    // #2619: the funding card lives on /dashboard (DashboardClient renders it
+    // there), so an agent can name the page instead of sending the human to a
+    // root it must then navigate.
+    dashboard: { signup: '/signup', login: '/login', device_approval: '/device', funding: '/dashboard' },
     api: {
       // Absolute: a different origin, and read from configuration — never from
       // a request header. Null when the backend could not be reached, which is
@@ -129,7 +185,24 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
       mcp: { name: '@haven_ai/mcp' },
       signer: { name: '@haven_ai/signer' },
     },
-    chains: facts?.chains ?? null,
+    // #2619: the runbook forbids the agent from assuming which chain it is on,
+    // so the manifest carries the facts rather than bare ids. `deployable`
+    // stays a bare-id array (the static half every served artifact quotes);
+    // `supported` carries id first, so bare ids remain derivable. Unknown ids
+    // are dropped rather than guessed — an entry naming facts we cannot source
+    // is worse than a shorter list.
+    chains: facts
+      ? {
+          deployable: facts.chains.deployable,
+          supported: facts.chains.supported
+            .map((id) => manifestChainEntry(id))
+            .filter((entry): entry is ManifestChainEntry => entry !== null),
+        }
+      : null,
+    // #2619: `via=agent` was documented in the runbook's scripts but not in the
+    // data an agent's code reads. The marker is the hand-off link shape from
+    // #2522, measured via the `handoff_via` funnel key.
+    attribution: { query: 'via=agent', purpose: 'tells Haven an agent drove this step' },
     docs: {
       // #2523 landed: the runbook written for the agent rather than the owner,
       // and the first thing it should read.

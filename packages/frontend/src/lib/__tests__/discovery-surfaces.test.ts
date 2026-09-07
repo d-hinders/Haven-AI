@@ -264,6 +264,28 @@ describe('the hooks are actually wired into the app', () => {
     ).toBeGreaterThan(0)
   })
 
+  it("the 402 surfaces route a new owner through the runbook's signup link (#2619)", () => {
+    // 402.md step 1 and both links in 402/index.html used to point at /?src=402
+    // — the landing page — while the runbook's "Before signup" script sends the
+    // human to /signup?next=/agents&via=agent. Two Haven-authored documents
+    // disagreeing on where a new user starts means the agent composes the link
+    // itself, which is where attribution and the funnel fall off. This link is
+    // the runbook's shape plus the 402 attribution slug; the attribution rule
+    // (docs/operations/agent-discovery-listings.md) allows ?src= alongside
+    // via=agent.
+    const SIGNUP_402 = '/signup?next=/agents&via=agent&src=402'
+    const md = read('public/402.md')
+    const html = read('public/402/index.html')
+    expect(md).toContain(SIGNUP_402)
+    expect(html).toContain(SIGNUP_402)
+    // The old bare link is GONE, not just joined by the new one — the two
+    // documents must agree, not accumulate options.
+    expect(md).not.toContain('/?src=402')
+    expect(html).not.toContain('/?src=402')
+    // The HTML carries the signup link twice: the step-1 sentence and the CTA.
+    expect(html.split(SIGNUP_402).length - 1).toBe(2)
+  })
+
   it('the landing page carries the agent sentence in server-rendered content', () => {
     const page = read('src/app/page.tsx')
     expect(page).not.toContain("'use client'")

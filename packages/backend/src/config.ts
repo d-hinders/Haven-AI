@@ -58,35 +58,85 @@ export function parseTrustProxyHops(raw: string | undefined): number {
 }
 
 /**
- * Boot warning for the public Base Sepolia RPC default (#2511).
+ * Boot warning for a public RPC default (#2511 for Base Sepolia, generalised
+ * per-chain by #2615).
  *
- * When `RPC_URL_BASE_SEPOLIA` is unset (or empty — `optionalEnv` semantics:
- * Railway can store an empty string, and "the operator cleared it" must land
- * on the same signal as "never configured"), this process is writing on-chain
- * legs through the SHARED public endpoint, so a provider-side outage there
- * surfaces as qa-dev failures (502s whose body carries
- * `URL: https://sepolia.base.org`) even though no Haven code changed — the
- * exact shape run 33796886018 produced, eight times. Logging ONCE at boot
- * makes the default distinguishable from a configured value in the logs, the
- * same way `parseTrustProxyHops` refuses to disarm silently.
+ * When the variable is unset — or empty; Railway can store an empty string,
+ * and "the operator cleared it" must land on the same signal as "never
+ * configured" — this process writes on-chain legs through a SHARED public
+ * endpoint, so a provider-side outage there surfaces as Haven failures even
+ * though no Haven code changed. Logging ONCE at boot makes the default
+ * distinguishable from a configured value in the logs, the same way
+ * `parseTrustProxyHops` refuses to disarm silently.
  *
- * Branches on the RAW value, not the resolved one: a variable that is SET is
- * a deliberate configuration even when it names the same public endpoint, and
- * must stay silent (the issue's criterion — "silent when the variable is
- * set"). This function also owns the resolution, replacing the plain
- * `optionalEnv` call, so the default literal exists in exactly one place.
+ * Branches on the RAW value, not the resolved one: a variable that is SET is a
+ * deliberate configuration even when it names the same public endpoint, and
+ * must stay silent. This function also owns the resolution, replacing the
+ * plain `optionalEnv` call, so each default literal exists in exactly one
+ * place.
+ *
+ * ## Why this is one function and not two (#2615)
+ *
+ * #2511 shipped this shape for Base Sepolia alone. Base MAINNET — the chain
+ * that moves real user funds — kept a bare `optionalEnv` and fell through to
+ * the public node with no signal of any kind, which is how production ran on
+ * it unnoticed. The obvious fix is a second near-identical function; this repo
+ * has paid for that kind of second copy repeatedly, so the parameterised form
+ * is the fix instead. `consequence` is the only per-chain prose, because it is
+ * the only part that genuinely differs: on testnet a public-node outage costs
+ * a red QA run, on mainnet it costs a paying user their payment.
+ *
+ * What it deliberately does NOT do is refuse to boot. Whether a missing
+ * mainnet RPC should be fail-closed the way `DELEGATION_RAIL_BUNDLER_URL` is
+ * (`rails/delegation-rail.ts`) is an OWNER decision, open on #2615 item 3, and
+ * taking it silently inside a warning change is exactly what that item forbids.
  */
-export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
-  const resolved = raw?.trim() || 'https://sepolia.base.org'
-  if (raw?.trim()) return resolved
+export function warnPublicRpc(input: {
+  envVar: string
+  publicUrl: string
+  raw: string | undefined
+  consequence: string
+}): string {
+  const resolved = input.raw?.trim() || input.publicUrl
+  if (input.raw?.trim()) return resolved
   // eslint-disable-next-line no-console
   console.warn(
-    'RPC_URL_BASE_SEPOLIA is not set — using the PUBLIC endpoint https://sepolia.base.org. ' +
-    'When that shared endpoint has an outage, qa-dev fails on it (502 bodies carrying ' +
-    '`URL: https://sepolia.base.org`) instead of on a Haven defect. Set RPC_URL_BASE_SEPOLIA ' +
-    'to a dedicated provider endpoint to decouple this deployment from those outages.',
+    `${input.envVar} is not set — using the PUBLIC endpoint ${input.publicUrl}. ` +
+    `${input.consequence} Set ${input.envVar} to a dedicated provider endpoint to ` +
+    'decouple this deployment from those outages.',
   )
   return resolved
+}
+
+/** #2511, kept as a named call site so the Sepolia consequence has one home. */
+export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
+  return warnPublicRpc({
+    envVar: 'RPC_URL_BASE_SEPOLIA',
+    publicUrl: 'https://sepolia.base.org',
+    raw,
+    consequence:
+      'When that shared endpoint has an outage, qa-dev fails on it (502 bodies carrying ' +
+      '`URL: https://sepolia.base.org`) instead of on a Haven defect.',
+  })
+}
+
+/**
+ * #2615: the same signal for Base MAINNET, where the consequence is not a red
+ * CI job. Production has no money-flow harness pointed at it, so a degraded
+ * public node surfaces first as a user complaint — a 502 to a paying agent, a
+ * counterfactual deploy failing in `ensureHybridDeployed`, or a budget read
+ * falling back to the optimistic full budget on real money.
+ */
+export function warnPublicBaseMainnetRpc(raw: string | undefined): string {
+  return warnPublicRpc({
+    envVar: 'RPC_URL_BASE',
+    publicUrl: 'https://mainnet.base.org',
+    raw,
+    consequence:
+      'This is the node every Base MAINNET settlement, account deploy and caveat-enforcer read ' +
+      'goes through, and production has no money-flow harness watching it — a degraded shared ' +
+      'node surfaces as a paying user\'s failed payment, not as a red workflow.',
+  })
 }
 
 /**
@@ -196,7 +246,7 @@ export const config = {
   opsToken: process.env.HAVEN_OPS_TOKEN ?? '',
 
   // Chain-specific RPC URLs
-  rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
+  rpcUrlBase: warnPublicBaseMainnetRpc(process.env.RPC_URL_BASE),
   rpcUrlBaseSepolia: warnPublicBaseSepoliaRpc(process.env.RPC_URL_BASE_SEPOLIA),
 
   // Optional (features degrade gracefully without these)

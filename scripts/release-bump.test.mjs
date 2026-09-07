@@ -1653,7 +1653,7 @@ test('#2536: a registry read that fails must not stop the tag move', async () =>
   // `npm view` failure must never fail a publish that succeeded.
   //
   // Why this test is at the unit level and not through the publish loop: the
-  // loop calls `promote_latest` inside an `if`, and bash suppresses `errexit`
+  // loop calls `record_latest_promotion` inside an `if`, and bash suppresses `errexit`
   // for a function invoked as a condition — so a failing read is invisible
   // there whatever the code does. Called directly, as here, `errexit` applies,
   // which is the context that can actually punish a missing `|| echo unknown`.

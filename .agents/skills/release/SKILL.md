@@ -233,10 +233,33 @@ A green workflow is not proof that five packages published. Verify both ends:
 for p in sdk signer mcp connect cli; do npm view @haven_ai/$p dist-tags --json; done
 ```
 
-Every package must show the new version on `alpha`, and `latest` must be
-unchanged for a prerelease. Also read the publish run's **per-package table** —
-since #1159 one package can fail without aborting the others, so a summary
-glance is not enough.
+Every package must show the new version on **both** `alpha` and `latest`.
+
+**`latest` moving onto a prerelease is correct, and this line used to say the
+opposite.** It read "`latest` must be unchanged for a prerelease", which was
+true until [#2536](https://github.com/d-hinders/Haven-AI/issues/2536) and has
+been wrong since: npm resolves a bare `npm install` / `npx` through the `latest`
+dist-tag and never through the highest version number, so leaving it behind is
+how `npx @haven_ai/connect` came to install a build 34 releases old. The
+prerelease tag stays as well, so `@alpha` keeps resolving. The owner decision
+and the mechanism are recorded in
+[`docs/operations/agent-discovery-listings.md`](../../../docs/operations/agent-discovery-listings.md)
+§ *The `latest` dist-tag*.
+
+Also read the publish run's **per-package table** — since #1159 one package can
+fail without aborting the others, so a summary glance is not enough.
+
+**And read the SECOND job.** Since
+[#2647](https://github.com/d-hinders/Haven-AI/issues/2647) the `latest` move is
+`promote-tags`, not a step of the publish: npm Trusted Publishing authorises
+`npm publish` and nothing else, so the tag move needs its own credential and its
+own `main`-only job. A promotion can therefore be **half green** — every package
+live under `alpha`, `latest` unmoved — which is exactly what the 0.1.35-alpha.0
+release did before the split, failing all five tag moves with E401. If
+`promote-tags` is red: the versions ARE published, so the remedy is to repair
+the credential and re-run that one job, **never** to cut another version. The
+usual cause is its npm token, which expires 2026-12-06 (npm caps write-enabled
+granular tokens at 90 days).
 
 Report what published, and name anything that did not.
 

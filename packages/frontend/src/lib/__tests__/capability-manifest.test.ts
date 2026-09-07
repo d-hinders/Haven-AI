@@ -25,6 +25,7 @@ const ORIGIN = 'https://preview.test'
 const FACTS: DiscoveryFacts = {
   hosted_mcp_url: 'https://mcp.test',
   connector_package: '@haven_ai/connect@dev',
+  cli_package: '@haven_ai/cli@dev',
   openapi_url: 'https://api.test/openapi.json',
   chains: { deployable: [84532], supported: [8453, 84532, 100] },
 }
@@ -138,6 +139,12 @@ describe('capability manifest', () => {
     const manifest = buildManifestFrom(ORIGIN, FACTS)
     expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
     expect(manifest.packages.connect.one_liner).toBe('npx @haven_ai/connect@dev')
+    // #2617: the CLI mirrors the connector's channel shape — the runbook and
+    // this manifest name a channel the deployment actually serves, so a bare
+    // `npx @haven_ai/cli` (which resolves to `latest`) is never what an agent
+    // following either surface runs.
+    expect(manifest.packages.cli.channel).toBe('@haven_ai/cli@dev')
+    expect(manifest.packages.cli.one_liner).toBe('npx @haven_ai/cli@dev')
     expect(manifest.hosted_mcp.url).toBe('https://mcp.test')
     expect(manifest.chains).toEqual(FACTS.chains)
     expect(manifest.api.openapi).toBe('https://api.test/openapi.json')
@@ -186,6 +193,8 @@ describe('capability manifest', () => {
     expect(manifest.hosted_mcp.url).toBeNull()
     expect(manifest.chains).toBeNull()
     expect(manifest.packages.connect).not.toHaveProperty('channel')
+    expect(manifest.packages.cli).not.toHaveProperty('channel')
+    expect(manifest.packages.cli).not.toHaveProperty('one_liner')
     expect(manifest.dashboard.signup).toBe('/signup')
     expect(manifest.docs.llms).toBe('/llms.txt')
   })

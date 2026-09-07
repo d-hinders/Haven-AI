@@ -111,12 +111,15 @@ describe('/for-agents.md (#2523)', () => {
     // flag-by-flag reference and the refusal shapes (CLI README's job, same
     // split #2527 recorded).
     //
-    // Deliberately NOT added, and the reason the number is not higher: the
-    // well-known manifest's own shape. The page says to read the chain from
-    // the command; enumerating `environment` and `chains.deployable` here
-    // would duplicate a JSON document that is one fetch away and would go
-    // stale the first time its shape changed.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(9900)
+    // 9900 -> 10100 for #2617 (the page is 9951 bytes at this commit). Step 1
+    // told an agent to run a bare `npx @haven_ai/cli`, which resolves to the
+    // `latest` dist-tag — whatever that happens to be, deployment by
+    // deployment — while the connector command was already tagged. The ~166
+    // bytes name the channel (`@<channel>`, the connector's own placeholder)
+    // and say where the tag comes from: `/.well-known/haven.json`
+    // (`packages.cli.channel`), never a tag the agent picks. Deliberately NOT
+    // added: restating the manifest's other fields, which are one fetch away.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10100)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -233,6 +236,14 @@ describe('/for-agents.md (#2523)', () => {
     // this page told it to run.
     expect(served).toContain('--api <api-url>')
     expect(served).toContain('HAVEN_API_URL')
+    // #2617: the CLI login is TAGGED. A bare `npx @haven_ai/cli` resolves to
+    // the `latest` dist-tag, which is only ever coincidentally the build a
+    // deployment's runbook describes; the connector command was already
+    // tagged, and the CLI now follows the same rule — with the source of the
+    // tag named, so the agent reads it rather than picks one.
+    expect(served).toContain('npx @haven_ai/cli@<channel> login --api <api-url>')
+    expect(served).toContain('read it from `/.well-known/haven.json` (`packages.cli.channel`)')
+    expect(served).toContain('never a tag you pick')
     // NOT "defaults to localhost". It does not — `commands.ts:22` sets
     // DEFAULT_API to Haven's hosted PRODUCTION backend, and has since #535
     // (2026-06-25). The CLI's own `--help` still says localhost, which is

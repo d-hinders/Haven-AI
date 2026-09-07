@@ -6026,7 +6026,7 @@ export const openapiSpec = {
       },
       DiscoveryDocument: {
         type: 'object',
-        required: ['hosted_mcp_url', 'connector_package', 'openapi_url', 'chains'],
+        required: ['hosted_mcp_url', 'connector_package', 'cli_package', 'openapi_url', 'chains'],
         properties: {
           hosted_mcp_url: {
             anyOf: [{ type: 'string', format: 'uri' }, { type: 'null' }],
@@ -6037,6 +6037,7 @@ export const openapiSpec = {
           },
           hosted_mcp_note: { type: 'string', description: 'Why the URL is null, when it is.' },
           connector_package: { type: 'string', pattern: '^@haven_ai/connect@[a-z][a-z0-9-]{0,31}$' },
+          cli_package: { type: 'string', pattern: '^@haven_ai/cli@[a-z][a-z0-9-]{0,31}$' },
           openapi_url: { type: 'string', format: 'uri' },
           chains: {
             type: 'object',

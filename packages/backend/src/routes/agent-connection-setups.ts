@@ -203,6 +203,19 @@ const PRODUCTION_API_HOST = 'havenbackend-production-8a00.up.railway.app'
 export const CONNECTOR_PACKAGE = `@haven_ai/connect@${config.connectorChannel}`
 
 /**
+ * The CLI package spec the agent-facing surfaces name (#2617).
+ *
+ * The CLI rides the SAME channel as the connector — the five packages release
+ * together — so it is derived from `config.connectorChannel` exactly as
+ * `CONNECTOR_PACKAGE` above is, and for the same reason: the channel is
+ * deployment configuration, resolved once at import. A bare `npx
+ * @haven_ai/cli` resolves to `latest`, which is only ever coincidentally the
+ * build a deployment's runbook describes, so every surface that names the CLI
+ * names the channel instead.
+ */
+export const CLI_PACKAGE = `@haven_ai/cli@${config.connectorChannel}`
+
+/**
  * Refuse a request from inside a transaction.
  *
  * `withTransaction` rolls back on a throw and commits on a normal return, so a

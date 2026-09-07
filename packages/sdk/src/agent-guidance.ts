@@ -117,14 +117,16 @@ and managing the account from the shell with \`@haven_ai/cli\`.`
  * The runbook, served at `/for-agents.md`.
  *
  * Every link is a same-origin path (#2520): resolve it against the host the
- * file was fetched from. The connector's npm dist-tag is the placeholder
- * `<channel>` rather than a literal, for two reasons that point the same way:
- * a published package must not hard-code one (#2423, guarded by
+ * file was fetched from. The npm dist-tags are the placeholder `<channel>`
+ * rather than literals — the connector's command and, since #2617, the CLI's
+ * login in step 1 — for two reasons that point the same way: a published
+ * package must not hard-code one (#2423, guarded by
  * `scripts/release-bump.test.mjs`), and this string is committed as a static
  * file, so baking in a channel `release-bump.mjs` later rewrites would put the
  * served copy out of parity at exactly the moment nobody is reading it. The
  * page tells the agent to run the command its setup prompt hands it, where the
- * tag is real and deployment-correct.
+ * tag is real and deployment-correct, and to read the CLI's tag from
+ * `/.well-known/haven.json` (`packages.cli.channel`).
  *
  * The budget-approval hand-off is now a LINK when the connector has one, and a
  * tab when it does not — #2528 landed the half of this that was missing.
@@ -177,7 +179,7 @@ Your user gives you a **budget on their own account** — not their wallet, and 
 
 Four of the six steps are your user's — each needs a human signature or a human decision. The rest is yours. If they already have a funded account, start at step 3.
 
-1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, \`npx @haven_ai/cli login --api <api-url>\` afterwards gets you a scoped session for steps 3-4 (that flag or \`HAVEN_API_URL\`, on the first command — the session then remembers the backend; **the CLI's built-in default is Haven's hosted production backend**, so on any other deployment an omitted flag connects you somewhere real and wrong rather than failing) — they approve a code in the browser, you never hold their password. It can set up agents and read the account; it cannot sign, approve a budget, move funds, or rotate any agent's keys.
+1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, \`npx @haven_ai/cli@<channel> login --api <api-url>\` afterwards gets you a scoped session for steps 3-4 (that flag or \`HAVEN_API_URL\`, on the first command — the session then remembers the backend; **the CLI's built-in default is Haven's hosted production backend**, so on any other deployment an omitted flag connects you somewhere real and wrong rather than failing) — they approve a code in the browser, you never hold their password. The \`<channel>\` in that command is the tag your deployment names — read it from \`/.well-known/haven.json\` (\`packages.cli.channel\`), never a tag you pick. It can set up agents and read the account; it cannot sign, approve a budget, move funds, or rotate any agent's keys.
 2. **HUMAN — fund it.** USDC only, no ETH: Haven sponsors the gas. \`haven wallets funding\` prints the address, the amount **and which chain** in one place; without a CLI session, the dashboard's funding card shows the address and amount and its Receive-funds screen names the chain. Read the chain off whichever you used and put it in your message — never assume one: a testnet deployment and production both call themselves Haven.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back. With a CLI session (step 1) you can do this step yourself: \`haven agents connect --name <n> --budget <amount> --token USDC --period <minutes>\` prints the same connector command and approval link; add \`--run\` to do step 4 too.
 4. **YOU — run the connector command** in that prompt (below). It makes your signing key locally, registering only the public address.
@@ -328,7 +330,7 @@ Start by reading {{HAVEN_ORIGIN}}/for-agents.md — it is written for you and ex
 
 Then:
 
-1. Run \`npx @haven_ai/cli login\`. It prints a link and a code and does not need my password — it must never ask for it. Give me the link straight away and wait for me to approve it in my browser.
+1. Run \`npx @haven_ai/cli@<channel> login\`. The \`<channel>\` in that command is the tag your deployment names — read it from \`/.well-known/haven.json\` (\`packages.cli.channel\`), never a tag you pick. It prints a link and a code and does not need my password — it must never ask for it. Give me the link straight away and wait for me to approve it in my browser.
 2. Once I have approved, run \`haven agents connect --name <a name you choose> --budget <amount> --token USDC --period <minutes>\` with the budget I tell you. If I have not given you one, ask me before running it. Add \`--run\` to complete the connection in the same step.
 3. ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
 4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means you can pay, \`needs_approval\` means my approval has not landed yet.

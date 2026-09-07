@@ -26,11 +26,12 @@ describe('GET /discovery', () => {
     // key here fails until someone adds it deliberately — and has to justify
     // it against the list below.
     const doc = buildDiscoveryDocument(req()) as unknown as Record<string, unknown>
-    const allowed = ['hosted_mcp_url', 'hosted_mcp_note', 'connector_package', 'openapi_url', 'chains']
+    const allowed = ['hosted_mcp_url', 'hosted_mcp_note', 'connector_package', 'cli_package', 'openapi_url', 'chains']
     for (const key of Object.keys(doc)) {
       expect(allowed, `unexpected key ${key}`).toContain(key)
     }
     expect(Object.keys(doc)).toContain('connector_package')
+    expect(Object.keys(doc)).toContain('cli_package')
     expect(Object.keys(doc)).toContain('chains')
   })
 

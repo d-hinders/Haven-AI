@@ -13,12 +13,15 @@ describe('haven guide text (#2525)', () => {
   it('is byte-for-byte the canonical SDK runbook', async () => {
     const canonical = (await readCanonicalRunbook()) as string
     expect(HAVEN_AGENT_RUNBOOK_MD).toBe(canonical)
-    // Both figures, because they differ and each gets quoted somewhere: 9,785
-    // UTF-8 bytes, 9,706 UTF-16 code units. The em-dashes are the gap — the
+    // Both figures, because they differ and each gets quoted somewhere: 9,951
+    // UTF-8 bytes, 9,870 UTF-16 code units. The em-dashes are the gap — the
     // same units confusion #2562 fixed in the docs chain gate. Moved by #2526
     // (device-code login in step 1), by #2534, whose step-2 sentence names
-    // `haven wallets funding`, by #2591, and by #2539, whose "Budget changes
-    // later" section names the `haven budget grant|revoke` commands.
+    // `haven wallets funding`, by #2591, by #2539, whose "Budget changes
+    // later" section names the `haven budget grant|revoke` commands, and by
+    // #2617, whose step-1 CLI login names the npm channel — `npx
+    // @haven_ai/cli@<channel> login`, with a sentence saying the tag is read
+    // from `/.well-known/haven.json` (`packages.cli.channel`), never picked.
     //
     // #2591 is the one worth a sentence, because it is a money-path copy fix
     // rather than an addition. Step 2 said "USDC on Base" on a page served
@@ -36,8 +39,8 @@ describe('haven guide text (#2525)', () => {
     // The true version is the more urgent one — on a non-production
     // deployment an omitted flag does not fail, it connects somewhere real and
     // wrong — so the page says that instead.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(9785)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(9706)
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(9951)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(9870)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

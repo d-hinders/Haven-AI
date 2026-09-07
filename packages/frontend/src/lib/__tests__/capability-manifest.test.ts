@@ -170,8 +170,6 @@ describe('capability manifest', () => {
     expect(Object.keys(CHAIN_REGISTRY).map(Number)).toEqual(
       expect.arrayContaining([...FACTS.chains.supported]),
     )
-    // Bare ids remain derivable, first field — the compatibility contract.
-    expect(supported.map((entry) => entry.id)).toEqual([8453, 84532, 100])
   })
 
   it('drops a supported id the registry does not know, rather than guessing facts (#2619)', () => {

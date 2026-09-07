@@ -114,7 +114,30 @@ describe('login', () => {
     //
     // Recorded as a contract change rather than deleted, so a reader who
     // remembers the old behaviour finds out why it moved.
-    const { deps } = harness({ sessionStore: memoryStore(null), env: {} })
+    //
+    // Mock the API and the clock: without a `makeApi` this test made a REAL
+    // request to the production backend (the default API base), got a real
+    // device/start, and then slept the server-named interval — pushing past
+    // vitest's 5000ms test timeout. Every other test here mocks `makeApi`;
+    // this one had slipped through. The assertion is only that it is NOT a
+    // usage error (2), so a start + one approved token is enough to prove the
+    // device flow runs.
+    const api = {
+      get: async () => { throw new CliApiError('unused', 404) },
+      post: async (path: string) => {
+        if (path === '/auth/device/start') {
+          return { device_code: 'd', user_code: 'ABCD-2345', verification_url: 'https://app.test/device', expires_in: 600, interval: 1 } as never
+        }
+        if (path === '/auth/device/token') return { token: 'jwt', user: USER } as never
+        throw new CliApiError(`Unmocked POST ${path}`, 404)
+      },
+    } as unknown as CliApi
+    const { deps } = harness({
+      sessionStore: memoryStore(null),
+      env: { HAVEN_API_URL: 'https://api.test' },
+      makeApi: () => api,
+      sleep: async () => {},
+    })
     const code = await run(['login'], deps)
     expect(code).not.toBe(2)
   })

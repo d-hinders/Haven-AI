@@ -89,8 +89,13 @@ effectively for good:
   with every `account_type` branch behind it.
 
 Read the readability promise as history: the rows are untouched and a direct
-database query still finds them, but no Haven surface displays them and nothing
-on-chain changed. Dropping the rows outright remains a separate, still-open
+database query still finds them, but no account, agent or dashboard surface
+displays them and nothing on-chain changed. **`GET /transactions` is NOT among
+the six** — neither `LIST_BASIC_SAFES_FOR_USER_SQL` nor
+`LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` carries a rail predicate, so
+transaction history still spans every account and agent row and legacy names
+still render in that screen's picklists (#2669, found by review after the first
+sweep read "no Haven surface" as complete). Dropping the rows outright remains a separate, still-open
 decision, blocked on `payment_intents`' RESTRICT foreign key.
 
 ## 2026-08-27 — the Agent Passport is delegation-rail only (#2138)
@@ -325,7 +330,7 @@ file, recorded here so each omission is a decision rather than an accident.
    re-onboard, pause/resume, re-key, or revoke controls for them. Owners manage
    any remaining Safe permission outside Haven where they have access;
    replacement agents use the live delegation flow."* Obsolete since #2413: no
-   Haven surface renders a legacy account or its agents at all, so a list of
+   account, agent or dashboard surface renders a legacy account or its agents, so a list of
    controls Haven declines to offer for them describes a screen that does not
    exist. The surviving half — an EOA owner manages their Safe at Safe's own
    interfaces — is stated under #1440 above.

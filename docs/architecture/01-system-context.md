@@ -26,7 +26,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-08-31" # #2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation. Prior: #1992: the "Two rails" callout said the legacy rail was "RETIRING ... existing accounts only", which reads as still-serving. It is retired: existing Safe accounts stay READABLE but cannot spend. Rewritten to frame the diagram below as the retired baseline. Scope: that callout. Prior: #1989: the "User-authorized execution" bullet linked `hooks/useSendTransaction.ts`, which this diff DELETES, and read as though a dashboard screen still composes an arbitrary Safe transfer. Corrected: the signing/relay path is unchanged and still runs, but only for the surviving agent-lifecycle transactions and for a direct `POST /safe/exec`. Scope: that bullet only; the rest of the doc was NOT re-read this pass. Prior: #1988: the "Owner authority remains on-chain" bullet described approver management as a live read of `getOwners()` plus stored metadata. Those routes are deleted; Haven now neither signs nor constructs an owner change, and the bullet says so — the custody claim gets STRONGER, not weaker, because owner management moves entirely to the user's own key. Scope: that bullet; the mermaid context diagram and the other invariants were not re-verified. Prior: #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
+last-verified: "2026-09-07" # #2669: THREE "readable" claims re-read and EDITED — the trust-boundary sentence, the retired-baseline blockquote above the diagram, and the dashboard-composition bullet. Each read as a product-surface guarantee that #2413 ended; all three now qualified to a direct database query. Scope: those three sentences; nothing else in this file was re-verified. Prior: #2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation. Prior: #1992: the "Two rails" callout said the legacy rail was "RETIRING ... existing accounts only", which reads as still-serving. It is retired: existing Safe accounts stay READABLE but cannot spend. Rewritten to frame the diagram below as the retired baseline. Scope: that callout. Prior: #1989: the "User-authorized execution" bullet linked `hooks/useSendTransaction.ts`, which this diff DELETES, and read as though a dashboard screen still composes an arbitrary Safe transfer. Corrected: the signing/relay path is unchanged and still runs, but only for the surviving agent-lifecycle transactions and for a direct `POST /safe/exec`. Scope: that bullet only; the rest of the doc was NOT re-read this pass. Prior: #1988: the "Owner authority remains on-chain" bullet described approver management as a live read of `getOwners()` plus stored metadata. Those routes are deleted; Haven now neither signs nor constructs an owner change, and the bullet says so — the custody claim gets STRONGER, not weaker, because owner management moves entirely to the user's own key. Scope: that bullet; the mermaid context diagram and the other invariants were not re-verified. Prior: #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
 ---
 
 # Haven — System Context
@@ -35,7 +35,8 @@ A C4-L1 view of Haven's primary account-control and payment paths, grouped by
 **trust boundary**. On the live delegation rail, user funds are held in the
 user's Haven wallet (a MetaMask Hybrid DeleGator smart account) until an owner-
 or delegate-authorized transfer; existing retired Safe accounts remain
-user-owned and readable. Standard x402 can temporarily fund the agent-controlled
+user-owned, and their rows readable to a direct database query, though since #2413
+no Haven surface displays them. Standard x402 can temporarily fund the agent-controlled
 delegate EOA. Owner authority remains with the user. Haven operates the web app,
 backend, hosted MCP, and gas relayers, but does not hold user or agent spending
 keys. The agent's delegate key stays in
@@ -44,8 +45,9 @@ its local signer or fully local MCP runtime.
 > **One live rail; this diagram is the retired baseline.** The diagram and notes
 > below describe the **legacy AllowanceModule rail**, which is **RETIRED** (#1440):
 > closed to new accounts (#1984), HTTP 410 on every payment and x402 entry point
-> (#1986), machinery deleted (#1987/#1988/#1989). Existing Safe accounts stay
-> readable but cannot spend through Haven's payment paths. All accounts that can spend run on the **delegation
+> (#1986), machinery deleted (#1987/#1988/#1989). Existing Safe rows stay readable to a
+> direct database query — though since #2413 no Haven surface displays them —
+> and cannot spend through Haven's payment paths. All accounts that can spend run on the **delegation
 > rail** (epic #821, `account_type='delegator_hybrid'`), where the Haven wallet is
 > a MetaMask Hybrid DeleGator smart account and the policy is a signed delegation
 > with caveat enforcers instead of an AllowanceModule allowance. The Smart Sessions
@@ -176,8 +178,9 @@ flowchart LR
   its `useSendTransaction` hook are deleted with the Safe rail. The signing and
   relay path above is unchanged for owner-signed transactions posted directly
   to `POST /safe/exec`; Haven no longer composes legacy Safe agent lifecycle
-  transactions in the dashboard. Legacy accounts remain readable, while live
-  agent setup and budget lifecycle runs through the delegation rail.
+  transactions in the dashboard. Legacy account rows persist but are
+  rendered nowhere since #2413, while live agent setup and budget lifecycle runs
+  through the delegation rail.
 - **x402 has separate funding and merchant legs.** Haven can fund the
   agent-controlled delegate EOA from the Safe within the approved allowance.
   The local signer then creates the merchant-bound EIP-3009 payment header, and

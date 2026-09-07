@@ -9,11 +9,24 @@
  *
  * This spec used to also capture the full `/design-system` page — a
  * 22.7M-pixel render against a 500-pixel budget — alongside the scoped shell
- * clips below. That whole-page assertion produced every sampled CI failure in
- * a 12-failure sample (5 of 12, all `toHaveScreenshot` timing out at the
- * pixel-comparison step's 15s assertion timeout on the mobile viewport's
- * 29,012px-tall render), none of them a real regression — the page is simply
- * too tall to screenshot-compare reliably in the time budget. It bought little
+ * clips below. It dominated this job's failure history: 5 of a 12-failure
+ * sample as first counted, and 7 of 12 when an independent review re-derived
+ * it over every `ci.yml` run in the same window. Both counts are recorded
+ * because they disagree, and the disagreement is a sampling difference (per-PR
+ * dedup vs. per-run) rather than a correction — the review's number is the
+ * larger one, so it strengthens the case rather than weakening it.
+ *
+ * WHAT THE FAILURES ACTUALLY WERE, corrected on review. The first reading here
+ * was "a 15s `toHaveScreenshot` timeout — the page is too tall to compare in
+ * the budget". The CI logs say otherwise: Playwright DID compute stable diffs
+ * before failing, and their magnitudes ranged from ~12k px (1%) to ~2.7M px
+ * (23% of the image) across branches with no relation to this page —
+ * cli-channel-naming, copy-dead-code-sweep, transaction-row-titles. A capture
+ * that renders 23% differently on unrelated branches is NON-DETERMINISTIC, not
+ * slow, and that is why raising the timeout was the wrong fix and deleting was
+ * the right one: no timeout closes a render that differs by a quarter of the
+ * image. The cause of the non-determinism — most likely below-the-fold content
+ * settling — is NOT established here, and is left named rather than guessed. It bought little
  * beyond what the scoped clips already cover: #1820 measured the whole-page
  * budget PASSING a sidebar-confined regression the scoped sidebar capture
  * failed at 3.66x its own budget, because one number cannot be both loose

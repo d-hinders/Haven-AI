@@ -67,14 +67,38 @@
 //
 // ## Residue
 //
-// Shrink-only baseline in the house style of `ui-gate-wording-baseline.json`:
-// doc → gap count. Counts may fall, never rise. `--update` rewrites it, and is
-// for a reviewed, intentional change only.
+// Shrink-only baseline: doc → the gap FILES. It was doc → COUNT first, in the
+// house style of `ui-gate-wording-baseline.json`, and a review proved a count
+// cannot do this job: a doc could close one gap and open a different one in the
+// same edit, and the run stayed green — totals unchanged, no shrink hint, a
+// brand-new false claim accepted in silence. The #1199 shape, walking through
+// the check built for it. `covers-gaps.test.mjs` pins that swap case.
+//
+// ## What the RATCHET does not catch
+//
+// Separate from the extraction limits above, and listed because the section
+// above covers only what the scan misses:
+//
+//   - **A path inside an illustrative fenced `covers:` example** is counted as
+//     a claim — a false POSITIVE, and the one class the "does NOT catch" list
+//     above lacked. `docs/contributing/docs-quality-system.md`'s own schema
+//     block names `packages/backend/src/routes/payments.ts` as a placeholder,
+//     and it is in the baseline. The "a path is never a citation of itself"
+//     reasoning under the fence decision is false in exactly this case.
+//   - **`status: archived` is an unguarded bypass.** Nothing constrains that
+//     value outside `docs/archive/` (`docs/operations/session-rail-vendor-ops.md`
+//     is a live precedent), so one word in a doc's front matter removes it and
+//     every gap it carries. Not silent: `departed()` names such docs and they
+//     are excluded from the shrink hint, so it is never reported as progress.
+//   - **The governed set is THIS script's definition.** `validate-frontmatter.mjs`
+//     governs 97 docs and applies no status filter; the archived/research
+//     carve-out on `governedDocs()` below is ours, and is what makes it 73.
 //
 // Usage:
-//   node scripts/docs/covers-gaps.mjs            # check (runs in docs:check)
-//   node scripts/docs/covers-gaps.mjs --list     # print every (doc, file) pair
-//   node scripts/docs/covers-gaps.mjs --update   # rewrite the baseline
+//   node scripts/docs/covers-gaps.mjs                      # check (docs:check)
+//   node scripts/docs/covers-gaps.mjs --list               # every (doc, file) pair
+//   node scripts/docs/covers-gaps.mjs --update             # tighten the baseline
+//   node scripts/docs/covers-gaps.mjs --update --accept-new  # accept new gaps
 //
 // See docs/contributing/docs-quality-system.md.
 import { readFile, writeFile } from 'node:fs/promises'
@@ -186,7 +210,11 @@ export async function governedDocs(root = REPO_ROOT) {
   return out
 }
 
-/** `{ file, gaps: [{ file, line }], covers }[]` for every governed doc with a gap. */
+/**
+ * `{ results, docCount, governed }` — gaps per doc, plus the FULL governed doc
+ * list. `governed` is what lets the caller tell "this gap was fixed" from "this
+ * doc left the governed set", which the count-only baseline could not.
+ */
 export async function scan(root = REPO_ROOT) {
   const tracked = trackedFiles(root)
   const docs = await governedDocs(root)
@@ -195,50 +223,124 @@ export async function scan(root = REPO_ROOT) {
     const gaps = uncovered(doc.raw, tracked, doc.data.covers)
     if (gaps.length > 0) results.push({ doc: doc.file, gaps, covers: doc.data.covers ?? [] })
   }
-  return { results, docCount: docs.length }
+  return { results, docCount: docs.length, governed: docs.map((d) => d.file) }
 }
 
-/** `{ doc: count }` from a scan. */
-export function countByDoc(results) {
+/**
+ * `{ doc: [file, ...] }` from a scan — the baseline's shape.
+ *
+ * The gap FILES, sorted, duplicates kept (one doc can name the same file on
+ * several lines, and each is its own claim). Line numbers are deliberately not
+ * stored: moving a sentence is not a new claim, and a line-keyed baseline would
+ * redden on every unrelated edit above it.
+ *
+ * This was `{ doc: count }` until the review of #2690, and a count is not
+ * enough. Gap identity was nowhere in the baseline, so a doc could CLOSE one
+ * gap and OPEN a different one in the same edit and stay green — totals
+ * unchanged, no shrink hint, a brand-new false claim about a file the doc had
+ * never mentioned, accepted silently. That is the #1199 shape this check exists
+ * to catch, walking straight through it. Reproduced on
+ * `docs/architecture/03-payment-sequence.md` before the fix.
+ */
+export function gapsByDoc(results) {
   return Object.fromEntries(
     results
-      .map((r) => [r.doc, r.gaps.length])
+      .map((r) => [r.doc, r.gaps.map((g) => g.file).sort()])
       .sort(([a], [b]) => a.localeCompare(b)),
   )
 }
 
-/** Docs whose gap count exceeds what the baseline allows. */
-export function newGaps(counts, baseline) {
+/** Multiset difference `a - b`, so a file named twice needs two baseline slots. */
+function surplus(a, b) {
+  const remaining = [...(b ?? [])]
+  const extra = []
+  for (const file of a ?? []) {
+    const i = remaining.indexOf(file)
+    if (i === -1) extra.push(file)
+    else remaining.splice(i, 1)
+  }
+  return { extra, absent: remaining }
+}
+
+/** Docs naming an uncovered file the baseline does not already allow. */
+export function newGaps(current, baseline) {
   const failures = []
-  for (const [doc, count] of Object.entries(counts)) {
-    const allowed = baseline?.[doc] ?? 0
-    if (count > allowed) failures.push({ doc, count, allowed })
+  for (const [doc, files] of Object.entries(current)) {
+    const { extra } = surplus(files, baseline?.[doc])
+    if (extra.length > 0) {
+      failures.push({ doc, files: extra, count: files.length, allowed: (baseline?.[doc] ?? []).length })
+    }
   }
   return failures.sort((a, b) => a.doc.localeCompare(b.doc))
 }
 
-/** True when any baselined count has fallen — the ratchet can be tightened. */
-export function hasShrunk(counts, baseline) {
-  for (const [doc, allowed] of Object.entries(baseline ?? {})) {
-    if ((counts?.[doc] ?? 0) < allowed) return true
+/**
+ * True when a baselined gap is gone from a doc that is STILL governed — the
+ * ratchet can be tightened.
+ *
+ * The governed-doc guard is the point (found by the review of #2690): flipping
+ * a doc's front-matter to `status: archived` drops it from the governed set,
+ * and every gap it carried disappears. That is a scope reduction, not progress,
+ * and the old version reported it as a shrink and recommended an `--update`
+ * that would have discarded those gaps permanently. A doc that left the
+ * governed set is reported by `departed()` instead, which says what actually
+ * happened.
+ */
+export function hasShrunk(current, baseline, governed) {
+  const stillGoverned = governed ? new Set(governed) : null
+  for (const [doc, files] of Object.entries(baseline ?? {})) {
+    if (stillGoverned && !stillGoverned.has(doc)) continue
+    if (surplus(files, current?.[doc]).extra.length > 0) return true
   }
   return false
 }
 
+/**
+ * Baselined docs that are no longer in the governed set — renamed, deleted, or
+ * flipped to `status: archived`/`research`.
+ *
+ * Reported rather than silently forgiven: their gaps did not get fixed, they
+ * stopped being looked at. Also clears the stale-entry nag, where a baseline
+ * key for a deleted doc made the shrink hint print forever with nothing to
+ * tighten.
+ */
+export function departed(baseline, governed) {
+  const stillGoverned = new Set(governed ?? [])
+  return Object.keys(baseline ?? {})
+    .filter((doc) => !stillGoverned.has(doc))
+    .sort()
+}
+
 async function readBaseline() {
+  let parsed
   try {
-    return JSON.parse(await readFile(BASELINE_PATH, 'utf8'))
+    parsed = JSON.parse(await readFile(BASELINE_PATH, 'utf8'))
   } catch (err) {
     if (err.code === 'ENOENT') return {}
     throw err
   }
+  // The baseline was `{ doc: count }` before the review of #2690 and is now
+  // `{ doc: [file, ...] }`. Say so in one sentence rather than letting a number
+  // reach the multiset code and surface as `(b ?? []) is not iterable`, which
+  // names nothing a reader can act on.
+  const numeric = Object.entries(parsed).filter(([, v]) => !Array.isArray(v))
+  if (numeric.length > 0) {
+    throw new Error(
+      `covers-gaps: ${BASELINE_PATH} is in the old count-only format ` +
+        `(e.g. "${numeric[0][0]}": ${JSON.stringify(numeric[0][1])}). The baseline now stores ` +
+        'the gap FILES, because a count cannot tell a closed gap from a swapped one. ' +
+        'Regenerate it with `node scripts/docs/covers-gaps.mjs --update --accept-new` ' +
+        'and review the diff.',
+    )
+  }
+  return parsed
 }
 
 async function main() {
   const update = process.argv.includes('--update')
   const list = process.argv.includes('--list')
-  const { results, docCount } = await scan()
-  const counts = countByDoc(results)
+  const { results, docCount, governed } = await scan()
+  const current = gapsByDoc(results)
   const total = results.reduce((n, r) => n + r.gaps.length, 0)
 
   if (list) {
@@ -251,24 +353,56 @@ async function main() {
     return
   }
 
+  // `--accept-new` is the deliberate override, and it is also the ONE path that
+  // must work when the existing baseline cannot be read at all — a format
+  // migration, or a hand-corrupted file. Reading it would only be to check for
+  // rises we are being told to accept.
+  const acceptNew = process.argv.includes('--accept-new')
+  const baseline = update && acceptNew ? {} : await readBaseline()
+
   if (update) {
-    await writeFile(BASELINE_PATH, `${JSON.stringify(counts, null, 2)}\n`)
+    // `--update` used to write unconditionally while printing "ratcheted",
+    // so it happily recorded a LOOSENING under the word for a tightening
+    // (found by the review of #2690). A rise is now refused: closing a gap is
+    // routine, accepting a new one is a decision, and the two must not share
+    // a command that reports them identically.
+    const rises = newGaps(current, baseline)
+    if (rises.length > 0 && !acceptNew) {
+      console.error(
+        '✗ `--update` would ACCEPT new gaps, not tighten the ratchet:\n',
+      )
+      for (const r of rises) {
+        console.error(`  ${r.doc} — ${r.files.length} new:`)
+        for (const f of r.files) console.error(`    ${f}`)
+      }
+      console.error(
+        '\nThe baseline is shrink-only. Close these gaps (declare the path, or ' +
+          'delete the claim), or re-run with `--accept-new` if accepting them is ' +
+          'the reviewed, intentional decision.\n',
+      )
+      process.exit(1)
+    }
+    await writeFile(BASELINE_PATH, `${JSON.stringify(current, null, 2)}\n`)
     console.log(
       `covers-gaps: baseline written — ${total} gap(s) across ${results.length} of ` +
-        `${docCount} governed docs ratcheted.`,
+        `${docCount} governed docs recorded.`,
     )
     return
   }
 
-  const baseline = await readBaseline()
-  const failures = newGaps(counts, baseline)
+  const failures = newGaps(current, baseline)
 
   if (failures.length > 0) {
     console.error('✗ A governed doc names a tracked file its `covers:` cannot reach:\n')
     for (const f of failures) {
       const hit = results.find((r) => r.doc === f.doc)
-      console.error(`  ${f.doc} — ${f.count} uncovered file(s), baseline allows ${f.allowed}`)
-      for (const g of hit.gaps) console.error(`    ${f.doc}:${g.line}: ${g.file}`)
+      console.error(
+        `  ${f.doc} — ${f.count} uncovered file(s), baseline allows ${f.allowed}` +
+          `, ${f.files.length} not baselined`,
+      )
+      for (const g of hit.gaps) {
+        console.error(`    ${f.files.includes(g.file) ? 'NEW ' : '    '}${f.doc}:${g.line}: ${g.file}`)
+      }
       console.error('')
     }
     console.error(
@@ -290,13 +424,24 @@ async function main() {
     process.exit(1)
   }
 
+  const gone = departed(baseline, governed)
   console.log(
     `✓ No new \`covers:\` gaps across ${docCount} governed doc(s) ` +
       `(${total} baselined pair(s) across ${results.length} doc(s) remain).` +
-      (hasShrunk(counts, baseline)
+      (hasShrunk(current, baseline, governed)
         ? ' Residue shrank — run `node scripts/docs/covers-gaps.mjs --update` to tighten the ratchet.'
         : ''),
   )
+  if (gone.length > 0) {
+    // Not a failure — a doc may be legitimately renamed or archived — but never
+    // silent, and never counted as a shrink. Their gaps were not fixed; they
+    // stopped being looked at.
+    console.log(
+      `\n  ${gone.length} baselined doc(s) are no longer governed (renamed, deleted, or ` +
+        'flipped to `status: archived`/`research`). Their gaps are no longer checked:',
+    )
+    for (const doc of gone) console.log(`    ${doc}`)
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

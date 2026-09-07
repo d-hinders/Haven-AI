@@ -5,7 +5,8 @@ import {
   blankFrontMatter,
   namedFiles,
   uncovered,
-  countByDoc,
+  departed,
+  gapsByDoc,
   newGaps,
   hasShrunk,
   lineOf,
@@ -145,24 +146,66 @@ test('MISS: a file that no longer exists — the ls-files intersection drops it'
 
 // --- Baseline ratchet
 
-test('baseline: a rise fails, an equal count passes, a fall reports shrink', () => {
-  const counts = { 'a.md': 3, 'b.md': 1 }
-  assert.deepEqual(newGaps(counts, { 'a.md': 3, 'b.md': 1 }), [])
-  assert.deepEqual(newGaps(counts, { 'a.md': 2, 'b.md': 1 }), [{ doc: 'a.md', count: 3, allowed: 2 }])
-  // A doc absent from the baseline is allowed zero.
-  assert.deepEqual(newGaps({ 'c.md': 1 }, {}), [{ doc: 'c.md', count: 1, allowed: 0 }])
-  assert.equal(hasShrunk(counts, { 'a.md': 3, 'b.md': 1 }), false)
-  assert.equal(hasShrunk(counts, { 'a.md': 4, 'b.md': 1 }), true)
-  // A doc that dropped to zero disappears from `counts` entirely.
-  assert.equal(hasShrunk({ 'a.md': 3 }, { 'a.md': 3, 'b.md': 1 }), true)
+test('baseline: a rise fails, an equal set passes, a fall reports shrink', () => {
+  const cur = { 'a.md': ['x', 'y', 'z'], 'b.md': ['q'] }
+  assert.deepEqual(newGaps(cur, { 'a.md': ['x', 'y', 'z'], 'b.md': ['q'] }), [])
+  assert.deepEqual(newGaps(cur, { 'a.md': ['x', 'y'], 'b.md': ['q'] }), [
+    { doc: 'a.md', files: ['z'], count: 3, allowed: 2 },
+  ])
+  // A doc absent from the baseline is allowed nothing.
+  assert.deepEqual(newGaps({ 'c.md': ['x'] }, {}), [
+    { doc: 'c.md', files: ['x'], count: 1, allowed: 0 },
+  ])
+  assert.equal(hasShrunk(cur, { 'a.md': ['x', 'y', 'z'], 'b.md': ['q'] }), false)
+  assert.equal(hasShrunk(cur, { 'a.md': ['w', 'x', 'y', 'z'], 'b.md': ['q'] }), true)
+  // A doc that dropped to zero disappears from the scan entirely.
+  assert.equal(hasShrunk({ 'a.md': ['x', 'y', 'z'] }, { 'a.md': ['x', 'y', 'z'], 'b.md': ['q'] }), true)
 })
 
-test('countByDoc is sorted and counts pairs', () => {
+test('baseline: a COUNT-PRESERVING SWAP is caught (the review finding on #2690)', () => {
+  // The defect the identity baseline exists for. A doc closes one gap and
+  // opens a different one in the same edit: totals identical, so a
+  // `{ doc: count }` baseline saw nothing and the run stayed green while a
+  // brand-new false claim entered the corpus. Reproduced for real on
+  // docs/architecture/03-payment-sequence.md before the fix.
+  const baseline = { 'a.md': ['packages/backend/src/old.ts'] }
+  const swapped = { 'a.md': ['packages/backend/src/new.ts'] }
+  assert.deepEqual(newGaps(swapped, baseline), [
+    { doc: 'a.md', files: ['packages/backend/src/new.ts'], count: 1, allowed: 1 },
+  ])
+  // And the swap is not mistaken for progress.
+  assert.equal(hasShrunk(swapped, baseline, ['a.md']), true)
+})
+
+test('baseline: the same file named twice needs two baseline slots', () => {
+  // Identity is a MULTISET: one doc can name one file on several lines, and
+  // each is its own claim. A set would let a second mention in through.
+  assert.deepEqual(newGaps({ 'a.md': ['x', 'x'] }, { 'a.md': ['x'] }), [
+    { doc: 'a.md', files: ['x'], count: 2, allowed: 1 },
+  ])
+  assert.deepEqual(newGaps({ 'a.md': ['x', 'x'] }, { 'a.md': ['x', 'x'] }), [])
+})
+
+test('baseline: a doc leaving the governed set is NOT a shrink', () => {
+  // Flipping `status: archived` drops a doc and every gap it carried. The
+  // old version reported that as a shrink and recommended an `--update` that
+  // would have discarded them permanently (review finding on #2690).
+  const baseline = { 'a.md': ['x'], 'gone.md': ['y'] }
+  assert.equal(hasShrunk({ 'a.md': ['x'] }, baseline, ['a.md']), false)
+  assert.deepEqual(departed(baseline, ['a.md']), ['gone.md'])
+  // Still a shrink when the doc is governed and the gap genuinely went away.
+  assert.equal(hasShrunk({}, baseline, ['a.md', 'gone.md']), true)
+})
+
+test('gapsByDoc is sorted, keeps duplicates, and drops line numbers', () => {
   const results = [
-    { doc: 'z.md', gaps: [{ file: 'x' }] },
-    { doc: 'a.md', gaps: [{ file: 'x' }, { file: 'y' }] },
+    { doc: 'z.md', gaps: [{ file: 'x', line: 9 }] },
+    { doc: 'a.md', gaps: [{ file: 'y', line: 2 }, { file: 'x', line: 1 }, { file: 'x', line: 5 }] },
   ]
-  assert.deepEqual(Object.entries(countByDoc(results)), [['a.md', 2], ['z.md', 1]])
+  assert.deepEqual(Object.entries(gapsByDoc(results)), [
+    ['a.md', ['x', 'x', 'y']],
+    ['z.md', ['x']],
+  ])
 })
 
 test('lineOf and namedFiles agree on position', () => {

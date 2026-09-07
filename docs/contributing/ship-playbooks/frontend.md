@@ -93,7 +93,15 @@ Run them locally with `npm run test:e2e:mobile -w packages/frontend`, or both wi
 
 Both pixel jobs still **run** on any diff under `packages/frontend/`: `scripts/ci/change-classifier.mjs` matches `packages/frontend/*` as the whole subtree, so a purely logic-only change sets `frontend='true'` and *Design visual regression* and *Frontend browser smoke* both fire (`ci.yml`, `needs.changes.outputs.frontend == 'true'`). To that extent the narrowing is in what the **author must attach**, not in what CI does.
 
-**But running is not comparing, and the difference decides whether this narrowing is safe on your route.** `design_visual` compares only routes that have a **committed baseline**, and that is five spec files, not the app: `design-system` (whole-page + topbar/sidebar clips), `product-routes` (`/dashboard` and `/transactions` only), `agent-panel-states`, `focus-visible` (agent card + sidebar menu), and `wallet-button-collapsed-states`. **Every other rendered route has no baseline at all** — `/agents`, `/accounts`, `/custody`, agent detail, the connect flow — so on those the job runs and compares nothing, and trigger 3 is the *only* check that a "logic-only" change really was. This is the same point `CLAUDE.md` makes about the green tick being narrower than it looks; the job prints what it actually compared (`scripts/ci/visual-baseline-inventory.mjs`), so **check that list before deciding your change needs no screenshot.**
+**But running is not comparing, and the difference decides whether this narrowing is safe on your route.** `design_visual` compares only what has a **committed baseline** under `e2e/__screenshots__/`, and coverage comes in three grades rather than two:
+
+- **Whole-page**, at the viewports that spec committed: `/design-system`, `/dashboard` and `/transactions` (the last two desktop-only).
+- **Element-scoped only.** `/agents` is the one to know: `agent-panel-states` and `focus-visible` both `goto('/agents')` and commit clips of the agent-card states, the empty states and the driven focus targets — real coverage, but of *elements*. A whole-page `/agents` regression outside those boxes is compared against nothing.
+- **Nothing at all**: `/accounts`, `/custody`, agent detail, the connect flow.
+
+On the last two grades, the job runs and compares nothing in the area you changed, and trigger 3 is the *only* check that a "logic-only" change really was.
+
+Do not take that list as the current set: it moves (#2318 added two routes, #2635 is reshaping the `/design-system` captures). **The job prints what it actually compared** — `scripts/ci/visual-baseline-inventory.mjs`, in the run summary — and `git ls-files 'packages/frontend/e2e/**/*.png'` answers the same question locally. Read one of those, not this paragraph, when the answer decides whether you capture. This is the same point `CLAUDE.md` makes about the green tick being narrower than it looks.
 
 So: on a baselined route, a misjudged trigger is caught by the gate. On an un-baselined one it is caught by nobody, and the honest instruction is to capture anyway when you are unsure. The narrowing buys back time on the routine case; it does not make self-assessment safe where there is no backstop.
 

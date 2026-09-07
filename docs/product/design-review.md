@@ -143,8 +143,9 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   authority, shared-behavior, or meaningful-risk changes. Unconditional since the
   2026-08-21 owner decision; `AGENTS.md` is canonical.
 - Run `haven-design-reviewer` over the screenshots for `area:frontend` diffs —
-  the rendered-UX pass alongside the code review; a finding from either pauses
-  auto-merge (frontend ship-playbook §5–6).
+  the rendered-UX pass alongside the code review; a `blocking` or `should-fix`
+  finding from either pauses auto-merge, a `nit` does not (#2636; frontend
+  ship-playbook §5–6).
 - Run `haven-doc-reviewer` after implementation; document `covers:` mappings are the
   floor of its scope, not the whole of it (#2499). Resolve stale claims before the PR.
 - Report changed surfaces, workflow/agents used, CI, local checks, browser or

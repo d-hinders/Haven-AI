@@ -653,8 +653,12 @@ gap this check exists to close, one pass over.
 Route the merge:
 
 - **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
-- **Frontend UI:** a UX, copy, or design-system finding from either review pass pauses
-  auto-merge. Clearing it does **not** need a second human ack (#1968): fix the finding,
+- **Frontend UI:** a **`blocking`** or **`should-fix`** UX, copy, or design-system
+  finding from either review pass pauses auto-merge; a **`nit`** does not (#2636 — fix
+  it in place when it is a one-line change, else file it with its screenshot). Severity
+  is the reviewer's label, never the author's re-reading of it, and the table is in
+  [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui).
+  Clearing a pausing finding does **not** need a second human ack (#1968): fix the finding,
   re-run the pass that raised it over fresh rendered evidence, and a clean re-review
   re-arms auto-merge on its own. Ask the user in the three cases a re-review does not
   cover — the re-review raises a **new** finding, the finding is being **deferred or

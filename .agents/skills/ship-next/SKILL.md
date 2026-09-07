@@ -673,6 +673,12 @@ diagnosis rule and why it is silent live in
 § *Before Merging* (#1366); read it there rather than re-deriving it from a stalled
 check list.
 
+**`BEHIND` is not a blocker on a PR into `dev`, and `main` is still strict
+(#2632).** What changed, why, and what it costs are in the ruleset inventory in
+[`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)
+step 3 — read it there. The only thing this skill needs from it: do not reach for
+`gh pr update-branch` or a `dev` merge-in on `BEHIND`.
+
 > **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate, which since [#1030](https://github.com/d-hinders/Haven-AI/issues/1030) refuses a `dev → main` promotion unless a green money-flow QA run actually **covered** the money-path code being promoted — recency alone does not satisfy it, and a money-path `hotfix/*` blocks outright. Its real limits are the deliberate ones: a logged `qa-override`, and the fact that it only bites while listed in `main`'s required checks. See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model" and "Be precise about what gate 2 proves", which is where the limits are enumerated — this line names them only to say they are not the ones people assume.
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
@@ -692,7 +698,7 @@ SHA=$(gh pr view <pr> --json headRefOid -q .headRefOid)   # read AFTER the merge
 gh api repos/<o>/<r>/commits/"$SHA"/check-runs
 ```
 
-A PR's head SHA is not stable between opening and merging. Four routes move it, and **only the first involves auto-merge**: GitHub's own *update branch* when auto-merge is armed and the base moves; `gh pr update-branch` to clear `BEHIND`; merging `dev` in to clear `DIRTY`; and any push after you last looked. This skill instructs the middle two itself, so **a session that never arms auto-merge is fully exposed** — that is the common route here, not the exotic one. Re-reading covers all four at once, because it asks what merged rather than what you were watching. It survives `--delete-branch`: `headRefOid` stays on the PR record after the branch is gone.
+A PR's head SHA is not stable between opening and merging. Routes move it, and **only the first involves auto-merge**: GitHub's own *update branch* when auto-merge is armed and the base moves; merging `dev` in to clear `DIRTY`; any hand-run `gh pr update-branch` (no longer instructed for `BEHIND` on `dev`, but still available and still moves the head); and any push after you last looked. This skill instructs the `DIRTY` merge-in itself, so **a session that never arms auto-merge is fully exposed** — that is the common route here, not the exotic one. Re-reading covers all four at once, because it asks what merged rather than what you were watching. It survives `--delete-branch`: `headRefOid` stays on the PR record after the branch is gone.
 
 **Do not substitute the merge commit for it.** Tempting, since a merge commit cannot go stale — but feature → `dev` is a **squash**, so the merge commit has exactly one parent and there is no second parent to recover the head from, and its own check runs are the push-to-`dev` run: a different, smaller set (16 on #2114 against the PR head's 23, with every PR-only gate — both coupling gates, contract-doc, copy lint — absent). Read it to ask "is `dev` green now"; it does not answer "did this PR's blocking jobs pass on what landed".
 
@@ -727,15 +733,21 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   cannot be satisfied by an empty rollup.** Before the first run is created,
   `statusCheckRollup` is empty, and an empty list satisfies both "nothing in
   progress" and "nothing failed". A count is the wrong floor too: on PR #2503, 6 of
-  the 15 required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
-  surfaces*), so a predicate that accepts only `SUCCESS` reports 6/15 forever. The
+  the required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
+  surfaces*), so a predicate that accepts only `SUCCESS` never reaches the full set. The
   expected set is the ruleset's, read live and documented in
   [`autonomous-pr-loop.md` § One-time GitHub setup](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)
   step 3 (a context listed there but absent from the rule is a pending operator
   step, #2321):
 
+  **Read `$REQ` from the PR's OWN base branch**, which is what `BASE` below is for.
+  Hardcoding `dev` on a promotion PR silently drops the four contexts required on
+  `main` alone (`gate`, `qa-freshness`, Design visual regression, Frontend browser
+  smoke), so the loop reports green on a set it never checked:
+
   ```bash
-  REQ=$(gh api repos/<o>/<r>/rules/branches/dev --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]')
+  BASE=$(gh pr view <pr> --json baseRefName -q .baseRefName)
+  REQ=$(gh api repos/<o>/<r>/rules/branches/"$BASE" --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]')
   gh pr view <pr> --json mergeStateStatus,statusCheckRollup | jq --argjson req "$REQ" '
     (.statusCheckRollup | map({name: (.name // .context), c: ((.conclusion // .state // "PENDING") | ascii_upcase)})) as $r
     | { state: .mergeStateStatus,
@@ -749,22 +761,30 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   `failed` non-empty (a **required** context with a failing conclusion; `CANCELLED`
   means read `gh run list --commit <sha>` for the superseding run before believing
   it); **green** — `missing`, `failed` and `pending` all empty **and**
-  `state ∈ {CLEAN, UNSTABLE}` — `UNSTABLE` *is* green here: every required context
+  `state ∈ {CLEAN, UNSTABLE}`, plus `BEHIND` on a PR **based on `dev`** —
+  `UNSTABLE` *is* green here: every required context
   is satisfied and something non-required failed (#2503 merged clean with `Vercel`
   = `FAILURE`; name `nonrequired_failed` in the report, never stop on it); or
-  **stuck** — the three lists empty and `state ∈ {BLOCKED, BEHIND, DIRTY}`, which is
-  a review requirement, a stale branch or a conflict, not CI: stop waiting and act
-  on the state (`BEHIND`/`DIRTY` guidance is above). Anything else — a non-empty
+  **stuck** — the three lists empty and `state ∈ {BLOCKED, DIRTY}`, plus `BEHIND`
+  on a PR **based on `main`**, which is a review requirement, a conflict or a
+  stale promotion head, not CI: stop waiting and act on the state (`DIRTY`
+  guidance is above). `BEHIND` is the one state whose verdict depends on the base
+  branch, because only `main` still requires an up-to-date head (#2632). Anything else — a non-empty
   `missing` or `pending`, an empty rollup, `state: UNKNOWN` (GitHub has not computed
   mergeability for that head yet; measured to persist across re-reads on a freshly
   pushed PR) — keeps waiting under a wall-clock ceiling you state, and a loop that
   outlives the ceiling reports that, not green. The rollup mixes `CheckRun`
   (`status`/`conclusion`/`name`) and `StatusContext` (`state`/`context`) shapes, which
   is why every field above is read with a fallback.
-- **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice:
-  the armed PR sat BEHIND indefinitely until a manual `gh pr update-branch <pr>`.
-  Treat BEHIND like DIRTY's quieter sibling: update the branch yourself, then let
-  the re-run checks carry the merge.
+- **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice
+  before #2632, when the armed PR sat BEHIND indefinitely until a manual
+  `gh pr update-branch <pr>`. On `dev` that no longer matters: with the up-to-date
+  rule off, an armed PR in `BEHIND` merges on its own checks and needs nothing from
+  you. The old behaviour still applies to a **promotion PR into `main`**, which is
+  still strict — update that branch yourself and let the re-run checks carry the
+  merge (the post-promotion sync-back in
+  [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
+  § *Promotion to production* exists for exactly this reason).
 
 ## Closeout
 

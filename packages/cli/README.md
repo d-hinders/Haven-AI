@@ -94,6 +94,8 @@ checks a command against. `haven --help` prints the same list.
 # auth
 haven login                              # browser device-code approval (the default)
 haven login --email you@example.com      # password path instead (prompt or HAVEN_PASSWORD)
+haven login --no-wait --json             # print the link object and exit — resume with --poll
+haven login --poll <device_code>         # one poll round: 0 approved, 3 pending, 4 denied
 haven whoami                             # user, session expiry, API URL
 haven guide                              # the agent onboarding runbook
 haven logout
@@ -238,16 +240,33 @@ driving this CLI must never hold its user's password.
 ```bash
 haven login --json
 # {"ok":true,"verification_url":"https://app.haven…/device?code=ABCD-2345",
-#  "user_code":"ABCD-2345","expires_at":"…"}
+#  "user_code":"ABCD-2345","device_code":"…","expires_at":"…"}
 ```
 
 Under `--json` that object is printed **before** polling begins, so an agent
 can hand its user the link immediately rather than after the flow completes.
-Add `--no-wait` to stop there and poll later; without it the CLI waits at the
-interval the server names, widening it when the server says `slow_down`.
+Without `--no-wait` the CLI then polls until approved, widening the interval
+when the server says `slow_down`.
 
-Exit codes carry the outcome an agent acts on: **3** when the code expired
-(ask for a new one), **4** when the human denied it (stop asking).
+**Non-blocking (for agents).** Under `--json` the wait is capped at **30
+seconds**: on timeout the CLI emits
+`{ "status": "pending", "device_code": "…", "retry_after": 5 }` and exits
+**3** — the flow is still alive, poll again. `--no-wait` skips even that wait
+and returns the link object at once. Either way, finish the flow with one
+poll round per invocation, so nothing holds your turn open:
+
+```bash
+haven login --api <api-url> --json --no-wait
+# { "ok": true, "verification_url": "…", "user_code": "ABCD-2345",
+#   "device_code": "…", "expires_at": "…" }        <- hand your user the link
+haven login --poll <device_code>                   # repeat until it stops saying pending
+```
+
+Exit codes carry the outcome an agent acts on: **0** once approved (the same
+success object as the blocking path; the session is saved), **3** while still
+pending — the object carries `retry_after`, widened when the server says
+`slow_down` — and on an expired code, which means start over with a fresh
+`login`. **4** when the human denied it (stop asking).
 
 `haven login --email <address>` keeps the password path for a human who wants
 it. It is not removed — it is simply no longer what an agent gets by asking to

@@ -106,7 +106,12 @@ export function toFailure(err: unknown): Failure {
         code: 'not_authenticated',
         exit: EXIT.notAuthenticated,
         message: err.message,
-        hint: 'Run `haven login` (or set HAVEN_EMAIL and HAVEN_PASSWORD).',
+        // #2618: the device flow is named FIRST because it is the path an
+        // agent can actually run — an agent never holds its user's password,
+        // which is the runbook's first rule; the previous hint led with the
+        // credentials as if they were the normal route. HAVEN_EMAIL and
+        // HAVEN_PASSWORD remain for a HUMAN scripting non-interactively.
+        hint: 'Run `haven login` (device flow — it never asks for a password; under --json pass --no-wait, then resume with `login --poll <device_code>`). HAVEN_EMAIL and HAVEN_PASSWORD are the human, non-interactive path.',
       }
     }
     if (err.status >= 400 && err.status < 500) {

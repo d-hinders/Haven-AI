@@ -59,6 +59,13 @@ export interface ParsedArgs {
      */
     expires?: number
     /**
+     * #2618: the device code for `haven login --poll <device_code>` — ONE poll
+     * round against POST /auth/device/token, for an agent that printed the
+     * link with `--no-wait` and came back later. The value is REQUIRED: a bare
+     * `--poll` would look like it resumed something.
+     */
+    poll?: string
+    /**
      * #2527: deliberately absent — `--recipient` for `agents connect`. The
      * issue sketched one, and neither `POST /agents` nor
      * `POST /agent-connection-setups` has a field to
@@ -76,7 +83,7 @@ const VALUE_FLAGS = new Set([
   '--api', '--email', '--safe', '--agent', '--limit', '--offset', '--direction',
   '--format', '--from', '--to', '--company',
   '--name', '--budget', '--token', '--period', '--status',
-  '--amount', '--recipient', '--expires',
+  '--amount', '--recipient', '--expires', '--poll',
 ])
 
 /**
@@ -139,6 +146,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       } else if (arg === '--format') {
         if (value !== 'csv' && value !== 'sie') throw new Error('--format must be "csv" or "sie"')
         flags.format = value
+      } else if (arg === '--poll') {
+        flags.poll = value
       } else if (arg === '--from') flags.from = value
       else if (arg === '--to') flags.to = value
       else if (arg === '--company') flags.company = value
@@ -163,6 +172,11 @@ export function helpText(): string {
     '  login                   Sign in. Opens a browser device-code approval by default —',
     '                          it prints a code and a link, and never asks for a password',
     '  login --email <e>       Password path instead (prompt, or HAVEN_PASSWORD)',
+    '  login --no-wait         Print the link and exit instead of polling. Under --json,',
+    '                          pass it: you get the object back at once (it carries',
+    '                          device_code) and finish with `login --poll <device_code>`',
+    '  login --poll <code>     One poll round of a started device flow: exit 0 approved,',
+    '                          3 still pending (the object carries retry_after), 4 denied',
     '  logout                  Clear the saved session',
     '  whoami                  Show the signed-in user, session expiry and API URL',
     '',

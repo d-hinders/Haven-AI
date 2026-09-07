@@ -7,7 +7,13 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import {
+  assertWorkerSchemaAtHead,
+  describeDb,
+  initDbHarness,
+  resetDb,
+  withMigrationReverted,
+} from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down } from '../062_normalize_price_display.js'
 
 async function seedRow(priceDisplay: string | null, suffix: string): Promise<string> {
@@ -97,11 +103,19 @@ describeDb('migration 062: normalize price_display (#1592)', () => {
 
   it('down restores the $ prefix on normalized USDC rows only', async () => {
     const id = await seedRow('$0.0015 USDC', 'down')
-    await up(db as never)
-    expect(await readDisplay(id)).toBe('0.0015 USDC')
+    // #2621: same reasoning as 059 — 062 is DATA-only in both directions, so
+    // the guard cannot see a leak here; the helper is what makes the
+    // restore-and-revert pair atomic against a failing assertion in the middle.
+    await withMigrationReverted(
+      () => up(db as never),
+      async () => {
+        expect(await readDisplay(id)).toBe('0.0015 USDC')
 
-    await down(db as never)
+        await down(db as never)
 
-    expect(await readDisplay(id)).toBe('$0.0015 USDC')
+        expect(await readDisplay(id)).toBe('$0.0015 USDC')
+      },
+      () => up(db as never),
+    )
   })
 })

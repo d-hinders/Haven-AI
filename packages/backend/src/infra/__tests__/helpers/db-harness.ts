@@ -140,7 +140,15 @@ import {
   acquireAdvisoryLockByPolling,
   releaseAdvisoryLock,
 } from '../../../db/advisory-lock.js'
+import { readFile } from 'node:fs/promises'
 import { runMigrations } from '../../../db/migrate.js'
+import {
+  diffFingerprints,
+  driftMessage,
+  readFingerprint,
+  REFERENCE_PATH_ENV,
+  type TableFingerprint,
+} from './schema-reference.js'
 import {
   ciFailureMessage,
   decideDbMode,
@@ -398,6 +406,44 @@ export function initDbHarness(): Promise<void> {
   return withSlowAnnouncement('initDbHarness()', () => ensureMigrated())
 }
 
+/**
+ * Fail if this worker schema was ALREADY off migration head when the run
+ * started (#2622) — the reservoir half of #2616.
+ *
+ * `ensureMigrated()` decides from `schema_migrations` and finds nothing
+ * pending; `resetDb()` never touches schema. So inherited drift is permanent
+ * and silent, and #2616's end-of-file guard cannot see it either, because that
+ * guard captures head AFTER the migration run: drift already present BECOMES
+ * head and diffs clean against itself forever.
+ *
+ * Compared against the run's pristine reference, built once in
+ * `vitest.global-setup.ts`. A missing reference is NOT a failure — a scoped run
+ * with no global setup, or the acknowledged no-database mode, both reach here
+ * legitimately — but it is also not silence: the absence is reported once, so
+ * a green run never reads as "the reference checked out" when no reference
+ * existed. A guard that cannot say whether it ran is the false-zero shape this
+ * repo keeps paying for.
+ */
+async function assertSchemaMatchesReference(): Promise<void> {
+  const file = process.env[REFERENCE_PATH_ENV]
+  if (!file) {
+    if (!referenceAbsenceReported) {
+      referenceAbsenceReported = true
+      console.warn(
+        `db-harness: no schema reference for this run (${REFERENCE_PATH_ENV} unset), so inherited ` +
+          'drift in this worker schema was NOT checked (#2622). Expected for a run without the ' +
+          'package global setup; unexpected otherwise.',
+      )
+    }
+    return
+  }
+  const reference = JSON.parse(await readFile(file, 'utf8')) as TableFingerprint[]
+  const differences = diffFingerprints(reference, await readFingerprint(db, WORKER_SCHEMA))
+  if (differences.length > 0) throw new Error(driftMessage(WORKER_SCHEMA, differences))
+}
+
+let referenceAbsenceReported = false
+
 function ensureMigrated(): Promise<void> {
   ready ??= (async () => {
     // Explicitly qualified — CREATE SCHEMA ignores search_path.
@@ -449,6 +495,10 @@ function ensureMigrated(): Promise<void> {
     // #2616: the shape at migration head, captured the one moment it is
     // known-good — after the runner finishes and before any test body runs.
     // `assertWorkerSchemaAtHead()` below diffs against it.
+    // BEFORE the head capture, deliberately. Capturing first would bake any
+    // inherited drift into `headTables` and make the comparison compare the
+    // drift against itself — the exact mechanism that let this class survive.
+    await assertSchemaMatchesReference()
     headTables = (await readSchemaShape()).tables
   })()
   return ready

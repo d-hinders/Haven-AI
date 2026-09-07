@@ -1,4 +1,4 @@
-import { DEFAULT_TEST_DATABASE_URL } from './src/infra/__tests__/helpers/db-availability.js'
+import { applyTestEnvDefaults } from './src/infra/__tests__/helpers/test-env.js'
 
 // Default matches `docker compose up -d postgres` AND the ci.yml service
 // container (the old postgres:postgres/haven_test default matched neither —
@@ -11,15 +11,10 @@ import { DEFAULT_TEST_DATABASE_URL } from './src/infra/__tests__/helpers/db-avai
 // probe one host while the workers connect to another — the guard reporting on
 // a database nobody used. One constant makes that impossible rather than
 // unlikely.
-process.env.DATABASE_URL ??= DEFAULT_TEST_DATABASE_URL
-process.env.JWT_SECRET ??= 'test-secret'
-
-// Cap the per-worker pool under vitest (#1222). The production default (20)
-// times a dozen parallel workers overruns Postgres's max_connections=100 —
-// observed as the real-DB suites' availability probe timing out under a full
-// run, which skips locally and FAILS in CI. Repository tests never need more
-// than a handful of concurrent connections per worker.
-process.env.DB_POOL_MAX ??= '5'
+// The three assignments live in `applyTestEnvDefaults()` because
+// `vitest.global-setup.ts` needs the same ones (#2622) and a second copy of
+// them is the divergence this file's own comment above warns about.
+applyTestEnvDefaults()
 
 // Real-DB isolation (#1220): bind this worker's connections to its own
 // schema BEFORE config.ts reads DATABASE_URL. `options` rides the postgres

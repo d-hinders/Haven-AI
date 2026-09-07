@@ -10,7 +10,7 @@
  * rows into the SAME table name, so when vitest schedules them in different
  * workers, each asserts it sees only its own rows.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../../db.js'
 import { migrations } from '../../../../db/migrations/index.js'
 import { withTransaction } from '../../../transaction.js'
@@ -28,6 +28,17 @@ describeDb('db-harness (#1220)', () => {
          note TEXT
        )`,
     )
+  })
+
+  // This file CREATES a table in the worker schema, so it must remove it
+  // (#2622). Worker schemas outlive the run, and the reservoir guard now
+  // compares each one against the run's pristine reference at init — a scratch
+  // table left behind is exactly the inherited drift that guard exists to
+  // catch, and leaving it would make this file poison whichever DIFFERENT file
+  // draws the same ordinal on a later run. `CREATE TABLE IF NOT EXISTS` above
+  // was what made that survivable and therefore invisible.
+  afterAll(async () => {
+    await db.query('DROP TABLE IF EXISTS harness_smoke')
   })
 
   beforeEach(async () => {

@@ -25,7 +25,8 @@
     "pilot:fortnox": "tsx scripts/fortnox-sandbox-validation.ts",
     "ops:register-passport-schema": "tsx scripts/register-passport-schema.ts",
     "ops:check-mainnet-reconciliation": "tsx scripts/check-mainnet-reconciliation.ts",
-    "ops:cancel-stuck-attest": "tsx scripts/cancel-stuck-attest-lane.ts"
+    "ops:cancel-stuck-attest": "tsx scripts/cancel-stuck-attest-lane.ts",
+    "db:reap-test-schemas": "node scripts/reap-test-schemas.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

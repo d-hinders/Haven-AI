@@ -18,7 +18,8 @@
  * "27/27 with zero skips" is a materially different claim from "green", and
  * until now only a human who went looking could make it. Now the run makes it.
  */
-import { readdir, readFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -32,6 +33,12 @@ import {
   unacknowledgedFailureMessage,
   type DbMode,
 } from './src/infra/__tests__/helpers/db-availability.js'
+import {
+  readFingerprint,
+  REFERENCE_PATH_ENV,
+  REFERENCE_SCHEMA,
+} from './src/infra/__tests__/helpers/schema-reference.js'
+import { applyTestEnvDefaults } from './src/infra/__tests__/helpers/test-env.js'
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'src')
 
@@ -64,7 +71,71 @@ async function countRealDbTestFiles(dir: string = SRC): Promise<number> {
   return total
 }
 
+/**
+ * Build the run's pristine schema reference and publish its fingerprint (#2622).
+ *
+ * Runs ONCE, in the main process, before a worker exists — which is the whole
+ * economy of the design. The alternative #2622 costed, dropping and recreating
+ * every worker schema, pays a full migration run per FILE (worker ids are file
+ * ordinals), so 63 of them per suite run here.
+ *
+ * The reference schema is dropped and recreated rather than reused. Reusing it
+ * would reproduce the very defect this closes one level up: a stale reference
+ * is worse than none, because every worker would then be compared against
+ * yesterday's drift and report clean.
+ *
+ * `DATABASE_URL` is repointed before the migration runner is imported, because
+ * `getPool()` is memoised and `config.ts` reads the URL at import time. The
+ * pool is ended in the `finally`, or vitest waits on an open handle.
+ */
+async function buildSchemaReference(url: string): Promise<void> {
+  // Before ANY import that reaches `config.ts`. Global setup runs ahead of
+  // setup files, so nothing has applied these yet and the migration runner
+  // would die on `Missing required environment variable: JWT_SECRET`.
+  applyTestEnvDefaults()
+  const pg = (await import('pg')).default
+  const admin = new pg.Client({ connectionString: url })
+  await admin.connect()
+  try {
+    await admin.query(`DROP SCHEMA IF EXISTS ${REFERENCE_SCHEMA} CASCADE`)
+    await admin.query(`CREATE SCHEMA ${REFERENCE_SCHEMA}`)
+  } finally {
+    await admin.end()
+  }
+
+  const scoped = new URL(url)
+  scoped.searchParams.set('options', `-c search_path=${REFERENCE_SCHEMA}`)
+  const previousUrl = process.env.DATABASE_URL
+  process.env.DATABASE_URL = scoped.toString()
+  try {
+    const { runMigrations } = await import('./src/db/migrate.js')
+    await runMigrations()
+    const { getPool } = await import('./src/db.js')
+    await getPool().end()
+  } finally {
+    process.env.DATABASE_URL = previousUrl
+  }
+
+  const reader = new pg.Client({ connectionString: url })
+  await reader.connect()
+  let fingerprint
+  try {
+    fingerprint = await readFingerprint(reader, REFERENCE_SCHEMA)
+  } finally {
+    await reader.end()
+  }
+
+  const dir = await mkdtemp(path.join(tmpdir(), 'haven-schema-ref-'))
+  const file = path.join(dir, 'reference.json')
+  await writeFile(file, JSON.stringify(fingerprint))
+  // Workers inherit the main process's env, so this is the transport — verified
+  // rather than assumed: a probe set here was read back inside a worker.
+  process.env[REFERENCE_PATH_ENV] = file
+  referenceDir = dir
+}
+
 let verdict: { mode: DbMode; url: string } | null = null
+let referenceDir: string | null = null
 
 export async function setup(): Promise<void> {
   const url = resolveTestDatabaseUrl()
@@ -76,9 +147,12 @@ export async function setup(): Promise<void> {
   // narrowed run back into a proof, so there is no value in running it first.
   if (mode === 'fail-ci') throw new Error(ciFailureMessage(url))
   if (mode === 'fail-unacknowledged') throw new Error(unacknowledgedFailureMessage(url))
+
+  if (mode === 'run') await buildSchemaReference(url)
 }
 
 export async function teardown(): Promise<void> {
+  if (referenceDir) await rm(referenceDir, { recursive: true, force: true })
   if (!verdict) return
   const { mode, url } = verdict
 

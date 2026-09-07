@@ -154,8 +154,9 @@ describeDb('agent reads survive the agent_allowances drop (#2020)', () => {
     )
 
     // The point of the whole test: the table does not exist from here on.
-    // (IF EXISTS is belt-and-braces; afterAll restores the table so the drop
-    // never leaks past this file into the shared worker schema.)
+    // (IF EXISTS is belt-and-braces. The drop needs no undoing: since 075 the
+    // ABSENT table IS migration head, and `afterAll` drops it again to leave
+    // exactly that. It used to RESTORE here, which was #2616.)
     await db.query('DROP TABLE IF EXISTS agent_allowances CASCADE')
 
     // GET /agents' data path: list, then derive for the hybrid subset.

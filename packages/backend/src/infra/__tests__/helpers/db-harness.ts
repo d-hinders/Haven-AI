@@ -462,8 +462,10 @@ let headTables: string[] | null = null
 
 /**
  * Fail if the worker schema is no longer the shape the migration runner left
- * (#2616). Call in `afterAll` from any file that drives a migration's `up()`
- * or `down()` by hand.
+ * (#2616). Call in `afterAll` from any file that changes SCHEMA — a migration's
+ * `up()`/`down()` driven by hand, or an ordinary test creating or dropping a
+ * table in a hook. The leak that caused #2616 was the second kind, so scoping
+ * this to migration tests would have missed it.
  *
  * ## Why this exists, and why it is not in `resetDb()`
  *

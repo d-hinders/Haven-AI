@@ -90,7 +90,24 @@ export const RULES = [
     id: 'retired-rendered-evidence-trigger',
     what: 'the rendered-evidence trigger #2636 retired ("any diff touching a rendered route or a shared primitive")',
     fix: 'name the three triggers: a new route, a changed shared primitive, or a diff that changes what a screen shows (#2636).',
-    requires: [/\brendered route\b/i, /\bprimitive\b/i],
+    // Two INDEPENDENT words, not one adjacency (review finding). `\brendered
+    // route\b` binds the pair, so any inline markup landing between them —
+    // `rendered **route**`, or a wrap onto a code span — slips through. That is
+    // the same defect one level down from the one this guard exists for: a hard
+    // wrap defeats grep, and a bolded word defeats a two-word regex. Both words
+    // must still appear in the SAME flattened sentence, which is what keeps
+    // this from firing on unrelated prose that happens to say "primitive".
+    // `rendered` and `route` must be ADJACENT — separated only by markup or
+    // whitespace, never by another word. Two earlier attempts bracket the right
+    // answer. `\brendered route\b` was too tight: any inline formatting between
+    // the words (`rendered **route**`, or a wrap onto a code span) slipped
+    // through, which is the same defect one level down from the hard wraps this
+    // guard exists for. Three independent words was too loose: it fired on
+    // `.github/pull_request_template.md`, whose checklist has no full stops, so
+    // the whole list flattens into one "sentence" containing all three words in
+    // unrelated bullets. The bounded gap admits the markup and refuses the
+    // distance.
+    requires: [/\brendered\b[^A-Za-z0-9]{0,12}\broute\b/i, /\bprimitive\b/i],
     excludes: [],
   },
 ]
@@ -101,6 +118,28 @@ export const RULES = [
  * pastes a chain entry as an example.
  */
 const CHAIN_QUOTE = [/last-verified/i, /\bPrior:/]
+
+/**
+ * The escape for a sentence that QUOTES the retired wording in order to explain
+ * or forbid it (review finding).
+ *
+ * Without one, this guard cannot tell a violation from a citation of one — and
+ * the document most likely to quote the retired sentence verbatim is the one
+ * explaining why it is retired. Today no body prose does that, so nothing is
+ * broken; the next explanatory doc would have had no clean way out, because
+ * baselining is semantically wrong for a citation. It is residue the baseline
+ * describes, and a citation is not residue.
+ *
+ * Deliberately an explicit marker rather than heuristics on words like
+ * "retired" or "forbidden": a guard that tries to read intent will get it
+ * wrong in both directions, and the repo already uses this shape
+ * (`// design-system-exempt: <reason>`, `// ui-local: <reason>`).
+ *
+ *     <!-- ui-gate-wording-allow: quoting the retired form to forbid it -->
+ *
+ * It applies to the sentence it appears in, so it cannot silence a file.
+ */
+const ALLOW_MARKER = /<!--\s*ui-gate-wording-allow:[^>]*-->/i
 
 /** Markdown files under the doc surface, excluding archived docs. */
 export function listMarkdownFiles(root = REPO_ROOT) {
@@ -197,6 +236,24 @@ export function lineOf(text, index) {
 export function scanText(file, raw) {
   const body = blankFrontMatter(raw)
   const hits = []
+  // The citation escape is LINE-scoped: the marker excuses the line it sits on
+  // and the line either side of it.
+  //
+  // Paragraph scope was tried first and cannot work here, for a reason worth
+  // recording. `sentences()` splits on full stops, and a marker line has no
+  // full stop — so the "sentence" beginning at the marker runs straight
+  // through the blank line into the next paragraph, and a marker anywhere
+  // above a violation excused it. The failure was invisible until a test put
+  // the marker in a DIFFERENT paragraph and expected the hit to survive.
+  //
+  // Lines are what an author can see. Same line, the line before, or the line
+  // after — and nothing further.
+  const allowedLines = new Set()
+  body.split('\n').forEach((line, i) => {
+    if (!ALLOW_MARKER.test(line)) return
+    allowedLines.add(i).add(i - 1).add(i + 1)
+  })
+
   for (const s of sentences(body)) {
     const { flat, map } = flattenWithMap(s.text)
     if (flat.length === 0) continue
@@ -208,10 +265,21 @@ export function scanText(file, raw) {
       // Report the FIRST required term, not the sentence start: the sentence
       // may open several hard-wrapped lines above the phrase.
       const offset = map[Math.min(...at)] ?? 0
+      const line = lineOf(body, s.index + offset)
+      // The citation escape is anchored to the line the VIOLATING PHRASE is
+      // on, not to where its sentence starts. Two earlier anchors were wrong
+      // for the same underlying reason and are recorded so the third is not
+      // tried again: `sentences()` splits on full stops, and a marker line has
+      // none — so the sentence containing a violation BEGINS at the marker
+      // whenever one sits above it. Anchoring on the sentence (or on its
+      // paragraph) therefore excused violations several paragraphs away, which
+      // is precisely what the escape must not do. The phrase's own line is the
+      // only anchor that means what an author reading the file would expect.
+      if (allowedLines.has(line - 1)) continue
       hits.push({
         file,
         rule: rule.id,
-        line: lineOf(body, s.index + offset),
+        line,
         sentence: flat.length > 220 ? `${flat.slice(0, 220)}…` : flat,
       })
     }

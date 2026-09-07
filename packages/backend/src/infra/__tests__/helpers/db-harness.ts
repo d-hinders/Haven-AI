@@ -465,7 +465,8 @@ export function initDbHarness(): Promise<void> {
  * false-zero shape, and it happened for real while building #2625's own
  * isolation suffix, which reached this module but not the setup file.
  *
- * Checked once per worker, on the one connection whose configuration the
+ * Checked once per FILE (not per worker — see the frequency note on
+ * `readSchemaFingerprint()`), on the one connection whose configuration the
  * whole pool shares, at the moment `headShape` is about to be captured — the
  * earliest point where being wrong already matters.
  */
@@ -537,7 +538,9 @@ function ensureMigrated(): Promise<void> {
     // `assertWorkerSchemaAtHead()` below diffs against it. A column/index
     // FINGERPRINT, not just table names (#2625) — see `readSchemaFingerprint()`
     // for why a name-only list let a shape change through, and why this extra
-    // round trip is paid HERE, once per worker, rather than in `readSchemaShape()`
+    // round trip is paid HERE, once per FILE (see the frequency note on
+    // `readSchemaFingerprint()`: this memo is per module instance, and vitest
+    // gives every test file its own), rather than in `readSchemaShape()`
     // below, which every `resetDb()` call already pays.
     headShape = await readSchemaFingerprint()
   })()
@@ -621,8 +624,10 @@ let headShape: TableFingerprint[] | null = null
  * process and its own worker id — which is also why `test_w*` schemas
  * accumulate one per file rather than one per core (#2622).
  *
- * So the real frequency is: one head capture per real-DB file (64 files import
- * this module today, counted at the commit that added this note), plus one
+ * So the real frequency is: one head capture per real-DB file (63 files import
+ * this module today, counted at the commit that added this note — a looser
+ * grep said 64 by counting `harness-call-budget.test.ts`, which only mentions
+ * the name), plus one
  * call per root-level `afterAll` — which is now EVERY one of those files, not
  * only the ones that opt in — plus any explicit inner registration a file
  * still carries.
@@ -635,7 +640,7 @@ let headShape: TableFingerprint[] | null = null
  * median for the plain `readSchemaShape()` `resetDb()` already pays on every
  * reset — roughly double, but still tens of milliseconds.
  *
- * Be careful how that unit cost is scaled: 64 files x ~31 ms is roughly 2 s of
+ * Be careful how that unit cost is scaled: 63 files x ~31 ms is roughly 2 s of
  * added worker time for the new root-level call, but that is ARITHMETIC ON AN
  * UNCONTENDED MEASUREMENT, not an end-to-end measurement of the suite. The
  * timings above were taken against an otherwise idle database; the real suite
@@ -711,8 +716,9 @@ let headShape: TableFingerprint[] | null = null
  * one and therefore — by the same LIFO rule — the last to run among root-level
  * siblings; a file that registers its own root-level `afterAll` and throws in
  * it suppresses the guard exactly the way the nested case used to, because now
- * they share a suite. No real-DB file does that today (checked: none of the 64
- * files importing this module has a top-level `afterAll(`), so this is latent
+ * they share a suite. No real-DB file does that today (checked: none of the 63
+ * files importing this module has a top-level `afterAll(`, with a positive
+ * control confirming the pattern finds one when present), so this is latent
  * rather than active — written down because an unstated boundary reads as a
  * closed guarantee. Read that call site's docstring for what the two
  * registrations together guarantee and do not.
@@ -771,11 +777,11 @@ export async function assertWorkerSchemaAtHead(): Promise<void> {
     `db-harness: this file left ${WORKER_SCHEMA} off migration head (#2616, #2625).` +
       (restored.length ? ` Tables present that head does not have: ${restored.join(', ')} — a down() or a CREATE was not undone.` : '') +
       (missing.length ? ` Tables head has that are gone: ${missing.join(', ')} — an up()/DROP was not followed by its down().` : '') +
-      (changed.length ? ` Tables present in both but with a different COLUMN or INDEX shape: ${changed.join('; ')} — restore it. (This compares column and index NAMES plus a few column attributes; it does not see a CHECK or FK constraint, an index redefined under the same name, or a varchar/numeric width change. See the blind-spot list in testing-strategy.md before reading a pass as full coverage.)` : '') +
+      (changed.length ? ` Tables present in both but with a different COLUMN or INDEX shape: ${changed.join('; ')} — restore it. (This compares column and index NAMES plus a few column attributes; it does not see a CHECK or FK constraint, an index redefined under the same name, or a varchar/numeric width change. See the full blind-spot list on assertWorkerSchemaAtHead() in this file before reading a pass as full coverage.)` : '') +
       ' The schema outlives this run (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
       ' so a later run would have inherited it as a mystery failure. Restore in a `finally`.' +
       ' (LATER RUN, not later file: `VITEST_WORKER_ID` is a per-run file ordinal, so no two' +
-      ' files in one run share a schema — the drift is inherited by whichever DIFFERENT file' +
+      ' files in one run share a schema — the drift is inherited by whichever file' +
       ' draws this ordinal next time, which is why the attribution is so hard to trace.)',
   )
 }
@@ -914,7 +920,8 @@ async function readSchemaShape(): Promise<SchemaShape> {
  * `assertWorkerSchemaAtHead()` diffs, deliberately SEPARATE from
  * `readSchemaShape()` above. `readSchemaShape()` runs on every `resetDb()`
  * because the emptying plan needs it every test; this function runs only at
- * migration head (once per worker) and inside `assertWorkerSchemaAtHead()`
+ * migration head (once per FILE — see the frequency note there) and inside
+ * `assertWorkerSchemaAtHead()`
  * itself, so the extra catalog work of fingerprinting every column and index
  * never lands on the per-test reset path. See the cost measurement in
  * `assertWorkerSchemaAtHead()`'s docstring.

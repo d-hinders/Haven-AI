@@ -84,6 +84,21 @@ const PACKAGE_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..')
  *
  * Seeding from the checkout path gives both properties at once, because
  * concurrent sessions are required to use separate worktrees.
+ *
+ * Two things this does NOT close, stated because the paragraph above otherwise
+ * reads as a closed guarantee:
+ *
+ *   - Two runs of the suite from the SAME worktree still share this suffix, so
+ *     run A's pre-spawn cleanup can drop the column run B's child just added
+ *     and B fails on the missing guard message. Bounded rather than fixed:
+ *     `AGENTS.md` requires concurrent sessions to take separate worktrees, and
+ *     CI runs the suite once per job.
+ *   - One schema per checkout is created and never dropped by anything. It is
+ *     one, not one per run — but it is permanent, and it lands in the same
+ *     `pg_class` whose size sets this harness's reset floor (#2622). The
+ *     scoping that keeps `dropFixtureLeak()` out of other sessions' schemas is
+ *     also what stops it reaching schemas stranded by earlier revisions of
+ *     this file.
  */
 const SESSION_SUFFIX = `_guard2625_${createHash('sha256')
   .update(PACKAGE_ROOT)
@@ -92,6 +107,12 @@ const SESSION_SUFFIX = `_guard2625_${createHash('sha256')
 
 /** The scratch column the child fixture leaks, named once. */
 const FIXTURE_COLUMN = '__scratch_2625_fixture_leak'
+
+/**
+ * Where the disposable child fixture is written — deliberately outside `src/`,
+ * and excluded from vitest's own `include` (see `vitest.config.ts`).
+ */
+const FIXTURE_DIR = path.join(PACKAGE_ROOT, '.tmp-fixtures')
 
 describeDb('assertWorkerSchemaAtHead (#2625)', () => {
   beforeAll(async () => {
@@ -160,8 +181,8 @@ describeDb('assertWorkerSchemaAtHead (#2625)', () => {
  */
 const FIXTURE_SOURCE = `
 import { afterAll, beforeAll, it } from 'vitest'
-import db from '../../../../db.js'
-import { describeDb, initDbHarness } from '../db-harness.js'
+import db from '../src/db.js'
+import { describeDb, initDbHarness } from '../src/infra/__tests__/helpers/db-harness.js'
 
 describeDb('fixture: a sibling afterAll throws with no explicit guard registration', () => {
   beforeAll(async () => {
@@ -218,7 +239,24 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
   it(
     "reports the drift purely from importing db-harness.js — no call site opts in, and the sibling's throw does not suppress it",
     async () => {
-      const fixturePath = path.join(__dirname, `hook-order-2625.${process.pid}.fixture.test.ts`)
+      // OUTSIDE `src/`, and this is not tidiness (#2690 review, blocking).
+      // Five test files under `src` walk the tree with `readdirSync` and then
+      // `readFileSync` what they listed — `harness-call-budget.test.ts`,
+      // `non-custody.invariants.test.ts`, `chain-default-guard.test.ts`,
+      // `migration-registry.test.ts`, `dependency-parity.test.ts`. This
+      // fixture lived in `src` for ~3 s per run, so any of them that listed it
+      // before the `rmSync` and read it after died on ENOENT — an unrelated
+      // file failing for a reason nothing in it explains. Reproduced at
+      // `--sequence.shuffle.files --sequence.seed=42`.
+      //
+      // The second failure mode is not a race at all: kill the parent between
+      // the write and the `finally`, and the fixture persists as a collectable
+      // test file whose `afterAll` throws and whose `it` drifts the schema —
+      // a permanently red suite that looks like drift in an innocent file.
+      // `.tmp-fixtures/**` is in `vitest.config.ts`'s `exclude` for exactly
+      // that, which is why the child below overrides `--exclude`.
+      fs.mkdirSync(FIXTURE_DIR, { recursive: true })
+      const fixturePath = path.join(FIXTURE_DIR, `hook-order-2625.${process.pid}.fixture.test.ts`)
       fs.writeFileSync(fixturePath, FIXTURE_SOURCE)
       // BEFORE the spawn, not only after (#2625). The child's schema is a
       // FIXED name that outlives the run, so a leak left by any earlier run —
@@ -244,7 +282,22 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
         // child a schema of its own.
         const result = spawnSync(
           'npx',
-          ['vitest', 'run', fixturePath, '--reporter=basic', '--no-file-parallelism'],
+          [
+            'vitest',
+            'run',
+            fixturePath,
+            '--reporter=basic',
+            '--no-file-parallelism',
+            // Lifts the main config's `.tmp-fixtures/**` exclusion, which
+            // exists so an ORPHANED fixture can never be collected by an
+            // ordinary run. A CLI `--exclude` cannot do this: vitest APPENDS
+            // it to the configured excludes rather than replacing them, so the
+            // child reported "No test files found" — verified, after an
+            // earlier probe of the flag gave a false pass by testing the
+            // override before the exclusion it was meant to override existed.
+            '--config',
+            'vitest.fixture.config.ts',
+          ],
           {
             // The PACKAGE root, derived from this file — never
             // `process.cwd()` (#2625). vitest's cwd is whatever invoked the

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
@@ -24,5 +24,14 @@ export default defineConfig({
     // while still bounding a genuinely hung/unreachable database to fail the
     // job ~7x faster than the workflow timeout would.
     hookTimeout: 120_000,
+    // #2625: `db-harness-schema-guard.test.ts` writes a disposable fixture
+    // here and spawns a child vitest at it. Excluded so an ORPHANED fixture —
+    // left by a killed parent — can never be collected by an ordinary run:
+    // its `afterAll` throws and its `it` drifts the worker schema, which would
+    // present as a permanently red suite blaming an innocent file. The child
+    // passes `--exclude node_modules/**` to override this for its own run.
+    // The directory is outside `src/` because five test files walk that tree
+    // and read what they list, and raced the fixture's ~3 s lifetime.
+    exclude: [...configDefaults.exclude, '.tmp-fixtures/**'],
   },
 })

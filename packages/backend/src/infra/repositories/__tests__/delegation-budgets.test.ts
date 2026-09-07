@@ -504,6 +504,17 @@ describeDb('delegation build slot lock (#2613)', () => {
       agentId, SLOT.token, SLOT.recipient, '5000000', 86400, 9_999_999_999, tx,
     )
     if (existing) return { reused: true, hash: existing.delegation_hash }
+    // Shares the insert with the positive control, so the two cannot drift.
+    return { reused: false, hash: await insertPending(agentId, userId, hashSeed, tx) }
+  }
+
+  /** The insert half of a build attempt, callable on its own (#2613 follow-up). */
+  async function insertPending(
+    agentId: string,
+    userId: string,
+    hashSeed: number,
+    tx?: Parameters<typeof findReusablePendingDelegation>[6],
+  ): Promise<string> {
     const hash = `0x${String(hashSeed).padStart(64, '0')}`
     await insertPendingDelegationForOwnedNonRevokedAgent({
       agentId, userId, chainId: 84532,
@@ -512,7 +523,7 @@ describeDb('delegation build slot lock (#2613)', () => {
       version: 1, budgetAtomic: '5000000', periodSeconds: 86400,
       startDate: 0, expiresAt: 9_999_999_999,
     }, tx)
-    return { reused: false, hash }
+    return hash
   }
 
   async function pendingCount(agentId: string): Promise<number> {
@@ -525,13 +536,31 @@ describeDb('delegation build slot lock (#2613)', () => {
 
   it('POSITIVE CONTROL: without the lock, two concurrent builds leave TWO pending rows', async () => {
     const { agentId, userId } = await seedOwnedAgent()
-    await Promise.all([
-      buildAttempt(agentId, userId, 1),
-      buildAttempt(agentId, userId, 2),
+
+    // The interleaving is FORCED, not raced. `Promise.all` orders nothing:
+    // whether both reuse reads land before either insert is pure timing, and
+    // the first version of this test relied on winning that race. It won
+    // locally and lost in CI — `expected 1 to be 2` — because the second read
+    // happened after the first insert had committed, found the row, and
+    // reused it. That is correct behaviour, so the test was wrong, not the
+    // code. Its own comment even said a drop to 1 meant the guard had stopped
+    // working; that advice was wrong too.
+    //
+    // Both reads first, then both inserts, is exactly the state the slot lock
+    // exists to prevent — and it is reproducible on every run.
+    const [firstRead, secondRead] = await Promise.all([
+      findReusablePendingDelegation(agentId, SLOT.token, SLOT.recipient, '5000000', 86400, 9_999_999_999),
+      findReusablePendingDelegation(agentId, SLOT.token, SLOT.recipient, '5000000', 86400, 9_999_999_999),
     ])
-    // This is the defect #2613 reports, reproduced. If this ever drops to 1,
-    // the test below has stopped proving anything and this comment is the
-    // place to start.
+    expect(firstRead).toBeNull()
+    expect(secondRead).toBeNull()
+
+    // Distinct hashes stand in for the wall-clock second that makes two
+    // concurrent builds hash differently — which is why ON CONFLICT never
+    // fires and both rows land.
+    await insertPending(agentId, userId, 1)
+    await insertPending(agentId, userId, 2)
+
     expect(await pendingCount(agentId)).toBe(2)
   })
 

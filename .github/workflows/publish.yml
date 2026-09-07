@@ -14,6 +14,13 @@ name: Publish packages
 #     to itself afterwards (#2536), keeping its own tag — so `@alpha` still
 #     resolves and a bare `npm install`/`npx`, which reads `latest` and never
 #     the highest version number, stops serving a build from months ago.
+#     Publishing and moving `latest` are separately authenticated (#2647) —
+#     see promote_latest() below — so a run can publish successfully and
+#     still fail to move `latest`. RECOVERY IS IDEMPOTENT: a re-run (or a
+#     `workflow_dispatch` of channel=prod on `main`) never re-publishes an
+#     already-registered version, but it now ALSO re-attempts `latest` for
+#     every already-published package on that run, healing a stale tag left
+#     behind by a prior failure without touching the registry version at all.
 #
 #   push to `dev` → DEV channel (#2421, epic #2420). The job computes
 #     0.0.0-dev.<YYYYMMDDHHMM>.<shortsha>, runs `release-bump.mjs --snapshot`
@@ -56,6 +63,10 @@ name: Publish packages
 #      deciding anything, so the ARTIFACT is what the rule turns on; the
 #      channel then decides only whether an unexpected snapshot is a silent
 #      no-op (dev, where snapshots are ordinary) or a failure (anywhere else).
+#      Since #2647 it ALSO refuses to call `npm dist-tag add` at all without
+#      its own credential (secrets.NPM_LATEST_TAG_TOKEN) — OIDC does not
+#      cover that mutation, so an absent token fails closed with a named
+#      GUARD instead of an opaque E401.
 #
 # The committed contract doc docs/operations/mcp-runtime-compatibility.md stays
 # PROD-only. Its Supported Runtime Manifest table is rewritten by the bump
@@ -63,11 +74,31 @@ name: Publish packages
 # deliberately no docs check run against that tree, and nothing is committed
 # from it.
 #
-# Authenticates to npm via Trusted Publishing (OIDC) — no NPM_TOKEN secret.
-# OIDC tokens are short-lived, so there is nothing to leak or rotate, and
-# publishes are exempt from the 2FA OTP prompt that blocks token-based
-# publishes. Requires npm >= 11.5.1 (installed below) and the `id-token: write`
-# permission granted to the job.
+# Authenticates to npm via Trusted Publishing (OIDC) — no NPM_TOKEN secret —
+# for EVERY `npm publish` call. OIDC tokens are short-lived, so there is
+# nothing to leak or rotate, and publishes are exempt from the 2FA OTP prompt
+# that blocks token-based publishes. Requires npm >= 11.5.1 (installed below)
+# and the `id-token: write` permission granted to the job.
+#
+# promote_latest()'s `npm dist-tag add` is DIFFERENT (#2647 incident, run
+# 34114664962): npm Trusted Publishing authorizes `npm publish` and nothing
+# else — a dist-tag mutation gets no OIDC token at all, and fails E401 on
+# every attempt, deterministically, forever, with no retry that helps. That
+# incident published five `alpha` prereleases correctly (OIDC covered the
+# publish) and then failed to move `latest` for all five, because the tag
+# move was never authenticated by anything.
+#
+# So `promote_latest()` carries its OWN, separate credential:
+# secrets.NPM_LATEST_TAG_TOKEN, a granular npm automation token scoped to
+# dist-tag only (an operator-provisioned secret — see the OPERATOR checklist
+# in the PR that added this). It is applied ONLY inside `promote_latest()`,
+# to the one `npm dist-tag add` invocation, via a throwaway `--userconfig`
+# file that exists for that single command and is deleted immediately after.
+# It is never written to the job's ambient `~/.npmrc` and never exported as
+# `NODE_AUTH_TOKEN`, so it cannot substitute for OIDC on the `npm publish`
+# calls above — those keep authenticating exactly as they did before this
+# secret existed. Two credentials, two blast radii: this token can move a
+# dist-tag and cannot publish a new version.
 #
 # mcp-server, backend, and frontend are intentionally excluded: they are not
 # published to npm (mcp-server is Docker-deployed; backend/frontend deploy to
@@ -217,6 +248,13 @@ jobs:
       - name: Publish packages whose version is not yet on npm
         env:
           HAVEN_PUBLISH_CHANNEL: ${{ steps.channel.outputs.channel }}
+          # Refs #2647. Scoped to promote_latest()'s one `npm dist-tag add`
+          # call — see the header comment for why this cannot be the same
+          # credential as the OIDC-authenticated `npm publish` calls below.
+          # Absent until an operator provisions it (checklist in the PR that
+          # added this): promote_latest() then fails closed with a named
+          # GUARD instead of the opaque E401 the incident produced.
+          NPM_LATEST_TAG_TOKEN: ${{ secrets.NPM_LATEST_TAG_TOKEN }}
         # One package's failure must not abort the rest (#1159): the loop
         # attempts every package, records each outcome, writes a per-package
         # table to the run summary, and only then exits non-zero naming the
@@ -331,11 +369,37 @@ jobs:
             # A stable version was already published under `latest`.
             [ "$pl_tag" = "latest" ] && return 0
 
+            # ── Refs #2647 ─────────────────────────────────────────────────
+            # OIDC Trusted Publishing authorizes `npm publish` and NOTHING
+            # else. `npm dist-tag add` gets no OIDC token at all, so without
+            # its own credential this line fails E401 deterministically —
+            # not a flake, not something a retry fixes — exactly as it did in
+            # production run 34114664962 for all five packages in a row.
+            # Fail closed here, loudly, naming the missing secret, rather
+            # than let an unauthenticated npm call produce that same opaque
+            # E401 again.
+            if [ -z "${NPM_LATEST_TAG_TOKEN:-}" ]; then
+              echo "GUARD: cannot move latest for $pl_name@$pl_version — secrets.NPM_LATEST_TAG_TOKEN is not set. OIDC Trusted Publishing authorizes npm publish only, never npm dist-tag add; an operator must provision a granular npm automation token scoped to dist-tag and store it under that secret name." >&2
+              return 1
+            fi
+
             # Informational only, and deliberately unable to fail the job: a
             # transient registry read must not fail a publish that succeeded.
             pl_before="$(npm view "$pl_name" dist-tags.latest 2>/dev/null || echo unknown)"
             echo "→ Moving latest for $pl_name: ${pl_before:-none} → $pl_version (published under $pl_tag, which stays)"
-            npm dist-tag add "$pl_name@$pl_version" latest
+
+            # The token is applied ONLY to this one command, through a
+            # throwaway --userconfig that exists for the duration of this
+            # call and is deleted immediately after — never written to the
+            # job's ambient ~/.npmrc, so it can never be picked up by (and
+            # can never silently replace OIDC for) the `npm publish` calls
+            # elsewhere in this step.
+            pl_userconfig="$(mktemp)"
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_LATEST_TAG_TOKEN" > "$pl_userconfig"
+            NPM_CONFIG_USERCONFIG="$pl_userconfig" npm dist-tag add "$pl_name@$pl_version" latest
+            pl_status=$?
+            rm -f "$pl_userconfig"
+            return $pl_status
           }
 
           published_any=false
@@ -373,8 +437,23 @@ jobs:
             assert_publish_allowed "$channel" "$version" "$tag"
 
             if npm view "$name@$version" version >/dev/null 2>&1; then
-              echo "✓ $name@$version already on npm — skipping"
-              results="$results| \`$name\` | $version | skipped — already on npm |"$'\n'
+              # Refs #2647. This is the recovery path for a run that
+              # published but could not move `latest` — a re-run (or a
+              # workflow_dispatch of channel=prod on `main`) lands here for
+              # every already-published package, and it must still heal a
+              # stale `latest` rather than call the run "skipped" and leave
+              # it stuck. promote_latest() is itself a no-op whenever `latest`
+              # already points at this version (`[ "$pl_tag" = "latest" ]`),
+              # so a healthy re-run costs one extra `npm view` per package and
+              # publishes nothing new either way.
+              echo "✓ $name@$version already on npm"
+              if promote_latest "$channel" "$name" "$version" "$tag"; then
+                results="$results| \`$name\` | $version | already on npm — latest verified |"$'\n'
+              else
+                echo "✗ $name@$version already on npm, but moving latest failed — continuing"
+                results="$results| \`$name\` | $version | already on npm, **latest NOT moved** |"$'\n'
+                tag_failed="$tag_failed $name@$version"
+              fi
               continue
             fi
 

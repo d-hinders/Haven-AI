@@ -1125,7 +1125,17 @@ test('the guard is called before every publish, and outside the failure isolatio
  * A guard that is skipped, backgrounded, or deleted shows up here as
  * PUBLISHES THAT SHOULD NOT EXIST, whatever the source text looks like.
  */
-function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
+// Refs #2647. A fixture value, never a real credential — the stub `npm`
+// below never talks to a registry, so nothing this string unlocks can be
+// exercised by a test. Tests that want to prove the MISSING-token path pass
+// `latestTagToken: ''` instead, which is how an unset `secrets.*` reference
+// actually renders in `env:` (an empty string, not an absent key).
+const FIXTURE_LATEST_TAG_TOKEN = 'fixture-not-a-real-npm-token'
+
+function runPublishLoop(
+  workflow,
+  { channel, version, tag, distTagExit = 0, alreadyPublishedExit = 1, latestTagToken = FIXTURE_LATEST_TAG_TOKEN },
+) {
   const dir = join(tmpdir(), `haven-2421-loop-${randomUUID()}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
   for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
@@ -1137,9 +1147,35 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
   }
   const log = join(dir, 'npm.log')
   writeFileSync(log, '')
+  // Refs #2647. `npm view` is called with two different third arguments by
+  // this step — `version` (the already-published check) and
+  // `dist-tags.latest` (promote_latest()'s informational before-value) — and
+  // this stub must be able to answer them differently, so `alreadyPublishedExit`
+  // exercises the #2647 recovery path (already on npm ⇒ still try to heal
+  // `latest`) independently of whatever `distTagExit` is testing. A second
+  // recorder (`userconfig.log`) captures `NPM_CONFIG_USERCONFIG` on the
+  // `dist-tag` call ONLY, so a test can prove the token-bearing config is
+  // scoped to that one command and never present on `npm publish`.
+  const userconfigLog = join(dir, 'userconfig.log')
+  writeFileSync(userconfigLog, '')
   writeFileSync(
     join(dir, 'bin', 'npm'),
-    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  dist-tag) exit ${distTagExit} ;;\n  *) exit 0 ;;\nesac\n`,
+    [
+      '#!/bin/sh',
+      `echo "$@" >> "${log}"`,
+      `echo "$1 userconfig=\${NPM_CONFIG_USERCONFIG:-none}" >> "${userconfigLog}"`,
+      'case "$1" in',
+      '  view)',
+      '    case "$3" in',
+      `      version) exit ${alreadyPublishedExit} ;;`,
+      '      *) exit 0 ;;',
+      '    esac',
+      '    ;;',
+      `  dist-tag) exit ${distTagExit} ;;`,
+      '  *) exit 0 ;;',
+      'esac',
+      '',
+    ].join('\n'),
   )
   spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
   const summary = join(dir, 'summary.md')
@@ -1153,6 +1189,7 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
     PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
     HAVEN_PUBLISH_CHANNEL: channel,
     GITHUB_STEP_SUMMARY: summary,
+    NPM_LATEST_TAG_TOKEN: latestTagToken,
   }
   if (tag) env.HAVEN_PUBLISH_TAG = tag
   else delete env.HAVEN_PUBLISH_TAG
@@ -1165,8 +1202,9 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
   // backgrounded or deleted shows up here as a TAG MOVE THAT SHOULD NOT EXIST
   // — whatever the source text says.
   const distTags = calls.filter((l) => l.startsWith('dist-tag'))
+  const userconfigCalls = readFileSync(userconfigLog, 'utf8').split('\n').filter(Boolean)
   rmSync(dir, { recursive: true, force: true })
-  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, distTags }
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, distTags, userconfigCalls }
 }
 
 /**
@@ -1177,19 +1215,40 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
  * real package and was stopped only by a 401. A unit test for a guard must not
  * be one credential away from mutating the registry it is describing.
  */
-function runPromoteLatest(script, args, { viewExit = 0 } = {}) {
+function runPromoteLatest(script, args, { viewExit = 0, latestTagToken = FIXTURE_LATEST_TAG_TOKEN } = {}) {
   const dir = join(tmpdir(), `haven-2536-pl-${randomUUID()}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
   const log = join(dir, 'npm.log')
   writeFileSync(log, '')
+  const userconfigLog = join(dir, 'userconfig.log')
+  writeFileSync(userconfigLog, '')
   writeFileSync(
     join(dir, 'bin', 'npm'),
-    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit ${viewExit} ;;\n  *) exit 0 ;;\nesac\n`,
+    [
+      '#!/bin/sh',
+      `echo "$@" >> "${log}"`,
+      `echo "$1 userconfig=\${NPM_CONFIG_USERCONFIG:-none}" >> "${userconfigLog}"`,
+      'case "$1" in',
+      `  view) exit ${viewExit} ;;`,
+      '  *) exit 0 ;;',
+      'esac',
+      '',
+    ].join('\n'),
   )
   spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
   try {
-    const r = runBash(script, { args, env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}` } })
-    return { ...r, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) }
+    const env = { PATH: `${join(dir, 'bin')}:${process.env.PATH}` }
+    // Refs #2647. Mirrors how an unset `secrets.NPM_LATEST_TAG_TOKEN` actually
+    // reaches the step — an EMPTY environment variable, not an absent one —
+    // so `latestTagToken: ''` exercises the real "operator has not provisioned
+    // it yet" shape rather than a stand-in for it.
+    env.NPM_LATEST_TAG_TOKEN = latestTagToken
+    const r = runBash(script, { args, env })
+    return {
+      ...r,
+      calls: readFileSync(log, 'utf8').split('\n').filter(Boolean),
+      userconfigCalls: readFileSync(userconfigLog, 'utf8').split('\n').filter(Boolean),
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -1569,6 +1628,135 @@ test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed
   assert.match(out, /failed to move the latest dist-tag/i)
   assert.match(out, /npm dist-tag add <name>@<version> latest/, 'the remedy is printed')
   assert.doesNotMatch(out, /ERROR: failed to publish/, 'must not report a publish failure')
+})
+
+// ── #2647: OIDC does not cover `npm dist-tag add`, and the incident this ─────
+// closes (production run 34114664962): five packages published cleanly under
+// `alpha` via OIDC, then five E401s in a row moving `latest`, because Trusted
+// Publishing authorizes `npm publish` and nothing else. `promote_latest()` now
+// carries its own credential (secrets.NPM_LATEST_TAG_TOKEN), applied ONLY to
+// the one `npm dist-tag add` call, and a re-run heals a stale tag without
+// re-publishing.
+
+test('#2647: an absent token fails closed with a named GUARD, not a bare npm error', async () => {
+  // The exact incident shape: `npm publish` is not reached by this guard at
+  // all (promote_latest runs strictly AFTER a successful publish) — only the
+  // tag move is refused, named, and refused BEFORE any unauthenticated `npm
+  // dist-tag` call is attempted.
+  const script = promoteLatestScript(await publishWorkflow())
+
+  const r = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'], { latestTagToken: '' })
+  assert.notEqual(r.code, 0, 'a real move with no token must be refused, not silently skipped')
+  assert.match(r.out, /GUARD:/, 'the refusal must say why')
+  assert.match(r.out, /NPM_LATEST_TAG_TOKEN/, 'the refusal must name the missing secret')
+  assert.deepEqual(
+    r.calls.filter((c) => c.startsWith('dist-tag')),
+    [],
+    'an unauthenticated dist-tag call must never be attempted',
+  )
+})
+
+test('#2647: the token is scoped to the ONE dist-tag call, never to npm publish', async () => {
+  // Proves the "cannot substitute for OIDC" claim in the header comment by
+  // execution rather than by reading: every `npm` invocation the step makes
+  // is inspected for NPM_CONFIG_USERCONFIG, and only `dist-tag add` may carry
+  // one — `npm publish` must run with the job's ordinary (OIDC) config.
+  const { code, userconfigCalls } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+  })
+  assert.equal(code, 0)
+  assert.ok(userconfigCalls.length > 0, 'expected the stub to record at least one npm call')
+
+  const withScopedConfig = userconfigCalls.filter((l) => !l.endsWith('userconfig=none'))
+  const publishCalls = userconfigCalls.filter((l) => l.startsWith('publish '))
+  const distTagCalls = userconfigCalls.filter((l) => l.startsWith('dist-tag '))
+
+  assert.equal(distTagCalls.length, 5, 'expected one dist-tag call per package')
+  assert.ok(
+    distTagCalls.every((l) => !l.endsWith('userconfig=none')),
+    `every dist-tag call must carry the scoped userconfig: ${JSON.stringify(distTagCalls)}`,
+  )
+  assert.ok(
+    publishCalls.every((l) => l.endsWith('userconfig=none')),
+    `no npm publish call may carry the dist-tag token's userconfig: ${JSON.stringify(publishCalls)}`,
+  )
+  assert.equal(
+    withScopedConfig.length,
+    distTagCalls.length,
+    'the scoped userconfig must appear on dist-tag calls and nowhere else',
+  )
+})
+
+test('#2647: RECOVERY IS IDEMPOTENT — a re-run heals a stale latest without republishing', async () => {
+  // Simulates exactly the incident's aftermath: every package already landed
+  // on the registry (publish succeeded, or a prior run already published it),
+  // and only `latest` is stale. A re-run must NOT attempt to publish again —
+  // `npm publish` rejects a duplicate version, so a defect here would surface
+  // as a publish failure, not a quiet no-op — and it MUST still call
+  // promote_latest for the already-published version, healing the tag.
+  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    alreadyPublishedExit: 0, // `npm view name@version` succeeds: already on npm
+  })
+
+  assert.equal(code, 0, 'a healthy re-run must succeed')
+  assert.deepEqual(published, [], 'an already-published version must never be re-published')
+  assert.equal(distTags.length, 5, 'latest must still be healed for every already-published package')
+  for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
+    assert.ok(
+      distTags.some((l) => l === `dist-tag add @haven_ai/${p}@${REAL_V} latest`),
+      `expected the re-run to heal latest for @haven_ai/${p}; got ${JSON.stringify(distTags)}`,
+    )
+  }
+})
+
+test('#2647: a re-run that cannot heal latest FAILS the job, naming which packages are stale', async () => {
+  // The failure-reporting half of the same recovery path: healing is
+  // attempted for every already-published package (failure isolation, #1159's
+  // rule applied to the new branch), and the run still fails overall so a
+  // permanently stale `latest` is never silent.
+  const { code, out, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    alreadyPublishedExit: 0,
+    distTagExit: 1,
+  })
+
+  assert.notEqual(code, 0, 'the job must fail — latest is still stale')
+  assert.deepEqual(published, [], 'still no republish attempt')
+  // `distTags` records every ATTEMPTED `npm dist-tag add` call, not only
+  // successful ones (it is written by the stub before the stub's own exit
+  // code is applied) — so five attempts with `distTagExit: 1` still show up
+  // here. The failure-isolation claim is that healing is attempted for every
+  // already-published package rather than aborting after the first failure,
+  // which is exactly what five attempts (one per package) demonstrates.
+  assert.equal(distTags.length, 5, 'a heal attempt must be made for every already-published package')
+  assert.match(out, /failed to move the latest dist-tag/i)
+  assert.doesNotMatch(out, /ERROR: failed to publish/, 'nothing was republished, so this is not a publish failure')
+})
+
+test('#2647: an already-published package with NO token still fails closed, not silently', async () => {
+  // The two independent failure modes composed: recovery is attempted (this
+  // is the #2647 fix), but without the credential it still cannot succeed —
+  // and it must say so, not report a healthy "already on npm" outcome.
+  const { code, out, published, distTags } = runPublishLoop(await publishWorkflow(), {
+    channel: 'prod',
+    version: REAL_V,
+    tag: null,
+    alreadyPublishedExit: 0,
+    latestTagToken: '',
+  })
+
+  assert.notEqual(code, 0)
+  assert.deepEqual(published, [])
+  assert.deepEqual(distTags, [], 'no unauthenticated dist-tag call may be attempted')
+  assert.match(out, /GUARD:.*NPM_LATEST_TAG_TOKEN/, 'the recovery failure must name the missing secret')
+  assert.match(out, /failed to move the latest dist-tag/i)
 })
 
 // ── #2580: a release bump only ever moves the version forward ────────────────

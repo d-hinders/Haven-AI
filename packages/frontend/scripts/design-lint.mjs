@@ -35,7 +35,13 @@
  *                                           # intentional, reviewed growth)
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
-import { newViolations, hasShrunk, writeBaseline, readBaseline } from '../../../scripts/lib/ratchet.mjs'
+import {
+  newViolations,
+  hasShrunk,
+  writeBaseline,
+  loadBaseline,
+  updateRefusals,
+} from '../../../scripts/lib/ratchet.mjs'
 import { isEscaped } from '../../../scripts/lib/lint-escapes.mjs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -460,14 +466,35 @@ function main() {
   if (process.argv.includes('--icons')) return iconCensus()
   const update = process.argv.includes('--update')
   const { counts, details } = scanAll()
+  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
 
   if (update) {
+    // #2728: this branch used to write unconditionally, with no comparison at
+    // all -- the same hole the copy lint had, on a BLOCKING frontend gate whose
+    // own failure message (below) sends you here. Found by review reading this
+    // module's importer list rather than the issue text: #2728 was filed
+    // against `frontend-copy-lint` and named three siblings that refuse, and
+    // this fifth consumer was in neither set.
+    //
+    // Reproduced before the fix: a component with two raw-palette hex literals
+    // fails the plain run naming the file, and `--update` exits 0 and writes
+    // the violations into the baseline.
+    const violations = updateRefusals(counts, baseline, { firstRun })
+    if (violations.length > 0) {
+      console.error('✗ --update refuses to RAISE the baseline. Grown:')
+      for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      console.error(
+        '\nGrowth is a reviewed decision, not a ratchet step. Route the colour through a ' +
+          'var(--v2-…) token or use the type ramp. If the exception is genuinely correct, ' +
+          'the baseline change belongs in a reviewed commit of its own.',
+      )
+      process.exit(1)
+    }
     writeBaseline(BASELINE_PATH, counts)
     console.log(`design-lint: baseline written (${details.length} existing violations ratcheted).`)
     return
   }
 
-  const baseline = readBaseline(BASELINE_PATH)
   const failures = newViolations(counts, baseline)
 
   if (failures.length === 0) {
@@ -492,8 +519,11 @@ function main() {
   }
   console.error(`\n${DOC_POINTER}`)
   console.error(
-    'Fix the new violations (route colours through var(--v2-…) tokens, use the type ramp), ' +
-      'or — only for a reviewed, intentional exception — run `npm run design:lint:update -w packages/frontend`.',
+    'Fix the new violations (route colours through var(--v2-…) tokens, use the type ramp). ' +
+      'Since #2728 `npm run design:lint:update -w packages/frontend` REFUSES to raise the ' +
+      'baseline, so it is not a way past this: use it after a genuine reduction to tighten ' +
+      'the ratchet. A reviewed, intentional exception is an edit to the baseline file in its ' +
+      'own commit, where a reviewer sees the number change.',
   )
   process.exit(1)
 }

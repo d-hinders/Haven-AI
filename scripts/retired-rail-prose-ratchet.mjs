@@ -29,7 +29,13 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { join, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { newViolations, hasShrunk, writeBaseline, readBaseline } from './lib/ratchet.mjs'
+import {
+  newViolations,
+  hasShrunk,
+  writeBaseline,
+  loadBaseline,
+  updateRefusals,
+} from './lib/ratchet.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const BASELINE_PATH = join(REPO_ROOT, 'packages', 'retired-rail-prose-baseline.json')
@@ -104,13 +110,14 @@ function totals(counts) {
 
 async function main() {
   const counts = await scanAll()
-  const baseline = readBaseline(BASELINE_PATH)
+  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
   const t = totals(counts)
   console.log(`retired-rail prose gauge: ${t.hits} phrase hit(s) across ${t.files} file(s).`)
 
   if (process.argv.includes('--update')) {
-    const violations = newViolations(counts, baseline)
-    if (Object.keys(baseline).length > 0 && violations.length > 0) {
+    // #2728: see db-mock-ratchet -- an empty baseline is not a first run.
+    const violations = updateRefusals(counts, baseline, { firstRun })
+    if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
       console.error(

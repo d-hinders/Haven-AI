@@ -183,3 +183,39 @@ test('CLI: `--update` DOES write when the count fell', () => {
   assert.match(out, /baseline written/)
   assert.deepEqual(JSON.parse(wrote['packages/backend/db-mock-baseline.json'])[SCANNED].positional, 1)
 })
+
+test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first run', () => {
+  // #2728. This gate's `--update` used to key its allowance on the baseline
+  // being empty, and `{}` is exactly what `writeBaseline` produces once the
+  // gate reaches zero debt -- so the refusal switched itself off on the first
+  // successful cleanup, which is the step this gate's own message tells you to
+  // run. The decision now lives in `lib/ratchet.mjs` and is keyed on the
+  // baseline FILE not existing.
+  //
+  // Pinned HERE rather than only on the gate that #2728 was filed against,
+  // because review measured that reverting the shared key left both converted
+  // gates' suites fully green: a tightening nothing observes is a tightening
+  // that can be undone silently.
+  const { status, out, wrote } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: { [SCANNED]: withMocks(3), 'packages/backend/db-mock-baseline.json': '{}' },
+    readBack: ['packages/backend/db-mock-baseline.json'],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote['packages/backend/db-mock-baseline.json'], '{}')
+})
+
+test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
+  // The other half: with no baseline file at all, `--update` is how the
+  // baseline comes into existence, and it still does.
+  const { status, wrote } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: { [SCANNED]: withMocks(3) },
+    readBack: ['packages/backend/db-mock-baseline.json'],
+  })
+  assert.equal(status, 0)
+  assert.match(wrote['packages/backend/db-mock-baseline.json'], /"positional": 3/)
+})

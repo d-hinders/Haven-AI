@@ -153,9 +153,12 @@ signable** — the approval queue died with the Safe rail, #1440 — though by
 different mechanisms per path: an on-chain gas-estimation revert on direct
 payments only, and an off-chain remaining-budget pre-check returning HTTP 403
 `delegation_budget_exceeded` before any chain call on **both** x402 schemes —
-erc7710 since #2082, the EIP-3009 leg since #2706 (PR #2719), so forcing this
-on either x402 path and hunting for a revert reason will find
-none), `PRICE_EXCEEDS_MAX`, and a merchant that
+erc7710 since #2082, the EIP-3009 leg since #2706 (PR #2719), so on a healthy
+budget read neither x402 path produces a revert reason to record. Both
+pre-checks FAIL OPEN, though: a degraded on-chain read falls through to prepare
+and you get the enforcer's 502 after all, so a 502 here is a flapping RPC
+before it is a regression — see agent-qa.md's #2511
+entry), `PRICE_EXCEEDS_MAX`, and a merchant that
 verifies but doesn't settle (delegate sweep recovery, still live via the #946
 EIP-3009 bridge).
 

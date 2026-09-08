@@ -64,11 +64,21 @@ const PRECHECK_403 = {
   data: {
     error:
       "This x402 payment of 2.00 USDC exceeds the agent's remaining budget for this period " +
-      '(1.00 USDC, short by 1.00).',
+      '(1.00 USDC, short by 1.00). There is no approval queue on the delegation rail — an ' +
+      'over-budget redemption reverts on-chain. Ask the wallet owner to grant or raise the ' +
+      'budget in Haven, then retry.',
     error_code: 'delegation_budget_exceeded',
-    phase: 'authorize',
-    next_action: 'ask_owner_to_raise_budget',
+    // The taxonomy's values, read out of `agent-payment-taxonomy.ts`, not
+    // invented: an earlier draft of this fixture carried `phase: 'authorize'`
+    // and `next_action: 'ask_owner_to_raise_budget'`, neither of which exists
+    // anywhere in the enum. Nothing asserts on them — which is exactly why a
+    // fixture that calls itself verbatim has to be.
+    phase: 'insufficient_funds',
+    next_action: 'fund_safe_or_raise_allowance',
+    rail: 'x402',
+    remaining: '1.00',
     remaining_atomic: '1000000',
+    shortfall: '1.00',
     shortfall_atomic: '1000000',
     merchant_address: MERCHANT.toLowerCase(),
   },

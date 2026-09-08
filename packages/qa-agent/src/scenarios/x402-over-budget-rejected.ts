@@ -38,11 +38,20 @@
  * Neither half alone proves the invariant. Read them together, and do not
  * retire `over-budget-refused` without moving its enforcer assertion first.
  *
- * What the pair does NOT restore, said plainly rather than left to be
- * discovered: the on-chain refusal of an x402 3009 FUNDING redemption is now
- * observed by nothing, and cannot be — after #2706 no client-side call reaches
- * the enforcer on that path. `over-budget-refused` covers a different
- * entrypoint on the same delegation. The coverage is gone, not relocated.
+ * What the pair does NOT restore: no leg observes the on-chain refusal of an
+ * x402 3009 FUNDING redemption any more. `over-budget-refused` covers a
+ * different entrypoint on the same delegation, so that observation is gone
+ * rather than relocated.
+ *
+ * Gone from the SUITE, not from the system, and the difference is load-bearing:
+ * the pre-check FAILS OPEN by design (#2706, inherited from #2082). A degraded
+ * budget read (`fromChain: false`), a thrown one or an unparseable one all mean
+ * "no usable measurement" and proceed to prepare, where the enforcer still
+ * refuses with the 502. So the enforcer remains reachable on this path — only
+ * when the read degrades, which is why this leg asserts 403 and why a 502 here
+ * has two causes, not one. An earlier draft of this note said no client-side
+ * call reaches the enforcer at all; that was false, and
+ * `docs/architecture/04-x402-payment-sequence.md` says so.
  *
  * **erc7710 direct settlement** (`payTo` = the merchant): authorize builds a
  * settlement CHILD delegation and returns 201 `pending_signature` WITH
@@ -67,9 +76,13 @@ const NETWORK = 'eip155:84532'
 
 export const x402OverBudgetRejected: Scenario = {
   name: 'x402-over-budget-rejected',
+  // Printed VERBATIM into the run-report table by `run.ts`, so it is the one
+  // claim an operator reads next to a green row. It said "refused by the
+  // on-chain caveat enforcer" until #2738: three passes rewrote every prose
+  // site and left the string the tool actually publishes.
   invariant:
-    'An x402 priced call above the agent budget is refused by the on-chain caveat enforcer ' +
-    'on the EIP-3009 funding leg, never turned into a signable intent.',
+    'An x402 priced call above the agent budget is refused at the budget pre-check on the ' +
+    'EIP-3009 funding leg, before any prepare and never turned into a signable intent.',
   async run(ctx: ScenarioContext) {
     if (!ctx.cfg.delegationAgentApiKey) {
       return skip('QA_DELEGATION_AGENT_API_KEY not set — the x402 budget check lives on the delegation rail since #2016')
@@ -98,6 +111,10 @@ export const x402OverBudgetRejected: Scenario = {
     // budget: without this, a backend refusing every x402 authorize — a
     // misconfigured merchant URL, a retired rail, a dead delegation — reads
     // exactly like a working enforcement.
+    // `amount` is atomic, so this is 1 unit rather than the 0.001 USDC its
+    // siblings use. Deliberate: `readOnchainBudget` only guarantees
+    // `remaining >= 1`, so a larger control turns a nearly-exhausted budget
+    // into a false red on the control instead of a result (review nit).
     const control = await api.authorizeX402({ ...shape, amount: '1' })
     if (!control.data.sign_data) {
       return fail(
@@ -127,9 +144,19 @@ export const x402OverBudgetRejected: Scenario = {
       return fail('over-budget x402 produced a signable intent — it must be refused before it is offered')
     }
     if (res.status !== 403) {
+      // A 502 here has TWO causes and the message names both, because reading
+      // it as a regression when it is a flapping RPC costs a triage cycle
+      // (#2511's entry documents Base Sepolia doing exactly that): either the
+      // pre-check is gone — a real regression — or its budget read degraded
+      // and it failed open to prepare, where the enforcer refused as it always
+      // did. The revert reason in `details` tells them apart.
       return fail(
         `expected HTTP 403 (budget pre-check, #2706) got ${res.status}: ` +
-          `${res.data.error ?? JSON.stringify(res.data).slice(0, 160)}`,
+          `${res.data.error ?? JSON.stringify(res.data).slice(0, 160)}` +
+          (res.status === 502
+            ? ' — a 502 means the pre-check did not answer: either it was removed, or its ' +
+              'on-chain budget read degraded and it failed OPEN to prepare (by design)'
+            : ''),
       )
     }
     // A bare 403 is also what a MISSING delegation produces, and a retired rail

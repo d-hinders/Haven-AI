@@ -62,7 +62,7 @@ const sourcemap = (sources) => JSON.stringify({ version: 3, sources, mappings: '
  * `mutate` optionally rewrites the script's source before it is copied in — this
  * is how a refusal is removed to prove the assertion against it can go red.
  */
-function runScope({ base = {}, changes = {}, args = [], mutate = null } = {}) {
+function runScope({ base = {}, changes = {}, remove = [], args = [], mutate = null } = {}) {
   // realpathSync: on macOS mktemp is reached through a symlink, so a script that
   // self-guards on `import.meta.url === file://${argv[1]}` would never run main()
   // and would exit 0 having done nothing — a false pass shaped like a clean run
@@ -98,6 +98,7 @@ function runScope({ base = {}, changes = {}, args = [], mutate = null } = {}) {
     const baseSha = git(root, ['rev-parse', 'HEAD'])
 
     for (const [rel, body] of Object.entries(changes)) write(root, rel, body)
+    for (const rel of remove) rmSync(join(root, rel))
     git(root, ['add', '-A'])
     // --allow-empty: the argument-handling tests below make no file change, and a
     // git that refuses an empty commit would fail them for a reason unrelated to
@@ -296,14 +297,25 @@ test('refuses a dist with no sourcemaps', () => {
 // them, a refusal could be deleted from the script and this suite would stay green
 // — which is the exact defect epic #2720 exists to close.
 
-test('MUTATION: deleting the missing-dist refusal makes that test fail', () => {
-  const { status, out } = runScope({
+test('MUTATION: replacing the missing-dist refusal with an empty set makes that test fail', () => {
+  const { status, out, stdout } = runScope({
     base: { 'packages/gamma/package.json': pkg('@fix/gamma') },
     changes: { 'packages/gamma/package.json': pkg('@fix/gamma', { version: '1.0.1' }) },
-    mutate: (src) => src.replace('if (!existsSync(distDir)) {', 'if (false) {'),
+    // Replace the refusal with the plausible WRONG behaviour — an empty set —
+    // rather than deleting it. `if (false)` alone made the next readdirSync throw
+    // ENOENT, so the assertion passed on an incidental crash and would have passed
+    // on any unrelated breakage too (review finding 6).
+    mutate: (src) =>
+      src.replace('if (!existsSync(distDir)) {', 'if (!existsSync(distDir)) {\n    return new Set()\n  }\n  if (false) {'),
+    args: ['--json'],
   })
-  assert.notEqual(status, 2, 'refusal removed, yet the script still refused — the test above proves nothing')
-  assert.doesNotMatch(out, /packages\/gamma\/dist does not exist/)
+  assert.equal(status, 0, 'the mutated script reports cleanly instead of refusing — which is the defect')
+  assert.deepEqual(
+    JSON.parse(stdout).shipped.files.map((f) => f.file),
+    ['packages/gamma/package.json'],
+    'and it reports a scope measured against a package it never built',
+  )
+  assert.doesNotMatch(out, /REFUSING TO REPORT/)
 })
 
 test('MUTATION: counting test files makes the exclusion test fail', () => {
@@ -331,14 +343,17 @@ test('MUTATION: counting test files makes the exclusion test fail', () => {
 
 // --- range and argument handling ---------------------------------------------
 
-test('reports the commits and the issue numbers they reference', () => {
+test('reports the commits and the numbers they reference', () => {
   const { stdout } = runScope({
     changes: { 'packages/alpha/README.md': 'edited\n' },
     args: ['--json'],
   })
   const report = JSON.parse(stdout)
   assert.equal(report.commits.length, 1)
-  assert.deepEqual(report.issues, [4242])
+  // `references`, not `issues`: a squash subject carries its own PR number, and a
+  // shard headed "issues" that lists PR numbers is a wrong regulatory record.
+  assert.deepEqual(report.references, [4242])
+  assert.equal(report.issues, undefined, 'the misleading field name must not come back')
 })
 
 test('names the affected packages', () => {
@@ -370,4 +385,65 @@ test('the human-readable report states its exclusions rather than hiding them', 
   })
   assert.match(stdout, /Excluded from the shipped delta: 1 files/)
   assert.match(stdout, /test file — not reachable from any bundle entry/)
+})
+
+// --- review findings 2, 4 and 7 ----------------------------------------------
+
+test('a deleted source file is counted as shipped, not left unresolved', () => {
+  // It cannot be in head's sourcemaps — it does not exist at head — so absence
+  // carries no information. Its removal is a real change to the tarball.
+  const { status, stdout } = runScope({
+    base: {
+      'packages/alpha/src/doomed.ts': 'export const d = 1\n',
+      'packages/alpha/dist/index.js.map': sourcemap(['../src/index.ts', '../src/helper.ts', '../src/doomed.ts']),
+    },
+    changes: { 'packages/alpha/dist/index.js.map': sourcemap(['../src/index.ts', '../src/helper.ts']) },
+    remove: ['packages/alpha/src/doomed.ts'],
+    args: ['--json'],
+  })
+  assert.equal(status, 0, 'a deletion must classify cleanly')
+  const report = JSON.parse(stdout)
+  assert.ok(
+    report.shipped.files.some((f) => f.file === 'packages/alpha/src/doomed.ts'),
+    'the removed module must appear in the shipped delta',
+  )
+  assert.deepEqual(report.unresolved, [])
+})
+
+test('a deleted TEST file is still excluded, not counted as shipped', () => {
+  const { stdout } = runScope({
+    remove: ['packages/alpha/src/index.test.ts'],
+    args: ['--json'],
+  })
+  assert.deepEqual(JSON.parse(stdout).shipped.files, [])
+})
+
+test('refuses a glob in the files field rather than matching nothing silently', () => {
+  const { status, out } = runScope({
+    base: { 'packages/alpha/package.json': JSON.stringify({ name: '@fix/alpha', version: '1.0.0', files: ['dist/*.js', 'README.md'] }) },
+    changes: { 'packages/alpha/README.md': 'edited\n' },
+  })
+  assert.equal(status, 2)
+  assert.match(out, /is a glob/)
+})
+
+test('LICENSE ships even though the files field never names it', () => {
+  const { stdout } = runScope({
+    base: { 'packages/alpha/LICENSE': 'MIT\n' },
+    changes: { 'packages/alpha/LICENSE': 'Apache-2.0\n' },
+    args: ['--json'],
+  })
+  assert.deepEqual(shippedFiles(stdout), ['packages/alpha/LICENSE'])
+})
+
+test('refuses a partial dist that is missing one entry bundle', () => {
+  const { status, out } = runScope({
+    base: {
+      'packages/alpha/src/cli.ts': 'export const c = 1\n',
+      // index.js.map exists (from the default fixture); cli.js.map does not.
+    },
+    changes: { 'packages/alpha/README.md': 'edited\n' },
+  })
+  assert.equal(status, 2)
+  assert.match(out, /none for cli\.js/)
 })

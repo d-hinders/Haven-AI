@@ -124,6 +124,27 @@ function bundledSources(pkg) {
     )
   }
 
+  // A dist holding cli.js.map but no index.js.map passes a bare length check and
+  // then silently under-reports everything the missing bundle carried. Require a
+  // .map for every entry the package declares through its own bin/exports shape:
+  // each src/<name>.ts that tsup would emit as dist/<name>.js.
+  const bundleNames = new Set(maps.map((m) => m.replace(/\.(c?js)\.map$/, '')).filter((b, i, a) => a.indexOf(b) === i))
+  const srcDir = join(PACKAGES_DIR, pkg.dir, 'src')
+  const declaredEntries = existsSync(srcDir)
+    ? readdirSync(srcDir, { withFileTypes: true })
+        .filter((e) => e.isFile() && /^(index|cli)\.ts$/.test(e.name))
+        .map((e) => e.name.replace(/\.ts$/, ''))
+    : []
+  const missingBundles = declaredEntries.filter((e) => !bundleNames.has(e))
+  if (missingBundles.length > 0) {
+    throw new Refusal(
+      `${pkg.name}: packages/${pkg.dir}/dist has sourcemaps but none for ${missingBundles
+        .map((b) => `${b}.js`)
+        .join(', ')}, though src/${missingBundles[0]}.ts exists. A partial dist under-reports whatever the ` +
+        `missing bundle carried, silently. Rebuild the package.`,
+    )
+  }
+
   const sources = new Set()
   for (const map of maps) {
     const parsed = JSON.parse(readFileSync(join(distDir, map), 'utf8'))
@@ -161,11 +182,30 @@ function literalMembers(pkg, changedFiles) {
   const prefix = `packages/${pkg.dir}/`
   const members = new Set()
 
+  // The prefix match below is faithful to npm ONLY for literal entries. Measured
+  // against `npm pack --dry-run` on a fixture: `files: ["dist/*.js"]` packs
+  // dist/a.js and NOT dist/b.map — a glob filters within the directory, where a
+  // prefix rule would match the whole of it. Worse, a prefix rule matches nothing
+  // at all against the literal string `dist/*.js`, so every dist file would be
+  // dropped in silence. No Haven package uses a glob entry today; refuse rather
+  // than wait for one, because silence is the failure this script exists to stop.
+  for (const entry of pkg.files) {
+    if (/[*?![\]{}]/.test(entry)) {
+      throw new Refusal(
+        `${pkg.name}: the "files" entry ${JSON.stringify(entry)} is a glob, and this script only matches literal ` +
+          `paths faithfully. Teach literalMembers to expand it (npm filters WITHIN a directory for a glob) rather ` +
+          `than letting it match nothing and drop the package's tarball members silently.`,
+      )
+    }
+  }
+
   for (const file of changedFiles) {
     if (!file.startsWith(prefix)) continue
     const rel = file.slice(prefix.length)
 
-    if (rel === 'package.json') {
+    // npm packs these whatever `files` says. Measured with `npm pack --dry-run`:
+    // package.json and LICENSE are included when present, CHANGELOG.md is not.
+    if (rel === 'package.json' || /^LICEN[CS]E(\.[^/]*)?$/i.test(rel)) {
       members.add(file)
       continue
     }
@@ -187,12 +227,13 @@ function classify(changedFiles, packages) {
   const excluded = []
   const unresolved = []
 
+  const paths = changedFiles.map((c) => c.path)
   const byPackage = new Map()
   for (const pkg of packages) {
-    byPackage.set(pkg.dir, { pkg, bundled: bundledSources(pkg), literals: literalMembers(pkg, changedFiles) })
+    byPackage.set(pkg.dir, { pkg, bundled: bundledSources(pkg), literals: literalMembers(pkg, paths) })
   }
 
-  for (const file of changedFiles) {
+  for (const { path: file, status } of changedFiles) {
     const match = /^packages\/([^/]+)\//.exec(file)
     const entry = match ? byPackage.get(match[1]) : undefined
 
@@ -211,18 +252,26 @@ function classify(changedFiles, packages) {
       continue
     }
 
-    // In a published package but neither packed literally nor bundled. Two very
-    // different causes with the same shape, so this is neither bucket: a test or
-    // config file (correctly excluded), or a source file the local build has not
-    // seen yet (a stale dist — an UNDER-report, the dangerous direction).
     const isSource = /^packages\/[^/]+\/src\//.test(file)
     const isTest = /(\.test\.[cm]?[jt]sx?$)|(^|\/)__tests__\//.test(file)
+
+    // A DELETED source cannot be in head's sourcemaps, because it does not exist
+    // at head. Absence carries no information here, so the sourcemap evidence
+    // simply does not apply — and the removal of a bundled module is a real
+    // change to the tarball that a record must name. Counted as shipped, which is
+    // also the safe direction: over-inclusive never loses a line from a record.
+    if (status === 'D' && isSource && !isTest) {
+      ships.push({ file, pkg: pkg.name, via: 'deleted from src/ — its removal changes the bundle' })
+      continue
+    }
 
     if (isSource && !isTest) {
       unresolved.push({
         file,
         pkg: pkg.name,
-        reason: 'under src/ but absent from every dist sourcemap — either unreachable from an entry point (dead code) or a stale build',
+        reason:
+          'under src/ but absent from every dist sourcemap — it emits no mapped output (a barrel or type-only module), ' +
+          'or nothing imports it from an entry point (dead code, test-support), or the build predates it (stale dist)',
       })
     } else {
       excluded.push({ file, reason: isTest ? 'test file — not reachable from any bundle entry' : 'in the package but outside the tarball' })
@@ -260,17 +309,34 @@ function commitsInRange(base, head) {
   })
 }
 
-function issuesReferenced(commits) {
-  const issues = new Set()
+// Every #N in the range's subjects. Named `references`, NOT `issues`: a squash
+// subject ends in its own PR number, so #2695 came out of the 0.1.36-alpha.0
+// range as a PR, not an issue. A release-cutter pasting these into a CASP shard
+// under the heading "issues" records PR numbers as issues, and the shard is a
+// regulatory record. Distinguishing the two needs the closing-keyword graph,
+// which this script does not read — so it reports what it actually measured.
+function referencesIn(commits) {
+  const refs = new Set()
   for (const { subject } of commits) {
-    for (const match of subject.matchAll(/#(\d+)/g)) issues.add(Number(match[1]))
+    for (const match of subject.matchAll(/#(\d+)/g)) refs.add(Number(match[1]))
   }
-  return [...issues].sort((a, b) => a - b)
+  return [...refs].sort((a, b) => a - b)
 }
 
+// Status matters, not just the path. A file DELETED in the range cannot appear in
+// head's sourcemaps — it does not exist at head — so status-blind classification
+// sends every removed module to `unresolved` with a cause that is provably wrong.
+// Its removal is a real change to the tarball and belongs in the record.
 function changedFilesInRange(base, head) {
-  const raw = git(['diff', '--name-only', `${base}...${head}`])
-  return raw === '' ? [] : raw.split('\n')
+  const raw = git(['diff', '--name-status', `${base}...${head}`])
+  if (raw === '') return []
+  return raw.split('\n').map((line) => {
+    const parts = line.split('\t')
+    const status = parts[0][0] // R100 -> R; take the letter only
+    // A rename reports old and new paths; the new path is what exists at head.
+    const path = status === 'R' ? parts[2] : parts[1]
+    return { path, status }
+  })
 }
 
 function lineStats(base, head, files) {
@@ -307,7 +373,7 @@ function buildReport(opts) {
   return {
     range: { base: opts.base, baseSha, head: opts.head, headSha },
     commits,
-    issues: issuesReferenced(commits),
+    references: referencesIn(commits),
     packages: packages.map((p) => ({ name: p.name, version: p.version })),
     affectedPackages: affected,
     shipped: { files: ships, count: ships.length, ...stats },
@@ -323,7 +389,10 @@ function render(report) {
   out.push('Release scope')
   out.push(`  range     ${range.base} (${range.baseSha.slice(0, 8)}) .. ${range.head} (${range.headSha.slice(0, 8)})`)
   out.push(`  commits   ${report.commits.length}`)
-  out.push(`  issues    ${report.issues.length ? report.issues.map((i) => `#${i}`).join(' ') : '(none referenced)'}`)
+  out.push(
+    `  refs      ${report.references.length ? report.references.map((i) => `#${i}`).join(' ') : '(none referenced)'}` +
+      '   (issue AND pull-request numbers — a squash subject carries its own PR number)',
+  )
   out.push('')
 
   out.push(`Publishes to npm: ${report.affectedPackages.length ? report.affectedPackages.join(', ') : '(no published package is affected)'}`)

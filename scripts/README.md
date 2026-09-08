@@ -260,13 +260,33 @@ source it consumed; that list is what the script reads. The non-compiled half �
 `README.md`, and `packages/sdk/examples/**` — comes from each package's `files`
 field. Nothing in the script is a hand-maintained list of what ships.
 
+**Build first.** The shipped set is read out of `dist`, so run `npm run build`
+before measuring. The script refuses rather than guessing when a package is
+unbuilt, but it has **no check binding `dist` to the ref you passed** — measuring
+a historical range against a `dist` built from your current checkout is on you.
+
+**Exit codes.** `0` measured cleanly · `1` measured, but at least one source file
+could not be classified · `2` refused, nothing measured.
+
 **It refuses rather than under-reports.** A measurement that says "nothing
 shipped" when it merely could not look is worse than none, because an empty
-result is exactly what tells a release author to skip the amendment. It exits
-non-zero on a shallow clone, on a package whose `dist` is missing or carries no
-sourcemaps (`npm run build` first), and on a changed source file it can resolve
-to neither bucket — that last one meaning either dead code or a stale build, and
-a stale build under-reports. Read a refusal as "measure again", never as "clean".
+result is exactly what tells a release author to skip the amendment. It refuses
+on a shallow clone, on a package whose `dist` is missing, carries no sourcemaps,
+or is missing one of its entry bundles, and on a `files` entry that is a glob
+(the prefix match is faithful to npm only for literal entries). Read a refusal as
+"measure again", never as "clean".
+
+**The unresolved bucket has three causes, and only one of them is a stale build.**
+A source file under `src/` that appears in no sourcemap is either a module that
+emits no *mapped output*, or one nothing imports from an entry point, or one the
+build predates. Two of those are benign and rebuilding will not change them, so
+do not read an unresolved file as automatically a staleness problem — check which
+cause applies before deciding whether it belongs in the record. Entry points and
+deleted sources are handled explicitly and never land here: a pure re-export
+barrel is absent from its own sourcemap (measured: `sdk`, `signer`, `mcp` and
+`cli` all omit `src/index.ts`; `connect` includes it, because that one has code
+of its own), and a file deleted in the range cannot be in the head tree's
+sourcemaps at all, so its removal is counted as shipped.
 
 The exclusions are printed, counted and grouped by reason rather than dropped
 silently: an exclusion nobody can see is indistinguishable from a file the

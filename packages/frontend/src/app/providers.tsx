@@ -6,6 +6,7 @@ import { LocaleProvider } from '@/context/LocaleContext'
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit'
+import { BRAND_COLOURS } from '@/lib/brand-colours'
 import { config } from '@/lib/wagmi'
 
 import '@rainbow-me/rainbowkit/styles.css'
@@ -53,7 +54,7 @@ export default function Providers({ children }: { children: ReactNode }) {
             <QueryClientProvider client={queryClient}>
               <RainbowKitProvider
                 theme={lightTheme({
-                  accentColor: '#4f46e5', // RainbowKit derives shades from a literal hex; mirrors --v2-brand — design-lint-disable-line
+                  accentColor: BRAND_COLOURS.brand,
                   accentColorForeground: 'white',
                   borderRadius: 'medium',
                   overlayBlur: 'small',

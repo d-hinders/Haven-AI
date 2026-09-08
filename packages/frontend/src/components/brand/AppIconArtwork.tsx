@@ -102,7 +102,7 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
             width: stroke,
             height: uprightHeight,
             borderRadius: stroke / 2,
-            background: BRAND_COLOURS.background,
+            background: BRAND_COLOURS.onBrand,
           }}
         />
         <div
@@ -113,7 +113,7 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
             width: stroke,
             height: uprightHeight,
             borderRadius: stroke / 2,
-            background: BRAND_COLOURS.background,
+            background: BRAND_COLOURS.onBrand,
           }}
         />
         <div
@@ -121,7 +121,7 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
             width: crossbarWidth,
             height: stroke,
             borderRadius: stroke / 2,
-            background: BRAND_COLOURS.background,
+            background: BRAND_COLOURS.onBrand,
           }}
         />
       </div>
@@ -137,7 +137,7 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
             alignItems: 'center',
             justifyContent: 'center',
             background: BRAND_COLOURS.warning,
-            color: BRAND_COLOURS.background,
+            color: BRAND_COLOURS.onBrand,
             fontSize: badgeFontSize,
             fontWeight: 700,
             letterSpacing: Math.round(badgeFontSize * 0.08),

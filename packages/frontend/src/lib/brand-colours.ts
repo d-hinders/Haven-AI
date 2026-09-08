@@ -1,8 +1,8 @@
 /**
- * The three `globals.css` tokens the installed-app shell needs OUTSIDE a
- * stylesheet (#2729): the web manifest's `theme_color` / `background_color`,
- * the `<meta name="theme-color">` the root layout emits, and the warning tone
- * the dev icon's badge is painted in.
+ * The four `globals.css` tokens the installed-app shell needs OUTSIDE a
+ * stylesheet (#2729, #2763): `--v2-brand` / `--v2-bg` for the web manifest
+ * and root layout metadata, `--v2-ink-on-brand` for the icon mark and badge
+ * label, and `--v2-warning` for the dev icon's badge.
  *
  * A manifest is JSON and a `<meta>` is an attribute value — neither can say
  * `var(--v2-brand)`, so the values have to exist as strings here. They are NOT
@@ -20,6 +20,8 @@
 export const BRAND_COLOURS = {
   /** `--v2-brand` — manifest `theme_color`, `<meta name="theme-color">`. */
   brand: '#4f46e5',
+  /** `--v2-ink-on-brand` — icon mark and warning badge label. */
+  onBrand: '#ffffff',
   /** `--v2-bg` — manifest `background_color` (the splash behind the icon). */
   background: '#ffffff',
   /** `--v2-warning` — the dev install's icon badge, same tone as `EnvBadge`. */
@@ -29,6 +31,7 @@ export const BRAND_COLOURS = {
 /** Which `globals.css` custom property each entry above is pinned to. */
 export const BRAND_COLOUR_TOKENS: Record<keyof typeof BRAND_COLOURS, string> = {
   brand: '--v2-brand',
+  onBrand: '--v2-ink-on-brand',
   background: '--v2-bg',
   warning: '--v2-warning',
 }

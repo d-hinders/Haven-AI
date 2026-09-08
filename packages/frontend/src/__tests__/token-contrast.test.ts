@@ -58,6 +58,15 @@ describe('v2 token contrast (WCAG AA, normal text)', () => {
     }
   })
 
+  it('on-brand ink is readable on brand and warning fills', () => {
+    for (const fill of ['brand', 'warning']) {
+      expect(
+        contrast(token('ink-on-brand'), token(fill)),
+        `--v2-ink-on-brand on --v2-${fill}`,
+      ).toBeGreaterThanOrEqual(AA)
+    }
+  })
+
   it('neutral badge text (ink-2 on surface-2) is readable', () => {
     expect(contrast(token('ink-2'), token('surface-2'))).toBeGreaterThanOrEqual(AA)
   })

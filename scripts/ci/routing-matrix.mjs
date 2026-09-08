@@ -96,7 +96,12 @@ export const ROUTING_MATRIX = [
     files: ['CLAUDE.md'],
     expect: ['code', 'backend'],
     kind: CONTRACT,
-    why: 'The ONE Markdown exception. CLAUDE.md mirrors the API surface table and chain registry that packages/backend/src/docs-drift pins, so a CLAUDE.md-only edit must run the backend suite or the drift test never guards it.',
+    why:
+      'The FIRST Markdown exception, and no longer the only one — #2743 added two more for ' +
+      'packages/frontend/public/, so this row states its own case rather than a count. ' +
+      'CLAUDE.md mirrors the API surface table and chain registry that ' +
+      'packages/backend/src/docs-drift pins, so a CLAUDE.md-only edit must run the backend ' +
+      'suite or the drift test never guards it.',
   },
 
   // ─── One workspace, one job ────────────────────────────────────────────────
@@ -264,6 +269,18 @@ export const ROUTING_MATRIX = [
       'what it was added to widen.',
   },
   {
+    files: ['packages/frontend/public/402.md'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'The GENERAL public/ arm (#2743), and the row that reaches it — the for-agents.md row ' +
+      'below matches the same glob but resolves to the specific arm ordered before it, so ' +
+      'without this row the general arm had no fixture that actually exercised it. 402.md is ' +
+      'authored rather than generated, advertised from llms.txt and 402/index.html, and its ' +
+      'content is asserted by discovery-artifacts.test.ts — a frontend-only test, which is why ' +
+      '`frontend` is the surface that matters and why routing nothing left it unchecked.',
+  },
+  {
     files: ['packages/frontend/public/for-agents.md'],
     expect: [
       'code',
@@ -283,7 +300,10 @@ export const ROUTING_MATRIX = [
       'sibling copy packages/cli/src/agent-guidance-text.ts routed `cli`, and its NON-MARKDOWN ' +
       'siblings in public/ routed `frontend` — the other Markdown file there, 402.md, was ' +
       'swallowed too, which is why DOC_EXCEPTIONS also carries a general arm for the ' +
-      'directory. #2727 routed the SOURCE; this row routes the COPY, the other direction.',
+      'directory. #2727 routed the SOURCE; this row routes the COPY, the other direction. ' +
+      'As above, only `sdk`, `cli` and `frontend` are decided by the arm — the other five come ' +
+      'from `dependentsOf(sdk)` — and `cli`/`frontend` are named by hand because both declare ' +
+      '`dependsOn: []` and fan-out structurally cannot reach them.',
   },
   {
     files: ['packages/sdk/src/skill-content.ts'],
@@ -303,8 +323,14 @@ export const ROUTING_MATRIX = [
       'so it can deploy standalone, and agent-skill-bundle.test.ts imports THIS file to assert ' +
       'byte parity — a test that runs only in frontend_checks. #2727 closed this shape for ' +
       'agent-guidance.ts and left this file behind: sdk routed, frontend did not, so a mutation ' +
-      'here failed a test in a job that never ran. `cli` is deliberately absent — the CLI holds ' +
-      'no copy of the skill, only of the runbook.',
+      'here failed a test in a job that never ran. Of the eight surfaces, only `sdk` and ' +
+      '`frontend` are decided here: backend, connect, mcp, mcp_server and signer arrive by ' +
+      '`dependentsOf(sdk)` fanning out through .github/package-dependencies.json. That is also ' +
+      'why an entry was the ONLY available mechanism — `frontend` and `cli` both declare ' +
+      '`dependsOn: []`, so no SDK change can ever reach either by propagation, which is what ' +
+      'made them the two surfaces both #2727 and #2743 had to name by hand. `cli` is absent ' +
+      'here for a product reason on top of that: the CLI holds no copy of the skill, only of ' +
+      'the runbook.',
   },
   {
     files: ['scripts/dep-lint.test.mjs'],

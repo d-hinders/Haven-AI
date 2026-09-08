@@ -139,6 +139,81 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         body: { error: 'merchantPayTo is required for EIP-3009 x402 on the delegation rail — the ledger must record the real merchant, not the funding target' },
       }
     }
+
+    // ── #2706: fail-fast remaining-budget pre-check on the funding leg ───────
+    //
+    // The SAME instrument and posture as #2082's erc7710 pre-check below — and
+    // now the SAME refusal for the same condition. Before this, the two schemes
+    // answered "this payment exceeds the agent's remaining budget" with
+    // opposite shapes: erc7710 a typed 403 `delegation_budget_exceeded` before
+    // any prepare, this leg an untyped 502 wrapping the raw viem/bundler
+    // simulation dump — a deliberate policy refusal reported as an upstream
+    // failure, inviting the one retry that can never succeed. #2041: generic
+    // plain-HTTP x402 always takes THIS leg, so the ugly refusal was the common
+    // path, not the edge case. The body is #2082's, field for field — same
+    // spellings, never a new one; `merchant_address` carries merchantPayTo
+    // here because on this leg payTo is the funding target, not the merchant.
+    //
+    // What it is NOT: a security boundary. The ERC20PeriodTransferEnforcer in
+    // the funding delegation's caveat stack remains the gate and still reverts
+    // an over-budget redemption inside prepareRedemption's gas estimation; the
+    // 502 below stays for genuine bundler/infrastructure failures only. The
+    // selection here is the same `selectDelegation(agent, token, payTo)` the
+    // prepare runs again — one extra indexed read ahead of a bundler call that
+    // costs orders of magnitude more.
+    //
+    // FAIL OPEN, exactly as #2082: a degraded read (`fromChain: false`), a
+    // thrown one, or an unparseable one all mean "no usable measurement" and
+    // proceed to prepare, where the enforcer rules. A null selection skips the
+    // pre-check entirely so the existing null-handling below can answer its
+    // own more specific 403 — this block must never preempt it.
+    const fundingDelegation = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
+    if (fundingDelegation) {
+      let fundingRemainingAtomic: bigint | null = null
+      try {
+        const fundingRead = await readRemainingBudget(
+          agent.chain_id,
+          fundingDelegation.delegation_json,
+          amountRaw.toString(),
+        )
+        fundingRemainingAtomic = fundingRead.fromChain ? BigInt(fundingRead.remainingAtomic) : null
+      } catch {
+        fundingRemainingAtomic = null
+      }
+      // `<`, never `<=`: spending the exact remainder is what the chain allows.
+      if (fundingRemainingAtomic !== null && fundingRemainingAtomic < amountRaw) {
+        const fundingShortfallAtomic = amountRaw - fundingRemainingAtomic
+        const fundingRemainingHuman = formatTokenValue(fundingRemainingAtomic.toString(), tokenConfig.decimals)
+        const fundingShortfallHuman = formatTokenValue(fundingShortfallAtomic.toString(), tokenConfig.decimals)
+        return {
+          code: 403,
+          body: {
+            error:
+              `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
+              `budget for this period (${fundingRemainingHuman} ${tokenConfig.symbol}, short by ${fundingShortfallHuman}). ` +
+              'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
+              'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+            error_code: 'delegation_budget_exceeded',
+            phase: AgentPaymentPhase.InsufficientFunds,
+            next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+            rail: AgentPaymentRail.X402,
+            chain_id: agent.chain_id,
+            token: tokenConfig.symbol,
+            asset: tokenAddress,
+            network,
+            amount: amountHuman,
+            amount_atomic: amountRaw.toString(),
+            remaining: fundingRemainingHuman,
+            remaining_atomic: fundingRemainingAtomic.toString(),
+            shortfall: fundingShortfallHuman,
+            shortfall_atomic: fundingShortfallAtomic.toString(),
+            resource_url: url,
+            merchant_address: merchantPayTo.toLowerCase(),
+          },
+        }
+      }
+    }
+
     let fundingAuth
     try {
       fundingAuth = await prepareDelegationPayment(

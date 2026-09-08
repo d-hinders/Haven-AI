@@ -245,6 +245,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-migration-constraint-scope.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'Refuses an unanchored pg_constraint lookup in packages/backend/src/db/migrations/** (#2702); it lives under scripts/ but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-migration-constraint-scope.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: "The guard's own fixtures — the half that can go red, since the guard reports on an already-clean repo (#2702).",
+  },
+  {
     files: ['scripts/retired-rail-prose-ratchet.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

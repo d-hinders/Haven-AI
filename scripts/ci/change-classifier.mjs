@@ -360,7 +360,8 @@ export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RUL
  *   routed and `CLI checks` ran on a pull request touching no CLI file. The
  *   three-dot form asks the question routing actually wants: what did this
  *   branch change SINCE IT DIVERGED. It needs the merge base to be reachable,
- *   which is why `ci.yml` checks out at `fetch-depth: 0`.
+ *   which the `changes` job's existing `fetch-depth: 0` checkout already
+ *   provides.
  * - **`push`** — `github.event.before` is the previous tip of THIS branch, and
  *   `A...B` against it would diff from a merge base that is not what happened.
  *   Two-dot is correct there and stays.

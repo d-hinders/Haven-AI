@@ -142,9 +142,10 @@ describe('base-SHA handling', () => {
 
   test('an unknown or absent event falls back to two-dot, never three', () => {
     // Fail toward OVER-routing. A three-dot diff needs a reachable merge base;
-    // if some future event carries a base SHA that is not a branch tip, the
-    // two-dot form still produces a usable (if wide) list, whereas a bad
-    // three-dot can fail the step outright and route nothing.
+    // if some future event carries a base SHA that has none, the two-dot form
+    // still produces a usable (if wide) list, whereas a bad three-dot fails the
+    // classify step — which reddens the run (ci.yml's `changes` job does not
+    // continue-on-error), so nothing routes and nothing merges.
     for (const eventName of [undefined, '', 'schedule', 'workflow_run']) {
       assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName }), [
         'diff',
@@ -172,7 +173,7 @@ describe('base-SHA handling', () => {
 
     const pr = changedFilesCommand({ baseSha: 'base', headSha: 'head', eventName: 'pull_request' })
     assert.ok(pr.includes('base...head'), 'a pull request must ask the three-dot question')
-    assert.ok(!pr.includes('base'.concat(' ')), 'no bare two-dot pair on a pull request')
+    assert.ok(!pr.includes('base'), 'no bare two-dot pair on a pull request')
 
     // What each list would route, to show the defect is about the QUESTION and
     // not about the rules: the branch's own files route nothing near the CLI;

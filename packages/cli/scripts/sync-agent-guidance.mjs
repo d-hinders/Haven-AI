@@ -17,17 +17,25 @@
  *
  * The pin test (`src/agent-guidance-text.test.ts`) fails if this file is not
  * re-run after the SDK string changes, so the copy cannot drift silently —
- * BUT that test runs in the `cli` job, and an SDK-only change does not route
- * `cli`. The same held for the frontend copy and its `frontend` job. #2713
- * edited the SDK runbook, both copies went stale, and `dev` went red for
- * everyone (#2727).
+ * BUT that test runs in the `cli` job, and before #2727 an SDK-only change
+ * routed neither `cli` nor `frontend`. #2713 edited the SDK runbook and the
+ * CLI copy went stale; the frontend copy survived only because that PR
+ * happened to touch frontend files too, so its job ran. `dev` did not even go
+ * red -- `cli_checks` was skipped, so the stale copy was carried until an
+ * unrelated backend PR (#2719) regenerated it.
  *
- * `--check` is the answer to that: it verifies EVERY generated copy against
- * this one reader and exits non-zero on drift, and `sdk_checks` runs it via
- * `npm run lint:runbook-parity`. The job that owns the canonical source is the
- * one job guaranteed to run when that source changes, so the check belongs
- * there rather than in each consumer's job — which would also mean routing the
- * whole matrix on every SDK edit, the over-routing this same issue removes.
+ * `--check` verifies the FULL-TEXT copies below against this one reader and
+ * exits non-zero on drift; `sdk_checks` runs it via
+ * `npm run lint:runbook-parity`, the one job guaranteed to run when the
+ * canonical source changes.
+ *
+ * It is NOT the whole story, and must not be described as one. The frontend
+ * also holds `lib/agent-onboarding-prompt.ts` (a copy of one constant) and
+ * `lib/agent-skill-bundle.ts` (text composed from four of them by
+ * `sdk/src/skill-content.ts`) — resolved text, not an extractable literal, so
+ * no check here can read it back. Those are covered by routing: the manifest
+ * names `frontend` as an owner of the canonical source, so their own pin tests
+ * run on an SDK-only change (#2727).
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -38,12 +46,17 @@ const SDK_SOURCE = join(here, '..', '..', 'sdk', 'src', 'agent-guidance.ts')
 const TARGET = join(here, '..', 'src', 'agent-guidance-text.ts')
 
 /**
- * Every generated copy of the canonical runbook, and how to read each back.
+ * The copies of the canonical runbook that can be READ BACK and compared —
+ * i.e. those embedding the whole string as a literal or as raw Markdown.
  *
- * Enumerated here, not in the caller, so adding a third copy is a one-line
- * change in the place the generator already lives. `extract` turns a file's
- * bytes into the runbook string it embeds; for a raw Markdown copy that is the
- * identity function.
+ * Deliberately not named "every copy": the frontend's partial derivations
+ * (`lib/agent-onboarding-prompt.ts`, `lib/agent-skill-bundle.ts`) are not in
+ * here and cannot be, because the skill bundle embeds text composed at build
+ * time rather than a literal. Their pin tests are the check for those, and
+ * routing is what makes those tests run (see the header).
+ *
+ * `extract` turns a file's bytes into the runbook string it embeds; for a raw
+ * Markdown copy that is the identity function.
  */
 export const GENERATED_COPIES = [
   {
@@ -107,10 +120,18 @@ if (invokedDirectly) {
         continue
       }
       drifted.push(copy)
+      // Sizes alone are useless for a same-length edit — both lines read
+      // identical under a "DRIFTED" heading. Name where they part company.
+      let at = 0
+      while (at < runbook.length && runbook[at] === embedded[at]) at += 1
+      const excerpt = (text) => JSON.stringify(text.slice(Math.max(0, at - 20), at + 40))
       console.error(
         `✗ ${copy.label} has DRIFTED from packages/sdk/src/agent-guidance.ts\n` +
           `    canonical ${Buffer.byteLength(runbook)} bytes / ${runbook.length} UTF-16 units\n` +
-          `    copy      ${Buffer.byteLength(embedded)} bytes / ${embedded.length} UTF-16 units`,
+          `    copy      ${Buffer.byteLength(embedded)} bytes / ${embedded.length} UTF-16 units\n` +
+          `    first differs at UTF-16 offset ${at}\n` +
+          `      canonical ${excerpt(runbook)}\n` +
+          `      copy      ${excerpt(embedded)}`,
       )
     }
     if (drifted.length > 0) {

@@ -256,13 +256,12 @@ describe('routing completeness — every gated guard has an owner (#1626)', () =
   // exemption is DERIVED from the job's own `if:`, never asserted here, so the
   // day someone gates a job that runs an unregistered guard, this fails.
 
-  /** Root package.json script name -> the scripts/ files it runs. */
   /**
    * A guard path inside a command string.
    *
    * The optional `packages/<pkg>/` prefix is load-bearing (#2727). Without it
    * these patterns anchored on a bare `scripts/`, so a guard living in a
-   *   * PACKAGE's scripts directory was seen under a truncated path —
+   * PACKAGE's scripts directory was seen under a truncated path —
    * `node packages/cli/scripts/sync-agent-guidance.mjs` read as
    * `scripts/sync-agent-guidance.mjs`, which matches no manifest entry and
    * therefore no ownership. The completeness check below could not be

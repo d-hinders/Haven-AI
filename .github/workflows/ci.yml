@@ -140,11 +140,14 @@ jobs:
       - name: Network-map pins (#1478)
         run: npm run lint:network-pins
 
-      # #2727: every GENERATED copy of packages/sdk/src/agent-guidance.ts is
-      # verified here, in the job that owns the canonical source. The copies'
-      # own pin tests live in the cli and frontend jobs, and an SDK-only change
-      # routes NEITHER — which is how #2713 left both stale and dev red. This is
-      # the one job guaranteed to run when the source changes.
+      # #2727: the two FULL-TEXT copies of packages/sdk/src/agent-guidance.ts
+      # are verified here, in the job that owns the canonical source — the one
+      # job guaranteed to run when it changes. It does NOT cover the frontend's
+      # partial copies (agent-onboarding-prompt.ts, agent-skill-bundle.ts),
+      # which is why that file also routes `frontend` so their own pin tests
+      # run. #2713 edited the runbook and left the CLI copy stale; dev did not
+      # even go red, because `cli_checks` was skipped -- the stale copy was
+      # simply carried until an unrelated backend PR (#2719) regenerated it.
       - name: Generated runbook copies are in sync (#2727)
         run: npm run lint:runbook-parity
 
@@ -175,9 +178,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # #2727: the same parity check sdk_checks runs. Both jobs own it — this
-      # job because the generated copy is its file, sdk_checks because the
-      # canonical source is its file and that job always runs when it changes.
+      # #2727: the same parity check sdk_checks and frontend_checks run. This
+      # job owns it because the generated copy is its file; sdk_checks because
+      # the canonical source is, and that job always runs when it changes.
       - name: Generated runbook copies are in sync (#2727)
         run: npm run lint:runbook-parity
 
@@ -519,6 +522,16 @@ jobs:
         run: |
           npm run visual:baselines
           npm run visual:baselines:test
+
+      # #2727: the frontend holds THREE pinned derivations of
+      # packages/sdk/src/agent-guidance.ts — public/for-agents.md,
+      # lib/agent-onboarding-prompt.ts and lib/agent-skill-bundle.ts — and only
+      # the first is checkable by lint:runbook-parity. This job is named an
+      # owner of that source so the other two pin tests below actually run on
+      # an SDK-only change; the check here is what makes that ownership
+      # expressible in root-guard-ownership.json.
+      - name: Generated runbook copies are in sync (#2727)
+        run: npm run lint:runbook-parity
 
       - name: Run frontend unit tests
         run: npm run test -w packages/frontend

@@ -31,9 +31,11 @@ const FRONTEND_ROOT = path.resolve(__dirname, '../../..')
 const GLOBALS_CSS = readFileSync(path.join(FRONTEND_ROOT, 'src/app/globals.css'), 'utf8')
 
 function cssToken(name: string): string {
-  const match = GLOBALS_CSS.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`))
-  if (!match) throw new Error(`globals.css defines no ${name}`)
-  return match[1].toLowerCase()
+  // Exactly one definition: the day a dark-mode block redefines a token, the
+  // manifest's single value is half the truth, and this is where that shows.
+  const matches = [...GLOBALS_CSS.matchAll(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`, 'g'))]
+  if (matches.length !== 1) throw new Error(`globals.css defines ${name} ${matches.length} times, expected once`)
+  return matches[0][1].toLowerCase()
 }
 
 describe('brand colours are the globals.css tokens', () => {
@@ -45,7 +47,7 @@ describe('brand colours are the globals.css tokens', () => {
   )
 
   it('the parser can say no — an unknown token throws rather than matching nothing', () => {
-    expect(() => cssToken('--v2-no-such-token')).toThrow(/defines no/)
+    expect(() => cssToken('--v2-no-such-token')).toThrow(/0 times/)
   })
 })
 
@@ -157,8 +159,8 @@ const ICON_ROUTES = {
 
 async function renderRoute(file: keyof typeof ICON_ROUTES, environment: string | undefined) {
   vi.resetModules()
-  if (environment === undefined) vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
-  else vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', environment)
+  // `undefined` deletes the key — the production convention is UNSET, not empty.
+  vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', environment)
   const route = await ICON_ROUTES[file]()
   recorded.length = 0
   route.default()

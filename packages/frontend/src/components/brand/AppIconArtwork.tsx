@@ -19,14 +19,37 @@ import { installedAppIdentity } from '@/lib/installed-app'
  * `'use client'` module: `ImageResponse` needs the element tree itself, and a
  * client reference would hand it an opaque placeholder.
  */
+/**
+ * The drawing's measurements, in pixels, for one canvas size. Exported so the
+ * pixel test can assert the render against the same numbers the render used.
+ *
+ * `HavenMark` puts its H at 10 × 11 of a 20-unit inset tile — 50% × 55% —
+ * counting the round caps that a `strokeLinecap="round"` path grows by a full
+ * stroke width in each axis. This field is full-bleed (24 units, no inset), so
+ * the same H is 10 × 11 of 24: the fractions below. The first cut kept the
+ * path's 8 × 9 as hard box sizes with no cap overhang on a 24-unit field and
+ * came out a third too small — `haven-design-reviewer` measured it at 33% of
+ * the tile against `HavenMark`'s 50%.
+ *
+ * With a badge across the bottom band, a flex-centred child with
+ * `marginBottom: m` moves up by `m / 2`, and the centre of the field that
+ * remains above the band sits `badgeHeight / 2` above the canvas centre — so
+ * the lift is the whole band height, not a fraction of it.
+ */
+export function appIconGeometry(size: number, badged: boolean) {
+  const badgeHeight = Math.round(size * 0.24)
+  return {
+    stroke: Math.round(size * 0.092),
+    crossbarWidth: Math.round(size * 0.42),
+    uprightHeight: Math.round(size * 0.47),
+    badgeHeight,
+    markLift: badged ? badgeHeight : 0,
+  }
+}
+
 export function AppIconArtwork({ size, environment }: { size: number; environment: string }) {
   const { badge } = installedAppIdentity(environment)
-  // Everything scales off the canvas so 180, 192 and 512 share one drawing.
-  const unit = size / 24
-  const stroke = Math.round(unit * 2.2)
-  const uprightHeight = Math.round(unit * 9)
-  const crossbarWidth = Math.round(unit * 8)
-  const badgeHeight = Math.round(size * 0.24)
+  const { stroke, uprightHeight, crossbarWidth, badgeHeight, markLift } = appIconGeometry(size, badge !== null)
 
   return (
     <div
@@ -49,8 +72,8 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
           height: uprightHeight,
           position: 'relative',
           // Lift the mark when a badge takes the bottom band, so it stays
-          // optically centred in what remains.
-          marginBottom: badge ? Math.round(badgeHeight * 0.55) : 0,
+          // centred in what remains — see `appIconGeometry` for the arithmetic.
+          marginBottom: markLift,
         }}
       >
         <div
@@ -97,9 +120,11 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
             justifyContent: 'center',
             background: BRAND_COLOURS.warning,
             color: BRAND_COLOURS.background,
-            fontSize: Math.round(badgeHeight * 0.62),
+            // Bounded by the band's width as well as its height, so a long
+            // environment name ("preview-42") shrinks rather than overflows.
+            fontSize: Math.round(Math.min(badgeHeight * 0.62, (size * 0.9) / (badge.length * 0.7))),
             fontWeight: 700,
-            letterSpacing: Math.round(unit * 0.3),
+            letterSpacing: Math.round(size * 0.0125),
           }}
         >
           {badge}

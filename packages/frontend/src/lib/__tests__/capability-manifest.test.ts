@@ -10,7 +10,7 @@ import {
   type DiscoveryFacts,
 } from '../capability-manifest'
 import { AUTH_MARKED_PREFIXES, PUBLIC_SURFACES } from '../discovery-surfaces'
-import { CHAIN_REGISTRY, getChainData } from '@haven_ai/core'
+import { CHAIN_REGISTRY, DEFAULT_CHAIN_ID, getChainData } from '@haven_ai/core'
 
 /**
  * The capability manifest at `/.well-known/haven.json` (#2531).
@@ -28,7 +28,7 @@ const FACTS: DiscoveryFacts = {
   connector_package: '@haven_ai/connect@dev',
   cli_package: '@haven_ai/cli@dev',
   openapi_url: 'https://api.test/openapi.json',
-  chains: { deployable: [84532], supported: [8453, 84532, 100] },
+  chains: { default: DEFAULT_CHAIN_ID, deployable: [84532], supported: [8453, 84532, 100] },
 }
 
 /** Every own-origin path the manifest names. They are relative by design. */
@@ -94,6 +94,8 @@ describe('capability manifest', () => {
     const manifest = buildManifestFrom('https://attacker.example', FACTS)
     expect(manifest.api.base).toBe('https://api.test')
     expect(manifest.hosted_mcp.url).toBe('https://mcp.test')
+    expect(manifest.api.openapi_mirror).toContain('/api/openapi.json')
+    expect(manifest.api.openapi_mirror).toContain('same document')
   })
 
   it('omits the keys whose targets do not exist yet, and names what lands them', () => {
@@ -138,6 +140,7 @@ describe('capability manifest', () => {
 
   it('takes the environment-dependent values from the backend, never a literal', () => {
     const manifest = buildManifestFrom(ORIGIN, FACTS)
+    expect(manifest.chains?.default).toBe(DEFAULT_CHAIN_ID)
     expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
     expect(manifest.packages.connect.one_liner).toBe('npx @haven_ai/connect@dev')
     // #2617: the CLI mirrors the connector's channel shape — the runbook and
@@ -184,7 +187,7 @@ describe('capability manifest', () => {
     // of the FACTS. If they ever disagree, an entry naming unsourced facts is
     // worse than a shorter list — and the static `deployable` half still
     // reports the id.
-    const unknown = { ...FACTS, chains: { deployable: [999999], supported: [8453, 999999] } }
+    const unknown = { ...FACTS, chains: { default: DEFAULT_CHAIN_ID, deployable: [999999], supported: [8453, 999999] } }
     const manifest = buildManifestFrom(ORIGIN, unknown)
     expect(manifest.chains?.deployable).toEqual([999999])
     expect(manifest.chains?.supported.map((entry) => entry.id)).toEqual([8453])

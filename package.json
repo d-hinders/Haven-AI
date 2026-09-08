@@ -23,6 +23,8 @@
     "test:e2e": "npm run test:e2e -w packages/frontend",
     "release:bump": "node scripts/release-bump.mjs",
     "release:bump:test": "node --test scripts/release-bump.test.mjs",
+    "release:scope": "node scripts/release-scope.mjs",
+    "release:scope:test": "node --test scripts/release-scope.test.mjs",
     "docs:check": "node scripts/docs/validate-frontmatter.mjs && node scripts/docs/validate-agent-skills.mjs && node scripts/docs/validate-readme-agent-section.mjs && node scripts/docs/chain-integrity.mjs && node scripts/docs/ui-gate-wording.mjs && node scripts/docs/covers-gaps.mjs",
     "docs:covers-gaps": "node scripts/docs/covers-gaps.mjs",
     "docs:covers-gaps:update": "node scripts/docs/covers-gaps.mjs --update",

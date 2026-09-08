@@ -198,3 +198,35 @@ test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
   assert.equal(status, 1)
   assert.match(out, /--update refuses to RAISE the baseline/)
 })
+
+test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first run', () => {
+  // #2728, pinned here for the same reason as in db-mock-ratchet: review
+  // measured that reverting the shared allowance key left this suite entirely
+  // green, so the tightening this gate received was unobserved. `{}` is what
+  // `writeBaseline` writes at zero debt, so keying on emptiness disables the
+  // refusal permanently after the first successful cleanup.
+  const { status, out, wrote } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [SRC]: '// stays readable\n// stays readable\n',
+      [BASE]: '{}',
+      [JUST]: '{}',
+    },
+    readBack: [BASE],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote[BASE], '{}')
+})
+
+test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
+  const { status, wrote } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: { [SRC]: '// stays readable\n// stays readable\n', [JUST]: '{}' },
+    readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.match(wrote[BASE], /stays-readable/)
+})

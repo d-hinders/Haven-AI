@@ -274,6 +274,7 @@ async function deviceLogin(args: ParsedArgs, d: ResolvedDeps, baseUrl: string): 
       verification_url: start.verification_url,
       user_code: start.user_code,
       device_code: start.device_code,
+      interval: start.interval,
       expires_at: new Date(deadline).toISOString(),
     },
     () =>

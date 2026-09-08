@@ -50,7 +50,13 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { join, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { newViolations, hasShrunk, writeBaseline, readBaseline } from './lib/ratchet.mjs'
+import {
+  newViolations,
+  hasShrunk,
+  writeBaseline,
+  loadBaseline,
+  updateRefusals,
+} from './lib/ratchet.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const BASELINE_PATH = join(REPO_ROOT, 'packages', 'frontend', 'wire-type-baseline.json')
@@ -187,29 +193,24 @@ const REMEDY =
   'a snake_case field, mark it:\n' +
   '  // ui-local: <why this is not a wire shape, at least 20 chars>'
 
-/**
- * The `--update` guard, as a pure function so it can be tested rather than
- * only read: an update may TIGHTEN the baseline, never raise it. Returns the
- * violations that block the write ([] when the write is allowed).
- *
- * The first-run case (no baseline yet) is deliberately allowed — that is how
- * the baseline gets created.
- */
-export function updateRefusals(counts, baseline) {
-  if (Object.keys(baseline).length === 0) return []
-  return newViolations(counts, baseline)
-}
+// Re-exported, not redefined: the decision moved to `lib/ratchet.mjs` in #2728
+// so all FIVE gates on that module share one copy. This module keeps the name
+// in its own export surface because callers and tests already import it here.
+// (An earlier draft of this comment said four. The count was the whole
+// blocking finding of that review, and this line was the one site the
+// correction sweep missed -- which is why the sweep is now a grep, not a list.)
+export { updateRefusals }
 
 async function main() {
   const counts = await scanAll()
-  const baseline = readBaseline(BASELINE_PATH)
+  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
   const t = total(counts)
   console.log(
     `wire-type gauge: ${t.types} hand-written wire shape(s) across ${t.files} file(s).`,
   )
 
   if (process.argv.includes('--update')) {
-    const violations = updateRefusals(counts, baseline)
+    const violations = updateRefusals(counts, baseline, { firstRun })
     if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)

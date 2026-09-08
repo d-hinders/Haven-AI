@@ -10,8 +10,13 @@ covers:
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/cli/src/commands.ts
+  - packages/cli/src/commands.test.ts
+  - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
+  - packages/connect/src/installed-clients.test.ts
 last-verified: "2026-09-08"
 verified:
+  - "#2710: RE-VERIFIED, NOT EDITED. This contract is implicated because `covers:` names `packages/cli/src/commands.ts`. The changed login start object adds the server-provided `interval` beside `device_code`; it neither changes the connector command, runtime selection, consent, tool schema, signing, nor the local/hosted runtime surface. The canonical runbook now describes `chains.default` as an expected deployment value that must still be confirmed with `haven wallets funding`, preserving the existing rule that the agent does not infer a network from a package, host, or credential. Scope: the CLI and guidance claims only. NOT re-verified: runtime profiles, the version-skew table, release mechanics, or the rest of this document."
+  - "#2680 (slice 2, epic #2678): three exhaustive-set claims now cite their pins: the #1719 scan-populates-never-selects invariant (installed-clients.test.ts), the --run adds-exactly---json contract (commands.test.ts "exactly --json appended"), and the runtime_config_unreadable only-one-of-six routing (runtime-status-copy.test.ts, extended with a source-scan pin). The doctor parked classification and its nothing-else-left case are cited to doctor.test.ts. The remaining matches are prose descriptions of ConnectorError shapes, release history and recovery runbooks — judgement, left alone. No claim found false. Scope: those five pointer insertions. NOT re-verified: the rest of the body."
   - "0.1.36-alpha.0 release (AMENDED THREE TIMES before promotion): the Supported Runtime Manifest table is re-pinned by `release-bump.mjs` (#1790); this note is the release's argument for what moved and what did not. WHAT MOVED: nothing in this document's subject matter. The release carries #2618 (the CLI's non-blocking login), #2617 (the CLI invocation names its channel; discovery gains `cli_package`, mirrored in the manifest as `packages.cli.channel`/`one_liner`), #2687 (two COMMENT blocks in `connect/src/rekey.ts` and `sdk/src/types.ts` retiring the stale \"import-only\" description of the legacy rail — 4 insertions, 2 deletions, no executable line), and a one-space copy fix at the seam where #2617's and #2618's sentences meet. What reaches a user's disk is 17 files, +194/-41 — source-minus-tests plus `packages/cli/README.md` plus ALL FIVE published `package.json` files, since the tarball carries only `dist/`, `package.json` and `README.md` (verified by listing one). This note first read 14 files / +186/-33, counting only two of the five package.json files — wrong by the tarball rule stated in the same sentence, caught by haven-doc-reviewer before promotion; the three added carry version and dep-pin lines only. WHY THREE TIMES: this note first said three issues (measured from the previous bump commit; two were already on npm), then one (correct for 76 minutes, until #2617 merged), then two (correct overnight, until #2687 merged shortly after 04:00 on 2026-09-08 and was caught by the scheduled pre-promotion re-measurement). `publish.yml` builds tarballs from `main`'s tree AT PROMOTION TIME, so a release record written at bump time is wrong by construction once anything lands behind it — it is a measurement taken at the door, not a document written once. WHAT DID NOT, with the qualifier a `main` baseline requires: the diff over `packages/mcp/src`, `packages/signer/src`, `packages/connect/src` and `packages/mcp-server/src` is six version literals the bump wrote (`MCP_VERSION`, `SIGNER_VERSION`, `CONNECTOR_VERSION`, `HOSTED_SERVER_VERSION`, connect's `sdkVersion`/`signerVersion`) plus #2687's two comment lines in `connect/src/rekey.ts`. No executable line in those four trees changed. An earlier draft called that diff EMPTY, which held only against the bump commit where both sides carried the same version. THE SDK EXPOSURE IS TRACED, NOT ASSUMED — restored after an amendment dropped it while keeping its conclusion. All four runtime packages depend on `@haven_ai/sdk`, which did change; the exported constants that moved (`HAVEN_AGENT_RUNBOOK_MD`, `AGENT_ONBOARDING_PROMPT`, and #2687's comment in `types.ts`) have no importer in those four trees, checked with a positive control. `@haven_ai/core` DID change by one line and an earlier draft wrongly said otherwise; it does not matter, because no published package depends on core at all (sdk and cli declare no `@haven_ai/*` dep; mcp/signer/connect depend only on the sdk). So the registered tool-name set, `consent.ts`, the signer's #1143 guard and `STRICT_INPUT_TOOLS` are untouched, and no operator is re-prompted on upgrade: the consent hash covers identity, the canonical tool set AND the canonical allowance set, none of them a version constant. The version-skew CONTRACT is unchanged and `HAVEN_CONNECTOR_CHANNEL` does not move (`alpha` -> `alpha`). ONE THING A READER OF THE #2647 PARAGRAPH BELOW SHOULD KNOW: this is the FIRST promotion that will run the `promote-tags` job it describes, on a credential path never yet exercised, so the half-green outcome that paragraph warns about is live here — verify with `npm view`, not with a green workflow. NOT re-verified in this pass: the hosted-runtime connector profiles, the version-skew table's own rows (a doc transcription, distinct from the code contract above), or the trusted-publisher section."
   - "#2687: re-verified, NOT edited. Implicated because `covers:` names `packages/connect/**`; the change there is two JSDoc lines retiring the stale \"import-only\" description of the legacy rail, and this document makes no claim about that comment. (Restored under"
   - "by the 0.1.36-alpha.0 amendment, which had dropped it — the `chain-reset(#2631)` token still in this line is an EARLIER, unrelated compaction and must not be read as licensing that drop.)"
@@ -343,7 +348,9 @@ precedence order:
    Claude Desktop's `claude_desktop_config.json`, `$HERMES_HOME/config.yaml`)
    and offers **only those**, likeliest first — an existing MCP config outranks
    a bare client directory. The scan **populates the choices; it never
-   selects.** Finding exactly one installed app still prompts, because an
+   selects** (the #1719 invariant — pinned by
+   [`packages/connect/src/installed-clients.test.ts`](../../packages/connect/src/installed-clients.test.ts)
+   "NEVER selects for the user", #2680). Finding exactly one installed app still prompts, because an
    installed app tells you what exists, not where the user wants their agent to
    run, and a silent wrong write plants an API key and a delegate key in an app
    they do not use. This rung is **omitted entirely** — not answered — under
@@ -462,7 +469,9 @@ yourself* — which is why the two artifacts do not contradict even though the
 prompt does not name this case.
 
 **A connector run invoked by `haven agents connect --run` (#2527) adds exactly
-`--json` and nothing else.** The CLI splits the `connector_command` the backend
+`--json` and nothing else** (pinned by
+[`packages/cli/src/commands.test.ts`](../../packages/cli/src/commands.test.ts)
+"exactly --json appended", #2680). The CLI splits the `connector_command` the backend
 returned and appends that one flag; it never rewrites `--api`, never composes a
 command of its own, and deliberately has no `--replace` or `--name` of its own
 to pass down. The second permitted change, `--runtime` after a runtime refusal,
@@ -487,7 +496,9 @@ agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only.
 
 `runtime_config_unreadable` is the exception, and the only one of the six that
-reaches the dashboard (`runtimeStatusHelper`): it happens after credentials
+reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by
+[`packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts`](../../packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts),
+#2680): it happens after credentials
 exist, during the config write. It is deliberately distinct from its
 retryable sibling `runtime_config_write_failed` — an unparseable config fails
 identically on every re-run until the file itself is fixed. Parsing happens

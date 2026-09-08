@@ -181,9 +181,11 @@ export const SURFACE_RULES = Object.freeze([
   // The guards that live outside the tree they police, one rule per entry in
   // .github/root-guard-ownership.json (#1624). These were four hand-written
   // arms; the ownership is data now, and the manifest is the only place it is
-  // decided. Position in this list does not matter — every guard path is exact
-  // and none collides with another rule — but they stay here so the routing
-  // order reads the same as it did.
+  // decided. Position MATTERS, since #2727 registered the first manifest paths
+  // that live under packages/<pkg>/: such a path is also matched by the
+  // packages/<pkg>/* arm below, so the manifest rule has to come first AND has
+  // to name every job it needs — a rule placed here that named fewer jobs than
+  // the generic arm would quietly NARROW routing rather than widen it.
   ...ROOT_GUARD_RULES,
   { patterns: ['packages/frontend/*'], surfaces: ['code', 'frontend'] },
   { patterns: ['packages/backend/*'], surfaces: ['code', 'backend'] },

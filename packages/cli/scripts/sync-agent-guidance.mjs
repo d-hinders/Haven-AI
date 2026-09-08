@@ -26,16 +26,20 @@
  *
  * `--check` verifies the FULL-TEXT copies below against this one reader and
  * exits non-zero on drift; `sdk_checks` runs it via
- * `npm run lint:runbook-parity`, the one job guaranteed to run when the
- * canonical source changes.
+ * `npm run lint:runbook-parity`. Since #2727 `cli_checks` and
+ * `frontend_checks` run it too; `sdk_checks` is the one that runs on a change
+ * to the canonical source even without the manifest row, via the generic
+ * `packages/sdk/*` arm.
  *
  * It is NOT the whole story, and must not be described as one. The frontend
- * also holds `lib/agent-onboarding-prompt.ts` (a copy of one constant) and
- * `lib/agent-skill-bundle.ts` (text composed from four of them by
- * `sdk/src/skill-content.ts`) — resolved text, not an extractable literal, so
- * no check here can read it back. Those are covered by routing: the manifest
- * names `frontend` as an owner of the canonical source, so their own pin tests
- * run on an SDK-only change (#2727).
+ * also holds `packages/frontend/src/lib/agent-onboarding-prompt.ts` (a copy
+ * of one constant) and `packages/frontend/src/lib/agent-skill-bundle.ts` (text
+ * composed from four of them by `packages/sdk/src/skill-content.ts`) —
+ * resolved text, not an extractable literal, so no check here can read it
+ * back. Those are covered by routing: the manifest names `frontend` as an
+ * owner of the canonical source, so their own pin tests run on a change to
+ * `agent-guidance.ts` (#2727). A change to `skill-content.ts` alone still does
+ * not route `frontend` — see #2743.
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -50,8 +54,9 @@ const TARGET = join(here, '..', 'src', 'agent-guidance-text.ts')
  * i.e. those embedding the whole string as a literal or as raw Markdown.
  *
  * Deliberately not named "every copy": the frontend's partial derivations
- * (`lib/agent-onboarding-prompt.ts`, `lib/agent-skill-bundle.ts`) are not in
- * here and cannot be, because the skill bundle embeds text composed at build
+ * (`packages/frontend/src/lib/agent-onboarding-prompt.ts` and
+ * `packages/frontend/src/lib/agent-skill-bundle.ts`) are not in here and
+ * cannot be, because the skill bundle embeds text composed at build
  * time rather than a literal. Their pin tests are the check for those, and
  * routing is what makes those tests run (see the header).
  *

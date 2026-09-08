@@ -141,8 +141,9 @@ jobs:
         run: npm run lint:network-pins
 
       # #2727: the two FULL-TEXT copies of packages/sdk/src/agent-guidance.ts
-      # are verified here, in the job that owns the canonical source — the one
-      # job guaranteed to run when it changes. It does NOT cover the frontend's
+      # are verified here, in the job that owns the canonical source — and the
+      # one that runs on a change to it even without the manifest row, via the
+      # generic packages/sdk/* arm. It does NOT cover the frontend's
       # partial copies (agent-onboarding-prompt.ts, agent-skill-bundle.ts),
       # which is why that file also routes `frontend` so their own pin tests
       # run. #2713 edited the runbook and left the CLI copy stale; dev did not
@@ -525,11 +526,18 @@ jobs:
 
       # #2727: the frontend holds THREE pinned derivations of
       # packages/sdk/src/agent-guidance.ts — public/for-agents.md,
-      # lib/agent-onboarding-prompt.ts and lib/agent-skill-bundle.ts — and only
-      # the first is checkable by lint:runbook-parity. This job is named an
-      # owner of that source so the other two pin tests below actually run on
-      # an SDK-only change; the check here is what makes that ownership
-      # expressible in root-guard-ownership.json.
+      # src/lib/agent-onboarding-prompt.ts and src/lib/agent-skill-bundle.ts —
+      # and only the first is checkable by lint:runbook-parity. This job is
+      # named an owner of that source so the other two pin tests below actually
+      # run on a change to agent-guidance.ts; the check here is what makes that
+      # ownership expressible in root-guard-ownership.json.
+      #
+      # Scoped to agent-guidance.ts deliberately, and NOT the same as "any
+      # SDK-only change": the skill bundle is pinned to
+      # packages/sdk/src/skill-content.ts too, which still routes sdk without
+      # frontend, so a change there leaves agent-skill-bundle.test.ts unrun.
+      # Closing that needs a runsVia the frontend job actually runs and this
+      # one does not cover — see #2743.
       - name: Generated runbook copies are in sync (#2727)
         run: npm run lint:runbook-parity
 

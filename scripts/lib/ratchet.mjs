@@ -88,6 +88,55 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * both what an absent file reads as and what a fully-cleaned gate writes, and
  * only one of those may accept growth. See `updateRefusals`.
  */
+/**
+ * Refuse a baseline the comparison cannot use, at the READ boundary rather than
+ * in the comparison (#2759).
+ *
+ * `newViolations` does `count > allowed`, and `1 > "x"` is `false`. So an entry
+ * whose value is a string, null, an array or an object silently disables
+ * itself: the gate reports a clean bill of health over a live violation, and
+ * `hasShrunk` stays quiet for the same reason, so not even the "residue shrank"
+ * hint fires. Measured on `scripts/docs/ui-gate-wording.mjs` with
+ * `{"docs/thing.md": {"blanket-merge-pause": "x"}}` — exit 0, "1 baselined
+ * occurrence(s) remain", violation live.
+ *
+ * Validating here rather than inside `newViolations` is deliberate: it is one
+ * place for all six gates, it keeps the comparison a pure numeric predicate,
+ * and it puts the error where the file is named — a comparison that throws can
+ * only say WHICH key, not which file it came from.
+ *
+ * This does not reach `scripts/docs/covers-gaps.mjs`, whose baseline stores gap
+ * FILE ARRAYS by design and which does not import this module (#2679). Audited
+ * before shipping: 155 entries across the six gates on this engine, all
+ * numeric, so this is a pure tightening rather than a build someone else has to
+ * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
+ */
+export function assertUsableBaseline(baseline, path = 'baseline') {
+  if (baseline === null || typeof baseline !== 'object' || Array.isArray(baseline)) {
+    const shape = Array.isArray(baseline) ? 'an array' : baseline === null ? 'null' : typeof baseline
+    throw new TypeError(`${path}: expected a JSON object, got ${shape}`)
+  }
+  for (const [file, keys] of Object.entries(baseline)) {
+    if (keys === null || typeof keys !== 'object' || Array.isArray(keys)) {
+      const shape = Array.isArray(keys) ? 'an array' : keys === null ? 'null' : typeof keys
+      throw new TypeError(`${path}: entry "${file}" should map keys to counts, got ${shape}`)
+    }
+    for (const [key, allowed] of Object.entries(keys)) {
+      if (typeof allowed !== 'number' || !Number.isFinite(allowed)) {
+        // `JSON.stringify(NaN)` is the string "null", which would report a
+        // NaN entry as null and send the reader looking for the wrong thing.
+        const shown = Number.isNaN(allowed) ? 'NaN' : JSON.stringify(allowed)
+        throw new TypeError(
+          `${path}: "${file}" [${key}] is ${shown}, not a number — ` +
+            'the comparison is `count > allowed`, so a non-numeric entry silently allows ' +
+            'everything for that key rather than failing loudly',
+        )
+      }
+    }
+  }
+  return baseline
+}
+
 export function loadBaseline(path) {
   // ONE `existsSync`, feeding both halves. Calling `readBaseline(path)` (which
   // does its own) and then `!existsSync(path)` leaves a window in which the two
@@ -98,7 +147,7 @@ export function loadBaseline(path) {
   // it was written for was also "two states that look alike" (review nit).
   const exists = existsSync(path)
   return {
-    baseline: exists ? JSON.parse(readFileSync(path, 'utf8')) : {},
+    baseline: exists ? assertUsableBaseline(JSON.parse(readFileSync(path, 'utf8')), path) : {},
     firstRun: !exists,
   }
 }

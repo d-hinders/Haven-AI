@@ -393,6 +393,18 @@ export const ROUTING_MATRIX = [
     why: 'Generates the API types the backend spec check compares against.',
   },
   {
+    files: ['scripts/lib/ratchet.test.mjs'],
+    expect: ['code', 'backend', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'The shared engine\'s own self-test (#2759). It routes to BOTH surfaces for the same ' +
+      'reason the engine does: a weakening reachable from either one must run it. Measured, ' +
+      'not assumed — before its entry in .github/root-guard-ownership.json the classifier ' +
+      'reported every flag false for this path, so the file would have run nowhere and been ' +
+      'weakenable without running. The manifest entry IS the routing rule; this row records ' +
+      'what that produces.',
+  },
+  {
     files: ['scripts/lib/ratchet.mjs'],
     expect: ['code', 'backend', 'frontend'],
     kind: CONTRACT,

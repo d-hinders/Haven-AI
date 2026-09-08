@@ -5,7 +5,9 @@ covers:
   - packages/backend/scripts/check-mainnet-reconciliation.ts
   - packages/backend/scripts/check-bundler.ts
   - packages/backend/scripts/check-delegation-contracts.ts
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of the reconciliation command and health-probe source; prior notes remain in git history.
+last-verified: "2026-09-04"
+verified:
+  - "chain-reset(#2542): scoped re-verification of the reconciliation command and health-probe source; prior notes remain in git history."
 ---
 
 # Mainnet (8453) canary & reconciliation runbook (#1067)

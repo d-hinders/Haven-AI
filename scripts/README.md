@@ -234,7 +234,7 @@ both** — this is not optional and not conditional:
 
 1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
    Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),
-   so do not copy those four numbers by hand. Still yours: prepend a note to
+   so do not copy those four numbers by hand. Still yours: prepend an entry to the `verified:` list of
    `last-verified` saying what the release carries and that no tool, capability,
    or version-skew surface moved. See *The manifest table writes itself* below.
 2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
@@ -458,6 +458,16 @@ is what left `latest` a release behind on 0.1.35-alpha.0. The owner decision
 behind moving it at all is recorded in
 [`../docs/operations/agent-discovery-listings.md`](../docs/operations/agent-discovery-listings.md)
 § *The `latest` dist-tag*.
+
+**This command is also the fix for a `latest` stranded by a normal CI release**,
+in the two cases where re-running `promote-tags` cannot heal it — a whole-workflow
+re-run nominates nothing, and re-running the failed job on a run a later
+promotion has superseded would move `latest` BACKWARDS onto that run's older
+versions, because the preserved nomination list names them. The
+release skill's *Closeout* routes here for that; the rule there is the same one
+that applies here — move `latest` forward only, after reading the live dist-tags.
+See [#2660](https://github.com/d-hinders/Haven-AI/issues/2660), where the owner
+chose to keep this a hand-run step rather than automate it.
 
 ### If verification fails
 

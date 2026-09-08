@@ -307,7 +307,7 @@ do not restate them here.
    - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
 
    **Bump `last-verified` the conflict-free way** the docs-quality system prescribes —
-   the gate's own error message names it. Two concurrent PRs that both prepend a note
+   the gate's own error message names it. Two concurrent PRs that both prepend an entry
    to the same front-matter line conflict by construction, about nothing
    ([#1496](https://github.com/d-hinders/Haven-AI/issues/1496): three such resolutions
    in a day, each pure ceremony). Follow the current convention rather than the shape
@@ -652,7 +652,10 @@ gap this check exists to close, one pass over.
 
 Route the merge:
 
-- **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
+- **Direct migration implementation (`db/migrations/*.ts`):** leave the pull request
+  for independent code-owner approval and merge (`.github/CODEOWNERS`). The
+  author's own approval does not satisfy it; migration tests under `__tests__/`
+  do not need code-owner approval.
 - **Frontend UI:** a **`blocking`** or **`should-fix`** UX, copy, or design-system
   finding from either review pass pauses auto-merge; a **`nit`** does not (#2636 — fix
   it in place when it is a one-line change, else file it with its screenshot). Severity

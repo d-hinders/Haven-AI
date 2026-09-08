@@ -30,13 +30,15 @@ describeDb('db-harness (#1220)', () => {
     )
   })
 
-  // This file CREATES a table in the worker schema, so it must remove it
-  // (#2622). Worker schemas outlive the run, and the reservoir guard now
-  // compares each one against the run's pristine reference at init — a scratch
-  // table left behind is exactly the inherited drift that guard exists to
-  // catch, and leaving it would make this file poison whichever DIFFERENT file
-  // draws the same ordinal on a later run. `CREATE TABLE IF NOT EXISTS` above
-  // was what made that survivable and therefore invisible.
+  // This file CREATES a table in the worker schema, so it must remove it.
+  // TWO guards now say so, and they catch different halves: #2625's
+  // root-level `assertWorkerSchemaAtHead()` fails the file that LEAVES drift,
+  // and #2622's reservoir check compares this schema against the run's
+  // pristine reference at init, so a table left behind fails whichever
+  // DIFFERENT file draws the same ordinal on a later run. The isolation proof
+  // above needs the table only WHILE this file's tests run.
+  // `CREATE TABLE IF NOT EXISTS` is what made leaving it survivable, and
+  // therefore invisible.
   afterAll(async () => {
     await db.query('DROP TABLE IF EXISTS harness_smoke')
   })

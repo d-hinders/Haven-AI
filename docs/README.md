@@ -2,7 +2,9 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-06-28"
+last-verified: "2026-09-08"
+verified:
+  - "#2640: the Code-quality loop entry repointed at `.agents/skills/quality-scan/references/discovery-method.md`, where the method now lives; the old path is a redirect stub. Scope: that one list entry."
 ---
 
 # Haven Documentation
@@ -51,7 +53,7 @@ describe how the system is actually built and how we work on it.
 - [Agentic delivery workflow](contributing/ai-agent-workflow.md)
 - [Recurring review patterns](contributing/ai-review-patterns.md)
 - [PR workflow checklist](contributing/pr-workflow-checklist.md)
-- [Code-quality loop](contributing/code-quality-loop.md)
+- [Code-quality discovery method](../.agents/skills/quality-scan/references/discovery-method.md) — the `quality-scan` skill's reference (redirect stub at [contributing/code-quality-loop.md](contributing/code-quality-loop.md))
 - [Documentation-quality system](contributing/docs-quality-system.md)
 - [Branch & release flow (dev → prod, issue lifecycle)](contributing/branch-and-release-flow.md)
 

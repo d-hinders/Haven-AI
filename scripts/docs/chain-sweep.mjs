@@ -53,7 +53,7 @@
 // one gets trusted without being checked.
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { lastVerifiedLine, issueRefs, checkChain, CHAIN_RESET_RE } from './chain-integrity.mjs'
+import { chainTextOf, issueRefs, checkChain, CHAIN_RESET_RE } from './chain-integrity.mjs'
 import { REPO_ROOT, ROOT_DOCS } from './validate-frontmatter.mjs'
 
 /**
@@ -163,7 +163,7 @@ function main() {
   const unmatched = []
   let scanned = 0
   for (const rel of docs) {
-    const nowLine = lastVerifiedLine(g(['show', `${ref}:${rel}`]) || '')
+    const nowLine = chainTextOf(g(['show', `${ref}:${rel}`]) || '')
     if (!nowLine) continue
     scanned++
     // No `--follow`: see the residual note at the foot of this file.
@@ -173,9 +173,9 @@ function main() {
     const resets = []
     for (let i = 0; i < revs.length; i++) {
       const [rev, date] = revs[i]
-      const nextLine = lastVerifiedLine(g(['show', `${rev}:${rel}`]) || '')
+      const nextLine = chainTextOf(g(['show', `${rev}:${rel}`]) || '')
       const prevRaw = g(['show', `${rev}^:${rel}`])
-      const prevLine = prevRaw && lastVerifiedLine(prevRaw)
+      const prevLine = prevRaw && chainTextOf(prevRaw)
       if (!prevLine || !nextLine || prevLine === nextLine) continue
       const c = classifyBreak({ prevLine, nextLine, nowLine })
       if (c.status === 'unrestored') hits.push({ rev: rev.slice(0, 8), date, stillLost: c.stillLost })

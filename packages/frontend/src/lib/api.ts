@@ -1,3 +1,5 @@
+import { isProductionEnvironment } from './env'
+
 const BASE_URL = '/api'
 const API_OVERRIDE_STORAGE_KEY = 'haven_api_base_url'
 
@@ -106,8 +108,9 @@ export interface ExecSafeResponse {
  * it is unset) evaluates this to `false` and the override path is dead code.
  */
 function isApiOverrideEnabled(): boolean {
-  const env = process.env.NEXT_PUBLIC_HAVEN_ENV?.trim().toLowerCase()
-  return env != null && env !== '' && env !== 'production' && env !== 'prod'
+  // One reading of the convention (#2709): unset, empty, `production` and
+  // `prod` are all production, and production never honours an override.
+  return !isProductionEnvironment()
 }
 
 export function getResolvedApiBaseUrl(): string {

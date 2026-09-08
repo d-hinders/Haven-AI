@@ -54,7 +54,9 @@
     "lint:workspace-pins:test": "node --test scripts/workspace-pin-lint.test.mjs",
     "generate:api-types": "node scripts/generate-api-types.mjs",
     "check:api-types": "node scripts/generate-api-types.mjs --check",
-    "check:dist": "node scripts/check-dist-freshness.mjs sdk signer mcp"
+    "check:dist": "node scripts/check-dist-freshness.mjs sdk signer mcp",
+    "lint:migration-constraint-scope": "node scripts/lint-migration-constraint-scope.mjs",
+    "lint:migration-constraint-scope:test": "node --test scripts/lint-migration-constraint-scope.test.mjs"
   },
   "overrides": {
     "axios": "^1.16.1",

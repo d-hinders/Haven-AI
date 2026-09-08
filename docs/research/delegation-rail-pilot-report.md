@@ -6,7 +6,9 @@ covers:
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/rails/delegation-authorization.ts
-last-verified: "2026-08-09" # #1209 re-verified: nonce wait reordered below the coverage decision at the sign-hash builders; nothing this report describes changed
+last-verified: "2026-08-09"
+verified:
+  - "#1209 re-verified: nonce wait reordered below the coverage decision at the sign-hash builders; nothing this report describes changed"
 ---
 
 # Delegation rail — definition-of-done report (#835, epic #821)

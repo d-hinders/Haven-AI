@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -121,5 +121,182 @@ describe('Sidebar', () => {
 
     expect(logout).toHaveBeenCalled()
     expect(mockPush).toHaveBeenCalledWith('/')
+  })
+})
+
+/**
+ * The drawer must not sit on top of the page after the viewport narrows (#2586).
+ *
+ * jsdom has no layout, so this asserts the ONE class that decides it:
+ * `-translate-x-full` is the only thing keeping a `fixed inset-y-0 left-0`
+ * drawer off screen below `lg`. Without it the drawer paints over the page —
+ * the reported symptom, where the sidebar's footer row obscures the left edge
+ * of the `/agents` empty state's prompt card and clips its footer link.
+ *
+ * Driven through `matchMedia` rather than `window.innerWidth` + a `resize`
+ * event, because that is what the component listens to; a test that fired
+ * `resize` would pass against an implementation that handles neither.
+ */
+describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
+  /*
+    The mock has to be as strict as the real API, or the tests below are
+    theatre — measured, not supposed. An earlier version discarded the query
+    string and the event type, and TWO mutations that break the product
+    completely stayed 7/7 green (review finding): inverting the query to
+    `min-width` (which un-collapses the drawer at every mobile width) and
+    registering the listener under a bogus event type (which makes the fix do
+    nothing). Neither is visible to a mock that fans every call out to every
+    listener regardless of what it was asked for.
+
+    So: the query string is asserted against the ONE query this component may
+    ask, `matches` is derived live from the current width rather than
+    snapshotted, and `change` is the only type that registers a listener.
+  */
+  const DESKTOP_QUERY = '(min-width: 1024px)'
+  const listeners = new Set<(e: MediaQueryListEvent) => void>()
+  let width = 1280
+
+  const installMatchMedia = () => {
+    listeners.clear()
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: (query: string) => {
+        // Not a soft assertion: a component asking a different question is a
+        // component this suite is not testing, and silently answering it is
+        // how the two mutations above passed.
+        expect(query, 'Sidebar asked matchMedia a query this mock does not model').toBe(
+          DESKTOP_QUERY,
+        )
+        return {
+          // A getter, so it tracks `width` the way a real MediaQueryList
+          // tracks the viewport instead of freezing at construction.
+          get matches() {
+            return width >= 1024
+          },
+          media: query,
+          onchange: null,
+          addEventListener: (type: string, fn: (e: MediaQueryListEvent) => void) => {
+            if (type === 'change') listeners.add(fn)
+          },
+          removeEventListener: (type: string, fn: (e: MediaQueryListEvent) => void) => {
+            if (type === 'change') listeners.delete(fn)
+          },
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }
+      },
+    })
+  }
+
+  /** Move the viewport and fire `change` exactly as a browser would. */
+  const setWidth = (next: number) => {
+    width = next
+    Object.defineProperty(window, 'innerWidth', {
+      value: next,
+      writable: true,
+      configurable: true,
+    })
+    act(() => {
+      for (const fn of listeners) fn({ matches: next >= 1024 } as MediaQueryListEvent)
+    })
+  }
+
+  const crossTo = (isMobile: boolean) => setWidth(isMobile ? 390 : 1280)
+
+  const drawer = () => document.querySelector('aside') as HTMLElement
+  const offScreen = () => drawer().className.includes('-translate-x-full')
+
+  beforeEach(() => {
+    mockUsePathname.mockReturnValue('/dashboard')
+    mockUseAuth.mockReturnValue({
+      user: { name: 'Ada Lovelace', email: 'ada@example.com', safes: [] },
+      logout: vi.fn(),
+    })
+    width = 1280
+    installMatchMedia()
+  })
+
+  it('collapses when the viewport narrows past the breakpoint', () => {
+    width = 1280
+    Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
+    render(<Sidebar />)
+
+    // Mounted at desktop width: on screen, which is correct — at `lg` the
+    // drawer is `static` and `collapsed` does not hide it.
+    expect(offScreen()).toBe(false)
+
+    crossTo(true)
+
+    // The regression. Before #2586 this stayed false, and the drawer painted
+    // over the page at every width below `lg`.
+    expect(offScreen()).toBe(true)
+  })
+
+  it('POSITIVE CONTROL: a fresh mount at mobile width was already collapsed', () => {
+    // Without this, the assertion above could pass against a component that
+    // collapses unconditionally — and it pins why no visual baseline could
+    // have caught the defect, since the capture harness sets the viewport
+    // before it navigates and therefore only ever exercises this path.
+    width = 390
+    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
+    render(<Sidebar />)
+    expect(offScreen()).toBe(true)
+  })
+
+  it('syncs on mount when the initialiser and the media query disagree', () => {
+    // The initialiser runs during RENDER and reads `window.innerWidth`, which
+    // is `undefined` on the server — so a server-rendered page reaches a phone
+    // with `collapsed = false` no matter how narrow the device is. Anything
+    // that resolves between that render and this effect's first run is lost
+    // until the NEXT crossing, which on a phone that never rotates is never.
+    //
+    // Modelled here as the disagreement itself: `innerWidth` says desktop (what
+    // the initialiser sees) while the media query says mobile (what is true).
+    // Without `sync(query)` at subscribe time this stays open, and the drawer
+    // covers the page from first paint.
+    Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
+    width = 390
+    render(<Sidebar />)
+    expect(offScreen()).toBe(true)
+  })
+
+  it('the toggle can still OPEN the drawer at mobile width', () => {
+    // The blast radius of `sync(query)`, pinned (review finding). Before that
+    // line existed, losing the effect's `[]` dependency array was a lint-level
+    // slip: only `change` events set state, so re-subscribing every render was
+    // wasteful and nothing more. With a mount-time sync it becomes
+    // product-killing — the effect re-runs after every render, so tapping
+    // `Open sidebar` sets `collapsed = false`, the re-render re-asserts the
+    // media query, and the drawer slams shut. Primary navigation below `lg`
+    // would be unopenable, the #1749 defect class.
+    //
+    // Measured: the suite stayed 8/8 green under exactly that one-token
+    // deletion. Nothing else here taps the toggle — the browser test only
+    // crosses the breakpoint, and the #1749 siblings mount fresh at mobile
+    // width without ever crossing.
+    width = 390
+    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
+    render(<Sidebar />)
+    expect(offScreen()).toBe(true)
+
+    act(() => {
+      screen.getByRole('button', { name: 'Open sidebar' }).click()
+    })
+    expect(offScreen()).toBe(false)
+  })
+
+  it('releases the drawer again when the viewport widens', () => {
+    // Not cosmetic: the state has to be released so a LATER narrowing is a
+    // real crossing rather than a no-op. Invisible at `lg` either way, because
+    // `lg:translate-x-0` pins the drawer open there.
+    width = 390
+    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
+    render(<Sidebar />)
+    expect(offScreen()).toBe(true)
+
+    crossTo(false)
+    expect(offScreen()).toBe(false)
   })
 })

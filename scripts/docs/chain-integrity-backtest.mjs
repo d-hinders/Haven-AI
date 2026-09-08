@@ -30,7 +30,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { REPO_ROOT, ROOT_DOCS } from './validate-frontmatter.mjs'
-import { lastVerifiedLine, checkChain, checkEntriesVerbatim } from './chain-integrity.mjs'
+import { chainTextOf, readChain, checkChain, checkChainEntries } from './chain-integrity.mjs'
 
 function arg(name, fallback) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -82,8 +82,8 @@ for (const entry of merges.split('\n').filter(Boolean)) {
     const prevRaw = git(['show', `${base}:${rel}`], true)
     const nextRaw = git(['show', `${p2}:${rel}`], true)
     if (prevRaw === null || nextRaw === null) continue
-    const prev = lastVerifiedLine(prevRaw)
-    const next = lastVerifiedLine(nextRaw)
+    const prev = chainTextOf(prevRaw)
+    const next = chainTextOf(nextRaw)
     if (!prev || !next || prev === next) continue
     lines++
     const result = checkChain(prev, next)
@@ -95,7 +95,12 @@ for (const entry of merges.split('\n').filter(Boolean)) {
     // #2504: the same replay for the verbatim-entry rule. A new chain rule is
     // adopted on a measured false-positive rate, not on how right it sounds —
     // that is what rejected #1843's ordering rule.
-    const verbatim = checkEntriesVerbatim(prev, next)
+    // ENTRIES, not the synthesised string. `chainTextOf` joins list entries
+    // with the legacy ` Prior: ` separator, and three real entries in this
+    // corpus contain that literal in their own prose — re-splitting the
+    // synthesis would invent entries and report them altered. Ref and marker
+    // scanning is unaffected (substring work); entry-level comparison is not.
+    const verbatim = { altered: checkChainEntries(readChain(prevRaw).entries, readChain(nextRaw).entries).altered }
     if (verbatim.altered.length) {
       altered++
       console.log(`ALTERED ${date}  ${merge.slice(0, 8)}  ${rel}  ${verbatim.altered.map((a) => a.head ?? '(entry)').join(', ')}`)

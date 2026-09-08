@@ -7,7 +7,13 @@ covers:
   - .github/workflows/qa-dev.yml
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
-last-verified: "2026-09-06" # #2511: EDITED, scope = ONE new bullet in § Configuration recording the two Base Sepolia RPC endpoints and why they must not be collapsed into one. The section listed `RPC_URL` and `RPC_URL_BASE` but neither `RPC_URL_BASE_SEPOLIA` nor the harness's `QA_RPC_URL_BASE_SEPOLIA`, so the one rule an operator can break by being helpful — pointing both at the same dedicated provider, which deletes the harness's independence from the node the backend wrote through — lived only in a code comment at `packages/qa-agent/src/lib/chain.ts`. Written against `packages/backend/src/config.ts` and that file on this branch. The bullet also names the secret-vs-variable choice (a provider URL embeds an API key, so it is a secret and not a repo variable, unlike its neighbours in `qa-dev.yml`) and the two things that make a misconfiguration visible: the backend's boot warning and the harness's endpoint-CLASS preamble. Scope: that bullet. NOT re-verified: the topology diagram, the branch-to-deploy mapping, the other isolation rules, or the inspection section. Prior: #2576: EDITED, scope = the one sentence describing what `HAVEN_CONNECTOR_CHANNEL` selects — "setup command" → **connector command**. Nothing about the dev environment, its services or its variables was re-verified. Prior: chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history.
+  - packages/frontend/src/lib/env.ts
+last-verified: "2026-09-08"
+verified:
+  - "#2709: EDITED, scope = § *The `DEV` badge* gains one paragraph, and `covers:` gains `packages/frontend/src/lib/env.ts` because that paragraph now asserts what the helper does (the covers-gap check, #2678, refused the claim without the declaration): the unset-means-production convention is now read through `packages/frontend/src/lib/env.ts` by the chip, the `?apiBaseUrl` override gate and the capability manifest's `environment` field, because the manifest read the raw variable and reported `unknown` on production (measured on the prod manifest 2026-09-08 after promotion `prod-20260908-062821`). The chip's behaviour is unchanged — pinned by the new `EnvBadge.test.tsx` (nothing on unset/`production`/`prod`, the name otherwise) — so the sentence \"production leaves the var unset, which renders nothing\" was re-read against `EnvBadge.tsx` on this branch and stands. Scope: that section and this note. NOT re-verified: the branch mapping, service URLs, secrets handling, seeding, the RPC bullets, or anything else in this document."
+  - "#2511: EDITED, scope = ONE new bullet in § Configuration recording the two Base Sepolia RPC endpoints and why they must not be collapsed into one. The section listed `RPC_URL` and `RPC_URL_BASE` but neither `RPC_URL_BASE_SEPOLIA` nor the harness's `QA_RPC_URL_BASE_SEPOLIA`, so the one rule an operator can break by being helpful — pointing both at the same dedicated provider, which deletes the harness's independence from the node the backend wrote through — lived only in a code comment at `packages/qa-agent/src/lib/chain.ts`. Written against `packages/backend/src/config.ts` and that file on this branch. The bullet also names the secret-vs-variable choice (a provider URL embeds an API key, so it is a secret and not a repo variable, unlike its neighbours in `qa-dev.yml`) and the two things that make a misconfiguration visible: the backend's boot warning and the harness's endpoint-CLASS preamble. Scope: that bullet. NOT re-verified: the topology diagram, the branch-to-deploy mapping, the other isolation rules, or the inspection section."
+  - "#2576: EDITED, scope = the one sentence describing what `HAVEN_CONNECTOR_CHANNEL` selects — \"setup command\" → **connector command**. Nothing about the dev environment, its services or its variables was re-verified."
+  - "chain-reset(#2542): scoped re-verification of the backend health-probe boundary; prior notes remain in git history."
 ---
 
 # Dev environment
@@ -375,6 +381,14 @@ Payments*.
 never mistaken for production. `NEXT_PUBLIC_*` is build-time inlined, so the dev
 Vercel deploy bakes the value in; **production leaves the var unset**, which
 renders nothing.
+
+"Unset means production" is read in ONE place, `packages/frontend/src/lib/env.ts`
+(#2709): the chip, the `?apiBaseUrl` override gate and the capability manifest's
+`environment` field all read it there. The manifest used to read the raw variable
+and answer `"unknown"` on production — the one deployment where an agent needs
+the answer — so the convention this section describes is now the helper's
+contract, not three separate interpretations of it: unset, empty, `production`
+and `prod` are production; any other value is the deployment's own name.
 
 ## Inspecting the dev environment
 

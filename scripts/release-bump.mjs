@@ -778,7 +778,7 @@ async function main() {
   log('       The mechanical half is already done; what is left needs judgement:')
   log('         docs/operations/mcp-runtime-compatibility.md')
   log('           the manifest table is ALREADY re-pinned and verified against the')
-  log('           source constants. Still yours: prepend a last-verified note saying')
+  log('           source constants. Still yours: prepend a `verified:` entry saying')
   log('           what this release carries and what did NOT move.')
   // #1789: named for the VERSION, never the PR number. The shard must exist
   // before the PR is opened — the coupling gate blocks the PR without it — so a

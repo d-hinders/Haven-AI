@@ -31,7 +31,8 @@ export async function up(client: PoolClient): Promise<void> {
     DO $$
     BEGIN
       IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'user_safes_account_type_check'
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conname = 'user_safes_account_type_check' AND c.conrelid = 'user_safes'::regclass
       ) THEN
         ALTER TABLE user_safes
           ADD CONSTRAINT user_safes_account_type_check

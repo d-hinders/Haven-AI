@@ -70,31 +70,16 @@ A root with no `node_modules` cannot re-run anything, and every verdict that say
 
 A CASP shard, an archive doc, a `last-verified` `Prior:` entry or a quotation that correctly records what *was* true is not stale. Say so **per hit** — `historical record, correct` — rather than flagging it or skipping it silently. Every hit gets one of: `stale`, `historical record`, `conditional truth (still holds)`, `out of scope, why`.
 
-## 6. `last-verified`: a bump records a re-read, never substitutes for one
+## 6. `last-verified`: a date records a re-read, never substitutes for one
 
-A bump records the re-read scope and what was **NOT** re-verified; a stamp without a re-read is a false verification claim and the staleness audit ranks on it. A doc whose claims did not change is right to stay unbumped with a scoped note. When the strict coupling gate forces a touch on a `contract: true` doc whose claims did not change, the note says exactly that — `re-verified, not edited, scope: <claim>` (PR #2502: `package-dev-channel.md`). Convention: [`docs-quality-system.md` § `last-verified` chain integrity](../../../../docs/contributing/docs-quality-system.md#last-verified-chain-integrity-1843).
-
-## 7. Chain health (#2477, #2504, #2637)
-
-The `last-verified` chain is a `verified:` block list, one entry per line,
-newest first. There is **no byte ceiling** — it went with the single-line shape
-in [#2637](https://github.com/d-hinders/Haven-AI/issues/2637), along with the
-40 KiB advisory band. What the gate still refuses: an entry **dropped**
-(#1843), an entry **rewritten** while its ref survives (#2504), and the same
-entry listed **twice** (#2477, the signature of a merge that concatenated two
-chains instead of interleaving them).
-
-```bash
-node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{
-  const fs = await import("node:fs")
-  const c = m.readChain(fs.readFileSync(process.argv[1], "utf8"))
-  console.log(c.shape, c.entries.length, "entries")
-  console.log(m.checkChainEntries(c.entries, c.entries))   // self-compare: all three lists empty
-})' <doc>
-```
-
-Run it against a doc to see the shape and entry count; run `npm run docs:check`
-for the real gate, which compares a base against a head.
+A date records the re-read scope; a stamp without a re-read is a false
+verification claim and the staleness audit ranks on it. A doc whose claims did
+not change is right to stay unbumped. When the strict coupling gate forces a
+touch on a `contract: true` doc whose claims did not change, the PR explains
+that it was re-read and not edited, with the claim's scope (PR #2502:
+`package-dev-channel.md`). Historical verification blocks retired in #2681 are
+preserved in the documentation-quality archive; they are historical records,
+not a current-doc review control.
 
 ## What NOT to flag
 

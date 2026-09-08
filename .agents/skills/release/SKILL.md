@@ -136,10 +136,9 @@ check fails without them, and forgetting is the single most common way a
 release PR goes red:
 
 1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
-   Manifest* table is re-pinned by the bump (#1790); prepend the `verified:`
-   note yourself. That note is not ceremony — it is the release's argument for
-   what moved and what did not, and it is the reason a generated table still
-   leaves a human reading this doc.
+   Manifest* table is re-pinned by the bump (#1790); update its
+   `last-verified` date only after reading the table. Record the release's
+   verification evidence in the PR and release shard rather than front matter.
 2. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
    shard ending in a perimeter verdict. The **version**, not the PR number
    (#1789): the shard must exist before the PR is opened, because the gate blocks

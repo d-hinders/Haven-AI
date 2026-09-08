@@ -60,7 +60,7 @@
 //     the other half of #1199 and is out of this slice's scope.
 //
 // Fenced code blocks ARE scanned, deliberately. A runbook whose command block
-// says `node scripts/docs/chain-integrity.mjs` is asserting that file exists at
+// says `node scripts/docs/retire-verified-chains.mjs` is asserting that file exists at
 // that path, and goes stale when it moves — the same #1199 shape as prose.
 // (`ui-gate-wording.mjs` blanks fences because an illustrative "before" snippet
 // is a citation of retired wording; a path is never a citation of itself.)
@@ -173,8 +173,8 @@ export function trackedFiles(root = REPO_ROOT) {
 /**
  * Blank the leading front-matter block, preserving byte offsets so line numbers
  * computed on the result still address the real file. Front-matter must not be
- * scanned: `covers:` itself lives there, and a `last-verified` chain quotes
- * paths from past PRs by design.
+ * scanned: `covers:` itself lives there, and front-matter metadata is not a
+ * body-level claim about a source file.
  */
 export function blankFrontMatter(raw) {
   const m = raw.match(/^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/)

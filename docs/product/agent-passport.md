@@ -3,8 +3,6 @@ owner: "@d-hinders"
 status: current
 covers: []  # narrative — the schema doc carries the code mapping
 last-verified: "2026-08-27"
-verified:
-  - "#2138: the three claims that a passport means \"controls enforced on-chain\" were unqualified — false for a legacy-rail agent, which could hold an issued passport because issuance was never gated by rail. The owner decided 2026-08-27 that it should be (\"we should not support issuance on legacy rails\"), so the code now refuses it and this page says so rather than describing a gate that did not exist. Existing legacy passports are NOT revoked — that was the same decision — so the caveat names them explicitly and points at the receipt's own policyEnforcedOnchain: false, which was always the honest answer. Deliberately does NOT restate the controls.rail value list: #2110 pinned that to migration 041 and the OpenAPI enum, and a hand-copied fourth source in product prose is the drift this epic keeps finding. Scope: the \"What a passport is\" intro, the Governed row, and the L0 ladder row; the revocation, verification and adoption sections were NOT re-verified in this pass."
 ---
 
 # Agent Passport

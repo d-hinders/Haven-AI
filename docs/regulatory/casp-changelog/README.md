@@ -3,11 +3,6 @@ owner: "@AntonioSaaranen"
 status: current
 covers: []  # index and naming convention for the shard directory — it describes how shards are written, not any code path
 last-verified: "2026-08-29"
-verified:
-  - "#2192: the whole file swept for the old any-match assumption, not just the section being changed — the Convention \"The gate:\" bullet still asserted it and now contradicted the rewritten section 30 lines below (review finding; my first pass changed the section and not its cross-references). The chain-reset section's shard COUNT corrected 181 -> 179, invalidated by this PR's own deletion of the two duplicates — the doc's own 'stale via a later change' case, caught on sweep rather than shipped. Case 3 also now names a byte-identical duplicate FILE explicitly, because its letter covered malformed content within a record and not deletion of an exact copy. Plus: the hazard this section described is now CHECKED — the coupling gate requires an ADDED satisfied-by match, so editing a merged shard no longer clears the blocking gate. Both the case-3 qualifier and the hazard paragraph rewritten accordingly (the former said in as many words that the rule was convention and not gate-checked; that is no longer true), and the parent-doc edit named as the escape hatch it always was. Immutability rule and the three cases otherwise unchanged."
-  - "#2188: merged shards are IMMUTABLE — new section states the correction mechanism for each of the three ways a shard goes wrong, and closes the wrong inference that shards have a `chain-reset` equivalent (they do not; the per-file model already is the compaction). Measured while writing it, and reproduced independently by review: editing a merged shard satisfies the satisfied-by gate for an unrelated money-path PR (exit 1 -> exit 0 on a one-character edit), so the rule has a mechanical reason, not only an attestation one — and the doc says plainly that its own case-3 qualifier is convention rather than a gate check. Counted for the chain-reset claim: 181 shards, zero carrying a last-verified line. Convention/filename rules re-read against the gate and unchanged."
-  - "#1789: release shards are named for the VERSION, not the PR number — the PR-number convention was unsatisfiable in principle (the gate blocks the PR until the shard exists, so the number cannot be known when the name is needed) and cost the 0.1.29-alpha.0 cut a wrong guess plus a correcting commit. Issue shards are unchanged; existing shards keep their names; the release/SKILL.md and scripts/README.md copies now say the same thing. Body re-read against the gate: the satisfied-by claim and the no-front-matter exemption still hold."
-  - "created for #1366 — the sharded CASP verification log"
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -107,22 +102,10 @@ If a money-path change genuinely warrants no new shard, the escape hatch is the
 one that was always there: **edit the parent `casp-risk-guardrails.md`
 directly**, which clears the gate and leaves a reviewable statement of why.
 
-**There is no `chain-reset` for shards, and there should not be.** The
-structural answer first, because it is not arguable: `chain-reset(#N)` is an
-escape hatch for one `last-verified` **line**, and
-[`chain-integrity.mjs`](../../../scripts/docs/chain-integrity.mjs) only ever
-inspects that line. **No shard carries one** — 179 shards, zero
-`last-verified:` front-matter entries (one shard carries other front-matter;
-none carries this). There is nothing for the marker to act on.
-
-The reason it feels like there should be one is worth naming, since the
-analogy is what misleads: `casp-risk-guardrails.md` declared
-`chain-reset(#1496)` on its own line *because its entries became these
-shards*. That is the compaction, already performed — reading it as precedent
-for an in-shard escape hatch inverts it. The per-file model gives you by
-default what the marker exists to license: one file per entry, compacted by
-never having been concatenated. A shard needs no escape from a chain it is
-not on.
+**Each shard is already an independent historical record.** It does not need
+front-matter provenance text: its filename, Git history, and the parent
+document's `satisfied-by:` declaration identify why it exists. Keep a new
+per-change analysis in a new shard rather than compacting it into an older one.
 
 ## Example shard (`2026-08-12-9999.md`)
 

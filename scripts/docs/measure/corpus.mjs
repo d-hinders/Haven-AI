@@ -25,33 +25,15 @@ export { REPO_ROOT }
 export const words = (s) => (s.trim() === '' ? 0 : s.trim().split(/\s+/).length)
 
 /**
- * Split a doc into front-matter, the `last-verified` chain, and the body.
- *
- * The chain is the trailing `# …` comment on the single `last-verified:` line
- * — the annotation #2681 proposes deleting. It is measured on its own because
- * it is front-matter by position but prose by nature, and the epic's headline
- * "20% of all governed prose" is the ratio of the two.
+ * Split a doc into front-matter and body. #2681 retired the live verification
+ * chain; `chain` remains an empty compatibility metric until #2678's measured
+ * report no longer needs to show its reduction to zero.
  */
 export function split(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/)
   const front = m ? m[1] : ''
   const body = m ? raw.slice(m[0].length) : raw
-  // #2637: the chain moved off the `last-verified:` scalar and into a
-  // `verified:` block list, so there is no longer a `#` marker to slice at.
-  // The legacy form is still read: this measures history as well as HEAD.
-  const lines = front.split(/\r?\n/)
-  const lv = lines.find((l) => /^last-verified:/.test(l)) ?? ''
-  const hash = lv.indexOf('#')
-  let chain = hash === -1 ? '' : lv.slice(hash)
-  if (!chain) {
-    const start = lines.findIndex((l) => /^verified:/.test(l))
-    if (start !== -1) {
-      const items = []
-      for (let i = start + 1; i < lines.length && /^\s*-\s+/.test(lines[i]); i++) items.push(lines[i])
-      chain = items.join('\n')
-    }
-  }
-  return { front, body, chain }
+  return { front, body, chain: '' }
 }
 
 /** Every governed doc: `{ file, raw, data, front, body, chain }`. */

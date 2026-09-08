@@ -8,8 +8,9 @@ last-verified: "2026-09-03"
 # Archived `last-verified` chain — `docs/operations/mcp-runtime-compatibility.md`
 
 > **ARCHIVED.** This is the older tail of that document's `last-verified` provenance chain, moved here verbatim on
-> 2026-09-03 (#2477) when the line was compacted under `scripts/docs/chain-integrity.mjs`'s 64 KiB ceiling.
-> Nothing here describes current state; the live chain is the `last-verified:` line in the source document.
+> 2026-09-03 (#2477) when the line was compacted under the then-current 64 KiB ceiling.
+> Nothing here describes current state. #2681 later retired the live chain and
+> preserved the complete corpus in its combined archive.
 > Entries are newest first, exactly as they sat in the chain. The full history is also in `git log -- docs/operations/mcp-runtime-compatibility.md`.
 
 38 entries. Each block below is one chain entry, byte-for-byte.

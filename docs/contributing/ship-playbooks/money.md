@@ -3,11 +3,6 @@ owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
 last-verified: "2026-08-25"
-verified:
-  - "#1992: the §2 example cited `modules/accounts/safe-deployer.ts` as a file in `casp-risk-guardrails.md`'s `covers:` list. It was never on that list (only the safe-deploy/user-safes ROUTES are) and #1988 has since deleted the module, so the example was doubly wrong. Removed; the surviving route examples are verified against the current covers list. Scope: that one sentence."
-  - "#1904: §2 gained the recorded reasoning for why NO mechanical fifth-copy detector ships — three signals measured, all fail, and the failure is directional (they measure a copy's freshness, so they are silent on stale copies). §2 re-read in full for this pass; §§1, 3-5 untouched and NOT re-verified."
-  - "#1892: §2's inline restatement of the money-path file list REMOVED, not corrected — it was a third copy, it contradicted this playbook's own \"links, does not restate\" line, and it had drifted (no re-key surface, no infra/chain, no infra/repositories, four rails/ files missing). §2 now points at .github/money-path-globs.json, the single CI-enforced perimeter. Only §2 was re-read; §§1, 3-5 untouched and NOT re-verified in this pass."
-  - "#1228: real-DB characterization pointer added (§2) / testing-strategy rule added"
 ---
 
 # Money / agent-authority playbook

@@ -196,9 +196,6 @@
     "packages/connect/src/runtime-manifest.ts",
     "scripts/generate-api-types.mjs"
   ],
-  "docs/regulatory/casp-changelog/README.md": [
-    "scripts/docs/chain-integrity.mjs"
-  ],
   "docs/regulatory/casp-risk-guardrails.md": [
     ".github/money-path-globs.json",
     "packages/backend/src/middleware/owner-cli.ts",

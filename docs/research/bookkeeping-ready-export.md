@@ -12,8 +12,6 @@ covers:
   - packages/backend/src/routes/accounting.ts
   - packages/backend/src/routes/fortnox.ts
 last-verified: "2026-08-10"
-verified:
-  - "re-verified for #1251 (MPP seam refusal) — no claim here affected"
 ---
 
 # Architecture — bookkeeping-ready export (Fortnox / SIE / beyond)

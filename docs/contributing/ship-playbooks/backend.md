@@ -3,11 +3,6 @@ owner: "@d-hinders"
 status: current
 covers: []  # narrative — process playbook
 last-verified: "2026-08-29"
-verified:
-  - "#2150: adds the \"Migrations run in a transaction\" bullet — the runner's default lane and the `transactional = false` opt-out it gained, with the pointer to `migrate.ts`'s header for the failure semantics. Only that bullet is new; nothing else in the body was re-verified in this pass."
-  - "#1892: the Money-path bullet said the SKILL.md copy is test-enforced to stay a SUBSET of money-path-globs.json. True until this change, and the reason routes/agent-rekey.ts sat in neither list; the pinning is now bidirectional and the word is corrected. Only that bullet was re-read; the rest of the body was NOT re-verified in this pass."
-  - "#1882: front-matter only — the `last-verified` chain had DROPPED `#1228`. Restored verbatim from `a3c5bcf5^`; it was dropped at `a3c5bcf5` (PR #1449, #1443, 2026-08-15), which REPLACED the note line rather than chaining under it, on the day the chaining convention took hold. The very next edit to this line (#1444) chained correctly. Nothing in the body was re-verified in this pass. #1444: `expectMatchesSpec` validates real route responses against the spec schema — assert it when you touch a documented route. #1443: route-coverage.test.ts widens the OpenAPI gate beyond the seven hand-listed files to every registered module, with a shrink-only per-module deferral list; keeping spec.test.ts green is no longer sufficient"
-  - "#1228: db-schema-smoke is no longer the only real-DB check — scoped against testing-strategy.md"
 ---
 
 # Backend / API playbook

@@ -6,14 +6,13 @@ under each block are the run in which the command last produced a number —
 its positive control until the ledger supersedes them.
 
 The 2026-09-03 retrospective over the 600-issue wave measured what the wave
-was made of; these are its seven classes, one block each, so a reader can
+was made of; these are its measured classes, one block each, so a reader can
 re-take any of them and the ledger can tell "no finding" from "did not look".
 Three rules hold for every block:
 
 - **Use the instrument that exists; never re-implement it.** The money-path
   matcher is `scripts/ci/qa-freshness.mjs`'s `matchesGlob` (the one
-  `money-path-classify.mjs` self-tests before it classifies anything); chain
-  arithmetic is `scripts/docs/chain-integrity.mjs`'s exports; a mutation runs
+  `money-path-classify.mjs` self-tests before it classifies anything); a mutation runs
   in a tree proven by `scripts/ci/review-isolation.mjs`, or in the builder's
   tree only behind a `cp` backup and a `git diff --quiet` after the restore.
   A second copy of a matcher is a second thing that can lie.
@@ -263,44 +262,3 @@ documented false-positive class); money path 29 verb files, 20 outside the
 perimeter (qa-agent pilots, backend scripts, `sdk/src/sweep.ts`,
 `frontend/src/lib/hybridAccountOps.ts`); visual gate 4 of 24 app routes
 shot; 36 Markdown files outside both docs-quality boundaries.
-
-**7. Chain health — duplicates and drift, no longer size.** The
-`last-verified` chain is a `verified:` block list, one entry per line
-([#2637](https://github.com/d-hinders/Haven-AI/issues/2637)). The 64 KiB
-ceiling and the 40 KiB advisory band are **gone** with the single-line shape
-that made them necessary, so size is no longer a dimension to scan. What is
-still worth scanning is what the gate only sees diff-scoped: duplicates that
-predate the current base, and the trend in chain length.
-
-```bash
-node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{
-  const {execFileSync} = await import("node:child_process")
-  const fs = await import("node:fs")
-  const files = execFileSync("git",["ls-files","*.md"],{encoding:"utf8"}).trim().split("\n")
-  const rows = []
-  for (const f of files) {
-    const c = m.readChain(fs.readFileSync(f,"utf8"))
-    if (!c.entries.length) continue
-    const dup = m.checkChainEntries(c.entries, c.entries).duplicates
-    rows.push({ f, entries: c.entries.length, dup: dup.length })
-  }
-  rows.sort((a,b)=>b.dup-a.dup || b.entries-a.entries)
-  console.table(rows.slice(0,15))
-})'
-```
-
-Historical figures, in the retired unit, kept as the record of what the old
-shape cost. Do not re-derive them against today's tree — the unit they are
-measured in no longer exists:
-
-- [#2477](https://github.com/d-hinders/Haven-AI/issues/2477): one chain reached
-  **774,483 bytes** through concatenating merges, which is what put a ceiling
-  there in the first place.
-- On `893d74f6`: **92 docs**; `mcp-runtime-compatibility.md` at **63,961 units
-  of 65,536** (97.6%) one merge after its #2477 compaction — the doc
-  `release-bump.mjs` re-pins on every release; `05-agent-api-openapi.md`
-  carrying **31 duplicate entries among 66**.
-
-Those figures are anchored to a commit precisely because they are in the old
-unit. The duplicate count is the one that still transfers: duplicates are a
-defect in any shape, and the recipe above is how you find today's.

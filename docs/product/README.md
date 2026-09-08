@@ -20,15 +20,6 @@ covers:
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
 last-verified: "2026-09-07"
-verified:
-  - "#2669: truth 2's \"Legacy Safe accounts remain readable in Haven\" re-read and EDITED — #2413 stopped rendering them entirely. Scope: that one clause. A later round narrowed \"no Haven surface displays them\" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row."
-  - "#2499: the `haven-doc-reviewer` bullet in the PR-closeout list re-read against `.agents/skills/haven-agent-workflow/references/doc-reviewer.md` as rewritten in the same PR and EDITED by one clause: it ran the pass only when changed paths matched a `covers:` mapping. The role derives its scope from the diff's claims and the `covers:`-implicated set is the floor. Scope: that ONE bullet; nothing else in this file was re-verified in this pass."
-  - "#2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation."
-  - "#2097: two files this doc `covers:` by exact path were re-verified — `docs/product/design-system.md` (Initiator semantics in § Transaction tables) and `docs/product/screen-recipes.md` (copy: `Payment sent by you` now human-reserved); the product README's doctrine/IA sections are unchanged. Scope: those two covered-file relationships only."
-  - "#2038: the tooltip keyboard-focus line gains the composite-control exception. Verified ONLY that line, against `ui/Tooltip.tsx`: focus does not bubble DOWNWARD, so a trigger inside a focusable ancestor gets no `tabIndex` and receives no `onFocus` — the blanket claim was factually wrong for `McpServerName` inside `AgentCard`'s `role=\"link\"`. The second clause (\"must not carry essential copy\") is load-bearing: without it the exception reads as permission. Line ~186 re-read and left unchanged — still accurate. NOT a re-read of this file; no other row was checked."
-  - "#1702: indexed the new `agent-key-rotation.md` beside `account-recovery.md`, which is the doc it is most often confused with. Index entry only; no other row re-verified."
-  - "#1726: the §8 \"Known implementation gap\" note on 36/40px Button sizes was stale once the hit area reached 44px — rewritten to point at the tap-target rule and to scope the manual check to non-Button controls."
-  - "re-verified for #1251 (MPP seam refusal) — no claim here affected"
 ---
 
 # Haven Product & UX Guide

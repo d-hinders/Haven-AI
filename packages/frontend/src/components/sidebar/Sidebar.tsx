@@ -189,11 +189,22 @@ export default function Sidebar() {
     the old initialiser (`1023 < 1024`) handled correctly. Asking the same
     question the stylesheet asks cannot drift from it.
 
-    `sync(query)` runs once at subscribe time, not only on later events. The
-    initialiser above runs during render and returns `false` on the server for
-    every device; any crossing between that and this effect's first run would
-    otherwise be lost until the next one — slow hydration plus a rotation, or
-    React re-rendering after an SSR mismatch.
+    `sync(query)` runs once at subscribe time, not only on later events —
+    because the initialiser above and this query can DISAGREE at mount, on the
+    same device, with no crossing involved. `window.innerWidth` is rounded;
+    the media query is not. Measured in Chromium at
+    `--force-device-scale-factor=1.1` with a device width of 1023:
+    `window.innerWidth` reads 1024 — so the initialiser says desktop — while
+    `(min-width: 1024px)` is false and `lg` does not apply. Without this line
+    the drawer would sit over the page from first paint at that width, and
+    nothing would correct it until the next real crossing.
+
+    An earlier version of this comment justified the line by SSR instead:
+    the initialiser returns `false` on the server, so a phone would hydrate
+    open. That is wrong — React re-runs a `useState` initialiser on the client
+    during hydration, so the client reaches the right value before this effect
+    runs. The rounding case is the one that is provable, and it is what
+    `Sidebar.test.tsx` pins.
   */
   useEffect(() => {
     const query = window.matchMedia(`(min-width: ${DESKTOP_BREAKPOINT_PX}px)`)

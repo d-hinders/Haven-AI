@@ -274,19 +274,21 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
         body: JSON.stringify({ agents: [] }),
       })
     })
-    // Hide Next's dev-tools indicator, exactly as `scripts/screenshot.mjs`
-    // does. Under `next dev` that badge sits at the bottom-left of every page
-    // and OWNS this spec's hit-test coordinate — so without this line the
-    // assertion below is answered by dev chrome rather than by the product,
-    // and would pass while the page was genuinely obscured. It is also the
-    // element #2586 mistook for the sidebar's avatar.
-    await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' }).catch(() => {})
   })
 
   test('narrowing past lg puts the drawer off screen and hands the coordinate back to the page', async ({
     page,
   }) => {
     await page.goto('/agents')
+    // Hide Next's dev-tools indicator, exactly as `scripts/screenshot.mjs`
+    // does. Under `next dev` that badge sits at the bottom-left of every page
+    // and OWNS this spec's hit-test coordinate — so without it the assertions
+    // below are answered by dev chrome rather than by the product. It is also
+    // the element #2586 mistook for the sidebar's avatar.
+    //
+    // AFTER the navigation, not in `beforeEach`: an earlier copy ran before
+    // any `goto`, so the injected style was discarded by the navigation and
+    // its `.catch(() => {})` hid that it never applied (review nit).
     await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' })
     // The shell renders after the auth context resolves, and at 1280 the
     // `Open sidebar` toggle this spec's sibling waits on is `lg:hidden` — so
@@ -356,8 +358,12 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
     // starts BELOW the fold and `elementFromPoint` at its coordinates returns
     // null (measured: `covering: null`, which reads as "covered" while nothing
     // is covering it). Scroll it into view before hit-testing.
+    // No fixed wait after this: nothing in `src/` sets `scroll-behavior:
+    // smooth`, so the scroll completes synchronously, and a sleep in a spec
+    // whose own comment above argues for `waitForFunction` over fixed waits is
+    // the wrong example to leave behind (review nit). The link's own position
+    // is what the probe reads, and it is settled by the time this returns.
     await guide.scrollIntoViewIfNeeded()
-    await page.waitForTimeout(300)
     const linkReachable = await guide.evaluate((el) => {
       // Per LINE BOX, not the bounding box. This link WRAPS at 390px, and the
       // centre of a two-line inline element's bounding box falls in the gap

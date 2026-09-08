@@ -262,6 +262,31 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     expect(offScreen()).toBe(true)
   })
 
+  it('the toggle can still OPEN the drawer at mobile width', () => {
+    // The blast radius of `sync(query)`, pinned (review finding). Before that
+    // line existed, losing the effect's `[]` dependency array was a lint-level
+    // slip: only `change` events set state, so re-subscribing every render was
+    // wasteful and nothing more. With a mount-time sync it becomes
+    // product-killing — the effect re-runs after every render, so tapping
+    // `Open sidebar` sets `collapsed = false`, the re-render re-asserts the
+    // media query, and the drawer slams shut. Primary navigation below `lg`
+    // would be unopenable, the #1749 defect class.
+    //
+    // Measured: the suite stayed 8/8 green under exactly that one-token
+    // deletion. Nothing else here taps the toggle — the browser test only
+    // crosses the breakpoint, and the #1749 siblings mount fresh at mobile
+    // width without ever crossing.
+    width = 390
+    Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
+    render(<Sidebar />)
+    expect(offScreen()).toBe(true)
+
+    act(() => {
+      screen.getByRole('button', { name: 'Open sidebar' }).click()
+    })
+    expect(offScreen()).toBe(false)
+  })
+
   it('releases the drawer again when the viewport widens', () => {
     // Not cosmetic: the state has to be released so a LATER narrowing is a
     // real crossing rather than a no-op. Invisible at `lg` either way, because

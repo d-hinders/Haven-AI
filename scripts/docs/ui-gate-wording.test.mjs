@@ -422,9 +422,28 @@ test('CLI: an unparseable baseline names the remedy instead of throwing a stack'
     args: ['--update'],
   })
   assert.equal(status, 1)
-  assert.match(out, /is not readable as JSON/)
+  assert.match(out, /is unusable as a baseline/)
   assert.match(out, /Delete the file and re-run with `--update`/)
   // And it must not read as the ratchet refusing growth, which is a different
   // failure with a different fix.
   assert.doesNotMatch(out, /refuses to RAISE/)
+})
+
+test('CLI: a baseline that parses but is not an object is refused too', () => {
+  // #2747 review: `JSON.parse` accepts `null`, `[]`, `"x"` and `3`. Measured
+  // before the fix — `null` threw a raw `TypeError` from the shared engine, and
+  // the others read as an EMPTY baseline, so a real baseline of 1 was silently
+  // ignored and `--update` on a clean tree overwrote the corrupt file. That is
+  // the silent repair this branch claims to have removed, surviving in the
+  // shapes the parser does not reject.
+  for (const body of ['null', '[]', '"x"', '3']) {
+    const { status, out } = runGuard(GATE, {
+      also: ALSO,
+      gitInit: true,
+      files: { [DOC]: CORRECTED, [BASE]: body },
+      args: ['--update'],
+    })
+    assert.equal(status, 1, `baseline body ${body} should be refused`)
+    assert.match(out, /is unusable as a baseline/)
+  }
 })

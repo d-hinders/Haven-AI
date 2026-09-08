@@ -460,11 +460,15 @@ export { newViolations, hasShrunk }
  * One difference the swap DOES carry, stated rather than left to surface on the
  * commit that matters: the baseline's key ORDER. The inline writer this gate
  * used sorted with `localeCompare`; `lib/ratchet.mjs`'s `writeBaseline` uses a
- * bare `.sort()`, i.e. code units, so an uppercase root doc (`CLAUDE.md`,
- * `AGENTS.md` — all inside this gate's 454-file set) now sorts BEFORE the
- * `docs/` entries instead of among them. Today's baseline has one entry so
- * nothing churns, and the first `--update` that adds a root entry will rewrite
- * the whole file once. Deliberate: the five gates already on `writeBaseline`
+ * bare `.sort()`, i.e. code units. Measured over the four tracked root docs in
+ * this gate's 454-file set, exactly ONE moves: `README.md`, which sorted after
+ * `docs/…` under `localeCompare` and sorts before it under code units.
+ * `CLAUDE.md`, `AGENTS.md` and `ABOUT_HAVEN.md` sort before `docs/` under BOTH
+ * orders — `localeCompare` is primary-strength on letters, so `A`/`C` precede
+ * `d` either way. A first draft of this note named those two as the example,
+ * which was the one sentence here nobody had measured. Today's baseline has a
+ * single entry so nothing churns, and the first `--update` that adds `README.md`
+ * rewrites the whole file once. Deliberate: the five gates already on `writeBaseline`
  * have code-unit-sorted baselines, and changing the shared writer to
  * `localeCompare` would churn theirs instead of this one's.
  */
@@ -483,13 +487,29 @@ async function main() {
   let loaded
   try {
     loaded = loadBaseline(BASELINE_PATH)
+    // `JSON.parse` ACCEPTS `null`, `[]`, `"x"` and `3`, and none of them is a
+    // baseline. Review measured what they did: `null` reached the engine and
+    // threw a raw `TypeError` (the same defect the catch below exists to stop,
+    // one shape over), and the others read as an empty baseline — so a real
+    // baseline of 1 was silently ignored and `--update` on a clean tree
+    // overwrote the corrupt file, which is exactly the silent repair this
+    // branch claims to have removed. Fail-closed in every case, but the CLAIM
+    // was wrong, so the check is widened to match it rather than the sentence
+    // narrowed to match the check.
+    const b = loaded.baseline
+    if (b === null || typeof b !== 'object' || Array.isArray(b)) {
+      throw new TypeError(`expected a JSON object, got ${Array.isArray(b) ? 'an array' : b === null ? 'null' : typeof b}`)
+    }
   } catch (err) {
-    console.error(`✗ ${BASELINE_PATH} is not readable as JSON: ${err.message}`)
+    // The headline says "unusable" rather than "not JSON": this also catches a
+    // permissions failure, where "not readable as JSON" would misdirect (N1).
+    console.error(`✗ ${BASELINE_PATH} is unusable as a baseline: ${err.message}`)
     console.error(
       '\nUntil #2747 `--update` overwrote it without reading, so a corrupt file repaired ' +
         'itself silently. It no longer can — the refusal has to read the baseline to compare ' +
         'against it. Delete the file and re-run with `--update` to regenerate it from the ' +
-        'current tree, which is the first-run path.',
+        'current tree, which is the first-run path. Note that this same step will baseline ' +
+        'any debt the tree currently carries, so read the regenerated file before committing it.',
     )
     process.exit(1)
   }

@@ -61,10 +61,23 @@
 //   node scripts/docs/ui-gate-wording.mjs --update   # rewrite the baseline
 //
 // See docs/contributing/docs-quality-system.md.
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// #2747: this gate carried PRIVATE copies of `newViolations`/`hasShrunk` while
+// five sibling gates imported them from here. That is why the #2728 sweep,
+// which found the missing `--update` refusal in `design-lint` by reading this
+// module's importer list, could not reach this file: a gate that CLONED the
+// engine is invisible to the sweep that finds gates which imported it. The
+// clone was both why it drifted and why nothing found it.
+import {
+  newViolations,
+  hasShrunk,
+  updateRefusals,
+  loadBaseline,
+  writeBaseline,
+} from '../lib/ratchet.mjs'
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'docs', 'ui-gate-wording-baseline.json')
@@ -428,39 +441,29 @@ export function countByFile(hits) {
   return counts
 }
 
-/** Occurrences beyond what the baseline allows. */
-export function newViolations(counts, baseline) {
-  const failures = []
-  for (const [file, rules] of Object.entries(counts)) {
-    for (const [rule, count] of Object.entries(rules)) {
-      const allowed = baseline?.[file]?.[rule] ?? 0
-      if (count > allowed) failures.push({ file, rule, count, allowed })
-    }
-  }
-  return failures.sort((a, b) => a.file.localeCompare(b.file) || a.rule.localeCompare(b.rule))
-}
+// Re-exported, not redefined: callers and tests already import these here, and
+// the point of #2747 is that this gate stops carrying its own copy of the
+// decision -- not that it stops offering the names.
+export { newViolations, hasShrunk }
 
-/** True when any baselined count has fallen — the ratchet can be tightened. */
-export function hasShrunk(counts, baseline) {
-  for (const [file, rules] of Object.entries(baseline ?? {})) {
-    for (const [rule, allowed] of Object.entries(rules)) {
-      if ((counts?.[file]?.[rule] ?? 0) < allowed) return true
-    }
-  }
-  return false
-}
-
-async function readBaseline() {
-  try {
-    return JSON.parse(await readFile(BASELINE_PATH, 'utf8'))
-  } catch (err) {
-    if (err.code === 'ENOENT') return {}
-    throw err
-  }
+/**
+ * The shared engine's violations, sorted for a stable report. The ordering is
+ * this gate's own concern -- `lib/ratchet.mjs` deliberately does not sort, and
+ * the private copy this replaced did, so keeping it here preserves the output
+ * byte-for-byte while the DECISION moves to the one place all six gates share.
+ *
+ * The shared engine names the second dimension `key`; this gate calls it a
+ * `rule`, and the printing below reads `f.key`.
+ */
+function sortedViolations(counts, baseline) {
+  return newViolations(counts, baseline).sort(
+    (a, b) => a.file.localeCompare(b.file) || a.key.localeCompare(b.key),
+  )
 }
 
 async function main() {
   const update = process.argv.includes('--update')
+  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
   const files = listMarkdownFiles()
   const hits = []
   for (const file of files) {
@@ -469,26 +472,36 @@ async function main() {
   const counts = countByFile(hits)
 
   if (update) {
-    const sorted = Object.fromEntries(
-      Object.entries(counts)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([f, r]) => [f, Object.fromEntries(Object.entries(r).sort(([a], [b]) => a.localeCompare(b)))]),
-    )
-    await writeFile(BASELINE_PATH, `${JSON.stringify(sorted, null, 2)}\n`)
+    // #2747: this branch used to write unconditionally, with no comparison at
+    // all -- so the command the message below sends you to absorbed any amount
+    // of retired wording silently, on a gate that runs inside `docs:check`.
+    // Same shape as #2728's, on the sixth consumer of the shared engine.
+    const violations = updateRefusals(counts, baseline, { firstRun })
+    if (violations.length > 0) {
+      console.error('✗ --update refuses to RAISE the baseline. Grown:')
+      for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      console.error(
+        '\nThese rules were RETIRED. Growth is a reviewed decision, not a ratchet step: ' +
+          'correct the sentence, or add the allow marker on a line that genuinely quotes the ' +
+          'retired wording. If a baseline change is genuinely correct, it belongs in a ' +
+          'reviewed commit of its own.',
+      )
+      process.exit(1)
+    }
+    writeBaseline(BASELINE_PATH, counts)
     console.log(`ui-gate-wording: baseline written (${hits.length} existing occurrence(s) ratcheted).`)
     return
   }
 
-  const baseline = await readBaseline()
-  const failures = newViolations(counts, baseline)
+  const failures = sortedViolations(counts, baseline)
 
   if (failures.length > 0) {
     console.error('✗ Retired UI merge-gate wording found in live documentation:\n')
     for (const f of failures) {
-      const rule = RULES.find((r) => r.id === f.rule)
-      console.error(`  ${f.file} — ${f.rule}: ${f.count} found, baseline allows ${f.allowed}`)
+      const rule = RULES.find((r) => r.id === f.key)
+      console.error(`  ${f.file} — ${f.key}: ${f.count} found, baseline allows ${f.allowed}`)
       console.error(`    states ${rule.what}`)
-      for (const h of hits.filter((h) => h.file === f.file && h.rule === f.rule)) {
+      for (const h of hits.filter((h) => h.file === f.file && h.rule === f.key)) {
         console.error(`    ${f.file}:${h.line}: ${h.sentence}`)
       }
       console.error(`    → ${rule.fix}\n`)
@@ -497,9 +510,10 @@ async function main() {
       'These two rules were retired by #2636 and corrected in ten places across five ' +
         'review rounds, because every sweep before this check was line-bound and the docs ' +
         'are hard-wrapped (#2657). Correct the sentence rather than baselining it; ' +
-        '`node scripts/docs/ui-gate-wording.mjs --update` is for a reviewed, intentional ' +
-        'change only, and a `last-verified` chain entry never needs one — front-matter is ' +
-        'not scanned.\n',
+        'since #2747 `node scripts/docs/ui-gate-wording.mjs --update` REFUSES to raise the ' +
+        'baseline, so it is not a way past this: run it after a genuine reduction to ' +
+        'tighten the ratchet. A `last-verified` chain entry never needs one — ' +
+        'front-matter is not scanned.\n',
     )
     process.exit(1)
   }

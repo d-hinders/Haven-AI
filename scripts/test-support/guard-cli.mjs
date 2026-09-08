@@ -37,7 +37,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -52,7 +52,16 @@ const SCRIPTS_DIR = fileURLToPath(new URL('..', import.meta.url))
  */
 export function runGuard(
   script,
-  { files = {}, also = [], args = [], env = {}, linkNodeModules = false, mtimes = {}, readBack = [] } = {},
+  {
+    files = {},
+    also = [],
+    args = [],
+    env = {},
+    linkNodeModules = false,
+    gitInit = false,
+    mtimes = {},
+    readBack = [],
+  } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'guard-cli-')))
   try {
@@ -74,6 +83,19 @@ export function runGuard(
       const dest = join(root, rel)
       mkdirSync(dirname(dest), { recursive: true })
       writeFileSync(dest, body)
+    }
+    // Some guards enumerate their scan set with `git ls-files` rather than by
+    // walking the tree — a deliberate choice, since it excludes untracked and
+    // ignored files for free. A plain temp directory answers that with a fatal
+    // error, so the guard sees NO files and reports a clean scan over nothing:
+    // the false pass this harness exists to stop, arriving through the file
+    // list instead of through `main()`. `git add` is given the fixture's own
+    // paths explicitly rather than `-A`, so the index holds exactly what the
+    // test wrote.
+    if (gitInit) {
+      const paths = Object.keys(files)
+      execFileSync('git', ['-C', root, 'init', '-q'], { stdio: 'ignore' })
+      if (paths.length) execFileSync('git', ['-C', root, 'add', '--', ...paths], { stdio: 'ignore' })
     }
     // Explicit mtimes where a guard compares them (review finding, blocking).
     // Relying on write ORDER is not enough: file-creation order is stable but

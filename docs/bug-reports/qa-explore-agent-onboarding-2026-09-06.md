@@ -6,7 +6,9 @@ covers:
   - packages/frontend/public/for-agents.md
   - packages/frontend/src/app/layout.tsx
   - packages/cli/src/args.ts
-last-verified: "2026-09-06" # #2538: created — run 1 of the agent-onboarding-cold scenario, scored against the A0 baseline of 2026-09-04. A run record, so it is a snapshot rather than a living claim: the four scores describe the deployment on this date and are superseded by run 2 rather than re-verified. `covers:` names the four files the run actually exercised a claim about — the two artifacts in the discovery chain it followed, the layout that advertises it, and the CLI help text finding A is about — so a change to any of them implicates this report and a reader is told the scores predate it. Two findings filed rather than fixed (#2590, #2591), per the cadence rule that discovery and delivery stay decoupled.
+last-verified: "2026-09-06"
+verified:
+  - "#2538: created — run 1 of the agent-onboarding-cold scenario, scored against the A0 baseline of 2026-09-04. A run record, so it is a snapshot rather than a living claim: the four scores describe the deployment on this date and are superseded by run 2 rather than re-verified. `covers:` names the four files the run actually exercised a claim about — the two artifacts in the discovery chain it followed, the layout that advertises it, and the CLI help text finding A is about — so a change to any of them implicates this report and a reader is told the scores predate it. Two findings filed rather than fixed (#2590, #2591), per the cadence rule that discovery and delivery stay decoupled."
 ---
 
 # agent-onboarding-cold — run 1 (2026-09-06)

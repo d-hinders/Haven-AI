@@ -67,13 +67,27 @@ A CASP shard, an archive doc, a `last-verified` `Prior:` entry or a quotation th
 
 A bump records the re-read scope and what was **NOT** re-verified; a stamp without a re-read is a false verification claim and the staleness audit ranks on it. A doc whose claims did not change is right to stay unbumped with a scoped note. When the strict coupling gate forces a touch on a `contract: true` doc whose claims did not change, the note says exactly that — `re-verified, not edited, scope: <claim>` (PR #2502: `package-dev-channel.md`). Convention: [`docs-quality-system.md` § `last-verified` chain integrity](../../../../docs/contributing/docs-quality-system.md#last-verified-chain-integrity-1843).
 
-## 7. Chain ceiling (#2477)
+## 7. Chain health (#2477, #2504, #2637)
 
-`scripts/docs/chain-integrity.mjs` fails a `last-verified` line over `MAX_CHAIN_BYTES` (65,536), measured in **UTF-8 bytes** since [#2562](https://github.com/d-hinders/Haven-AI/issues/2562) — it compared `line.length` (UTF-16 code units) while reporting "bytes" before that, and the two differ by hundreds on a chain dense with em-dashes and arrows. Measure any doc you would have bumped, and say when it is near the ceiling; never propose an entry that would exceed it. Since #2562 a **non-blocking 40 KiB band** also names every governed doc on its way there, on every run — if the doc you are bumping is already warned, say so in your findings rather than adding to it silently.
+The `last-verified` chain is a `verified:` block list, one entry per line,
+newest first. There is **no byte ceiling** — it went with the single-line shape
+in [#2637](https://github.com/d-hinders/Haven-AI/issues/2637), along with the
+40 KiB advisory band. What the gate still refuses: an entry **dropped**
+(#1843), an entry **rewritten** while its ref survives (#2504), and the same
+entry listed **twice** (#2477, the signature of a merge that concatenated two
+chains instead of interleaving them).
 
 ```bash
-node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{const fs=await import("node:fs");const l=m.lastVerifiedLine(fs.readFileSync(process.argv[1],"utf8"));console.log(m.chainLineBytes(l),"of",m.MAX_CHAIN_BYTES,"bytes; band",m.WARN_CHAIN_BYTES)})' <doc>
+node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{
+  const fs = await import("node:fs")
+  const c = m.readChain(fs.readFileSync(process.argv[1], "utf8"))
+  console.log(c.shape, c.entries.length, "entries")
+  console.log(m.checkChainEntries(c.entries, c.entries))   // self-compare: all three lists empty
+})' <doc>
 ```
+
+Run it against a doc to see the shape and entry count; run `npm run docs:check`
+for the real gate, which compares a base against a head.
 
 ## What NOT to flag
 

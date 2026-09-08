@@ -2,7 +2,10 @@
 owner: "@d-hinders"
 status: archived
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-09-08" # #2640: ONE cross-reference added under § *The closures, in order*. Twelve files now point at this file's `#1440` anchor for "the closure sequence" (two of them, `README.md` and `ABOUT_HAVEN.md`, added in this same change; a first draft of this note said "nine", the count taken before the change it describes). That section listed #1984/#1986/#1987-89/#2259/#2055 but not #2020 or #2413 — both live in the newer § *retirement is deletion, not accommodation* above it, so a reader following the anchor scrolled AWAY from two of the seven. Found by review, not by a gate: nothing in `docs:check` validates what is AT an anchor. Scope: that one paragraph; no historical entry was edited, and this log's records stay as written. Prior: "2026-09-07"
+last-verified: "2026-09-08"
+verified:
+  - "#2640: ONE cross-reference added under § *The closures, in order*. Twelve files now point at this file's `#1440` anchor for \"the closure sequence\" (two of them, `README.md` and `ABOUT_HAVEN.md`, added in this same change; a first draft of this note said \"nine\", the count taken before the change it describes). That section listed #1984/#1986/#1987-89/#2259/#2055 but not #2020 or #2413 — both live in the newer § *retirement is deletion, not accommodation* above it, so a reader following the anchor scrolled AWAY from two of the seven. Found by review, not by a gate: nothing in `docs:check` validates what is AT an anchor. Scope: that one paragraph; no historical entry was edited, and this log's records stay as written."
+  - "\"2026-09-07\""
 ---
 
 # Decision Log

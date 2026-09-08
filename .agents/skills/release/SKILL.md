@@ -136,7 +136,7 @@ check fails without them, and forgetting is the single most common way a
 release PR goes red:
 
 1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
-   Manifest* table is re-pinned by the bump (#1790); prepend the `last-verified`
+   Manifest* table is re-pinned by the bump (#1790); prepend the `verified:`
    note yourself. That note is not ceremony — it is the release's argument for
    what moved and what did not, and it is the reason a generated table still
    leaves a human reading this doc.

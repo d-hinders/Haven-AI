@@ -39,20 +39,56 @@
  * either and says which happened, rather than trading one brittle expectation
  * for another.
  *
+ * In the harness the 403 is what will essentially always fire: this leg refuses
+ * to start unless its OWN budget read was `fromChain: true`, and the backend's
+ * pre-check hits the same reader against the same RPC seconds later. The 502
+ * branch needs a transient degradation inside that window. It is defensive, not
+ * expected — and it is not dead code to be deleted as untaken, because the
+ * product may legitimately answer that way.
+ *
  * What does NOT vary, and is asserted on both branches: no signable intent is
  * ever produced. That is the #420 invariant; the status code is the mechanism.
  *
+ * ── Why the 403 branch still satisfies #2016, which is the real question ──
+ *
+ * #2016 exists because this leg once reported PASS on a rail-retirement refusal
+ * instead of the budget check — a green that would have survived deleting
+ * over-budget enforcement outright. Accepting a second outcome has to not
+ * reopen that. It does not, and the reason is a coupling worth stating because
+ * it is not obvious:
+ *
+ * the pre-check's number is not a backend-side opinion. `readRemainingBudget`
+ * reads the ENFORCER'S OWN STORAGE
+ * (`infra/chain/delegation-budget-reader.ts`), and reports `fromChain: false`
+ * when the delegation carries no period caveat it can speak for. So run the
+ * #2016 mutation — delete over-budget enforcement from the caveat stack — and
+ * the read degrades, the pre-check fails open, nothing reverts, and authorize
+ * answers 201 with `sign_data`: the signability guard below fails the leg.
+ * Upstream of that, this leg's own precondition refuses to run at all against a
+ * fallback read. The green cannot survive that mutation on either branch, which
+ * is what makes `error_code` + `remaining_atomic` equivalent in force to the
+ * decoded enforcer name.
+ *
+ * A future reader trimming the `fromChain` guard in that reader would break
+ * this coupling silently, which is why it is written down here.
+ *
  * ── Why there is no control here, unlike the erc7710 sibling ──────────────
  *
- * That sibling opens with a within-budget authorize to prove the account can
- * pay at all, because on erc7710 an authorize only builds a signable child —
- * nothing settles until the merchant redeems it, so the control is free. On
- * this shape authorize prepares a real funding redemption, so a control would
- * drive an actual on-chain funding leg on every QA run. The discrimination the
- * control buys is instead bought below by asserting the refusal's `error_code`
- * and that its `remaining_atomic` matches the live read this leg derived its
- * amount from — a revoked or missing delegation refuses with a different code,
- * and a different budget.
+ * Not because a control would move funds — it would not. `prepareDelegationPayment`
+ * prepares the redemption and returns; submission is a separate call reached
+ * only through `POST /payments/:id/sign`. A control here would cost a sponsored
+ * gas estimation and leave an unsigned `pending_signature` row per run.
+ *
+ * The real reason is that the ordered run already contains one: `run.ts` puts
+ * `within-budget-settle` first, and `x402-delegation-3009` is a full
+ * within-budget authorize → sign → settle on THIS EXACT shape. The sibling
+ * embeds its own control because its scheme has no such leg. Duplicating it
+ * here would buy nothing the suite does not already prove.
+ *
+ * What the control would have discriminated is bought below instead, by
+ * asserting the refusal's `error_code` and that its `remaining_atomic` matches
+ * the live read this leg derived its amount from — a revoked or missing
+ * delegation refuses with a different code, and a different budget.
  *
  * **erc7710 direct settlement** (`payTo` = the merchant): authorize builds a
  * settlement CHILD delegation and returns 201 `pending_signature` WITH
@@ -125,7 +161,8 @@ export const x402OverBudgetRejected: Scenario = {
       if (res.data.remaining_atomic !== budget.remaining.toString()) {
         return fail(
           `the refusal reported remaining=${res.data.remaining_atomic} atomic, but the live budget ` +
-            `read said ${budget.remaining} — the pre-check consulted a different delegation`,
+            `read said ${budget.remaining} — the two reads disagree: a different delegation, or the ` +
+            `budget moved between them`,
         )
       }
       return pass(

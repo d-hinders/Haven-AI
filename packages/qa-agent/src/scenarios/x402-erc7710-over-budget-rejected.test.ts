@@ -130,7 +130,11 @@ describe('x402-erc7710-over-budget-rejected (#2082)', () => {
     mockAuthorizeX402.mockResolvedValueOnce(SIGNABLE_ERC7710).mockResolvedValueOnce(BUDGET_403)
     await x402Erc7710OverBudgetRejected.run(ctx)
     const [body] = mockAuthorizeX402.mock.calls[1]
-    expect(BigInt(body.amount)).toBeGreaterThan(1_000_000n)
+    // Not `> 1_000_000n`: a hardcoded '999999999999' satisfies that too, and a
+    // hardcoded over-budget constant is the #2016 defect class — it stops being
+    // over-budget the moment the account or the seed changes. Checked against
+    // the exact derivation instead. Found on the 3009 sibling's review (#2738).
+    expect(body.amount).toBe((1_000_000n + 1_000_000n).toString())
   })
 
   it('FAILS when the over-budget authorize IS turned into a signable intent', async () => {

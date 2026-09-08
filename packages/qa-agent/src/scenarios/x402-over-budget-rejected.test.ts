@@ -62,16 +62,25 @@ const BUDGET_403 = {
 /**
  * A 502 whose `details` carry the ABI-encoded `Error(string)` payload for
  * `ERC20PeriodTransferEnforcer:transfer-amount-exceeded` — the fail-open path.
- * Hex, not plain text, exactly as the bundler returns it (see revert-reason.ts).
+ * Hex, not plain text, which is the whole reason `revert-reason.ts` decodes
+ * rather than greps: the enforcer's name never appears as readable text in
+ * `details`. Encoded properly (offset, length, padded data) so the fixture
+ * exercises the real decoder on a real payload rather than on a shape that
+ * happens to decode.
  */
-const enforcerHex = Buffer.from('ERC20PeriodTransferEnforcer:transfer-amount-exceeded', 'ascii')
-  .toString('hex')
+const ENFORCER_MSG = 'ERC20PeriodTransferEnforcer:transfer-amount-exceeded'
+/** `Error(string)`: 32-byte offset, 32-byte length, then the data, right-padded. */
+const errorStringPayload = (msg: string) => {
+  const hex = Buffer.from(msg, 'ascii').toString('hex')
+  const padded = hex.padEnd(Math.ceil(hex.length / 64) * 64, '0')
+  return `${(32).toString(16).padStart(64, '0')}${msg.length.toString(16).padStart(64, '0')}${padded}`
+}
 const ENFORCER_502 = {
   ok: false,
   status: 502,
   data: {
     error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)',
-    details: `UserOperation reverted during simulation with reason: 0x08c379a0${'00'.repeat(28)}${enforcerHex}`,
+    details: `UserOperation reverted during simulation with reason: 0x08c379a0${errorStringPayload(ENFORCER_MSG)}`,
   },
 }
 
@@ -124,7 +133,7 @@ describe('the two refusals it must accept', () => {
     expect(r.pass).toBe(true)
     // The detail must name the enforcer, not merely the status — a 502 alone
     // is what a bundler outage looks like too.
-    expect(r.detail).toMatch(/ERC20PeriodTransferEnforcer:transfer-amount-exceeded/)
+    expect(r.detail).toContain(ENFORCER_MSG)
     expect(r.detail).toMatch(/failed open/)
   })
 
@@ -143,11 +152,28 @@ describe('the two refusals it must accept', () => {
     )
   })
 
-  it('asks for an amount derived from the live budget, not a constant', async () => {
-    mockAuthorizeX402.mockResolvedValue(BUDGET_403)
-    await x402OverBudgetRejected.run(ctx)
-    const { amount } = mockAuthorizeX402.mock.calls[0][0]
-    expect(BigInt(amount)).toBeGreaterThan(BigInt(REMAINING))
+  it('asks for an amount DERIVED from the live budget, not a constant above it', async () => {
+    // `> REMAINING` alone does not prove derivation: a hardcoded
+    // '999999999999' satisfies it, and a hardcoded over-budget constant is
+    // exactly the defect #2016 was filed about — it stops being over-budget
+    // the moment the account, the rail or the seed changes, and the refusal
+    // then proves nothing. Measured: with the amount hardcoded, an earlier
+    // version of this case left all ten tests green.
+    //
+    // So it is checked against the EXACT derivation, at two different budgets:
+    // a constant cannot track both.
+    for (const remaining of ['1000000', '4734500']) {
+      vi.clearAllMocks()
+      mockGetAgent.mockResolvedValue({ ok: true, status: 200, data: { delegate_address: DELEGATE } })
+      mockGetAllowances.mockResolvedValue(allowances(remaining))
+      mockAuthorizeX402.mockResolvedValue({
+        ...BUDGET_403,
+        data: { ...BUDGET_403.data, remaining_atomic: remaining },
+      })
+      await x402OverBudgetRejected.run(ctx)
+      const { amount } = mockAuthorizeX402.mock.calls[0][0]
+      expect(amount).toBe((BigInt(remaining) + 1_000_000n).toString())
+    }
   })
 })
 
@@ -171,7 +197,7 @@ describe('the refusals it must NOT accept', () => {
     })
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/consulted a different delegation/)
+    expect(r.detail).toMatch(/the two reads disagree/)
   })
 
   it('fails a 502 that is a bundler outage rather than an enforcer refusal', async () => {

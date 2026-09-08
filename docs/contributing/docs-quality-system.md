@@ -19,8 +19,10 @@ covers:
   - packages/frontend/scripts/serve-docs.mjs
   - packages/frontend/src/lib/__tests__/served-docs.test.ts
   - scripts/frontend-copy-lint.mjs
+  - scripts/docs/chain-entry-codec-census-pin.test.mjs
 last-verified: "2026-09-08"
 verified:
+  - "#2680 (slice 2, epic #2678): three exhaustive-set claims now cite their pins: the served-docs single editable copy (served-docs.test.ts, extended with a tracked-file census), the packages Markdown boundary exactly-one-of-two-sets (package-docs.test.mjs, cited — checkPackageDocBoundary enforces it in both directions), and the quoteEntry/unquoteEntry only-writer-and-reader census (chain-entry-codec-census-pin.test.mjs, NEW). The retained self-description sentences (the L191 conjunct narrative) stay prose as history. No claim found false. Scope: those three pointer insertions. NOT re-verified: Phases 1-4 otherwise."
   - "#2637: § *`last-verified` chain integrity* rewritten for the list shape — the chain is a `verified:` block list, one entry per line, newest first, and the validator rejects the retired inline `#` form by name. The RETENTION subsection and the check-inventory band row are DELETED with the 64 KiB ceiling and the 40 KiB band they described. States the measured correction to this issue's own premise: git does NOT merge concurrent entries as ordinary line insertions — two entries inserted at the same anchor conflict in both orderings — so what the reshape buys is a two-line conflict with every other entry as untouched context, instead of hand-merging one 37,561-byte line, which is how #1843 dropped entries and #2504 rewrote them. Scope: that section, its retention subsection and one inventory row. NOT re-verified: the front-matter schema, the coupling-gate subsections, the `packages/**` boundary, or Phases 3-4."
   - "#2679 (review follow-up 2): a SECOND review pass on the ratchet semantics, and two of its four findings were claims I introduced while correcting others. (a) The comment and a test asserted the baseline keeps DUPLICATE gap files because \"each mention is its own claim\" — `namedFiles()` reports each file once at its first mention, so that state is unreachable; measured directly. The prose now says identity is a SET today and `surplus()` is multiset-safe only as defence against a future extractor. (b) The \"the archived bypass is not silent\" disclosure read the BASELINE alone, and 33 of the 73 governed docs have no baseline entry — for those the flip printed nothing at all, so the disclosure was false for most of the corpus. `departed()` now takes the docs `governedDocs()` dropped, narrowed to those OUTSIDE docs/archive/ and docs/research/ so the line names the anomaly (1 today) rather than all 24 permanently-archived docs on every clean run. (c) The `--update` rise refusal and the legacy-format error lived only in `main()` and BOTH survived mutation to `if (false)` with the suite green — the exact \"mutate before you trust a guard\" failure, on guards added by a review that raised it. `BASELINE_PATH` is now overridable via HAVEN_COVERS_GAPS_BASELINE and four CLI tests drive the real binary against a throwaway file; both mutations now redden, as do the two halves of `departed()`. (d) A SECOND bypass, undisclosed and strictly worse: an over-broad `covers:` glob (`packages/**` + `scripts/**` + `.github/**`) closes every gap a doc has or will ever have, and the run reported \"residue shrank\" and invited an `--update` locking it in — reproduced with two new false claims admitted and announced as a win. REFUSED rather than disclosed (`tooBroadCovers()`), which was free: 0 of 73 governed docs declare one, against 33 using some `**` glob (positive control). `packages/backend/**` stays legal. The three scan prefixes became ONE definition (`SCAN_PREFIXES`, used by the path regex and the new guard) because a prefix added to one and not the other is a bypass arriving silently — the #2625 shape from the same day. 27/27 unit tests, docs:check green, baseline still 129/40/73. Scope: that ONE subsection and this note."
   - "#2679 (review follow-up): the § *`covers:` gap check* subsection REWRITTEN on three findings from the independent review of PR #2690, all reproduced by execution. (1) The baseline was doc -> COUNT, so a doc could close one gap and open a different one in the same edit and stay green — totals unchanged, no shrink hint, a new false claim accepted silently. Reproduced on docs/architecture/03-payment-sequence.md; the baseline now stores the gap FILES and the swap fails with a NEW marker naming the added path. (2) `--update` wrote a RISE while printing \"ratcheted\"; it now refuses one (exit 1, baseline byte-unchanged) unless `--accept-new` is passed. (3) The sentence attributing the governed set to \"validate-frontmatter.mjs's own definition\" was FALSE — that validator governs 97 docs and applies no status filter, and the archived/research carve-out giving 73 is covers-gaps.mjs's own; corrected, and the `status: archived` bypass it implies is now stated with its live precedent (docs/operations/session-rail-vendor-ops.md) and no longer misreported as a shrink — a departed doc is named instead. Also records the one false POSITIVE class the old list lacked: a path inside an illustrative fenced `covers:` example is counted as a claim, and this document is its own example. Re-derived at this commit: 129 pairs across 40 of 73 governed docs, unchanged by the format migration; `validate-frontmatter.mjs` prints 97. Scope: that ONE subsection and this note. NOT re-verified: Phases 2-4, the front-matter schema, the chain-integrity mechanics, the check-inventory table, or any other `covers:` target."
@@ -342,7 +344,10 @@ origin it is reading:
 | `/docs/agent-passport.md` | `docs/product/agent-passport.md` |
 | `/docs/security-model.md` | `docs/security/delegation-rail-security-model.md` |
 
-**There is still exactly one editable copy, and it is the source.**
+**There is still exactly one editable copy, and it is the source**
+(the single-copy invariant is pinned by
+[`packages/frontend/src/lib/__tests__/served-docs.test.ts`](../../packages/frontend/src/lib/__tests__/served-docs.test.ts),
+#2680).
 `packages/frontend/scripts/serve-docs.mjs` regenerates the served files from
 the sources, and `packages/frontend/public/docs/` is gitignored.
 
@@ -461,7 +466,9 @@ would manufacture ceremony on files that have no code mirror, and a requirement
 nobody can satisfy gets bypassed — the next contributor adds a blanket ignore
 and the system ends up weaker than before. What is enforced instead is that the
 **boundary** is declared. `scripts/docs/package-docs.mjs` holds two sets, and
-every `packages/**/*.md` must be in exactly one — with one narrow exception
+every `packages/**/*.md` must be in exactly one — enforced by
+`checkPackageDocBoundary` in both directions and pinned by
+`scripts/docs/package-docs.test.mjs` (#2680) — with one narrow exception
 added by [#2532](https://github.com/d-hinders/Haven-AI/issues/2532): a path
 under a declared `GENERATED_MARKDOWN_PREFIXES` entry is excluded from the
 enumeration altogether, because a generated file has no decision for anyone to
@@ -545,7 +552,8 @@ verified:
 Add yours at the top. Entries are double-quoted YAML scalars because their text
 contains `"`, `#`, `:` and backslashes; `quoteEntry`/`unquoteEntry` in
 `validate-frontmatter.mjs` are the only writer and reader, so the two cannot
-drift apart. The retired form put the whole chain in a `#` comment on the
+drift apart (the census is pinned by
+`scripts/docs/chain-entry-codec-census-pin.test.mjs`, #2680). The retired form put the whole chain in a `#` comment on the
 `last-verified:` scalar, joined by `Prior:` markers — the validator now rejects
 that shape and names the one-shot migration (`scripts/docs/migrate-chain-to-list.mjs`).
 

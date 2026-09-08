@@ -25,6 +25,12 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
+  - packages/mcp-server/src/tools.test.ts
+  - packages/mcp-server/src/strict-tool-input.test.ts
+  - packages/backend/src/__tests__/x402-resume-producer-pin.test.ts
+  - packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts
+  - packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts
+  - packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
@@ -32,6 +38,7 @@ satisfied-by:
   - docs/regulatory/casp-changelog/**
 last-verified: "2026-09-08"
 verified:
+  - "#2680 (slice 2, epic #2678): exhaustive-set claims dispositioned — five claims now cite their pins by path: the preflight one-call-per-surface (tools.test.ts ROUND-TRIP BUDGET, existing), the max_amount XOR (strict-tool-input.test.ts, existing), the retry_original_x402_request single producer (x402-resume-producer-pin.test.ts, pre-existing from this branch and now cited), the erc7710 confirm only-door (erc7710-confirm-seam-census-pin.test.ts, NEW), the resume-gate two-site roster (resume-gate-call-census-pin.test.ts, NEW), and the settlement-verifier eight-check roster (settlement-verifier-roster-pin.test.ts, NEW). Left as prose with reasons: the L645/L871/L904/L1193 remaining matches are historical narrative or inside already-pinned sentences; no claim found false. Scope: those six pointer insertions + one broken relative link fixed (../../../packages -> ../../packages at the ROUND-TRIP BUDGET cite). NOT re-verified: the rest of the body."
   - "#2640: the Safe-retirement CLOSURE SEQUENCE removed and replaced with a link to the canonical record (`docs/archive/decision-log.md` § *retire the Safe rail entirely (#1440)*, which slice 6 created and which carries all 8 closure refs — the only file that did). This doc kept the sentence its audience needs and dropped the #1984/#1986/#1987/#1988/#1989/#2020/#2055/#2413 enumeration. Per-claim citations of a single closure are deliberately KEPT: they are the local fact a reader needs, not a retelling of the narrative. Scope: the retirement passage(s) only; nothing else in this file was re-verified."
   - "#2669: \"Accounts, balances and history stay readable\" re-read and EDITED — true of the rows, false of any Haven surface since #2413. Scope: that one sentence. A later round narrowed \"no Haven surface displays them\" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row. A THIRD round corrected that narrowing where it had been relocated rather than removed: the clause listing what \"no longer renders\" still named transaction history, which DOES render — `LIST_BASIC_SAFES_FOR_USER_SQL` and `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` have no rail predicate, so legacy account and agent names still appear in the `/transactions` picklists. The exception is now named with BOTH halves; a first statement of it gave only the account half."
   - "#2530: the Guided Catalog Purchase Preflight discovery paragraph gains the unauthenticated shape — `GET /catalog` now answers without a credential in a reduced form, so \"the existing rail plus agent-chain scoping still apply\" needed the qualifier that the public path has no agent to scope by. The read-only and never-authorizes claims are re-read against the diff and unchanged. Scope: that one paragraph; the scheme-selection, header-semantics, resume and erc7710 sections were NOT re-verified."
@@ -625,7 +632,7 @@ Sequence:
    already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
    successful preflight makes exactly ONE call per Haven surface — catalog,
    agent, allowances, `POST /x402` — pinned by
-   [`packages/mcp-server/src/tools.test.ts`](../../../packages/mcp-server/src/tools.test.ts)
+   [`packages/mcp-server/src/tools.test.ts`](../../packages/mcp-server/src/tools.test.ts)
    ("ROUND-TRIP BUDGET", #1348), which counts every stubbed fetch per surface;
    per-step wall-clock telemetry rides the
    promotion-gating QA scenario's pass detail.
@@ -642,7 +649,9 @@ Sequence:
 
    **Two spellings, one cap (#1351).** `max_amount` is atomic units;
    `max_amount_human` is the same cap in whole tokens, so `"1"` means 1 USDC
-   rather than 0.000001 USDC. Exactly one may be sent. The human form is
+   rather than 0.000001 USDC. Exactly one may be sent — pinned by
+   [`packages/mcp-server/src/strict-tool-input.test.ts`](../../packages/mcp-server/src/strict-tool-input.test.ts)
+   ("Both max_amount", #2349). The human form is
    converted using the decimals of the **selected option's own** asset
    (`resolveTokenFromAddress(option.asset, option.network)` inside
    `priceSelectedOption` — the same address→token binding that produces
@@ -818,7 +827,10 @@ id. Local MCP normalizes most fields to camelCase while retaining
 beneath them) are gated by `assertCanResumeX402`
 ([`packages/sdk/src/x402-protocol.ts`](../../packages/sdk/src/x402-protocol.ts)),
 which hard-requires `nextAction === retry_original_x402_request` and throws
-otherwise. That value now has exactly one producer, and it is server-side:
+otherwise. That value now has exactly one producer, and it is server-side
+(pinned by
+[`packages/backend/src/__tests__/x402-resume-producer-pin.test.ts`](../../packages/backend/src/__tests__/x402-resume-producer-pin.test.ts),
+#2680):
 
 1. The backend's status projection
    ([`modules/payments/agent-payment-status.ts`](../../packages/backend/src/modules/payments/agent-payment-status.ts),
@@ -901,7 +913,9 @@ drew it for a caller-asserted settlement hash:
   cannot move funds, cannot change the intent's status, amount or recipient,
   cannot confirm a `submitted` erc7710 intent (that has no Haven tx hash and is
   refused here — the on-chain-verified seam in `attachMachinePaymentEvidence`
-  stays the only door), and cannot block or unblock a sweep, which is driven by
+  stays the only door, pinned by an importer census
+  ([`packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts`](../../packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts),
+  #2680)), and cannot block or unblock a sweep, which is driven by
   the delegate's on-chain balance. A false `accepted` additionally triggers the
   server's own post-settlement residue read, which re-flags stranded funds
   independently.
@@ -943,8 +957,10 @@ it reads the *same* predicate over the *same* derived row:
 `isFundedX402AwaitingMerchantLeg` is exported from `agent-payment-status.ts`
 and called by both `intentStateFor` and `getX402SignContext`
 ([`modules/x402/sign-context.ts`](../../packages/backend/src/modules/x402/sign-context.ts)),
-so a published remedy and the permission to act on it cannot drift apart. A
-real-Postgres test asserts that biconditional across nine evidence states.
+so a published remedy and the permission to act on it cannot drift apart. That
+two-site roster is pinned by
+[`packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts`](../../packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts)
+(#2680). A real-Postgres test asserts that biconditional across nine evidence states.
 Everything else still refuses: erc7710, a reported merchant leg, a
 client-reported rejection (whose remedy stays `sweep_stranded_funds`), an
 intent inside the grace window, absent scheme metadata, and a pending intent
@@ -1166,7 +1182,9 @@ cannot be mined outside `authorize .. authorize + 600s`).
 
 Since [#2094](https://github.com/d-hinders/Haven-AI/issues/2094) there is a
 check 8, and it is the only one about WHICH payment rather than what shape it
-had: when the transaction carries `RedeemedDelegation` logs from the **pinned**
+had (the eight-check roster is pinned by
+[`packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts`](../../packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts),
+#2680): when the transaction carries `RedeemedDelegation` logs from the **pinned**
 DelegationManager, the emitted `Delegation` struct is re-hashed with the
 framework's own `hashDelegation` and this intent's stored `delegation_hash`
 must be among them; if it is not, the transaction demonstrably settled a

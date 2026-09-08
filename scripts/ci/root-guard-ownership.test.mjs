@@ -30,6 +30,7 @@ import {
   classifyChangedFiles,
 } from './change-classifier.mjs'
 import { ROUTING_MATRIX } from './routing-matrix.mjs'
+import { GENERATED_COPIES } from '../../packages/cli/scripts/sync-agent-guidance.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
@@ -67,9 +68,14 @@ const packageJson = JSON.parse(read('package.json'))
  *     cross-package-import test below, which asserts the LINK rather than the
  *     command. Prefer a root script whenever one honestly exists.
  *
- * Both forms still have to appear as the whole `npm run <entry>` command in
- * every owning job's block — see `jobRuns`, which is what makes `jobs` a claim
- * about ci.yml rather than an assertion.
+ * What is checked, stated precisely because the imprecise version reads as a
+ * stronger guarantee than it is: every owning job's block must contain AT
+ * LEAST ONE of the entries as a whole `npm run <entry>` command — not every
+ * entry in every block. `frontend_checks` runs `test -w packages/frontend` and
+ * never `test -w packages/sdk`, and that is correct. The consequence to know:
+ * a manifest pairing two entries with one job passes on either spelling, so
+ * `runsVia` is a claim about the SET, and `jobRuns` is what ties that set to
+ * ci.yml rather than to an assertion.
  */
 export function resolveRunsVia(entry) {
   const workspace = entry.match(/^(\S+) -w (\S+)$/)
@@ -405,6 +411,56 @@ describe('cross-package source imports route the importing job (#2743)', () => {
           `so the pin lives in a suite the change never runs. Give ${resolved} a ` +
           '.github/root-guard-ownership.json entry naming that job, or declare the ' +
           'dependency in .github/package-dependencies.json if the packages really do depend.',
+      )
+    }
+  })
+})
+
+describe('generated copies route the jobs that verify them (#2743)', () => {
+  // The COPY direction of the same boundary. The block above asserts that a
+  // change to a canonical SOURCE reaches the job holding its pin; this asserts
+  // the reverse — that a hand-edit of a generated COPY reaches a job that runs
+  // the check comparing it back.
+  //
+  // Both directions had to be written, because closing one says nothing about
+  // the other and the copy direction was the worse hole: `for-agents.md` is a
+  // generated artifact that happens to be Markdown, so the DOC_ONLY `*.md` arm
+  // (whose `*` crosses `/`) swallowed it and an edit routed NOTHING — not even
+  // `code` — while its CLI sibling routed `cli` and any other file in the same
+  // public/ directory routes `frontend`. The one copy an agent actually
+  // fetches was the one copy whose drift no job could catch.
+  //
+  // Derived from the generator's OWN list, so a third copy added to
+  // GENERATED_COPIES fails here until it routes, rather than joining silently.
+
+  const copies = GENERATED_COPIES.map((c) => path.relative(ROOT, c.file).split(path.sep).join('/'))
+
+  test('the copy list is the generator’s, and it is not empty', () => {
+    // Positive control: an import that silently resolved to [] would make every
+    // assertion below a vacuous pass.
+    assert.ok(copies.length >= 2, `expected the generated copies, saw ${copies.length}`)
+    assert.ok(copies.includes('packages/frontend/public/for-agents.md'))
+    assert.ok(copies.includes('packages/cli/src/agent-guidance-text.ts'))
+    for (const copy of copies) assert.ok(existsSync(path.join(ROOT, copy)), `${copy} is missing`)
+  })
+
+  test('a hand-edit of any generated copy routes a job that runs lint:runbook-parity', () => {
+    // `lint:runbook-parity` is the check that compares these back, so the copy
+    // must reach at least one job that runs it. Read off ci.yml rather than
+    // hardcoded, so moving the step between jobs cannot leave this stale.
+    const verifying = OWNING_FLAGS.filter((flag) => {
+      const block = jobBlock(jobKeyFor(flag))
+      return block && jobRuns(block, 'lint:runbook-parity')
+    })
+    assert.ok(verifying.length > 0, 'no ci.yml job runs lint:runbook-parity — has it been renamed?')
+
+    for (const copy of copies) {
+      const routed = classifyChangedFiles([copy])
+      assert.ok(
+        verifying.some((flag) => routed[flag]),
+        `${copy} is a generated copy verified by lint:runbook-parity, but editing it routes ` +
+          `none of ${JSON.stringify(verifying)} — so drift in the copy runs no check. ` +
+          'A generated artifact under a doc-only extension needs a DOC_EXCEPTIONS arm.',
       )
     }
   })

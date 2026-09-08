@@ -264,6 +264,28 @@ export const ROUTING_MATRIX = [
       'what it was added to widen.',
   },
   {
+    files: ['packages/frontend/public/for-agents.md'],
+    expect: [
+      'code',
+      'sdk',
+      'cli',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+    ],
+    kind: CONTRACT,
+    why:
+      'The served runbook (#2743) — a GENERATED artifact that happens to be Markdown, so the ' +
+      'DOC_ONLY `*.md` arm swallowed it and a hand-edit routed NOTHING, not even `code`. Its ' +
+      'sibling copy packages/cli/src/agent-guidance-text.ts routed `cli`, and any other file ' +
+      'in the same public/ directory routes `frontend`, so the one copy an agent actually ' +
+      'fetches was the one whose drift no job could catch. #2727 routed the SOURCE; this row ' +
+      'routes the COPY, which is the other direction.',
+  },
+  {
     files: ['packages/sdk/src/skill-content.ts'],
     expect: [
       'code',

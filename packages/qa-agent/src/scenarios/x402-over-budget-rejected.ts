@@ -14,10 +14,29 @@
  * ── What the delegation rail actually does, per scheme ─────────────────
  *
  * **EIP-3009 bridge shape** (`payTo` = the agent's delegate EOA,
- * `merchantPayTo` = the merchant): authorize prepares the funding redemption,
- * so the budget caveat is enforced during gas estimation and an over-budget
- * call is refused with HTTP 502 and NO intent row. The invariant holds here,
- * and this is the shape this leg drives.
+ * `merchantPayTo` = the merchant): authorize used to prepare the funding
+ * redemption, so the budget caveat was enforced during gas estimation and an
+ * over-budget call came back HTTP 502 carrying the enforcer's revert reason.
+ * Since #2706 (landed as PR #2719) a typed 403 pre-check refuses BEFORE any
+ * prepare, field-for-field the erc7710 body, so the enforcer never speaks on
+ * this path. That is deliberate and this leg now asserts the new shape.
+ *
+ * ── Where the enforcer proof went, stated rather than dropped ──────────
+ *
+ * The naive edit here — swap 502 for 403 — would have destroyed what this
+ * leg exists for: with the pre-check alone satisfying it, DELETING the
+ * on-chain enforcer would leave it green, which is the 2026-08-25 defect
+ * recorded above, one rail across. The guarantee is now split across a PAIR,
+ * and each half is falsified by a different deletion:
+ *
+ *   * delete the pre-check → this leg's 403 becomes the enforcer's 502 and
+ *     THIS scenario fails;
+ *   * delete the enforcer → `over-budget-refused` (POST /payments, which
+ *     still reaches the chain and still asserts
+ *     `ERC20PeriodTransferEnforcer:transfer-amount-exceeded`) fails.
+ *
+ * Neither half alone proves the invariant. Read them together, and do not
+ * retire `over-budget-refused` without moving its enforcer assertion first.
  *
  * **erc7710 direct settlement** (`payTo` = the merchant): authorize builds a
  * settlement CHILD delegation and returns 201 `pending_signature` WITH
@@ -28,12 +47,11 @@
  * coverage gap and it is recorded on #1993 rather than papered over here:
  * proving it would need a merchant redemption attempt, which no leg does.
  *
- * The assertions below are built so a 502 alone cannot satisfy them — see
- * `over-budget-refused`, whose comment block carries the full reasoning.
+ * The assertions below are built so a bare status code cannot satisfy them —
+ * see `over-budget-refused`, whose comment block carries the full reasoning.
  */
 
 import { HavenApi } from '../lib/haven-api.js'
-import { caveatEnforcerRejection } from '../lib/revert-reason.js'
 import { overBudgetAmount, readOnchainBudget } from '../lib/delegation-budget.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
@@ -59,39 +77,66 @@ export const x402OverBudgetRejected: Scenario = {
     const budget = await readOnchainBudget(api)
     if ('error' in budget) return fail(`precondition: ${budget.error}`)
 
-    const over = overBudgetAmount(budget.remaining)
-    const res = await api.authorizeX402({
+    // The 3009 funding shape: fund the delegate EOA, settle to the merchant.
+    const shape = {
       url: ctx.cfg.demoMerchantUrl ?? 'https://example.test/resource',
-      // The 3009 funding shape: fund the delegate EOA, settle to the merchant.
       payTo: delegate,
       merchantPayTo: ctx.cfg.paymentTo,
-      settlementScheme: 'eip3009',
-      amount: over.toString(),
+      settlementScheme: 'eip3009' as const,
       asset: USDC,
       network: NETWORK,
-    })
+    }
+
+    // The control, which this leg did not have before #2738. A refusal proves
+    // the budget check only if the SAME shape is offered when it is within
+    // budget: without this, a backend refusing every x402 authorize — a
+    // misconfigured merchant URL, a retired rail, a dead delegation — reads
+    // exactly like a working enforcement.
+    const control = await api.authorizeX402({ ...shape, amount: '1000' })
+    if (!control.data.sign_data) {
+      return fail(
+        'control: a within-budget 3009 authorize was NOT offered as signable ' +
+          `(HTTP ${control.status}: ${control.data.error ?? ''}) — a refusal below would prove nothing`,
+      )
+    }
+
+    const over = overBudgetAmount(budget.remaining)
+    const res = await api.authorizeX402({ ...shape, amount: over.toString() })
 
     if (res.data.payment_id || res.data.status === 'pending_signature' || res.data.sign_data) {
       return fail('over-budget x402 produced a signable intent — it must be refused before it is offered')
     }
-    if (res.status !== 502) {
+    if (res.status !== 403) {
       return fail(
-        `expected HTTP 502 (chain-side policy refusal), got ${res.status}: ` +
+        `expected HTTP 403 (budget pre-check, #2706) got ${res.status}: ` +
           `${res.data.error ?? JSON.stringify(res.data).slice(0, 160)}`,
       )
     }
-    const enforcer = caveatEnforcerRejection(res.data.details)
-    if (!enforcer) {
+    // A bare 403 is also what a MISSING delegation produces, and a retired rail
+    // produced the 410 that caused the 2026-08-25 false green. The typed code
+    // is what separates "the budget check ran and said no" from "something
+    // else said no".
+    if (res.data.error_code !== 'delegation_budget_exceeded') {
       return fail(
-        'the x402 refusal did not come from a caveat enforcer — a bare 502 is also what a bundler ' +
-          'failure, an RPC outage or a retired rail produces, and none of those prove the budget ' +
-          `check ran: ${(res.data.details ?? res.data.error ?? '').slice(0, 200)}`,
+        'the 403 did not come from the budget pre-check — a missing delegation and a retired rail ' +
+          `also refuse with 403, and neither proves the budget was consulted: ` +
+          `error_code=${res.data.error_code ?? '(absent)'} ${(res.data.error ?? '').slice(0, 160)}`,
+      )
+    }
+    // And it must have consulted THIS delegation: a pre-check reading a stale
+    // or different budget refuses correctly by accident.
+    if (res.data.remaining_atomic !== budget.remaining.toString()) {
+      return fail(
+        `the refusal reported remaining=${res.data.remaining_atomic} atomic, but the live budget ` +
+          `read said ${budget.remaining} — the pre-check consulted a different delegation`,
       )
     }
 
     return pass(
-      `x402 ${over} atomic refused on-chain by ${enforcer} with no signable intent, ` +
-        `against a live remaining budget of ${budget.remaining} atomic`,
+      `3009 funding leg: ${over} atomic refused 403 delegation_budget_exceeded before any prepare ` +
+        `(remaining ${res.data.remaining_atomic}, shortfall ${res.data.shortfall_atomic}), ` +
+        'against a control that WAS offered. The on-chain enforcer proof for this rail lives in ' +
+        '`over-budget-refused`',
     )
   },
 }

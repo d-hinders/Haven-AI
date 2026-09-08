@@ -33,7 +33,11 @@ const { x402OverBudgetRejected } = await import('./x402-over-budget-rejected.js'
 const DELEGATE = '0x' + 'a3'.repeat(20)
 const MERCHANT = '0x' + 'cc'.repeat(20)
 
-/** The verbatim shape dev returns for an over-budget refusal (2026-08-25). */
+/**
+ * The verbatim shape dev returns for an over-budget refusal on the DIRECT
+ * payment path (2026-08-25). Still current: `over-budget-refused` reaches the
+ * chain, so the enforcer still answers it.
+ */
 const ENFORCER_502 = {
   ok: false,
   status: 502,
@@ -46,6 +50,32 @@ const ENFORCER_502 = {
       '4552433230506572696f645472616e73666572456e666f726365723a7472616e736665722d616d6f756e742d65786365656465' +
       '6400000000000000000000000000',
   },
+}
+
+/**
+ * The typed 403 the x402 EIP-3009 funding leg returns since #2706 (PR #2719),
+ * which refuses at a pre-check BEFORE any prepare. Field-for-field the erc7710
+ * body; `merchant_address` carries merchantPayTo, since payTo is the funding
+ * target on this shape.
+ */
+const PRECHECK_403 = {
+  ok: false,
+  status: 403,
+  data: {
+    error:
+      "This x402 payment of 5.6165 USDC exceeds the agent's remaining budget for this period " +
+      '(4.6165 USDC, short by 1.00).',
+    error_code: 'delegation_budget_exceeded',
+    remaining_atomic: '1000000',
+    shortfall_atomic: '1000000',
+  },
+}
+
+/** A within-budget authorize, offered as signable — the control this leg gained in #2738. */
+const OFFERED = {
+  ok: true,
+  status: 201,
+  data: { payment_id: 'x_ok', status: 'pending_signature', sign_data: { signature_scheme: 'eip712_delegation' } },
 }
 
 /** The refusal the OLD leg was accepting as proof (#1986's retirement 410). */
@@ -170,72 +200,108 @@ describe('over-budget-refused (POST /payments)', () => {
 })
 
 describe('x402-over-budget-rejected (POST /x402/authorize)', () => {
-  it('PASSES on the live enforcer refusal, naming the enforcer', async () => {
-    mockAuthorizeX402.mockResolvedValue({
-      ...ENFORCER_502,
-      data: { ...ENFORCER_502.data, error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)' },
-    })
+  // Every case feeds the CONTROL first (a within-budget authorize that must be
+  // offered) and the refusal second, because the leg makes two calls since
+  // #2738. A single-call mock would satisfy the control with the refusal and
+  // then run out.
+  const then = (refusal: unknown) =>
+    mockAuthorizeX402.mockResolvedValueOnce(OFFERED).mockResolvedValueOnce(refusal)
+
+  it('PASSES on the typed 403 pre-check, naming the error_code', async () => {
+    // The positive control for this half of the file: without it every red
+    // below is also consistent with a leg that can never pass at all.
+    then(PRECHECK_403)
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(true)
-    expect(r.detail).toContain('ERC20PeriodTransferEnforcer:transfer-amount-exceeded')
+    expect(r.detail).toContain('delegation_budget_exceeded')
+    expect(r.detail).toContain('control that WAS offered')
   })
 
   it('drives the EIP-3009 funding shape, not erc7710', async () => {
     // The shape IS the scheme. On erc7710 an over-budget authorize returns a
     // signable child delegation (verified live 2026-08-25), so a leg that
-    // drifted to that shape would be asserting something false.
-    mockAuthorizeX402.mockResolvedValue(ENFORCER_502)
+    // drifted to that shape would be asserting something false. Checked on the
+    // REFUSAL call, not the control, since that is the one under test.
+    then(PRECHECK_403)
     await x402OverBudgetRejected.run(ctx)
-    const [body] = mockAuthorizeX402.mock.calls[0]
+    const [body] = mockAuthorizeX402.mock.calls[1]
     expect(body.payTo.toLowerCase()).toBe(DELEGATE.toLowerCase())
     expect(body.merchantPayTo).toBe(MERCHANT)
     expect(body.settlementScheme).toBe('eip3009')
   })
 
+  it('asks for an amount ACTUALLY above the live remaining budget', async () => {
+    then(PRECHECK_403)
+    await x402OverBudgetRejected.run(ctx)
+    const [control] = mockAuthorizeX402.mock.calls[0]
+    const [over] = mockAuthorizeX402.mock.calls[1]
+    // remaining is 1000000 atomic (1 USDC): the control must sit under it and
+    // the ask above it, or neither call is testing what it claims.
+    expect(Number(control.amount)).toBeLessThan(1000000)
+    expect(Number(over.amount)).toBeGreaterThan(1000000)
+  })
+
+  it('FAILS when the CONTROL is not offered — a backend refusing everything proves nothing', async () => {
+    // #2738. Without this the 403 assertion below is satisfied by a dead
+    // merchant URL, a retired rail or a revoked delegation, none of which is
+    // the budget check. This is the same class as the 2026-08-25 false green,
+    // arriving through the control rather than through the refusal.
+    mockAuthorizeX402.mockResolvedValue(PRECHECK_403)
+    const r = await x402OverBudgetRejected.run(ctx)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/control: a within-budget 3009 authorize was NOT offered/)
+  })
+
   it('FAILS on the rail-retirement 410 — the exact false green from 2026-08-25', async () => {
-    // This is the regression test for the bug. The OLD leg returned PASS here.
-    mockAuthorizeX402.mockResolvedValue(RETIREMENT_410)
+    then(RETIREMENT_410)
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)
   })
 
-  it('FAILS on any other rejection that is not the budget check', async () => {
-    mockAuthorizeX402.mockResolvedValue({
-      ok: false, status: 403,
+  it('FAILS on a 403 that is a MISSING delegation, not the budget check', async () => {
+    // The reason the typed `error_code` is asserted rather than the status. A
+    // revoked or absent delegation refuses with 403 too, and reading that as
+    // proof would mean an agent with NO budget at all reports the budget check
+    // working.
+    then({
+      ok: false,
+      status: 403,
       data: { error: 'Agent has no active budget delegation for USDC to this merchant' },
     })
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/did not come from the budget pre-check/)
   })
 
-  it('FAILS on a 502 that is a bundler failure, not a policy refusal', async () => {
-    // Reaches the enforcer check specifically. Without this case the status
-    // guard above SHADOWS it and the enforcer assertion survives deletion —
-    // measured, not assumed: mutation M8 survived until this test existed.
-    mockAuthorizeX402.mockResolvedValue({
-      ok: false, status: 502,
-      data: { error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)', details: 'AA31 paymaster deposit too low' },
-    })
+  it('FAILS when the refusal reports a budget other than the live one', async () => {
+    // A pre-check reading a stale or different delegation refuses correctly by
+    // accident, and would stay green after the delegation it consults drifts
+    // away from the one the agent actually spends against.
+    then({ ...PRECHECK_403, data: { ...PRECHECK_403.data, remaining_atomic: '999' } })
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/did not come from a caveat enforcer/)
+    expect(r.detail).toMatch(/consulted a different delegation/)
+  })
+
+  it('FAILS on the pre-#2719 enforcer 502 — the pre-check no longer runs', async () => {
+    // Deliberately red. Since #2706 the refusal happens BEFORE prepare, so a
+    // 502 carrying the enforcer's revert reason means the pre-check was
+    // bypassed or deleted and the call reached gas estimation after all. The
+    // enforcer's own guarantee is not lost: `over-budget-refused` still drives
+    // the chain path and still asserts the revert reason.
+    then(ENFORCER_502)
+    const r = await x402OverBudgetRejected.run(ctx)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/expected HTTP 403/)
   })
 
   it('FAILS when the over-budget authorize IS turned into a signable intent', async () => {
-    mockAuthorizeX402.mockResolvedValue({
+    then({
       ok: true, status: 201,
       data: { payment_id: 'x_1', status: 'pending_signature', sign_data: { signature_scheme: 'eip712_delegation' } },
     })
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/signable intent/)
-  })
-
-  it('FAILS rather than guessing when the budget read is a FALLBACK', async () => {
-    mockGetAllowances.mockResolvedValue(allowances('1000000', false))
-    mockAuthorizeX402.mockResolvedValue(ENFORCER_502)
-    const r = await x402OverBudgetRejected.run(ctx)
-    expect(r.pass).toBe(false)
-    expect(r.detail).toMatch(/FALLBACK/)
   })
 })

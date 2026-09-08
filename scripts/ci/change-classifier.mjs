@@ -113,13 +113,50 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
 /**
  * Markdown that is NOT documentation-only.
  *
- * CLAUDE.md mirrors backend contracts (the API surface table and the chain
- * registry) that packages/backend/src/docs-drift pins. A CLAUDE.md-only edit
- * must therefore run the backend suite even though it is Markdown — otherwise
- * the drift test never guards it. This arm wins over `*.md` because the shell
- * `case` it came from takes the first matching arm.
+ * THREE arms as of #2743, on two distinct rationales, and each arm's reasoning
+ * lives beside it rather than up here — this header used to explain CLAUDE.md
+ * alone and then outlived that, which is the enumeration-drift shape #2743's
+ * review kept finding in exactly this kind of sentence.
+ *
+ *   - CLAUDE.md mirrors backend contracts (the API surface table and the chain
+ *     registry) that packages/backend/src/docs-drift pins, so a CLAUDE.md-only
+ *     edit must run the backend suite even though it is Markdown — otherwise
+ *     the drift test never guards it.
+ *   - The two packages/frontend/public/ arms are SERVED CONTENT: Markdown an
+ *     agent fetches over HTTP, not documentation. See their inline comment.
+ *
+ * Every arm wins over `*.md` because this list is consulted first, and within
+ * it the FIRST matching arm decides — the shell `case` these came from behaved
+ * the same way, which is why the specific public/ arm precedes the general one.
  */
-export const DOC_EXCEPTIONS = Object.freeze([{ patterns: ['CLAUDE.md'], surfaces: ['code', 'backend'] }])
+export const DOC_EXCEPTIONS = Object.freeze([
+  { patterns: ['CLAUDE.md'], surfaces: ['code', 'backend'] },
+  // packages/frontend/public/ is SERVED CONTENT, not documentation. Markdown
+  // there is a build artifact an agent fetches over HTTP, but `*.md` above
+  // crosses `/` (see globToRegExp), so it swallowed the whole directory: an
+  // edit to a served .md routed NOTHING, not even `code`, while every
+  // non-Markdown sibling in the same directory routed `frontend`. Both arms
+  // below exist because that was measured, not assumed (#2743):
+  //
+  //   for-agents.md  routed []  — byte-pinned to packages/sdk/src/agent-guidance.ts
+  //                               by for-agents-runbook.test.ts AND compared by
+  //                               lint:runbook-parity, so it needs the three jobs
+  //                               that run that lint, not just frontend.
+  //   402.md         routed []  — authored, not generated, and asserted by
+  //                               discovery-artifacts.test.ts, which is
+  //                               frontend-only. Found while correcting a claim
+  //                               that the first arm alone had closed the
+  //                               directory; it had closed one file.
+  //
+  // Ordered specific-then-general, since DOC_EXCEPTIONS is first-match-wins.
+  // The general arm is what makes this the DIRECTORY's rule rather than a list
+  // of the two files that happen to exist today.
+  {
+    patterns: ['packages/frontend/public/for-agents.md'],
+    surfaces: ['code', 'sdk', 'cli', 'frontend'],
+  },
+  { patterns: ['packages/frontend/public/*.md'], surfaces: ['code', 'frontend'] },
+])
 
 /**
  * The root-guard ownership manifest: which job owns each guard that lives

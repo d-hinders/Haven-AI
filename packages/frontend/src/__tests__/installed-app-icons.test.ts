@@ -226,6 +226,9 @@ describe('rendered home-screen icons (#2729)', () => {
       const geometry = appIconGeometry(size, true)
       const bandTop = size - geometry.badgeHeight
       const text = boundingBox(png, BG, bandTop, size)
+      // An empty box reports minX = width, maxX = -1 and would pass the
+      // containment checks vacuously — so first, there IS text.
+      expect(text.width).toBeGreaterThan(0)
       // Inside the canvas with a margin on both sides, and vertically inside the band.
       expect(text.minX).toBeGreaterThan(size * 0.02)
       expect(text.maxX).toBeLessThan(size * 0.98)

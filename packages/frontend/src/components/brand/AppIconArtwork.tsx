@@ -60,7 +60,11 @@ export function appIconGeometry(size: number, badged: boolean) {
 export function AppIconArtwork({ size, environment }: { size: number; environment: string }) {
   const { badge } = installedAppIdentity(environment)
   const { stroke, uprightHeight, crossbarWidth, badgeHeight, markLift } = appIconGeometry(size, badge !== null)
-  // ~0.7 em per glyph plus 0.08 em of tracking, held inside 90% of the width.
+  // Height-bound normally; width-bound for a long environment name
+  // ("pull-request-preview"): ~0.7 em per glyph plus 0.08 em of tracking,
+  // which at twenty characters is a fifth of the line, held inside 90% of
+  // the width. Pixel-identical to a plain height bound for "DEV" at all
+  // three sizes; the pixel test renders the long case.
   const badgeFontSize = badge
     ? Math.round(Math.min(badgeHeight * 0.62, (size * 0.9) / (badge.length * 0.78)))
     : 0
@@ -124,12 +128,6 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
       {badge ? (
         <div
           style={{
-            // Height-bound normally; width-bound for a long environment name
-            // ("pull-request-preview"), counting the letter spacing, which at
-            // twenty characters is a fifth of the line. `badgeFontSize` is
-            // pixel-identical to the old fixed formula for "DEV" at all
-            // three sizes; the pixel test renders the long case.
-
             position: 'absolute',
             left: 0,
             right: 0,

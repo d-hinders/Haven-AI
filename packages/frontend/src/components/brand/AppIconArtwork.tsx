@@ -7,8 +7,10 @@ import { installedAppIdentity } from '@/lib/installed-app'
  * Renders through satori, which understands a flexbox subset and neither CSS
  * custom properties nor `<svg>` `className` — so the colours come in as the
  * test-pinned strings from `lib/brand-colours.ts` and the mark is boxes, not
- * paths. The geometry is `HavenMark`'s: a rounded brand square with a white
- * "H" of two uprights and a crossbar.
+ * paths. The H is `HavenMark`'s — two uprights and a crossbar, the same
+ * proportions — on a full-bleed brand field rather than its rounded inset
+ * square: iOS masks the touch icon's corners itself, so a radius drawn here
+ * would show as a second, smaller rounding inside Apple's.
  *
  * A non-production environment gets a badge band across the bottom in the
  * warning tone `EnvBadge` uses, carrying the environment's name, so the dev

@@ -256,11 +256,27 @@ describe('routing completeness — every gated guard has an owner (#1626)', () =
   // exemption is DERIVED from the job's own `if:`, never asserted here, so the
   // day someone gates a job that runs an unregistered guard, this fails.
 
-  /** Root package.json script name -> the scripts/ files it runs. */
+  /**
+   * A guard path inside a command string.
+   *
+   * The optional `packages/<pkg>/` prefix is load-bearing (#2727). Without it
+   * these patterns anchored on a bare `scripts/`, so a guard living in a
+   * PACKAGE's scripts directory was seen under a truncated path —
+   * `node packages/cli/scripts/sync-agent-guidance.mjs` read as
+   * `scripts/sync-agent-guidance.mjs`, which matches no manifest entry and
+   * therefore no ownership. The completeness check below could not be
+   * satisfied for such a guard by ANY manifest edit: the very check that
+   * exists so a gated guard cannot go unowned was itself blind to a whole
+   * directory shape. Found while registering the first package-scoped guard.
+   */
+  const GUARD_PATH_IN_COMMAND = /(?:packages\/[a-zA-Z0-9._-]+\/)?scripts\/[a-zA-Z0-9/._-]+/g
+  const GUARD_PATH_AFTER_NODE =
+    /node (?:--test )?((?:packages\/[a-zA-Z0-9._-]+\/)?scripts\/[a-zA-Z0-9/._*-]+)/g
+
   const scriptTargets = new Map(
     Object.entries(packageJson.scripts).map(([name, body]) => [
       name,
-      [...body.matchAll(/scripts\/[a-zA-Z0-9/._-]+/g)].map((m) => m[0]),
+      [...body.matchAll(GUARD_PATH_IN_COMMAND)].map((m) => m[0]),
     ]),
   )
 
@@ -319,7 +335,7 @@ describe('routing completeness — every gated guard has an owner (#1626)', () =
 
       const targets = []
       for (const m of line.matchAll(/npm run ([a-z:._-]+)/g)) targets.push(...(scriptTargets.get(m[1]) ?? []))
-      for (const m of line.matchAll(/node (?:--test )?(scripts\/[a-zA-Z0-9/._*-]+)/g)) targets.push(m[1])
+      for (const m of line.matchAll(GUARD_PATH_AFTER_NODE)) targets.push(m[1])
 
       for (const target of targets) {
         // Expand a glob invocation to the files it actually runs. Left as a
@@ -356,6 +372,10 @@ describe('routing completeness — every gated guard has an owner (#1626)', () =
       ['scripts/dep-lint.mjs', 'backend_checks'],
       ['scripts/lint-wire-types.mjs', 'frontend_checks'],
       ['scripts/network-map-pins.test.mjs', 'sdk_checks'],
+      // Package-scoped, and the reason the patterns above carry an optional
+      // packages/<pkg>/ prefix. Pinned here so that prefix cannot be dropped
+      // without this walk visibly losing a guard it used to see (#2727).
+      ['packages/cli/scripts/sync-agent-guidance.mjs', 'sdk_checks'],
     ]) {
       assert.ok(
         all.some((i) => i.file === file && i.job === job && i.gated),

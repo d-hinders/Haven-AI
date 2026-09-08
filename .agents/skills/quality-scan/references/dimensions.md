@@ -289,8 +289,18 @@ node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{
 })'
 ```
 
-Historical figures, in the retired unit and kept as the record of what the old
-shape cost — do not re-derive them against today's tree:
+Historical figures, in the retired unit, kept as the record of what the old
+shape cost. Do not re-derive them against today's tree — the unit they are
+measured in no longer exists:
 
-chain reached 774,483 bytes through concatenating merges; the gate now
-duplicates, and the trend. On `893d74f6`: 92 docs;
+- [#2477](https://github.com/d-hinders/Haven-AI/issues/2477): one chain reached
+  **774,483 bytes** through concatenating merges, which is what put a ceiling
+  there in the first place.
+- On `893d74f6`: **92 docs**; `mcp-runtime-compatibility.md` at **63,961 units
+  of 65,536** (97.6%) one merge after its #2477 compaction — the doc
+  `release-bump.mjs` re-pins on every release; `05-agent-api-openapi.md`
+  carrying **31 duplicate entries among 66**.
+
+Those figures are anchored to a commit precisely because they are in the old
+unit. The duplicate count is the one that still transfers: duplicates are a
+defect in any shape, and the recipe above is how you find today's.

@@ -43,6 +43,22 @@ docs/contributing/ship-playbooks/README.md. -->
 - [ ] `area:docs`
 - [ ] `money-path`
 
+## Promotion checklist
+
+<!-- Owner decision 2026-09-08 (#2767). Two kinds of box, every one unticked when
+the epic is filed, each naming WHERE it is done (a dashboard, a runbook step, a
+repo variable, a QA scenario): (1) the operator steps the epic depends on — the
+sub-issues' operator-verify steps, collected here; (2) the epic's product
+verification — which runbook or QA scenario is run on `dev`, by whom, before
+promotion. `new-task` writes this section from the slices' operator-step notes.
+ship-next's closeout reports the epic "ready to close" only when every box here
+is ticked (`node scripts/ci/epic-promotion-checklist.mjs`), and otherwise lists
+the unticked ones; the epic stays open across the promotion until a human ticks
+the last box. -->
+
+- [ ] Operator step: <what> — done in <where>
+- [ ] Product verification on `dev`: <runbook or QA scenario> — run by <whom>
+
 ## Notes
 
 <!-- Shared context, invariants to preserve, money-path callouts, etc. -->

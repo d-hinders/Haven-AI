@@ -25,6 +25,7 @@ covers:
   - .claude/commands/**
 last-verified: "2026-09-08"
 verified:
+  - "#2767: EDITED, scope = ONE new paragraph in § *How shipping is governed*, above the \"deliberately not built\" line — the three finding dispositions (fixed / dropped under **Not filed** / filed above the bar), linking `ship-next` § *Filing bar* rather than restating the five checks, and the sentence that an issue filed to end a round is a finding against the session. Nothing else in this file was re-read."
   - "#2706: re-verified, NOT edited. Implicated by the coupling gate (advisory). The two claims this file makes about budget enforcement — \"over-budget REVERTS, it does not queue\" and the gas-estimation enforcement line — both still hold: the new funding-leg pre-check is a fail-fast CONVENIENCE before prepare, the enforcer remains the gate, and no queue exists on any rail. Scope: those two sentences. NOT re-verified: anything else in this file."
   - "#2716: EDITED, scope = five words in the half-green `latest` bullet of § *Releasing & publishing packages*. It gave \"re-run that job\" as THE remedy for an unmoved `latest`, which #2660 measured as insufficient in two cases: a whole-workflow re-run publishes nothing so nominates nothing, and re-running the failed job on a SUPERSEDED run would move `latest` backwards onto that run's older versions. The second case was written as \"cannot be re-run at all\" in the first draft, taken verbatim from #2660's closing comment; haven-reviewer caught that it contradicts the adjacent bullet's own mechanism, and the reconciled reading — the preserved nomination list is both why the job re-run works and why it is dangerous on a superseded run — is what all three files now say. Not false before this change and not made false by it — the drift is that this gravity file now reads as contradicting the canonical procedure it points to, which this same PR corrected in `.agents/skills/release/SKILL.md`. The manual forward-only `npm dist-tag add` path stays in `scripts/README.md` § *Manual fallback*; this is a pointer-shaped correction, not a second copy. Word-neutral to within one word, against a body already 55 words over the <=2,500 target. Scope: that ONE clause. NOT re-verified: anything else in this file. AGENTS.md was implicated by the same advisory coupling match and deliberately left untouched — its § *Releasing npm Packages* names the half-green state but asserts no remedy, so there is nothing there to correct."
   - "#2698: the GitHub-enforced workflow-tier statement re-read — CODEOWNERS now names direct migration implementation files, excluding migration tests. Scope: that sentence only."
@@ -391,6 +392,15 @@ per pull request is not a rule.
 `.claude/hooks/ship-next-guard.sh` can block PR creation without a recorded
 pass, but it is **opt-in** and enforces nothing until wired; **the rule does not
 depend on the hook.**
+
+**A finding has three dispositions, and filing is the hard one (#2767).** Every
+finding a session makes — its own, a reviewer's, a sweep's, a guard's — is **fixed
+in the PR**, **dropped with a reason** under the PR body's **Not filed** list, or
+**filed** only when it clears the five-check filing bar in
+[`ship-next` § *Filing bar*](.agents/skills/ship-next/SKILL.md#filing-bar-2767).
+Not fewer checks — fewer tickets filed too easily, and slightly larger PRs instead.
+Reviewers never file; an issue filed to end a round is a finding against the
+session, not a deliverable.
 
 Deliberately **not** built: a check asking whether `ship-next` was used —
 enforce outcomes, never tooling.

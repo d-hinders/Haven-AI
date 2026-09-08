@@ -8,6 +8,7 @@ covers:
   - .github/CODEOWNERS
 last-verified: "2026-09-08"
 verified:
+  - "#2767: EDITED, scope = the epic row of the two-sources table — `.github/ISSUE_TEMPLATE/loop-epic.md` gained a `## Promotion checklist` section and `ship-next`'s closeout now reports an epic ready to close only when every box in it is ticked (`scripts/ci/epic-promotion-checklist.mjs`), so the row says the epic outlives its sub-issues until then. Nothing else in this file was re-read."
   - "#2698: the money-path summary re-read — direct migration implementation files, not migration tests, require the CODEOWNERS review. Scope: that sentence only."
   - "#2640: the code-quality-loop pointer repointed at the quality-scan skill reference the method moved to. Scope: that one link."
   - "#2300: the \"Money-path?\" summary bullet names the hosted MCP tool surface (`packages/mcp-server/src/**`) beside the surfaces it already listed; the pointer to the authoritative JSON is unchanged. Scope: that bullet only."
@@ -34,7 +35,7 @@ The loop reads **GitHub Issues**. Two sources (see
 | Source | When | How to run |
 | --- | --- | --- |
 | **Standalone labeled issue** | a small, self-contained task | open an issue + add the **`code-quality`** label → run `ship-next` |
-| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>` |
+| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>`; its **Promotion checklist** (operator steps + product verification on `dev`, each an unticked box) keeps the epic open until a human ticks the last one — `ship-next` reports it ready to close only then ([#2767](https://github.com/d-hinders/Haven-AI/issues/2767)) |
 
 Issue state *is* the backlog state: an open issue with no PR and no live claim
 or work overlap is **ready**, an open issue with an open Haven PR is **in

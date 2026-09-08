@@ -12,6 +12,7 @@ covers:
   - .claude/commands/new-task.md
 last-verified: "2026-09-08"
 verified:
+  - "#2767: EDITED, scope = ONE new paragraph after the § *Merge policy A* bullet list (the three finding dispositions — fixed / dropped under **Not filed** / filed above the bar — linking `ship-next` § *Filing bar*, attributing the 195/199/141 figures to #2767's hand count rather than to \"the loop\" after haven-doc-reviewer flagged the unattributed form, and naming the promotion digest as the trend line) and ONE clause in the frontend bullet of that list, where a `nit` was \"filed as a follow-up with its screenshot\" and is now dropped under **Not filed** with it. Written against `.agents/skills/ship-next/SKILL.md`, `.agents/skills/new-task/SKILL.md` and `.github/ISSUE_TEMPLATE/loop-epic.md` as changed in this PR (all three in `covers:`). NOT re-verified: the ruleset inventory, the money-path safety model, the flake signatures, or the operator-verify paragraphs."
   - "#2698: the money-path safety model, migration-review guidance, ruleset inventory, and loop constraints re-read — CODEOWNERS now gates direct migration implementation `.ts` files only, excluding `__tests__/`. No other claim re-verified."
   - "#2636: EDITED, scope = ONE bullet in § *Reviewer-gated auto-merge* — the frontend addition said a UI finding \"even a nit-level one\" pauses the loop, which #2636 makes false; it now names `blocking`/`should-fix` as the pausing severities and points at the playbook for the table rather than restating it. Found by a repo-wide sweep for the blanket-pause wording, not by the issue's file list, which did not name this file: leaving it would have left two contradicting merge rules. #1968's clearing rule in the same bullet is unchanged and was re-read. Scope: that ONE bullet. NOT re-verified: the ruleset inventory, the money-path safety model, the flake signatures, or the verdict-line bullet below it."
   - "#2633: § *One-time GitHub setup*, step 3 (the ruleset inventory) REWRITTEN against the live API after epic #2632's owner steps O1/O2 landed on 2026-09-07 — three active rulesets now, not two: a new `dev`-only \"Dev merge\" (22449193) pins `dev` to squash, \"Haven automerge rules\" (18021461) dropped the up-to-date policy and *Design visual regression*, and \"Dev gate\" (18134280) gained *Design visual regression* and *Frontend browser smoke*. Adds the union/intersection composition rule, an effective-per-branch table (`dev` 15 contexts / not strict / squash only; `main` 19 / strict / merge commit only) and a paragraph on what strict-off does and does not change (`BEHIND` mergeable, `DIRTY` still blocking, no revert of intervening commits, semantic conflicts surfacing on the push-to-`dev` run). Verified with `for id in $(gh api repos/d-hinders/Haven-AI/rulesets --jq '.[].id'); do gh api .../rulesets/$id; done` plus `rules/branches/{dev,main}`; two counts in the first draft were wrong against that output (`main` carries two pull-request rules, not three) and are corrected from it. Scope: ONLY step 3. NOT re-verified: the money-path safety model, § *Merge policy A*, the flake signatures, or the operator-verify/closing-keyword paragraphs."
@@ -206,8 +207,9 @@ PR go through before handing it the whole queue.
   if the design-review / haven-reviewer UI pass raises a **`blocking`** or
   **`should-fix`** UX, copy, or design-system finding, the loop **pauses** even if
   CI is green. A **`nit`** does not pause since [#2636](https://github.com/d-hinders/Haven-AI/issues/2636)
-  — it is fixed in place when it is a one-line change, or filed as a follow-up with
-  its screenshot; the severity table and the reasoning are in that playbook, not here.
+  — it is fixed in place when it is a one-line change, or dropped under **Not filed**
+  with its screenshot (#2767); the severity table and the reasoning are in that
+  playbook, not here.
 
   Clearing that pause is the reviewer's call, not the user's (#1968) —
   fix, re-capture the screenshots, re-run the pass that raised it, and a clean
@@ -231,6 +233,18 @@ PR go through before handing it the whole queue.
   (migrations are irreversible in prod; `__tests__/` is not a schema change).
 - Auto-merge does not bypass anything: GitHub still requires all configured
   status checks. If CI fails, the merge simply doesn't happen.
+
+**What happens to a finding (#2767).** Every finding a session makes — its own,
+a reviewer's, a sweep's, a guard's — ends in one of three dispositions: **fixed in
+the PR**, **dropped with a reason** under the PR body's **Not filed** list, or
+**filed** only when it clears the five-check filing bar in
+[`ship-next` § *Filing bar*](../../.agents/skills/ship-next/SKILL.md#filing-bar-2767)
+— the bar is stated there once and not restated here. Filing is not a way to
+finish a round: #2767's hand count over the issues API on 2026-09-08 (not
+re-derivable from `git log`) was 195 issues filed against 199 PRs merged in the
+week to 2026-09-08, 141 of the 195 citing another issue filed the same week, and
+the promotion digest now prints the filed-per-closed ratio and the
+product share of merges every run so the trend is visible.
 
 ## Money-path safety model (read this)
 

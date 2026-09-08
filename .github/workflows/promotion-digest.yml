@@ -5,6 +5,12 @@ name: Pending promotion digest
 # dev → main promotion: it keeps a single always-current "📦 Pending promotion"
 # issue listing the commits on dev that aren't in prod (main) yet.
 # See docs/contributing/autonomous-pr-loop.md.
+#
+# Since #2767 the digest also prints two figures over the trailing 7 days, each
+# with the command that reproduces it (scripts/ci/promotion-digest-metrics.mjs):
+# issues filed per issue closed (target < 0.3) and product PRs as a share of
+# merges to dev (target > 60 %). They are the trend line for the filing bar
+# ship-next § Filing bar introduced; the rule is there, not here.
 
 on:
   push:
@@ -33,6 +39,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
       - name: Build and upsert the digest issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,10 +54,15 @@ jobs:
           list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev)
           ts=$(date -u +%FT%TZ)
 
+          # #2767: the two filing-bar figures, trailing 7 days, each with its
+          # reproducing command. Failure here must not lose the digest itself.
+          metrics=$(node scripts/ci/promotion-digest-metrics.mjs --days=7 --ref=origin/dev 2>&1) \
+            || metrics="_promotion-digest-metrics failed — see the run log_"
+
           if [ "$count" -eq 0 ]; then
-            body=$(printf '✅ **dev and main are in sync** — nothing awaiting promotion.\n\n_Updated %s by the promotion-digest workflow._' "$ts")
+            body=$(printf '✅ **dev and main are in sync** — nothing awaiting promotion.\n\n## Filing bar (#2767), trailing 7 days\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$metrics" "$ts")
           else
-            body=$(printf '**%s commit(s) on `dev` not yet in prod (`main`).** Promote with a `dev → main` PR.\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$count" "$list" "$ts")
+            body=$(printf '**%s commit(s) on `dev` not yet in prod (`main`).** Promote with a `dev → main` PR.\n\n%s\n\n## Filing bar (#2767), trailing 7 days\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$count" "$list" "$metrics" "$ts")
           fi
 
           # Self-heal the label so the workflow works even before labels.yml syncs.

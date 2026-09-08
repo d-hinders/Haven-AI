@@ -4,6 +4,8 @@ status: current
 covers:
   - .env.dev.example
   - .github/workflows/qa-dev.yml
+  - scripts/ci/qa-failure-issue.mjs
+  - .github/workflows/docs-audit.yml
   - .github/workflows/qa-live.yml
   - .github/workflows/dev-gate.yml
   - .claude/commands/qa-dev.md
@@ -22,6 +24,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
 last-verified: "2026-09-08"
 verified:
+  - "#2767: EDITED, scope = § *Automated failure reporting* ONLY — `qa-dev.yml` no longer files a `qa-dev money-flow failed (<date>)` issue whenever none is open (13 between 2026-09-01 and 2026-09-08, up to three a day — the first draft of this entry said \"per failing day, four in eight days\", which haven-doc-reviewer falsified against `docs/quality/issue-classification-2026-09.csv` and the count was then re-read from the issues API); it upserts ONE standing `qa-failure` issue titled `qa-dev money-flow failing` through `scripts/ci/qa-failure-issue.mjs` (body rewritten with the latest run, a comment per failure, reopened when it was closed on green), the three states driven by `scripts/ci/qa-failure-issue.test.mjs` with a recording `gh` stub, plus the one-time migration note (close the legacy dated issues once; the open lookup is by label, the closed lookup by title — a review finding); `covers:` gains that script, because this section now describes its behaviour and `covers-gaps.mjs` refused the undeclared claim, and `docs-audit.yml`, because the same sentence describes that workflow's one-standing-issue behaviour comparatively (haven-doc-reviewer derived-vs-declared). The triage instruction (re-dispatch a flake, bug-report a regression, close once green) is unchanged. NOT re-verified: the scenario tables, the post-deploy trigger section, the freshness gate, or Troubleshooting."
   - "#2738: the `x402-over-budget-rejected` scenario-table row REWRITTEN, and the leg with it. The money-flow gate had been red since `c3a81644` — the merge of #2706 (PR #2719, not #2714, which closed) — with 13 of 14 scenarios green and this one failing `expected HTTP 502 (chain-side policy refusal), got 403`. Not a testnet flake: the typed 403 pre-check is deliberate and refuses BEFORE prepare on a healthy budget read, so the caveat enforcer is not asked there and the leg was pinning the pre-#2719 shape. The naive fix — swap 502 for 403 — would have destroyed what the leg exists for, since the pre-check alone satisfying it means DELETING the on-chain enforcer leaves it green, which is precisely the 2026-08-25 false green #2016 re-based it for. The guarantee is now split across a PAIR and the row says so: delete the pre-check and this leg reddens (403 becomes 502); delete the enforcer and `over-budget-refused` reddens, since that leg still reaches the chain and still decodes `ERC20PeriodTransferEnforcer:transfer-amount-exceeded`. The leg also gained the within-budget CONTROL it never had — its erc7710 sibling has always had one — because a backend refusing every authorize is otherwise indistinguishable from working enforcement. Assertions mirror the sibling that already passes live: typed `error_code`, `remaining_atomic` equal to the live on-chain read, no signable intent. Mutation-proven, each dropped guard reddening the named case and no other — FIVE guards after review, not three. One guard, one named case PER LEG IT SERVES, which is not the same as one case: the fallback-read precondition lives in the shared `delegation-budget.ts` helper, so neutering it reddens the matching case in BOTH legs that consume it. The guards are: control-offered, control-dispatched-to-3009 (`signature_scheme: eip712_userop`, which the leg never checked and whose first version survived its own mutation), `error_code`, `remaining_atomic`, and the fallback-read precondition that an earlier commit on this branch deleted undisclosed; 20/20 green unmutated. Scope: THAT ONE TABLE ROW. The other scenario rows, the preflight/funding/env tables, seeding, the trigger/gating/freshness sections and the troubleshooting entries were NOT re-verified in this pass — including the `over-budget-refused` row above, which this change makes load-bearing for the enforcer proof and which I read but did not re-measure against dev."
   - "#2594: EDITED, scope = the `within-budget-settle` row's closing sentences only. The row described the leg's shape but not its precondition, and the precondition is what failed on 2026-09-06: four scenarios refused together because the backend reported `remaining_is_from_chain: false`, and this leg's line said it was \"refusing to build an over-budget amount\" — a use it never makes, since it checks a floor. The row now states which direction its budget read runs and why a fallback is unusable for it specifically. Written against `packages/qa-agent/src/lib/delegation-budget.ts` and `scenarios/within-budget-settle.ts` on this branch. Deliberately NOT recorded here: whether an unestablished precondition should fail or skip — that is an open owner decision on #2594 and this row would be the wrong place to pre-empt it. Scope: that one row. NOT re-verified: the other scenario rows, the QA identity/funding/secrets section, the layer map, the stable dev targets, or the troubleshooting entries."
   - "#2538: EDITED, scope = ONE new section, § \"Layer 3b — the cold-agent onboarding scenario\", placed after Layer 3 and before § Reading results. It records the second scenario on the qa-explore-ui cadence and links the rubric rather than restating it — the scoring bands live in `.claude/commands/qa-explore-agent-onboarding.md`, and a second copy of a rubric is how two copies start disagreeing about the same run. Names the scenario-specific reason it is owner-armed rather than a CI job: a cold agent cannot be cold inside this repository's own runner, so score 1 would stop meaning what it says. Scope: that section only. NOT re-verified: the layer map, the QA identity/funding/secrets section, the stable dev targets, the money-flow QA section, the automation and gating rules, or the troubleshooting entries."
@@ -978,12 +981,19 @@ had — a visible block turned into a false pass, which is worse than the gap.
 
 ### Automated failure reporting
 
-On failure, `qa-dev.yml` files a GitHub issue labeled **`qa-failure`** with the
-run URL and trigger (or comments on the existing open one, so a flapping chain
-doesn't spam new issues). Triage it via [Troubleshooting](#troubleshooting):
-re-dispatch to clear a transient testnet/RPC flake, or open a
-[`bug-reports/`](../bug-reports/) report for a real regression, then close the
-`qa-failure` issue once green.
+On failure, `qa-dev.yml` upserts **one standing** GitHub issue labeled
+**`qa-failure`** — title `qa-dev money-flow failing`, the way `docs-audit.yml`
+keeps one staleness issue — through `scripts/ci/qa-failure-issue.mjs`: the body
+is rewritten with the latest run URL and trigger, a comment records the failure
+in the thread's history, and a standing issue that was closed on green is
+**reopened** rather than replaced. Before #2767 the step filed a new `qa-dev money-flow failed (<date>)` issue whenever **no** `qa-failure` issue was open — the date was only in the title — so a failure after the previous one had been closed filed a sibling, several on one day, and a failing day with one already open filed nothing: 13 between 2026-09-01 and 2026-09-08, up to three a day (`gh issue list --label qa-failure --state all --search 'created:2026-09-01..2026-09-08'`, read 2026-09-08). The reopen is the half that lookup lacked. **One-time
+migration:** the open lookup is by label, so the first failure after #2767
+lands on whichever dated issue is still open and leaves any others orphaned —
+close every legacy `qa-failure` issue once and let the next failure create the
+standing one (the closed lookup is title-bound and will not reopen a dated one). Triage it via
+[Troubleshooting](#troubleshooting): re-dispatch to clear a transient
+testnet/RPC flake, or open a [`bug-reports/`](../bug-reports/) report for a real
+regression, then close the `qa-failure` issue once green.
 
 ### The dev → main freshness gate
 

@@ -6,9 +6,13 @@ covers:
   - .github/workflows/dev-gate.yml
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
+  - scripts/ci/promotion-digest-metrics.mjs
+  - scripts/release-bump.mjs
+  - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-09-07"
+last-verified: "2026-09-08"
 verified:
+  - "#2767: EDITED, scope = the `promotion-digest.yml` row of § *Workflows in this flow* and ONE new paragraph under § *What's in prod vs. pending* — the digest body now ends with two trailing-7-day figures (issues filed per issue closed, product share of `dev` merges) printed by `scripts/ci/promotion-digest-metrics.mjs`, each with its reproducing command, and `covers:` gains that script because the new paragraph describes its output (`covers-gaps.mjs` refused the undeclared claim), plus two pre-existing derived-vs-declared gaps haven-doc-reviewer found on this pass — `scripts/release-bump.mjs` (the offline forward-only refusal this doc describes) and `scripts/ci/qa-freshness.mjs` (the truth-maker behind the `dev-gate.yml` row's blocking conditions); the upsert-by-label mechanism and the pinned-issue rule are unchanged and were re-read against the workflow on this branch. Implicated by the BLOCKING half of the coupling gate (`contract: true`, covers the workflow). NOT re-verified: the branch lifetime section, the promotion procedure, `dev-gate.yml`, `release.yml` or `publish.yml` rows."
   - "#2638: EDITED, scope = ONE new paragraph under § *Promotion to production*, immediately above the prod-bar list — docs drift is swept at promotion rather than per PR, with the contract-vs-non-contract division of labour stated and the dispositions themselves left to `promoting-dev-to-main.md` rather than restated here. Contract doc, so the coupling gate implicated it; this is a real re-read of that section, not a stamp. Scope: that ONE paragraph. NOT re-verified: the branch model, branch lifetime, the issue-state table, the merge-method rules or the release wiring."
   - "#2647: EDITED, scope = the `publish.yml` bullet under § *Promotion to production* and its row in the workflow table. Both said the promotion \"publishes ... then moves `latest`\" as one act. Since #2647 the tag move is a separate `main`-only `promote-tags` job — it has to be, because npm Trusted Publishing authorises `npm publish` only, so the move needs a long-lived token, and a GitHub Environment (the only `main`-only scoping that exists) is job-level. The operative consequence for this doc, which is what the edit adds, is that a promotion can now be HALF GREEN: published under `alpha`, `latest` unmoved. That is not hypothetical — it is the 0.1.35-alpha.0 outcome, where all five tag moves failed E401. Both passages re-read against `.github/workflows/publish.yml` on this branch. NOT re-verified: the branch model, the dev-gate rules, the merge-method rules, the issue-state table, the branch-lifetime section, the revert callout or the prod-bar list."
   - "#2633: EDITED, scope = two passages under § *Promotion to production*. (a) The \"PRs into `dev` are untouched\" consequence was FALSE as of 2026-09-07 — it said `dev`'s ruleset allows all three merge methods, and epic #2632's owner step O1 added a `dev`-only \"Dev merge\" ruleset pinning it to squash; rewritten to name that ruleset and to state why neither restriction can live in the shared `main`+`dev` one (merge methods intersect, so squash-only there would leave `main` with no permitted method). (b) A new paragraph names the prod bar as a list — 19 required contexts: the 15 shared plus `gate`, `qa-freshness`, Design visual regression and Frontend browser smoke, the last two required on `main` only since O2 — pointing at the inventory in `autonomous-pr-loop.md` for the numbers rather than duplicating them. Both verified against `gh api repos/d-hinders/Haven-AI/rulesets`. Scope: those two passages. NOT re-verified: the branch model, the branch-lifetime section, the issue-state table, the release wiring or the revert callout."
@@ -308,13 +312,20 @@ would flatten away exactly the commit being synced. First done as #1231.
   a new number. It's **pinned** rather than recreated — a bot-maintained tracker
   wants a stable identity, and pinning is what keeps it visible. Leave it open.
 
+  Since [#2767](https://github.com/d-hinders/Haven-AI/issues/2767) the same body
+  ends with a **Filing bar** section: two figures over the trailing seven days,
+  each followed by the command that reproduces it — issues filed per issue
+  closed (target < 0.3) and product PRs as a share of merges to `dev` (target
+  > 60 %). They are the trend line for `ship-next` § *Filing bar*; the rule
+  lives there, the digest only measures it.
+
 ## Workflows in this flow
 
 | Workflow | Trigger | Does |
 |---|---|---|
 | `dev-gate.yml` | PR into `main` | `gate`: blocks anything but `dev`/`hotfix/*`. `qa-freshness`: blocks unless a green money-flow QA run covers the promoted money-path code; a money-path `hotfix/*` blocks outright ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)). Bypass: `qa-override`. |
 | `release.yml` | push to `main` | cuts the `prod-*` Release |
-| `promotion-digest.yml` | push to `main` + weekly + manual | upserts the pending-promotion issue |
+| `promotion-digest.yml` | push to `main` + weekly + manual | upserts the pending-promotion issue; since [#2767](https://github.com/d-hinders/Haven-AI/issues/2767) the body also carries two trailing-7-day figures with their reproducing commands — issues filed per issue closed and product PRs as a share of `dev` merges (`scripts/ci/promotion-digest-metrics.mjs`) |
 | `publish.yml` | push to `main` | **prod channel**: publishes packages whose version isn't yet on npm, under the tag its version implies (`alpha`/`latest`), then hands them to the `promote-tags` job, which moves `latest` onto each one (#2536, split out by [#2647](https://github.com/d-hinders/Haven-AI/issues/2647)) so a bare `npm install`/`npx` gets the newest release. Two jobs, two outcomes: publish can succeed while the tag move fails |
 | `publish.yml` | push to `dev` | **dev channel** ([#2421](https://github.com/d-hinders/Haven-AI/issues/2421)): publishes a `0.0.0-dev.<ts>.<sha>` snapshot of all five packages under the `dev` tag. Same file, by necessity — npm trusted publishing is pinned to the workflow filename. Runbook: [`../operations/package-dev-channel.md`](../operations/package-dev-channel.md) |
 

@@ -1,7 +1,8 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — process playbook
+covers:
+  - packages/backend/src/openapi/**
 last-verified: "2026-08-29"
 ---
 

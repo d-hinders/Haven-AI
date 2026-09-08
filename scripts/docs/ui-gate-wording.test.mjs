@@ -99,9 +99,7 @@ test('the corrected form is still caught once its severity qualifier is removed'
 
 // ── Front-matter is not scanned ────────────────────────────────────────────
 
-test('a `last-verified` chain entry quoting the retired wording is not a violation', () => {
-  // Real shape: #2636's own chain entries describe the wording they retired,
-  // and will keep doing so forever.
+test('front-matter is not scanned even when it quotes retired wording', () => {
   const raw =
     '---\nowner: "@d-hinders"\nstatus: current\ncovers: []\n' +
     'last-verified: "2026-09-07" # #2636: EDITED — "a finding from either pauses ' +
@@ -129,9 +127,9 @@ test('flattenWithMap maps each flattened index back to its source index', () => 
   assert.equal(src.slice(map[flat.indexOf('route')], map[flat.indexOf('route')] + 5), 'route')
 })
 
-test('a body that quotes a chain entry is filtered by substring', () => {
+test('a body quotation of retired wording remains a violation', () => {
   const raw = `${FM}For example: \`last-verified: "2026-09-07" # #2636: a finding from either pass pauses auto-merge\` is chain text.\n`
-  assert.deepEqual(scanText('doc.md', raw), [])
+  assert.equal(scanText('doc.md', raw).length, 1)
 })
 
 // ── Segmentation and helpers ───────────────────────────────────────────────

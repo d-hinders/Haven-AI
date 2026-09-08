@@ -1,7 +1,8 @@
 ---
 owner: "@AntonioSaaranen"
 status: current
-covers: []  # index and naming convention for the shard directory — it describes how shards are written, not any code path
+covers:
+  - docs/regulatory/casp-changelog/**
 last-verified: "2026-08-29"
 ---
 

@@ -1,7 +1,8 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — process playbook
+covers:
+  - docs/product/**
 last-verified: "2026-09-08"
 ---
 

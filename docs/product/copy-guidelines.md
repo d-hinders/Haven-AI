@@ -552,10 +552,8 @@ out and the live-copy figure is **0**: append
 ```
 
 Both numbers are stated because the first one is what a future reader actually
-gets, and a lone "0" here would make them think the sweep had regressed. A
-`last-verified` chain naming the term it retired is the chain doing its job;
-it is not residue, and it is why the retired phrase can never reach zero under
-the unfiltered command again.
+gets, and a lone "0" here would make them think the sweep had regressed. The
+remaining occurrences are historical records, not live product copy.
 
 Positive control: `grep -rn "connector command" packages/frontend/public README.md`
 returns 9 both before and after, so the 0 above means the sweep landed rather

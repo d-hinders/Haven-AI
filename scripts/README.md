@@ -263,9 +263,10 @@ both** — this is not optional and not conditional:
 
 1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
    Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),
-   so do not copy those four numbers by hand. Still yours: prepend an entry to the `verified:` list of
-   `last-verified` saying what the release carries and that no tool, capability,
-   or version-skew surface moved. See *The manifest table writes itself* below.
+   so do not copy those four numbers by hand. Still yours: re-read the table,
+   update its `last-verified` date, and record in the release PR and shard what
+   the release carries and that no tool, capability, or version-skew surface
+   moved. See *The manifest table writes itself* below.
 2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
    shard, named for the **version** and not the PR number (#1789): the gate
    blocks the PR until the shard exists, so the shard has to be written *before*

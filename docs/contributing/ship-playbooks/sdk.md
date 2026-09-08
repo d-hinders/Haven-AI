@@ -1,7 +1,12 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — process playbook
+covers:
+  - packages/sdk/**
+  - packages/signer/**
+  - packages/mcp/**
+  - packages/connect/**
+  - packages/cli/**
 last-verified: "2026-08-19"
 ---
 

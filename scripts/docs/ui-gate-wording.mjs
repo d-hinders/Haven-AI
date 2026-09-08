@@ -39,15 +39,8 @@
 //
 // ## What it deliberately does not read
 //
-// **Front-matter.** A `last-verified` chain records what a past PR changed, so
-// it quotes the retired wording by design and forever — `frontend.md`'s chain
-// alone carries several such quotes. The chain is stripped before scanning
-// (newline-for-newline, so reported line numbers still point at the real line),
-// which is strictly more reliable than the substring filter the issue's
-// prototype sweep used: that filter is sentence-scoped too, so it misses a
-// chain entry whose own sentence happens not to contain the words
-// `last-verified` or `Prior:` — the residue that prototype printed.
-// In-body quotations of a chain are still filtered by substring.
+// **Front-matter.** It is metadata, not user-facing prose. The scanner blanks
+// it newline-for-newline so reported body line numbers remain accurate.
 //
 // ## Residue
 //
@@ -88,8 +81,7 @@ export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'docs', 'ui-gate-wording
  * `requires` are ALL matched against the sentence with its whitespace
  * flattened, so word order does not matter and a hard wrap between any two
  * words of a phrase is invisible to the match. `excludes` are the forms that
- * are legitimate: the corrected `blocking`/`should-fix` wording, and text that
- * is quoting a `last-verified` chain inside a doc body.
+ * are legitimate: the corrected `blocking`/`should-fix` wording.
  */
 export const RULES = [
   {
@@ -133,13 +125,6 @@ export const RULES = [
     excludes: [],
   },
 ]
-
-/**
- * Sentences that are quoting the `last-verified` chain from inside a doc BODY.
- * Front-matter is stripped before this ever applies; this is for prose that
- * pastes a chain entry as an example.
- */
-const CHAIN_QUOTE = [/last-verified/i, /\bPrior:/]
 
 /**
  * The escape for a sentence that QUOTES the retired wording in order to explain
@@ -390,7 +375,6 @@ export function scanText(file, raw) {
   for (const s of sentences(body)) {
     const { flat, map } = flattenWithMap(s.text)
     if (flat.length === 0) continue
-    if (CHAIN_QUOTE.some((re) => re.test(flat))) continue
     for (const rule of RULES) {
       // Rules match the MARKUP-STRIPPED sentence, and the reported position is
       // mapped from THAT SAME text (#2671). The previous code searched the
@@ -556,8 +540,7 @@ async function main() {
         'are hard-wrapped (#2657). Correct the sentence rather than baselining it; ' +
         'since #2747 `node scripts/docs/ui-gate-wording.mjs --update` REFUSES to raise the ' +
         'baseline, so it is not a way past this: run it after a genuine reduction to ' +
-        'tighten the ratchet. A `last-verified` chain entry never needs one — ' +
-        'front-matter is not scanned.\n',
+        'tighten the ratchet. Front-matter is not scanned.\n',
     )
     process.exit(1)
   }

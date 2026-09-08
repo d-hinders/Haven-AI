@@ -1,7 +1,8 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - docs/product/README.md
 last-verified: "2026-09-08"
 ---
 

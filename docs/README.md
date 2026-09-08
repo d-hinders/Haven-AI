@@ -1,7 +1,8 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - docs/contributing/docs-quality-system.md
 last-verified: "2026-09-08"
 ---
 

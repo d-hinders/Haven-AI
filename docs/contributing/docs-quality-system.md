@@ -366,8 +366,8 @@ no unresolvable relative link survives.
 **Copy-lint does not scan the served copies, deliberately.** Its `SCAN_FILES`
 entries must exist in a checkout (it fails on a missing target, by design), and
 these files exist only after a build. The sources are governed by this system —
-front matter, `covers:`, the coupling gate and the `last-verified` chain — which
-is the stronger instrument for a document anyway.
+front matter, `covers:`, and the coupling gate — which is the stronger
+instrument for a document anyway.
 
 ## Check layers
 
@@ -395,13 +395,31 @@ report on every PR or auto-merge deadlocks waiting for a run that never happens
 setup). Add **Docs front-matter & agent skills** to the "Haven automerge rules"
 ruleset for the blocking column above to be true.
 
-The chain check runs **inside that same required job** rather than as a job of
-its own. A new job would be a new check name, and a check name that is not in
-the ruleset blocks nothing — so the rule would have started enforcing on the
-day someone remembered to edit the ruleset, not the day it merged. The cost of
-folding it in is that its failures are attributed to a job whose name says
-"front-matter"; the failure message names the doc and the dropped references,
-so nobody has to guess which of the three spoke.
+The archive-integrity probe runs with the docs unit tests rather than as a
+required workflow job. It verifies the hash-pinned historical archive and that
+no current front matter reintroduces a retired `verified:` block; the required
+job remains focused on current documentation contracts.
+
+### Empty-coverage disposition (#2681)
+
+The #2678 baseline counted eleven governed `covers: []` docs. One of those,
+`docs/contributing/code-quality-loop.md`, was folded into the quality-scan
+reference and archived by #2640 before this retirement landed; the remaining
+ten are current and now declare the real surface each document references.
+
+| Document | Disposition | Destination / declared surface |
+| --- | --- | --- |
+| `docs/contributing/code-quality-loop.md` | fold + archive | `.agents/skills/quality-scan/references/discovery-method.md` (#2640) |
+| `ABOUT_HAVEN.md` | cover | `docs/product/README.md` |
+| `docs/README.md` | cover | `docs/contributing/docs-quality-system.md` |
+| `docs/contributing/ship-playbooks/backend.md` | cover | `packages/backend/src/openapi/**` |
+| `docs/contributing/ship-playbooks/docs.md` | cover | `scripts/docs/**` |
+| `docs/contributing/ship-playbooks/frontend.md` | cover | `docs/product/**` |
+| `docs/contributing/ship-playbooks/money.md` | cover | `.github/money-path-globs.json`, `docs/regulatory/casp-risk-guardrails.md` |
+| `docs/contributing/ship-playbooks/sdk.md` | cover | published package source directories |
+| `docs/operations/demo-agent-purchase-runbook.md` | cover | demo merchant and reporting source directories |
+| `docs/product/agent-passport.md` | cover | `docs/architecture/11-agent-passport-schema.md` |
+| `docs/regulatory/casp-changelog/README.md` | cover | `docs/regulatory/casp-changelog/**` |
 
 Until [#1023](https://github.com/d-hinders/Haven-AI/issues/1023) these ran as a
 hard gate only inside `ship-next`, which made the canonical workflow stricter

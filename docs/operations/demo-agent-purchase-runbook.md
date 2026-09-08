@@ -1,7 +1,9 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # presentation runbook — narrative, no direct code mirror
+covers:
+  - packages/demo-merchant-mcp/**
+  - packages/backend/src/modules/reporting/**
 last-verified: "2026-09-05"
 ---
 

@@ -1,7 +1,9 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — process playbook
+covers:
+  - .github/money-path-globs.json
+  - docs/regulatory/casp-risk-guardrails.md
 last-verified: "2026-08-25"
 ---
 

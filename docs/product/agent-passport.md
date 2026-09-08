@@ -1,7 +1,8 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — the schema doc carries the code mapping
+covers:
+  - docs/architecture/11-agent-passport-schema.md
 last-verified: "2026-08-27"
 ---
 

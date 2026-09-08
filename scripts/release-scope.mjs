@@ -133,6 +133,24 @@ function bundledSources(pkg) {
       if (!abs.startsWith(REPO_ROOT)) continue // out-of-tree (node_modules) — not our source
       sources.add(relative(REPO_ROOT, abs).split('\\').join('/'))
     }
+
+    // THE ENTRY POINT IS NOT ALWAYS IN ITS OWN SOURCEMAP, and the exception is
+    // the dangerous one. `sources` lists files that contributed MAPPED OUTPUT, so
+    // an entry that is a pure re-export barrel — `export * from './x'`, emitting
+    // no code of its own — is absent. Measured on this repo: sdk, signer, mcp and
+    // cli all omit their src/index.ts; connect includes it, because that one has
+    // real code in it. Relying on `sources` alone would therefore classify a
+    // change to @haven_ai/sdk's public export surface as unshipped, which is the
+    // single most release-relevant file in the package.
+    //
+    // tsup writes one bundle per entry, named for it, so dist/<name>.js.map pairs
+    // with src/<name>.ts. Add that back explicitly. `existsSync` keeps this from
+    // inventing a source for a bundle whose entry is named differently.
+    const bundle = map.replace(/\.(c?js)\.map$/, '')
+    if (bundle !== map) {
+      const entry = `packages/${pkg.dir}/src/${bundle}.ts`
+      if (existsSync(join(REPO_ROOT, entry))) sources.add(entry)
+    }
   }
   return sources
 }

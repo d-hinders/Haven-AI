@@ -226,6 +226,48 @@ test('a bundled source file ships; an unbundled one is unresolved, not silently 
   assert.equal(status, 1, 'an unresolved file must not exit 0 — a green run would be quoted as a clean measure')
 })
 
+// --- the entry point, which its own sourcemap does not always list -----------
+//
+// `sources` lists files that contributed MAPPED OUTPUT, so a pure re-export
+// barrel entry emits nothing and is absent from its own map. Measured on this
+// repo: sdk, signer, mcp and cli all omit src/index.ts; connect includes it,
+// because that one has code of its own. Reading `sources` alone would classify a
+// change to a package's public export surface as unshipped.
+
+test('the bundle entry ships even when absent from its own sourcemap', () => {
+  const { status, stdout } = runScope({
+    base: {
+      // A barrel that contributes no mapped output — sources names only helper.
+      'packages/alpha/dist/index.js.map': sourcemap(['../src/helper.ts']),
+    },
+    changes: { 'packages/alpha/src/index.ts': "export * from './helper'\n" },
+    args: ['--json'],
+  })
+  assert.equal(status, 0, 'the entry must classify cleanly, not land in unresolved')
+  assert.deepEqual(shippedFiles(stdout), ['packages/alpha/src/index.ts'])
+})
+
+test('MUTATION: dropping the entry-point recovery sends the entry to unresolved', () => {
+  const { status, stdout } = runScope({
+    base: { 'packages/alpha/dist/index.js.map': sourcemap(['../src/helper.ts']) },
+    changes: { 'packages/alpha/src/index.ts': "export * from './helper'\n" },
+    mutate: (src) => src.replace('if (existsSync(join(REPO_ROOT, entry))) sources.add(entry)', ''),
+    args: ['--json'],
+  })
+  assert.equal(status, 1, 'without the recovery the entry is unclassifiable')
+  assert.deepEqual(shippedFiles(stdout), [], 'and it would NOT have been counted as shipped')
+})
+
+test('the entry recovery does not invent a source for a bundle with no matching src file', () => {
+  const { stdout } = runScope({
+    base: { 'packages/alpha/dist/extra.js.map': sourcemap(['../src/helper.ts']) },
+    changes: { 'packages/alpha/src/helper.ts': 'export const h = 2\n' },
+    args: ['--json'],
+  })
+  // src/extra.ts does not exist, so nothing is fabricated for dist/extra.js.
+  assert.deepEqual(shippedFiles(stdout), ['packages/alpha/src/helper.ts'])
+})
+
 // --- refusals: the instrument must be able to say no -------------------------
 
 test('refuses a package with no dist rather than reporting an empty shipped set', () => {

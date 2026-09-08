@@ -624,8 +624,10 @@ Sequence:
    sequential calls stay fresh reads), and `createX402Intent` accepts the
    already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
    successful preflight makes exactly ONE call per Haven surface — catalog,
-   agent, allowances, `POST /x402` — enforced by round-trip-count unit tests
-   (deterministic, unlike wall-clock); per-step wall-clock telemetry rides the
+   agent, allowances, `POST /x402` — pinned by
+   [`packages/mcp-server/src/tools.test.ts`](../../../packages/mcp-server/src/tools.test.ts)
+   ("ROUND-TRIP BUDGET", #1348), which counts every stubbed fetch per surface;
+   per-step wall-clock telemetry rides the
    promotion-gating QA scenario's pass detail.
 4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
    this IS the guided path, so there is no `cap_warning`

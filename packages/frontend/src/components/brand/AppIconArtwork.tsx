@@ -62,7 +62,7 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
   const { stroke, uprightHeight, crossbarWidth, badgeHeight, markLift } = appIconGeometry(size, badge !== null)
   // Height-bound normally; width-bound for a long environment name
   // ("pull-request-preview"): ~0.7 em per glyph plus 0.08 em of tracking,
-  // which at twenty characters is a fifth of the line, held inside 90% of
+  // which at twenty characters is a tenth of the line, held inside 90% of
   // the width. Pixel-identical to a plain height bound for "DEV" at all
   // three sizes; the pixel test renders the long case.
   const badgeFontSize = badge

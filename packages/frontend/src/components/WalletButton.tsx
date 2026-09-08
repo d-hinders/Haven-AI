@@ -157,8 +157,10 @@ interface PopoverProps {
    *
    * No semantic token. There is no `--v2-info` family to reach for, and
    * `--v2-warning` is scoped in `design-system.md` to "402 Payment Required,
-   * pending review" — spending amber here would both misuse it and train users
-   * to ignore it. Nothing has failed and nothing is blocked: the marker is a
+   * pending review" and to environment identity — the `DEV` chip and the dev
+   * install's icon badge (widened by #2729) — none of which this marker is;
+   * spending amber here would both misuse it and train users to ignore it.
+   * Nothing has failed and nothing is blocked: the marker is a
    * LOCAL hint, so a miss costs a ceremony the authenticator resolves from its
    * own credential lookup (delegation-rail-security-model.md §6). The weight
    * this state needs is carried structurally — a rule, an icon, a named fact —

@@ -332,6 +332,18 @@ describe('cross-package source imports route the importing job (#2743)', () => {
   // package's `src/`, a change to the imported file must route the importing
   // package's job -- otherwise the pin lives in a suite that does not run.
   //
+  // SCOPE, so the describe name is not over-read: this catches statically
+  // written relative `from '.../<pkg>/src/...'` imports originating under
+  // packages/*/src. It does NOT see require()/dynamic import(), bare package
+  // specifiers, targets outside src/, importers outside packages/*/src, or
+  // READ-coupling — a file that opens another package's file rather than
+  // importing it. That last one is #2727's own shape
+  // (packages/cli/scripts/sync-agent-guidance.mjs reads agent-guidance.ts), so
+  // this block would not have caught the defect that preceded it; the
+  // generated-copy block below covers the read-coupled copies, and every other
+  // shape above is routed today by dependency fan-out or by the file's own
+  // surface rule. The class closed here is the import-shaped subset.
+  //
   // Deliberately mechanism-agnostic. It asserts the classifier's OUTPUT, not
   // that a manifest entry exists, because there are two legitimate ways to
   // satisfy it and only one of them is this manifest:

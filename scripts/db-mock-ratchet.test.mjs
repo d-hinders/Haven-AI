@@ -106,3 +106,80 @@ test('no phantom baseline entries — every entry names a file the scan still co
       'iterates the baseline). Run: node scripts/db-mock-ratchet.mjs --update',
   )
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The cases above test the counting and the ratchet arithmetic. Neither
+// reaches `main()`, where this guard's two refusals live: growth past the
+// baseline, and `--update` declining to RAISE it. Those are the lines that
+// decide whether a pull request lands, and the exact shape that survived
+// mutation elsewhere in this repo with a green suite (#2690).
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const SCANNED = 'packages/backend/src/x.test.ts'
+const withMocks = (n) =>
+  `vi.mock('../db.js')\n` + Array.from({ length: n }, () => 'mockResolvedValueOnce()').join('\n')
+
+test('CLI: growth past the baseline exits non-zero and names the file', () => {
+  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SCANNED]: withMocks(3),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /positional DB mocking grew/)
+  assert.match(out, /x\.test\.ts/)
+})
+
+test('CLI: a tree at or under the baseline exits 0', () => {
+  // The control: without it the case above passes against a ratchet that
+  // refuses everything.
+  const { status } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SCANNED]: withMocks(1),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } }),
+    },
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => {
+  // The second clause is checked, not just claimed (review nit): `readBack`
+  // reads the fixture file before the harness removes the root, so "writes
+  // nothing" means the baseline on disk is byte-identical to what went in.
+  // A shrink-only ratchet whose `--update` quietly accepts growth is not a
+  // ratchet. This refusal lives only in `main()`.
+  const before = JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } })
+  const { status, out, wrote } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: { [SCANNED]: withMocks(3), 'packages/backend/db-mock-baseline.json': before },
+    readBack: ['packages/backend/db-mock-baseline.json'],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote['packages/backend/db-mock-baseline.json'], before)
+})
+
+test('CLI: `--update` DOES write when the count fell', () => {
+  // `baseline written` is a console line, not evidence: a `writeBaseline` that
+  // resolves its path against the wrong root, or swallows an error, prints it
+  // and exits 0 having written nothing -- and `npm run lint:db-mocks:update`
+  // becomes a no-op while the ratchet drifts. Read the file back instead.
+  const { status, out, wrote } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [SCANNED]: withMocks(1),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 5 } }),
+    },
+    readBack: ['packages/backend/db-mock-baseline.json'],
+  })
+  assert.equal(status, 0)
+  assert.match(out, /baseline written/)
+  assert.deepEqual(JSON.parse(wrote['packages/backend/db-mock-baseline.json'])[SCANNED].positional, 1)
+})

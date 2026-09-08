@@ -393,3 +393,60 @@ test('ceiling: the committed JSON matches the tree (bootstrap parity, shrink-onl
     `inline-SQL call sites grew past the committed ceiling (${gauge.callSites} > ${ceiling.total})`,
   )
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The cases above test the exemption parsing and the call-site gauge. The
+// refusals live in `main()`: the inline-SQL ceiling, and `--update` declining
+// to raise it. Neither is reachable from an exported function.
+//
+// This guard needs three things the others do not, and each is a real part of
+// its contract rather than harness noise: the dependency-cruiser package, its
+// root config, and the committed ceiling file.
+
+import { readFileSync } from 'node:fs'
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const CRUISER_CONFIG = readFileSync(new URL('../.dependency-cruiser.cjs', import.meta.url), 'utf8')
+const CEILING = 'packages/backend/dep-lint-callsite-ceiling.json'
+const SRC = 'packages/backend/src/a.ts'
+const inlineSql = (n) =>
+  Array.from({ length: n }, (_, i) => `export const q${i} = db.query(\`SELECT ${i}\`)`).join('\n')
+
+const base = (files) => ({
+  linkNodeModules: true,
+  files: { '.dependency-cruiser.cjs': CRUISER_CONFIG, ...files },
+})
+
+test('CLI: inline SQL above the ceiling exits non-zero', () => {
+  const { status, out } = runGuard(
+    'dep-lint.mjs',
+    base({ [SRC]: inlineSql(3), [CEILING]: JSON.stringify({ total: 0, files: {} }) }),
+  )
+  assert.equal(status, 1)
+  // The refusal LINE, not the word "ceiling" — that word is printed on every
+  // run, pass or fail, and also appears in an ENOENT stack when the ceiling
+  // JSON is missing. Measured: `/ceiling/i` was satisfied by a crashed
+  // fixture, so the test would have stayed green on a guard that never
+  // refused anything.
+  assert.match(out, /inline-SQL call sites grew past the ceiling: 3 > 0/)
+})
+
+test('CLI: a tree at or under the ceiling exits 0', () => {
+  // The control: without it the case above passes against a guard that
+  // refuses everything.
+  const { status } = runGuard(
+    'dep-lint.mjs',
+    base({ [SRC]: 'export const x = 1\n', [CEILING]: JSON.stringify({ total: 0, files: {} }) }),
+  )
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update-ceiling` refuses growth rather than writing it', () => {
+  const { status, out } = runGuard('dep-lint.mjs', {
+    ...base({ [SRC]: inlineSql(3), [CEILING]: JSON.stringify({ total: 0, files: {} }) }),
+    args: ['--update-ceiling'],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update-ceiling refuses to RAISE the ceiling/)
+})

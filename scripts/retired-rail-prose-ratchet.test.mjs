@@ -150,3 +150,51 @@ test('every phrase regex matches its own canonical example', () => {
     assert.ok(re.test(examples[id]), `phrase "${id}" does not match its own example`)
   }
 })
+
+// --- The CLI path (#2721, epic #2720)
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const SRC = 'packages/backend/src/z.ts'
+const BASE = 'packages/retired-rail-prose-baseline.json'
+const JUST = 'packages/retired-rail-prose-justifications.json'
+
+test('CLI: prose growth past the baseline exits non-zero and names the file', () => {
+  const { status, out } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SRC]: '// the row stays readable\n// and this one stays readable too\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 1 } }),
+      [JUST]: '{}',
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /retired-rail prose grew/)
+  assert.match(out, /z\.ts/)
+})
+
+test('CLI: a tree at the baseline exits 0', () => {
+  const { status } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SRC]: '// the row stays readable\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 1 } }),
+      [JUST]: JSON.stringify({ [SRC]: { 'stays-readable': { category: 'x', note: 'y' } } }),
+    },
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
+  const { status, out } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [SRC]: '// stays readable\n// stays readable\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 1 } }),
+      [JUST]: '{}',
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+})

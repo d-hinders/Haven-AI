@@ -245,6 +245,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/test-support/guard-cli.mjs'],
+    expect: [],
+    kind: CONTRACT,
+    why:
+      'The harness the guard self-tests drive their CLI through (#2721). It routes NOWHERE ' +
+      'itself — the classifier reports every flag false — and is covered today only because ' +
+      'ci_config_checks and frontend-copy-lint.yml are unconditional and three of its consumers ' +
+      'run there. Recorded for the same reason .github/root-guard-ownership.json is: the ' +
+      'coverage is incidental, and it evaporates silently the day a consumer moves off an ' +
+      'unconditional job (#1624).',
+  },
+  {
     files: ['scripts/lint-migration-constraint-scope.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

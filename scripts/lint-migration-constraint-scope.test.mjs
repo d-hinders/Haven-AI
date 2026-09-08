@@ -79,3 +79,48 @@ test('POSITIVE CONTROL: the extractor finds nothing in SQL that has no lookup', 
   // every "unscoped === false" assertion above by finding nothing at all.
   assert.deepEqual(constraintLookups('ALTER TABLE t ADD COLUMN c text;'), [])
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The fixtures above test `constraintLookups`/`isScoped`. Both of this guard's
+// refusals live in `main()` — an unscoped lookup, and the zero-lookups control
+// that fires when the extractor has drifted from the SQL. Neither is reachable
+// from an exported function, and this guard is the one that shipped green
+// under `isScoped() → return true` (#2704).
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const MIG = 'packages/backend/src/db/migrations/001_x.ts'
+
+test('CLI: an unscoped lookup exits non-zero and names file and line', () => {
+  const { status, out } = runGuard('lint-migration-constraint-scope.mjs', {
+    files: {
+      [MIG]: `export const version = '001_x'\nconst sql = \`\n  IF NOT EXISTS (\n    SELECT 1 FROM pg_constraint WHERE conname = 'c'\n  ) THEN\n\`\n`,
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /unscoped pg_constraint lookup/)
+  assert.match(out, /001_x\.ts:/)
+})
+
+test('CLI: a conrelid-anchored lookup exits 0', () => {
+  const { status, out } = runGuard('lint-migration-constraint-scope.mjs', {
+    files: {
+      [MIG]: `export const version = '001_x'\nconst sql = \`\n  IF NOT EXISTS (\n    SELECT 1 FROM pg_constraint c WHERE c.conname = 'c' AND c.conrelid = 't'::regclass\n  ) THEN\n\`\n`,
+    },
+  })
+  assert.equal(status, 0)
+  assert.match(out, /are schema- or relation-scoped/)
+})
+
+test('CLI: the zero-lookups control refuses rather than reporting a clean repo', () => {
+  // The failure this guard would have if its regex ever drifted from the SQL:
+  // a scan that matches nothing looks exactly like a scan that found nothing
+  // wrong. A migration set with no `pg_constraint` lookup at all must be
+  // refused as not credible, not reported green.
+  const { status, out } = runGuard('lint-migration-constraint-scope.mjs', {
+    files: { [MIG]: `export const version = '001_x'\nconst sql = \`ALTER TABLE t ADD COLUMN c text\`\n` },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /found ZERO pg_constraint lookups/)
+})

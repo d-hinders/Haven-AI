@@ -3,8 +3,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, chainAnomalies, checkEntriesVerbatim, normalizeEntryText, chainNoteBody, MAX_CHAIN_BYTES, WARN_CHAIN_BYTES, chainLineBytes, chainSizeWarnings, reportChainSizeWarnings, resolveWarnBytes } from './chain-integrity.mjs'
+import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, checkEntriesVerbatim, normalizeEntryText, chainNoteBody, readChain, entriesRefs, checkChainEntries } from './chain-integrity.mjs'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -164,57 +165,6 @@ test('headOfEntry reads the leading ref CLUSTER, not refs cited in prose', () =>
   assert.equal(headOfEntry('no ref'), null)
 })
 
-test('a doubled chain is DETECTED (duplicate entries) where containment alone was green', () => {
-  // The #2477 incident shape: the same chain CONCATENATED instead of
-  // interleaved. Containment passes — nothing is dropped — which is exactly why
-  // the old gate reported `✓ chains intact` on a doubled chain.
-  const base = 'last-verified: "2026-08-02" # #100: a. Prior: #90: b.'
-  const concatenated = 'last-verified: "2026-08-02" # #100: a. Prior: #90: b. Prior: #100: a. Prior: #90: b.'
-  assert.equal(checkChain(base, concatenated).status, 'ok') // containment: green
-  const r = chainAnomalies(concatenated)
-  assert.equal(r.tooLarge, null)
-  assert.equal(r.duplicates.length, 2)
-  const byHead = Object.fromEntries(r.duplicates.map((d) => [d.head, d.count]))
-  assert.equal(byHead['#100'], 2)
-  assert.equal(byHead['#90'], 2)
-})
-
-test('a chain where an entry merely CITES another issue is NOT a duplicate', () => {
-  // The prose-citation subtlety: #1816's entry cites #1800, which also has its
-  // own chain entry. A naive split on every #NNN would count #1800 twice;
-  // split on the chain-word it is one cited ref and one entry.
-  const line =
-    'last-verified: "2026-08-22" # #1816: §4 reuses #1800\'s port mechanism. ' +
-    'Prior: #1805/#1760: a. Prior: #1800: b'
-  const r = chainAnomalies(line)
-  assert.equal(r.duplicates.length, 0)
-})
-
-test('two DIFFERENT entries for the same issue are NOT duplicates (text differs)', () => {
-  // #1508 appears twice on the real dev chain — once as "(actual fix)", once as
-  // a later re-verification. Different prose, so not a concatenation duplicate.
-  const line =
-    'last-verified: "2026-08-22" # #1508 (actual fix): x. Prior #1508: y'
-  const r = chainAnomalies(line)
-  assert.equal(r.duplicates.length, 0)
-})
-
-test('the size ceiling is a hard failure and reports bytes vs ceiling', () => {
-  const small = `last-verified: "2026-08-02" # ${'x'.repeat(100)}`
-  const big = `last-verified: "2026-08-02" # ${'x'.repeat(MAX_CHAIN_BYTES)}`
-  assert.equal(chainAnomalies(small).tooLarge, null)
-  const r = chainAnomalies(big)
-  assert.ok(r.tooLarge.bytes > MAX_CHAIN_BYTES) // prefix pushes the line over the ceiling
-  assert.equal(r.tooLarge.maxBytes, MAX_CHAIN_BYTES)
-})
-
-test('chain-reset does NOT excuse a chain over the size ceiling', () => {
-  // The escape hatch is for compaction (a DROP). A doubled line that stays over
-  // the ceiling is still a growth problem a reset does not fix.
-  const big = `last-verified: "2026-08-02" # chain-reset(#1843): compacted. ${'x'.repeat(MAX_CHAIN_BYTES)}`
-  assert.ok(chainAnomalies(big).tooLarge.bytes > MAX_CHAIN_BYTES)
-})
-
 test('only a dev → main promotion is exempt; a hotfix into main is not', () => {
   assert.equal(isPromotionPR({ GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' }), true)
   assert.equal(isPromotionPR({ GITHUB_HEAD_REF: 'hotfix/x', GITHUB_BASE_REF: 'main' }), false)
@@ -357,188 +307,164 @@ test('#2504: a LOST `# ` comment marker is not read as an altered entry (review 
   assert.equal(chainNoteBody(next).startsWith('#1992:'), true)
 })
 
-test('#2504: a marker followed by a space still opens the comment (release-token entries)', () => {
-  const line = 'last-verified: "2026-09-01" # 0.1.31-alpha.0: published from this branch.'
-  assert.equal(chainNoteBody(line), '0.1.31-alpha.0: published from this branch.')
+// ---------------------------------------------------------------------------
+// #2637: the list shape. One entry per line, newest first.
+//
+// The three checks are unchanged in what they ASK — nothing dropped (#1843),
+// nothing duplicated (#2477), every surviving entry verbatim (#2504) — and
+// changed in how they answer: set operations over entry lines instead of
+// substring work on one long string.
+// ---------------------------------------------------------------------------
+
+const LIST_DOC = (entries, date = '2026-09-08') =>
+  ['---', 'owner: "@d-hinders"', 'status: current', `last-verified: "${date}"`, 'verified:']
+    .concat(entries.map((e) => `  - ${JSON.stringify(e)}`))
+    .concat(['---', '', '# Body'])
+    .join('\n')
+
+const E1 = '#2533: EDITED — three claims this diff made false. Scope: §3.'
+const E2 = '#2445: re-read §3 and §7 against the rail seam.'
+const E3 = '#2321: added the sixteenth required context.'
+
+test('#2637: readChain reads the list shape, newest first', () => {
+  const c = readChain(LIST_DOC([E1, E2, E3]))
+  assert.equal(c.shape, 'list')
+  assert.equal(c.date, '2026-09-08')
+  assert.deepEqual(c.entries, [E1, E2, E3])
 })
 
-
-// ── #2562: the ceiling measures and reports the same quantity ──────────────
-// The defect: `chainAnomalies` compared `line.length` (UTF-16 code units)
-// while naming the result `bytes` and failing with "chain line is N bytes".
-// These tests are written in a multi-byte alphabet on purpose — an ASCII
-// fixture cannot tell the two measures apart, which is why the original had
-// no test that could fail.
-
-test('#2562: chainLineBytes counts UTF-8 bytes, not UTF-16 code units', () => {
-  // An em-dash is 1 code unit and 3 bytes; the difference is the whole defect.
-  const line = 'last-verified: "2026-09-04" # #1: a — b — c'
-  assert.equal(line.length, 43)
-  assert.equal(chainLineBytes(line), 47) // 43 + 2 em-dashes × 2 extra bytes
-  assert.ok(chainLineBytes(line) > line.length)
+test('#2637: readChain still reads a LEGACY single-line chain — the migration transition', () => {
+  // Across the migration the base is the old shape and the head is the new
+  // one. If this stopped working, every PR open at migration time would report
+  // its whole chain as dropped.
+  const legacy = ['---', 'owner: "@d-hinders"', `last-verified: "2026-09-01" # ${E1} Prior: ${E2}`, '---'].join('\n')
+  const c = readChain(legacy)
+  assert.equal(c.shape, 'line')
+  assert.deepEqual(c.entries, [E1, E2])
 })
 
-test('#2562: MUTATION PROOF — the enforced and reported figures agree on a multi-byte line', () => {
-  // Sized so it is UNDER the ceiling by code units and OVER it by bytes: the
-  // exact state the mcp-runtime-compatibility chain was in on 2026-09-03
-  // (65,448 code units, 65,719 bytes), where the gate passed while its own
-  // message would have said the line was over.
-  const prefix = 'last-verified: "2026-09-04" # '
-  const emDashes = '—'.repeat(400) // 400 code units, 1200 bytes
-  const filler = 'x'.repeat(MAX_CHAIN_BYTES - prefix.length - 800)
-  const line = prefix + filler + emDashes
-  assert.ok(line.length < MAX_CHAIN_BYTES, 'fixture must be under the ceiling by code units')
-
-  const r = chainAnomalies(line)
-  assert.ok(r.tooLarge, 'a line over the ceiling in BYTES must fail')
-  // The reported figure is the one that was compared — that is the fix.
-  assert.equal(r.tooLarge.bytes, chainLineBytes(line))
-  assert.ok(r.tooLarge.bytes > r.tooLarge.maxBytes)
-  assert.notEqual(r.tooLarge.bytes, line.length)
+test('#2637: a legacy base and a list head compare as EQUAL when nothing was lost', () => {
+  const legacy = ['---', `last-verified: "2026-09-01" # ${E1} Prior: ${E2}`, '---'].join('\n')
+  const r = checkChainEntries(readChain(legacy).entries, readChain(LIST_DOC([E1, E2])).entries)
+  assert.deepEqual(r.dropped, [])
+  assert.deepEqual(r.altered, [])
+  assert.deepEqual(r.duplicates, [])
 })
 
-test('#2562: an ASCII line still reports identically — the fix changes no existing verdict', () => {
-  const line = 'last-verified: "2026-09-04" # ' + 'a'.repeat(MAX_CHAIN_BYTES)
-  const r = chainAnomalies(line)
-  assert.equal(r.tooLarge.bytes, line.length) // ASCII: bytes === code units
-  assert.equal(r.tooLarge.bytes, chainLineBytes(line))
+test('#2637: DROPPED — an entry removed outright is a finding', () => {
+  const r = checkChainEntries([E1, E2, E3], [E1, E3])
+  assert.deepEqual(r.dropped, ['#2445'])
+  assert.deepEqual(r.altered, [])
 })
 
-// ── #2562: the advisory band, over every governed doc ───────────────────────
+test('#2637: DUPLICATED — the same entry listed twice (a concatenating merge)', () => {
+  const r = checkChainEntries([E1, E2], [E1, E2, E1])
+  assert.equal(r.duplicates.length, 1)
+  assert.equal(r.duplicates[0].head, '#2533')
+  assert.equal(r.duplicates[0].count, 2)
+})
 
-/** A throwaway repo-shaped tree: `docs/` plus the root gravity files. */
-async function fixtureRepo(files) {
-  const root = await mkdtemp(join(tmpdir(), 'haven-2562-'))
-  for (const [rel, body] of Object.entries(files)) {
-    const abs = join(root, rel)
-    await mkdir(join(abs, '..'), { recursive: true })
-    await writeFile(abs, body)
-  }
-  return root
+test('#2637: ALTERED — the ref survives but the prose was rewritten', () => {
+  // The distinction that matters: this is NOT a drop, because #2533 is still
+  // there. A chain records what was verified and what was explicitly not, so
+  // editing that text in place rewrites the record (#2504).
+  const r = checkChainEntries([E1, E2], ['#2533: EDITED — two claims. Scope: §3.', E2])
+  assert.deepEqual(r.dropped, [])
+  assert.equal(r.altered.length, 1)
+  assert.equal(r.altered[0].head, '#2533')
+})
+
+test('#2637: an entry that merely CITES another issue is not a duplicate of it', () => {
+  const citing = '#2601: §4 reuses #2533’s mechanism, verified against the same fixture.'
+  const r = checkChainEntries([E1], [citing, E1])
+  assert.deepEqual(r.duplicates, [])
+  assert.deepEqual(r.dropped, [])
+})
+
+test('#2637: chain-reset still excuses a compaction, and only in the marker form', () => {
+  const reset = 'chain-reset(#2637): compacted, keeping the newest entries.'
+  assert.deepEqual(checkChainEntries([E1, E2, E3], [reset]).dropped, [])
+  // Prose about resets must not excuse a real deletion.
+  const prose = 'clarified when a chain-reset is not needed'
+  assert.deepEqual(checkChainEntries([E1, E2, E3], [prose]).dropped, ['#2533', '#2445', '#2321'])
+})
+
+test('#2637: entriesRefs collects refs across entries', () => {
+  assert.deepEqual([...entriesRefs([E1, E2])].sort(), ['#2445', '#2533'])
+})
+
+// The claim this whole shape change rests on, proved with a real `git merge`
+// rather than asserted: two PRs each adding their own verification entry.
+//
+// #1496 recorded three such conflicts in one day, each pure ceremony — the two
+// sides never disagreed about anything, they just both prepended to the same
+// physical line. One entry per line makes each side an ordinary line insertion.
+function mergeTwoWays(makeDoc, mineEntry, theirsEntry) {
+  const root = mkdtempSync(join(tmpdir(), 'chain-merge-'))
+  const g = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' })
+  g('init', '-q', '-b', 'main')
+  g('config', 'user.email', 't@example.com')
+  g('config', 'user.name', 'T')
+  const file = join(root, 'doc.md')
+  writeFileSync(file, makeDoc([]))
+  g('add', '-A'); g('commit', '-qm', 'base')
+  g('checkout', '-q', '-b', 'theirs')
+  writeFileSync(file, makeDoc([theirsEntry]))
+  g('add', '-A'); g('commit', '-qm', 'theirs')
+  g('checkout', '-q', 'main')
+  writeFileSync(file, makeDoc([mineEntry]))
+  g('add', '-A'); g('commit', '-qm', 'mine')
+  const merge = g('merge', 'theirs', '-m', 'merge')
+  const text = readFileSync(file, 'utf8')
+  rmSync(root, { recursive: true, force: true })
+  return { conflicted: merge.status !== 0 || /^<{7}/m.test(text), text }
 }
 
-const CHAIN_PREFIX = 'last-verified: "2026-09-04" # '
+test('#2637: two concurrent verifications STILL CONFLICT — and the conflict is now trivial', () => {
+  // MEASURED, and it corrects #2637's own premise. The issue said git would
+  // merge concurrent entries "as ordinary line insertions". It does not: both
+  // sides insert a different line at the same anchor, which conflicts in git's
+  // line-based merge, and it conflicts in BOTH orderings (newest-first and
+  // oldest-last were both tried). The shape change does not remove the
+  // conflict.
+  //
+  // What it removes is the DAMAGE. The conflict hunk is the two inserted lines
+  // with every other entry as untouched context, so the resolution is "keep
+  // both" and an unrelated entry cannot be lost on the way. In the old shape
+  // the identical conflict was one 37,561-byte line that both sides had
+  // rewritten whole — hand-merging that is how #1843 dropped entries and how
+  // #2504 rewrote them in place.
+  const NEW = '#2701: re-read §2 against the new gate.'
+  const MINE = '#2700: re-read §5 and bumped nothing else.'
+  const OLD_ENTRY = '#2533: EDITED — three claims this diff made false. Scope: §3.'
+  const r = mergeTwoWays((extra) => LIST_DOC([...extra, OLD_ENTRY]), MINE, NEW)
+  assert.equal(r.conflicted, true, 'measured: a same-anchor insertion conflicts in the list shape too')
 
-/** A doc whose `last-verified` LINE is exactly `bytes` bytes (ASCII padding). */
-const chainOf = (bytes) =>
-  `---\nowner: "@x"\nstatus: current\ncovers: []  # narrative\n` +
-  CHAIN_PREFIX + 'a'.repeat(Math.max(0, bytes - CHAIN_PREFIX.length)) +
-  `\n---\n\n# T\n`
+  // The part that is the actual win: the untouched entries survive as context
+  // outside the conflict markers, so no other entry is at risk in the resolve.
+  assert.ok(r.text.includes(OLD_ENTRY), 'unrelated entries stay outside the conflict hunk')
+  const hunk = r.text.split('\n').filter((l) => /^[<>=]{7}/.test(l))
+  assert.equal(hunk.length, 3, 'exactly one conflict hunk')
 
-test('#2562: the band names a doc that is over it, with its size', async () => {
-  const root = await fixtureRepo({ 'docs/big.md': chainOf(5000), 'docs/small.md': chainOf(100) })
-  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1000 })
-  assert.equal(w.length, 1)
-  assert.equal(w[0].rel, 'docs/big.md')
-  assert.equal(w[0].bytes, 5000) // the helper sizes the LINE exactly
-  assert.equal(w[0].overCeiling, false)
+  // And resolving it the obvious way — keep both — passes every check.
+  const resolved = LIST_DOC([MINE, NEW, OLD_ENTRY])
+  const c = checkChainEntries([OLD_ENTRY], readChain(resolved).entries)
+  assert.deepEqual(c.dropped, [])
+  assert.deepEqual(c.altered, [])
+  assert.deepEqual(c.duplicates, [])
 })
 
-test('#2562: MUTATION PROOF — an UNCHANGED doc over the band is still reported, and does not fail the run', async () => {
-  // This is the whole defect: the blocking check skips a doc whose line did
-  // not change (`if (prevLine === nextLine) continue`), so a chain crosses the
-  // ceiling invisibly. The band answers a question with no base and no diff.
-  const root = await fixtureRepo({ 'docs/untouched.md': chainOf(5000) })
-  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1000 })
-  assert.deepEqual(w.map((x) => x.rel), ['docs/untouched.md'])
-
-  // Non-blocking: the reporter returns nothing and writes only to its log sink.
-  const lines = []
-  assert.equal(reportChainSizeWarnings(w, (m) => lines.push(m)), undefined)
-  assert.ok(lines.join('\n').includes('nothing is blocked by this'))
-})
-
-test('#2562: a doc over the CEILING is warned too, and marked as already blocking', async () => {
-  const root = await fixtureRepo({ 'docs/huge.md': chainOf(9000) })
-  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1000, maxBytes: 5000 })
-  assert.equal(w[0].overCeiling, true)
-  const lines = []
-  reportChainSizeWarnings(w, (m) => lines.push(m))
-  assert.match(lines.join('\n'), /ALSO OVER the 5000-byte ceiling/)
-})
-
-test('#2562: membership is isDocPath\'s answer — a non-.md file with a chain line is not a doc', async () => {
-  // The refactor that made `isDocPath` the single authority is correct today
-  // only INCIDENTALLY: `lastVerifiedLine` rejects most non-Markdown files on
-  // content, so nothing in the real tree exercises the gap. Pin the contract
-  // instead of relying on that (haven-reviewer nit at 31ed6f68, closed by
-  // fixture there and by this test here) — a fixture file that would pass the
-  // content filter but is not a doc must not be reported.
-  const root = await fixtureRepo({
-    'docs/real.md': chainOf(5000),
-    'docs/not-markdown.txt': chainOf(5000),
-    'docs/nested/also-real.md': chainOf(5000),
-  })
-  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1000 })
-  assert.deepEqual(w.map((x) => x.rel).sort(), ['docs/nested/also-real.md', 'docs/real.md'])
-})
-
-test('#2562: the band sweeps ROOT gravity files, not only docs/', async () => {
-  const root = await fixtureRepo({ 'CLAUDE.md': chainOf(5000) })
-  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1000 })
-  assert.deepEqual(w.map((x) => x.rel), ['CLAUDE.md'])
-})
-
-test('#2562: docs with no front-matter or no chain line are skipped, not crashed on', async () => {
-  const root = await fixtureRepo({
-    'docs/plain.md': '# no front-matter\n' + 'a'.repeat(5000),
-    'docs/nochain.md': '---\nowner: "@x"\nstatus: current\n---\n' + 'a'.repeat(5000),
-  })
-  assert.deepEqual(await chainSizeWarnings({ repoRoot: root, warnBytes: 100 }), [])
-})
-
-test('#2562: a clean repo prints nothing — the band must not train people to skim', async () => {
-  const root = await fixtureRepo({ 'docs/small.md': chainOf(100) })
-  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 40 * 1024 })
-  assert.deepEqual(w, [])
-  const lines = []
-  reportChainSizeWarnings(w, (m) => lines.push(m))
-  assert.deepEqual(lines, [])
-})
-
-test('#2562: warnings are ordered biggest-first — the list is read as a queue', async () => {
-  const root = await fixtureRepo({
-    'docs/mid.md': chainOf(3000),
-    'docs/biggest.md': chainOf(6000),
-    'docs/small.md': chainOf(2000),
-  })
-  const w = await chainSizeWarnings({ repoRoot: root, warnBytes: 1500 })
-  assert.deepEqual(w.map((x) => x.rel), ['docs/biggest.md', 'docs/mid.md', 'docs/small.md'])
-})
-
-test('#2562: the band is under the ceiling, so it fires before the hard stop', () => {
-  assert.ok(WARN_CHAIN_BYTES < MAX_CHAIN_BYTES)
-})
-
-// These two drive the real CLI with `--warn-bytes=1`, so every governed doc is
-// over the band and the report is guaranteed. The first draft asserted against
-// the live `docs/` tree and went red the moment this same PR compacted the two
-// docs it was reading — a test that measures the repository rather than the
-// code. The property under test is placement, not repo content.
-test('#2562: the band prints on a PUSH build too — the early returns say nothing about disk', () => {
-  // The three early returns (promotion, push, no base) all mean "this diff
-  // cannot be judged". A push to `dev` is precisely where a standing warning
-  // costs least to see, so the band runs ahead of them.
-  const r = runCli({ GITHUB_EVENT_NAME: 'push' }, ['--warn-bytes=1'])
-  assert.equal(r.code, 0)
-  assert.match(r.out, /push build, no pull-request base — skipped/)
-  assert.match(r.out, /chain size: \d+ doc\(s\) over the/)
-  // Placement, stated as an assertion rather than left to reading order: the
-  // band's report precedes the early return's own line in the output.
-  assert.ok(r.out.indexOf('chain size:') < r.out.indexOf('push build'))
-})
-
-test('#2562: the band prints on a dev → main promotion too, and still blocks nothing', () => {
-  const r = runCli({ GITHUB_HEAD_REF: 'dev', GITHUB_BASE_REF: 'main' }, ['--warn-bytes=1'])
-  assert.equal(r.code, 0)
-  assert.match(r.out, /promotion — already checked/)
-  assert.match(r.out, /chain size: \d+ doc\(s\) over the/)
-  assert.ok(r.out.indexOf('chain size:') < r.out.indexOf('promotion'))
-})
-
-test('#2562: with no override the band is the 40 KiB default — the repo is not the fixture', () => {
-  assert.equal(resolveWarnBytes([]), WARN_CHAIN_BYTES)
-  assert.equal(resolveWarnBytes(['--warn-bytes=1']), 1)
-  assert.equal(resolveWarnBytes(['--warn-bytes=nonsense']), WARN_CHAIN_BYTES)
-  assert.equal(resolveWarnBytes(['--warn-bytes=-5']), WARN_CHAIN_BYTES)
+test('#2637: the OLD shape conflicts on the same edit, over one enormous line', () => {
+  // The contrast that carries the argument. Same two edits, old shape: also a
+  // conflict — but the conflicting region is the whole chain, not two lines.
+  const legacyDoc = (extra) =>
+    ['---', 'owner: "@d-hinders"',
+     `last-verified: "2026-09-08" # ${[...extra, '#2533: EDITED — three claims.'].join(' Prior: ')}`,
+     '---', '', '# Body'].join('\n')
+  const r = mergeTwoWays(legacyDoc, '#2700: re-read §5.', '#2701: re-read §2.')
+  assert.equal(r.conflicted, true)
+  // Both sides' versions of the ENTIRE chain are in the hunk — that is the
+  // thing a human then hand-merges, and the reason entries went missing.
+  const conflicting = r.text.split('\n').filter((l) => l.startsWith('last-verified:'))
+  assert.equal(conflicting.length, 2, 'the whole chain appears twice, once per side')
 })

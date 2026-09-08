@@ -11,7 +11,9 @@ covers:
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of the passport diagnostic disclosure boundary; prior notes remain in git history.
+last-verified: "2026-09-04"
+verified:
+  - "chain-reset(#2542): scoped re-verification of the passport diagnostic disclosure boundary; prior notes remain in git history."
 ---
 
 # L0 Agent Passport — EAS schema

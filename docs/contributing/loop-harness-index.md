@@ -9,7 +9,12 @@ covers:
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-31" # #2257: the withdrawn x402 transaction-verification candidate and its route consumer were re-read against the deletion; LP-2 and the allowance-module read-only infrastructure remain unchanged. Prior: #2020: LP-1 WITHDRAWN — its target computeEffectiveAllowance lost its last caller when GET /machine-payments/allowances went 410 on the retired rail (owner reversal of #1986); function, harness and test:loop script deleted together, maintenance notes updated to LP-2-only. Prior: #1987: re-read against the AllowanceModule deletion. LP-1 STAYS and its target survives, but its stated purpose was wrong post-deletion (it drives the allowances report, not routing) — corrected. `domain/payment-coverage.ts` dropped from `covers:` (deleted), and two of the three candidate loops withdrawn because their surfaces are gone. LP-2 (frontend) untouched — that is #1989. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-08-31"
+verified:
+  - "#2257: the withdrawn x402 transaction-verification candidate and its route consumer were re-read against the deletion; LP-2 and the allowance-module read-only infrastructure remain unchanged."
+  - "#2020: LP-1 WITHDRAWN — its target computeEffectiveAllowance lost its last caller when GET /machine-payments/allowances went 410 on the retired rail (owner reversal of #1986); function, harness and test:loop script deleted together, maintenance notes updated to LP-2-only."
+  - "#1987: re-read against the AllowanceModule deletion. LP-1 STAYS and its target survives, but its stated purpose was wrong post-deletion (it drives the allowances report, not routing) — corrected. `domain/payment-coverage.ts` dropped from `covers:` (deleted), and two of the three candidate loops withdrawn because their surfaces are gone. LP-2 (frontend) untouched — that is #1989."
+  - "re-verified for #1251 (MPP seam refusal) — no claim here affected"
 ---
 
 # Loop Harness Index

@@ -441,9 +441,11 @@ export function countByFile(hits) {
   return counts
 }
 
-// Re-exported, not redefined: callers and tests already import these here, and
-// the point of #2747 is that this gate stops carrying its own copy of the
-// decision -- not that it stops offering the names.
+// Re-exported, not redefined. The point of #2747 is that this gate stops
+// carrying its own COPY of the decision, not that it stops offering the names.
+// The only importer is this gate's own test file -- there are no other callers,
+// so this is an export surface kept for the tests rather than for a consumer,
+// and it is worth saying so instead of implying a wider audience.
 export { newViolations, hasShrunk }
 
 /**
@@ -454,6 +456,17 @@ export { newViolations, hasShrunk }
  *
  * The shared engine names the second dimension `key`; this gate calls it a
  * `rule`, and the printing below reads `f.key`.
+ *
+ * One difference the swap DOES carry, stated rather than left to surface on the
+ * commit that matters: the baseline's key ORDER. The inline writer this gate
+ * used sorted with `localeCompare`; `lib/ratchet.mjs`'s `writeBaseline` uses a
+ * bare `.sort()`, i.e. code units, so an uppercase root doc (`CLAUDE.md`,
+ * `AGENTS.md` — all inside this gate's 454-file set) now sorts BEFORE the
+ * `docs/` entries instead of among them. Today's baseline has one entry so
+ * nothing churns, and the first `--update` that adds a root entry will rewrite
+ * the whole file once. Deliberate: the five gates already on `writeBaseline`
+ * have code-unit-sorted baselines, and changing the shared writer to
+ * `localeCompare` would churn theirs instead of this one's.
  */
 function sortedViolations(counts, baseline) {
   return newViolations(counts, baseline).sort(
@@ -463,7 +476,24 @@ function sortedViolations(counts, baseline) {
 
 async function main() {
   const update = process.argv.includes('--update')
-  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
+  // A corrupt baseline used to be REPAIRED by `--update`, which read nothing
+  // and overwrote. Reading it first is what makes the refusal possible, so the
+  // repair path is gone and a `SyntaxError` with a raw stack is not a remedy
+  // (#2747, review finding). Name it instead.
+  let loaded
+  try {
+    loaded = loadBaseline(BASELINE_PATH)
+  } catch (err) {
+    console.error(`✗ ${BASELINE_PATH} is not readable as JSON: ${err.message}`)
+    console.error(
+      '\nUntil #2747 `--update` overwrote it without reading, so a corrupt file repaired ' +
+        'itself silently. It no longer can — the refusal has to read the baseline to compare ' +
+        'against it. Delete the file and re-run with `--update` to regenerate it from the ' +
+        'current tree, which is the first-run path.',
+    )
+    process.exit(1)
+  }
+  const { baseline, firstRun } = loaded
   const files = listMarkdownFiles()
   const hits = []
   for (const file of files) {

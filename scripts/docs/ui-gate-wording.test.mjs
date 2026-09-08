@@ -316,7 +316,13 @@ const BASE = 'scripts/docs/ui-gate-wording-baseline.json'
 const DOC = 'docs/thing.md'
 // Trips `blanket-merge-pause`: names a finding and a pause, with no severity.
 const RETIRED = 'A finding from either pass pauses auto-merge.\n'
-const CORRECTED = 'A `blocking` finding from either pass pauses auto-merge.\n'
+// #2636's prescribed form, not merely a form the rule tolerates: it names both
+// severities that pause AND the one that does not. The rule only requires a
+// severity term to be present, so a shorter sentence would also pass — using
+// the full form keeps the control honest about what the docs are supposed to
+// say (review nit).
+const CORRECTED =
+  'A `blocking` or `should-fix` finding from either pass pauses auto-merge; a `nit` does not.\n'
 
 test('CLI: retired wording in a tracked doc exits 1 and names file, rule and line', () => {
   const { status, out } = runGuard(GATE, {
@@ -401,4 +407,24 @@ test('CLI: a MISSING baseline file still writes -- the real first-run allowance'
   })
   assert.equal(status, 0)
   assert.match(wrote[BASE], /"blanket-merge-pause": 1/)
+})
+
+test('CLI: an unparseable baseline names the remedy instead of throwing a stack', () => {
+  // #2747, review finding. Until this branch, `--update` never read the
+  // baseline, so a corrupt file was repaired by regenerating it. Reading it is
+  // what makes the refusal possible, so that repair path is gone — and a bare
+  // `SyntaxError` is not a remedy. Pinned because an unpinned message is how
+  // this repo's claims rot.
+  const { status, out } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: CORRECTED, [BASE]: 'not json{' },
+    args: ['--update'],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /is not readable as JSON/)
+  assert.match(out, /Delete the file and re-run with `--update`/)
+  // And it must not read as the ratchet refusing growth, which is a different
+  // failure with a different fix.
+  assert.doesNotMatch(out, /refuses to RAISE/)
 })

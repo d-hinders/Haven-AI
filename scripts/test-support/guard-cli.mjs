@@ -94,8 +94,19 @@ export function runGuard(
     // test wrote.
     if (gitInit) {
       const paths = Object.keys(files)
+      if (!paths.length) {
+        throw new Error('runGuard: gitInit with no files stages nothing, so a git-enumerating guard reports a clean scan over ZERO files — the false pass this option exists to close')
+      }
       execFileSync('git', ['-C', root, 'init', '-q'], { stdio: 'ignore' })
-      if (paths.length) execFileSync('git', ['-C', root, 'add', '--', ...paths], { stdio: 'ignore' })
+      // `-c core.excludesFile=/dev/null` and `-f`: a contributor's global
+      // gitignore (or an `init.templateDir` carrying `info/exclude`) can match
+      // fixture paths like `docs/**` or `*.md`, and then `git add` refuses and
+      // every case here reddens on the machine of whoever has that config.
+      // stderr is inherited rather than swallowed so the reason is legible —
+      // measured, the ignored-paths explanation was otherwise lost.
+      execFileSync('git', ['-c', 'core.excludesFile=/dev/null', '-C', root, 'add', '-f', '--', ...paths], {
+        stdio: ['ignore', 'ignore', 'inherit'],
+      })
     }
     // Explicit mtimes where a guard compares them (review finding, blocking).
     // Relying on write ORDER is not enough: file-creation order is stable but

@@ -92,6 +92,27 @@ describe('epic-promotion-checklist', () => {
     assert.equal(evaluate(body).reason, 'unticked')
   })
 
+  test('empty stdin (an upstream `gh` failure in the pipe) → exit 2, never "ready"', () => {
+    for (const input of ['', '   \n\n']) {
+      const r = cli(input)
+      assert.equal(r.status, 2, `input ${JSON.stringify(input)}: ${r.stdout}`)
+      assert.doesNotMatch(r.stdout, /ready to close/)
+      assert.match(r.stderr, /empty body/)
+    }
+  })
+
+  test('reported line numbers are the real 1-based lines, on the shipped template and a simple body', () => {
+    const body = readFileSync(TEMPLATE, 'utf8').replace(/^---[\s\S]*?---\n/, '')
+    const lines = body.split('\n')
+    const { boxes } = readPromotionChecklist(body)
+    assert.equal(boxes.length, 2)
+    for (const box of boxes) {
+      assert.equal(lines[box.line - 1].includes(box.text), true, `line ${box.line} does not hold "${box.text}"`)
+    }
+    const simple = '## Promotion checklist\n\n- [ ] step one\n'
+    assert.equal(readPromotionChecklist(simple).boxes[0].line, 3)
+  })
+
   test('unreadable file → exit 2', () => {
     const r = spawnSync(process.execPath, [SCRIPT, '/nonexistent/epic-body.md'], { encoding: 'utf8' })
     assert.equal(r.status, 2)

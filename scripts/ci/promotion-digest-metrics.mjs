@@ -10,10 +10,14 @@
 // that PR's body against a named commit. A figure in this file would be a third
 // copy that nothing re-derives.
 //
-// Why these two. In the week to 2026-09-08 the repository merged 199 PRs and
-// filed 195 issues, 141 of them citing another issue filed in the same week; 127
-// of the 199 merges changed tooling, docs, CI, guards or the QA harness rather
-// than the product. #2767 changed the skill so a finding is fixed in its PR or
+// Why these two. #2767's hand count for the week to 2026-09-08: 199 PRs merged
+// and 195 issues filed, 141 of them citing another issue filed in the same week;
+// 127 of the 199 merges changed tooling, docs, CI, guards or the QA harness
+// rather than the product (36 % product). The title classifier below reads the
+// same window HIGHER — roughly 46 % product at #2767's head — because it counts a
+// `fix(backend)` test-adjacent change as product and reads pre-#2632 two-parent
+// merges off their branch prefix; the two figures are not comparable and the
+// digest never restates the hand count as its own. #2767 changed the skill so a finding is fixed in its PR or
 // dropped with a reason, and filed only above a bar. Whether that moved anything
 // is a number, printed every digest, not an impression. If figure 1 has not
 // moved within two weeks, the next step named in #2767 is filing-asks-the-user.
@@ -96,16 +100,25 @@ export function fmtDate(d) {
  * The digest lines. `ref` is the branch the merges are read from; `since`/`until`
  * are ISO dates. Every figure is followed by the command that reproduces it.
  */
+export const ISSUE_LIST_LIMIT = 1000
+const ISSUE_LIST_ARGS = (search) => ['issue', 'list', '--state', 'all', '--limit', String(ISSUE_LIST_LIMIT), '--json', 'number', '--search', search]
+const issueListCmd = (search) => `gh ${ISSUE_LIST_ARGS(search).map((a) => (/\s/.test(a) ? `'${a}'` : a)).join(' ')}`
+
+/** `--limit` caps the listing silently; say so rather than print 1000/1000 = 1.00 as a ratio. */
+const truncNote = (n) => (n >= ISSUE_LIST_LIMIT ? ` ⚠ hit the ${ISSUE_LIST_LIMIT}-row listing limit — a floor, not a count` : '')
+
 export function renderDigestLines({ since, until, created, closed, subjects, ref = 'origin/dev' }) {
   const ratio = filedPerClosed(created, closed)
   const share = productShare(subjects)
   const sinceDay = fmtDate(since)
   const untilDay = fmtDate(until)
-  const issueCmd = `gh issue list --state all --limit 1000 --json number --search 'created:${sinceDay}..${untilDay}' | jq length; gh issue list --state closed --limit 1000 --json number --search 'closed:${sinceDay}..${untilDay}' | jq length`
+  // Literally the calls `collect()` makes — the command that PRODUCED the number,
+  // not an equivalent one (review finding).
+  const issueCmd = `${issueListCmd(`created:${sinceDay}..${untilDay}`)} | jq length; ${issueListCmd(`is:closed closed:${sinceDay}..${untilDay}`)} | jq length`
   const prCmd = `git log --first-parent --format=%s --since=${since} --until=${until} ${ref} | node scripts/ci/promotion-digest-metrics.mjs --classify`
   return [
     `**Filing ratio (${sinceDay} → ${untilDay}):** ${ratio === null ? 'n/a' : ratio} issues filed per issue closed` +
-      ` (${created} filed / ${closed} closed; target < 0.3 — baseline and rationale in #2767).`,
+      ` (${created} filed${truncNote(created)} / ${closed} closed${truncNote(closed)}; target < 0.3 — baseline and rationale in #2767).`,
     `  \`${issueCmd}\``,
     `**Product share of \`${ref}\` merges (${sinceDay} → ${untilDay}):** ${share.pct === null ? 'n/a' : `${share.pct} %`}` +
       ` (${share.product} product / ${share.tooling} tooling / ${share.unclassified} unclassified of ${share.total}; target > 60 % — baseline and rationale in #2767).`,
@@ -119,7 +132,7 @@ const defaultGh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
 const defaultGit = (args) => execFileSync('git', args, { encoding: 'utf8' })
 
 function countIssues(gh, search) {
-  const out = gh(['issue', 'list', '--state', 'all', '--limit', '1000', '--json', 'number', '--search', search])
+  const out = gh(ISSUE_LIST_ARGS(search))
   const parsed = JSON.parse(out || '[]')
   return Array.isArray(parsed) ? parsed.length : 0
 }

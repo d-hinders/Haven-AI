@@ -2,10 +2,14 @@
 // The ONE standing `qa-failure` issue (#2767).
 //
 // Until #2767, `.github/workflows/qa-dev.yml` opened a new issue titled
-// `qa-dev money-flow failed (<date>)` on the first failure of every day, and
-// commented on it for the rest of that day. Four such issues in eight days
-// (2026-09-01 → 2026-09-08), each closed by hand once green, each a ticket the
-// backlog counted as needed. `docs-audit.yml` already does the right thing for
+// `qa-dev money-flow failed (<date>)` whenever NO `qa-failure` issue was open —
+// the date was only in the title — so a failure after the previous issue had
+// been closed filed a sibling (several on one day), and a failing day with one
+// already open filed nothing. Thirteen such issues between 2026-09-01 and
+// 2026-09-08, up to three a day (`gh issue list --label qa-failure --state all
+// --search 'created:2026-09-01..2026-09-08'`, read 2026-09-08), each closed by
+// hand once green, each a ticket the backlog counted as needed. The reopen path
+// below is the half that lookup lacked. `docs-audit.yml` already does the right thing for
 // the staleness report — one issue, rewritten in place — and this script gives
 // the money-flow harness the same shape:
 //

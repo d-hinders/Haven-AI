@@ -412,9 +412,12 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
 
 ### Filing bar (#2767)
 
-**Filing an issue is not a way to finish.** Between 2026-09-01 and 2026-09-08 the
-repository merged 199 PRs and filed 195 issues; 141 of the 195 cited another issue
-filed in the same window, and roughly 160 were the instruments auditing each other.
+**Filing an issue is not a way to finish.** By the owner's hand count in #2767
+(`gh issue list` / `gh pr list`, title-classified, 2026-09-08), between 2026-09-01
+and 2026-09-08 the repository merged 199 PRs and filed 195 issues; 141 of the 195
+cited another issue filed in the same window, and roughly 160 were the instruments
+auditing each other. Those are the issue's figures, not re-derived here; the
+promotion digest re-derives the two that matter every run.
 The mechanism was this skill: three exits (deferred findings, non-converging
 rounds, nits-only rounds) each let a session complete by filing rather than by
 doing the remaining work, and nothing triages what gets filed — so the only place
@@ -428,11 +431,16 @@ pass, a sweep, or a guard — ends in exactly one of three dispositions:
 1. **Fixed in this PR.** The default for every `blocking` and `should-fix`
    finding, and for any residue of the session's own diff. A non-converging round
    runs the enumerating sweep and finishes the class here. A removal PR is not done
-   until its claim sweep is clean.
+   until its claim sweep is clean; a sweep hit that is a correct **historical
+   record** (a chain entry, a shard) is this disposition's sweep-specific form —
+   nothing to change, and *Implement* step 6 names it as such.
 2. **Dropped, with a reason.** One line in the PR body under **Not filed**: what,
    where, why it does not carry its weight. A legitimate outcome — it is where nits,
    doc wording, counts, comments and guard-about-a-guard findings go. Nothing is
-   lost silently and nothing enters the backlog.
+   lost silently and nothing enters the backlog. **Drop is not available above
+   `nit`**: a `blocking` or `should-fix` finding, or a non-converging class that
+   carries one, is fixed here or — if it clears the bar — filed; the *Merge Gate*
+   pauses on it either way, and dropping it would be the silent third path.
 3. **Filed, above the bar.** No cap, and every filed issue clears **all five**:
    - **Product defect or missing product behaviour** — a user, an agent or an
      operator hits it — **or a required check is wrong**: red for a false reason,

@@ -159,6 +159,11 @@ jobs:
       group: qa-dev-money-flow
       cancel-in-progress: false
     steps:
+      # Checkout FIRST: the failure step at the bottom runs
+      # scripts/ci/qa-failure-issue.mjs from the checkout, and `if: failure()`
+      # fires for a failed override validation too — before #2767 that step was
+      # inline shell and needed nothing from the tree (review finding).
+      - uses: actions/checkout@v4
       # #1047: the dispatch override points the harness — WITH the QA payment
       # secrets in env — at an arbitrary backend. Constrain it to Haven's own
       # deploy surface (a Railway origin) and put the actor + URL in the log,
@@ -185,7 +190,6 @@ jobs:
           # Log AFTER validation — an unvalidated echo is a workflow-command
           # injection surface via embedded ::-directives.
           echo "::notice::qa-dev dispatched with haven_api_url override '$OVERRIDE_URL' by $DISPATCH_ACTOR"
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
@@ -276,9 +280,9 @@ jobs:
           fi
           echo "all legs executed -- full coverage"
       # #2767: ONE standing `qa-failure` issue, upserted — rewritten with the latest
-      # run, a comment per failure, reopened when it was closed on green — instead
-      # of a new `qa-dev money-flow failed (<date>)` issue per failing day (four in
-      # eight days before this). The upsert lives in scripts/ci/qa-failure-issue.mjs
+      # run, a comment per failure, REOPENED when it was closed on green — instead
+      # of a new `qa-dev money-flow failed (<date>)` issue whenever none was open
+      # (13 between 2026-09-01 and 2026-09-08, up to three a day). The upsert lives in scripts/ci/qa-failure-issue.mjs
       # so scripts/ci/qa-failure-issue.test.mjs can drive all three states with a
       # recording `gh` stub; this step only builds the trigger line.
       - name: Update the standing qa-failure issue

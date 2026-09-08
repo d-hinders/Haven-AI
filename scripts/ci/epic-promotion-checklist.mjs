@@ -13,7 +13,10 @@
 //   0  ready — every box ticked, OR the epic has no such section (it predates the
 //      template change; the tool SAYS so on stdout rather than inventing boxes)
 //   1  not ready — at least one unticked box; each is printed
-//   2  usage / unreadable input
+//   2  usage / unreadable input — INCLUDING an empty or whitespace-only body. A
+//      plain pipeline does not propagate `gh issue view`'s failure, so a bad epic
+//      number or an auth failure delivers empty stdin; reading that as "no
+//      section, ready" would be a false green (review finding on #2767).
 //
 // Usage:
 //   gh issue view <epic> --json body -q .body | node scripts/ci/epic-promotion-checklist.mjs
@@ -22,7 +25,10 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-export const SECTION_HEADING = /^##\s+promotion checklist\s*$/im
+// `[ \t]` rather than `\s`: under the `m` flag `\s*$` would swallow the heading's
+// newline and every blank line after it, and the line numbers reported below
+// would then start inside the template's guidance comment (review finding).
+export const SECTION_HEADING = /^##[ \t]+promotion checklist[ \t]*$/im
 
 /**
  * Parse the Promotion checklist section out of an issue body.
@@ -48,7 +54,9 @@ export function readPromotionChecklist(body) {
   section.split('\n').forEach((raw, i) => {
     const m = /^\s*[-*]\s+\[([ xX])\]\s*(.*)$/.exec(raw)
     if (!m) return
-    boxes.push({ ticked: m[1] !== ' ', text: m[2].trim(), line: headingLine + 1 + i })
+    // `rest` begins on the heading's own line (after its text), so index 0 IS the
+    // heading line and box i sits at headingLine + i.
+    boxes.push({ ticked: m[1] !== ' ', text: m[2].trim(), line: headingLine + i })
   })
   return { present: true, boxes }
 }
@@ -101,6 +109,10 @@ function main(argv) {
     body = argv[0] ? readFileSync(argv[0], 'utf8') : readFileSync(0, 'utf8')
   } catch (err) {
     console.error(`epic-promotion-checklist: could not read body: ${err.message}`)
+    return 2
+  }
+  if (body.trim() === '') {
+    console.error('epic-promotion-checklist: empty body — did `gh issue view … -q .body` fail upstream of the pipe?')
     return 2
   }
   const verdict = evaluate(body)

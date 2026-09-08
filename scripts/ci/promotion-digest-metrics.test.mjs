@@ -95,9 +95,17 @@ describe('renderDigestLines', () => {
     assert.doesNotMatch(lines, /baseline 2026-09-08 [=≈]/, 'no restated baseline figure — it lives in #2767')
   })
   test('each figure is followed by the command that reproduces it', () => {
-    assert.match(lines, /gh issue list --state all --limit 1000 --json number --search 'created:2026-09-01\.\.2026-09-08'/)
+    assert.match(lines, /gh issue list --state all --limit 1000 --json number --search created:2026-09-01\.\.2026-09-08 \| jq length; gh issue list --state all --limit 1000 --json number --search 'is:closed closed:2026-09-01\.\.2026-09-08' \| jq length/)
     assert.match(lines, /git log --first-parent --format=%s --since=2026-09-01T00:00:00\.000Z --until=2026-09-08T00:00:00\.000Z origin\/dev \| node scripts\/ci\/promotion-digest-metrics\.mjs --classify/)
   })
+  test('a count at the listing limit is flagged as a floor, not printed as a ratio of 1.00', () => {
+    const out = renderDigestLines({ since: '2026-09-01', until: '2026-09-08', created: 1000, closed: 1000, subjects: [] })
+    assert.match(out, /1000 filed ⚠ hit the 1000-row listing limit/)
+    assert.match(out, /1000 closed ⚠ hit the 1000-row listing limit/)
+    const ok = renderDigestLines({ since: '2026-09-01', until: '2026-09-08', created: 999, closed: 10, subjects: [] })
+    assert.doesNotMatch(ok, /listing limit/)
+  })
+
   test('n/a when nothing closed or nothing merged, never ∞ or NaN', () => {
     const out = renderDigestLines({ since: '2026-09-01', until: '2026-09-08', created: 3, closed: 0, subjects: [] })
     assert.match(out, /\*\* n\/a issues filed per issue closed \(3 filed \/ 0 closed/)
@@ -126,6 +134,12 @@ describe('collect (injected gh/git)', () => {
     assert.equal(out.since, '2026-09-01T00:00:00.000Z')
     assert.ok(ghCalls[0].includes('created:2026-09-01..2026-09-08'))
     assert.ok(ghCalls[1].includes('is:closed closed:2026-09-01..2026-09-08'))
+    // The printed repro command is the executed call, argument for argument.
+    const printed = renderDigestLines(out)
+    for (const call of ghCalls) {
+      const cmd = `gh ${call.map((a) => (/\s/.test(a) ? `'${a}'` : a)).join(' ')}`
+      assert.ok(printed.includes(cmd), `printed command lacks executed call: ${cmd}`)
+    }
     assert.ok(gitCalls[0].includes('--first-parent'))
     assert.ok(gitCalls[0].includes('origin/dev'))
   })

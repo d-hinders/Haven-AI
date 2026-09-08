@@ -5,9 +5,12 @@
 // (file → key → count) that may only SHRINK — new occurrences, or growth of
 // an existing count, fail. This module is the single implementation; a further
 // ratcheting gate should import it rather than clone either script. There are
-// FIVE as of #2728 — design-lint, copy-lint, the wire-type ratchet, the
-// db-mock ratchet and the retired-rail prose ratchet — and the two that had
-// cloned instead of imported were the two missing a `--update` refusal.
+// SIX as of #2747 — design-lint, copy-lint, the wire-type ratchet, the db-mock
+// ratchet, the retired-rail prose ratchet and ui-gate-wording — and the two
+// that had cloned instead of imported were the two missing a `--update`
+// refusal. That count is ASSERTED against the real importer list by
+// `ratchet.test.mjs` rather than maintained by hand: it said FIVE here and in
+// four other places for a week after the sixth landed (#2759).
 //
 // The `key` dimension is whatever the gate counts per file: a rule id for
 // design-lint, a banned phrase for copy-lint.
@@ -72,7 +75,8 @@ export function writeBaseline(path, counts) {
  *
  * This lives here rather than in one gate because `--update` is the command a
  * gate's own failure message sends you to, so a gate that omits the check
- * turns its remedy into a laundering step. Of the five gates on this module,
+ * turns its remedy into a laundering step. Of the five gates on this module
+ * AT THE TIME (six today),
  * three had a line-for-line copy of this decision and TWO had none at all
  * (`frontend-copy-lint`, the subject of #2728, and `design-lint`, which review
  * found by reading the importer list rather than the issue) -- exactly the
@@ -83,11 +87,6 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
   return newViolations(counts, baseline)
 }
 
-/**
- * Read a baseline and say whether the file existed. The pair matters: `{}` is
- * both what an absent file reads as and what a fully-cleaned gate writes, and
- * only one of those may accept growth. See `updateRefusals`.
- */
 /**
  * Refuse a baseline the comparison cannot use, at the READ boundary rather than
  * in the comparison (#2759).
@@ -111,22 +110,49 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * numeric, so this is a pure tightening rather than a build someone else has to
  * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
  */
+/**
+ * A refusal, not a crash — so it is presented as one.
+ *
+ * Five of the six gates have no catch around their baseline read: they inherit
+ * `main().catch((err) => { console.error(err); process.exit(1) })`, which dumps
+ * a `node:internal` stack whose frames all point inside this module. For a
+ * malformed baseline that is noise around the one line the operator needs, and
+ * it is why the "the error can name the FILE" argument landed in exactly one
+ * gate until review said so (#2759).
+ *
+ * Replacing `stack` is deliberate rather than clever: this error reports a bad
+ * INPUT FILE, and where it was thrown from tells the reader nothing. A genuine
+ * bug inside this module still throws normally and keeps its frames.
+ */
+function refusal(message) {
+  const err = new TypeError(message)
+  err.stack = `TypeError: ${message}`
+  return err
+}
+
 export function assertUsableBaseline(baseline, path = 'baseline') {
   if (baseline === null || typeof baseline !== 'object' || Array.isArray(baseline)) {
     const shape = Array.isArray(baseline) ? 'an array' : baseline === null ? 'null' : typeof baseline
-    throw new TypeError(`${path}: expected a JSON object, got ${shape}`)
+    throw refusal(`${path}: expected a JSON object, got ${shape}`)
   }
   for (const [file, keys] of Object.entries(baseline)) {
     if (keys === null || typeof keys !== 'object' || Array.isArray(keys)) {
       const shape = Array.isArray(keys) ? 'an array' : keys === null ? 'null' : typeof keys
-      throw new TypeError(`${path}: entry "${file}" should map keys to counts, got ${shape}`)
+      throw refusal(`${path}: entry "${file}" should map keys to counts, got ${shape}`)
     }
     for (const [key, allowed] of Object.entries(keys)) {
       if (typeof allowed !== 'number' || !Number.isFinite(allowed)) {
         // `JSON.stringify(NaN)` is the string "null", which would report a
         // NaN entry as null and send the reader looking for the wrong thing.
-        const shown = Number.isNaN(allowed) ? 'NaN' : JSON.stringify(allowed)
-        throw new TypeError(
+        // Every non-finite number stringifies to "null", not just NaN — the
+        // first version of this line special-cased NaN and left `1e400`
+        // reporting as null, sending the reader after a JSON null that is not
+        // in the file (review finding).
+        const shown =
+          typeof allowed === 'number' && !Number.isFinite(allowed)
+            ? String(allowed)
+            : JSON.stringify(allowed)
+        throw refusal(
           `${path}: "${file}" [${key}] is ${shown}, not a number — ` +
             'the comparison is `count > allowed`, so a non-numeric entry silently allows ' +
             'everything for that key rather than failing loudly',
@@ -137,6 +163,11 @@ export function assertUsableBaseline(baseline, path = 'baseline') {
   return baseline
 }
 
+/**
+ * Read a baseline and say whether the file existed. The pair matters: `{}` is
+ * both what an absent file reads as and what a fully-cleaned gate writes, and
+ * only one of those may accept growth. See `updateRefusals`.
+ */
 export function loadBaseline(path) {
   // ONE `existsSync`, feeding both halves. Calling `readBaseline(path)` (which
   // does its own) and then `!existsSync(path)` leaves a window in which the two
@@ -152,7 +183,15 @@ export function loadBaseline(path) {
   }
 }
 
-/** Read the baseline, or {} when none exists yet. */
+/**
+ * Read the baseline, or {} when none exists yet.
+ *
+ * Validated like `loadBaseline`, because leaving one unvalidated read path
+ * exported reopens #2759 for whichever gate reaches for it next — and none of
+ * that gate's mutations would redden, since the hole would be in a function no
+ * current caller uses. No gate uses this today (all six call `loadBaseline`);
+ * it stays for callers that need the object without the `firstRun` flag.
+ */
 export function readBaseline(path) {
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+  return existsSync(path) ? assertUsableBaseline(JSON.parse(readFileSync(path, 'utf8')), path) : {}
 }

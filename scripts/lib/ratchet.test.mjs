@@ -7,7 +7,10 @@
 // had cloned the engine rather than importing it; #2759 is the defect below.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { newViolations, hasShrunk, assertUsableBaseline } from './ratchet.mjs'
+
+const REPO_ROOT = new URL('../..', import.meta.url).pathname
 
 // ── The defect: a non-numeric count silently allows everything ──────────────
 
@@ -58,7 +61,14 @@ test('assertUsableBaseline: NaN and Infinity are reported as themselves', () => 
   // `JSON.stringify(NaN)` is the string "null", so the obvious message would
   // report a NaN entry as null and send the reader looking for the wrong value.
   assert.throws(() => assertUsableBaseline({ 'a.md': { r: NaN } }), /is NaN, not a number/)
-  assert.throws(() => assertUsableBaseline({ 'a.md': { r: Infinity } }), /is null, not a number/)
+  // Infinity too: EVERY non-finite number stringifies to "null", not just NaN.
+  // The first version special-cased NaN alone, so a baseline containing `1e400`
+  // reported as null and sent the reader after a JSON null not in the file.
+  assert.throws(() => assertUsableBaseline({ 'a.md': { r: Infinity } }), /is Infinity, not a number/)
+  assert.throws(() => assertUsableBaseline({ 'a.md': { r: -Infinity } }), /is -Infinity, not a number/)
+  // And a string still keeps its quotes, which is how a reader tells `"3"` from
+  // `3` in the message — the naive fix for the above dropped them.
+  assert.throws(() => assertUsableBaseline({ 'a.md': { r: '3' } }), /is "3", not a number/)
 })
 
 test('assertUsableBaseline: a negative or fractional count is ALLOWED through', () => {
@@ -67,4 +77,39 @@ test('assertUsableBaseline: a negative or fractional count is ALLOWED through', 
   // be a second, unstated rule. Recorded so the omission reads as a decision.
   assert.doesNotThrow(() => assertUsableBaseline({ 'a.md': { r: -1 } }))
   assert.doesNotThrow(() => assertUsableBaseline({ 'a.md': { r: 0.5 } }))
+})
+
+// ── The gate count, derived rather than written ────────────────────────────
+
+test('the importer count in the comments matches the real importer list', () => {
+  // #2759. The engine's header, its `updateRefusals` docstring,
+  // `lint-wire-types.mjs`, `frontend-copy-lint.test.mjs` and the routing-matrix
+  // row ALL carried a hand-written "FIVE gates" for a week after #2747 added
+  // the sixth. Five copies of one number is five chances to be wrong, and the
+  // repo already made this argument once, about `docs:check`'s validator count
+  // (#2666: derive it, do not write it).
+  //
+  // A comment cannot compute, so the number stays written — but it stops being
+  // unchecked. Add or remove a gate and this reddens, naming the drift.
+  const out = execFileSync(
+    'git',
+    ['-C', REPO_ROOT, 'grep', '-l', '--', "from '.*lib/ratchet.mjs'", '--', '*.mjs'],
+    { encoding: 'utf-8' },
+  )
+  const importers = out
+    .trim()
+    .split('\n')
+    .filter((f) => f && !f.endsWith('.test.mjs') && !f.endsWith('lib/ratchet.mjs'))
+    .sort()
+
+  assert.deepEqual(importers, [
+    'packages/frontend/scripts/design-lint.mjs',
+    'scripts/db-mock-ratchet.mjs',
+    'scripts/docs/ui-gate-wording.mjs',
+    'scripts/frontend-copy-lint.mjs',
+    'scripts/lint-wire-types.mjs',
+    'scripts/retired-rail-prose-ratchet.mjs',
+  ])
+  // The count the prose claims, in one place, next to the list that proves it.
+  assert.equal(importers.length, 6, 'the comments say SIX gates import this engine')
 })

@@ -265,12 +265,29 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
   test.beforeEach(async ({ page }) => {
     await mockHavenApi(page)
     await seedAuthenticatedSession(page)
+    // `/agents` with no agents is #2586's own route and state: the empty state
+    // is the first screen tall enough to reach the coordinate in question.
+    await page.route('**/api/agents*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ agents: [] }),
+      })
+    })
+    // Hide Next's dev-tools indicator, exactly as `scripts/screenshot.mjs`
+    // does. Under `next dev` that badge sits at the bottom-left of every page
+    // and OWNS this spec's hit-test coordinate — so without this line the
+    // assertion below is answered by dev chrome rather than by the product,
+    // and would pass while the page was genuinely obscured. It is also the
+    // element #2586 mistook for the sidebar's avatar.
+    await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' }).catch(() => {})
   })
 
   test('narrowing past lg puts the drawer off screen and hands the coordinate back to the page', async ({
     page,
   }) => {
-    await page.goto('/dashboard')
+    await page.goto('/agents')
+    await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' })
     // The shell renders after the auth context resolves, and at 1280 the
     // `Open sidebar` toggle this spec's sibling waits on is `lg:hidden` — so
     // wait on the drawer itself rather than on a control that is correctly
@@ -311,16 +328,56 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
     // 2. The claim that actually matters, asked the way a tap asks it: at the
     //    bottom-left coordinate the sidebar's footer row occupied, what would
     //    the user reach? Anything inside `aside` here is the reported defect.
+    //    `insideDrawer: false` alone is too weak, and was (review finding): it
+    //    passes when the coordinate is owned by ANYTHING that is not the aside
+    //    — the `fixed inset-0` scrim included, which would obscure the entire
+    //    page. So the element is named and required to be inside `<main>`.
     const hit = await page.evaluate(() => {
       const top = document.elementFromPoint(24, window.innerHeight - 40)
       const aside = document.querySelector('aside')
       return {
         insideDrawer: !!(top && aside?.contains(top)),
+        insidePageContent: !!top?.closest('main'),
         // Named so a failure says WHAT is covering the page rather than just
         // `true` — the first question anyone asks next.
         topElement: top?.tagName.toLowerCase() ?? null,
       }
     })
-    expect(hit).toMatchObject({ insideDrawer: false })
+    expect(hit).toMatchObject({ insideDrawer: false, insidePageContent: true })
+
+    // 3. The symptom #2586 actually reported, asserted on the element it named:
+    //    the empty state's footer link must be reachable, not clipped by
+    //    anything. `toBeVisible` is not enough — a covered element is still
+    //    visible — so this hit-tests the link's own centre.
+    const guide = page.getByRole('link', { name: 'Read the agent guide' })
+    await expect(guide).toBeVisible()
+    // The shell is `h-screen overflow-hidden` with `<main>` as the only
+    // scroller, and the empty state is taller than the viewport — so the link
+    // starts BELOW the fold and `elementFromPoint` at its coordinates returns
+    // null (measured: `covering: null`, which reads as "covered" while nothing
+    // is covering it). Scroll it into view before hit-testing.
+    await guide.scrollIntoViewIfNeeded()
+    await page.waitForTimeout(300)
+    const linkReachable = await guide.evaluate((el) => {
+      // Per LINE BOX, not the bounding box. This link WRAPS at 390px, and the
+      // centre of a two-line inline element's bounding box falls in the gap
+      // between the lines — which returns the parent and reads as "covered"
+      // when nothing is covering it. Measured: the first assertion written
+      // this way failed on a page with the link fully legible.
+      const rects = Array.from(el.getClientRects())
+      const probes = rects.map((r) => {
+        const top = document.elementFromPoint(
+          Math.round(r.left + r.width / 2),
+          Math.round(r.top + r.height / 2),
+        )
+        return { reachable: top === el || el.contains(top), covering: top?.tagName.toLowerCase() ?? null }
+      })
+      return {
+        lineBoxes: rects.length,
+        reachable: probes.length > 0 && probes.every((p) => p.reachable),
+        covering: probes.find((p) => !p.reachable)?.covering ?? null,
+      }
+    })
+    expect(linkReachable).toMatchObject({ reachable: true })
   })
 })

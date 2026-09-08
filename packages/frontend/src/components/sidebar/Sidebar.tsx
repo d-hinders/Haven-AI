@@ -151,7 +151,7 @@ export default function Sidebar() {
     },
   ]
 
-  // Outside-click to close kebab popover
+  // Keep the drawer honest across the `lg` breakpoint (#2586)
   /*
     Keep the drawer's state honest when the viewport CROSSES the breakpoint
     (#2586).
@@ -176,10 +176,29 @@ export default function Sidebar() {
     while a window is being dragged. Both directions are synced — going wide
     releases it (harmless, since `lg:translate-x-0` pins the drawer open at
     desktop regardless) so that a later narrowing is a real crossing again.
+
+    The query is `min-width: 1024px` — Tailwind's OWN `lg` — and the result is
+    negated, rather than the more obvious `max-width: 1023px` (review finding).
+    Those two are not complements. At a fractional CSS viewport in [1023, 1024),
+    which Windows display scaling and Chrome page zoom produce routinely, BOTH
+    are false: measured at cssWidth 1023.2, `(min-width:1024px)` false and
+    `(max-width:1023px)` false. With `max-width` the listener would then report
+    "not mobile" while `lg:static` / `lg:translate-x-0` do not apply — so
+    widening 390 -> 1023.2 would set `collapsed = false` and park the drawer on
+    the page. That is worse than the bug being fixed: a REGRESSION at a width
+    the old initialiser (`1023 < 1024`) handled correctly. Asking the same
+    question the stylesheet asks cannot drift from it.
+
+    `sync(query)` runs once at subscribe time, not only on later events. The
+    initialiser above runs during render and returns `false` on the server for
+    every device; any crossing between that and this effect's first run would
+    otherwise be lost until the next one — slow hydration plus a rotation, or
+    React re-rendering after an SSR mismatch.
   */
   useEffect(() => {
-    const query = window.matchMedia(`(max-width: ${DESKTOP_BREAKPOINT_PX - 1}px)`)
-    const sync = (e: MediaQueryListEvent | MediaQueryList) => setCollapsed(e.matches)
+    const query = window.matchMedia(`(min-width: ${DESKTOP_BREAKPOINT_PX}px)`)
+    const sync = (e: MediaQueryListEvent | MediaQueryList) => setCollapsed(!e.matches)
+    sync(query)
     query.addEventListener('change', sync)
     return () => query.removeEventListener('change', sync)
   }, [])

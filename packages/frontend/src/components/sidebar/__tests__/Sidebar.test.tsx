@@ -138,33 +138,72 @@ describe('Sidebar', () => {
  * `resize` would pass against an implementation that handles neither.
  */
 describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
+  /*
+    The mock has to be as strict as the real API, or the tests below are
+    theatre — measured, not supposed. An earlier version discarded the query
+    string and the event type, and TWO mutations that break the product
+    completely stayed 7/7 green (review finding): inverting the query to
+    `min-width` (which un-collapses the drawer at every mobile width) and
+    registering the listener under a bogus event type (which makes the fix do
+    nothing). Neither is visible to a mock that fans every call out to every
+    listener regardless of what it was asked for.
+
+    So: the query string is asserted against the ONE query this component may
+    ask, `matches` is derived live from the current width rather than
+    snapshotted, and `change` is the only type that registers a listener.
+  */
+  const DESKTOP_QUERY = '(min-width: 1024px)'
   const listeners = new Set<(e: MediaQueryListEvent) => void>()
-  let matches = false
+  let width = 1280
 
   const installMatchMedia = () => {
     listeners.clear()
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       configurable: true,
-      value: (query: string) => ({
-        matches,
-        media: query,
-        onchange: null,
-        addEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => listeners.add(fn),
-        removeEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => listeners.delete(fn),
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent: () => false,
-      }),
+      value: (query: string) => {
+        // Not a soft assertion: a component asking a different question is a
+        // component this suite is not testing, and silently answering it is
+        // how the two mutations above passed.
+        expect(query, 'Sidebar asked matchMedia a query this mock does not model').toBe(
+          DESKTOP_QUERY,
+        )
+        return {
+          // A getter, so it tracks `width` the way a real MediaQueryList
+          // tracks the viewport instead of freezing at construction.
+          get matches() {
+            return width >= 1024
+          },
+          media: query,
+          onchange: null,
+          addEventListener: (type: string, fn: (e: MediaQueryListEvent) => void) => {
+            if (type === 'change') listeners.add(fn)
+          },
+          removeEventListener: (type: string, fn: (e: MediaQueryListEvent) => void) => {
+            if (type === 'change') listeners.delete(fn)
+          },
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }
+      },
     })
   }
 
-  const crossTo = (isMobile: boolean) => {
-    matches = isMobile
+  /** Move the viewport and fire `change` exactly as a browser would. */
+  const setWidth = (next: number) => {
+    width = next
+    Object.defineProperty(window, 'innerWidth', {
+      value: next,
+      writable: true,
+      configurable: true,
+    })
     act(() => {
-      for (const fn of listeners) fn({ matches: isMobile } as MediaQueryListEvent)
+      for (const fn of listeners) fn({ matches: next >= 1024 } as MediaQueryListEvent)
     })
   }
+
+  const crossTo = (isMobile: boolean) => setWidth(isMobile ? 390 : 1280)
 
   const drawer = () => document.querySelector('aside') as HTMLElement
   const offScreen = () => drawer().className.includes('-translate-x-full')
@@ -175,11 +214,12 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
       user: { name: 'Ada Lovelace', email: 'ada@example.com', safes: [] },
       logout: vi.fn(),
     })
-    matches = false
+    width = 1280
     installMatchMedia()
   })
 
   it('collapses when the viewport narrows past the breakpoint', () => {
+    width = 1280
     Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
     render(<Sidebar />)
 
@@ -199,8 +239,25 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // collapses unconditionally — and it pins why no visual baseline could
     // have caught the defect, since the capture harness sets the viewport
     // before it navigates and therefore only ever exercises this path.
+    width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    matches = true
+    render(<Sidebar />)
+    expect(offScreen()).toBe(true)
+  })
+
+  it('syncs on mount when the initialiser and the media query disagree', () => {
+    // The initialiser runs during RENDER and reads `window.innerWidth`, which
+    // is `undefined` on the server — so a server-rendered page reaches a phone
+    // with `collapsed = false` no matter how narrow the device is. Anything
+    // that resolves between that render and this effect's first run is lost
+    // until the NEXT crossing, which on a phone that never rotates is never.
+    //
+    // Modelled here as the disagreement itself: `innerWidth` says desktop (what
+    // the initialiser sees) while the media query says mobile (what is true).
+    // Without `sync(query)` at subscribe time this stays open, and the drawer
+    // covers the page from first paint.
+    Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
+    width = 390
     render(<Sidebar />)
     expect(offScreen()).toBe(true)
   })
@@ -209,8 +266,8 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // Not cosmetic: the state has to be released so a LATER narrowing is a
     // real crossing rather than a no-op. Invisible at `lg` either way, because
     // `lg:translate-x-0` pins the drawer open there.
+    width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    matches = true
     render(<Sidebar />)
     expect(offScreen()).toBe(true)
 

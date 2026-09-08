@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of reconciliation-probe tooling; prior notes remain in git history.
+last-verified: "2026-09-08" # #2706: re-verified, NOT edited. The strict coupling gate implicated this doc because the PR edits `packages/backend/src/modules/x402/delegation-authorize.ts` (in covers:). The claims this document makes about that file are the #1667 relayer-deploy trigger sites and the #961 hourly-cap rationale — both re-read against the diff and both hold: the pre-check sits inside the funding-shape branch AFTER the cap check and BEFORE `prepareDelegationPayment`, so neither trigger site, the deploy short-circuit, nor the sponsored-estimation cost story changes; a refused-over-budget payment now exits BEFORE the prepare, which only REDUCES sponsored estimations spent on payments that could never sign. The diff adds no env surface, no vendor endpoint and no cost term. Scope: those two claim classes. NOT re-verified: the paymaster/relayer cost tables, the bundler URL residency rules, or the operator runbooks. Prior: chain-reset(#2542): scoped re-verification of reconciliation-probe tooling; prior notes remain in git history.
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)

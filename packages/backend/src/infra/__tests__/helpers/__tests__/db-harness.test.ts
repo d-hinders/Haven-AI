@@ -10,7 +10,7 @@
  * rows into the SAME table name, so when vitest schedules them in different
  * workers, each asserts it sees only its own rows.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../../db.js'
 import { migrations } from '../../../../db/migrations/index.js'
 import { withTransaction } from '../../../transaction.js'
@@ -28,6 +28,16 @@ describeDb('db-harness (#1220)', () => {
          note TEXT
        )`,
     )
+  })
+
+  // Since #2625: db-harness.ts now auto-registers `assertWorkerSchemaAtHead()`
+  // at the root of every real-DB file, so a scratch table created here and
+  // left behind would fail as drift. Dropping it here is just this file
+  // restoring migration head, the same obligation every other schema-mutating
+  // file in this suite already carries — the isolation proof above needs the
+  // table only WHILE its own tests run, not afterwards.
+  afterAll(async () => {
+    await db.query('DROP TABLE IF EXISTS harness_smoke')
   })
 
   beforeEach(async () => {

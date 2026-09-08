@@ -99,7 +99,6 @@ export async function readCanonicalRunbook() {
 }
 
 const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-const runbook = await readCanonicalRunbook()
 
 const header = `/**
  * The agent onboarding runbook — GENERATED, do not edit by hand.
@@ -117,6 +116,16 @@ const header = `/**
 `
 
 if (invokedDirectly) {
+  // Read INSIDE the guard, not at module scope (review nit, #2743).
+  // `readCanonicalRunbook` evaluates the SDK source through `new Function`, and
+  // scripts/ci/root-guard-ownership.test.mjs imports GENERATED_COPIES from this
+  // file. At module scope that eval ran on import, so a future `import`
+  // statement in agent-guidance.ts — anything `new Function` cannot eval —
+  // would fail the ENTIRE ci_config_checks suite with a SyntaxError pointing at
+  // a package source, far from anything the suite is about. Every use of
+  // `runbook` is in this block already, so the move costs nothing.
+  const runbook = await readCanonicalRunbook()
+
   if (process.argv.includes('--check')) {
     const drifted = []
     for (const copy of GENERATED_COPIES) {

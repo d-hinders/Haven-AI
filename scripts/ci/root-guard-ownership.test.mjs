@@ -438,9 +438,11 @@ describe('generated copies route the jobs that verify them (#2743)', () => {
   // the other and the copy direction was the worse hole: `for-agents.md` is a
   // generated artifact that happens to be Markdown, so the DOC_ONLY `*.md` arm
   // (whose `*` crosses `/`) swallowed it and an edit routed NOTHING — not even
-  // `code` — while its CLI sibling routed `cli` and any other file in the same
-  // public/ directory routes `frontend`. The one copy an agent actually
-  // fetches was the one copy whose drift no job could catch.
+  // `code` — while its CLI sibling routed `cli` and its NON-MARKDOWN siblings
+  // in public/ routed `frontend`. Stated that way deliberately: the first
+  // draft said "any other file in public/", which was false — `402.md` is
+  // swallowed by the same arm, and believing the looser sentence is what made
+  // a one-file fix look like a directory-wide one.
   //
   // Derived from the generator's OWN list, so a third copy added to
   // GENERATED_COPIES fails here until it routes, rather than joining silently.
@@ -473,6 +475,43 @@ describe('generated copies route the jobs that verify them (#2743)', () => {
         `${copy} is a generated copy verified by lint:runbook-parity, but editing it routes ` +
           `none of ${JSON.stringify(verifying)} — so drift in the copy runs no check. ` +
           'A generated artifact under a doc-only extension needs a DOC_EXCEPTIONS arm.',
+      )
+    }
+  })
+})
+
+describe('served public artifacts are not treated as docs (#2743)', () => {
+  // The directory rule, rather than a list of the files in it today.
+  //
+  // packages/frontend/public/ is served content: everything in it is fetched
+  // over HTTP by a browser or an agent, and several entries are asserted by
+  // frontend tests. The DOC_ONLY `*.md` arm swallowed the Markdown ones, so
+  // `for-agents.md` and `402.md` both routed NOTHING while every non-Markdown
+  // sibling routed `frontend`. Fixing only the first left the second open —
+  // which is how this test came to exist, and why it asserts the directory.
+  const PUBLIC_DIR = 'packages/frontend/public'
+
+  test('the directory has files, including Markdown — the instrument can say yes', () => {
+    // Positive control on BOTH halves: an empty sweep, or one that happened to
+    // contain no Markdown, would make the assertion below vacuous — and
+    // Markdown is the only extension the DOC_ONLY arm swallows.
+    const files = globSync(`${PUBLIC_DIR}/**/*`, { cwd: ROOT, nodir: true })
+    assert.ok(files.length >= 4, `expected served artifacts, saw ${files.length}`)
+    assert.ok(
+      files.some((f) => f.endsWith('.md')),
+      'no Markdown under public/ — this test would pass vacuously; has the directory moved?',
+    )
+  })
+
+  test('every served file routes the frontend job', () => {
+    for (const file of globSync(`${PUBLIC_DIR}/**/*`, { cwd: ROOT, nodir: true })) {
+      const served = file.split(path.sep).join('/')
+      assert.equal(
+        classifyChangedFiles([served])['frontend'],
+        true,
+        `${served} is served to users and agents, but editing it does not route "frontend" — ` +
+          'so no frontend test that asserts its content runs. Markdown here is a build ' +
+          'artifact, not documentation: it needs a DOC_EXCEPTIONS arm.',
       )
     }
   })

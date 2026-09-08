@@ -121,18 +121,31 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
  */
 export const DOC_EXCEPTIONS = Object.freeze([
   { patterns: ['CLAUDE.md'], surfaces: ['code', 'backend'] },
-  // packages/frontend/public/for-agents.md is a GENERATED ARTIFACT that happens
-  // to be Markdown: byte-pinned to packages/sdk/src/agent-guidance.ts by
-  // for-agents-runbook.test.ts, and verified by lint:runbook-parity. `*.md`
-  // above crosses `/`, so it swallowed this file and a hand-edit of the served
-  // copy routed NOTHING — not even `code` — while its sibling
-  // packages/cli/src/agent-guidance-text.ts routed `cli` and any other file in
-  // the same public/ directory routes `frontend`. So the ONE copy an agent
-  // actually fetches was the one copy whose drift no job could catch (#2743).
+  // packages/frontend/public/ is SERVED CONTENT, not documentation. Markdown
+  // there is a build artifact an agent fetches over HTTP, but `*.md` above
+  // crosses `/` (see globToRegExp), so it swallowed the whole directory: an
+  // edit to a served .md routed NOTHING, not even `code`, while every
+  // non-Markdown sibling in the same directory routed `frontend`. Both arms
+  // below exist because that was measured, not assumed (#2743):
   //
-  // #2727 routed the SOURCE to all three jobs; this routes the COPY. The two
-  // are different directions and only the first was done.
-  { patterns: ['packages/frontend/public/for-agents.md'], surfaces: ['code', 'sdk', 'cli', 'frontend'] },
+  //   for-agents.md  routed []  — byte-pinned to packages/sdk/src/agent-guidance.ts
+  //                               by for-agents-runbook.test.ts AND compared by
+  //                               lint:runbook-parity, so it needs the three jobs
+  //                               that run that lint, not just frontend.
+  //   402.md         routed []  — authored, not generated, and asserted by
+  //                               discovery-artifacts.test.ts, which is
+  //                               frontend-only. Found while correcting a claim
+  //                               that the first arm alone had closed the
+  //                               directory; it had closed one file.
+  //
+  // Ordered specific-then-general, since DOC_EXCEPTIONS is first-match-wins.
+  // The general arm is what makes this the DIRECTORY's rule rather than a list
+  // of the two files that happen to exist today.
+  {
+    patterns: ['packages/frontend/public/for-agents.md'],
+    surfaces: ['code', 'sdk', 'cli', 'frontend'],
+  },
+  { patterns: ['packages/frontend/public/*.md'], surfaces: ['code', 'frontend'] },
 ])
 
 /**

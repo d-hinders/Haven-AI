@@ -280,10 +280,10 @@ export const ROUTING_MATRIX = [
     why:
       'The served runbook (#2743) — a GENERATED artifact that happens to be Markdown, so the ' +
       'DOC_ONLY `*.md` arm swallowed it and a hand-edit routed NOTHING, not even `code`. Its ' +
-      'sibling copy packages/cli/src/agent-guidance-text.ts routed `cli`, and any other file ' +
-      'in the same public/ directory routes `frontend`, so the one copy an agent actually ' +
-      'fetches was the one whose drift no job could catch. #2727 routed the SOURCE; this row ' +
-      'routes the COPY, which is the other direction.',
+      'sibling copy packages/cli/src/agent-guidance-text.ts routed `cli`, and its NON-MARKDOWN ' +
+      'siblings in public/ routed `frontend` — the other Markdown file there, 402.md, was ' +
+      'swallowed too, which is why DOC_EXCEPTIONS also carries a general arm for the ' +
+      'directory. #2727 routed the SOURCE; this row routes the COPY, the other direction.',
   },
   {
     files: ['packages/sdk/src/skill-content.ts'],

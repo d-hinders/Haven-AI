@@ -251,6 +251,8 @@ jobs:
         run: |
           npm run lint:retired-rail-prose
           npm run lint:retired-rail-prose:test
+          npm run lint:migration-constraint-scope
+          npm run lint:migration-constraint-scope:test
 
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the

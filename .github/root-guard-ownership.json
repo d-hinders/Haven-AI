@@ -46,87 +46,167 @@
   "guards": [
     {
       "path": ".dependency-cruiser.cjs",
-      "jobs": ["backend"],
-      "runsVia": ["lint:deps"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:deps"
+      ],
       "reason": "The module-boundary rule set (#982). It is authoritative over the prose in the architecture doc, so weakening a rule here is exactly the change that must re-run the gate enforcing it."
     },
     {
       "path": "scripts/dep-lint.mjs",
-      "jobs": ["backend"],
-      "runsVia": ["lint:deps"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:deps"
+      ],
       "reason": "The dependency-boundary gate itself. It scans packages/backend and packages/core but is only ever run by backend_checks."
     },
     {
       "path": "scripts/dep-lint.test.mjs",
-      "jobs": ["backend"],
-      "runsVia": ["lint:deps:test"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:deps:test"
+      ],
       "reason": "The gate's own self-test. A lint nobody tests can start passing vacuously, so loosening the test must run it."
     },
     {
       "path": "scripts/db-mock-ratchet.mjs",
-      "jobs": ["backend"],
-      "runsVia": ["lint:db-mocks"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:db-mocks"
+      ],
       "reason": "The shrink-only ratchet that stops the positional-mock pattern growing back in packages/backend tests (#1219)."
     },
     {
       "path": "scripts/db-mock-ratchet.test.mjs",
-      "jobs": ["backend"],
-      "runsVia": ["lint:db-mocks:test"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:db-mocks:test"
+      ],
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
       "path": "scripts/retired-rail-prose-ratchet.mjs",
-      "jobs": ["backend"],
-      "runsVia": ["lint:retired-rail-prose"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:retired-rail-prose"
+      ],
       "reason": "The shrink-only ratchet that stops the retired-rail prose phrase family growing back across packages/** (#2685). It scans all packages but only backend_checks runs it."
     },
     {
       "path": "scripts/retired-rail-prose-ratchet.test.mjs",
-      "jobs": ["backend"],
-      "runsVia": ["lint:retired-rail-prose:test"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:retired-rail-prose:test"
+      ],
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
       "path": "scripts/generate-api-types.mjs",
-      "jobs": ["backend"],
-      "runsVia": ["check:api-types"],
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "check:api-types"
+      ],
       "reason": "Generates packages/core/src/api-types.ts from the backend OpenAPI spec. Backend rather than frontend despite writing into core: the drift check that would fail runs only in backend_checks."
     },
     {
       "path": "scripts/lib/ratchet.mjs",
-      "jobs": ["backend", "frontend"],
-      "runsVia": ["lint:db-mocks", "lint:wire-types"],
+      "jobs": [
+        "backend",
+        "frontend"
+      ],
+      "runsVia": [
+        "lint:db-mocks",
+        "lint:wire-types"
+      ],
       "reason": "The shared ratchet ENGINE, backing both the backend db-mock gate and the frontend wire-type gate (#1447). Routing it to one job would leave the other gate unguarded, which is the whole reason two jobs are named here."
     },
     {
       "path": "scripts/lint-wire-types.mjs",
-      "jobs": ["frontend"],
-      "runsVia": ["lint:wire-types"],
+      "jobs": [
+        "frontend"
+      ],
+      "runsVia": [
+        "lint:wire-types"
+      ],
       "reason": "The wire-type ratchet (#1447). It polices packages/frontend hooks and types, and only frontend_checks runs it."
     },
     {
       "path": "scripts/lint-wire-types.test.mjs",
-      "jobs": ["frontend"],
-      "runsVia": ["lint:wire-types:test"],
+      "jobs": [
+        "frontend"
+      ],
+      "runsVia": [
+        "lint:wire-types:test"
+      ],
       "reason": "Its self-test. Widening the exemption regex or deleting the --update refusal without running the gate is the specific failure this covers."
     },
     {
       "path": "scripts/network-map-pins.test.mjs",
-      "jobs": ["backend", "sdk", "signer"],
-      "runsVia": ["lint:network-pins"],
+      "jobs": [
+        "backend",
+        "sdk",
+        "signer"
+      ],
+      "runsVia": [
+        "lint:network-pins"
+      ],
       "reason": "The network-map pin test (#1478) spans backend, SDK and signer sources, and all three jobs run it. Naming fewer would let a drift ship past the job that would have caught it."
     },
     {
       "path": "scripts/ci/visual-baseline-inventory.mjs",
-      "jobs": ["frontend"],
-      "runsVia": ["visual:baselines"],
-      "reason": "The visual gate's honesty instrument (#2318): it names the baselines that were actually compared, and refuses an EMPTY baseline tree \u2014 the case where the pixel gate passes having compared nothing. It reads packages/frontend/e2e/__screenshots__ but lives under scripts/, and the job that reads it beside the tick (design_visual) is gated on the frontend surface, so a pull request touching only this file must be routed to frontend_checks to run it at all."
+      "jobs": [
+        "frontend"
+      ],
+      "runsVia": [
+        "visual:baselines"
+      ],
+      "reason": "The visual gate's honesty instrument (#2318): it names the baselines that were actually compared, and refuses an EMPTY baseline tree — the case where the pixel gate passes having compared nothing. It reads packages/frontend/e2e/__screenshots__ but lives under scripts/, and the job that reads it beside the tick (design_visual) is gated on the frontend surface, so a pull request touching only this file must be routed to frontend_checks to run it at all."
     },
     {
       "path": "scripts/ci/visual-baseline-inventory.test.mjs",
-      "jobs": ["frontend"],
-      "runsVia": ["visual:baselines:test"],
+      "jobs": [
+        "frontend"
+      ],
+      "runsVia": [
+        "visual:baselines:test"
+      ],
       "reason": "Its self-test. A report nobody tests can start answering vacuously, which is the exact defect the report exists to expose, so weakening the test must run it."
+    },
+    {
+      "path": "scripts/lint-migration-constraint-scope.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:migration-constraint-scope"
+      ],
+      "reason": "Refuses a pg_constraint lookup in packages/backend/src/db/migrations/** that is not anchored to a relation or schema (#2702). `conname` is not unique across schemas, so an unanchored lookup is answered by another schema's copy and the constraint is silently skipped — measured at 185 and 193 schemas missing three constraints. It lives under scripts/ and only backend_checks runs it, so a PR that only weakens the guard would not route to the job that runs it."
+    },
+    {
+      "path": "scripts/lint-migration-constraint-scope.test.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:migration-constraint-scope:test"
+      ],
+      "reason": "The guard's own fixtures, and they are load-bearing rather than decoration: with the repo already clean, neutering the guard's scope predicate left it GREEN (measured). These tests are the half that can go red, including a fixture in the multi-line shape a hand-written grep missed."
     }
   ]
 }

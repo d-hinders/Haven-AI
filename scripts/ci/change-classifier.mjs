@@ -53,6 +53,15 @@ export const OUTPUT_NAMES = Object.freeze([
 export const ZERO_SHA = '0'.repeat(40)
 
 /**
+ * Events whose BASE_SHA is a base BRANCH tip rather than this branch's previous
+ * tip, and which therefore need a three-dot diff (#2727). `pull_request_target`
+ * carries the same `pull_request` payload shape, so it belongs here even though
+ * ci.yml does not currently use it — a workflow that adopts it later would
+ * otherwise silently get the wrong diff form.
+ */
+export const PULL_REQUEST_EVENTS = Object.freeze(new Set(['pull_request', 'pull_request_target']))
+
+/**
  * Translate one POSIX `case` pattern to a RegExp.
  *
  * The patterns below came from a shell `case`, and shell `case` globs are NOT
@@ -172,9 +181,11 @@ export const SURFACE_RULES = Object.freeze([
   // The guards that live outside the tree they police, one rule per entry in
   // .github/root-guard-ownership.json (#1624). These were four hand-written
   // arms; the ownership is data now, and the manifest is the only place it is
-  // decided. Position in this list does not matter — every guard path is exact
-  // and none collides with another rule — but they stay here so the routing
-  // order reads the same as it did.
+  // decided. Position MATTERS, since #2727 registered the first manifest paths
+  // that live under packages/<pkg>/: such a path is also matched by the
+  // packages/<pkg>/* arm below, so the manifest rule has to come first AND has
+  // to name every job it needs — a rule placed here that named fewer jobs than
+  // the generic arm would quietly NARROW routing rather than widen it.
   ...ROOT_GUARD_RULES,
   { patterns: ['packages/frontend/*'], surfaces: ['code', 'frontend'] },
   { patterns: ['packages/backend/*'], surfaces: ['code', 'backend'] },
@@ -335,10 +346,39 @@ export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RUL
  * a NUL-separated list of raw paths, which is also the only separator a path
  * cannot itself contain: a filename may hold a newline, so newline-delimited
  * output is ambiguous even when nothing is quoted.
+ *
+ * ## Two-dot or three-dot depends on the EVENT (#2727)
+ *
+ * `BASE_SHA` means two different things depending on what fired the workflow,
+ * so one diff form cannot serve both:
+ *
+ * - **`pull_request`** — `github.event.pull_request.base.sha` is the base
+ *   BRANCH TIP, which moves independently of this branch. `git diff A B`
+ *   reports every difference between the two trees, so once anything lands on
+ *   the base the list includes files this pull request never touched. Measured
+ *   on PR #2718: its own diff is 2 files, but the two-dot list was 16, and two
+ *   of the inherited files were root `package.json` and
+ *   `.github/workflows/ci.yml` — the first SURFACE_RULES arm — so every surface
+ *   routed and `CLI checks` ran on a pull request touching no CLI file. The
+ *   three-dot form asks the question routing actually wants: what did this
+ *   branch change SINCE IT DIVERGED. It needs the merge base to be reachable,
+ *   which the `changes` job's existing `fetch-depth: 0` checkout already
+ *   provides.
+ * - **`push`** — `github.event.before` is the previous tip of THIS branch, and
+ *   `A...B` against it would diff from a merge base that is not what happened.
+ *   Two-dot is correct there and stays.
+ *
+ * The direction of the old bug was over-routing, so it cost CI minutes and put
+ * unrelated red on pull requests rather than skipping a job. That is the safe
+ * direction to have been wrong in, and the reason it survived: nothing failed
+ * that should have passed, so nobody looked.
  */
-export function changedFilesCommand({ baseSha, headSha }) {
-  if (baseSha && baseSha !== ZERO_SHA) return ['diff', '-z', '--name-only', baseSha, headSha]
-  return ['ls-tree', '-r', '-z', '--name-only', headSha]
+export function changedFilesCommand({ baseSha, headSha, eventName }) {
+  if (!baseSha || baseSha === ZERO_SHA) return ['ls-tree', '-r', '-z', '--name-only', headSha]
+  if (PULL_REQUEST_EVENTS.has(eventName)) {
+    return ['diff', '-z', '--name-only', `${baseSha}...${headSha}`]
+  }
+  return ['diff', '-z', '--name-only', baseSha, headSha]
 }
 
 /**
@@ -387,7 +427,11 @@ function main(argv) {
         ? readFileList(argv[filesFrom + 1])
         : execFileSync(
             'git',
-            changedFilesCommand({ baseSha: process.env.BASE_SHA, headSha: process.env.HEAD_SHA }),
+            changedFilesCommand({
+              baseSha: process.env.BASE_SHA,
+              headSha: process.env.HEAD_SHA,
+              eventName: process.env.EVENT_NAME,
+            }),
             {
               encoding: 'utf8',
               // Roughly three orders of magnitude above the whole tree's worth

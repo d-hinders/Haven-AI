@@ -227,6 +227,43 @@ export const ROUTING_MATRIX = [
     why: 'The dependency-boundary gate itself (#982).',
   },
   {
+    files: ['packages/sdk/src/agent-guidance.ts'],
+    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer'],
+    kind: CONTRACT,
+    why:
+      'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
+      'stay installable alone — the CLI a full-text copy, the frontend a full-text copy PLUS two ' +
+      'partial ones (agent-onboarding-prompt.ts, agent-skill-bundle.ts) — and each is byte-pinned ' +
+      'by a test in its own job. Before this row, an SDK-only change reached neither cli nor ' +
+      'frontend, so none of those tests ran: #2713 edited this file and left the CLI copy stale, ' +
+      'and dev did not even go red — cli_checks was skipped, so the stale copy was carried until ' +
+      'an unrelated backend PR (#2719) regenerated it. lint:runbook-parity covers the two ' +
+      'full-text copies from every job that owns the source; the ' +
+      'partial ones are not readable back, so frontend is ROUTED rather than checked. That is the ' +
+      'reason both jobs are here, and why removing either silently uncovers a pin test.',
+  },
+  {
+    files: ['packages/cli/scripts/sync-agent-guidance.mjs'],
+    expect: [
+      'code',
+      'sdk',
+      'cli',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+    ],
+    kind: CONTRACT,
+    why:
+      'The generator/verifier for those copies (#2727). It lives under packages/cli/ but reads ' +
+      'packages/sdk/ and is run by all three jobs that check a copy, so all three own it. The ' +
+      'explicit cli matters: root-guard rules match before the packages/cli/* arm, so omitting ' +
+      "it would stop a change here routing the CLI's own suite — a rule that quietly narrows " +
+      'what it was added to widen.',
+  },
+  {
     files: ['scripts/dep-lint.test.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

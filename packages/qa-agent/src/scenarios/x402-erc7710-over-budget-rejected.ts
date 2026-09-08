@@ -14,7 +14,11 @@
  * narrowed child — so a failed-open over-budget request comes back
  * `201 pending_signature` WITH `sign_data`, which is the #1993 shape this file
  * exists to prevent, reappearing precisely when the budget read degrades. No
- * erc7710 path reaches the enforcer at authorize at all.
+ * erc7710 path lets the enforcer ADJUDICATE at authorize. (The pre-check does
+ * read the enforcer's storage — it is an `eth_call` — so "reaches" here means
+ * the enforcer decides, not that no chain call happens. The `at all` absolute
+ * this sentence used to carry is the phrase family that has misled four review
+ * rounds on this branch.)
  *
  * The on-chain proof for the rail lives in `over-budget-refused`, on
  * `POST /payments` (#2738). That leg was deliberately pinned to 3009 by #2016 because on

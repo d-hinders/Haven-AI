@@ -62,12 +62,23 @@
  *
  * **erc7710 direct settlement** (`payTo` = the merchant): authorize builds a
  * settlement CHILD delegation and returns 201 `pending_signature` WITH
- * `sign_data`, for any amount. The budget is enforced when the merchant
- * redeems the [child, budget] chain on-chain — funds are safe, but the
- * invariant's words ("never turned into a signable intent") are FALSE on the
- * preferred scheme. Verified live against dev on 2026-08-25. That is a real
- * coverage gap and it is recorded on #1993 rather than papered over here:
- * proving it would need a merchant redemption attempt, which no leg does.
+ * `sign_data`. It used to do that FOR ANY AMOUNT — the budget was enforced
+ * only when the merchant redeemed the [child, budget] chain on-chain, so funds
+ * were safe but the invariant's words ("never turned into a signable intent")
+ * were FALSE on the preferred scheme (#1993, verified live against dev on
+ * 2026-08-25). #2082 closed that at authorize with a fail-fast pre-check, and
+ * `x402-erc7710-over-budget-rejected` now proves it.
+ *
+ * This paragraph said "for any amount", present tense, for as long as it took
+ * five review rounds to notice — including the round that rewrote the EIP-3009
+ * paragraph directly above it and left this one alone. The heading says what
+ * the rail ACTUALLY does, so a stale half is worse here than anywhere else on
+ * the file.
+ *
+ * One caveat that is NOT stale: the erc7710 pre-check fails open like its
+ * sibling, and because this branch prepares nothing, a degraded budget read
+ * still yields a signable 201 rather than a refusal. The #1993 shape is closed
+ * on a healthy read, not deleted.
  *
  * The assertions below are built so a bare status code cannot satisfy them —
  * see `over-budget-refused`, whose comment block carries the full reasoning.

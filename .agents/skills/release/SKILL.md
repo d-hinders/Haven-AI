@@ -216,23 +216,21 @@ not as permission.
 What it leaves to you:
 
 - **Re-measure the scope at the door, and amend the record if it moved.** The
-  tarballs are built from `main`'s tree **at promotion time**; the CASP shard and
-  the Supported Runtime Manifest note were written back at *Satisfy The
-  Contract-Doc Gate*, against a different tree. Everything merged to `dev` in
-  between publishes inside this release without appearing in its record.
+  tarballs are built from `main`'s tree **at promotion time**; the shard and the
+  Supported Runtime Manifest note were written back at *Satisfy The Contract-Doc
+  Gate*, against a different tree. Anything merged to `dev` in between publishes
+  inside this release without appearing in its record.
 
   ```sh
   npm run release:scope        # origin/main..origin/dev
   ```
 
-  Compare its shipped delta against what the shard claims; amend the shard when
-  they disagree. **Do not hand-count the diff** — that is the failure this step
-  exists to stop, not a fallback for when the script is inconvenient. On
-  `0.1.36-alpha.0` the shard was amended four times in eighteen hours and the
-  scope was counted wrongly three separate ways: the baseline taken from the bump
-  commit, 219 lines of test files counted, and `packages/cli/README.md` omitted
-  while it shipped. The script refuses rather than under-reporting; a refusal
-  means measure again, never "clean" (#2724).
+  Compare its shipped delta against what the shard claims and amend the shard
+  when they disagree. **Never hand-count the diff** — that is the judgement this
+  step exists to enforce, and on 0.1.36-alpha.0 hand-counting got the scope wrong
+  four separate ways. The script's semantics, its exit codes and what it refuses
+  are `scripts/README.md` § *`release-scope.mjs`*; the operator checklist is
+  `promoting-dev-to-main.md`. Read them there rather than from here (#2724).
 
 - It calls the promotion a human step; it does not say whose. **Confirm the user
   wants it** before opening one — cutting the release and shipping it to

@@ -6,10 +6,12 @@
 // The tarballs are built from `main`'s tree at PROMOTION time. Anything merged to
 // `dev` in between ships inside the release without appearing in its record.
 //
-// On 0.1.36-alpha.0 that shard was amended four times in eighteen hours, and the
-// scope was hand-counted wrongly three separate ways: the baseline was taken from
-// the bump commit rather than from main..dev; 219 lines of test files that never
-// ship were counted; and packages/cli/README.md, which does ship, was omitted.
+// On 0.1.36-alpha.0 that shard was amended repeatedly before promotion (the dated
+// shard owns the count), and the scope was hand-counted wrongly four separate
+// ways: the baseline was taken from the bump commit rather than from main..dev;
+// 219 lines of test files that never ship were counted; packages/cli/README.md,
+// which does ship, was omitted; and three of the five package.json files were
+// left out while the other two were included.
 // Counting a diff by hand is the defect. This script is the instrument.
 //
 // WHAT "SHIPS" MEANS HERE, AND WHY IT IS MEASURED RATHER THAN ASSUMED.
@@ -32,8 +34,11 @@
 // REFUSALS. A measurement instrument that reports "nothing ships" when it simply
 // could not look is worse than no instrument, because an empty result is what tells
 // a release author to skip the amendment. So this script refuses rather than
-// under-reports: on a shallow clone, on a package whose dist is missing or carries
-// no sourcemaps, and on a changed source file it cannot resolve to either bucket.
+// under-reports: on a shallow clone; on a package whose dist is missing, carries no
+// sourcemaps, or lacks one of the bundles its own package.json resolves to; and on
+// a `files` entry that is a glob, which the literal prefix match would silently
+// match nothing against. A source file it can place in neither bucket is reported
+// in an `unresolved` list and exits 1 — measured, but not measured completely.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
@@ -90,7 +95,32 @@ function publishedPackages() {
     if (!existsSync(manifestPath)) continue
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     if (manifest.private === true) continue
-    published.push({ dir: name, name: manifest.name, files: manifest.files ?? [], version: manifest.version })
+    // Required bundles come from what npm consumers actually RESOLVE — main,
+    // module and bin all point at concrete dist/<name>.{js,cjs} paths — not from
+    // a filename convention over src/. Deriving them from /^(index|cli)\.ts$/
+    // was both a false-refusal risk (an ordinary internal module named
+    // src/cli.ts hard-stopped @haven_ai/sdk at exit 2, which no rebuild could
+    // clear, because sdk's only entry is src/index.ts) and a false-pass risk (a
+    // future entry named src/server.ts would not be required at all, reopening
+    // the partial-dist hole). A bundle missing from these fields is definitionally
+    // a broken tarball.
+    const entryRefs = [manifest.main, manifest.module, ...Object.values(manifest.bin ?? {})].filter(
+      (v) => typeof v === 'string',
+    )
+    const requiredBundles = [
+      ...new Set(
+        entryRefs
+          .map((ref) => /(?:^|\/)dist\/([^/]+)\.(?:c?js)$/.exec(ref)?.[1])
+          .filter((b) => typeof b === 'string'),
+      ),
+    ]
+    published.push({
+      dir: name,
+      name: manifest.name,
+      files: manifest.files ?? [],
+      version: manifest.version,
+      requiredBundles,
+    })
   }
 
   if (published.length === 0) {
@@ -128,19 +158,13 @@ function bundledSources(pkg) {
   // then silently under-reports everything the missing bundle carried. Require a
   // .map for every entry the package declares through its own bin/exports shape:
   // each src/<name>.ts that tsup would emit as dist/<name>.js.
-  const bundleNames = new Set(maps.map((m) => m.replace(/\.(c?js)\.map$/, '')).filter((b, i, a) => a.indexOf(b) === i))
-  const srcDir = join(PACKAGES_DIR, pkg.dir, 'src')
-  const declaredEntries = existsSync(srcDir)
-    ? readdirSync(srcDir, { withFileTypes: true })
-        .filter((e) => e.isFile() && /^(index|cli)\.ts$/.test(e.name))
-        .map((e) => e.name.replace(/\.ts$/, ''))
-    : []
-  const missingBundles = declaredEntries.filter((e) => !bundleNames.has(e))
+  const bundleNames = new Set(maps.map((m) => m.replace(/\.(c?js)\.map$/, '')))
+  const missingBundles = pkg.requiredBundles.filter((e) => !bundleNames.has(e))
   if (missingBundles.length > 0) {
     throw new Refusal(
       `${pkg.name}: packages/${pkg.dir}/dist has sourcemaps but none for ${missingBundles
         .map((b) => `${b}.js`)
-        .join(', ')}, though src/${missingBundles[0]}.ts exists. A partial dist under-reports whatever the ` +
+        .join(', ')}, though package.json's main/module/bin resolve to it. A partial dist under-reports whatever the ` +
         `missing bundle carried, silently. Rebuild the package.`,
     )
   }
@@ -253,7 +277,16 @@ function classify(changedFiles, packages) {
     }
 
     const isSource = /^packages\/[^/]+\/src\//.test(file)
-    const isTest = /(\.test\.[cm]?[jt]sx?$)|(^|\/)__tests__\//.test(file)
+    // Test-support modules are not tarball content. `test-helpers.ts` is not
+    // `.test.ts`, so without this a MODIFIED one landed in `unresolved` while a
+    // DELETED one was counted as shipped — the same file, opposite answers,
+    // decided only by change status (review finding D). This is a naming
+    // heuristic and is deliberately narrow: it only routes a file that is ALREADY
+    // absent from every bundle, so it can never remove something the build says
+    // it consumed.
+    const isTest =
+      /(\.test\.[cm]?[jt]sx?$)|(^|\/)__tests__\//.test(file) ||
+      /(^|\/)(test-helpers?|test-support|__mocks__)(\.[cm]?[jt]sx?)?$/.test(file.replace(/\.[cm]?[jt]sx?$/, '$&'))
 
     // A DELETED source cannot be in head's sourcemaps, because it does not exist
     // at head. Absence carries no information here, so the sourcemap evidence
@@ -334,23 +367,47 @@ function changedFilesInRange(base, head) {
     const parts = line.split('\t')
     const status = parts[0][0] // R100 -> R; take the letter only
     // A rename reports old and new paths; the new path is what exists at head.
-    const path = status === 'R' ? parts[2] : parts[1]
+    // R (rename) and C (copy) both report old and new; the new path is what
+    // exists at head. Copies need `diff.renames = copies`, unset here, so this is
+    // dormant — but reading parts[1] for a C would name the SOURCE file, which is
+    // not the file that changed.
+    const path = status === 'R' || status === 'C' ? parts[2] : parts[1]
     return { path, status }
   })
 }
 
+// Parse the WHOLE range once and filter by path afterwards. Passing a pathspec
+// to `git diff --numstat` applies it BEFORE rename detection, so the old path is
+// filtered out, the rename becomes undetectable, and a renamed file is counted as
+// a pure add: measured on ba7c46f5, a real +3/-5 rename reported +107/-0 under a
+// pathspec, and `--name-status` with the same pathspec called it `A` while the
+// unfiltered form called it `R`. Two of the script's own git calls contradicting
+// each other is how a wrong number reaches the artifact this script exists to
+// produce. Filtering after the parse also removes the `{old => new}` path-form
+// hazard, since the path column is never re-read.
 function lineStats(base, head, files) {
-  if (files.length === 0) return { added: 0, removed: 0 }
-  const raw = git(['diff', '--numstat', `${base}...${head}`, '--', ...files])
+  if (files.length === 0) return { added: 0, removed: 0, binary: [] }
+  const wanted = new Set(files)
+  const raw = git(['diff', '--numstat', `${base}...${head}`])
   let added = 0
   let removed = 0
+  const binary = []
   for (const line of raw === '' ? [] : raw.split('\n')) {
-    const [a, r] = line.split('\t')
-    if (a === '-' || r === '-') continue // binary
+    const [a, r, pathField] = line.split('\t')
+    // A rename renders as `old => new` or `dir/{old => new}/file`; resolve to the
+    // new path, which is what the classifier keyed on.
+    const path = pathField.includes('=>')
+      ? pathField.replace(/\{([^{}]*) => ([^{}]*)\}/, '$2').replace(/^.* => /, '').trim()
+      : pathField
+    if (!wanted.has(path)) continue
+    if (a === '-' || r === '-') {
+      binary.push(path) // counted as a file, never as lines — and said so, not silent
+      continue
+    }
     added += Number(a)
     removed += Number(r)
   }
-  return { added, removed }
+  return { added, removed, binary }
 }
 
 // --- report ------------------------------------------------------------------
@@ -368,6 +425,13 @@ function buildReport(opts) {
   const shippedFiles = ships.map((s) => s.file)
   const stats = lineStats(baseSha, headSha, shippedFiles)
 
+  // A deleted source is ATTRIBUTED to the tarball, not measured into it: nothing
+  // in the head tree can confirm it was bundled, so its lines are inference. Kept
+  // as its own sub-total rather than merged into the headline, so a shard author
+  // can see how much of the delta rests on that inference.
+  const inferredFiles = ships.filter((s) => s.via.startsWith('deleted')).map((s) => s.file)
+  const inferred = lineStats(baseSha, headSha, inferredFiles)
+
   const affected = [...new Set(ships.map((s) => s.pkg))].sort()
 
   return {
@@ -376,7 +440,12 @@ function buildReport(opts) {
     references: referencesIn(commits),
     packages: packages.map((p) => ({ name: p.name, version: p.version })),
     affectedPackages: affected,
-    shipped: { files: ships, count: ships.length, ...stats },
+    shipped: {
+      files: ships,
+      count: ships.length,
+      ...stats,
+      inferred: { count: inferredFiles.length, added: inferred.added, removed: inferred.removed },
+    },
     excluded,
     unresolved,
   }
@@ -395,10 +464,27 @@ function render(report) {
   )
   out.push('')
 
-  out.push(`Publishes to npm: ${report.affectedPackages.length ? report.affectedPackages.join(', ') : '(no published package is affected)'}`)
+  // NOT "publishes to npm": publish.yml is VERSION-gated and skips any version
+  // already on the registry, so a promotion carrying no bump publishes nothing
+  // however many packages appear here. Saying "publishes" would contradict
+  // branch-and-release-flow.md, and this output gets pasted into shards.
+  out.push(
+    `Published packages affected: ${report.affectedPackages.length ? report.affectedPackages.join(', ') : '(none)'}`,
+  )
+  out.push('  (the publish itself is version-gated — no bump in the range means nothing is published)')
   out.push('')
 
   out.push(`Shipped delta: ${report.shipped.count} files, +${report.shipped.added}/-${report.shipped.removed}`)
+  if (report.shipped.inferred.count > 0) {
+    out.push(
+      `  of which attributed, not measured: ${report.shipped.inferred.count} deleted source file(s), ` +
+        `+${report.shipped.inferred.added}/-${report.shipped.inferred.removed} — nothing in the head tree can ` +
+        `confirm a deleted module was bundled`,
+    )
+  }
+  if (report.shipped.binary.length > 0) {
+    out.push(`  ${report.shipped.binary.length} binary file(s) counted as files but not as lines`)
+  }
   for (const entry of report.shipped.files) {
     out.push(`  ${entry.file}`)
     out.push(`      ${entry.pkg} — ${entry.via}`)
@@ -424,9 +510,14 @@ function render(report) {
     }
     out.push('')
     out.push('  These are under src/ in a published package but absent from every dist sourcemap.')
-    out.push('  Either they are unreachable from an entry point, or the local build predates them.')
-    out.push('  Rebuild (`npm run build`) and re-run before trusting the shipped delta: a stale')
-    out.push('  build under-reports, which is the direction that loses a record.')
+    out.push('  THREE causes, and only the third is a staleness problem:')
+    out.push('    1. the file emits no mapped output (a barrel, or a type-only module);')
+    out.push('    2. nothing imports it from an entry point (dead code, test support);')
+    out.push('    3. the build predates it (a stale dist, which UNDER-reports).')
+    out.push('  1 and 2 are benign and a rebuild will not change them, so do not read this list')
+    out.push('  as automatically a rebuild instruction. Check which cause applies before deciding')
+    out.push('  whether the file belongs in the record. The delta above is measured but not')
+    out.push('  complete, which is why this run exits 1 rather than 0.')
   }
 
   return out.join('\n')

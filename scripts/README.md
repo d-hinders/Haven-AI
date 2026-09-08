@@ -211,23 +211,26 @@ gh pr create --base dev --fill
 > bump commit.** Step 5 rebuilds `dist` from whatever `main` holds once the
 > promotion merges — so everything that lands on `dev` between the bump and the
 > promotion is published inside that release, whether or not the release record
-> mentions it. The record (the CASP shard and the Supported Runtime Manifest
+> mentions it — everything, that is, that lives in one of the five published
+> packages and reaches a tarball, and only when the range carries a version bump
+> at all, since the publish step is version-gated. The record (the CASP shard and the Supported Runtime Manifest
 > note) is written back at step 2, potentially days earlier, against a different
 > tree.
 >
-> That gap is not theoretical: on `0.1.36-alpha.0` the shard was amended four
-> times in eighteen hours, and #2687 was caught only by re-measuring the scope by
-> hand on the morning of the promotion. **Re-measure at the door** — when the
-> promotion PR is opened, not when the bump is cut:
+> That gap is not theoretical: the `0.1.36-alpha.0` shard was amended repeatedly
+> before promotion (it is dated and records its own count), and #2687 was caught
+> only by re-measuring the scope by hand on the morning of the promotion.
+> **Re-measure at the door** — when the promotion PR is opened, not when the bump
+> is cut:
 >
 > ```sh
 > npm run release:scope          # defaults to origin/main..origin/dev
 > ```
 >
 > It reads the shipped set out of each package's built sourcemaps and `files`
-> field rather than counting a diff by hand, and refuses rather than
-> under-reporting when it cannot see (an unbuilt package, a source file it cannot
-> resolve). Amend the shard if the scope moved. See
+> field rather than counting a diff by hand, and refuses rather than guessing when
+> it cannot see. Build first; read the exit code (2 refused, 1 measured but
+> incomplete, 0 clean). Amend the shard if the scope moved. See
 > [#2724](https://github.com/d-hinders/Haven-AI/issues/2724).
 
 > **Target `dev`, never `main`.** This block said `--base main` for as long as
@@ -236,61 +239,6 @@ gh pr create --base dev --fill
 > only `dev` or `hotfix/*` may merge into `main` — the `dev-gate` workflow fails
 > a `release/*` PR aimed at `main`. Following this doc literally used to produce
 > a PR that could not merge.
-
-### Measuring what a promotion publishes (`release:scope`)
-
-```sh
-npm run release:scope                                    # origin/main..origin/dev
-npm run release:scope -- --base=<ref> --head=<ref>
-npm run release:scope -- --json                          # for a script, not a human
-```
-
-Prints the commits and the issues they reference, which of the published
-packages are affected, and the **shipped delta** — the files that actually reach
-a tarball, with their line counts and the reason each one ships.
-
-**Why it is measured rather than reasoned about.** All five packages build with
-`tsup`, which *bundles* from a declared entry point, so `src/foo.ts →
-dist/foo.js` is false — `dist/index.js` is one bundle and a source file reaches
-it only by being imported. A rule like "src files ship, tests do not" is an
-approximation of that, and an approximation in the under-inclusive direction is
-how a record ends up missing something it published. `tsup` runs with
-`sourcemap: true`, so each bundle's `.map` carries the build's own list of every
-source it consumed; that list is what the script reads. The non-compiled half —
-`README.md`, and `packages/sdk/examples/**` — comes from each package's `files`
-field. Nothing in the script is a hand-maintained list of what ships.
-
-**Build first.** The shipped set is read out of `dist`, so run `npm run build`
-before measuring. The script refuses rather than guessing when a package is
-unbuilt, but it has **no check binding `dist` to the ref you passed** — measuring
-a historical range against a `dist` built from your current checkout is on you.
-
-**Exit codes.** `0` measured cleanly · `1` measured, but at least one source file
-could not be classified · `2` refused, nothing measured.
-
-**It refuses rather than under-reports.** A measurement that says "nothing
-shipped" when it merely could not look is worse than none, because an empty
-result is exactly what tells a release author to skip the amendment. It refuses
-on a shallow clone, on a package whose `dist` is missing, carries no sourcemaps,
-or is missing one of its entry bundles, and on a `files` entry that is a glob
-(the prefix match is faithful to npm only for literal entries). Read a refusal as
-"measure again", never as "clean".
-
-**The unresolved bucket has three causes, and only one of them is a stale build.**
-A source file under `src/` that appears in no sourcemap is either a module that
-emits no *mapped output*, or one nothing imports from an entry point, or one the
-build predates. Two of those are benign and rebuilding will not change them, so
-do not read an unresolved file as automatically a staleness problem — check which
-cause applies before deciding whether it belongs in the record. Entry points and
-deleted sources are handled explicitly and never land here: a pure re-export
-barrel is absent from its own sourcemap (measured: `sdk`, `signer`, `mcp` and
-`cli` all omit `src/index.ts`; `connect` includes it, because that one has code
-of its own), and a file deleted in the range cannot be in the head tree's
-sourcemaps at all, so its removal is counted as shipped.
-
-The exclusions are printed, counted and grouped by reason rather than dropped
-silently: an exclusion nobody can see is indistinguishable from a file the
-instrument failed to notice.
 
 ### Which version string
 
@@ -554,3 +502,62 @@ The script exits non-zero with a clear error message pointing at the specific fi
 - **`cli.cjs` does not contain `"<new-version>"`** — `sdkVersion` or `signerVersion` was not updated in `runtime-manifest.ts`, or tsup bundled a stale version. Check that the regex patterns in the script matched correctly (`sdkVersion:` and `signerVersion:` labels).
 - **`MCP_VERSION` in `server.ts` is wrong** — the regex did not match. Check the line format: `export const MCP_VERSION = '...'`.
 - **Build failed mid-way** — the relevant package's `npm run build` exited non-zero. The error output is printed before the failure message.
+
+---
+
+## `release-scope.mjs` — Measuring what a promotion publishes
+
+```sh
+npm run release:scope                                    # origin/main..origin/dev
+npm run release:scope -- --base=<ref> --head=<ref>
+npm run release:scope -- --json                          # for a script, not a human
+```
+
+Prints the commits and the numbers they reference — **issue and pull-request
+numbers alike**, since a squash subject carries its own PR number and the script
+does not read the closing-keyword graph — which of the published
+packages are affected, and the **shipped delta** — the files that actually reach
+a tarball, with their line counts and the reason each one ships.
+
+**Why it is measured rather than reasoned about.** All five packages build with
+`tsup`, which *bundles* from a declared entry point, so `src/foo.ts →
+dist/foo.js` is false — `dist/index.js` is one bundle and a source file reaches
+it only by being imported. A rule like "src files ship, tests do not" is an
+approximation of that, and an approximation in the under-inclusive direction is
+how a record ends up missing something it published. `tsup` runs with
+`sourcemap: true`, so each bundle's `.map` carries the build's own list of every
+source it consumed; that list is what the script reads. The non-compiled half —
+`README.md`, and `packages/sdk/examples/**` — comes from each package's `files`
+field. Nothing in the script is a hand-maintained list of what ships.
+
+**Build first.** The shipped set is read out of `dist`, so run `npm run build`
+before measuring. The script refuses rather than guessing when a package is
+unbuilt, but it has **no check binding `dist` to the ref you passed** — measuring
+a historical range against a `dist` built from your current checkout is on you.
+
+**Exit codes.** `0` measured cleanly · `1` measured, but at least one source file
+could not be classified · `2` refused, nothing measured.
+
+**It refuses rather than under-reports.** A measurement that says "nothing
+shipped" when it merely could not look is worse than none, because an empty
+result is exactly what tells a release author to skip the amendment. It refuses
+on a shallow clone, on a package whose `dist` is missing, carries no sourcemaps,
+or is missing one of its entry bundles, and on a `files` entry that is a glob
+(the prefix match is faithful to npm only for literal entries). Read a refusal as
+"measure again", never as "clean".
+
+**The unresolved bucket has three causes, and only one of them is a stale build.**
+A source file under `src/` that appears in no sourcemap is either a module that
+emits no *mapped output*, or one nothing imports from an entry point, or one the
+build predates. Two of those are benign and rebuilding will not change them, so
+do not read an unresolved file as automatically a staleness problem — check which
+cause applies before deciding whether it belongs in the record. Entry points and
+deleted sources are handled explicitly and never land here: a pure re-export
+barrel is absent from its own sourcemap (measured: `sdk`, `signer`, `mcp` and
+`cli` all omit `src/index.ts`; `connect` includes it, because that one has code
+of its own), and a file deleted in the range cannot be in the head tree's
+sourcemaps at all, so its removal is counted as shipped.
+
+The exclusions are printed, counted and grouped by reason rather than dropped
+silently: an exclusion nobody can see is indistinguishable from a file the
+instrument failed to notice.

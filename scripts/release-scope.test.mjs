@@ -49,7 +49,11 @@ function write(root, rel, body) {
 }
 
 const pkg = (name, extra = {}) =>
-  JSON.stringify({ name, version: '1.0.0', files: ['dist', 'README.md'], ...extra }, null, 2)
+  JSON.stringify(
+    { name, version: '1.0.0', files: ['dist', 'README.md'], main: './dist/index.cjs', ...extra },
+    null,
+    2,
+  )
 
 // A sourcemap is the build's record of which sources entered a bundle. `sources`
 // is relative to dist/, exactly as tsup emits it.
@@ -145,6 +149,36 @@ test('a file the files field does not name is excluded even at the package root'
     args: ['--json'],
   })
   assert.deepEqual(shippedFiles(stdout), [])
+})
+
+// --- error 0: the baseline itself, which is the error that RECURRED ----------
+//
+// haven-doc-reviewer's figure table found this one unpinned while the commit
+// message claimed all the hand-count errors were covered: nothing asserted the
+// default range. Taking the baseline from the bump commit instead of from
+// main..dev is the mistake that happened twice on 0.1.36-alpha.0, so it is the
+// last one that should rest on a default nobody checks.
+
+test('the default range is origin/main..origin/dev, not anything bump-relative', () => {
+  const source = readFileSync(join(SCRIPTS_DIR, SCRIPT), 'utf8')
+  assert.match(source, /const DEFAULT_BASE = 'origin\/main'/)
+  assert.match(source, /const DEFAULT_HEAD = 'origin\/dev'/)
+})
+
+test('--help states the promotion-time baseline the defaults encode', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'release-scope-help-')))
+  try {
+    mkdirSync(join(root, 'scripts'), { recursive: true })
+    cpSync(join(SCRIPTS_DIR, SCRIPT), join(root, 'scripts', SCRIPT))
+    const r = spawnSync(process.execPath, [join(root, 'scripts', SCRIPT), '--help'], { encoding: 'utf8' })
+    assert.equal(r.status, 0)
+    assert.match(r.stdout, /--base=origin\/main --head=origin\/dev/)
+    // The reason for the default, not just the default: a reader who sees only
+    // the refs can still reach for the bump commit.
+    assert.match(r.stdout, /promotion time/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 // --- error 2: the 219 counted lines that never ship --------------------------
@@ -436,14 +470,80 @@ test('LICENSE ships even though the files field never names it', () => {
   assert.deepEqual(shippedFiles(stdout), ['packages/alpha/LICENSE'])
 })
 
-test('refuses a partial dist that is missing one entry bundle', () => {
+test('refuses a partial dist missing a bundle its package.json resolves to', () => {
   const { status, out } = runScope({
     base: {
+      // bin resolves to dist/cli.js, but only index.js.map exists.
+      'packages/alpha/package.json': pkg('@fix/alpha', { bin: { alpha: './dist/cli.js' } }),
       'packages/alpha/src/cli.ts': 'export const c = 1\n',
-      // index.js.map exists (from the default fixture); cli.js.map does not.
     },
     changes: { 'packages/alpha/README.md': 'edited\n' },
   })
   assert.equal(status, 2)
   assert.match(out, /none for cli\.js/)
+})
+
+test('does NOT refuse over a src/cli.ts that is not a declared entry', () => {
+  // Review finding B: deriving required bundles from the filename convention
+  // /^(index|cli)\.ts$/ made an ordinary internal module named src/cli.ts a hard
+  // exit 2 that no rebuild could clear — @haven_ai/sdk's only entry is
+  // src/index.ts, so tsup will never emit dist/cli.js for it.
+  const { status, stdout } = runScope({
+    base: { 'packages/alpha/src/cli.ts': 'export const internal = 1\n' },
+    changes: { 'packages/alpha/README.md': 'edited\n' },
+    args: ['--json'],
+  })
+  assert.equal(status, 0, 'a non-entry module named cli.ts must not stop the measurement')
+  assert.deepEqual(shippedFiles(stdout), ['packages/alpha/README.md'])
+})
+
+test('a renamed shipping file keeps its real line counts', () => {
+  // Review finding A: a pathspec is applied BEFORE rename detection, so the old
+  // path is filtered out and the rename reads as a pure add — measured at +107/-0
+  // for a real +3/-5 rename. lineStats parses the whole range and filters after.
+  const body = `${'line\n'.repeat(40)}`
+  const { stdout } = runScope({
+    base: { 'packages/alpha/src/old-name.ts': body, 'packages/alpha/dist/index.js.map': sourcemap(['../src/index.ts', '../src/new-name.ts']) },
+    changes: { 'packages/alpha/src/new-name.ts': body },
+    remove: ['packages/alpha/src/old-name.ts'],
+    args: ['--json'],
+  })
+  const report = JSON.parse(stdout)
+  assert.ok(report.shipped.added < 40, `a detected rename must not count all 40 lines as added (got +${report.shipped.added})`)
+})
+
+test('deleted-source lines are reported as attributed, not merged into the headline silently', () => {
+  const { stdout } = runScope({
+    base: {
+      'packages/alpha/src/doomed.ts': `${'x\n'.repeat(30)}`,
+      'packages/alpha/dist/index.js.map': sourcemap(['../src/index.ts', '../src/doomed.ts']),
+    },
+    changes: { 'packages/alpha/dist/index.js.map': sourcemap(['../src/index.ts']) },
+    remove: ['packages/alpha/src/doomed.ts'],
+    args: ['--json'],
+  })
+  const report = JSON.parse(stdout)
+  assert.equal(report.shipped.inferred.count, 1)
+  assert.equal(report.shipped.inferred.removed, 30)
+})
+
+test('a test-support module gets the same answer whether modified or deleted', () => {
+  // Review finding D: test-helpers.ts is not `.test.ts`, so it used to be
+  // unresolved when modified and SHIPPED when deleted — same file, opposite
+  // answers, decided only by change status.
+  const modified = runScope({
+    base: { 'packages/alpha/src/test-helpers.ts': 'export const t = 1\n' },
+    changes: { 'packages/alpha/src/test-helpers.ts': 'export const t = 2\n' },
+    args: ['--json'],
+  })
+  const deleted = runScope({
+    base: { 'packages/alpha/src/test-helpers.ts': 'export const t = 1\n' },
+    remove: ['packages/alpha/src/test-helpers.ts'],
+    args: ['--json'],
+  })
+  assert.deepEqual(shippedFiles(modified.stdout), [], 'modified: not shipped')
+  assert.deepEqual(shippedFiles(deleted.stdout), [], 'deleted: also not shipped')
+  assert.equal(JSON.parse(modified.stdout).unresolved.length, 0, 'and not unresolved either')
+  assert.equal(modified.status, 0)
+  assert.equal(deleted.status, 0)
 })

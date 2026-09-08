@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { runtimeStatusHelper, runtimeStatusLabel } from '../setup-copy'
 import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnectionSetupStatus'
 
@@ -191,6 +193,30 @@ describe('runtimeStatusHelper takes the connector spec from the server (#2422)',
     const helper = runtimeStatusHelper(installWith('runtime_config_unreadable'))
 
     expect((helper.match(/`/g) ?? []).length).toBe(2)
+  })
+
+  it('is the ONLY one of the six connector refusal codes the helper handles (#2680 pin)', () => {
+    // mcp-runtime-compatibility.md's error table pins the six refusal codes
+    // and states `runtime_config_unreadable` is "the only one of the six that
+    // reaches the dashboard (runtimeStatusHelper)" — the other five refuse
+    // before any side effect, so they are the connector's exit contract only.
+    // This is a SOURCE scan, not a behaviour probe: a future branch naming a
+    // second refusal code in setup-copy.ts reddens here until the doc is
+    // consciously updated.
+    const src = readFileSync(join(__dirname, '..', 'setup-copy.ts'), 'utf8')
+    const six = [
+      'runtime_undetermined',
+      'runtime_unrecognized',
+      'runtime_force_unrecognized',
+      'runtime_no_installed_clients',
+      'runtime_prompt_aborted',
+      'runtime_config_unreadable',
+    ]
+    const reached = six.filter((code) => src.includes(`error_code === '${code}'`))
+    expect(reached).toEqual(['runtime_config_unreadable'])
+    for (const code of six.filter((c) => c !== 'runtime_config_unreadable')) {
+      expect(src).not.toContain(code)
+    }
   })
 })
 

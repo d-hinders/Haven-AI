@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -223,5 +224,24 @@ describe('the served paths are advertised', () => {
     // A committed copy is a second home that goes stale silently.
     const ignore = readFileSync(join(REPO_ROOT, '.gitignore'), 'utf8')
     expect(ignore).toContain('packages/frontend/public/docs/')
+  })
+
+  it('public/docs/ holds no TRACKED file — exactly one editable copy (#2680 pin)', () => {
+    // The doc's claim is "There is still exactly one editable copy, and it is
+    // the source." The gitignore check above pins the mechanism; this pins the
+    // consequence, so a committed copy reddens even if someone deletes the
+    // gitignore entry and commits in the same edit. Uses execFileSync because
+    // this is a git-tree assertion, not a filesystem one.
+    let out = ''
+    try {
+      out = execFileSync('git', ['ls-files', 'packages/frontend/public/docs/'], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+      })
+    } catch {
+      out = ''
+    }
+    const tracked = out.split('\n').map((l) => l.trim()).filter(Boolean)
+    expect(tracked).toEqual([])
   })
 })

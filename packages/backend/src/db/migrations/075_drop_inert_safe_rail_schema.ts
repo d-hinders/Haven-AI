@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg'
 
+// Temporary #2698 dev-base CODEOWNERS probe: direct migration changes must require owners.
 export const version = '075_drop_inert_safe_rail_schema'
 
 /**

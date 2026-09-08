@@ -48,6 +48,17 @@ export const REFERENCE_PATH_ENV = 'HAVEN_SCHEMA_REFERENCE'
 /** The schema the reference is built in. One per run, dropped and recreated. */
 export const REFERENCE_SCHEMA = 'test_schema_reference'
 
+/**
+ * Serialises the reference build across concurrent runs against one database.
+ *
+ * Distinct from `MIGRATION_LOCK_KEY` (811000061), which `ensureMigrated()`
+ * takes per worker for the worker schemas: this one covers the whole
+ * drop/create/migrate/read sequence on the shared reference schema, which is
+ * destructive and was raced. See `vitest.global-setup.ts` for the three
+ * interleavings it closes.
+ */
+export const REFERENCE_LOCK_KEY = 811000062
+
 /** One table's column and index shape. */
 export type TableFingerprint = {
   table: string

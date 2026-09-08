@@ -35,6 +35,7 @@ import {
 } from './src/infra/__tests__/helpers/db-availability.js'
 import {
   readFingerprint,
+  REFERENCE_LOCK_KEY,
   REFERENCE_PATH_ENV,
   REFERENCE_SCHEMA,
 } from './src/infra/__tests__/helpers/schema-reference.js'
@@ -94,15 +95,45 @@ async function buildSchemaReference(url: string): Promise<void> {
   // would die on `Missing required environment variable: JWT_SECRET`.
   applyTestEnvDefaults()
   const pg = (await import('pg')).default
-  const admin = new pg.Client({ connectionString: url })
-  await admin.connect()
-  try {
-    await admin.query(`DROP SCHEMA IF EXISTS ${REFERENCE_SCHEMA} CASCADE`)
-    await admin.query(`CREATE SCHEMA ${REFERENCE_SCHEMA}`)
-  } finally {
-    await admin.end()
-  }
 
+  // SERIALISED across concurrent runs (review finding, blocking). The
+  // reference schema is a single fixed name and this whole sequence —
+  // drop, create, migrate, fingerprint — is destructive on it, so two runs
+  // against one Postgres raced. Reproduced on the first attempt: run A died
+  // in global setup with `42P06 schema "test_schema_reference" already
+  // exists`, before collecting a single test. This repo documents many
+  // worktrees against one database as the ordinary case, so that is not an
+  // exotic interleaving.
+  //
+  // The 42P06 was the BENIGN branch. Two worse ones live in the same window:
+  // B's `DROP ... CASCADE` landing mid-migration kills A with a
+  // relation-not-found from an arbitrary migration, and B's drop+create
+  // landing between A's migration and A's fingerprint read makes A publish a
+  // PARTIAL reference — which the empty-reference guard below cannot catch,
+  // and which would redden all 62 real-DB files with a wrong message carrying
+  // a destructive repair instruction.
+  //
+  // A lock rather than a per-run schema name, deliberately: the workers read
+  // the fingerprint from a FILE, not from the schema, so a later run
+  // rebuilding it cannot disturb a suite already running — while a per-run
+  // name would leave `--audit` with no persistent reference to compare
+  // against, and would strand one schema per run (#2622's own subject).
+  const holder = new pg.Client({ connectionString: url })
+  await holder.connect()
+  try {
+    await holder.query('SELECT pg_advisory_lock($1)', [REFERENCE_LOCK_KEY])
+    await holder.query(`DROP SCHEMA IF EXISTS ${REFERENCE_SCHEMA} CASCADE`)
+    await holder.query(`CREATE SCHEMA ${REFERENCE_SCHEMA}`)
+    await buildReferenceUnderLock(url, pg)
+  } finally {
+    // Releasing by ending the session: an advisory lock is session-scoped, so
+    // this cannot leak a held lock even if the body threw partway.
+    await holder.end()
+  }
+}
+
+/** The drop/create/migrate/read body, run while `REFERENCE_LOCK_KEY` is held. */
+async function buildReferenceUnderLock(url: string, pg: typeof import('pg').default): Promise<void> {
   const scoped = new URL(url)
   scoped.searchParams.set('options', `-c search_path=${REFERENCE_SCHEMA}`)
   const previousUrl = process.env.DATABASE_URL

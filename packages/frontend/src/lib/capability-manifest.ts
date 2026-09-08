@@ -73,6 +73,16 @@ export interface ManifestChainEntry {
   explorer_url: string
   /** The chain's USDC-family token contract (USDC, or USDC.e on Gnosis). */
   usdc_address: string
+  /**
+   * Whether the chain is a testnet (#2709). Derived from the registry, never
+   * asserted here: `@haven_ai/core` carries a faucet ONLY for testnets (#2534,
+   * "a mainnet carries no entry"), so a faucet's presence is the registry's
+   * own statement that the chain holds test funds. Production lists Base
+   * Sepolia beside Base, and an agent reading `environment: production` must
+   * not conclude that every listed chain carries real money — this is the
+   * field that says which do.
+   */
+  testnet: boolean
 }
 
 export interface CapabilityManifest {
@@ -128,6 +138,7 @@ function manifestChainEntry(chainId: number): ManifestChainEntry | null {
     name: chain.name,
     explorer_url: chain.explorerUrl,
     usdc_address: usdc.address,
+    testnet: chain.faucetUrl !== undefined,
   }
 }
 

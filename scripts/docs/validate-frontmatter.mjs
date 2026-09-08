@@ -123,6 +123,60 @@ export function emptyCoversNote(raw) {
  * Deliberately minimal: handles scalar keys and a `covers` block-list or
  * inline `[]`, with `# comments` stripped from scalar lines.
  */
+/**
+ * Read one `verified:` list item back to its original text (#2637).
+ *
+ * Entries are written as double-quoted YAML scalars because their content is
+ * hostile to every cheaper option: they contain `"`, `'`, `:`, backticks, `#`
+ * and backslashes (regex fragments quoted from the code they describe). Only
+ * `\\` and `\"` are escaped on the way out, so only those two are unescaped
+ * here — a full YAML unescape would turn a literal `\d` inside a quoted regex
+ * into something else, and those appear in real entries.
+ *
+ * An unquoted item is returned as-is rather than rejected: the validator is the
+ * place that complains about shape, and a parser that throws here would take
+ * down every consumer of the front matter over one malformed line.
+ */
+export function unquoteEntry(item) {
+  if (item.length >= 2 && item.startsWith('"') && item.endsWith('"')) {
+    return item.slice(1, -1).replace(/\\(["\\])/g, '$1')
+  }
+  return item
+}
+
+/**
+ * Write one chain entry as a double-quoted YAML scalar (#2637). The inverse of
+ * `unquoteEntry`, and the only writer — the migration and `docs:new` both go
+ * through it so the two directions cannot drift apart.
+ *
+ * NEVER hand-write a quoted entry. `unquoteEntry` decodes `\\\\` and `\\"` and
+ * nothing else, so a different escaping convention silently mis-renders rather
+ * than failing: writing an entry with `JSON.stringify`-style `\\uXXXX` escapes
+ * put a literal `\\u00a7` in a doc during this very change. Pipe new prose
+ * through this function before pasting it.
+ */
+export function quoteEntry(text) {
+  return `"${String(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+/**
+ * The retired inline chain, if this doc still carries one (#2637).
+ *
+ * Matches a `#` comment on the `last-verified:` scalar itself. Deliberately
+ * not `indexOf('#')`: a date never contains one, but being explicit about the
+ * shape keeps this from firing on some future scalar that legitimately does.
+ */
+export function rawLastVerifiedComment(raw) {
+  if (!raw.startsWith('---')) return null
+  const lines = raw.split(/\r?\n/)
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') return null
+    const m = lines[i].match(/^last-verified:\s*"[^"]*"\s*(#.*)$/)
+    if (m) return m[1]
+  }
+  return null
+}
+
 export function parseFrontMatter(raw) {
   if (!raw.startsWith('---')) {
     return { ok: false, error: 'missing front-matter (file must start with `---`)' }
@@ -190,6 +244,34 @@ export function parseFrontMatter(raw) {
       i++
       continue
     }
+    // #2637: `verified:` is a block list of `last-verified` chain entries, and
+    // it CANNOT go through the `covers:` branch above. That branch strips
+    // everything from the first ` #` (globs never contain one) — but every
+    // chain entry begins `#2533: …` and cites more refs in its prose, so the
+    // same rule would delete the entry. It also strips one leading and one
+    // trailing quote blindly, which mangles an entry that legitimately ends in
+    // a quote. Entries are emitted as double-quoted YAML scalars and read back
+    // with real unescaping instead.
+    if (key === 'verified') {
+      const items = []
+      let j = i + 1
+      while (j < end && /^\s*-\s+/.test(lines[j])) {
+        items.push(unquoteEntry(lines[j].replace(/^\s*-\s+/, '').trim()))
+        j++
+      }
+      data[key] = items
+      // The list-consuming loop above already moved past those lines, so `i`
+      // must advance to `j` unconditionally — advancing by 1 on a non-empty
+      // `rest` would re-visit consumed `  - ` lines as top-level keys and
+      // cascade "unparseable front-matter line" errors instead of saying what
+      // is wrong. Unreachable from the migration, which always emits a bare
+      // `verified:`, but the next hand-edit is what this is for (review, #2637).
+      if (rest.trim() !== '') {
+        return { ok: false, error: `\`verified:\` takes a block list, not inline text: "${line}"` }
+      }
+      i = j
+      continue
+    }
     // Scalar: strip a trailing comment and surrounding quotes.
     const hash = rest.indexOf(' #')
     if (hash !== -1) rest = rest.slice(0, hash)
@@ -230,6 +312,17 @@ async function main() {
     }
     if (!lastVerified) {
       errors.push(`${rel}: missing required key \`last-verified\``)
+    }
+    // #2637: the chain is a `verified:` block list, one entry per line. The
+    // retired form put it in a `#` comment on this scalar, where two concurrent
+    // PRs rewrote one 37 KB line and hand-resolving that dropped entries
+    // (#1843) and rewrote them (#2504). Named rather than described: a
+    // contributor who hits this is usually rebasing an older branch.
+    if (rawLastVerifiedComment(raw)) {
+      errors.push(
+        `${rel}: \`last-verified\` carries a retired inline \`#\` chain. ` +
+          `Move it to a \`verified:\` block list — run \`node scripts/docs/migrate-chain-to-list.mjs\` (#2637).`,
+      )
     } else if (!DATE_RE.test(lastVerified)) {
       errors.push(`${rel}: \`last-verified\` must be YYYY-MM-DD, got "${lastVerified}"`)
     }

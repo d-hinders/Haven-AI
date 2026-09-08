@@ -4,7 +4,9 @@ status: current
 covers:
   - .agents/skills/ship-next/SKILL.md
   - .github/labels.yml
-last-verified: "2026-09-08" # #2698: the surface-routing summary re-read — only direct migration implementation `.ts` files remain CODEOWNERS hard-gated; `__tests__/` stays money-path-classified but does not require code-owner approval. Scope: that summary sentence only.
+last-verified: "2026-09-08"
+verified:
+  - "#2698: the surface-routing summary re-read — only direct migration implementation `.ts` files remain CODEOWNERS hard-gated; `__tests__/` stays money-path-classified but does not require code-owner approval. Scope: that summary sentence only."
 ---
 
 # Ship-next playbooks

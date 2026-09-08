@@ -36,9 +36,21 @@ export function split(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/)
   const front = m ? m[1] : ''
   const body = m ? raw.slice(m[0].length) : raw
-  const lv = front.split(/\r?\n/).find((l) => /^last-verified:/.test(l)) ?? ''
+  // #2637: the chain moved off the `last-verified:` scalar and into a
+  // `verified:` block list, so there is no longer a `#` marker to slice at.
+  // The legacy form is still read: this measures history as well as HEAD.
+  const lines = front.split(/\r?\n/)
+  const lv = lines.find((l) => /^last-verified:/.test(l)) ?? ''
   const hash = lv.indexOf('#')
-  const chain = hash === -1 ? '' : lv.slice(hash)
+  let chain = hash === -1 ? '' : lv.slice(hash)
+  if (!chain) {
+    const start = lines.findIndex((l) => /^verified:/.test(l))
+    if (start !== -1) {
+      const items = []
+      for (let i = start + 1; i < lines.length && /^\s*-\s+/.test(lines[i]); i++) items.push(lines[i])
+      chain = items.join('\n')
+    }
+  }
   return { front, body, chain }
 }
 

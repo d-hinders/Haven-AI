@@ -6,7 +6,13 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-09-08" # #2698: the money-path summary re-read — direct migration implementation files, not migration tests, require the CODEOWNERS review. Scope: that sentence only. Prior: #2640: the code-quality-loop pointer repointed at the quality-scan skill reference the method moved to. Scope: that one link. Prior: #2300: the "Money-path?" summary bullet names the hosted MCP tool surface (`packages/mcp-server/src/**`) beside the surfaces it already listed; the pointer to the authoritative JSON is unchanged. Scope: that bullet only. Prior: #2276: the queue-state table said a closed issue is done and implied every open issue is ready; an `operator-verify` issue is neither — merged code, open on purpose, not queueable. Added that one exception. Scope: the queue-state paragraph only; the issue-writing rigour section and the loop-template mapping were NOT re-verified. Prior: #1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination
+last-verified: "2026-09-08"
+verified:
+  - "#2698: the money-path summary re-read — direct migration implementation files, not migration tests, require the CODEOWNERS review. Scope: that sentence only."
+  - "#2640: the code-quality-loop pointer repointed at the quality-scan skill reference the method moved to. Scope: that one link."
+  - "#2300: the \"Money-path?\" summary bullet names the hosted MCP tool surface (`packages/mcp-server/src/**`) beside the surfaces it already listed; the pointer to the authoritative JSON is unchanged. Scope: that bullet only."
+  - "#2276: the queue-state table said a closed issue is done and implied every open issue is ready; an `operator-verify` issue is neither — merged code, open on purpose, not queueable. Added that one exception. Scope: the queue-state paragraph only; the issue-writing rigour section and the loop-template mapping were NOT re-verified."
+  - "#1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination"
 ---
 
 # Backlogs moved to GitHub Issues

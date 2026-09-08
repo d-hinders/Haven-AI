@@ -41,106 +41,42 @@
 // line reached 774,483 bytes on `dev` through repeated concatenation, all of it
 // invisible to the containment check.
 //
-// So the gate now also asks two questions of the CANDIDATE line itself
-// (`chainAnomalies`):
+// So the gate also asks a question of the CANDIDATE chain itself: does the same
+// ENTRY — same leading issue ref AND same prose — appear more than once? A
+// concatenating merge produces exactly that; legitimate interleaving never
+// does, because every entry's prose is written once.
 //
-//   1. does the same ENTRY — same leading issue ref AND same prose — appear
-//      more than once? (A concatenating merge produces exactly that; legitimate
-//      interleaving never does, because every entry's prose is written once.)
-//   2. does the raw line exceed `MAX_CHAIN_BYTES` (64 KiB)? A cheap backstop:
-//      duplication shows up as growth long before anyone reads the entries.
+// #2637 CHANGED THE SHAPE, and it is worth being exact about what that bought,
+// because the issue that asked for it predicted something else. The chain used
+// to be one front-matter comment line; it is now a `verified:` block list, one
+// entry per line, newest first.
 //
-// Both are hard failures (exit 1), reported like the existing "broken" status.
+// The prediction was that git would then merge concurrent verifications as
+// ordinary line insertions. It does NOT — measured both ways round: two
+// branches each inserting a different entry at the same anchor conflict in
+// git's line-based merge whether the newest entry goes first or last. The
+// conflict did not go away.
 //
-// Deliberately narrow: this is not a general "did prose disappear" detector.
-// It targets the one line where a lost entry is provable rather than guessed,
-// and it stays silent everywhere else. See docs/contributing/docs-quality-system.md.
+// What went away is the DAMAGE. The conflict is now the two inserted lines,
+// with every other entry sitting outside the hunk as untouched context, so the
+// resolution is "keep both" and no unrelated entry is in reach. In the old
+// shape the identical conflict presented as one line — 37,561 bytes on
+// `delegation-rail-security-model.md` — that both sides had rewritten whole,
+// and hand-merging that line is precisely how #1843 dropped entries and how
+// #2504 rewrote them in place. Both failures needed a human editing a chain
+// they could not read; neither is reachable from a two-line hunk.
 //
-// ## #2504 — an entry that survives by REFERENCE but not by TEXT
+// The byte ceiling and its advisory band went with the old shape (#2477,
+// #2562). They existed because an unbounded single line is a cost every reader
+// pays; a list has no such line, and `git diff` on one added entry is one added
+// line rather than a rewritten 37 KB.
 //
-// Both checks above read the chain from the outside: one counts refs, the
-// other counts repetitions. Neither opens an entry to ask whether it still
-// says what it said. A base refresh conflicts on this one line and is resolved
-// by hand, and a hand resolution can keep `#1849` on the line while cutting
-// its sentence in half — which is exactly what happened to
-// `docs/product/agent-key-rotation.md`, and what both existing checks call
-// healthy. `checkEntriesVerbatim` asks the third question: is every entry of
-// the base line still present, verbatim, in the candidate?
-//
-// Entries `checkChain` already reports as DROPPED are excluded, so one defect
-// is never reported under two names. Whitespace and one terminal period are
-// normalised away — measured, not assumed: the replay in
-// `chain-integrity-backtest.mjs` turned up a deleted full stop, and a gate
-// that goes red over punctuation teaches people to route around it.
-//
-// ## #2562 — the ceiling measured one thing and reported another, and nothing
-// announced a chain BEFORE it hit
-//
-// Two defects, both about the size backstop rather than the containment rules.
-//
-// FIRST, `chainAnomalies` compared `line.length` — UTF-16 code units — while
-// naming the result `bytes` and failing with "chain line is N bytes". On a
-// chain full of em-dashes and arrows the two differ measurably: the
-// mcp-runtime-compatibility line was 65,448 code units and 65,719 bytes at
-// `f37184b5c0d6` (2026-09-04), so the SAME line was under the limit by the measure enforced and
-// over it by the measure reported. Either is defensible; enforcing one while
-// reporting the other is not, and it put wrong numbers into #2563's first
-// framing and into #2562's own first draft. The measure is now UTF-8 bytes on
-// both sides, which is what `MAX_CHAIN_BYTES` was always named for and what
-// the file actually costs on disk.
-//
-// SECOND, the blocking ceiling is diff-scoped — the runner skips a doc whose
-// line is unchanged — so a chain crosses it SILENTLY and the cost lands on the
-// next unrelated contributor. Measured: #2557 was a TypeScript interface fix,
-// the coupling gate required a note on a doc 88 code units under the ceiling,
-// and a normal-length note pushed it over. Compacting 55 entries of someone
-// else's provenance is not work that belongs inside a type fix.
-//
-// So a NON-BLOCKING warning band (`WARN_CHAIN_BYTES`, 40 KiB) is evaluated
-// over EVERY governed doc on every run, changed or not, and printed. Three
-// properties, each deliberate:
-//
-//   - it does not block, at the band or above it. The ceiling stays the only
-//     hard stop, and it stays diff-scoped: failing a PR for the size of a doc
-//     it never touched is the same ambush one layer up.
-//   - it runs on every invocation, ahead of the promotion/push/no-base early
-//     returns. Those returns mean "this diff cannot be judged"; they say
-//     nothing about what the docs on disk weigh, and a push build to `dev` is
-//     exactly where a standing warning is cheapest to see.
-//   - it reads the working tree, not a git range. The question is "how big is
-//     this chain now", which has no base.
-//
-// What to do about a warning is a written rule rather than an invention at the
-// moment of tripping it: compact to the newest ~20 entries under a declared
-// `chain-reset(#N)`, in its own PR. See docs/contributing/docs-quality-system.md
-// § `last-verified` chain integrity.
-//
-// ## Escape hatch — named and logged, never silent
-//
-// A chain that genuinely needs compacting says so ON the line:
-//
-//   last-verified: "2026-08-22" # chain-reset(#1843): <why> …
-//
-// The check then passes and PRINTS the dropped references, so the deletion
-// appears in the run log instead of vanishing. The escape hatch covers a
-// DROP — compaction — not duplication: a concatenated chain that stays over
-// the byte ceiling is still reported, because a reset does not make a doubled
-// line smaller.
-//
-// Usage:
-//   npm run docs:chain                       # part of `npm run docs:check`
-//   BASE_SHA=… HEAD_SHA=… node scripts/docs/chain-integrity.mjs   # CI
-//   node scripts/docs/chain-integrity.mjs --base=<ref>
-//   node scripts/docs/chain-integrity.mjs --warn-bytes=20480   # see what is NEXT
-//                                            in the queue, not only what is
-//                                            already over the 40 KiB band
-
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { REPO_ROOT, ROOT_DOCS, walk } from './validate-frontmatter.mjs'
+import { REPO_ROOT, ROOT_DOCS, walk, parseFrontMatter } from './validate-frontmatter.mjs'
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -260,6 +196,128 @@ export function headOfEntry(entry) {
 export const CHAIN_RESET_RE = /chain-reset\(#\d+\)/
 
 /**
+ * Read a doc's chain in EITHER shape (#2637).
+ *
+ * The chain used to be one front-matter comment line that every PR prepended
+ * to. It is now a `verified:` block list, newest first, one entry per line —
+ * which is what lets git merge two concurrent verifications as ordinary line
+ * insertions instead of a conflict about nothing (#1496).
+ *
+ * This reader accepts both, and that is not a courtesy: the checks below
+ * compare a BASE against a HEAD, and across the migration the base is the old
+ * shape while the head is the new one. A reader that understood only one shape
+ * would have to special-case the transition; understanding both means the
+ * comparison is the same comparison it always was, and every PR opened before
+ * the migration keeps working after it.
+ *
+ * Returns `{ shape, date, entries }`, entries newest-first in both shapes.
+ */
+export function readChain(raw) {
+  const parsed = parseFrontMatter(raw)
+  if (parsed.ok && Array.isArray(parsed.data.verified)) {
+    return {
+      shape: 'list',
+      date: parsed.data['last-verified'] ?? null,
+      entries: parsed.data.verified.filter(Boolean),
+    }
+  }
+  const line = lastVerifiedLine(raw)
+  if (!line) return { shape: null, date: null, entries: [] }
+  const m = line.match(/^last-verified:\s*"([^"]*)"/)
+  return { shape: 'line', date: m ? m[1] : null, entries: chainEntries(line) }
+}
+
+/**
+ * A doc's chain as ONE string, whichever shape it is stored in (#2637).
+ *
+ * The history tools — `chain-sweep.mjs` and `chain-integrity-backtest.mjs` —
+ * replay commits from before the migration as well as after it, and every
+ * function they lean on (`issueRefs`, `checkChain`, `CHAIN_RESET_RE`,
+ * `declaredResetIssues`) is a substring or ref operation over the old line.
+ * Rather than teach each of them two shapes, this presents the list shape in
+ * the legacy join so all of them stay correct with no change.
+ *
+ * LIMIT, and it is load-bearing: the synthesis joins entries with the legacy
+ * ` Prior: ` separator, and **three entries in this corpus contain that literal
+ * in their own prose**. So the result is safe for anything that scans it —
+ * `issueRefs`, `CHAIN_RESET_RE`, `declaredResetIssues`, `checkChain` — and must
+ * NEVER be split back into entries with `chainEntries`, which would invent one
+ * per occurrence. For entry-level work read `readChain(raw).entries` instead.
+ *
+ * Without it those tools read a migrated doc as `last-verified: "<date>"` with
+ * no refs at all, and report the migration commit as having dropped every
+ * entry in the repository — a permanent false BROKEN across ~78 docs, since
+ * history does not change. Found in review, not by a test, because the tools
+ * have no fixture spanning the migration.
+ */
+export function chainTextOf(raw) {
+  const c = readChain(raw)
+  if (c.shape === null) return null
+  if (c.shape === 'line') return lastVerifiedLine(raw)
+  return c.entries.length ? `last-verified: "${c.date ?? ''}" # ${c.entries.join(' Prior: ')}` : null
+}
+
+/** Every issue ref appearing anywhere in a chain's entries. */
+export function entriesRefs(entries) {
+  return new Set(entries.flatMap((e) => issueRefs(e)))
+}
+
+/**
+ * The three checks, as ONE pass over entry SETS (#2637).
+ *
+ * Before the list shape these were three functions reading one long string:
+ * `checkChain` diffed issue refs, `chainAnomalies` counted repeated segments,
+ * `checkEntriesVerbatim` asked whether each base entry still appeared inside
+ * the head's text. All three existed in that form because the entries were not
+ * separable — they were segments of a line, recovered by splitting on the
+ * `Prior:` chain-word. One entry per line makes them separable, so the same
+ * three questions become set operations and the answers get sharper:
+ *
+ *  - **dropped** (#1843) — a base entry is gone AND none of its refs survive.
+ *  - **altered** (#2504) — a base entry is gone but its ref is still there, so
+ *    the entry was rewritten rather than removed. The distinction is the same
+ *    one the old pair drew; it is now decided in one place instead of two.
+ *  - **duplicated** (#2477) — the head lists one entry twice, which is what a
+ *    merge that CONCATENATED two chains produces instead of interleaving them.
+ *
+ * `chain-reset(#N)` still excuses losses, and still only in the documented
+ * marker form: a note that merely discusses resets in prose must not excuse a
+ * real deletion.
+ */
+export function checkChainEntries(prevEntries, nextEntries) {
+  const nextNorm = nextEntries.map(normalizeEntryText)
+  const nextSet = new Set(nextNorm)
+  const survivingRefs = entriesRefs(nextEntries)
+  const reset = nextEntries.some((e) => CHAIN_RESET_RE.test(e))
+
+  const dropped = []
+  const altered = []
+  if (!reset) {
+    for (const entry of prevEntries) {
+      if (nextSet.has(normalizeEntryText(entry))) continue
+      const head = headOfEntry(entry)
+      const refs = head ? head.match(/#\d+/g) : null
+      if (refs && refs.some((r) => survivingRefs.has(r))) {
+        altered.push({ head, excerpt: entry.slice(0, 96) })
+      } else {
+        dropped.push(head ?? entry.slice(0, 48))
+      }
+    }
+  }
+
+  const counts = new Map()
+  for (const n of nextNorm) counts.set(n, (counts.get(n) || 0) + 1)
+  const duplicates = []
+  for (const [text, count] of counts) {
+    if (count < 2) continue
+    duplicates.push({ head: headOfEntry(text), count, excerpt: text.slice(0, 96) })
+  }
+  duplicates.sort((a, b) => b.count - a.count)
+
+  return { dropped, altered, duplicates, reset }
+}
+
+/**
  * Pure core. Given the previous and current raw `last-verified` lines, decide
  * whether the chain survived.
  *
@@ -366,6 +424,12 @@ export function normalizeEntryText(text) {
   return text.replace(/\s+/g, ' ').trim().replace(/\.$/, '').trim()
 }
 
+// RETAINED, NOT WIRED (#2637). `main()` now asks this question through
+// `checkChainEntries`, which decides altered-vs-dropped in one pass over entry
+// sets. This line-based form stays because `chain-integrity-backtest.mjs`
+// replays it over history and its own unit tests pin the #2504 tolerance; it is
+// NOT part of the live gate path, so do not read a change here as changing what
+// CI enforces.
 export function checkEntriesVerbatim(prevLine, nextLine) {
   if (CHAIN_RESET_RE.test(nextLine)) return { altered: [] }
   const body = normalizeEntryText(chainNoteBody(nextLine))
@@ -383,173 +447,6 @@ export function checkEntriesVerbatim(prevLine, nextLine) {
     altered.push({ head, excerpt: entry.slice(0, 96) })
   }
   return { altered }
-}
-
-export const MAX_CHAIN_BYTES = 64 * 1024
-
-/**
- * The advisory band (#2562), at ~62% of the ceiling.
- *
- * Not a second wall: nothing fails here. It exists so a chain announces itself
- * while compacting is still cheap and while the person reading the warning is
- * not mid-PR on something else. 40 KiB was chosen against the live curve
- * rather than as a round fraction — at the time it landed the three largest
- * chains were 45.3 KB, 43.7 KB and 23.6 KB, so it names the two that are
- * genuinely on the way to the ceiling and stays quiet about the one that was
- * just compacted and has room for roughly 40 more verifications.
- */
-export const WARN_CHAIN_BYTES = 40 * 1024
-
-/**
- * The band, overridable per run: `--warn-bytes=<n>`.
- *
- * Two real uses, and a test property that falls out of them. An auditor can
- * lower it to see which chains are next in the queue rather than only the ones
- * already over 40 KiB; and this check's own tests can force the report on
- * without depending on how large the repo's docs happen to be that week — the
- * first version of those tests asserted against the live `docs/` tree and went
- * red the moment this PR compacted the two docs they were reading, which is a
- * test measuring the repository rather than the code.
- */
-export function resolveWarnBytes(argv = process.argv) {
-  const hit = argv.find((a) => a.startsWith('--warn-bytes='))
-  if (!hit) return WARN_CHAIN_BYTES
-  const n = Number(hit.slice('--warn-bytes='.length))
-  return Number.isFinite(n) && n >= 0 ? n : WARN_CHAIN_BYTES
-}
-
-/**
- * The size of a chain line, in the unit the ceiling is named for (#2562).
- *
- * `line.length` counts UTF-16 code units; these lines are dense with
- * em-dashes, arrows and typographic quotes, each of which costs three bytes
- * and one code unit. The constant says BYTES and the failure message says
- * bytes, so this is what both the comparison and the report use.
- */
-export function chainLineBytes(line) {
-  return Buffer.byteLength(line, 'utf8')
-}
-
-/**
- * Pure core for the #2477 direction: the OPPOSITE failure of #1843, one entry
- * appearing twice where the check's containment rule can only see losses.
- *
- * `checkChain` compares ref PRESENCE, and `issueRefs` de-duplicates to first
- * occurrence — so a merge that CONCATENATED the chain (entry A then entry B,
- * twice) loses nothing, every "did we drop history" question answers yes, and
- * the gate reported `✓ chains intact` on a chain that had doubled. This check
- * asks the other question: does the candidate line contain the same ENTRY — the
- * same leading issue ref AND the same prose — more than once?
- *
- * Entries are split the way the chain is actually structured (`chainEntries`):
- * on the `Prior:` chain-word, never on raw `#NNN` — an entry's prose routinely
- * cites other issues, and a citation is not a separate entry. Two entries are
- * duplicates only when their FULL text (leading ref + prose) is byte-identical,
- * which is exactly what a concatenating merge produces and what legitimate
- * interleaving never does: every entry's prose is written once, per issue.
- *
- * Returns { duplicates: [{ head, count, excerpt }], tooLarge: null | { bytes,
- * maxBytes } }.
- *  - duplicates — entries whose text occurs > 1× on the line, with the entry's
- *                 head (leading ref cluster, or release token) and occurrence
- *                 count.
- *  - tooLarge   — the raw line length over the ceiling.
- */
-export function chainAnomalies(line, maxBytes = MAX_CHAIN_BYTES) {
-  const counts = new Map()
-  for (const entry of chainEntries(line)) {
-    counts.set(entry, (counts.get(entry) || 0) + 1)
-  }
-  const duplicates = []
-  for (const [text, count] of counts) {
-    if (count < 2) continue
-    duplicates.push({ head: headOfEntry(text), count, excerpt: text.slice(0, 96) })
-  }
-  duplicates.sort((a, b) => b.count - a.count)
-  const bytes = chainLineBytes(line)
-  return {
-    duplicates,
-    tooLarge: bytes > maxBytes ? { bytes, maxBytes } : null,
-  }
-}
-
-/**
- * Every governed doc whose chain line is over the advisory band (#2562).
- *
- * Governed = whatever `isDocPath` says, which is the same predicate the
- * blocking path filters on. Enumerate candidates, then filter THROUGH it
- * rather than restating its rule here: the first draft re-derived "`docs/**`
- * plus the root gravity files, `.md` only" inline and asserted parity in this
- * comment, which is true until someone adds an exclusion to `isDocPath` and
- * only one of the two learns about it (review nit). A doc with no
- * front-matter or no `last-verified` line simply has no chain and is skipped —
- * that is the validator's business, not this one's.
- *
- * Sorted biggest-first, because the list is read as a queue. `overCeiling`
- * marks the rows that are past the hard limit too: those are already blocking
- * for the next person to touch that doc, which is a materially different piece
- * of news from "this one is getting large".
- */
-export async function chainSizeWarnings({
-  repoRoot = REPO_ROOT,
-  warnBytes = WARN_CHAIN_BYTES,
-  maxBytes = MAX_CHAIN_BYTES,
-} = {}) {
-  const candidates = new Set(ROOT_DOCS)
-  const docsDir = join(repoRoot, 'docs')
-  if (existsSync(docsDir)) {
-    for (const abs of await walk(docsDir)) {
-      candidates.add(relative(repoRoot, abs).split(sep).join('/'))
-    }
-  }
-  const warnings = []
-  for (const rel of [...candidates].filter(isDocPath)) {
-    const abs = join(repoRoot, rel)
-    if (!existsSync(abs)) continue
-    let raw
-    try {
-      raw = await readFile(abs, 'utf8')
-    } catch {
-      continue
-    }
-    const line = lastVerifiedLine(raw)
-    if (!line) continue
-    const bytes = chainLineBytes(line)
-    if (bytes <= warnBytes) continue
-    warnings.push({ rel, bytes, warnBytes, maxBytes, overCeiling: bytes > maxBytes })
-  }
-  warnings.sort((a, b) => b.bytes - a.bytes || a.rel.localeCompare(b.rel))
-  return warnings
-}
-
-/**
- * Print the band report. Non-blocking by construction: it returns nothing and
- * the caller never branches on it. Silent when every chain is under the band,
- * so a clean repo stays quiet rather than teaching people to skim the run log.
- */
-export function reportChainSizeWarnings(warnings, log = console.log) {
-  if (warnings.length === 0) return
-  const kib = (n) => `${(n / 1024).toFixed(1)} KiB`
-  log(
-    `\n⚠ \`last-verified\` chain size: ${warnings.length} doc(s) over the ` +
-    `${kib(warnings[0].warnBytes)} advisory band (nothing is blocked by this):`,
-  )
-  for (const w of warnings) {
-    log(
-      `  - ${w.rel}: ${w.bytes} bytes (${kib(w.bytes)})` +
-      (w.overCeiling
-        ? ` — ALSO OVER the ${w.maxBytes}-byte ceiling: the next edit to this doc's chain is blocked until it is compacted`
-        : ''),
-    )
-  }
-  log(
-    'Compact a warned chain in its OWN pull request, keeping the newest ~20 entries ' +
-    'verbatim under a declared `chain-reset(#<issue>)`; the dropped entries stay ' +
-    'recoverable in `git log -p` on the file. Doing it here, now, is the point — the ' +
-    'alternative is that it lands on whoever next edits the doc for an unrelated ' +
-    'reason (#2562). The rule is in docs/contributing/docs-quality-system.md ' +
-    '§ `last-verified` chain integrity.\n',
-  )
 }
 
 function isDocPath(p) {
@@ -600,7 +497,6 @@ async function main() {
   // return below. Those returns all mean "this change cannot be judged against
   // a base"; none of them means the docs on disk are fine, and the whole point
   // of the band is to be seen by someone who is not mid-PR.
-  reportChainSizeWarnings(await chainSizeWarnings({ warnBytes: resolveWarnBytes() }))
 
   if (isPromotionPR()) {
     console.log('Chain integrity: dev → main promotion — already checked on each dev PR.')
@@ -687,27 +583,25 @@ async function main() {
       if (!existsSync(join(REPO_ROOT, rel))) continue // deleted doc — out of scope
       nextRaw = await readFile(join(REPO_ROOT, rel), 'utf8')
     }
-    const prevLine = lastVerifiedLine(prevRaw)
-    const nextLine = lastVerifiedLine(nextRaw)
-    if (!prevLine || !nextLine) continue
-    if (prevLine === nextLine) continue
+    // #2637: read BOTH shapes. Across the migration the base is the old
+    // single-line chain and the head is the `verified:` list, so a reader that
+    // understood one shape would report every entry as dropped.
+    const prev = readChain(prevRaw)
+    const next = readChain(nextRaw)
+    if (prev.shape === null || next.shape === null) continue
+    if (prev.shape === next.shape && prev.entries.join('\u0000') === next.entries.join('\u0000')) continue
     compared++
-    const result = checkChain(prevLine, nextLine)
-    if (result.status === 'broken') failures.push({ rel, kind: 'dropped', ...result })
-    if (result.status === 'reset') resets.push({ rel, ...result })
-    // #2477: the opposite failure — an entry appearing twice (a chain that was
-    // CONCATENATED instead of interleaved), plus the size-ceiling backstop.
-    // `chainAnomalies` judges the CANDIDATE line itself, not a prev→next
-    // difference: a concatenating merge produces a line that is broken on its
-    // own, and no "did we drop anything" comparison can see it.
-    const anomalies = chainAnomalies(nextLine)
-    if (anomalies.duplicates.length) failures.push({ rel, kind: 'duplicated', duplicates: anomalies.duplicates })
-    if (anomalies.tooLarge) failures.push({ rel, kind: 'oversize', ...anomalies.tooLarge })
-    // #2504: the entry is still referenced but no longer says what it said. A
-    // hand-resolved base refresh can keep the ref and rewrite the prose behind
-    // it, which both checks above read as healthy.
-    const verbatim = checkEntriesVerbatim(prevLine, nextLine)
-    if (verbatim.altered.length) failures.push({ rel, kind: 'altered', altered: verbatim.altered })
+    const r = checkChainEntries(prev.entries, next.entries)
+    if (r.reset && r.dropped.length === 0 && r.altered.length === 0) {
+      // A declared compaction still reports what it removed.
+      const gone = prev.entries
+        .filter((e) => !next.entries.map(normalizeEntryText).includes(normalizeEntryText(e)))
+        .map((e) => headOfEntry(e) ?? e.slice(0, 32))
+      if (gone.length) resets.push({ rel, dropped: gone })
+    }
+    if (r.dropped.length) failures.push({ rel, kind: 'dropped', dropped: r.dropped })
+    if (r.altered.length) failures.push({ rel, kind: 'altered', altered: r.altered })
+    if (r.duplicates.length) failures.push({ rel, kind: 'duplicated', duplicates: r.duplicates })
   }
 
   for (const r of resets) {
@@ -727,8 +621,6 @@ async function main() {
         const det = f.altered.map((a) => a.head ?? '(entry)').slice(0, 8).join(', ')
         console.error(`  - ${f.rel}: ${det}${f.altered.length > 8 ? ' …' : ''} — entry still referenced, but its text changed`)
         for (const a of f.altered.slice(0, 3)) console.error(`      was: ${a.excerpt}${a.excerpt.length === 96 ? '…' : ''}`)
-      } else if (f.kind === 'oversize') {
-        console.error(`  - ${f.rel}: chain line is ${f.bytes} bytes — over the ${f.maxBytes}-byte ceiling`)
       } else {
         console.error(`  - ${f.rel}: dropped ${f.dropped.join(', ')} from the chain`)
       }
@@ -753,10 +645,8 @@ async function main() {
       'the line grows without bound, and every reader pays the cost (#2477). ' +
       'Deduplicating a provenance chain needs a rule for which copy survives — ' +
       'that repair is a decision, not something this gate performs on its own.\n' +
-      'A genuinely intended compaction says so on the line: ' +
-      '`last-verified: "…" # chain-reset(#<issue>): <why>`. ' +
-      'A line that simply exceeds the byte ceiling has no plain-word escape: it ' +
-      'must actually be reduced.\n',
+      'A genuinely intended compaction says so in an entry: '+
+      '`verified:` → `  - "chain-reset(#<issue>): <why>"`.\n',
     )
     process.exit(1)
   }

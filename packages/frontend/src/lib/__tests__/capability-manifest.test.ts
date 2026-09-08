@@ -10,7 +10,7 @@ import {
   type DiscoveryFacts,
 } from '../capability-manifest'
 import { AUTH_MARKED_PREFIXES, PUBLIC_SURFACES } from '../discovery-surfaces'
-import { CHAIN_REGISTRY } from '@haven_ai/core'
+import { CHAIN_REGISTRY, getChainData } from '@haven_ai/core'
 
 /**
  * The capability manifest at `/.well-known/haven.json` (#2531).
@@ -267,6 +267,21 @@ describe('capability manifest', () => {
     it('reports the deployment name on a non-production build', () => {
       vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
       expect(buildManifestFrom(ORIGIN, FACTS).environment).toBe('dev')
+    })
+
+    it('marks each supported chain as testnet or not, from the registry rather than a literal', () => {
+      // The registry carries a faucet ONLY for testnets (#2534); the manifest
+      // derives `testnet` from that so production — which lists Base Sepolia
+      // beside Base — never lets an agent read "production" as "real money on
+      // every chain listed".
+      const manifest = buildManifestFrom(ORIGIN, FACTS)
+      for (const entry of manifest.chains?.supported ?? []) {
+        expect(entry.testnet).toBe(getChainData(entry.id).faucetUrl !== undefined)
+      }
+      const byId = Object.fromEntries((manifest.chains?.supported ?? []).map((c) => [c.id, c.testnet]))
+      expect(byId[84532]).toBe(true)
+      expect(byId[8453]).toBe(false)
+      expect(byId[100]).toBe(false)
     })
 
     it('never answers unknown, even without backend facts', () => {

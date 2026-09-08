@@ -18,7 +18,7 @@ import { appIconGeometry } from '@/components/brand/AppIconArtwork'
  * its intent rather than to a snapshot:
  *
  * - the canvas is the size the manifest advertises;
- * - the field is `--v2-brand` (corner pixel), the mark is `--v2-bg` (its
+ * - the field is `--v2-brand` (corner pixel), the mark is `--v2-ink-on-brand` (its
  *   centre pixel), the dev band is `--v2-warning` and prod has no band
  *   (bottom-centre pixel);
  * - the mark's white bounding box is `HavenMark`'s proportion — the finding
@@ -155,7 +155,7 @@ function boundingBox(png: Png, colour: Rgb, top = 0, bottom = png.height, tolera
 }
 
 const BRAND = hexToRgb(BRAND_COLOURS.brand)
-const BG = hexToRgb(BRAND_COLOURS.background)
+const ON_BRAND = hexToRgb(BRAND_COLOURS.onBrand)
 const WARNING = hexToRgb(BRAND_COLOURS.warning)
 
 const CASES = [
@@ -170,7 +170,8 @@ describe('rendered home-screen icons (#2729)', () => {
   })
 
   describe.each(CASES)('%s', (file, size) => {
-    it('production: brand field, white H at HavenMark proportion, no band', async () => {
+    it('production: brand field, on-brand H at HavenMark proportion, no band', async () => {
+      expect(BRAND_COLOURS.onBrand).not.toBe(BRAND_COLOURS.brand)
       const png = await renderPng(file, undefined)
       expect([png.width, png.height]).toEqual([size, size])
       expect(pixel(png, 2, 2)).toEqual(BRAND)
@@ -178,10 +179,10 @@ describe('rendered home-screen icons (#2729)', () => {
       // Bottom-centre is still field on prod — the band exists only off production.
       expect(pixel(png, Math.floor(size / 2), size - 3)).toEqual(BRAND)
       // The crossbar passes through the canvas centre.
-      expect(pixel(png, Math.floor(size / 2), Math.floor(size / 2))).toEqual(BG)
+      expect(pixel(png, Math.floor(size / 2), Math.floor(size / 2))).toEqual(ON_BRAND)
 
       const geometry = appIconGeometry(size, false)
-      const mark = boundingBox(png, BG)
+      const mark = boundingBox(png, ON_BRAND)
       expect(Math.abs(mark.width - geometry.crossbarWidth)).toBeLessThanOrEqual(2)
       expect(Math.abs(mark.height - geometry.uprightHeight)).toBeLessThanOrEqual(2)
       // HavenMark's H is 50% × 55% of its inset tile; on a full-bleed field
@@ -208,7 +209,7 @@ describe('rendered home-screen icons (#2729)', () => {
       expect(pixel(png, 2, bandTop - 2)).toEqual(BRAND)
 
       // Only look for the H above the band: the badge text is white too.
-      const mark = boundingBox(png, BG, 0, bandTop)
+      const mark = boundingBox(png, ON_BRAND, 0, bandTop)
       expect(mark.width / size).toBeGreaterThan(0.4)
       expect(Math.abs(mark.width - geometry.crossbarWidth)).toBeLessThanOrEqual(2)
       // Gap above the mark equals the gap between the mark and the band.
@@ -216,7 +217,7 @@ describe('rendered home-screen icons (#2729)', () => {
       const below = bandTop - 1 - mark.maxY
       expect(Math.abs(above - below)).toBeLessThanOrEqual(3)
       // And the band carries white text (the environment name), centred.
-      const text = boundingBox(png, BG, bandTop, size)
+      const text = boundingBox(png, ON_BRAND, bandTop, size)
       expect(text.width).toBeGreaterThan(size * 0.2)
       expect(Math.abs(text.minX - (size - 1 - text.maxX))).toBeLessThanOrEqual(3)
     })
@@ -225,7 +226,7 @@ describe('rendered home-screen icons (#2729)', () => {
       const png = await renderPng(file, 'pull-request-preview')
       const geometry = appIconGeometry(size, true)
       const bandTop = size - geometry.badgeHeight
-      const text = boundingBox(png, BG, bandTop, size)
+      const text = boundingBox(png, ON_BRAND, bandTop, size)
       // An empty box reports minX = width, maxX = -1 and would pass the
       // containment checks vacuously — so first, there IS text.
       expect(text.width).toBeGreaterThan(0)
@@ -235,7 +236,7 @@ describe('rendered home-screen icons (#2729)', () => {
       expect(text.minY).toBeGreaterThanOrEqual(bandTop)
       expect(text.maxY).toBeLessThan(size)
       // And it is the whole word, not a clipped one: wider than the three-letter badge.
-      const dev = boundingBox(await renderPng(file, 'dev'), BG, bandTop, size)
+      const dev = boundingBox(await renderPng(file, 'dev'), ON_BRAND, bandTop, size)
       expect(text.width).toBeGreaterThan(dev.width)
     })
   })

@@ -26,16 +26,21 @@ import {
   credentialIdFromKeyId,
 } from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
+import { BRAND_COLOURS } from '@/lib/brand-colours'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
 import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
 // Generative identicon gradient stops — decorative art hashed from an address
 // for visual variety, NOT design-system colour. These are data, not UI chrome,
-// so they legitimately stay literal (design-lint-disable-line per row) rather
+// so they legitimately stay literal (design-lint-disable-line per colour) rather
 // than becoming ~18 meaningless tokens. See /design-system → "How to use this page".
 const AVATAR_PALETTES = [
-  ['#4f46e5', '#06b6d4', '#14b8a6'], // design-lint-disable-line
+  [
+    BRAND_COLOURS.brand,
+    '#06b6d4', // design-lint-disable-line
+    '#14b8a6', // design-lint-disable-line
+  ],
   ['#0f766e', '#22c55e', '#facc15'], // design-lint-disable-line
   ['#7c3aed', '#ec4899', '#f97316'], // design-lint-disable-line
   ['#2563eb', '#8b5cf6', '#f43f5e'], // design-lint-disable-line

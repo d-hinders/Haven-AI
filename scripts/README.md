@@ -207,12 +207,70 @@ gh pr create --base dev --fill
 #    --tag latest. A commit that does not change a version is a no-op.
 ```
 
+> **The tarballs are built from `main`'s tree at PROMOTION time, not from the
+> bump commit.** Step 5 rebuilds `dist` from whatever `main` holds once the
+> promotion merges — so everything that lands on `dev` between the bump and the
+> promotion is published inside that release, whether or not the release record
+> mentions it. The record (the CASP shard and the Supported Runtime Manifest
+> note) is written back at step 2, potentially days earlier, against a different
+> tree.
+>
+> That gap is not theoretical: on `0.1.36-alpha.0` the shard was amended four
+> times in eighteen hours, and #2687 was caught only by re-measuring the scope by
+> hand on the morning of the promotion. **Re-measure at the door** — when the
+> promotion PR is opened, not when the bump is cut:
+>
+> ```sh
+> npm run release:scope          # defaults to origin/main..origin/dev
+> ```
+>
+> It reads the shipped set out of each package's built sourcemaps and `files`
+> field rather than counting a diff by hand, and refuses rather than
+> under-reporting when it cannot see (an unbuilt package, a source file it cannot
+> resolve). Amend the shard if the scope moved. See
+> [#2724](https://github.com/d-hinders/Haven-AI/issues/2724).
+
 > **Target `dev`, never `main`.** This block said `--base main` for as long as
 > the dev-gate model has been in force. Under the branch
 > model ([`docs/contributing/branch-and-release-flow.md`](../docs/contributing/branch-and-release-flow.md))
 > only `dev` or `hotfix/*` may merge into `main` — the `dev-gate` workflow fails
 > a `release/*` PR aimed at `main`. Following this doc literally used to produce
 > a PR that could not merge.
+
+### Measuring what a promotion publishes (`release:scope`)
+
+```sh
+npm run release:scope                                    # origin/main..origin/dev
+npm run release:scope -- --base=<ref> --head=<ref>
+npm run release:scope -- --json                          # for a script, not a human
+```
+
+Prints the commits and the issues they reference, which of the published
+packages are affected, and the **shipped delta** — the files that actually reach
+a tarball, with their line counts and the reason each one ships.
+
+**Why it is measured rather than reasoned about.** All five packages build with
+`tsup`, which *bundles* from a declared entry point, so `src/foo.ts →
+dist/foo.js` is false — `dist/index.js` is one bundle and a source file reaches
+it only by being imported. A rule like "src files ship, tests do not" is an
+approximation of that, and an approximation in the under-inclusive direction is
+how a record ends up missing something it published. `tsup` runs with
+`sourcemap: true`, so each bundle's `.map` carries the build's own list of every
+source it consumed; that list is what the script reads. The non-compiled half —
+`README.md`, and `packages/sdk/examples/**` — comes from each package's `files`
+field. Nothing in the script is a hand-maintained list of what ships.
+
+**It refuses rather than under-reports.** A measurement that says "nothing
+shipped" when it merely could not look is worse than none, because an empty
+result is exactly what tells a release author to skip the amendment. It exits
+non-zero on a shallow clone, on a package whose `dist` is missing or carries no
+sourcemaps (`npm run build` first), and on a changed source file it can resolve
+to neither bucket — that last one meaning either dead code or a stale build, and
+a stale build under-reports. Read a refusal as "measure again", never as "clean".
+
+The exclusions are printed, counted and grouped by reason rather than dropped
+silently: an exclusion nobody can see is indistinguishable from a file the
+instrument failed to notice.
 
 ### Which version string
 

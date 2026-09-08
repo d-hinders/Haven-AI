@@ -7,8 +7,9 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-09-07"
+last-verified: "2026-09-08"
 verified:
+  - "#2724: EDITED, scope = ONE new checklist item at the end of § *Before opening the promotion PR* — re-measure the release scope with `npm run release:scope` and amend the CASP shard when it disagrees. The doc's `covers:` already named `.github/workflows/publish.yml`, and the fact this item exists to state was nowhere in this file or any other: the tarballs are rebuilt from `main`'s tree AT PROMOTION TIME, while the release record is written back at bump time against a different tree, so anything merged to `dev` in between publishes unrecorded. Verified by grep across this file, `scripts/README.md`, `branch-and-release-flow.md` and the release skill for 'promotion time' / \"main's tree\" — zero hits before this change. Measured on the 0.1.36-alpha.0 range (783300eb..0e80a26e): the new script reports 17 files +194/-41, independently re-derived with a plain `git diff --numstat` over that file list, against a hand count of 14 files +186/-33 that had omitted connect/mcp/signer package.json while including cli/sdk. Scope: that ONE checklist item and this note. NOT re-verified: the npm/`promote-tags` item, the required-checks list, the migration items, the RPC variable item, or § *Run the prod smoke on the right hostname*."
   - "#2638: EDITED, scope = ONE new checklist item under § *Open and review the PR* — open the standing weekly staleness-audit issue (#2645, upserted by `docs-audit.yml`) and disposition every `current` doc it ranks: fix, file, or accept with a reason in the promotion PR. Written with the reason it is not redundant with the coupling gate: a `contract: true` doc is blocked on the PR that made it stale and never reaches promotion, so what this sweeps is the non-contract drift that is deliberately allowed to accumulate on `dev`. Notes that `archived`/`research` are no longer ranked (same PR) and that an unchanged report is a valid ticked outcome. Scope: that ONE item. NOT re-verified: the QA, migration, sweep-floor, env, npm, prod-bar or post-merge items."
   - "#2647: EDITED, scope = the **npm** checklist item only. It described one outcome to read (the per-package publish table); since #2647 there are two jobs and two outcomes, and the new failure mode is a green publish with a red `promote-tags` — versions live under `alpha`, `latest` still on the previous release, which is the 0.1.35-alpha.0 outcome. The item now says to check `npm view ... dist-tags` before calling the promotion done, names the token expiry as the likely cause, and says the fix is renewing and re-running that job rather than cutting another version. NOT re-verified: the prod bar, the qa-freshness section, the merge-method rules or anything else in this checklist."
   - "#2633: EDITED, scope = the \"Required checks are green\" item under § *Open and review the PR*, split in two. It named `dev-gate` and stopped; the bar is now written out as a list — 19 required contexts, the 15 shared with `dev` plus `gate`, `qa-freshness`, **Design visual regression** and **Frontend browser smoke**, the last two added to ruleset 18134280 on 2026-09-07 by epic #2632's owner step O2 — with the note that `main` is now the only branch still requiring an up-to-date head, since O1 removed that policy from the shared ruleset. Numbers point at the inventory in `../contributing/autonomous-pr-loop.md` step 3 rather than being restated. Verified against `gh api repos/d-hinders/Haven-AI/rulesets`. Scope: that ONE item. NOT re-verified: the QA, migration, sweep-floor, env, npm or post-merge verification items."
@@ -55,6 +56,23 @@ for how the environments are wired, see
       tell agents to run. Do **not** move `latest` by hand; the bump and the
       publish workflow own it. Without this, an agent following the runbook to
       the letter resolves the command to a dist-tag that predates the change.
+
+- [ ] **Re-measure the release scope, here at the door.** `publish.yml` rebuilds
+      the tarballs from **`main`'s tree at promotion time**, not from the bump
+      commit — so anything merged to `dev` since the bump publishes inside this
+      release whether or not the release record names it.
+
+      ```sh
+      npm run release:scope        # origin/main..origin/dev
+      ```
+
+      Compare the shipped delta against the CASP shard for this version and amend
+      the shard if they disagree. The script reads what ships from each package's
+      built sourcemaps and `files` field, and **refuses** rather than
+      under-reporting when it cannot see — an unbuilt package (run `npm run
+      build`), or a source file it cannot resolve. Treat a refusal as "measure
+      again", never as "clean". Do not hand-count the diff
+      ([#2724](https://github.com/d-hinders/Haven-AI/issues/2724)).
 
 ## Open and review the PR (base `main`, head `dev`)
 

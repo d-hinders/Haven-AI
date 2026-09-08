@@ -8,7 +8,7 @@ covers:
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/code-quality-loop.md
-last-verified: "2026-08-27" # #2103: the loop-shapes table's property/invariant EXAMPLE asserted "over-remaining intent => pending_approval, never executed" — an invariant template teaching contributors and agents to build a state no live rail produces (the queue died with #2055). Restated as declined-before-signable. The DIFFERENTIAL row is deliberately unchanged: computeEffectiveAllowance vs the AllowanceModule reset model is still a live differential, because allowance-math retains a legacy-display consumer. Scope: that one table cell; nothing else in this file re-verified. Prior: #2020: the backend loop-harness instance (LP-1) retired with its target; anatomy section now cites the frontend instance, dead covers glob dropped. The method itself is unchanged. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-09-08" # #2640: the code-quality-loop reference repointed at the quality-scan skill reference. This doc's own subject — oracle-grounded differential campaigns — is untouched and stays separate, as this issue directs. Scope: that one sentence. Prior: #2103: the loop-shapes table's property/invariant EXAMPLE asserted "over-remaining intent => pending_approval, never executed" — an invariant template teaching contributors and agents to build a state no live rail produces (the queue died with #2055). Restated as declined-before-signable. The DIFFERENTIAL row is deliberately unchanged: computeEffectiveAllowance vs the AllowanceModule reset model is still a live differential, because allowance-math retains a legacy-display consumer. Scope: that one table cell; nothing else in this file re-verified. Prior: #2020: the backend loop-harness instance (LP-1) retired with its target; anatomy section now cites the frontend instance, dead covers glob dropped. The method itself is unchanged. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
 ---
 
 # Loop Engineering (oracle-grounded automated loops)
@@ -16,7 +16,7 @@ last-verified: "2026-08-27" # #2103: the loop-shapes table's property/invariant 
 Last updated: 2026-07-18
 
 > **Disambiguation.** Haven uses “loop” in three ways:
-> [`code-quality-loop.md`](./code-quality-loop.md) is a human-curated discovery
+> [the quality-scan discovery method](../../.agents/skills/quality-scan/references/discovery-method.md) is a human-curated discovery
 > method whose actionable queue is GitHub Issues;
 > [`autonomous-pr-loop.md`](./autonomous-pr-loop.md) describes the issue-driven
 > `/loop /ship-next` workflow; and this doc is about

@@ -1,84 +1,20 @@
 ---
 owner: "@d-hinders"
-status: current
-covers:
-  - .claude/commands/ship-next.md
-  - .github/ISSUE_TEMPLATE/loop-task.md
-  - .github/ISSUE_TEMPLATE/loop-epic.md
-  - .claude/agents/haven-reviewer.md
-  - .agents/skills/haven-agent-workflow/references/reviewer.md
-  - docs/backlogs/README.md
-  - docs/contributing/ai-agent-workflow.md
-  - docs/contributing/autonomous-pr-loop.md
-  - docs/contributing/loop-engineering.md
-  - docs/contributing/loop-harness-index.md
-last-verified: "2026-09-07" # #2639: EDITED, scope = ONE clause. It named `AGENTS.md` as canonical for the unconditional-reviewer rule; #2639 moved that rule's full statement into `CLAUDE.md` § *How shipping is governed* and left AGENTS.md a pointer, so the attribution follows it. The rule is unchanged. Scope: that ONE clause; nothing else in this file was re-verified. Prior: #2258: the coverage summary now distinguishes retired AllowanceModule work from live delegation-budget enforcement. The old summary presented allowance routing and owner-side allowance writes as current coverage even though the agent rail is retired. The unconditional haven-reviewer rule remains canonical in AGENTS.md. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected.
+status: archived
+covers: []  # redirect stub — the method moved into the quality-scan skill (#2640)
+last-verified: "2026-09-08" # #2640: REDUCED TO A REDIRECT STUB. The discovery method moved verbatim to `.agents/skills/quality-scan/references/discovery-method.md`, per this issue's "fold code-quality-loop.md into the quality-scan skill's reference". Nothing was rewritten in the move — the sections (Run a quality pass, Discovery prompts, Coverage summary, Verification baseline) are byte-identical apart from the new header. `covers:` is emptied because a stub makes no claim about code; the moved file carries the claims now. Prior: #2639: EDITED, scope = ONE clause. It named `AGENTS.md` as canonical for the unconditional-reviewer rule; #2639 moved that rule's full statement into `CLAUDE.md` § *How shipping is governed* and left AGENTS.md a pointer, so the attribution follows it. The rule is unchanged. Scope: that ONE clause; nothing else in this file was re-verified. Prior: #2258: the coverage summary now distinguishes retired AllowanceModule work from live delegation-budget enforcement. The old summary presented allowance routing and owner-side allowance writes as current coverage even though the agent rail is retired. The unconditional haven-reviewer rule remains canonical in AGENTS.md. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected.
 ---
 
-# Haven Code Quality Loop
+# Haven Code Quality Loop — moved
 
-This is the stable discovery and prioritization method for small, guarded code
-quality PRs. It is not the runtime queue: actionable work lives in standalone
-GitHub Issues labeled `code-quality`, or in open sub-issues of a selected epic.
-The old `docs/backlogs/*.yml` tracks are retired.
+The code-quality discovery method now lives with the skill that runs it:
+[`.agents/skills/quality-scan/references/discovery-method.md`](../../.agents/skills/quality-scan/references/discovery-method.md).
 
-It is distinct from the issue-driven autonomous PR loop (`/loop /ship-next`)
-in [`autonomous-pr-loop.md`](autonomous-pr-loop.md), and from oracle-grounded
-differential campaigns in [`loop-engineering.md`](loop-engineering.md).
+Moved by #2640 (epic #2632), which required one canonical statement per fact.
+The method was a reference for `quality-scan` and nothing else; keeping it under
+`docs/contributing/` meant a second place to look and a second place to drift.
 
-## Run a quality pass
-
-1. Discover against current code and recent commits, not a dated backlog.
-2. Prefer money movement, agent authority, external financial writes, state
-   transitions, and credential boundaries.
-3. Keep one PR narrow, guarded, reversible, and free of unrelated behavior.
-4. Add a machine-checkable invariant where practical.
-5. Run focused and package checks, typecheck/build where relevant, and
-   `git diff --check`.
-6. Run `haven-reviewer` — on every pull request, not only for money, authority,
-   shared contracts, or primary UX. Unconditional since the 2026-08-21 owner
-   decision; `CLAUDE.md` § *How shipping is governed* is canonical since #2639.
-7. Record actionable follow-up as a GitHub Issue, not an in-document queue.
-
-Promote findings that need migrations, custody/signing changes, or coordinated
-multi-entrypoint work to an epic with bounded sub-issues.
-
-## Discovery prompts
-
-- Which live route or library lacks an invariant-level test?
-- Can invalid input reach a financial or external side effect?
-- Can retry duplicate a write, settlement, or state transition?
-- Can secrets appear in responses, logs, errors, or generated artifacts?
-- Does an off-chain mirror disagree with its contract or other oracle?
-- Did an API, OpenAPI, UI, or documentation contract drift?
-
-OpenAPI scope is intentional: `packages/backend/src/openapi/spec.ts` publishes
-the agent-payment surface, not every dashboard/accounting route. Expanding it
-is a product/API scope decision, not an automatic quality fix.
-
-## Coverage summary
-
-Live hardened areas include payment terminal states, x402/MPP validation,
-delegation-budget enforcement, delegate credential redaction, chain-scoped
-reads, reconciliation status, receipt contracts, reporting-feed deduplication,
-Fortnox token hygiene, and Fortnox/contact/reporting route invariants.
-
-Historical coverage includes AllowanceModule routing and owner-side allowance
-writes. That rail is retired and fail-closed for agent payments; remaining
-allowance math is historical display/test coverage, not live agent authority.
-
-PT-1 x402/machine-payment consolidation is complete; see
-[`x402-mpp-consolidation.md`](x402-mpp-consolidation.md). User-triggered
-gasless delegate sweep is shipped. Automated merchant retry and broader
-operational reconciliation jobs remain separate future work.
-
-Select the next target from open GitHub Issues after re-validating it against
-current code. This document intentionally has no “current run” or
-recommended-next snapshot.
-
-## Verification baseline
-
-For backend work, run focused tests, the full backend suite, typecheck, build,
-and `git diff --check`. Avoid concurrent commands that clean/build shared SDK
-output. Apply the Captain Self-Check Preflight in
-[`ai-agent-workflow.md`](ai-agent-workflow.md).
+Not moved, and deliberately: the autonomous PR loop
+([`autonomous-pr-loop.md`](autonomous-pr-loop.md)) and oracle-grounded
+differential campaigns ([`loop-engineering.md`](loop-engineering.md)) are
+different concepts, as their own front-matter says.

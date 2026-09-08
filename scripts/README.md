@@ -213,13 +213,16 @@ gh pr create --base dev --fill
 > promotion is published inside that release, whether or not the release record
 > mentions it — everything, that is, that lives in one of the five published
 > packages and reaches a tarball, and only when the range carries a version bump
-> at all, since the publish step is version-gated. The record (the CASP shard and the Supported Runtime Manifest
+> at all — the publish step skips any version already on the registry, so an
+> unbumped range is a no-op unless a previous publish of that same version
+> failed. The record (the CASP shard and the Supported Runtime Manifest
 > note) is written back at step 2, potentially days earlier, against a different
 > tree.
 >
 > That gap is not theoretical: the `0.1.36-alpha.0` shard was amended repeatedly
 > before promotion (it is dated and records its own count), and #2687 was caught
-> only by re-measuring the scope by hand on the morning of the promotion.
+> only by the scheduled pre-promotion re-measurement on the morning of the
+> promotion.
 > **Re-measure at the door** — when the promotion PR is opened, not when the bump
 > is cut:
 >

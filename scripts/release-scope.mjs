@@ -481,7 +481,8 @@ function render(report) {
   out.push(
     `Published packages affected: ${report.affectedPackages.length ? report.affectedPackages.join(', ') : '(none)'}`,
   )
-  out.push('  (the publish itself is version-gated — no bump in the range means nothing is published)')
+  out.push('  (the publish skips any version already on the registry, so an unbumped range publishes nothing')
+  out.push('   unless a previous publish of that same version failed)')
   out.push('')
 
   out.push(`Shipped delta: ${report.shipped.count} files, +${report.shipped.added}/-${report.shipped.removed}`)

@@ -5,8 +5,10 @@
  *
  * The page's job is to show what actually constrains an agent. Until #2106 it
  * showed one rail's answer to every account. It now branches so delegation
- * budgets are shown as signed control, while legacy accounts remain readable
- * without presenting an actionable Haven spending surface.
+ * budgets are shown as signed control. (#2673 correction: the old text
+ * continued "while legacy accounts remain readable" — since #2413 the account
+ * list the page renders is delegation-only, so no legacy account reaches this
+ * page at all.)
  *
  * #2413: no rail marker is read here any more — the account list is
  * delegation-only, so every account this page renders is on the live rail.
@@ -27,6 +29,8 @@
  *    claim to have re-read them from the chain.
  *  - SAFE (legacy, retired rail): owners/threshold from
  *    `GET /safe/:address/details`, plus the read-only retirement notice.
+ *    (#2673 correction: this branch was removed with #2413 — no SAFE branch
+ *    renders below; the delegation-rail branch is the whole page.)
  *
  * Two claims that were rail-blind and are now branched, because they are FALSE
  * on the delegation rail:
@@ -62,14 +66,6 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
-
-/** EIP-3770 short names Safe{Wallet} uses in its deep links. */
-const SAFE_SHORT_NAME: Record<number, string> = { 100: 'gno', 8453: 'base', 84532: 'basesep' }
-
-function safeWalletUrl(safe: UserSafe): string {
-  const prefix = SAFE_SHORT_NAME[safe.chain_id] ?? ''
-  return `https://app.safe.global/home?safe=${prefix}:${safe.safe_address}`
-}
 
 function OnChainBadge() {
   return (
@@ -249,7 +245,7 @@ function DelegationControlCard({ safe, agents }: { safe: UserSafe; agents: Agent
           </p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-[var(--v2-border)]">
-            {/* Same dense admin shape as the legacy table below: it SCROLLS
+            {/* Same dense admin shape the legacy table had: it SCROLLS
                 inside its `overflow-x-auto` wrapper rather than collapsing
                 columns, because these rows carry no self-labelling content
                 (#1999). No `revealAt` columns, so it queries nothing. */}

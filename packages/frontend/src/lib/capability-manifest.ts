@@ -45,6 +45,7 @@ export interface DiscoveryFacts {
   hosted_mcp_url: string | null
   hosted_mcp_note?: string
   connector_package: string
+  cli_package: string
   openapi_url: string
   chains: { deployable: number[]; supported: readonly number[] }
 }
@@ -175,7 +176,11 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
         ...(facts?.connector_package ? { channel: facts.connector_package } : {}),
         ...(facts?.connector_package ? { one_liner: `npx ${facts.connector_package}` } : {}),
       },
-      cli: { name: '@haven_ai/cli' },
+      cli: {
+        name: '@haven_ai/cli',
+        ...(facts?.cli_package ? { channel: facts.cli_package } : {}),
+        ...(facts?.cli_package ? { one_liner: `npx ${facts.cli_package}` } : {}),
+      },
       sdk: { name: '@haven_ai/sdk' },
       mcp: { name: '@haven_ai/mcp' },
       signer: { name: '@haven_ai/signer' },

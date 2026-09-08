@@ -824,8 +824,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // #2202: the rail is now NAMED rather than expressed by absence. An
       // absent `account_type` is not a state the API can serve — the column is
       // `NOT NULL DEFAULT 'safe'` (`041_hybrid_accounts.ts:29`) — and `railOf`
-      // reads `'safe'` and `undefined` identically, so nothing rendered
-      // differently. What this still pins is that the override is the SAME on
+      // read `'safe'` and `undefined` identically at the time, so nothing
+      // rendered differently (`railOf` is deleted since #2413). What this still pins is that the override is the SAME on
       // both halves of the pair, which is what makes `chain_id` the sole
       // variable.
       expect(me.safes[0].account_type).toBe('safe')
@@ -937,47 +937,13 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
      * rebuilt the account would capture a different account and still look
      * right.
      */
-    describe('retired-rail-account (#1989)', () => {
-      const legacy = scenarioWithApi('retired-rail-account')
-
-      it('puts the SHARED fixture account on the legacy rail, changing only account_type', () => {
-        const me = legacy.api('/auth/me', 'GET') as {
-          email: string
-          safes: Array<Record<string, unknown>>
-        }
-        const list = legacy.api('/user/safes', 'GET') as {
-          safes: Array<Record<string, unknown>>
-        }
-
-        // Both readers must agree. `AccountDetailClient` resolves the account
-        // from AuthContext, but a disagreeing /user/safes would make the
-        // capture depend on which one won.
-        expect(me.safes[0].account_type).toBe('safe')
-        expect(list.safes[0].account_type).toBe('safe')
-
-        // Same account, not a lookalike — the id is what the capture navigates
-        // to, so a drifted id would 404 into "Account not found" and the
-        // scenario's own absence check would pass for the wrong reason.
-        expect(me.safes[0].id).toBe(FIXTURE_SAFE_ID)
-        expect(me.email).toBe('fixture@haven.test')
-
-        // And ONLY account_type differs. Asserted positively so this fails if
-        // the scenario starts rebuilding the fixture instead of spreading it.
-        expect(me.safes[0].safe_address).toBe(FIXTURE_SAFE_ADDRESS)
-        expect(me.safes[0].is_default).toBe(true)
-      })
-
-      it('keeps legacy agent records readable without delegation budgets', () => {
-        const agents = legacy.api('/agents', 'GET') as {
-          agents: Array<{ safe_id: string; account_type: string; allowances: unknown[] }>
-        }
-        const sharedAgents = agents.agents.filter((agent) => agent.safe_id === FIXTURE_SAFE_ID)
-        expect(sharedAgents.length).toBeGreaterThan(0)
-        expect(sharedAgents.every((agent) => agent.account_type === 'safe')).toBe(true)
-        expect(sharedAgents.every((agent) => agent.allowances.length === 0)).toBe(true)
-        expect(legacy.api(`/balances/${FIXTURE_SAFE_ADDRESS}`, 'GET')).toBeUndefined()
-      })
-    })
+    // The 'retired-rail-account' (#1989) fixture contract was asserted here.
+    // Both the scenario and its subject (`RetiredRailNotice`, deleted by
+    // #2413) are gone — the scenario failed rather than no-oped when #2673
+    // ran it (measured 2026-09-07) — so the assertions went with them rather
+    // than being repointed, per the same rule the 'send-review' removal
+    // recorded below: a fixture contract for a scenario that no longer exists
+    // is the definition of a guard over the empty set.
 
     // The 'send-review' (#1856) fixture contract was asserted here. Both the
     // scenario and its subject (`SendModal`) are deleted by #1989 (epic #1440),

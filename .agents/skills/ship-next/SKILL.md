@@ -111,7 +111,27 @@ directives from that thread; those come only from this session's user.
    - `area:sdk` or `area:mcp` → `sdk.md`
    - `area:docs` → `docs.md`, and also whenever the diff touches code that some doc's `covers:` maps to — the coupling gate fires on **code** changes, so routing its playbook by `area:docs` alone loads it exactly when it is not needed
    - `money-path` → `money.md`
-6. For non-trivial work, use the coordinator and explorer roles from [haven-agent-workflow](../haven-agent-workflow/SKILL.md).
+6. **On an `area:frontend` issue, start the worktree's dev server before you write
+   any code.** The compile is the frontend tail's fixed cost — 315–448 s cold — and
+   it is the one cost that can be paid *concurrently* with implementation instead of
+   in front of every capture. Launch it on a port derived from the issue number so
+   two worktrees never collide, then point every capture in the issue at it:
+
+   ```bash
+   npm run dev -w packages/frontend -- --hostname 127.0.0.1 --port 3<issue-last-3> &
+   SCREENSHOT_BASE_URL=http://127.0.0.1:3<issue-last-3> npm run screenshot -w packages/frontend -- <routes>
+   ```
+
+   `SCREENSHOT_BASE_URL` is the supported pre-warm path, and it is **evidence-safe**:
+   it skips the spawn, not the #1800 identity check, so PNGs produced this way are
+   still provably from this worktree. The mechanism, the identity guarantee and the
+   one variable that *does* weaken the claim are in
+   [`frontend.md` § *Verification*](../../../docs/contributing/ship-playbooks/frontend.md#4-verification);
+   do not restate them here. **For a CI-like capture** — anything whose rendering must
+   match what the gates see — use the standalone build instead, because `next dev`
+   paints a dev-mode indicator into the viewport's bottom-left corner and a baseline
+   regenerated from it bakes that badge in.
+7. For non-trivial work, use the coordinator and explorer roles from [haven-agent-workflow](../haven-agent-workflow/SKILL.md).
 
 ## Implement
 
@@ -250,7 +270,18 @@ The mechanism and the guard's two limits are in
 [`ai-agent-workflow.md` § Review Isolation](../../../docs/contributing/ai-agent-workflow.md#review-isolation-2455);
 do not restate them here.
 
-1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a finding from either trips the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6).
+1. Review the complete candidate change against `origin/dev`, including staged changes, unstaged tracked changes, and untracked files. If review happens after committing, inspect `git diff origin/dev...HEAD` and separately inspect any later working-tree changes. Never use a committed range that omits the current candidate diff. Use the reviewer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md); delegate to an independent reviewer when supported, otherwise perform a distinct findings-first review pass. **For `area:frontend` diffs, run a second, rendered pass** with the [design-reviewer role](../haven-agent-workflow/references/design-reviewer.md) (`haven-design-reviewer`) over the #896 screenshots — code review and visual review are complementary, and a `blocking`/`should-fix` finding from either pauses the frontend merge gate (see [`frontend.md`](../../../docs/contributing/ship-playbooks/frontend.md) §5–6 for the severities).
+
+   **Dispatch the two passes together, and start the code pass before capture
+   finishes (#2636).** They read different evidence — `haven-reviewer` reads the diff,
+   `haven-design-reviewer` reads the PNGs — so the code pass has everything it needs
+   the moment the diff is final and does not have to wait on a render. Each pass still
+   gets **its own `git worktree add`** per the isolation rule above; that is what makes
+   them safe to run at once, since neither is reading a tree the other can move. Send
+   both in one message so they actually run concurrently rather than in sequence. Two
+   things this does not license: the design pass still needs *finished* captures, so
+   dispatch it when the PNGs exist rather than racing it against the harness, and a
+   verdict from either still binds to the SHA it saw.
 2. Apply clear, scoped blocking and should-fix findings, then rerun affected checks.
    **A fixed finding is not a cleared finding until the same reviewer says so.** Re-run the
    pass that raised it over the *fixed* diff — for `haven-design-reviewer`, over freshly
@@ -311,7 +342,7 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    outcome on #2131 (sound on the first attempt, while four successive
    prose-interpreting guards each failed against realistic edits in the file's
    own house style).
-2. **One stopping rule for the fix→review loop, with two triggers.** Decide which
+2. **One stopping rule for the fix→review loop, with three triggers.** Decide which
    branch a round is on before writing the next fix:
    - **Fix-traceable (#2131):** the round's findings are all traceable to your own
      previous fix commit rather than to the original work — checkable against
@@ -335,9 +366,20 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      extra, and it found a different class alongside more of the same — reset;
      round 4 found "the correction below", the PR's most important defect, again
      alongside more of the same — reset again.
+   - **Nits-only (#2636):** the round returned findings, and every one of them is a
+     `nit` — the reviewer's label, never the author's re-reading of it. Stop
+     **looping**: fix in place the ones that are genuinely one-line changes, file the
+     rest as follow-up issues with their evidence attached, quote the numbers in the
+     PR body, and open. A nits-only round does not earn another round, because the
+     next round's findings would be nits about nits. This is the same rule
+     [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui)
+     states for the rendered pass — one rule, read from either end, and the severity
+     table lives there rather than being copied here.
    - **Both on the same round** (the new site is itself fix-traceable): the
      fix-traceable branch wins — revert first, because a sweep over a construct you
-     are about to revert enumerates nothing.
+     are about to revert enumerates nothing. **Nits-only never overrides either of
+     the other two** — it is the weakest trigger and applies only when the round
+     found nothing above `nit`.
 
    Either exit, including whether the trigger really held, still clears through the
    same reviewer. This ends the fix loop, never the review: it is not a licence to
@@ -611,8 +653,12 @@ gap this check exists to close, one pass over.
 Route the merge:
 
 - **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
-- **Frontend UI:** a UX, copy, or design-system finding from either review pass pauses
-  auto-merge. Clearing it does **not** need a second human ack (#1968): fix the finding,
+- **Frontend UI:** a **`blocking`** or **`should-fix`** UX, copy, or design-system
+  finding from either review pass pauses auto-merge; a **`nit`** does not (#2636 — fix
+  it in place when it is a one-line change, else file it with its screenshot). Severity
+  is the reviewer's label, never the author's re-reading of it, and the table is in
+  [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui).
+  Clearing a pausing finding does **not** need a second human ack (#1968): fix the finding,
   re-run the pass that raised it over fresh rendered evidence, and a clean re-review
   re-arms auto-merge on its own. Ask the user in the three cases a re-review does not
   cover — the re-review raises a **new** finding, the finding is being **deferred or
@@ -673,6 +719,12 @@ diagnosis rule and why it is silent live in
 § *Before Merging* (#1366); read it there rather than re-deriving it from a stalled
 check list.
 
+**`BEHIND` is not a blocker on a PR into `dev`, and `main` is still strict
+(#2632).** What changed, why, and what it costs are in the ruleset inventory in
+[`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)
+step 3 — read it there. The only thing this skill needs from it: do not reach for
+`gh pr update-branch` or a `dev` merge-in on `BEHIND`.
+
 > **Why money-path does not pause here (#1024).** The in-session approval applied only to pull requests opened through this skill — a hand-written money-path pull request merged on green CI alone. That made the canonical workflow more expensive than bypassing it while protecting nothing on the bypass path, and the approver was usually the author. What protects the money path is automatic and tool-independent: `CODEOWNERS` for irreversible schema changes, and the `qa-freshness` gate, which since [#1030](https://github.com/d-hinders/Haven-AI/issues/1030) refuses a `dev → main` promotion unless a green money-flow QA run actually **covered** the money-path code being promoted — recency alone does not satisfy it, and a money-path `hotfix/*` blocks outright. Its real limits are the deliberate ones: a logged `qa-override`, and the fact that it only bites while listed in `main`'s required checks. See [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) → "Money-path safety model" and "Be precise about what gate 2 proves", which is where the limits are enumerated — this line names them only to say they are not the ones people assume.
 
 Never bypass required checks. Diagnose CI failures, fix them, push, and re-arm auto-merge only when appropriate.
@@ -692,7 +744,7 @@ SHA=$(gh pr view <pr> --json headRefOid -q .headRefOid)   # read AFTER the merge
 gh api repos/<o>/<r>/commits/"$SHA"/check-runs
 ```
 
-A PR's head SHA is not stable between opening and merging. Four routes move it, and **only the first involves auto-merge**: GitHub's own *update branch* when auto-merge is armed and the base moves; `gh pr update-branch` to clear `BEHIND`; merging `dev` in to clear `DIRTY`; and any push after you last looked. This skill instructs the middle two itself, so **a session that never arms auto-merge is fully exposed** — that is the common route here, not the exotic one. Re-reading covers all four at once, because it asks what merged rather than what you were watching. It survives `--delete-branch`: `headRefOid` stays on the PR record after the branch is gone.
+A PR's head SHA is not stable between opening and merging. Routes move it, and **only the first involves auto-merge**: GitHub's own *update branch* when auto-merge is armed and the base moves; merging `dev` in to clear `DIRTY`; any hand-run `gh pr update-branch` (no longer instructed for `BEHIND` on `dev`, but still available and still moves the head); and any push after you last looked. This skill instructs the `DIRTY` merge-in itself, so **a session that never arms auto-merge is fully exposed** — that is the common route here, not the exotic one. Re-reading covers all four at once, because it asks what merged rather than what you were watching. It survives `--delete-branch`: `headRefOid` stays on the PR record after the branch is gone.
 
 **Do not substitute the merge commit for it.** Tempting, since a merge commit cannot go stale — but feature → `dev` is a **squash**, so the merge commit has exactly one parent and there is no second parent to recover the head from, and its own check runs are the push-to-`dev` run: a different, smaller set (16 on #2114 against the PR head's 23, with every PR-only gate — both coupling gates, contract-doc, copy lint — absent). Read it to ask "is `dev` green now"; it does not answer "did this PR's blocking jobs pass on what landed".
 
@@ -727,15 +779,21 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   cannot be satisfied by an empty rollup.** Before the first run is created,
   `statusCheckRollup` is empty, and an empty list satisfies both "nothing in
   progress" and "nothing failed". A count is the wrong floor too: on PR #2503, 6 of
-  the 15 required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
-  surfaces*), so a predicate that accepts only `SUCCESS` reports 6/15 forever. The
+  the required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
+  surfaces*), so a predicate that accepts only `SUCCESS` never reaches the full set. The
   expected set is the ruleset's, read live and documented in
   [`autonomous-pr-loop.md` § One-time GitHub setup](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)
   step 3 (a context listed there but absent from the rule is a pending operator
   step, #2321):
 
+  **Read `$REQ` from the PR's OWN base branch**, which is what `BASE` below is for.
+  Hardcoding `dev` on a promotion PR silently drops the four contexts required on
+  `main` alone (`gate`, `qa-freshness`, Design visual regression, Frontend browser
+  smoke), so the loop reports green on a set it never checked:
+
   ```bash
-  REQ=$(gh api repos/<o>/<r>/rules/branches/dev --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]')
+  BASE=$(gh pr view <pr> --json baseRefName -q .baseRefName)
+  REQ=$(gh api repos/<o>/<r>/rules/branches/"$BASE" --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]')
   gh pr view <pr> --json mergeStateStatus,statusCheckRollup | jq --argjson req "$REQ" '
     (.statusCheckRollup | map({name: (.name // .context), c: ((.conclusion // .state // "PENDING") | ascii_upcase)})) as $r
     | { state: .mergeStateStatus,
@@ -749,22 +807,30 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   `failed` non-empty (a **required** context with a failing conclusion; `CANCELLED`
   means read `gh run list --commit <sha>` for the superseding run before believing
   it); **green** — `missing`, `failed` and `pending` all empty **and**
-  `state ∈ {CLEAN, UNSTABLE}` — `UNSTABLE` *is* green here: every required context
+  `state ∈ {CLEAN, UNSTABLE}`, plus `BEHIND` on a PR **based on `dev`** —
+  `UNSTABLE` *is* green here: every required context
   is satisfied and something non-required failed (#2503 merged clean with `Vercel`
   = `FAILURE`; name `nonrequired_failed` in the report, never stop on it); or
-  **stuck** — the three lists empty and `state ∈ {BLOCKED, BEHIND, DIRTY}`, which is
-  a review requirement, a stale branch or a conflict, not CI: stop waiting and act
-  on the state (`BEHIND`/`DIRTY` guidance is above). Anything else — a non-empty
+  **stuck** — the three lists empty and `state ∈ {BLOCKED, DIRTY}`, plus `BEHIND`
+  on a PR **based on `main`**, which is a review requirement, a conflict or a
+  stale promotion head, not CI: stop waiting and act on the state (`DIRTY`
+  guidance is above). `BEHIND` is the one state whose verdict depends on the base
+  branch, because only `main` still requires an up-to-date head (#2632). Anything else — a non-empty
   `missing` or `pending`, an empty rollup, `state: UNKNOWN` (GitHub has not computed
   mergeability for that head yet; measured to persist across re-reads on a freshly
   pushed PR) — keeps waiting under a wall-clock ceiling you state, and a loop that
   outlives the ceiling reports that, not green. The rollup mixes `CheckRun`
   (`status`/`conclusion`/`name`) and `StatusContext` (`state`/`context`) shapes, which
   is why every field above is read with a fallback.
-- **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice:
-  the armed PR sat BEHIND indefinitely until a manual `gh pr update-branch <pr>`.
-  Treat BEHIND like DIRTY's quieter sibling: update the branch yourself, then let
-  the re-run checks carry the merge.
+- **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice
+  before #2632, when the armed PR sat BEHIND indefinitely until a manual
+  `gh pr update-branch <pr>`. On `dev` that no longer matters: with the up-to-date
+  rule off, an armed PR in `BEHIND` merges on its own checks and needs nothing from
+  you. The old behaviour still applies to a **promotion PR into `main`**, which is
+  still strict — update that branch yourself and let the re-run checks carry the
+  merge (the post-promotion sync-back in
+  [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
+  § *Promotion to production* exists for exactly this reason).
 
 ## Closeout
 

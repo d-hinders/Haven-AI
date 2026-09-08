@@ -1,8 +1,8 @@
 /**
  * Resting-state visual regression for AgentPanel and AgentCard.
  *
- * The legacy Safe rail is intentionally absent from this fixture: legacy
- * accounts are readable but do not expose Haven agent authority controls.
+ * The legacy Safe rail is intentionally absent from this fixture: since #2413
+ * the agent list is delegation-only, so no legacy account reaches this panel.
  */
 import { expect, test, type Page } from '@playwright/test'
 import {

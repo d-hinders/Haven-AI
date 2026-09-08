@@ -113,14 +113,38 @@ describe('/for-agents.md (#2523)', () => {
     //
     // #2619 moved the page to 9810 bytes (the "At funding" script names the
     // funding card's page, `<host>/dashboard`, instead of "the dashboard") —
-    // under the ceiling, so the bound is unchanged.
+    // under the ceiling, so the bound was unchanged.
+    //
+    // 9900 -> 10100 for #2618 (the page is 10059 bytes at this commit). The
+    // step-1 sentence now names the non-blocking login sequence — under
+    // `--json`, pass `--no-wait` and finish with `haven login --poll
+    // <device_code>` — because the cold run it fixes hung its whole turn on
+    // the ten-minute poll, then killed the process and lost the code. The
+    // ~250 bytes buy the way to run the flow an agent can actually keep.
+    //
+    // 9900 -> 10100 for #2617 (the page is 9976 bytes at this commit, on top
+    // of #2619's rewording). Step 1 told an agent to run a bare
+    // `npx @haven_ai/cli`, which resolves to the `latest` dist-tag — whatever
+    // that happens to be, deployment by deployment — while the connector
+    // command was already tagged. The ~166 bytes name the channel
+    // (`@<channel>`, the connector's own placeholder) and say where the tag
+    // comes from: `/.well-known/haven.json` (`packages.cli.channel`), never a
+    // tag the agent picks. Deliberately NOT added: restating the manifest's
+    // other fields, which are one fetch away.
     //
     // Deliberately NOT added, and the reason the number is not higher: the
     // well-known manifest's own shape. The page says to read the chain from
     // the command; enumerating `environment` and `chains.deployable` here
     // would duplicate a JSON document that is one fetch away and would go
     // stale the first time its shape changed.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(9900)
+    //
+    // Raised 10100 -> 10300 by #2618, whose step-1 sentence names the
+    // non-blocking login sequence (`--no-wait` under --json, then
+    // `haven login --poll <device_code>`) — the flow an agent runs without
+    // holding its turn open for ten minutes. The served page is 10,224 bytes
+    // with both #2617's channel text and #2618's no-wait text; the ceiling
+    // clears it with headroom for the next small addition.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10300)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {
@@ -237,6 +261,14 @@ describe('/for-agents.md (#2523)', () => {
     // this page told it to run.
     expect(served).toContain('--api <api-url>')
     expect(served).toContain('HAVEN_API_URL')
+    // #2617: the CLI login is TAGGED. A bare `npx @haven_ai/cli` resolves to
+    // the `latest` dist-tag, which is only ever coincidentally the build a
+    // deployment's runbook describes; the connector command was already
+    // tagged, and the CLI now follows the same rule — with the source of the
+    // tag named, so the agent reads it rather than picks one.
+    expect(served).toContain('npx @haven_ai/cli@<channel> login --api <api-url>')
+    expect(served).toContain('read it from `/.well-known/haven.json` (`packages.cli.channel`)')
+    expect(served).toContain('never a tag you pick')
     // NOT "defaults to localhost". It does not — `commands.ts:22` sets
     // DEFAULT_API to Haven's hosted PRODUCTION backend, and has since #535
     // (2026-06-25). The CLI's own `--help` still says localhost, which is

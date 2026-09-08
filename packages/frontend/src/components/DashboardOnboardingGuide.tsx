@@ -23,7 +23,6 @@ interface Props {
   hasFunds: boolean
   hasAgents: boolean
   hasFirstAgentPayment: boolean
-  canConnectAgents?: boolean
   /**
    * #2534: the funding facts from `GET /user/safes/:safeId/funding` — the same
    * object `haven wallets funding` prints. The instruction text, the address
@@ -49,7 +48,6 @@ export default function DashboardOnboardingGuide({
   hasFunds,
   hasAgents,
   hasFirstAgentPayment,
-  canConnectAgents = true,
   funding = null,
   onReceiveFunds,
   onAddAgent,
@@ -59,8 +57,6 @@ export default function DashboardOnboardingGuide({
   inProgressDismissed,
   completeDismissed,
 }: Props) {
-  if (!canConnectAgents) return null
-
   const allComplete = hasFunds && hasAgents && hasFirstAgentPayment
 
   // Setup-complete banner — celebrate, then get out of the way.

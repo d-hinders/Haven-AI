@@ -186,7 +186,8 @@ This warning does not block. It is on you.'
 #
 # The written rule was conditional before this ("when the change touches
 # user-facing UX, money movement, agent authority, shared behavior, or
-# meaningful risk", AGENTS.md), and that conditional was the licence: each skip
+# meaningful risk"; the clause lived in AGENTS.md until #2639 moved it to
+# CLAUDE.md), and that conditional was the licence: each skip
 # had its own plausible reason, so no skip felt like a pattern. Three happened
 # in one session. The rule is unconditional now, and this makes it so at the
 # only moment that matters.

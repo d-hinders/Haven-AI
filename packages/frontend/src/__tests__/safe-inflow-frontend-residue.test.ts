@@ -22,8 +22,9 @@
  * `hooks/useUserSafes.ts`). Only creation and import are gone.
  *
  * **Known limits — a partial net, documented here rather than implied to be a
- * closed guarantee** (haven-reviewer, #2261; the same treatment `CLAUDE.md`
- * gives the chain-default guard). All four were measured, not guessed:
+ * closed guarantee** (haven-reviewer, #2261; the same treatment
+ * `docs/archive/decision-log.md` gives the chain-default guard, moved there
+ * from CLAUDE.md by #2639). All four were measured, not guessed:
  *
  * 1. Only a literal first argument is matched. `api.post(IMPORT_PATH, …)` with
  *    the path hoisted to a `const`, and `` api.post(`/user/${'safes'}`, …) ``,

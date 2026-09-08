@@ -1125,7 +1125,7 @@ test('the guard is called before every publish, and outside the failure isolatio
  * A guard that is skipped, backgrounded, or deleted shows up here as
  * PUBLISHES THAT SHOULD NOT EXIST, whatever the source text looks like.
  */
-function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
+function runPublishLoop(workflow, { channel, version, tag }) {
   const dir = join(tmpdir(), `haven-2421-loop-${randomUUID()}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
   for (const p of ['sdk', 'signer', 'mcp', 'connect', 'cli']) {
@@ -1139,11 +1139,19 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
   writeFileSync(log, '')
   writeFileSync(
     join(dir, 'bin', 'npm'),
-    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  dist-tag) exit ${distTagExit} ;;\n  *) exit 0 ;;\nesac\n`,
+    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  *) exit 0 ;;\nesac\n`,
   )
   spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
   const summary = join(dir, 'summary.md')
   writeFileSync(summary, '')
+  // #2647: the step writes its nomination list here. The real runner always
+  // sets GITHUB_OUTPUT, and the step runs under `set -euo pipefail`, so
+  // leaving it unset makes an unbound-variable abort look like a guard
+  // refusal — a false green in exactly the direction this suite exists to
+  // catch. It is a real file so the list can be read back and fed to the
+  // promote-tags step, which is where the tag move now lives.
+  const ghOutput = join(dir, 'github-output')
+  writeFileSync(ghOutput, '')
 
   const file = join(dir, 'step.sh')
   writeFileSync(file, stepRunScript(workflow, 'Publish packages whose version is not yet on npm'))
@@ -1153,6 +1161,7 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
     PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
     HAVEN_PUBLISH_CHANNEL: channel,
     GITHUB_STEP_SUMMARY: summary,
+    GITHUB_OUTPUT: ghOutput,
   }
   if (tag) env.HAVEN_PUBLISH_TAG = tag
   else delete env.HAVEN_PUBLISH_TAG
@@ -1160,24 +1169,98 @@ function runPublishLoop(workflow, { channel, version, tag, distTagExit = 0 }) {
   const r = spawnSync('bash', [file], { cwd: dir, encoding: 'utf8', env })
   const calls = readFileSync(log, 'utf8').split('\n')
   const published = calls.filter((l) => l.startsWith('publish'))
-  // #2536: every `npm dist-tag add <pkg>@<v> latest` the step actually made.
-  // Read from the same recorder as `published`, so a guard that is skipped,
-  // backgrounded or deleted shows up here as a TAG MOVE THAT SHOULD NOT EXIST
-  // — whatever the source text says.
+  // #2647: the step no longer moves a tag — it NOMINATES. Any `dist-tag` call
+  // recorded here would be the credential regression this split exists to
+  // prevent, so it is still read from the same recorder and asserted empty.
   const distTags = calls.filter((l) => l.startsWith('dist-tag'))
+  // The `name@version` specs handed to promote-tags, read from the real
+  // GITHUB_OUTPUT file rather than from stdout — the same channel the runner
+  // uses, so a step that stops writing it shows up as an empty nomination.
+  const written = readFileSync(ghOutput, 'utf8')
+  const promoteLine = written.split('\n').filter((l) => l.startsWith('promote=')).pop()
+  const promote = promoteLine === undefined ? null : promoteLine.slice('promote='.length)
   rmSync(dir, { recursive: true, force: true })
-  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, distTags }
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, published, distTags, promote }
 }
 
 /**
- * Run the lifted `promote_latest()` with a STUBBED npm on PATH.
+ * Run the REAL promote-tags step, with `npm` stubbed, and report the tag moves.
+ *
+ * The other half of the #2647 split. The behavioural question #2536 asked —
+ * "which `npm dist-tag add` calls actually happen" — did not go away when the
+ * mutation moved jobs; it moved with it. Answering it by running this step on
+ * the publish step's own output keeps the end-to-end property under test
+ * rather than trading it for two half-tests that each pass in isolation.
+ */
+function runPromoteTags(workflow, { promote, distTagExit = 0, token = 'stub-token' }) {
+  const dir = join(tmpdir(), `haven-2647-promote-${randomUUID()}`)
+  mkdirSync(join(dir, 'bin'), { recursive: true })
+  const log = join(dir, 'npm.log')
+  writeFileSync(log, '')
+  writeFileSync(
+    join(dir, 'bin', 'npm'),
+    `#!/bin/sh\necho "$@" >> "${log}"\ncase "$1" in\n  view) exit 1 ;;\n  dist-tag) exit ${distTagExit} ;;\n  *) exit 0 ;;\nesac\n`,
+  )
+  spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
+  const summary = join(dir, 'summary.md')
+  writeFileSync(summary, '')
+
+  const file = join(dir, 'step.sh')
+  writeFileSync(file, stepRunScript(workflow, 'Move latest'))
+
+  const env = {
+    ...process.env,
+    PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+    GITHUB_STEP_SUMMARY: summary,
+    PROMOTE: promote,
+  }
+  if (token === null) delete env.NODE_AUTH_TOKEN
+  else env.NODE_AUTH_TOKEN = token
+
+  const r = spawnSync('bash', [file], { cwd: dir, encoding: 'utf8', env })
+  const calls = readFileSync(log, 'utf8').split('\n').filter(Boolean)
+  rmSync(dir, { recursive: true, force: true })
+  return {
+    code: r.status,
+    out: `${r.stdout ?? ''}${r.stderr ?? ''}`,
+    calls,
+    distTags: calls.filter((l) => l.startsWith('dist-tag')),
+  }
+}
+
+/**
+ * Publish, then promote — the two steps the #2647 split separated, run in the
+ * order and with the data the real workflow passes between them.
+ *
+ * `promote-tags` is skipped when the nomination list is empty (`if:` on the
+ * job), so an empty list here means NO tag move, which is what the assertions
+ * about a snapshot or a stable release are really claiming.
+ */
+function runPublishThenPromote(workflow, args) {
+  const publish = runPublishLoop(workflow, args)
+  assert.deepEqual(
+    publish.distTags,
+    [],
+    'the publish job made a `dist-tag` call — since #2647 that mutation belongs to promote-tags, ' +
+      'and putting it back forces the long-lived npm token into the publish job scope',
+  )
+  if (!publish.promote) return { ...publish, distTags: [], promoteOut: '', promoteCode: null }
+  const promote = runPromoteTags(workflow, { promote: publish.promote, distTagExit: args.distTagExit ?? 0 })
+  return { ...publish, distTags: promote.distTags, promoteOut: promote.out, promoteCode: promote.code }
+}
+
+/**
+ * Run the lifted `record_latest_promotion()` with a STUBBED npm on PATH.
  *
  * Not a convenience. The first version of this test ran the real `npm`, which
  * issued a live `PUT https://registry.npmjs.org/.../dist-tags/latest` against a
  * real package and was stopped only by a 401. A unit test for a guard must not
- * be one credential away from mutating the registry it is describing.
+ * be one credential away from mutating the registry it is describing. Since
+ * #2647 the function nominates rather than moves, so the stub proves a
+ * different thing: that the ONLY npm call on this path is the informational
+ * `view`, and that a refusal reaches npm not at all.
  */
-function runPromoteLatest(script, args, { viewExit = 0 } = {}) {
+function runRecordPromotion(script, args, { viewExit = 0 } = {}) {
   const dir = join(tmpdir(), `haven-2536-pl-${randomUUID()}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
   const log = join(dir, 'npm.log')
@@ -1189,17 +1272,19 @@ function runPromoteLatest(script, args, { viewExit = 0 } = {}) {
   spawnSync('chmod', ['+x', join(dir, 'bin', 'npm')])
   try {
     const r = runBash(script, { args, env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}` } })
-    return { ...r, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) }
+    // The nominated specs, echoed by the wrapper the script builder appends.
+    const nominated = (r.out.match(/^NOMINATED\[(.*)\]$/m)?.[1] ?? '').trim()
+    return { ...r, nominated, calls: readFileSync(log, 'utf8').split('\n').filter(Boolean) }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
-/** `promote_latest()` lifted out of the publish step and invoked (#2536). */
-function promoteLatestScript(workflow) {
+/** `record_latest_promotion()` lifted out of the publish step and invoked (#2536/#2647). */
+function recordLatestPromotionScript(workflow) {
   const step = stepRunScript(workflow, 'Publish packages whose version is not yet on npm')
-  const start = step.indexOf('promote_latest() {')
-  assert.notEqual(start, -1, 'the publish step no longer defines promote_latest()')
+  const start = step.indexOf('record_latest_promotion() {')
+  assert.notEqual(start, -1, 'the publish step no longer defines record_latest_promotion()')
   const rest = step.slice(start).split('\n')
   const collected = []
   let depth = 0
@@ -1208,8 +1293,19 @@ function promoteLatestScript(workflow) {
     depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length
     if (depth === 0 && collected.length > 1) break
   }
-  assert.equal(depth, 0, 'could not find the end of promote_latest()')
-  return `set -euo pipefail\n${collected.join('\n')}\npromote_latest "$1" "$2" "$3" "$4"\n`
+  assert.equal(depth, 0, 'could not find the end of record_latest_promotion()')
+  // `promote` is the accumulator the function appends to; it is declared in
+  // the step above the function, so the lifted copy declares it here. Echoing
+  // it back is how a caller sees what was nominated — the function no longer
+  // calls npm on the allowed path beyond the informational `view`.
+  return [
+    'set -euo pipefail',
+    'promote=""',
+    collected.join('\n'),
+    'record_latest_promotion "$1" "$2" "$3" "$4"',
+    'echo "NOMINATED[$promote]"',
+    '',
+  ].join('\n')
 }
 
 test('GUARD 2/3 (behavioural): a forbidden combination PUBLISHES NOTHING (#2421)', async () => {
@@ -1430,15 +1526,27 @@ test('no published package still hard-codes a connector channel in a re-run hint
 //
 // Every assertion below is on what the step ACTUALLY CALLED, recorded by the
 // stub `npm` on PATH, not on the workflow's source text.
+//
+// #2647 SPLIT THE MECHANISM ACROSS TWO JOBS, and these tests follow it rather
+// than narrow to the half that still fits. npm Trusted Publishing authorises
+// `npm publish` and nothing else, so `npm dist-tag add` moved into a
+// `main`-only `promote-tags` job with its own credential; the publish job now
+// only NOMINATES. The behavioural question is unchanged — which tag moves
+// actually happen, for which versions — so `runPublishThenPromote` runs both
+// steps in sequence, feeding the real GITHUB_OUTPUT nomination list from the
+// first into the second, exactly as the runner does. An empty list means
+// promote-tags is skipped by its own `if:`, which is what "moves nothing"
+// means on the real workflow.
 
 test('#2536: a prod prerelease publishes under alpha AND moves latest to itself', async () => {
-  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+  const { code, published, distTags, promoteCode } = runPublishThenPromote(await publishWorkflow(), {
     channel: 'prod',
     version: REAL_V,
     tag: null,
   })
 
   assert.equal(code, 0, 'the run must succeed')
+  assert.equal(promoteCode, 0, 'promote-tags must succeed')
   assert.equal(published.length, 5, 'all five packages publish')
   for (const line of published) {
     assert.match(line, /--tag alpha\b/, `the prerelease tag is kept: ${line}`)
@@ -1458,7 +1566,7 @@ test('#2536: a STABLE prod version moves nothing — npm publish already set lat
   // Not a nicety. A redundant `dist-tag add` would be a second, unguarded
   // route to the same tag, and the guard reading `$tag` is what keeps the two
   // paths from disagreeing.
-  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+  const { code, published, distTags } = runPublishThenPromote(await publishWorkflow(), {
     channel: 'prod',
     version: '0.2.0',
     tag: null,
@@ -1473,7 +1581,7 @@ test('#2536: a STABLE prod version moves nothing — npm publish already set lat
 test('#2536: the dev channel NEVER touches latest', async () => {
   // The invariant the whole file is built around, extended to the new step:
   // a snapshot may reach only the `dev` dist-tag.
-  const { code, published, distTags } = runPublishLoop(await publishWorkflow(), {
+  const { code, published, distTags, promote } = runPublishThenPromote(await publishWorkflow(), {
     channel: 'dev',
     version: SNAPSHOT_V,
     tag: 'dev',
@@ -1483,6 +1591,10 @@ test('#2536: the dev channel NEVER touches latest', async () => {
   assert.equal(published.length, 5, 'snapshots still publish')
   for (const line of published) assert.match(line, /--tag dev\b/)
   assert.deepEqual(distTags, [], 'a snapshot must never reach latest')
+  // #2647: the nomination list is what promote-tags gates on, so an empty
+  // one is the dev channel's real protection — the job never starts, and
+  // therefore never obtains the npm token.
+  assert.equal(promote, '', `the dev channel must nominate nothing, got "${promote}"`)
 })
 
 test('#2536 GUARD 4/4: a snapshot never reaches latest — refused on prod, no-op on dev', async () => {
@@ -1491,44 +1603,48 @@ test('#2536 GUARD 4/4: a snapshot never reaches latest — refused on prod, no-o
   // channel, which failed every dev publish, because on the dev channel a
   // snapshot version is the ordinary case. Both rows below end with `latest`
   // untouched; they differ in whether the run survives.
-  const script = promoteLatestScript(await publishWorkflow())
+  const script = recordLatestPromotionScript(await publishWorkflow())
 
-  const refused = runPromoteLatest(script, ['prod', '@haven_ai/sdk', SNAPSHOT_V, 'alpha'])
+  const refused = runRecordPromotion(script, ['prod', '@haven_ai/sdk', SNAPSHOT_V, 'alpha'])
   assert.notEqual(refused.code, 0, 'a snapshot on the prod channel must be refused')
   assert.match(refused.out, /GUARD:/, 'the refusal must say why')
   assert.deepEqual(refused.calls, [], 'a refused call must reach npm not at all')
 
-  const devNoop = runPromoteLatest(script, ['dev', '@haven_ai/sdk', SNAPSHOT_V, 'dev'])
+  const devNoop = runRecordPromotion(script, ['dev', '@haven_ai/sdk', SNAPSHOT_V, 'dev'])
   assert.equal(devNoop.code, 0, `a snapshot on the dev channel is ordinary, got: ${devNoop.out}`)
   assert.doesNotMatch(devNoop.out, /GUARD:/, 'the ordinary dev path must not print a guard refusal')
   assert.deepEqual(devNoop.calls, [], 'the dev no-op must move no tag')
+  assert.equal(devNoop.nominated, '', 'the dev no-op must nominate nothing')
 
   // A non-snapshot version on a non-prod channel. Unreachable through the
   // publish loop — `assert_publish_allowed` refuses that pair before any
   // publish — so a loop-level mutation test cannot see the line that handles
   // it, and one that dropped the line survived. Asked directly, it is
   // load-bearing: without it this row moves `latest` from the dev channel.
-  const devReal = runPromoteLatest(script, ['dev', '@haven_ai/sdk', REAL_V, 'alpha'])
+  const devReal = runRecordPromotion(script, ['dev', '@haven_ai/sdk', REAL_V, 'alpha'])
   assert.equal(devReal.code, 0, `a non-prod channel is a no-op, got: ${devReal.out}`)
   assert.deepEqual(devReal.calls, [], 'only the prod channel may move latest')
+  assert.equal(devReal.nominated, '', 'only the prod channel may nominate for latest')
 
   // The control half — a guard that refuses everything protects nothing.
-  const allowed = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'])
+  const allowed = runRecordPromotion(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'])
   assert.equal(allowed.code, 0, `a real prerelease must be allowed, got: ${allowed.out}`)
-  // The full call sequence, not just the move. The `view` is the before-value
-  // printed into the run log so a backwards move is visible in the record
-  // (haven-reviewer, this PR): it is informational, must never fail the job,
-  // and must never be mistaken for a decision — there is exactly ONE
-  // `dist-tag` call and nothing branches on what the view returned.
+  // The full call sequence, not just the outcome. The `view` is the
+  // before-value printed into the run log so a backwards move is visible in
+  // the record (haven-reviewer, #2536): it is informational, must never fail
+  // the job, and must never be mistaken for a decision — nothing branches on
+  // what it returned. Since #2647 it is also the ONLY npm call on this path:
+  // the mutation itself belongs to promote-tags, and a `dist-tag` call
+  // reappearing here is the credential regression the split exists to stop.
   assert.deepEqual(
     allowed.calls,
-    [`view @haven_ai/sdk dist-tags.latest`, `dist-tag add @haven_ai/sdk@${REAL_V} latest`],
-    'the allowed path reads the before-value, then makes exactly one tag move',
+    [`view @haven_ai/sdk dist-tags.latest`],
+    'the allowed path reads the before-value and makes no registry mutation',
   )
   assert.equal(
-    allowed.calls.filter((c) => c.startsWith('dist-tag')).length,
-    1,
-    'exactly one tag move, whatever the informational read returned',
+    allowed.nominated,
+    `@haven_ai/sdk@${REAL_V}`,
+    'the allowed path nominates exactly the version it published',
   )
 })
 
@@ -1537,18 +1653,19 @@ test('#2536: a registry read that fails must not stop the tag move', async () =>
   // `npm view` failure must never fail a publish that succeeded.
   //
   // Why this test is at the unit level and not through the publish loop: the
-  // loop calls `promote_latest` inside an `if`, and bash suppresses `errexit`
+  // loop calls `record_latest_promotion` inside an `if`, and bash suppresses `errexit`
   // for a function invoked as a condition — so a failing read is invisible
   // there whatever the code does. Called directly, as here, `errexit` applies,
   // which is the context that can actually punish a missing `|| echo unknown`.
   // A mutation dropping it survives the loop-level test and dies here.
-  const script = promoteLatestScript(await publishWorkflow())
+  const script = recordLatestPromotionScript(await publishWorkflow())
 
-  const r = runPromoteLatest(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'], { viewExit: 1 })
-  assert.equal(r.code, 0, `a failed registry read must not fail the move, got: ${r.out}`)
-  assert.ok(
-    r.calls.includes(`dist-tag add @haven_ai/sdk@${REAL_V} latest`),
-    `the tag move must still happen; calls were ${JSON.stringify(r.calls)}`,
+  const r = runRecordPromotion(script, ['prod', '@haven_ai/sdk', REAL_V, 'alpha'], { viewExit: 1 })
+  assert.equal(r.code, 0, `a failed registry read must not fail the nomination, got: ${r.out}`)
+  assert.equal(
+    r.nominated,
+    `@haven_ai/sdk@${REAL_V}`,
+    `the nomination must still happen; out was ${r.out}`,
   )
   assert.match(r.out, /unknown/, 'the log records the before-value as unknown rather than blank')
 })
@@ -1556,19 +1673,71 @@ test('#2536: a registry read that fails must not stop the tag move', async () =>
 test('#2536: a failed tag move fails the job WITHOUT claiming the publish failed', async () => {
   // The state this reports is real and specific: the package is live under its
   // own tag and only `latest` is stale. Calling that "FAILED" would send the
-  // next reader hunting for a publish that did happen.
-  const { code, out, published } = runPublishLoop(await publishWorkflow(), {
-    channel: 'prod',
-    version: REAL_V,
-    tag: null,
-    distTagExit: 1,
-  })
+  // next reader hunting for a publish that did happen. Since #2647 the two
+  // halves land in two jobs, and the split is what makes the distinction
+  // legible at a glance: publish GREEN, promote-tags RED.
+  const { code, published, promote, promoteCode, promoteOut } = runPublishThenPromote(
+    await publishWorkflow(),
+    { channel: 'prod', version: REAL_V, tag: null, distTagExit: 1 },
+  )
 
-  assert.notEqual(code, 0, 'the job must fail so the stale tag is not silent')
+  assert.equal(code, 0, 'the publish job succeeded — the packages ARE live')
   assert.equal(published.length, 5, 'the packages did publish')
-  assert.match(out, /failed to move the latest dist-tag/i)
-  assert.match(out, /npm dist-tag add <name>@<version> latest/, 'the remedy is printed')
-  assert.doesNotMatch(out, /ERROR: failed to publish/, 'must not report a publish failure')
+  assert.notEqual(promoteCode, 0, 'promote-tags must fail so the stale tag is not silent')
+  assert.match(promoteOut, /Failed to move the latest dist-tag/i)
+  assert.doesNotMatch(promoteOut, /ERROR: failed to publish/, 'must not report a publish failure')
+
+  // The diagnosis the 0.1.35-alpha.0 incident lacked. A bare E401 named
+  // neither the credential nor its 90-day life, and that cost a cycle.
+  assert.match(promoteOut, /NPM_DIST_TAG_TOKEN/, 'the failure names the credential')
+  assert.match(promoteOut, /90 days/, 'the failure names the expiry mechanism')
+
+  // The whole point of the split, asserted on behaviour rather than on YAML:
+  // the versions were nominated, so the promotion is recoverable by re-running
+  // ONE job with a repaired credential — never by cutting another version.
+  assert.equal(promote.split(' ').length, 5, `all five were nominated, got "${promote}"`)
+})
+
+test('#2647: promote-tags refuses a MISSING token by name, before touching npm', async () => {
+  // An expired token and an absent one are the same fix, and both must fail
+  // with the cause rather than the symptom. Asserting the npm log is empty is
+  // what proves the refusal precedes the mutation rather than following a
+  // failed one.
+  const workflow = await publishWorkflow()
+  const r = runPromoteTags(workflow, { promote: `@haven_ai/sdk@${REAL_V}`, token: null })
+
+  assert.notEqual(r.code, 0, 'a missing token must fail the job')
+  assert.match(r.out, /NPM_DIST_TAG_TOKEN is not set/, 'the failure names the secret')
+  assert.match(r.out, /npm-production-tags/, 'the failure names the environment holding it')
+  assert.deepEqual(r.calls, [], 'the refusal must reach npm not at all')
+})
+
+test('#2647: promote-tags splits SCOPED specs correctly — the five real packages', async () => {
+  // `@haven_ai/sdk@1.2.3` carries two `@`, and every package this workflow
+  // publishes is scoped, so a split at the FIRST one would break all five.
+  //
+  // Where that would actually show, measured rather than assumed: the tag move
+  // passes `$spec` verbatim, so it survives a broken split — the damage lands
+  // on `$name`, which feeds the before-value read and the run-summary table.
+  // A mutation to `%%@*` (empty name) leaves the mutation correct and the
+  // record unreadable, so the `view` calls are asserted here too. Without
+  // them this test passes on a broken split, which is where it started.
+  const workflow = await publishWorkflow()
+  const packages = ['sdk', 'signer', 'mcp', 'connect', 'cli']
+  const specs = packages.map((p) => `@haven_ai/${p}@${REAL_V}`)
+  const r = runPromoteTags(workflow, { promote: specs.join(' ') })
+
+  assert.equal(r.code, 0, `promote-tags must succeed, got: ${r.out}`)
+  assert.deepEqual(
+    r.distTags,
+    specs.map((spec) => `dist-tag add ${spec} latest`),
+    'each nominated spec must reach npm intact, scope and version both',
+  )
+  assert.deepEqual(
+    r.calls.filter((l) => l.startsWith('view')),
+    packages.map((p) => `view @haven_ai/${p} dist-tags.latest`),
+    'the before-value is read for the NAME half of each spec — a bad split reads the wrong package, or none',
+  )
 })
 
 // ── #2580: a release bump only ever moves the version forward ────────────────

@@ -265,7 +265,8 @@ describe('the guard itself is falsifiable', () => {
     // property under test. A frozen roster is how the CASP claim #2307 corrects
     // went stale in the first place, so this list is the assertion, not a
     // convenience: what remains is exactly the three shared, rail-agnostic
-    // reads CLAUDE.md names, and no AllowanceModule contract binding at all.
+    // reads `docs/archive/decision-log.md` names (moved out of CLAUDE.md by
+    // #2639), and no AllowanceModule contract binding at all.
     const { names } = moduleExportNames(path.resolve(BACKEND_SRC, 'rails/allowance-module.ts'))
     expect(names).not.toBeNull()
     expect([...(names ?? [])].sort()).toEqual([

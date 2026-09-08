@@ -581,7 +581,8 @@ export interface HavenAgent {
   chainId: number
   /**
    * Which on-chain policy primitive gates this agent's spend (#1306): the
-   * legacy Safe AllowanceModule (import-only accounts) or the delegation
+   * legacy Safe AllowanceModule (retired — no account can enter it since
+   * #1984, and it cannot spend since #1986) or the delegation
    * rail's active budget delegations (#1090). Read-only reporting — the
    * on-chain state is the actual gate either way, this only says which
    * mechanism a caller should read/derive from.

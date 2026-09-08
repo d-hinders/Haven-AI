@@ -31,18 +31,44 @@ function optionalEnv(key: string, fallback: string): string {
 }
 
 /**
- * Parse TRUST_PROXY_HOPS defensively (#1670). The failure mode this guards is
- * SILENT disarming: the auth rate-limit tier deliberately returns no limit at
- * 0 hops, so a value that fails to parse — pasted with quotes, a stray word,
- * "true" — would leave the front door unthrottled while the operator believes
- * it is protected, and nothing would say so. Quotes and whitespace are
- * stripped (dashboard paste artefacts); anything else non-numeric warns
- * LOUDLY at boot and disarms, because guessing a hop count is worse than
- * refusing one — `true` in particular is the spoofable Fastify mode this
- * setting exists to avoid, and must never be coerced into a count.
+ * Parse TRUST_PROXY_HOPS defensively (#1670, boot-unset warning added #2630).
+ * The failure mode this guards is SILENT disarming: the auth rate-limit tier
+ * deliberately returns no limit at 0 hops, so a value that fails to parse —
+ * pasted with quotes, a stray word, "true" — would leave the front door
+ * unthrottled while the operator believes it is protected, and nothing would
+ * say so. Quotes and whitespace are stripped (dashboard paste artefacts);
+ * anything else non-numeric warns LOUDLY at boot and disarms, because
+ * guessing a hop count is worse than refusing one — `true` in particular is
+ * the spoofable Fastify mode this setting exists to avoid, and must never be
+ * coerced into a count.
+ *
+ * ## The unset case also warns now (#2630)
+ *
+ * #2630 found `TRUST_PROXY_HOPS` unset on the production backend: every other
+ * required piece of payment infrastructure is fail-closed
+ * (`DELEGATION_RAIL_BUNDLER_URL` throws at startup when unset), but this
+ * variable was fail-open AND silent — production had booted without it for an
+ * unknown length of time with nothing anywhere saying so. The owner decision
+ * (folded into #2630 rather than filed separately) is: stay fail-open, but
+ * stop being silent — the same `warnPublicRpc` shape #2615 established for an
+ * unset RPC endpoint, applied here. Branches on the RAW value, not the
+ * resolved one: a deliberately-configured `TRUST_PROXY_HOPS=0` is an operator
+ * choice and stays silent, exactly as a garbage value that resolves to the
+ * same 0 does NOT (it gets the louder, different, "not a non-negative
+ * integer" message below) — unset and "invalid" are distinct operator
+ * mistakes and get distinct messages.
  */
 export function parseTrustProxyHops(raw: string | undefined): number {
-  if (raw === undefined || raw.trim() === '') return 0
+  if (raw === undefined || raw.trim() === '') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'TRUST_PROXY_HOPS is not set — treating it as 0: the proxy stays UNTRUSTED and the ' +
+      'per-IP auth rate limits (signup, login, device_start, device_lookup, device_token) stay ' +
+      'DISARMED. Set TRUST_PROXY_HOPS to the number of trusted proxy hops in front of this ' +
+      'process (Railway terminates in exactly one edge proxy, so that is usually 1) to arm them.',
+    )
+    return 0
+  }
   const cleaned = raw.trim().replace(/^["']+|["']+$/g, '').trim()
   const hops = Number(cleaned)
   if (!Number.isFinite(hops) || !Number.isInteger(hops) || hops < 0) {
@@ -58,35 +84,108 @@ export function parseTrustProxyHops(raw: string | undefined): number {
 }
 
 /**
- * Boot warning for the public Base Sepolia RPC default (#2511).
+ * Boot warning for a public RPC default (#2511 for Base Sepolia, generalised
+ * per-chain by #2615).
  *
- * When `RPC_URL_BASE_SEPOLIA` is unset (or empty — `optionalEnv` semantics:
- * Railway can store an empty string, and "the operator cleared it" must land
- * on the same signal as "never configured"), this process is writing on-chain
- * legs through the SHARED public endpoint, so a provider-side outage there
- * surfaces as qa-dev failures (502s whose body carries
- * `URL: https://sepolia.base.org`) even though no Haven code changed — the
- * exact shape run 33796886018 produced, eight times. Logging ONCE at boot
- * makes the default distinguishable from a configured value in the logs, the
- * same way `parseTrustProxyHops` refuses to disarm silently.
+ * When the variable is unset — or empty; Railway can store an empty string,
+ * and "the operator cleared it" must land on the same signal as "never
+ * configured" — this process writes on-chain legs through a SHARED public
+ * endpoint, so a provider-side outage there surfaces as Haven failures even
+ * though no Haven code changed. Logging ONCE at boot makes the default
+ * distinguishable from a configured value in the logs, the same way
+ * `parseTrustProxyHops` refuses to disarm silently.
  *
- * Branches on the RAW value, not the resolved one: a variable that is SET is
- * a deliberate configuration even when it names the same public endpoint, and
- * must stay silent (the issue's criterion — "silent when the variable is
- * set"). This function also owns the resolution, replacing the plain
- * `optionalEnv` call, so the default literal exists in exactly one place.
+ * Branches on the RAW value, not the resolved one: a variable that is SET is a
+ * deliberate configuration even when it names the same public endpoint, and
+ * must stay silent. This function also owns the resolution, replacing the
+ * plain `optionalEnv` call, so each default literal exists in exactly one
+ * place.
+ *
+ * ## Why this is one function and not two (#2615)
+ *
+ * #2511 shipped this shape for Base Sepolia alone. Base MAINNET — the chain
+ * that moves real user funds — kept a bare `optionalEnv` and fell through to
+ * the public node with no signal of any kind, which is how production ran on
+ * it unnoticed. The obvious fix is a second near-identical function; this repo
+ * has paid for that kind of second copy repeatedly, so the parameterised form
+ * is the fix instead. `consequence` is the only per-chain prose, because it is
+ * the only part that genuinely differs: on testnet a public-node outage costs
+ * a red QA run, on mainnet it costs a paying user their payment.
+ *
+ * ## It TRIMS, and `optionalEnv` did not (#2615, found by review)
+ *
+ * This is a real behaviour change on the mainnet path, so it is written down
+ * rather than left to be rediscovered. `optionalEnv` is `process.env[k] ||
+ * fallback` — no trimming, ever. Two inputs therefore resolve differently than
+ * they did before `rpcUrlBase` moved onto this function:
+ *
+ * - `"   "` (whitespace only) used to resolve to that literal whitespace
+ *   string; it now counts as UNSET — public endpoint, with the warning.
+ * - `"  https://provider.example/rpc  "` used to keep its padding; it is now
+ *   trimmed, and stays silent because the raw value is set.
+ *
+ * Both are kept deliberately. A padded URL is a dashboard paste artefact and
+ * trimming it makes a correctly-intended configuration work instead of
+ * constructing a provider from a string with spaces in it. Whitespace-only is
+ * the same case `parseConnectorChannel` below already decides the same way:
+ * "the operator cleared it" must land on the same signal as "never
+ * configured", not on a third state. Sepolia has behaved this way since #2511;
+ * this makes mainnet agree with it rather than with `optionalEnv`.
+ *
+ * The edge cases are pinned by tests, so the change stays deliberate.
+ *
+ * What it deliberately does NOT do is refuse to boot. Whether a missing
+ * mainnet RPC should be fail-closed the way `DELEGATION_RAIL_BUNDLER_URL` is
+ * (`rails/delegation-rail.ts`) is an OWNER decision — answered on #2615 item 3
+ * on 2026-09-07 as FAIL-OPEN, and taking it silently inside a warning change
+ * is exactly what that item forbade.
  */
-export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
-  const resolved = raw?.trim() || 'https://sepolia.base.org'
-  if (raw?.trim()) return resolved
+export function warnPublicRpc(input: {
+  envVar: string
+  publicUrl: string
+  raw: string | undefined
+  consequence: string
+}): string {
+  const resolved = input.raw?.trim() || input.publicUrl
+  if (input.raw?.trim()) return resolved
   // eslint-disable-next-line no-console
   console.warn(
-    'RPC_URL_BASE_SEPOLIA is not set — using the PUBLIC endpoint https://sepolia.base.org. ' +
-    'When that shared endpoint has an outage, qa-dev fails on it (502 bodies carrying ' +
-    '`URL: https://sepolia.base.org`) instead of on a Haven defect. Set RPC_URL_BASE_SEPOLIA ' +
-    'to a dedicated provider endpoint to decouple this deployment from those outages.',
+    `${input.envVar} is not set — using the PUBLIC endpoint ${input.publicUrl}. ` +
+    `${input.consequence} Set ${input.envVar} to a dedicated provider endpoint to ` +
+    'decouple this deployment from those outages.',
   )
   return resolved
+}
+
+/** #2511, kept as a named call site so the Sepolia consequence has one home. */
+export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
+  return warnPublicRpc({
+    envVar: 'RPC_URL_BASE_SEPOLIA',
+    publicUrl: 'https://sepolia.base.org',
+    raw,
+    consequence:
+      'When that shared endpoint has an outage, qa-dev fails on it (502 bodies carrying ' +
+      '`URL: https://sepolia.base.org`) instead of on a Haven defect.',
+  })
+}
+
+/**
+ * #2615: the same signal for Base MAINNET, where the consequence is not a red
+ * CI job. Production has no money-flow harness pointed at it, so a degraded
+ * public node surfaces first as a user complaint — a 502 to a paying agent, a
+ * counterfactual deploy failing in `ensureHybridDeployed`, or a budget read
+ * falling back to the optimistic full budget on real money.
+ */
+export function warnPublicBaseMainnetRpc(raw: string | undefined): string {
+  return warnPublicRpc({
+    envVar: 'RPC_URL_BASE',
+    publicUrl: 'https://mainnet.base.org',
+    raw,
+    consequence:
+      'This is the node every Base MAINNET settlement, account deploy and caveat-enforcer read ' +
+      'goes through, and production has no money-flow harness watching it — a degraded shared ' +
+      'node surfaces as a paying user\'s failed payment, not as a red workflow.',
+  })
 }
 
 /**
@@ -196,7 +295,7 @@ export const config = {
   opsToken: process.env.HAVEN_OPS_TOKEN ?? '',
 
   // Chain-specific RPC URLs
-  rpcUrlBase: optionalEnv('RPC_URL_BASE', 'https://mainnet.base.org'),
+  rpcUrlBase: warnPublicBaseMainnetRpc(process.env.RPC_URL_BASE),
   rpcUrlBaseSepolia: warnPublicBaseSepoliaRpc(process.env.RPC_URL_BASE_SEPOLIA),
 
   // Optional (features degrade gracefully without these)

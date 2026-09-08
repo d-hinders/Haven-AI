@@ -1,8 +1,8 @@
 ---
 name: haven-design-reviewer
-description: Use after implementation for a rendered-UX/visual/design-system review of an area:frontend change, keyed off the #896 screenshots (desktop + mobile) rather than the code. Read-only, findings-first. Pairs with haven-reviewer (code) — together they keep the "any UI finding pauses auto-merge" gate meaningful.
+description: Use after implementation for a rendered-UX/visual/design-system review of an area:frontend change, keyed off the #896 screenshots (desktop + mobile) rather than the code. Read-only, findings-first. Pairs with haven-reviewer (code) — dispatched together, each in its own worktree; a blocking or should-fix finding from either pauses auto-merge, a nit does not.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
 color: pink
 ---
 

@@ -8,7 +8,13 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import {
+  assertWorkerSchemaAtHead,
+  describeDb,
+  initDbHarness,
+  resetDb,
+  withMigrationReverted,
+} from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../073_drop_x402_resource_tables.js'
 
 const RESOURCE_TABLE = ['x402', 'resources'].join('_')
@@ -50,6 +56,12 @@ describeDb('migration 073: drop merchant-resource tables (#2257)', () => {
     await initDbHarness()
   })
 
+  // #2616: this file hand-drives up()/down(), which mutates SCHEMA — and
+  // nothing else in the harness undoes that. Fail HERE if the schema is left
+  // off head, rather than letting the next file on this worker inherit it as
+  // an unexplained table-existence failure.
+  afterAll(assertWorkerSchemaAtHead)
+
   afterAll(async () => {
     await up(db as never)
   })
@@ -71,41 +83,55 @@ describeDb('migration 073: drop merchant-resource tables (#2257)', () => {
   })
 
   it('down() restores both schemas, indexes, and the child foreign key', async () => {
-    await down(db as never)
+    // #2621: this file HAS an `afterAll(up)` safety net (the #2020 leak
+    // lesson), so a missed restore here heals at the file boundary rather than
+    // poisoning the next file — which is also why the guard cannot see it
+    // (registered first, it runs after that cleanup). The helper is what stops
+    // the leak being *invented* in the first place: without it, a failing
+    // expectation in this long block left both retired tables restored for
+    // every test after it in this file, and for the run if the net itself threw.
+    await withMigrationReverted(
+      () => down(db as never),
+      async () => {
+        expect(await tableExists(RESOURCE_TABLE)).toBe(true)
+        expect(await tableExists(RECEIPT_TABLE)).toBe(true)
+        expect(await columnNames(RESOURCE_TABLE)).toEqual([
+          'active', 'chain_id', 'created_at', 'description', 'id', 'name',
+          'price_amount', 'safe_id', 'token_address', 'token_symbol', 'updated_at', 'user_id',
+        ])
+        expect(await columnNames(RECEIPT_TABLE)).toEqual([
+          'amount_raw', 'chain_id', 'created_at', 'id', 'payer_address', 'resource_id',
+          'tx_hash', 'user_id', 'verified_at',
+        ])
+        expect(await indexNames(RESOURCE_TABLE)).toEqual([
+          RESOURCE_INDEX,
+          `${RESOURCE_TABLE}_pkey`,
+        ])
+        expect(await indexNames(RECEIPT_TABLE)).toEqual([
+          RECEIPT_RESOURCE_INDEX,
+          RECEIPT_USER_INDEX,
+          RECEIPT_TABLE + '_pkey',
+          `${RECEIPT_TABLE}_tx_hash_key`,
+        ])
 
-    expect(await tableExists(RESOURCE_TABLE)).toBe(true)
-    expect(await tableExists(RECEIPT_TABLE)).toBe(true)
-    expect(await columnNames(RESOURCE_TABLE)).toEqual([
-      'active', 'chain_id', 'created_at', 'description', 'id', 'name',
-      'price_amount', 'safe_id', 'token_address', 'token_symbol', 'updated_at', 'user_id',
-    ])
-    expect(await columnNames(RECEIPT_TABLE)).toEqual([
-      'amount_raw', 'chain_id', 'created_at', 'id', 'payer_address', 'resource_id',
-      'tx_hash', 'user_id', 'verified_at',
-    ])
-    expect(await indexNames(RESOURCE_TABLE)).toEqual([
-      RESOURCE_INDEX,
-      `${RESOURCE_TABLE}_pkey`,
-    ])
-    expect(await indexNames(RECEIPT_TABLE)).toEqual([
-      RECEIPT_RESOURCE_INDEX,
-      RECEIPT_USER_INDEX,
-      RECEIPT_TABLE + '_pkey',
-      `${RECEIPT_TABLE}_tx_hash_key`,
-    ])
+        const { rows: foreignKeys } = await db.query<{ child: string; parent: string }>(
+          `SELECT c.conrelid::regclass::text AS child, c.confrelid::regclass::text AS parent
+           FROM pg_constraint c
+           WHERE c.contype = 'f'
+             AND c.conrelid = $1::regclass
+             AND c.confrelid = $2::regclass`,
+          [RECEIPT_TABLE, RESOURCE_TABLE],
+        )
+        expect(foreignKeys).toHaveLength(1)
 
-    const { rows: foreignKeys } = await db.query<{ child: string; parent: string }>(
-      `SELECT c.conrelid::regclass::text AS child, c.confrelid::regclass::text AS parent
-       FROM pg_constraint c
-       WHERE c.contype = 'f'
-         AND c.conrelid = $1::regclass
-         AND c.confrelid = $2::regclass`,
-      [RECEIPT_TABLE, RESOURCE_TABLE],
+        // Reverting an already-restored schema is idempotent (`down()` is
+        // `IF NOT EXISTS`), and `up()` then retires both again — the pair an
+        // operator rolling back a rollback would run.
+        await down(db as never)
+        expect(await tableExists(RESOURCE_TABLE)).toBe(true)
+      },
+      () => up(db as never),
     )
-    expect(foreignKeys).toHaveLength(1)
-
-    await down(db as never)
-    await up(db as never)
     expect(await tableExists(RESOURCE_TABLE)).toBe(false)
     expect(await tableExists(RECEIPT_TABLE)).toBe(false)
   })

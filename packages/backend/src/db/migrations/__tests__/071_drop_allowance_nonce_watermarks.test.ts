@@ -15,9 +15,15 @@
  * the dropped TABLE with the live `payment_intents.allowance_nonce` COLUMN.
  * So the column is pinned by execution.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import {
+  assertWorkerSchemaAtHead,
+  describeDb,
+  initDbHarness,
+  resetDb,
+  withMigrationReverted,
+} from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../071_drop_allowance_nonce_watermarks.js'
 
 async function tableExists(name: string): Promise<boolean> {
@@ -43,6 +49,12 @@ describeDb('migration 071: drop allowance_nonce_watermarks (#2084)', () => {
     await initDbHarness()
   })
 
+  // #2616: this file hand-drives up()/down(), which mutates SCHEMA — and
+  // nothing else in the harness undoes that. Fail HERE if the schema is left
+  // off head, rather than letting the next file on this worker inherit it as
+  // an unexplained table-existence failure.
+  afterAll(assertWorkerSchemaAtHead)
+
   beforeEach(async () => {
     await resetDb()
   })
@@ -60,72 +72,94 @@ describeDb('migration 071: drop allowance_nonce_watermarks (#2084)', () => {
   // ── Reversibility. ───────────────────────────────────────────────────────
 
   it("down() restores 055's exact shape, and up() drops it again", async () => {
-    await down(db as never)
+    // #2621: the whole assertion block sits between the revert and the
+    // restore, so this is exactly the shape #2616's leak needed — one failing
+    // expectation in the middle left `allowance_nonce_watermarks` PRESENT in a
+    // worker schema whose `schema_migrations` still records 071 as applied, and
+    // nothing repairs it. Unlike 070/075 this file has no `afterAll(up)` to
+    // heal that, so `assertWorkerSchemaAtHead()` is the only thing standing
+    // between the leak and the next file on the worker — and this is the leak
+    // IT CAN SEE (a restored table the head does not have).
+    await withMigrationReverted(
+      () => down(db as never),
+      async () => {
+        expect(await tableExists('allowance_nonce_watermarks')).toBe(true)
+        expect(await columnNames('allowance_nonce_watermarks')).toEqual([
+          'chain_id',
+          'delegate_address',
+          'nonce',
+          'safe_address',
+          'token_address',
+          'updated_at',
+        ])
 
-    expect(await tableExists('allowance_nonce_watermarks')).toBe(true)
-    expect(await columnNames('allowance_nonce_watermarks')).toEqual([
-      'chain_id',
-      'delegate_address',
-      'nonce',
-      'safe_address',
-      'token_address',
-      'updated_at',
-    ])
+        // The FOUR-column primary key 055 created, not merely "a primary key" —
+        // the address triple plus the chain. A restore that narrowed this would
+        // collapse distinct watermarks onto one row.
+        const { rows: pk } = await db.query<{ indexdef: string }>(
+          `SELECT indexdef FROM pg_indexes
+           WHERE schemaname = current_schema() AND tablename = 'allowance_nonce_watermarks'
+             AND indexname = 'allowance_nonce_watermarks_pkey'`,
+        )
+        expect(pk).toHaveLength(1)
+        expect(pk[0].indexdef).toMatch(
+          /\(chain_id,\s*safe_address,\s*delegate_address,\s*token_address\)/,
+        )
 
-    // The FOUR-column primary key 055 created, not merely "a primary key" —
-    // the address triple plus the chain. A restore that narrowed this would
-    // collapse distinct watermarks onto one row.
-    const { rows: pk } = await db.query<{ indexdef: string }>(
-      `SELECT indexdef FROM pg_indexes
-       WHERE schemaname = current_schema() AND tablename = 'allowance_nonce_watermarks'
-         AND indexname = 'allowance_nonce_watermarks_pkey'`,
+        // And the restored shape accepts the row it was designed for, then
+        // refuses a second one on the same key — the upsert target 055 relied on.
+        const row = ['84532', '0xaa', '0xbb', '0xcc']
+        await db.query(
+          `INSERT INTO allowance_nonce_watermarks
+             (chain_id, safe_address, delegate_address, token_address, nonce)
+           VALUES ($1, $2, $3, $4, 7)`,
+          row,
+        )
+        await expect(
+          db.query(
+            `INSERT INTO allowance_nonce_watermarks
+               (chain_id, safe_address, delegate_address, token_address, nonce)
+             VALUES ($1, $2, $3, $4, 8)`,
+            row,
+          ),
+        ).rejects.toThrow(/duplicate key/i)
+      },
+      () => up(db as never),
     )
-    expect(pk).toHaveLength(1)
-    expect(pk[0].indexdef).toMatch(
-      /\(chain_id,\s*safe_address,\s*delegate_address,\s*token_address\)/,
-    )
-
-    // And the restored shape accepts the row it was designed for, then
-    // refuses a second one on the same key — the upsert target 055 relied on.
-    const row = ['84532', '0xaa', '0xbb', '0xcc']
-    await db.query(
-      `INSERT INTO allowance_nonce_watermarks
-         (chain_id, safe_address, delegate_address, token_address, nonce)
-       VALUES ($1, $2, $3, $4, 7)`,
-      row,
-    )
-    await expect(
-      db.query(
-        `INSERT INTO allowance_nonce_watermarks
-           (chain_id, safe_address, delegate_address, token_address, nonce)
-         VALUES ($1, $2, $3, $4, 8)`,
-        row,
-      ),
-    ).rejects.toThrow(/duplicate key/i)
-
-    await up(db as never)
     expect(await tableExists('allowance_nonce_watermarks')).toBe(false)
   })
 
   it('the drop needs no CASCADE — nothing references the table in either direction', async () => {
-    await down(db as never)
+    // #2621: the issue flagged this site as possibly needing nothing, because
+    // the body ends with its own `DROP TABLE`. That holds only on the
+    // straight-through path: the catalogue assertion below sits BETWEEN the
+    // `down()` and that DROP, so a failure there leaves the table present with
+    // 071 still recorded as applied — the #2616 leak, and this file has no
+    // `afterAll(up)` to heal it. The plain (non-IF-EXISTS) DROP stays exactly
+    // where it is: it is the proof, not the cleanup. The helper's restore is
+    // the path that runs when the proof does not reach it.
+    await withMigrationReverted(
+      () => down(db as never),
+      async () => {
+        // 055 states it is "Deliberately NOT foreign-keyed", which is why the
+        // 069/070 evidence-cascade hazard cannot arise here. Asserted against the
+        // catalogue rather than by reading the header: no constraint points AT the
+        // table, and none points OUT of it.
+        const { rows } = await db.query<{ conname: string }>(
+          `SELECT c.conname FROM pg_constraint c
+           WHERE c.contype = 'f'
+             AND ( c.conrelid  = 'allowance_nonce_watermarks'::regclass
+                OR c.confrelid = 'allowance_nonce_watermarks'::regclass )`,
+        )
+        expect(rows).toEqual([])
 
-    // 055 states it is "Deliberately NOT foreign-keyed", which is why the
-    // 069/070 evidence-cascade hazard cannot arise here. Asserted against the
-    // catalogue rather than by reading the header: no constraint points AT the
-    // table, and none points OUT of it.
-    const { rows } = await db.query<{ conname: string }>(
-      `SELECT c.conname FROM pg_constraint c
-       WHERE c.contype = 'f'
-         AND ( c.conrelid  = 'allowance_nonce_watermarks'::regclass
-            OR c.confrelid = 'allowance_nonce_watermarks'::regclass )`,
+        // So a plain DROP — no CASCADE, which would mask a dependency rather than
+        // prove its absence — succeeds.
+        await db.query('DROP TABLE allowance_nonce_watermarks')
+        expect(await tableExists('allowance_nonce_watermarks')).toBe(false)
+      },
+      () => up(db as never),
     )
-    expect(rows).toEqual([])
-
-    // So a plain DROP — no CASCADE, which would mask a dependency rather than
-    // prove its absence — succeeds.
-    await db.query('DROP TABLE allowance_nonce_watermarks')
-    expect(await tableExists('allowance_nonce_watermarks')).toBe(false)
   })
 
   // ── The KEEP half. A deletion slice is judged by what it kept. ────────────

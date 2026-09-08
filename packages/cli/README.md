@@ -27,12 +27,16 @@ npm i -g @haven_ai/cli@alpha   # or run ad hoc: npx @haven_ai/cli@alpha <command
 haven --help
 ```
 
-A bare `npx @haven_ai/cli` resolves to the **same version** as `@alpha`: the
-`latest` dist-tag now tracks the newest published release (owner decision
-2026-09-04, mechanism in `publish.yml` since #2536). Verified on 2026-09-06 from
-a clean directory — `@alpha` and the bare form both `0.1.34-alpha.0`, `@dev` the
-snapshot `0.0.0-dev.202609061037.7cf43bb`. The pinned `@alpha` stays in the
-one-liner above because every generated artifact quotes that string verbatim.
+A bare `npx @haven_ai/cli` resolves to the `latest` dist-tag, which may be an
+**older build** than the one your deployment's docs describe — `latest` tracks
+the newest *published* release and nothing guarantees it matches the channel a
+given deployment serves (owner decision 2026-09-04 put the mechanism behind a
+release; issue [#2617](https://github.com/d-hinders/Haven-AI/issues/2617) is
+the reason the runbook and the manifest now name the channel explicitly). The
+runbook (`/for-agents.md`, printed by `haven guide`) and the manifest
+(`/.well-known/haven.json`, field `packages.cli.channel`) name the channel the
+deployment serves as `@<channel>`: read the tag from there, never pick one.
+`<channel>` below is that tag; `@alpha` is only a concrete example.
 
 The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 `--api <url>` or `HAVEN_API_URL` (e.g. a local backend at
@@ -52,7 +56,8 @@ are your user's; these are the two that are yours.
 
 ```bash
 # 1. Get a scoped session. Prints a code and a link for your user to approve in
-#    a browser — you never see or ask for their password.
+#    a browser — you never see or ask for their password. @alpha is an example:
+#    run the tag your deployment names (see "Install" above).
 npx -y @haven_ai/cli@alpha login --api <api-url>
 
 # 2. Create the agent and its budget. Prints the connector command the backend
@@ -94,6 +99,8 @@ checks a command against. `haven --help` prints the same list.
 # auth
 haven login                              # browser device-code approval (the default)
 haven login --email you@example.com      # password path instead (prompt or HAVEN_PASSWORD)
+haven login --no-wait --json             # print the link object and exit — resume with --poll
+haven login --poll <device_code>         # one poll round: 0 approved, 3 pending, 4 denied
 haven whoami                             # user, session expiry, API URL
 haven guide                              # the agent onboarding runbook
 haven logout
@@ -238,16 +245,33 @@ driving this CLI must never hold its user's password.
 ```bash
 haven login --json
 # {"ok":true,"verification_url":"https://app.haven…/device?code=ABCD-2345",
-#  "user_code":"ABCD-2345","expires_at":"…"}
+#  "user_code":"ABCD-2345","device_code":"…","expires_at":"…"}
 ```
 
 Under `--json` that object is printed **before** polling begins, so an agent
 can hand its user the link immediately rather than after the flow completes.
-Add `--no-wait` to stop there and poll later; without it the CLI waits at the
-interval the server names, widening it when the server says `slow_down`.
+Without `--no-wait` the CLI then polls until approved, widening the interval
+when the server says `slow_down`.
 
-Exit codes carry the outcome an agent acts on: **3** when the code expired
-(ask for a new one), **4** when the human denied it (stop asking).
+**Non-blocking (for agents).** Under `--json` the wait is capped at **30
+seconds**: on timeout the CLI emits
+`{ "status": "pending", "device_code": "…", "retry_after": 5 }` and exits
+**3** — the flow is still alive, poll again. `--no-wait` skips even that wait
+and returns the link object at once. Either way, finish the flow with one
+poll round per invocation, so nothing holds your turn open:
+
+```bash
+haven login --api <api-url> --json --no-wait
+# { "ok": true, "verification_url": "…", "user_code": "ABCD-2345",
+#   "device_code": "…", "expires_at": "…" }        <- hand your user the link
+haven login --poll <device_code>                   # repeat until it stops saying pending
+```
+
+Exit codes carry the outcome an agent acts on: **0** once approved (the same
+success object as the blocking path; the session is saved), **3** while still
+pending — the object carries `retry_after`, widened when the server says
+`slow_down` — and on an expired code, which means start over with a fresh
+`login`. **4** when the human denied it (stop asking).
 
 `haven login --email <address>` keeps the password path for a human who wants
 it. It is not removed — it is simply no longer what an agent gets by asking to
@@ -313,7 +337,7 @@ describes how to get out of. The string is generated from
 `packages/sdk/src/agent-guidance.ts` by
 `node packages/cli/scripts/sync-agent-guidance.mjs` and byte-pinned to it by a
 test; the copy exists so this package keeps **zero runtime dependencies** and
-`npx @haven_ai/cli` stays a small install for an agent.
+`npx @haven_ai/cli@<channel>` stays a small install for an agent.
 
 ## Config
 

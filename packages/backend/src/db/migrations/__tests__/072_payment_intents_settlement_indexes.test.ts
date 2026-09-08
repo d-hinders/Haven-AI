@@ -20,9 +20,15 @@
  *    the index present and again with it dropped, and the outcome must be
  *    identical.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import {
+  assertWorkerSchemaAtHead,
+  describeDb,
+  initDbHarness,
+  resetDb,
+  withMigrationReverted,
+} from '../../../infra/__tests__/helpers/db-harness.js'
 import {
   confirmObservedSettlement,
   findSweepableErc7710Intents,
@@ -78,6 +84,12 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
     await initDbHarness()
   })
 
+  // #2616: this file hand-drives up()/down(), which mutates SCHEMA — and
+  // nothing else in the harness undoes that. Fail HERE if the schema is left
+  // off head, rather than letting the next file on this worker inherit it as
+  // an unexplained table-existence failure.
+  afterAll(assertWorkerSchemaAtHead)
+
   beforeEach(async () => {
     await resetDb()
     // Rebuild from THIS file's own DDL, every body. `resetDb` truncates rows
@@ -128,25 +140,37 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
   it('down() drops both and up() recreates them byte-identically', async () => {
     const before = await indexDefs()
 
-    await down(db as never)
-    const dropped = await indexDefs()
-    expect(dropped[TX_HASH_INDEX]).toBeUndefined()
-    expect(dropped[SWEEP_INDEX]).toBeUndefined()
-    // Nothing else on the table was collateral damage.
-    expect(Object.keys(dropped).sort()).toEqual(
-      Object.keys(before)
-        .filter((n) => n !== TX_HASH_INDEX && n !== SWEEP_INDEX)
-        .sort(),
+    // #2621: the trailing `up()` was the file's only restore, so any
+    // expectation failing above it — including the "down() twice is safe"
+    // pair at the end, whose own assertion sits between the second `down()`
+    // and that restore — left both indexes dropped on a schema that still
+    // records 072 as applied. This file has no `afterAll(up)` to heal it,
+    // and the guard cannot SEE it: 072 changes only indexes, and
+    // `readSchemaShape()` diffs table names (#2625's blind spot, arriving
+    // for indexes). The helper is the only thing that closes the route.
+    await withMigrationReverted(
+      () => down(db as never),
+      async () => {
+        const dropped = await indexDefs()
+        expect(dropped[TX_HASH_INDEX]).toBeUndefined()
+        expect(dropped[SWEEP_INDEX]).toBeUndefined()
+        // Nothing else on the table was collateral damage.
+        expect(Object.keys(dropped).sort()).toEqual(
+          Object.keys(before)
+            .filter((n) => n !== TX_HASH_INDEX && n !== SWEEP_INDEX)
+            .sort(),
+        )
+
+        await up(db as never)
+        expect(await indexDefs()).toEqual(before)
+
+        // down() twice is safe too — an operator rolling back a rollback.
+        await down(db as never)
+        await down(db as never)
+        expect((await indexDefs())[TX_HASH_INDEX]).toBeUndefined()
+      },
+      () => up(db as never),
     )
-
-    await up(db as never)
-    expect(await indexDefs()).toEqual(before)
-
-    // down() twice is safe too — an operator rolling back a rollback.
-    await down(db as never)
-    await down(db as never)
-    expect((await indexDefs())[TX_HASH_INDEX]).toBeUndefined()
-    await up(db as never)
   })
 
   // ── No behaviour change: the point of the whole migration. ───────────────
@@ -194,11 +218,16 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
     }
 
     const withIndex = await refusalOutcome()
-    await down(db as never)
-    const withoutIndex = await refusalOutcome()
-    await up(db as never)
-
     expect(withIndex).toEqual({ replayed: false, fresh: true })
+
+    // #2621: the comparison needs the index gone for exactly one call, and the
+    // trailing `up()` was the only thing putting it back — a throw inside
+    // refusalOutcome() (the confirm path, not an assertion) skipped it.
+    const withoutIndex = await withMigrationReverted(
+      () => down(db as never),
+      () => refusalOutcome(),
+      () => up(db as never),
+    )
     expect(withoutIndex).toEqual(withIndex)
   }, 30_000)
 
@@ -228,11 +257,16 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
     ])
 
     const withIndex = await candidates()
-    await down(db as never)
-    const withoutIndex = await candidates()
-    await up(db as never)
-
     expect(withIndex).toEqual([open.id])
+
+    // #2621: same shape as the replay-guard test above — the trailing `up()`
+    // was the only restore, so a throw in the second candidates() read left
+    // both indexes dropped on a schema that still records 072 as applied.
+    const withoutIndex = await withMigrationReverted(
+      () => down(db as never),
+      () => candidates(),
+      () => up(db as never),
+    )
     expect(withoutIndex).toEqual(withIndex)
   }, 30_000)
 })

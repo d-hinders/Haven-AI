@@ -446,8 +446,141 @@ function ensureMigrated(): Promise<void> {
     } finally {
       lockHolder.release()
     }
+    // #2616: the shape at migration head, captured the one moment it is
+    // known-good — after the runner finishes and before any test body runs.
+    // `assertWorkerSchemaAtHead()` below diffs against it.
+    headTables = (await readSchemaShape()).tables
   })()
   return ready
+}
+
+/**
+ * The worker schema's table list at migration head, captured once by
+ * `ensureMigrated()`. `null` until the first migration run completes.
+ */
+let headTables: string[] | null = null
+
+/**
+ * Fail if the worker schema is no longer the shape the migration runner left
+ * (#2616). Call in `afterAll` from any file that changes SCHEMA — a migration's
+ * `up()`/`down()` driven by hand, or an ordinary test creating or dropping a
+ * table in a hook. The leak that caused #2616 was the second kind, so scoping
+ * this to migration tests would have missed it.
+ *
+ * ## Why this exists, and why it is not in `resetDb()`
+ *
+ * A migration test's `down()` mutates SCHEMA, and nothing in this harness
+ * undoes that. `resetDb()` empties ROWS; `ensureMigrated()` is memoised and
+ * reads `schema_migrations`, which still says the migration is applied while
+ * the table it dropped is sitting there restored. Worker schemas are created
+ * `IF NOT EXISTS`, so they outlive the run. So a `down()` that never reaches
+ * its `up()` — an assertion failing in between, a `-t` filter selecting the
+ * test that reverts but not the one that restores — leaves the schema off
+ * head for every later FILE on that worker, and for every later RUN.
+ *
+ * What made #2616 expensive was not the drift, it was the ATTRIBUTION: the
+ * drift surfaced as an unrelated migration test asserting that some table is
+ * gone, in a full suite, passing when run alone. Nothing pointed at the file
+ * that caused it. This check fails in the file that did the damage, names the
+ * tables, and says which direction they moved.
+ *
+ * ## Register it FIRST
+ *
+ * Vitest runs sibling `afterAll` hooks in REVERSE registration order, so
+ * registering this first makes it run LAST — after the file's own cleanup.
+ * That is the intended reading: the question is what the file LEAVES, not
+ * what it touched on the way. A file that reverts a migration and repairs it
+ * in its own `afterAll` has leaked nothing and must stay green.
+ *
+ * It is not in `resetDb()` deliberately. Some test files legitimately CREATE
+ * tables in the worker schema, and `resetDb()` runs in `beforeEach` — between
+ * two tests of such a file the schema is *supposed* to carry an extra table.
+ * A check there would either fire on them or need an allowlist that drifts.
+ * `afterAll` is where the rule is unambiguous.
+ */
+export async function assertWorkerSchemaAtHead(): Promise<void> {
+  if (headTables === null) return // real-DB mode off, or migrations never ran
+  const current = (await readSchemaShape()).tables
+  const head = new Set(headTables)
+  const now = new Set(current)
+  const restored = current.filter((t) => !head.has(t))
+  const missing = headTables.filter((t) => !now.has(t))
+  if (restored.length === 0 && missing.length === 0) return
+  throw new Error(
+    `db-harness: this file left ${WORKER_SCHEMA} off migration head (#2616).` +
+      (restored.length ? ` Tables present that head does not have: ${restored.join(', ')} — a down() or a CREATE was not undone.` : '') +
+      (missing.length ? ` Tables head has that are gone: ${missing.join(', ')} — an up()/DROP was not followed by its down().` : '') +
+      ' The schema outlives this run (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
+      ' so the next file on this worker would have inherited it as a mystery failure. Restore in a `finally`.',
+  )
+}
+
+/**
+ * Revert a migration for the duration of one test body and guarantee the
+ * restore runs, whatever the assertions do (#2621).
+ *
+ * ```ts
+ * await withMigrationReverted(
+ *   () => down(db as never),
+ *   async () => {
+ *     expect(await tableExists('x')).toBe(true)
+ *     return await columnNames('x')     // the body's value is returned
+ *   },
+ *   () => up(db as never),
+ * )
+ * ```
+ *
+ * ## The shape this replaces
+ *
+ * ```ts
+ * await down(db as never)
+ * expect(...)                       // ← an assertion failing here skips the restore
+ * await up(db as never)
+ * ```
+ *
+ * `resetDb()` empties ROWS and never creates or drops a table, so a revert
+ * that never reaches its restore leaves the worker schema off migration head —
+ * and worker schemas are created `IF NOT EXISTS`, so they outlive the run
+ * (#2616). Before this helper the leak needed only one assertion to fail in the
+ * middle, or a `-t` filter selecting the reverting test without the restoring
+ * one. A `finally` closes both routes, which is why the files that already had
+ * that shape (`070_drop_approval_requests`, `075_drop_inert_safe_rail_schema`)
+ * are the model and the five that lacked it are what #2621 is about.
+ *
+ * ## Why the restore is a function and not a value
+ *
+ * `up`/`down` are the migration's own exports, passed unchanged, so a call site
+ * cannot drift from what the runner actually runs — the failure mode this repo
+ * has twice hit with DDL hand-copied into tests.
+ *
+ * ## What `assertWorkerSchemaAtHead()` will NOT catch here
+ *
+ * That guard diffs TABLE NAMES (`readSchemaShape()` reads `pg_tables`). So it
+ * sees the leaks that matter most — the table-restoring reverts of `071` and
+ * `073`, whose missed restore leaves a table the head says is gone — and that
+ * is where this helper pays in guard-visible coin. It cannot see the other two
+ * classes this repo's migrations also contain: a data-only `up()` that is
+ * nothing but an `UPDATE` (`059_retire_mpp_demo_catalog`,
+ * `062_normalize_price_display`) cannot put the schema off head at all, and
+ * an index-only revert (`072_payment_intents_settlement_indexes`, whose
+ * `down()`/`up()` are DROP/CREATE INDEX) leaves drift that is real but
+ * invisible to a name diff — the same shape-blindness #2625 files for
+ * columns, arriving for indexes through the same door. In the data-only files
+ * the helper's worth is the uniformity of the rule plus exception safety; in
+ * `072` it prevents the drift itself, since nothing downstream would have
+ * detected it.
+ */
+export async function withMigrationReverted<T>(
+  revert: () => Promise<unknown>,
+  body: () => Promise<T>,
+  restore: () => Promise<unknown>,
+): Promise<T> {
+  await revert()
+  try {
+    return await body()
+  } finally {
+    await restore()
+  }
 }
 
 /**

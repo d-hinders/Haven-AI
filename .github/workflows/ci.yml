@@ -537,8 +537,11 @@ jobs:
           npm run visual:baselines:test
 
       # #2727: the frontend holds THREE pinned derivations of
-      # packages/sdk/src/agent-guidance.ts — public/for-agents.md,
-      # src/lib/agent-onboarding-prompt.ts and src/lib/agent-skill-bundle.ts —
+      # packages/sdk/src/agent-guidance.ts — public/for-agents.md and
+      # src/lib/agent-onboarding-prompt.ts directly, and
+      # src/lib/agent-skill-bundle.ts via skill-content.ts, which interpolates
+      # four of this file's sentence constants (so "pinned to" means that file
+      # for the bundle, and this one for the other two) —
       # and only the first is checkable by lint:runbook-parity. This job is
       # named an owner of that source so the other two pin tests below actually
       # run on a change to agent-guidance.ts; the check here is what makes that

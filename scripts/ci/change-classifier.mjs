@@ -113,11 +113,21 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
 /**
  * Markdown that is NOT documentation-only.
  *
- * CLAUDE.md mirrors backend contracts (the API surface table and the chain
- * registry) that packages/backend/src/docs-drift pins. A CLAUDE.md-only edit
- * must therefore run the backend suite even though it is Markdown — otherwise
- * the drift test never guards it. This arm wins over `*.md` because the shell
- * `case` it came from takes the first matching arm.
+ * THREE arms as of #2743, on two distinct rationales, and each arm's reasoning
+ * lives beside it rather than up here — this header used to explain CLAUDE.md
+ * alone and then outlived that, which is the enumeration-drift shape #2743's
+ * review kept finding in exactly this kind of sentence.
+ *
+ *   - CLAUDE.md mirrors backend contracts (the API surface table and the chain
+ *     registry) that packages/backend/src/docs-drift pins, so a CLAUDE.md-only
+ *     edit must run the backend suite even though it is Markdown — otherwise
+ *     the drift test never guards it.
+ *   - The two packages/frontend/public/ arms are SERVED CONTENT: Markdown an
+ *     agent fetches over HTTP, not documentation. See their inline comment.
+ *
+ * Every arm wins over `*.md` because this list is consulted first, and within
+ * it the FIRST matching arm decides — the shell `case` these came from behaved
+ * the same way, which is why the specific public/ arm precedes the general one.
  */
 export const DOC_EXCEPTIONS = Object.freeze([
   { patterns: ['CLAUDE.md'], surfaces: ['code', 'backend'] },

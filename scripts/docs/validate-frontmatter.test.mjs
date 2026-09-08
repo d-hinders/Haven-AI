@@ -157,7 +157,7 @@ test('emptyCoversNote: a `#` inside the reason text survives', () => {
 // REPO_ROOT it derives from its own location is the fixture's; the real
 // `docs/` is never scanned. See scripts/test-support/guard-cli.mjs.
 import { runGuard } from "../test-support/guard-cli.mjs"
-import { GOVERNED_PACKAGE_DOCS, EXEMPT_PACKAGE_DOCS } from "./package-docs.mjs";
+import { GOVERNED_PACKAGE_DOCS, EXEMPT_PACKAGE_DOCS } from "./package-docs.mjs"
 
 const GOOD = `---
 owner: "platform"
@@ -167,7 +167,7 @@ last-verified: "2026-09-08"
 ---
 
 # A Doc
-`;
+`
 
 /**
  * The minimum tree `main()` accepts.
@@ -199,20 +199,20 @@ function baseFixture(extra = {}) {
   return { ...files, ...extra }
 }
 
-const OPTS = { also: ["docs/package-docs.mjs"] };
+const OPTS = { also: ["docs/package-docs.mjs"] }
 
 test("CLI: a valid tree exits 0 and says how much it checked", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
     ...OPTS,
     files: baseFixture(),
   })
-  assert.equal(status, 0);
+  assert.equal(status, 0)
   // The COUNTS are asserted, not just the ✓. A walker pointed at the wrong
   // root prints the same tick over zero files; `5 docs` is 4 root docs plus
   // the one under `docs/`, and 15 is 8 governed + 7 exempt.
   assert.match(out, /✓ Front-matter valid across 5 docs\./)
   assert.match(out, /boundary declared for 15 file\(s\): 8 governed, 7 exempt/)
-});
+})
 
 test("CLI: a doc missing `owner` exits 1 and names the key and the file", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
@@ -221,12 +221,12 @@ test("CLI: a doc missing `owner` exits 1 and names the key and the file", () => 
       "docs/area/thing.md": GOOD.replace('owner: "platform"\n', ""),
     }),
   })
-  assert.equal(status, 1);
+  assert.equal(status, 1)
   // The header proves the refusal ran to its report rather than crashing on
   // the way there -- a stack trace also exits 1 and also contains the path.
   assert.match(out, /✗ Front-matter validation failed \(1 issue\(s\)\):/)
   assert.match(out, /docs\/area\/thing\.md: missing required key `owner`/)
-});
+})
 
 test("CLI: an unparseable front-matter block exits 1 (the fail-open the chain depends on)", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
@@ -238,7 +238,7 @@ test("CLI: an unparseable front-matter block exits 1 (the fail-open the chain de
   assert.equal(status, 1)
   assert.match(out, /✗ Front-matter validation failed/)
   assert.match(out, /docs\/area\/thing\.md: /)
-});
+})
 
 test("CLI: a `covers` glob resolving to no files exits 1", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
@@ -256,7 +256,7 @@ test("CLI: a `covers` glob resolving to no files exits 1", () => {
     out,
     /`covers` glob "packages\/nowhere\/src\/\*\*" resolves to no files/,
   )
-});
+})
 
 test("CLI: the retired inline `#` chain is refused by name (#2637)", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
@@ -271,7 +271,7 @@ test("CLI: the retired inline `#` chain is refused by name (#2637)", () => {
   assert.equal(status, 1)
   assert.match(out, /carries a retired inline `#` chain/)
   assert.match(out, /migrate-chain-to-list\.mjs/)
-});
+})
 
 test('CLI: a THROW inside main() still exits non-zero (the second refusal)', () => {
   // The four cases above all reach `if (errors.length) { …; process.exit(1) }`.
@@ -298,4 +298,23 @@ test('CLI: a THROW inside main() still exits non-zero (the second refusal)', () 
   // And it must not be mistaken for either a clean run or a clean refusal.
   assert.doesNotMatch(out, /✓ Front-matter valid/)
   assert.doesNotMatch(out, /Front-matter validation failed/)
+})
+
+test('CLI: a NON-ENOENT throw inside main() also exits non-zero', () => {
+  // The case above pins ONE crash shape. Review showed that is narrower than
+  // it reads: narrow the handler to `if (err.code === 'ENOENT') process.exit(1)`
+  // and that case alone stays green, while a permission error, a failed
+  // dynamic import, or a TypeError from a future bug all exit 0. So the
+  // handler is driven a second time through a completely different shape --
+  // `package-docs.mjs` is deliberately NOT copied, so main()'s
+  // `await import('./package-docs.mjs')` rejects with ERR_MODULE_NOT_FOUND
+  // AFTER the whole scan has already succeeded.
+  //
+  // Deliberately no `also:` here. That omission IS the fixture.
+  const { status, out } = runGuard('docs/validate-frontmatter.mjs', {
+    files: baseFixture(),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /ERR_MODULE_NOT_FOUND|Cannot find module/)
+  assert.doesNotMatch(out, /✓ Front-matter valid/)
 })

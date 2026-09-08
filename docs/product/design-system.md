@@ -6,6 +6,9 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/app/layout.tsx
+  - packages/frontend/src/lib/brand-colours.ts
+  - packages/frontend/src/lib/installed-app.ts
+  - packages/frontend/src/components/brand/AppIconArtwork.tsx
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
   - packages/frontend/src/app/protocols/**
@@ -24,6 +27,7 @@ covers:
   - packages/frontend/src/__tests__/button-tertiary-hover-pin.test.ts
 last-verified: "2026-09-08"
 verified:
+  - "#2729: § 1 *Brand* gains one paragraph — the installed-app shell (web manifest, `theme-color` meta, generated icons) now carries `--v2-brand`, `--v2-bg` and `--v2-warning` OUTSIDE the stylesheet, as test-pinned strings in `lib/brand-colours.ts`, and the paragraph says which test holds the pin so the next token change knows where its copy lives. `covers:` gains `brand-colours.ts`, `installed-app.ts` (the manifest and viewport builders) and `components/brand/AppIconArtwork.tsx` (the badge), the three files the paragraph asserts behaviour of; the doc-reviewer pass caught the lead saying \"Two\" over a sentence naming three, corrected in the same PR. `layout.tsx` (a `covers:` target) gained a `viewport` export and the iOS metadata; nothing about tokens, typography, cards or the shell's layout changed, and no baseline moves. Scope: that paragraph. Round two of the same pass: the lead said \"of these\" while pointing at the Brand table, which holds one of the three — now names each token's own section; § *Semantic*'s `--v2-warning` row and § *Local hint marker*'s scoping clause both said 402/pending-review only, while `EnvBadge` had painted the `DEV` chip in it since before this PR and the icon badge now does too — both name environment identity; this entry's own unescaped quotes, which strict YAML rejected while the hand-rolled validator did not, are escaped. Scope: § 1 *Brand*'s closing paragraph (the one this entry added), the one § *Semantic* cell, the one § *Local hint marker* clause. Round three: the same scoping sentence was quoted in comments in `components/agent-panel/AgentCard.tsx` and `components/WalletButton.tsx` (the § *Local hint marker* component itself) and both were widened with it; the first sweep's phrase families missed the second because its quotation is line-wrapped, and the wrap-proof proximity sweep that found it, with its positive control, is in the PR body. NOT re-verified: the rest of § 1, §§ 2-9."
   - "#2680 (slice 2, epic #2678): exhaustive-set claims dispositioned — four claims now cite their pins by path: the tertiary hover text-shift (button-tertiary-hover-pin.test.ts, NEW), the modal single scroller (modal-single-scroller.test.ts, pre-existing, now cited), the two viewport widths 1280/390 (capture-viewports.test.ts, extended with a width assertion), the one-file arrow allowlist (design-system-arrows-allowlist.test.ts, pre-existing, now cited), the exactly-one-permanently-open showcase (showcase-permanently-open-pin.test.ts, NEW), and the busy-tolerant capture surface named in the gates table (busy-tolerant-captures-pin.test.ts, pre-existing, now cited). Left as prose: variant-shape descriptions, remediation history and testimonial lines that are judgement, not machine-checkable sets. No claim found false. Scope: those six pointer insertions. NOT re-verified: the rest of the body."
   - "#2636: EDITED, scope = ONE cell of the agent-roles table — the `haven-design-reviewer` row said \"any finding pauses auto-merge\", the blanket rule #2636 retires; it now names `blocking`/`should-fix` as pausing and a `nit` as not. Found by `haven-reviewer` sweeping for the concept after my own string sweep missed it, and this file's `covers:` lists no `.agents/`/`.claude/` policy file, so the coupling gate could not have implicated it either — a second contradicting merge rule would have survived in the doc a designer reads first. #1968's clearing clause in the same cell is unchanged. Scope: that ONE table cell. NOT re-verified: the surface hierarchy, the token tables, the primitive inventory, or anything else in this file."
   - "chain-reset(#2562): compacted at the new 40 KiB advisory band — this chain was 45275 bytes (44.2 KiB) at 2214a0272875, over the band and on the way to the 65,536-byte ceiling. Compacting here is the point of the band: the alternative is that it lands on whoever next edits this doc for an unrelated reason, which is exactly what #2557 hit. The 20 newest entries are retained VERBATIM and in order; the 8 older ones leave the line and stay fully recoverable in git history (`git log -p -- docs/product/design-system.md`, or read the line at 2214a0272875). Two counts, because they measure different things and the gate prints the second: 8 ENTRIES were dropped (listed below by leading ref), while 14 issue REFS disappear from the line entirely. Neither bounds the other, in either direction: a dropped entry's own ref SURVIVES when a kept entry still cites it or when it is named in the list below, and a single dropped entry can take SEVERAL refs with it when its prose cited issues that appear nowhere else. Here it went the second way — more refs than entries. The chain had 28 entries and no duplicates — counted with the validator's own `chainEntries` and `chainAnomalies`, not by eye — so this is genuine growth, not the concatenating-merge damage the ceiling was written for. Dropped entries: #1946, #1945, #1893, #1803, #1867, #1878, #1710, #1708. Nothing was re-verified by this edit, no claim in the body changed, and the date is deliberately NOT bumped."
@@ -104,13 +108,15 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 
 Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do not use the gradient for buttons, badges, large panels, or repeated decoration.
 
+**Three tokens leave the stylesheet ([#2729](https://github.com/d-hinders/Haven-AI/issues/2729)): `--v2-brand` from this table, `--v2-bg` from § *Surfaces*, `--v2-warning` from § *Semantic*.** The installed-app shell — `/manifest.webmanifest`, the `<meta name="theme-color">` the root layout emits, and the generated home-screen icon routes `APP_ICONS` in `packages/frontend/src/lib/installed-app.ts` names — carries `--v2-brand` as `theme_color` and `--v2-bg` as `background_color`, with `--v2-warning` painting the badge on the dev install's icon. A manifest is JSON and a `<meta>` is an attribute, so those values exist as strings in `packages/frontend/src/lib/brand-colours.ts`; that file is not a second source of truth, because `src/lib/__tests__/installed-app.test.ts` parses `globals.css` and fails on any drift between the two. Change the token here and in the CSS, and let that test tell you the copy moved with it — never edit the copy first.
+
 ### Semantic
 
 | Token | Value | Soft variant | Use |
 |---|---|---|---|
 | `--v2-success` | `#047857` | `--v2-success-soft` `#ecfdf5` | Settled, confirmed, incoming |
 | `--v2-debit` | `#0369a1` | `--v2-debit-soft` `#f0f9ff` | Outgoing / sent money (sibling to success; never a warning) |
-| `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review |
+| `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge |
 | `--v2-danger` | `#b42318` | `--v2-danger-soft` `#fef2f2` | Failed, destructive |
 
 Same rule as v1: **never repurpose a semantic color**.
@@ -949,7 +955,8 @@ font-medium text-[var(--v2-ink-2)]`). One call site so far —
 on `/design-system` → *Signing credential (wallet menu)*.
 
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
-`--v2-info` family, and `--v2-warning` is scoped to 402/pending-review (§ 1), so
+`--v2-info` family, and `--v2-warning` is scoped to 402/pending-review and to
+environment identity — the `DEV` chip and the dev install's icon badge (§ 1) — so
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
 another device" hints in `AccountSignersCard` and `DelegationSendModal` are

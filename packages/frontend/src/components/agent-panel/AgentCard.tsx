@@ -234,13 +234,16 @@ export function AgentCard({
           them.
 
           `--v2-warning` is scoped to "402 Payment Required, pending review"
-          (`docs/product/design-system.md` § 1, restated in § Local hint
-          marker), which is a reason the tint belongs on a severity MARKER and
-          not on a paragraph.
+          and to environment identity — the DEV chip and the dev install's
+          icon badge (`docs/product/design-system.md` § 1, restated in § Local
+          hint marker, widened by #2729) — neither of which is a paused agent,
+          which is a reason the tint belongs on a severity MARKER and not on a
+          paragraph.
 
           The tones are the ones `AgentDetailClient` already passes for the
           same two facts (`:666`, `:674`) — `neutral` for paused, `warning` for
-          stranded. Paused is not 402/pending-review, and the card has not lost
+          stranded. Paused is neither 402/pending-review nor environment
+          identity, and the card has not lost
           its amber: the header's status pill and the bot tile both still paint
           it. Choosing anything else here would leave one fact rendered two
           ways on two screens the card's own link navigates between, which is

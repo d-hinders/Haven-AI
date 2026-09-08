@@ -62,7 +62,8 @@ name: QA — money-flow (dev)
 #     evidence; until then #2268 / #2273 stay open in operator-verify mode.
 #
 # This run is the promotion signal that dev-gate.yml's freshness gate reads before
-# allowing dev → main. On failure it files (or comments on) a `qa-failure` issue.
+# allowing dev → main. On failure it upserts the ONE standing `qa-failure` issue
+# (#2767, scripts/ci/qa-failure-issue.mjs).
 on:
   workflow_dispatch:
     inputs:
@@ -274,7 +275,13 @@ jobs:
             exit 1
           fi
           echo "all legs executed -- full coverage"
-      - name: File (or update) a failure issue
+      # #2767: ONE standing `qa-failure` issue, upserted — rewritten with the latest
+      # run, a comment per failure, reopened when it was closed on green — instead
+      # of a new `qa-dev money-flow failed (<date>)` issue per failing day (four in
+      # eight days before this). The upsert lives in scripts/ci/qa-failure-issue.mjs
+      # so scripts/ci/qa-failure-issue.test.mjs can drive all three states with a
+      # recording `gh` stub; this step only builds the trigger line.
+      - name: Update the standing qa-failure issue
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -297,27 +304,4 @@ jobs:
             *)
               TRIGGER="${GITHUB_EVENT_NAME}" ;;
           esac
-          # Ensure the label exists (labels.yml owns only the surface taxonomy).
-          gh label create qa-failure --color b60205 \
-            --description "Automated: a scheduled/post-deploy money-flow QA run failed" 2>/dev/null || true
-          BODY=$(printf '%s\n' \
-            "The deterministic money-flow QA run (\`qa-dev.yml\`) failed." \
-            "" \
-            "- **Trigger:** \`${TRIGGER}\`" \
-            "- **Run:** ${RUN_URL}" \
-            "- **When:** $(date -u '+%Y-%m-%d %H:%M UTC')" \
-            "" \
-            "This blocks the dev → main freshness gate (#578) until a green run exists." \
-            "Open the run to see which scenario failed, then follow the triage steps in" \
-            "\`docs/operations/agent-qa.md\` → Troubleshooting. A transient testnet/RPC" \
-            "flake can be cleared by re-dispatching the workflow; a real regression should" \
-            "get its own bug report under \`docs/bug-reports/\`.")
-          EXISTING=$(gh issue list --label qa-failure --state open --limit 1 --json number -q '.[0].number // empty')
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body "Another \`qa-dev\` failure (trigger: \`${TRIGGER}\`) — ${RUN_URL}"
-            echo "Commented on existing qa-failure issue #${EXISTING}"
-          else
-            gh issue create --label qa-failure \
-              --title "qa-dev money-flow failed ($(date -u '+%Y-%m-%d'))" \
-              --body "$BODY"
-          fi
+          TRIGGER="$TRIGGER" RUN_URL="$RUN_URL" node scripts/ci/qa-failure-issue.mjs

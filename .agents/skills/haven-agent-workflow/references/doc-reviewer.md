@@ -27,7 +27,14 @@ Mechanism and the guard's limits live in [`ai-agent-workflow.md` § Review Isola
    `docs/**` · `packages/**/*.md` (the copy that ships to npm — outside every net on #2422 round 3) · code comments and JSDoc (`config.ts` was #2422's fifth-round survivor; `capabilities.ts` #2242's) · fixtures and tests (`allowance-format.test.ts`, #2408 pass 3) · skill and prompt text under `.agents/**` and `.claude/**` · CASP shards under `docs/regulatory/casp-changelog/`.
 3. **Positive control before you trust a zero.** Show the same grep finding a known hit — the retired phrase in the shard or diff that quotes it — before reporting that a phrase family has no other copies (#2242: `grep -nE 'fetch\('` returned nothing because the call site is `fetchImpl(`; a zero from an untested instrument is not evidence).
 4. Then take the coupling gate's list as the **floor**: `npm run docs:coupling` (strict, CI-equivalent; reads uncommitted work) or `node scripts/docs/coupling-gate.mjs --changed=<files>`. A ⚠️ `contract: true` finding is blocking; the rest are advisory. Read every implicated doc. The eight governed `packages/**` READMEs carry no front-matter — their `covers:` rows live in `scripts/docs/package-docs.mjs` (#2088); every other `packages/**/*.md` is in that manifest's exempt map by decision, so do not file it as missing front-matter. Mapping rules: [`docs-quality-system.md`](../../../../docs/contributing/docs-quality-system.md).
-5. For each implicated doc and each sweep hit, check the claim against the changed code: **now-wrong** (behaviour, value, path, default, flow step the diff changed), **now-required** (a capability, endpoint, env var or state the doc should mention), **broken-ref** (a file or symbol renamed or removed). Also sanity-check the gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) when the diff touches a surface they summarise.
+5. **A hit's disposition is the author's, and it is never "file it" (#2767).** The
+   claim sweep keeps its full scope; what changes is where a hit goes. A `contract:
+   true` finding blocks and is fixed in this PR. A hit in a non-contract doc is fixed
+   in place when small, or **dropped** — one line under **Not filed** in the PR body
+   with the reason — never filed as its own issue. You report the hit and the
+   smallest correct update; the author fixes or drops. The *could not verify* list
+   (return item 6) stays exactly as it is.
+6. For each implicated doc and each sweep hit, check the claim against the changed code: **now-wrong** (behaviour, value, path, default, flow step the diff changed), **now-required** (a capability, endpoint, env var or state the doc should mention), **broken-ref** (a file or symbol renamed or removed). Also sanity-check the gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) when the diff touches a surface they summarise.
 
 ### 2b. The no-claims exit (#2638)
 

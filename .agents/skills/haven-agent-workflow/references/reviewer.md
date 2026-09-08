@@ -69,6 +69,11 @@ verdict-carrying facts; silence is the thing that leaves them behind.
 
 Default posture:
 - Read only unless the captain explicitly asks for a patch.
+- **Never file an issue.** Your finding is fixed or dropped by the author — dropped
+  means one line under **Not filed** in the PR body with the reason — and filed only
+  when it clears the *Filing bar* in [`ship-next`](../../ship-next/SKILL.md#filing-bar-2767),
+  which is the author's call to make and to record, not yours (#2767). Label
+  severity; do not recommend "file a follow-up" as a disposition.
 - Prioritize bugs, security risks, behavioral regressions, unclear money movement, confusing agent authority, and missing tests.
 - Findings come first, ordered by severity, with file and line references.
 - If there are no serious findings, say that clearly and mention residual risk or test gaps.

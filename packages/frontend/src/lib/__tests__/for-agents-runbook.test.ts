@@ -153,7 +153,7 @@ describe('/for-agents.md (#2523)', () => {
     // because production lists a testnet beside its mainnets, so `environment`
     // alone would have let it call test funds real money (haven-design-reviewer
     // on the first wording).
-    // 10600 -> 10700 for #2710 (the page is 10633 bytes at this commit).
+    // 10600 -> 10700 for #2710 (the page is 10607 bytes at this commit).
     // The manifest can name a deployment default, but a funded wallet is the
     // authority for the actual receiving chain; this small clause says both
     // instead of letting an agent turn a default into a transfer instruction.

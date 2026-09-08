@@ -5,6 +5,7 @@ covers:
   - packages/backend/src/openapi/**
   - packages/backend/src/index.ts
   - packages/backend/src/routes/openapi.ts
+  - packages/backend/src/routes/root-document.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/catalog.ts
@@ -35,6 +36,7 @@ covers:
   - packages/frontend/next.config.ts
 last-verified: "2026-09-08"
 verified:
+  - "#2710: edited and re-verified the bare-URL discovery contract. `GET /` now requires a `manifest` URL built from configured dashboard origin, not request headers; it points at `/.well-known/haven.json`. Scope: the root-document description and its `covers:` entry only."
   - "#2706: re-verified, NOT edited. Implicated because the PR edits `packages/backend/src/openapi/spec.ts` (in covers:). The diff rewrites the `/x402/authorize` 403 response DESCRIPTION only — no schema, no status set, no field addition (the 403 body fields were already in `errorResponse`-shaped prose, not a typed schema this doc pins). The claims this document makes about `spec.ts` are the producer rules for the human/atomic amount shapes and the openapi-sync tests (§ around line 510), none of which a description string touches. Scope: that one claim class. NOT re-verified: the endpoint inventory or the auth/rate-limit tables."
   - "#2640: the Safe-retirement CLOSURE SEQUENCE removed and replaced with a link to the canonical record (`docs/archive/decision-log.md` § *retire the Safe rail entirely (#1440)*, which slice 6 created and which carries all 8 closure refs — the only file that did). This doc kept the sentence its audience needs and dropped the #1984/#1986/#1987/#1988/#1989/#2020/#2055/#2413 enumeration. Per-claim citations of a single closure are deliberately KEPT: they are the local fact a reader needs, not a retelling of the narrative. Scope: the retirement passage(s) only; nothing else in this file was re-verified."
   - "#2669: \"Existing Safe accounts stay READABLE\" re-read and EDITED — qualified to the database rows; #2413 removed the rendering. Scope: that one sentence; the OpenAPI contract claims around it were not re-verified. A later round narrowed \"no Haven surface displays them\" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row."
@@ -60,12 +62,12 @@ a credential:
 
 | Surface | What it gives |
 | --- | --- |
-| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, which credential each door wants, and the health path. |
+| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, the capability-manifest URL, which credential each door wants, and the health path. The manifest URL uses configured dashboard origin rather than request headers, so it remains the deployment's dashboard endpoint even when the API is reached through another host. |
 | `GET /openapi.json` | The machine-readable contract. |
 | `GET /catalog` | The merchant catalogue, in a reduced public shape — see below. |
 
 **The root document is deliberately thin.** Names, paths, and credential
-guidance — no version, build identifier or environment name. A service banner
+guidance, plus the configured-origin manifest pointer — no version, build identifier or environment name. A service banner
 that fingerprints the deployment is a gift to a scanner and buys an agent
 nothing.
 

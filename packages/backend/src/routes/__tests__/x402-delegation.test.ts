@@ -483,6 +483,104 @@ describe('x402 delegation-rail settlement (#830)', () => {
     })
   })
 
+  // ── #2706 characterization: the EIP-3009 funding leg, BEFORE the fix ──────
+  // money.md §2: pin the behaviour being changed before changing it. Today an
+  // over-budget 3009 authorize collapses a deliberate policy refusal and a
+  // genuine bundler outage into one untyped 502 carrying the raw viem/bundler
+  // dump — the sibling branch (erc7710, #2082) refuses the same condition with
+  // a typed, actionable 403 BEFORE any prepare. These tests are written
+  // against the 502 world; the #2706 commit flips the over-budget case to the
+  // typed 403 and keeps the genuine-failure 502 pins below.
+  describe('EIP-3009 funding-leg budget refusal (#2706 — characterization first)', () => {
+    function primeFundingLeg() {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+    }
+
+    it('CHARACTERIZATION: an over-budget funding authorize 502s with the raw error — the untyped refusal #2706 replaces', async () => {
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '50000', fromChain: true }) // 0.05 USDC
+      mockPrepareFunding.mockRejectedValueOnce(
+        new Error('ERC20PeriodTransferEnforcer:transfer-amount-exceeded'),
+      )
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, amount: '100000' }),
+      })
+      // The pre-#2706 contract: policy refusal = infrastructure failure = one
+      // 502 with a raw dump. Nothing written either way.
+      expect(res.statusCode).toBe(502)
+      expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(res.json().details).toContain('transfer-amount-exceeded')
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+    })
+
+    it('CHARACTERIZATION: a genuine bundler failure 502s with the raw error, database untouched', async () => {
+      // This pin SURVIVES #2706: the typed refusal must not swallow the real
+      // failure mode — a bundler outage keeps its 502.
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      mockPrepareFunding.mockRejectedValueOnce(new Error('bundler: aa_sendUserOperation timeout'))
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(502)
+      expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(res.json().details).toContain('aa_sendUserOperation timeout')
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+    })
+
+    it('CHARACTERIZATION: a within-budget funding authorize is 201 with a signable child', async () => {
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().sign_data.signature_scheme).toBe('eip712_userop')
+    })
+
+    it('CHARACTERIZATION: a degraded budget read does not refuse the funding leg', async () => {
+      // fromChain:false is a fallback number, never a measurement — refusing
+      // on it would turn an RPC outage into a stopped agent. The enforcer
+      // stays the gate.
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '1', fromChain: false })
+      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().sign_data).toBeDefined()
+    })
+
+    it('CHARACTERIZATION: a THROWN budget read does not refuse the funding leg either', async () => {
+      primeFundingLeg()
+      mockReadRemaining.mockRejectedValue(new Error('rpc exploded'))
+      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(201)
+    })
+  })
+
   // ── #1058: facilitator redeemers ─────────────────────────────────────────
   it('authorize pins the child to forwarded facilitators and stores them verbatim', async () => {
     mockSelect.mockResolvedValueOnce({

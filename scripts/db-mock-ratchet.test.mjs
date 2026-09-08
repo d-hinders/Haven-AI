@@ -166,14 +166,20 @@ test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => 
 })
 
 test('CLI: `--update` DOES write when the count fell', () => {
-  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+  // `baseline written` is a console line, not evidence: a `writeBaseline` that
+  // resolves its path against the wrong root, or swallows an error, prints it
+  // and exits 0 having written nothing -- and `npm run lint:db-mocks:update`
+  // becomes a no-op while the ratchet drifts. Read the file back instead.
+  const { status, out, wrote } = runGuard('db-mock-ratchet.mjs', {
     also: ['lib/ratchet.mjs'],
     args: ['--update'],
     files: {
       [SCANNED]: withMocks(1),
       'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 5 } }),
     },
+    readBack: ['packages/backend/db-mock-baseline.json'],
   })
   assert.equal(status, 0)
   assert.match(out, /baseline written/)
+  assert.deepEqual(JSON.parse(wrote['packages/backend/db-mock-baseline.json'])[SCANNED].positional, 1)
 })

@@ -92,6 +92,13 @@ export function runGuard(
       // A hung guard should name itself rather than burn the job's ceiling.
       timeout: 120_000,
     })
+    // On timeout `spawnSync` returns status `null`, which fails every
+    // `assert.equal(status, <number>)` below -- correct, but the report reads
+    // `null !== 1` and says nothing about a timeout. Surface the cause the
+    // comment above promises.
+    if (res.error?.code === 'ETIMEDOUT') {
+      throw new Error(`guard \`${script}\` timed out after 120s (signal ${res.signal})`)
+    }
     // Read fixture files back BEFORE the `finally` removes the root, so a test
     // can assert what a guard WROTE and not only what it printed.
     const wrote = Object.fromEntries(

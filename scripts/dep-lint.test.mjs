@@ -442,7 +442,6 @@ test('CLI: a tree at or under the ceiling exits 0', () => {
   assert.equal(status, 0)
 })
 
-
 test('CLI: `--update-ceiling` refuses growth rather than writing it', () => {
   const { status, out } = runGuard('dep-lint.mjs', {
     ...base({ [SRC]: inlineSql(3), [CEILING]: JSON.stringify({ total: 0, files: {} }) }),

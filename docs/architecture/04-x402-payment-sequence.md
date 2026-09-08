@@ -32,6 +32,7 @@ satisfied-by:
   - docs/regulatory/casp-changelog/**
 last-verified: "2026-09-08"
 verified:
+  - "#2706: EDITED, scope = the #2121 refusal-shape blockquote only. It stated the EIP-3009 refusal surfaces as an untyped `502` with no intent row and named the typed `403 delegation_budget_exceeded` as erc7710-only — false since this change, which extends the #2082 pre-check to the funding leg. The block now states the typed 403 for the funding leg WITH the inherited fail-open carve-out (degraded/thrown read proceeds to prepare, where the enforcer revert still answers the 502) and links #2706. Read against `packages/backend/src/modules/x402/delegation-authorize.ts` as changed on this branch. The `satisfied-by:` casp-changelog shard also covers this edit, kept for the review trail. Scope: that ONE blockquote. NOT re-verified: the two-leg diagram, the SDK funding-leg module list, the resume sections, or any other sequence step."
   - "#2640: the Safe-retirement CLOSURE SEQUENCE removed and replaced with a link to the canonical record (`docs/archive/decision-log.md` § *retire the Safe rail entirely (#1440)*, which slice 6 created and which carries all 8 closure refs — the only file that did). This doc kept the sentence its audience needs and dropped the #1984/#1986/#1987/#1988/#1989/#2020/#2055/#2413 enumeration. Per-claim citations of a single closure are deliberately KEPT: they are the local fact a reader needs, not a retelling of the narrative. Scope: the retirement passage(s) only; nothing else in this file was re-verified."
   - "#2669: \"Accounts, balances and history stay readable\" re-read and EDITED — true of the rows, false of any Haven surface since #2413. Scope: that one sentence. A later round narrowed \"no Haven surface displays them\" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row. A THIRD round corrected that narrowing where it had been relocated rather than removed: the clause listing what \"no longer renders\" still named transaction history, which DOES render — `LIST_BASIC_SAFES_FOR_USER_SQL` and `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` have no rail predicate, so legacy account and agent names still appear in the `/transactions` picklists. The exception is now named with BOTH halves; a first statement of it gave only the account half."
   - "#2530: the Guided Catalog Purchase Preflight discovery paragraph gains the unauthenticated shape — `GET /catalog` now answers without a credential in a reduced form, so \"the existing rail plus agent-chain scoping still apply\" needed the qualifier that the public path has no agent to scope by. The read-only and never-authorizes claims are re-read against the diff and unchanged. Scope: that one paragraph; the scheme-selection, header-semantics, resume and erc7710 sections were NOT re-verified."
@@ -317,9 +318,15 @@ sequenceDiagram
 >
 > What actually happens on the branch is a **refusal, and it is rail- and
 > scheme-specific**: on the EIP-3009 shape drawn here the delegation rail
-> estimates the redemption, so the caveat enforcer's refusal surfaces as a
-> `502` **with no intent row**; on erc7710 authorize pre-checks the live
-> remaining budget and answers `403 delegation_budget_exceeded`
+> estimates the redemption, and the caveat enforcer's refusal surfaces as a
+> typed `403 delegation_budget_exceeded` (#2082, extended to this leg by
+> [#2706](https://github.com/d-hinders/Haven-AI/issues/2706)) when the
+> authorize-time pre-check read the live budget — the fail-open posture is
+> inherited verbatim, so a degraded budget read (`fromChain: false`) or a
+> thrown one proceeds to prepare, where the enforcer's revert still surfaces
+> as the `502` **with no intent row** that this branch used to answer with
+> for every refusal; on erc7710 authorize pre-checks the live remaining
+> budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a
 > `payment_id` to poll. The `pending_approval` branch retained in the hosted

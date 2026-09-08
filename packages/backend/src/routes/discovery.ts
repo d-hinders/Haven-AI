@@ -11,6 +11,7 @@ import {
 // copy: one answer, three surfaces, which was the point of lifting it.
 import { apiBaseUrl } from '../domain/request-origin.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from '../domain/chains.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 
 /**
  * `GET /discovery` — the public, read-only facts an agent's CODE needs (#2531).
@@ -41,7 +42,7 @@ export interface DiscoveryDocument {
   /** The CLI package spec this deployment's runbook and manifest name (#2617). */
   cli_package: string
   openapi_url: string
-  chains: { deployable: number[]; supported: readonly number[] }
+  chains: { default: number; deployable: number[]; supported: readonly number[] }
 }
 
 export function buildDiscoveryDocument(request: FastifyRequest): DiscoveryDocument {
@@ -68,7 +69,7 @@ export function buildDiscoveryDocument(request: FastifyRequest): DiscoveryDocume
     connector_package: CONNECTOR_PACKAGE,
     cli_package: CLI_PACKAGE,
     openapi_url: `${base}/openapi.json`,
-    chains: { deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS },
+    chains: { default: DEFAULT_CHAIN_ID, deployable: deployableChainIds(), supported: SUPPORTED_CHAIN_IDS },
   }
 }
 

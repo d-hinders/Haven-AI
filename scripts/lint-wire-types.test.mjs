@@ -140,7 +140,13 @@ test('--update refuses to raise the baseline', () => {
 test('--update allows a shrink, and allows the very first write', () => {
   const baseline = { 'packages/frontend/src/hooks/useContacts.ts': { Contact: 1 } }
   assert.deepEqual(updateRefusals({}, baseline), [])
-  assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}), [])
+  // The first-write allowance is keyed on `firstRun`, NOT on the baseline being
+  // empty (#2728). Those are different states: `{}` is what an absent file
+  // reads as AND what this gate writes once its debt reaches zero, so keying on
+  // emptiness switched the refusal off on the first successful cleanup. The
+  // second assertion below is the one that used to say `[]`.
+  assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}, { firstRun: true }), [])
+  assert.equal(updateRefusals({ 'a.ts': { Any: 9 } }, {}).length, 1)
 })
 
 // --- The CLI path (#2721, epic #2720)

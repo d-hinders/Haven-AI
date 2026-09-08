@@ -8,6 +8,7 @@ import { AGENT_MISSING_KEY_BODY, AGENT_INVALID_KEY_BODY } from '../middleware/ag
 import { PUBLIC_CATALOG_FIELDS, toPublicListing, endpointHost } from '../routes/catalog.js'
 import { fastifyPathToOpenApi } from '../openapi/route-inventory.js'
 import { openapiSpec } from '../openapi/spec.js'
+import { buildApiRootDocument } from '../routes/root-document.js'
 
 /**
  * Backend discoverability (#2530).
@@ -233,6 +234,12 @@ describe('public catalogue shape', () => {
 })
 
 describe('the root document is a documented route', () => {
+  it('points to the manifest on the configured dashboard origin, not the request host', () => {
+    const doc = buildApiRootDocument({ host: 'attacker.test', 'x-forwarded-proto': 'https' }, 'https://app.configured.test/')
+    expect(doc.manifest).toBe('https://app.configured.test/.well-known/haven.json')
+    expect(doc.manifest).not.toContain('attacker.test')
+  })
+
   it('normalises a prefix-less root route to "/", not the empty string', () => {
     // The empty string is not a path OpenAPI can express. Nothing exercised
     // this until the root document existed, so the coverage gate reported a
@@ -258,5 +265,6 @@ describe('the root document is a documented route', () => {
     for (const forbidden of ['version', 'build', 'commit', 'environment', 'env']) {
       expect(schema?.properties, forbidden).not.toHaveProperty(forbidden)
     }
+    expect(schema?.properties).toHaveProperty('manifest')
   })
 })

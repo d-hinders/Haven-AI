@@ -245,7 +245,7 @@ driving this CLI must never hold its user's password.
 ```bash
 haven login --json
 # {"ok":true,"verification_url":"https://app.haven…/device?code=ABCD-2345",
-#  "user_code":"ABCD-2345","device_code":"…","expires_at":"…"}
+#  "user_code":"ABCD-2345","device_code":"…","interval":5,"expires_at":"…"}
 ```
 
 Under `--json` that object is printed **before** polling begins, so an agent
@@ -263,8 +263,8 @@ poll round per invocation, so nothing holds your turn open:
 ```bash
 haven login --api <api-url> --json --no-wait
 # { "ok": true, "verification_url": "…", "user_code": "ABCD-2345",
-#   "device_code": "…", "expires_at": "…" }        <- hand your user the link
-haven login --poll <device_code>                   # repeat until it stops saying pending
+#   "device_code": "…", "interval": 5, "expires_at": "…" } <- hand your user the link
+haven login --poll <device_code>                   # wait interval seconds first; repeat until it stops saying pending
 ```
 
 Exit codes carry the outcome an agent acts on: **0** once approved (the same

@@ -52,8 +52,8 @@ describe('haven guide text (#2525)', () => {
     // release shard's SDK-delta claim was reviewed against the merged string.
     // Caught before publication: 0.1.35-alpha.0 predates #2617, so the run-on
     // never reached npm.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10543)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10458)
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10607)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10524)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

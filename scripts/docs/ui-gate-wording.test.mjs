@@ -265,7 +265,10 @@ test('a count at the baseline passes; one over it fails', () => {
   const baseline = { 'a.md': { 'blanket-merge-pause': 1 } }
   assert.deepEqual(newViolations({ 'a.md': { 'blanket-merge-pause': 1 } }, baseline), [])
   assert.deepEqual(newViolations({ 'a.md': { 'blanket-merge-pause': 2 } }, baseline), [
-    { file: 'a.md', rule: 'blanket-merge-pause', count: 2, allowed: 1 },
+    // `key`, not `rule`: since #2747 this comes from the shared
+    // `lib/ratchet.mjs` engine, whose second dimension is `key`. The gate still
+    // calls it a rule in its own prose and printing.
+    { file: 'a.md', key: 'blanket-merge-pause', count: 2, allowed: 1 },
   ])
 })
 
@@ -291,4 +294,156 @@ test('the check is green on the repository as it stands', () => {
   const r = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' })
   assert.equal(r.status, 0, r.stdout + r.stderr)
   assert.match(r.stdout, /✓ No retired UI merge-gate wording/)
+})
+
+// ── The CLI, over a fixture the test OWNS (#2747) ──────────────────────────
+//
+// The case above runs the guard against the real repository, which is green —
+// so it proves the guard does not false-alarm and nothing else. A guard
+// reporting on an already-clean tree is green under a neutered predicate too,
+// which is the defect epic #2720 was filed about, and this gate's `--update`
+// carried the #2728 hole for exactly as long as nobody drove it.
+//
+// `gitInit` is not optional here: this guard enumerates with `git ls-files`, so
+// a plain temp directory answers with a fatal error and the guard reports a
+// clean scan over ZERO files — the false pass arriving through the file list
+// rather than through `main()`.
+import { runGuard } from '../test-support/guard-cli.mjs'
+
+const GATE = 'docs/ui-gate-wording.mjs'
+const ALSO = ['lib/ratchet.mjs']
+const BASE = 'scripts/docs/ui-gate-wording-baseline.json'
+const DOC = 'docs/thing.md'
+// Trips `blanket-merge-pause`: names a finding and a pause, with no severity.
+const RETIRED = 'A finding from either pass pauses auto-merge.\n'
+// #2636's prescribed form, not merely a form the rule tolerates: it names both
+// severities that pause AND the one that does not. The rule only requires a
+// severity term to be present, so a shorter sentence would also pass — using
+// the full form keeps the control honest about what the docs are supposed to
+// say (review nit).
+const CORRECTED =
+  'A `blocking` or `should-fix` finding from either pass pauses auto-merge; a `nit` does not.\n'
+
+test('CLI: retired wording in a tracked doc exits 1 and names file, rule and line', () => {
+  const { status, out } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: RETIRED, [BASE]: '{}' },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /Retired UI merge-gate wording found in live documentation/)
+  assert.match(out, /docs\/thing\.md — blanket-merge-pause: 1 found, baseline allows 0/)
+  assert.match(out, /docs\/thing\.md:\d+:/)
+})
+
+test('CLI: the corrected form exits 0 — the rule reads severity, not keywords', () => {
+  // The control. Without it the case above also passes against a guard that
+  // fires on the word "finding", and the whole point of #2636's rule is that a
+  // sentence naming a severity is the CORRECTED form.
+  const { status, out } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: CORRECTED, [BASE]: '{}' },
+  })
+  assert.equal(status, 0)
+  assert.match(out, /✓ No retired UI merge-gate wording in 1 Markdown file\(s\)/)
+})
+
+test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => {
+  // #2747, the hole. Before the fix this exited 0 and wrote the growth in, on a
+  // gate that runs inside `docs:check` and whose own failure message sent you
+  // here.
+  const before = JSON.stringify({ [DOC]: { 'blanket-merge-pause': 0 } })
+  const shared = { also: ALSO, gitInit: true, files: { [DOC]: RETIRED, [BASE]: before } }
+
+  // The plain run refuses it, so the growth is real and not a fixture artifact.
+  assert.equal(runGuard(GATE, shared).status, 1)
+
+  const { status, out, wrote } = runGuard(GATE, { ...shared, args: ['--update'], readBack: [BASE] })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.match(out, /docs\/thing\.md \[blanket-merge-pause\]: 0 → 1/)
+  assert.equal(wrote[BASE], before)
+})
+
+test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first run', () => {
+  // `{}` is what this gate writes once its residue reaches zero, so keying the
+  // allowance on emptiness would disable the refusal permanently after the
+  // first successful cleanup (#2728).
+  const { status, out, wrote } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: RETIRED, [BASE]: '{}' },
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote[BASE], '{}')
+})
+
+test('CLI: `--update` DOES write when the residue fell', () => {
+  // The accept half: a refusal that refuses everything breaks the ratchet in
+  // the other direction, so residue could never be tightened after a cleanup.
+  const { status, out, wrote } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: CORRECTED, [BASE]: JSON.stringify({ [DOC]: { 'blanket-merge-pause': 3 } }) },
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.match(out, /baseline written/)
+  assert.equal(JSON.parse(wrote[BASE])[DOC], undefined)
+})
+
+test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
+  const { status, wrote } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: RETIRED },
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.match(wrote[BASE], /"blanket-merge-pause": 1/)
+})
+
+test('CLI: an unparseable baseline names the remedy instead of throwing a stack', () => {
+  // #2747, review finding. Until this branch, `--update` never read the
+  // baseline, so a corrupt file was repaired by regenerating it. Reading it is
+  // what makes the refusal possible, so that repair path is gone — and a bare
+  // `SyntaxError` is not a remedy. Pinned because an unpinned message is how
+  // this repo's claims rot.
+  const { status, out } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: CORRECTED, [BASE]: 'not json{' },
+    args: ['--update'],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /is unusable as a baseline/)
+  assert.match(out, /Delete the file and re-run with `--update`/)
+  // And it must not read as the ratchet refusing growth, which is a different
+  // failure with a different fix.
+  assert.doesNotMatch(out, /refuses to RAISE/)
+})
+
+test('CLI: a baseline that parses but is not an object is refused too', () => {
+  // #2747 review: `JSON.parse` accepts `null`, `[]`, `"x"` and `3`. Measured
+  // before the fix — `null` threw a raw `TypeError` from the shared engine, and
+  // the others read as an EMPTY baseline, so a real baseline of 1 was silently
+  // ignored and `--update` on a clean tree overwrote the corrupt file. That is
+  // the silent repair this branch claims to have removed, surviving in the
+  // shapes the parser does not reject.
+  for (const body of ['null', '[]', '"x"', '3']) {
+    const { status, out } = runGuard(GATE, {
+      also: ALSO,
+      gitInit: true,
+      files: { [DOC]: CORRECTED, [BASE]: body },
+      args: ['--update'],
+    })
+    assert.equal(status, 1, `baseline body ${body} should be refused`)
+    assert.match(out, /is unusable as a baseline/)
+  }
 })

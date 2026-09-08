@@ -424,7 +424,12 @@ test('CLI: inline SQL above the ceiling exits non-zero', () => {
     base({ [SRC]: inlineSql(3), [CEILING]: JSON.stringify({ total: 0, files: {} }) }),
   )
   assert.equal(status, 1)
-  assert.match(out, /ceiling/i)
+  // The refusal LINE, not the word "ceiling" — that word is printed on every
+  // run, pass or fail, and also appears in an ENOENT stack when the ceiling
+  // JSON is missing. Measured: `/ceiling/i` was satisfied by a crashed
+  // fixture, so the test would have stayed green on a guard that never
+  // refused anything.
+  assert.match(out, /inline-SQL call sites grew past the ceiling: 3 > 0/)
 })
 
 test('CLI: a tree at or under the ceiling exits 0', () => {
@@ -437,20 +442,6 @@ test('CLI: a tree at or under the ceiling exits 0', () => {
   assert.equal(status, 0)
 })
 
-test('CLI: `--update-ceiling` REFUSES to raise the ceiling', () => {
-  // dep-lint's own remediation path, and the one a contributor reaches for
-  // when the case above turns red. If it quietly accepted growth, the ceiling
-  // would be advisory.
-  const { status, out } = runGuard(
-    'dep-lint.mjs',
-    base({
-      [SRC]: inlineSql(3),
-      [CEILING]: JSON.stringify({ total: 0, files: {} }),
-    }),
-  )
-  assert.equal(status, 1)
-  void out
-})
 
 test('CLI: `--update-ceiling` refuses growth rather than writing it', () => {
   const { status, out } = runGuard('dep-lint.mjs', {

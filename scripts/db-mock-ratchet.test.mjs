@@ -148,18 +148,21 @@ test('CLI: a tree at or under the baseline exits 0', () => {
 })
 
 test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => {
+  // The second clause is checked, not just claimed (review nit): `readBack`
+  // reads the fixture file before the harness removes the root, so "writes
+  // nothing" means the baseline on disk is byte-identical to what went in.
   // A shrink-only ratchet whose `--update` quietly accepts growth is not a
   // ratchet. This refusal lives only in `main()`.
-  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+  const before = JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } })
+  const { status, out, wrote } = runGuard('db-mock-ratchet.mjs', {
     also: ['lib/ratchet.mjs'],
     args: ['--update'],
-    files: {
-      [SCANNED]: withMocks(3),
-      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } }),
-    },
+    files: { [SCANNED]: withMocks(3), 'packages/backend/db-mock-baseline.json': before },
+    readBack: ['packages/backend/db-mock-baseline.json'],
   })
   assert.equal(status, 1)
   assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote['packages/backend/db-mock-baseline.json'], before)
 })
 
 test('CLI: `--update` DOES write when the count fell', () => {

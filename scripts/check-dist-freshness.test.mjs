@@ -134,18 +134,27 @@ test('CLI: no arguments is a usage refusal, and exits 2 not 1', () => {
 })
 
 test('CLI: a package whose src is newer than its dist is refused', () => {
+  // mtimes are SET, not inferred from write order (review finding). The first
+  // draft relied on the helper writing `dist` before `src`; that order is
+  // stable but timestamp RESOLUTION is not, and the guard treats
+  // `dist >= src` as fresh — so it passed on macOS and failed on the ubuntu
+  // runner. A test that depends on clock granularity is flaky-green wherever
+  // the ordering happens to hold, and a green run then proves nothing.
   const { status, out } = runGuard('check-dist-freshness.mjs', {
     args: ['pkg'],
     files: {
       'packages/pkg/package.json': '{"name":"pkg"}',
       'packages/pkg/dist/index.js': 'stale',
-      // Written after dist, so its mtime is newer. The helper writes files in
-      // object order, which is what makes this deterministic.
       'packages/pkg/src/index.ts': 'export const x = 1',
     },
+    mtimes: { 'packages/pkg/dist/index.js': 1000, 'packages/pkg/src/index.ts': 2000 },
   })
   assert.equal(status, 1)
-  assert.match(out, /pkg/)
+  // The refusal TEXT, not the package name: the fixture path contains "pkg",
+  // so `/pkg/` matched any stack trace — the test stayed green on a guard that
+  // crashed instead of refusing (measured with an injected throw).
+  assert.match(out, /older than|behind/i)
+  assert.match(out, /dist/)
 })
 
 test('CLI: a package whose dist is newer exits 0 and says so', () => {
@@ -156,6 +165,7 @@ test('CLI: a package whose dist is newer exits 0 and says so', () => {
       'packages/pkg/src/index.ts': 'export const x = 1',
       'packages/pkg/dist/index.js': 'fresh',
     },
+    mtimes: { 'packages/pkg/src/index.ts': 1000, 'packages/pkg/dist/index.js': 2000 },
   })
   assert.equal(status, 0)
   assert.match(out, /✓ dist is current for: pkg/)

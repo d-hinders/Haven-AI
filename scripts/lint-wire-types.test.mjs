@@ -192,22 +192,23 @@ test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
   assert.match(out, /--update refuses to RAISE the baseline/)
 })
 
-test('CLI: HOLE — `--update` accepts a brand-new file with any count', () => {
-  // Pinning what the guard DOES, not what it should do. The plain run refuses
-  // this exact tree ("hand-written wire shapes grew"), but `--update` — the
-  // command the failure message tells you to run — writes it in silently. So
-  // the ratchet is shrink-only per existing ENTRY and not per corpus: new debt
-  // in a new file enters without a refusal.
-  //
-  // Found by driving the CLI, which is this slice's whole point: no exported
-  // function reaches this asymmetry. Shared by every ratchet on
-  // `lib/ratchet.mjs` — measured on db-mock, wire-types and retired-rail-prose.
-  // Filed separately; not fixed here, because #2721's scope is the tests.
+test('CLI: `--update` refuses a brand-new file when the baseline is not empty', () => {
+  // Corrected on review. An earlier version of this case asserted the OPPOSITE
+  // and called it a hole, on a fixture with an EMPTY baseline — which is a
+  // documented deliberate first-run allowance (`updateRefusals` returns [] for
+  // `{}`), already pinned by the unit test above. With any real baseline a new
+  // file compares against 0, so its first occurrence IS growth and IS refused.
+  // Measured both ways before rewriting this.
   const { status, out } = runGuard('lint-wire-types.mjs', {
     also: ['lib/ratchet.mjs'],
     args: ['--update'],
-    files: { [HOOK]: snake(3), 'packages/frontend/wire-type-baseline.json': '{}' },
+    files: {
+      [HOOK]: snake(1),
+      'packages/frontend/wire-type-baseline.json': JSON.stringify({
+        'packages/frontend/src/hooks/other.ts': { PrepareResponse: 1 },
+      }),
+    },
   })
-  assert.equal(status, 0)
-  assert.match(out, /baseline written/)
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
 })

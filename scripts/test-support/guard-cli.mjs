@@ -26,7 +26,17 @@
 // reported exit 0 and printed nothing at all — a false pass that looks exactly
 // like a clean run. `realpathSync` is what stops this helper from certifying
 // silence as success.
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -40,7 +50,10 @@ const SCRIPTS_DIR = fileURLToPath(new URL('..', import.meta.url))
  * `files` maps repo-relative paths to contents; directories are created.
  * `also` names sibling scripts the guard imports, copied alongside it.
  */
-export function runGuard(script, { files = {}, also = [], args = [], env = {}, linkNodeModules = false } = {}) {
+export function runGuard(
+  script,
+  { files = {}, also = [], args = [], env = {}, linkNodeModules = false, mtimes = {}, readBack = [] } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'guard-cli-')))
   try {
     mkdirSync(join(root, 'scripts'), { recursive: true })
@@ -62,12 +75,35 @@ export function runGuard(script, { files = {}, also = [], args = [], env = {}, l
       mkdirSync(dirname(dest), { recursive: true })
       writeFileSync(dest, body)
     }
+    // Explicit mtimes where a guard compares them (review finding, blocking).
+    // Relying on write ORDER is not enough: file-creation order is stable but
+    // timestamp RESOLUTION is not, and `check-dist-freshness` treats
+    // `dist >= src` as fresh — so on a coarse-grained filesystem the two came
+    // out equal and the staleness test passed on macOS while failing on the
+    // ubuntu runner. Worse than a red build: where the ordering sometimes
+    // holds, the test is flaky-GREEN and a pass proves nothing.
+    for (const [rel, seconds] of Object.entries(mtimes)) {
+      utimesSync(join(root, rel), seconds, seconds)
+    }
     const res = spawnSync(process.execPath, [join(root, 'scripts', script), ...args], {
       encoding: 'utf-8',
       cwd: root,
       env: { ...process.env, ...env },
+      // A hung guard should name itself rather than burn the job's ceiling.
+      timeout: 120_000,
     })
-    return { status: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}`, root }
+    // Read fixture files back BEFORE the `finally` removes the root, so a test
+    // can assert what a guard WROTE and not only what it printed.
+    const wrote = Object.fromEntries(
+      readBack.map((rel) => {
+        try {
+          return [rel, readFileSync(join(root, rel), 'utf-8')]
+        } catch {
+          return [rel, null]
+        }
+      }),
+    )
+    return { status: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}`, wrote }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

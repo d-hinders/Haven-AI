@@ -347,3 +347,36 @@ test('CLI: an occurrence already in the baseline is tolerated', () => {
   })
   assert.equal(status, 0)
 })
+
+test('CLI: HOLE — `--update` writes new banned copy in without any refusal', () => {
+  // #2728, pinned where it actually lives. This guard's three siblings on the
+  // same `lib/ratchet.mjs` all refuse to raise; this one does not compare
+  // against the baseline at all — `if (update) { writeBaseline(...); return }`.
+  //
+  // So the command the failure message sends you to is the one that launders
+  // the failure: the plain run refuses this exact tree, and `--update` absorbs
+  // it. That matters more here than elsewhere, because this gate exists for
+  // user-facing product copy and #2246 removed two phrases from the frontend
+  // precisely because they were a disclosed compliance gap.
+  //
+  // Asserting what it DOES, not what it should. The fix and this test's
+  // replacement belong to #2728.
+  const grown = scaffold({
+    [PAGE]: copy('Haven runs a policy engine for you.'),
+    [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 0 } }),
+  })
+  const shared = { also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'], files: grown }
+
+  // The plain run refuses it — so the growth is real, not a fixture artifact.
+  assert.equal(runGuard('frontend-copy-lint.mjs', shared).status, 1)
+
+  const { status, out, wrote } = runGuard('frontend-copy-lint.mjs', {
+    ...shared,
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.match(out, /baseline written/)
+  // And it really wrote the growth in, rather than merely exiting 0.
+  assert.match(wrote[BASE] ?? '', /"policy engine": 1/)
+})

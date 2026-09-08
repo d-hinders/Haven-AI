@@ -60,9 +60,21 @@ describe('haven guide text (#2525)', () => {
     // `testnet`, and real money is at stake only on a non-testnet chain of a
     // production deployment. That PR edited the SDK runbook WITHOUT running
     // `node packages/cli/scripts/sync-agent-guidance.mjs`, so this suite went
-    // red on `dev` itself and stayed red for every pull request in the
-    // repository until #2705's probe surfaced it — `CLI checks` is a required
-    // context on both `dev` and `main`. Note the shape of the miss: the
+    // red on `dev` itself. `CLI checks` is a required context on both `dev` and
+    // `main`, but it is conditional (`if: needs.changes.outputs.cli`), and a
+    // skipped required job counts as satisfied — so on the classifier's own
+    // terms an SDK-only change should not have reddened unrelated pull
+    // requests. It did anyway, and the reason is worth knowing: the classifier
+    // reads its file list from a TWO-dot `git diff BASE_SHA HEAD_SHA` against
+    // `pull_request.base.sha` (`change-classifier.mjs`, `changedFilesCommand`),
+    // so a pull request whose base moved inherits everyone else's commits.
+    // Measured on #2705's probe: 2 files three-dot (`cli:false`), 16 two-dot,
+    // and among those 16 were root `package.json` and `.github/workflows/ci.yml`
+    // from other people's merges — full-matrix files, so every surface routed
+    // and `CLI checks` ran on a pull request that touched no CLI file. Since
+    // #2632 turned the up-to-date rule off on `dev`, bases move constantly, so
+    // this is the common case rather than the exotic one. Note also the shape
+    // of the miss: the
     // regeneration alone does not make this test pass, because these two
     // figures are asserted by hand and a content change invalidates them too.
     // Both halves have to move together.

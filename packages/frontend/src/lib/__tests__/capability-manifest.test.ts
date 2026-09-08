@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -248,6 +248,31 @@ describe('capability manifest', () => {
     } finally {
       delete process.env.NEXT_PUBLIC_API_URL
     }
+  })
+
+  describe('environment (#2709)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('reports production when the build variable is unset — the production convention', () => {
+      // Production leaves NEXT_PUBLIC_HAVEN_ENV unset (dev-environment.md,
+      // EnvBadge). The manifest used to read the raw variable and answer
+      // `unknown` on exactly the deployment where an agent most needs the
+      // answer.
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+      expect(buildManifestFrom(ORIGIN, FACTS).environment).toBe('production')
+    })
+
+    it('reports the deployment name on a non-production build', () => {
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
+      expect(buildManifestFrom(ORIGIN, FACTS).environment).toBe('dev')
+    })
+
+    it('never answers unknown, even without backend facts', () => {
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+      expect(buildManifestFrom(ORIGIN, null).environment).toBe('production')
+    })
   })
 
   it('degrades honestly when the backend is unreachable', () => {

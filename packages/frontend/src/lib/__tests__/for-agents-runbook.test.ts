@@ -144,7 +144,13 @@ describe('/for-agents.md (#2523)', () => {
     // holding its turn open for ten minutes. The served page is 10,224 bytes
     // with both #2617's channel text and #2618's no-wait text; the ceiling
     // clears it with headroom for the next small addition.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10300)
+    //
+    // 10300 -> 10500 for #2709 (the page is 10445 bytes at this commit). Step 2
+    // told the agent never to assume the chain and gave it nothing to read the
+    // deployment from; the manifest now answers `environment` honestly on
+    // production, and the 220 bytes tell the agent to read it, and the chain
+    // entries beside it, before it writes the funding message.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10500)
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {

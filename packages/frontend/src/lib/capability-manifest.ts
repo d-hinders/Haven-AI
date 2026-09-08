@@ -9,6 +9,8 @@
 
 import { CHAIN_REGISTRY, getChainData, resolveToken } from '@haven_ai/core'
 
+import { havenEnvironment } from './env'
+
 /**
  * Bumped when a key is REMOVED or changes meaning. Adding a key is not a
  * breaking change, which is what lets the omissions below land later without
@@ -86,6 +88,13 @@ export interface CapabilityManifest {
   /** How an agent tags a hand-off link it drove, so the funnel can measure it. */
   attribution: { query: string; purpose: string }
   docs: Record<string, string>
+  /**
+   * Which deployment this is: `production`, or the deployment's own name
+   * (`dev`). Never `unknown` (#2709): production leaves the build variable
+   * unset by convention, and reporting that convention as ignorance told an
+   * agent nothing on exactly the deployment where real money is at stake.
+   * Read through `lib/env.ts`, the same helper the `DEV` badge uses.
+   */
   environment: string
 }
 
@@ -212,7 +221,7 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
       pay_402: '/402.md',
       exit: '/exit',
     },
-    environment: process.env.NEXT_PUBLIC_HAVEN_ENV ?? 'unknown',
+    environment: havenEnvironment(),
   }
 }
 

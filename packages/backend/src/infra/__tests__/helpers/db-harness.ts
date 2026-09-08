@@ -492,6 +492,7 @@ async function assertSearchPathMatchesWorkerSchema(): Promise<void> {
   }
 }
 
+/**
  * Fail if this worker schema was ALREADY off migration head when the run
  * started (#2622) — the reservoir half of #2616.
  *
@@ -604,11 +605,13 @@ function ensureMigrated(): Promise<void> {
  * `ORDER BY indexname`), so two fingerprints of the same shape serialise
  * identically regardless of catalog insertion order.
  */
-type TableFingerprint = {
-  table: string
-  columns: { name: string; type: string; nullable: string; default: string | null }[]
-  indexes: string[]
-}
+// The local copy of this type is GONE (#2622 merge): `schema-reference.ts`
+// owns it, and both this module and `vitest.global-setup.ts` read the same
+// fingerprints through it. Two byte-identical definitions of one shape is the
+// divergence #2625 spent a session on — they agree until the day one is
+// edited, and then the guard and the thing it compares against disagree
+// silently.
+// (imported above from ./schema-reference.js)
 
 /**
  * The worker schema's per-table column/index fingerprint at migration head,

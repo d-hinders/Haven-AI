@@ -106,21 +106,81 @@ describe('base-SHA handling', () => {
     // non-ASCII or control character comes back quoted and escaped, matches no
     // rule, and routes nowhere — silently, in the unsafe direction.
     for (const args of [
-      changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb' }),
-      changedFilesCommand({ baseSha: undefined, headSha: 'bbb' }),
+      changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName: 'push' }),
+      changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName: 'pull_request' }),
+      changedFilesCommand({ baseSha: undefined, headSha: 'bbb', eventName: 'pull_request' }),
     ]) {
       assert.ok(args.includes('-z'), `${args.join(' ')} is missing -z`)
     }
   })
 
-  test('a normal PR/push diffs base against head', () => {
-    assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb' }), [
+  test('a push diffs base against head — two-dot, and correctly so', () => {
+    // On `push`, BASE_SHA is github.event.before: the previous tip of THIS
+    // branch. Two-dot is the right question there, and A...B would diff from a
+    // merge base that is not what happened.
+    assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName: 'push' }), [
       'diff',
       '-z',
       '--name-only',
       'aaa',
       'bbb',
     ])
+  })
+
+  test('a pull_request diffs the merge base — three-dot (#2727)', () => {
+    // On `pull_request`, BASE_SHA is the base BRANCH TIP, which moves
+    // independently of this branch. Two-dot there reports everything the base
+    // gained since the branch point as though this pull request changed it.
+    for (const eventName of ['pull_request', 'pull_request_target']) {
+      assert.deepEqual(
+        changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName }),
+        ['diff', '-z', '--name-only', 'aaa...bbb'],
+        `${eventName} must ask what this branch changed since it diverged`,
+      )
+    }
+  })
+
+  test('an unknown or absent event falls back to two-dot, never three', () => {
+    // Fail toward OVER-routing. A three-dot diff needs a reachable merge base;
+    // if some future event carries a base SHA that is not a branch tip, the
+    // two-dot form still produces a usable (if wide) list, whereas a bad
+    // three-dot can fail the step outright and route nothing.
+    for (const eventName of [undefined, '', 'schedule', 'workflow_run']) {
+      assert.deepEqual(changedFilesCommand({ baseSha: 'aaa', headSha: 'bbb', eventName }), [
+        'diff',
+        '-z',
+        '--name-only',
+        'aaa',
+        'bbb',
+      ])
+    }
+  })
+
+  test('REGRESSION #2718: a stale base must not import the base branch\'s files', () => {
+    // The measured case. PR #2718's own diff was 2 files; the two-dot list
+    // against its base tip was 16, because one unrelated merge had landed in
+    // between — and two of those inherited files were root package.json and
+    // .github/workflows/ci.yml, the first SURFACE_RULES arm. Every surface
+    // routed and `CLI checks` ran, and failed, on a pull request touching no
+    // CLI file.
+    //
+    // This asserts the SHAPE of the command rather than a git result, because
+    // the classifier's job ends at choosing the question to ask git. That the
+    // three-dot form answers it correctly is git's contract, not ours.
+    const own = ['packages/backend/src/db/migrations/075_x.ts', 'docs/regulatory/casp-changelog/x.md']
+    const inherited = ['package.json', '.github/workflows/ci.yml']
+
+    const pr = changedFilesCommand({ baseSha: 'base', headSha: 'head', eventName: 'pull_request' })
+    assert.ok(pr.includes('base...head'), 'a pull request must ask the three-dot question')
+    assert.ok(!pr.includes('base'.concat(' ')), 'no bare two-dot pair on a pull request')
+
+    // What each list would route, to show the defect is about the QUESTION and
+    // not about the rules: the branch's own files route nothing near the CLI;
+    // the polluted list routes the entire matrix.
+    assert.equal(classifyChangedFiles(own).cli, false, 'the branch itself touches no CLI surface')
+    assert.equal(classifyChangedFiles(own).full, false)
+    assert.equal(classifyChangedFiles([...own, ...inherited]).full, true, 'the inherited files force the full matrix')
+    assert.equal(classifyChangedFiles([...own, ...inherited]).cli, true)
   })
 
   test('an all-zero base SHA falls back to the whole tree at head', () => {

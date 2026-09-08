@@ -207,6 +207,28 @@
         "lint:migration-constraint-scope:test"
       ],
       "reason": "The guard's own fixtures, and they are load-bearing rather than decoration: with the repo already clean, neutering the guard's scope predicate left it GREEN (measured). These tests are the half that can go red, including a fixture in the multi-line shape a hand-written grep missed."
+    },
+    {
+      "path": "packages/sdk/src/agent-guidance.ts",
+      "jobs": [
+        "sdk",
+        "cli"
+      ],
+      "runsVia": [
+        "lint:runbook-parity"
+      ],
+      "reason": "The canonical agent runbook. Two GENERATED copies exist so their packages stay installable alone -- packages/cli/src/agent-guidance-text.ts and packages/frontend/public/for-agents.md -- each byte-pinned by a test in its own package's job. An SDK-only change routed code, sdk, backend, connect, mcp, mcp_server and signer: NEITHER cli NOR frontend, so neither pin test ran and both copies could go stale unnoticed. #2713 did exactly that and left dev red for everyone. lint:runbook-parity verifies EVERY copy and runs in sdk_checks -- the one job guaranteed to run when this file changes -- which is what covers the frontend copy without routing the frontend job. cli is named as an owner as well because cli_checks runs the same check (#2727)."
+    },
+    {
+      "path": "packages/cli/scripts/sync-agent-guidance.mjs",
+      "jobs": [
+        "sdk",
+        "cli"
+      ],
+      "runsVia": [
+        "lint:runbook-parity"
+      ],
+      "reason": "The generator and verifier for the runbook copies above. It lives under packages/cli/ but reads packages/sdk/, so a change here can break a check that sdk_checks runs -- and these rules match before the packages/cli/* arm, so without the explicit cli in jobs a change to this file would stop routing the CLI's own suite (#2727)."
     }
   ]
 }

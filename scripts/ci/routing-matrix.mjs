@@ -227,6 +227,29 @@ export const ROUTING_MATRIX = [
     why: 'The dependency-boundary gate itself (#982).',
   },
   {
+    files: ['packages/sdk/src/agent-guidance.ts'],
+    expect: ['code', 'sdk', 'cli', 'backend', 'connect', 'mcp', 'mcp_server', 'signer'],
+    kind: CONTRACT,
+    why:
+      'The canonical agent runbook (#2727). Two packages hold GENERATED copies of this string, ' +
+      'each byte-pinned by a test in its own job, and NEITHER declares a dependency on the SDK — ' +
+      'correctly, since the copies exist so those packages need none. Before #2727 this file ' +
+      'routed sdk plus dependentsOf(sdk) and reached neither cli nor frontend, so #2713 edited it ' +
+      'and left both copies stale and dev red. cli is here because both jobs run the parity ' +
+      'check; frontend is deliberately NOT, because lint:runbook-parity verifies the frontend ' +
+      'copy from inside sdk_checks — covering it without fanning the matrix out further.',
+  },
+  {
+    files: ['packages/cli/scripts/sync-agent-guidance.mjs'],
+    expect: ['code', 'sdk', 'cli', 'backend', 'connect', 'mcp', 'mcp_server', 'signer'],
+    kind: CONTRACT,
+    why:
+      'The generator/verifier for those copies (#2727). It lives under packages/cli/ but reads ' +
+      'packages/sdk/, so it is owned by both jobs. The explicit cli matters: root-guard rules ' +
+      'match before the packages/cli/* arm, so omitting it would stop a change here routing the ' +
+      "CLI's own suite — a rule that quietly narrows what it was added to widen.",
+  },
+  {
     files: ['scripts/dep-lint.test.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

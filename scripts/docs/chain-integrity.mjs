@@ -227,6 +227,29 @@ export function readChain(raw) {
   return { shape: 'line', date: m ? m[1] : null, entries: chainEntries(line) }
 }
 
+/**
+ * A doc's chain as ONE string, whichever shape it is stored in (#2637).
+ *
+ * The history tools — `chain-sweep.mjs` and `chain-integrity-backtest.mjs` —
+ * replay commits from before the migration as well as after it, and every
+ * function they lean on (`issueRefs`, `checkChain`, `CHAIN_RESET_RE`,
+ * `declaredResetIssues`) is a substring or ref operation over the old line.
+ * Rather than teach each of them two shapes, this presents the list shape in
+ * the legacy join so all of them stay correct with no change.
+ *
+ * Without it those tools read a migrated doc as `last-verified: "<date>"` with
+ * no refs at all, and report the migration commit as having dropped every
+ * entry in the repository — a permanent false BROKEN across ~78 docs, since
+ * history does not change. Found in review, not by a test, because the tools
+ * have no fixture spanning the migration.
+ */
+export function chainTextOf(raw) {
+  const c = readChain(raw)
+  if (c.shape === null) return null
+  if (c.shape === 'line') return lastVerifiedLine(raw)
+  return c.entries.length ? `last-verified: "${c.date ?? ''}" # ${c.entries.join(' Prior: ')}` : null
+}
+
 /** Every issue ref appearing anywhere in a chain's entries. */
 export function entriesRefs(entries) {
   return new Set(entries.flatMap((e) => issueRefs(e)))
@@ -394,6 +417,12 @@ export function normalizeEntryText(text) {
   return text.replace(/\s+/g, ' ').trim().replace(/\.$/, '').trim()
 }
 
+// RETAINED, NOT WIRED (#2637). `main()` now asks this question through
+// `checkChainEntries`, which decides altered-vs-dropped in one pass over entry
+// sets. This line-based form stays because `chain-integrity-backtest.mjs`
+// replays it over history and its own unit tests pin the #2504 tolerance; it is
+// NOT part of the live gate path, so do not read a change here as changing what
+// CI enforces.
 export function checkEntriesVerbatim(prevLine, nextLine) {
   if (CHAIN_RESET_RE.test(nextLine)) return { altered: [] }
   const body = normalizeEntryText(chainNoteBody(nextLine))
@@ -585,8 +614,6 @@ async function main() {
         const det = f.altered.map((a) => a.head ?? '(entry)').slice(0, 8).join(', ')
         console.error(`  - ${f.rel}: ${det}${f.altered.length > 8 ? ' …' : ''} — entry still referenced, but its text changed`)
         for (const a of f.altered.slice(0, 3)) console.error(`      was: ${a.excerpt}${a.excerpt.length === 96 ? '…' : ''}`)
-      } else if (f.kind === 'oversize') {
-        console.error(`  - ${f.rel}: chain line is ${f.bytes} bytes — over the ${f.maxBytes}-byte ceiling`)
       } else {
         console.error(`  - ${f.rel}: dropped ${f.dropped.join(', ')} from the chain`)
       }
@@ -611,10 +638,8 @@ async function main() {
       'the line grows without bound, and every reader pays the cost (#2477). ' +
       'Deduplicating a provenance chain needs a rule for which copy survives — ' +
       'that repair is a decision, not something this gate performs on its own.\n' +
-      'A genuinely intended compaction says so on the line: ' +
-      '`last-verified: "…" # chain-reset(#<issue>): <why>`. ' +
-      'A line that simply exceeds the byte ceiling has no plain-word escape: it ' +
-      'must actually be reduced.\n',
+      'A genuinely intended compaction says so in an entry: '+
+      '`verified:` → `  - "chain-reset(#<issue>): <why>"`.\n',
     )
     process.exit(1)
   }

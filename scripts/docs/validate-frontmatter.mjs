@@ -148,6 +148,12 @@ export function unquoteEntry(item) {
  * Write one chain entry as a double-quoted YAML scalar (#2637). The inverse of
  * `unquoteEntry`, and the only writer — the migration and `docs:new` both go
  * through it so the two directions cannot drift apart.
+ *
+ * NEVER hand-write a quoted entry. `unquoteEntry` decodes `\\\\` and `\\"` and
+ * nothing else, so a different escaping convention silently mis-renders rather
+ * than failing: writing an entry with `JSON.stringify`-style `\\uXXXX` escapes
+ * put a literal `\\u00a7` in a doc during this very change. Pipe new prose
+ * through this function before pasting it.
  */
 export function quoteEntry(text) {
   return `"${String(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
@@ -254,7 +260,16 @@ export function parseFrontMatter(raw) {
         j++
       }
       data[key] = items
-      i = rest.trim() === '' ? j : i + 1
+      // The list-consuming loop above already moved past those lines, so `i`
+      // must advance to `j` unconditionally — advancing by 1 on a non-empty
+      // `rest` would re-visit consumed `  - ` lines as top-level keys and
+      // cascade "unparseable front-matter line" errors instead of saying what
+      // is wrong. Unreachable from the migration, which always emits a bare
+      // `verified:`, but the next hand-edit is what this is for (review, #2637).
+      if (rest.trim() !== '') {
+        return { ok: false, error: `\`verified:\` takes a block list, not inline text: "${line}"` }
+      }
+      i = j
       continue
     }
     // Scalar: strip a trailing comment and surrounding quotes.

@@ -100,6 +100,10 @@ satisfied-by:              # OPTIONAL (#1366): globs whose NEW files count as
                            # real shard convention (see
                            # docs/regulatory/casp-changelog/README.md).
 last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
+verified:                    # REQUIRED once the doc has been re-verified once:
+  - "#2637: what this pass   # the chain, one entry per line, NEWEST FIRST.
+     checked, and what it    # Add yours at the top. Double-quoted; write it
+     did NOT re-verify."     # through quoteEntry, never by hand (#2637).
 ---
 ```
 
@@ -578,22 +582,24 @@ The marker lives in the file rather than in a PR description so the excuse lands
 in the diff of the file it excuses.
 
 **Refreshing a base: interleave, never take a side ([#2504](https://github.com/d-hinders/Haven-AI/issues/2504)).**
-When a branch merges `dev` in and both sides prepended to the same chain, `git`
-conflicts on one line and the resolution is done by hand. Three properties make
-the result correct, and each one is checked rather than trusted:
+When a branch merges `dev` in and both sides added an entry, `git` conflicts —
+that did not change in #2637, and the measurement is in the section above. What
+changed is the size of the thing you resolve: a two-line hunk with every other
+entry outside it as context, rather than one rewritten 37 KB line. Two
+properties make the result correct, and each is checked rather than trusted:
 
 1. **Newest first, both sides kept.** Your new entries, then the incoming
    side's, then the shared tail exactly once. Taking one side drops history
-   (#1843); concatenating the two doubles it (#2477).
-2. **Every prior entry byte-verbatim behind `Prior:`.** Refs gained, none
-   dropped, none doubled — and none *edited*. An entry that keeps its ref while
-   its prose changes still passed both earlier checks, because one asks about
-   refs and the other about duplicates; neither asks whether the surviving
-   entry still says what it said.
-3. **Nothing above the ceiling.** The line must stay under `MAX_CHAIN_BYTES`.
+   (#1843); concatenating the two doubles it (#2477). In the list shape the
+   resolution is usually just *keep both lines*.
+2. **Every prior entry byte-verbatim.** Refs gained, none dropped, none
+   doubled — and none *edited*. An entry that keeps its ref while its prose
+   changes still passed both earlier checks, because one asks about refs and
+   the other about duplicates; neither asks whether the surviving entry still
+   says what it said.
 
-`node scripts/docs/chain-integrity.mjs --base=<ref>` now answers all three. The
-third is `checkEntriesVerbatim`, and its tolerance was set by replaying it over
+`node scripts/docs/chain-integrity.mjs --base=<ref>` answers both. The second is
+`checkChainEntries`'s `altered` list, and its tolerance was set by replaying it over
 merged history rather than by argument. The command, in full, because the window
 is not the script's default and the numbers do not hold without it:
 

@@ -30,7 +30,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { REPO_ROOT, ROOT_DOCS } from './validate-frontmatter.mjs'
-import { lastVerifiedLine, checkChain, checkEntriesVerbatim } from './chain-integrity.mjs'
+import { chainTextOf, checkChain, checkEntriesVerbatim } from './chain-integrity.mjs'
 
 function arg(name, fallback) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -82,8 +82,8 @@ for (const entry of merges.split('\n').filter(Boolean)) {
     const prevRaw = git(['show', `${base}:${rel}`], true)
     const nextRaw = git(['show', `${p2}:${rel}`], true)
     if (prevRaw === null || nextRaw === null) continue
-    const prev = lastVerifiedLine(prevRaw)
-    const next = lastVerifiedLine(nextRaw)
+    const prev = chainTextOf(prevRaw)
+    const next = chainTextOf(nextRaw)
     if (!prev || !next || prev === next) continue
     lines++
     const result = checkChain(prev, next)

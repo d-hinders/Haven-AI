@@ -468,3 +468,22 @@ test('#2637: the OLD shape conflicts on the same edit, over one enormous line', 
   const conflicting = r.text.split('\n').filter((l) => l.startsWith('last-verified:'))
   assert.equal(conflicting.length, 2, 'the whole chain appears twice, once per side')
 })
+
+test('#2637: a MULTI-REF head with only one ref surviving is ALTERED, not dropped', () => {
+  // The `.some` vs `.every` case. `headOfEntry` supports a ref cluster
+  // (`#2100/#2101 (+#2098)`), and partial survival is the only shape where the
+  // two differ: `.every` would reclassify this as a drop. Review found that no
+  // test constructed it, so the mutant survived all 230 — this is that test.
+  // PARTIAL survival is the discriminating shape: the entry is gone, and only
+  // ONE of its three head refs still appears anywhere in the chain — cited in
+  // someone else's prose. `.some` reads that as rewritten (altered); `.every`
+  // reads it as removed (dropped). A fixture where all three survive cannot
+  // tell them apart, which is why the first attempt at this test passed the
+  // mutant.
+  const multi = '#2100/#2101 (+#2098): the three-part landing, verified together.'
+  const citesOne = '#2445: re-read §3, which #2100 introduced.'
+  const r = checkChainEntries([multi], [citesOne])
+  assert.deepEqual(r.dropped, [], 'one surviving ref means rewritten, not removed')
+  assert.equal(r.altered.length, 1)
+  assert.equal(r.altered[0].head, '#2100/#2101(+#2098)')
+})

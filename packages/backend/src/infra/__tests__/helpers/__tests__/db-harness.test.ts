@@ -30,12 +30,15 @@ describeDb('db-harness (#1220)', () => {
     )
   })
 
-  // Since #2625: db-harness.ts now auto-registers `assertWorkerSchemaAtHead()`
-  // at the root of every real-DB file, so a scratch table created here and
-  // left behind would fail as drift. Dropping it here is just this file
-  // restoring migration head, the same obligation every other schema-mutating
-  // file in this suite already carries — the isolation proof above needs the
-  // table only WHILE its own tests run, not afterwards.
+  // This file CREATES a table in the worker schema, so it must remove it.
+  // TWO guards now say so, and they catch different halves: #2625's
+  // root-level `assertWorkerSchemaAtHead()` fails the file that LEAVES drift,
+  // and #2622's reservoir check compares this schema against the run's
+  // pristine reference at init, so a table left behind fails whichever
+  // DIFFERENT file draws the same ordinal on a later run. The isolation proof
+  // above needs the table only WHILE this file's tests run.
+  // `CREATE TABLE IF NOT EXISTS` is what made leaving it survivable, and
+  // therefore invisible.
   afterAll(async () => {
     await db.query('DROP TABLE IF EXISTS harness_smoke')
   })

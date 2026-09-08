@@ -141,7 +141,15 @@ import {
   acquireAdvisoryLockByPolling,
   releaseAdvisoryLock,
 } from '../../../db/advisory-lock.js'
+import { readFile } from 'node:fs/promises'
 import { runMigrations } from '../../../db/migrate.js'
+import {
+  diffFingerprints,
+  driftMessage,
+  readFingerprint,
+  REFERENCE_PATH_ENV,
+  type TableFingerprint,
+} from './schema-reference.js'
 import {
   ciFailureMessage,
   decideDbMode,
@@ -484,6 +492,44 @@ async function assertSearchPathMatchesWorkerSchema(): Promise<void> {
   }
 }
 
+/**
+ * Fail if this worker schema was ALREADY off migration head when the run
+ * started (#2622) — the reservoir half of #2616.
+ *
+ * `ensureMigrated()` decides from `schema_migrations` and finds nothing
+ * pending; `resetDb()` never touches schema. So inherited drift is permanent
+ * and silent, and #2616's end-of-file guard cannot see it either, because that
+ * guard captures head AFTER the migration run: drift already present BECOMES
+ * head and diffs clean against itself forever.
+ *
+ * Compared against the run's pristine reference, built once in
+ * `vitest.global-setup.ts`. A missing reference is NOT a failure — a scoped run
+ * with no global setup, or the acknowledged no-database mode, both reach here
+ * legitimately — but it is also not silence: the absence is reported once, so
+ * a green run never reads as "the reference checked out" when no reference
+ * existed. A guard that cannot say whether it ran is the false-zero shape this
+ * repo keeps paying for.
+ */
+async function assertSchemaMatchesReference(): Promise<void> {
+  const file = process.env[REFERENCE_PATH_ENV]
+  if (!file) {
+    if (!referenceAbsenceReported) {
+      referenceAbsenceReported = true
+      console.warn(
+        `db-harness: no schema reference for this run (${REFERENCE_PATH_ENV} unset), so inherited ` +
+          'drift in this worker schema was NOT checked (#2622). Expected for a run without the ' +
+          'package global setup; unexpected otherwise.',
+      )
+    }
+    return
+  }
+  const reference = JSON.parse(await readFile(file, 'utf8')) as TableFingerprint[]
+  const differences = diffFingerprints(reference, await readFingerprint(db, WORKER_SCHEMA))
+  if (differences.length > 0) throw new Error(driftMessage(WORKER_SCHEMA, differences))
+}
+
+let referenceAbsenceReported = false
+
 function ensureMigrated(): Promise<void> {
   ready ??= (async () => {
     // Explicitly qualified — CREATE SCHEMA ignores search_path.
@@ -542,6 +588,12 @@ function ensureMigrated(): Promise<void> {
     // `readSchemaFingerprint()`: this memo is per module instance, and vitest
     // gives every test file its own), rather than in `readSchemaShape()`
     // below, which every `resetDb()` call already pays.
+    //
+    // The reservoir check runs FIRST, and the order is the whole point (#2622).
+    // Capturing head first would bake any INHERITED drift into the fingerprint
+    // and make the comparison diff the drift against itself — the exact
+    // mechanism that let that class survive.
+    await assertSchemaMatchesReference()
     headShape = await readSchemaFingerprint()
   })()
   return ready
@@ -553,11 +605,13 @@ function ensureMigrated(): Promise<void> {
  * `ORDER BY indexname`), so two fingerprints of the same shape serialise
  * identically regardless of catalog insertion order.
  */
-type TableFingerprint = {
-  table: string
-  columns: { name: string; type: string; nullable: string; default: string | null }[]
-  indexes: string[]
-}
+// The local copy of this type is GONE (#2622 merge): `schema-reference.ts`
+// owns it, and both this module and `vitest.global-setup.ts` read the same
+// fingerprints through it. Two byte-identical definitions of one shape is the
+// divergence #2625 spent a session on — they agree until the day one is
+// edited, and then the guard and the thing it compares against disagree
+// silently.
+// (imported above from ./schema-reference.js)
 
 /**
  * The worker schema's per-table column/index fingerprint at migration head,

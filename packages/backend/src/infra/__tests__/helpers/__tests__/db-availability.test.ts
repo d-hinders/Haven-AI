@@ -97,18 +97,45 @@ describe('resolveTestDatabaseUrl', () => {
     expect(resolveTestDatabaseUrl({})).toBe(DEFAULT_TEST_DATABASE_URL)
   })
 
-  it('vitest.setup.ts IMPORTS that default rather than restating it', async () => {
+  it('every test entry point reaches that default by IMPORT, never by literal', async () => {
     // The assertion above is a tautology on its own (the function against its
     // own constant) and could never catch the drift that matters: global setup
     // probes before setup files run, so a second hand-copied literal in
     // vitest.setup.ts would let the guard report on a host the workers never
     // connect to. Structural, because the value equality cannot be checked —
     // importing the setup file here would mutate this worker's env.
-    const setup = await readFile(
-      new URL('../../../../../vitest.setup.ts', import.meta.url),
-      'utf8',
-    )
-    expect(setup).toContain('DEFAULT_TEST_DATABASE_URL')
+    //
+    // Widened from `vitest.setup.ts` alone to the CHAIN that now applies these
+    // defaults (#2622). `vitest.global-setup.ts` became a second entry point
+    // reaching `config.ts` — it imports the migration runner to build the run's
+    // pristine schema reference — so the three assignments moved into
+    // `test-env.ts` and both files call it. Checking only `vitest.setup.ts`
+    // for the constant would now pass on the indirection while saying nothing
+    // about the file that actually holds the value, which is precisely the
+    // "guard reporting on a database nobody used" failure this test exists for.
+    const read = (rel: string) => readFile(new URL(rel, import.meta.url), 'utf8')
+    const setup = await read('../../../../../vitest.setup.ts')
+    const globalSetup = await read('../../../../../vitest.global-setup.ts')
+    const testEnv = await read('../test-env.js'.replace('.js', '.ts'))
+
+    // The value lives in exactly one place, and it gets there by import.
+    expect(testEnv).toContain('DEFAULT_TEST_DATABASE_URL')
+    // Both entry points reach it through that one place rather than their own.
+    // WITH the parentheses. Without them the pin matched the surviving IMPORT
+    // line, so deleting the call while leaving the import passed — measured by
+    // review under a CI-shaped env (JWT_SECRET and DATABASE_URL supplied), which
+    // is exactly where the "it breaks loudly anyway" defence does not apply,
+    // because CI sets all three values itself. An earlier version of this
+    // comment claimed every such mutation stops the run collecting; that was
+    // true locally and false in CI, which is the environment that matters.
+    // The tripwire below is the half that catches a SILENT regression, and it
+    // is mutation-proven: a literal added to vitest.global-setup.ts reddens it
+    // while the run stays healthy.
+    expect(setup).toContain('applyTestEnvDefaults()')
+    expect(globalSetup).toContain('applyTestEnvDefaults()')
+    // No entry point may restate the literal — the original tripwire, now
+    // applied to all three files rather than one.
+    for (const source of [setup, globalSetup]) expect(source).not.toContain(DEFAULT_TEST_DATABASE_URL)
     // The negative tripwire matches the LITERAL, not an assignment shape
     // (review nit). A pattern like /DATABASE_URL \?\?= ['"]postgres:/ pins one
     // syntax and is walked around by bracket access, `||`, a template literal,
@@ -117,7 +144,7 @@ describe('resolveTestDatabaseUrl', () => {
     // fail in most of the cases it was written for. Compared against the
     // constant rather than a second copy of the string, so this assertion
     // cannot become the duplication it forbids.
-    expect(setup).not.toContain(DEFAULT_TEST_DATABASE_URL)
+    expect(testEnv).not.toContain(DEFAULT_TEST_DATABASE_URL)
   })
 })
 

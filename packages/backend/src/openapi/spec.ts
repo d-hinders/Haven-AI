@@ -4686,7 +4686,8 @@ export const openapiSpec = {
           'bridge (agent-EOA payTo + merchantPayTo) is the fallback and is the only shape that ' +
           'still funds anything. #2105: there is no approval branch — spend authority is the ' +
           'agent\'s budget delegation, refused up front with 403 when the amount exceeds the live ' +
-          'remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. ' +
+          'remaining budget (#2082, extended to this endpoint\'s EIP-3009 funding leg by #2706) and ' +
+          'enforced on-chain by the caveat enforcers at redemption. ' +
           'Preserve the original merchant session and the x402 details. The client ' +
           'performs the merchant retry itself; nothing mid-flow waits for a resume ' +
           'signal. #2145: if the process dies after the funding leg confirms, a later ' +
@@ -4722,7 +4723,7 @@ export const openapiSpec = {
           // enforcer at redemption) instead of queuing an approval.
           '400': errorResponse,
           '401': errorResponse,
-          '403': { ...errorResponse, description: 'Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082) the erc7710 direct-settlement amount exceeds that delegation\'s live remaining period budget. The over-budget refusal is PRE-FUNDING — no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. It is a fail-fast convenience, not the gate: the budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds).' },
+          '403': { ...errorResponse, description: 'Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation\'s live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules).' },
           '409': errorResponse,
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,

@@ -91,3 +91,56 @@ test('the real workspace is clean', async () => {
   assert.deepEqual(violations, [], `expected no violations, got:\n${JSON.stringify(violations, null, 2)}`)
   assert.ok(checked >= 8, `expected to scan the workspace packages, scanned ${checked}`)
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// Everything above tests `violationsFor` and `lint`. Neither reaches the
+// refusal, which lives in `main()`: the non-zero exit and the message a
+// contributor acts on. That gap is not hypothetical — two refusals in this
+// repo were mutated to `if (false)` in one week and their suites stayed green
+// (#2690, #2704). These cases run the shipped script as a process against a
+// fixture repo, so the exit code and the message are the things under test.
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const manifest = (deps) =>
+  JSON.stringify({ name: '@haven_ai/a', version: '1.0.0', dependencies: deps })
+
+test('CLI: a violating tree exits non-zero and names the offending pin', () => {
+  const { status, out } = runGuard('workspace-pin-lint.mjs', {
+    files: { 'packages/a/package.json': manifest({ '@haven_ai/b': '*' }) },
+  })
+  assert.equal(status, 1)
+  // The pin AND the reason. Exit code alone cannot tell "refused correctly"
+  // from "crashed on a malformed fixture".
+  assert.match(out, /@haven_ai\/a → dependencies\.@haven_ai\/b = "\*"/)
+  assert.match(out, /published packages must pin a concrete version/)
+})
+
+test('CLI: a clean tree exits 0 and says what it checked', () => {
+  // The control. Without it the case above passes against a script that
+  // refuses everything — which is the failure mode a refusal test invites.
+  const { status, out } = runGuard('workspace-pin-lint.mjs', {
+    files: { 'packages/a/package.json': manifest({ '@haven_ai/b': '1.2.3' }) },
+  })
+  assert.equal(status, 0)
+  assert.match(out, /✓ internal @haven_ai\/\* pins correct across 1 workspace package/)
+})
+
+test('CLI: the private-consumer direction refuses too', () => {
+  // The rule has two halves and they fail in opposite directions. A test that
+  // only covered the published half would pass against a guard that had lost
+  // the private one entirely.
+  const { status, out } = runGuard('workspace-pin-lint.mjs', {
+    files: {
+      'packages/a/package.json': JSON.stringify({
+        name: '@haven_ai/a',
+        version: '1.0.0',
+        private: true,
+        dependencies: { '@haven_ai/b': '1.2.3' },
+      }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /private workspace consumers must use "\*"/)
+})

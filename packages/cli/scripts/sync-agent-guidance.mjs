@@ -12,10 +12,35 @@
  * precedent: a decoupled copy, byte-pinned by a test, for a package that must
  * stay installable on its own.
  *
- *   node packages/cli/scripts/sync-agent-guidance.mjs
+ *   node packages/cli/scripts/sync-agent-guidance.mjs           # write
+ *   node packages/cli/scripts/sync-agent-guidance.mjs --check   # verify only
  *
  * The pin test (`src/agent-guidance-text.test.ts`) fails if this file is not
- * re-run after the SDK string changes, so the copy cannot drift silently.
+ * re-run after the SDK string changes, so the copy cannot drift silently —
+ * BUT that test runs in the `cli` job, and before #2727 an SDK-only change
+ * routed neither `cli` nor `frontend`. #2713 edited the SDK runbook and the
+ * CLI copy went stale; the frontend copy survived only because that PR
+ * happened to touch frontend files too, so its job ran. `dev` did not even go
+ * red -- `cli_checks` was skipped, so the stale copy was carried until an
+ * unrelated backend PR (#2719) regenerated it.
+ *
+ * `--check` verifies the FULL-TEXT copies below against this one reader and
+ * exits non-zero on drift; `sdk_checks` runs it via
+ * `npm run lint:runbook-parity`. Since #2727 `cli_checks` and
+ * `frontend_checks` run it too; `sdk_checks` is the one that runs on a change
+ * to the canonical source even without the manifest row, via the generic
+ * `packages/sdk/*` arm.
+ *
+ * It is NOT the whole story, and must not be described as one. The frontend
+ * also holds `packages/frontend/src/lib/agent-onboarding-prompt.ts` (a copy
+ * of one constant) and `packages/frontend/src/lib/agent-skill-bundle.ts` (text
+ * composed from four of them by `packages/sdk/src/skill-content.ts`) —
+ * resolved text, not an extractable literal, so no check here can read it
+ * back. Those are covered by routing: the manifest names `frontend` as an
+ * owner of the canonical source, so their own pin tests run on a change to
+ * `agent-guidance.ts` (#2727) — and `skill-content.ts`, which the skill bundle
+ * is pinned to as well, carries its own manifest entry for the same reason
+ * (#2743). Routing, not this script, is what covers both.
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -24,6 +49,37 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const SDK_SOURCE = join(here, '..', '..', 'sdk', 'src', 'agent-guidance.ts')
 const TARGET = join(here, '..', 'src', 'agent-guidance-text.ts')
+
+/**
+ * The copies of the canonical runbook that can be READ BACK and compared —
+ * i.e. those embedding the whole string as a literal or as raw Markdown.
+ *
+ * Deliberately not named "every copy": the frontend's partial derivations
+ * (`packages/frontend/src/lib/agent-onboarding-prompt.ts` and
+ * `packages/frontend/src/lib/agent-skill-bundle.ts`) are not in here and
+ * cannot be, because the skill bundle embeds text composed at build
+ * time rather than a literal. Their pin tests are the check for those, and
+ * routing is what makes those tests run (see the header).
+ *
+ * `extract` turns a file's bytes into the runbook string it embeds; for a raw
+ * Markdown copy that is the identity function.
+ */
+export const GENERATED_COPIES = [
+  {
+    label: 'CLI (packages/cli/src/agent-guidance-text.ts)',
+    file: TARGET,
+    extract: (text) => {
+      const match = text.match(/export const HAVEN_AGENT_RUNBOOK_MD = ("(?:[^"\\]|\\.)*")/)
+      if (!match) throw new Error(`${TARGET}: no HAVEN_AGENT_RUNBOOK_MD string literal found`)
+      return JSON.parse(match[1])
+    },
+  },
+  {
+    label: 'frontend (packages/frontend/public/for-agents.md)',
+    file: join(here, '..', '..', 'frontend', 'public', 'for-agents.md'),
+    extract: (text) => text,
+  },
+]
 
 /**
  * The canonical runbook, read from the SDK source.
@@ -43,7 +99,6 @@ export async function readCanonicalRunbook() {
 }
 
 const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-const runbook = await readCanonicalRunbook()
 
 const header = `/**
  * The agent onboarding runbook — GENERATED, do not edit by hand.
@@ -61,7 +116,51 @@ const header = `/**
 `
 
 if (invokedDirectly) {
-  const body = `${header}\nexport const HAVEN_AGENT_RUNBOOK_MD = ${JSON.stringify(runbook)}\n`
-  await writeFile(TARGET, body)
-  console.log(`wrote ${TARGET} (${Buffer.byteLength(runbook)} bytes, ${runbook.length} UTF-16 units)`)
+  // Read INSIDE the guard, not at module scope (review nit, #2743).
+  // `readCanonicalRunbook` evaluates the SDK source through `new Function`, and
+  // scripts/ci/root-guard-ownership.test.mjs imports GENERATED_COPIES from this
+  // file. At module scope that eval ran on import, so a future `import`
+  // statement in agent-guidance.ts — anything `new Function` cannot eval —
+  // would fail the ENTIRE ci_config_checks suite with a SyntaxError pointing at
+  // a package source, far from anything the suite is about. Every use of
+  // `runbook` is in this block already, so the move costs nothing.
+  const runbook = await readCanonicalRunbook()
+
+  if (process.argv.includes('--check')) {
+    const drifted = []
+    for (const copy of GENERATED_COPIES) {
+      const embedded = copy.extract(await readFile(copy.file, 'utf8'))
+      if (embedded === runbook) {
+        console.log(`✓ ${copy.label} matches the canonical runbook`)
+        continue
+      }
+      drifted.push(copy)
+      // Sizes alone are useless for a same-length edit — both lines read
+      // identical under a "DRIFTED" heading. Name where they part company.
+      let at = 0
+      while (at < runbook.length && runbook[at] === embedded[at]) at += 1
+      const excerpt = (text) => JSON.stringify(text.slice(Math.max(0, at - 20), at + 40))
+      console.error(
+        `✗ ${copy.label} has DRIFTED from packages/sdk/src/agent-guidance.ts\n` +
+          `    canonical ${Buffer.byteLength(runbook)} bytes / ${runbook.length} UTF-16 units\n` +
+          `    copy      ${Buffer.byteLength(embedded)} bytes / ${embedded.length} UTF-16 units\n` +
+          `    first differs at UTF-16 offset ${at}\n` +
+          `      canonical ${excerpt(runbook)}\n` +
+          `      copy      ${excerpt(embedded)}`,
+      )
+    }
+    if (drifted.length > 0) {
+      console.error(
+        `\n${drifted.length} generated copy/copies are stale. Regenerate with:\n` +
+          '    node packages/cli/scripts/sync-agent-guidance.mjs\n' +
+          '  and update any hand-asserted size figures the pin tests carry — a content\n' +
+          '  change invalidates those too, so regenerating alone does not go green.',
+      )
+      process.exitCode = 1
+    }
+  } else {
+    const body = `${header}\nexport const HAVEN_AGENT_RUNBOOK_MD = ${JSON.stringify(runbook)}\n`
+    await writeFile(TARGET, body)
+    console.log(`wrote ${TARGET} (${Buffer.byteLength(runbook)} bytes, ${runbook.length} UTF-16 units)`)
+  }
 }

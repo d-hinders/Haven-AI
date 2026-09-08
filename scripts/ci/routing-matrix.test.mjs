@@ -137,12 +137,30 @@ describe('the matrix covers the rules', () => {
       )
       assert.ok(hit, `doc-only pattern ${pattern} has no row asserting it routes nowhere`)
     }
+    // FIRST match, not any match (#2743). DOC_EXCEPTIONS is first-match-wins,
+    // and #2743 created the first overlapping pair in it: the specific
+    // `packages/frontend/public/for-agents.md` arm sits before the general
+    // `packages/frontend/public/*.md` one. Under an any-match test the general
+    // arm counted the for-agents.md fixture as its own coverage, so deleting
+    // the general arm outright left this whole file green — the arm was
+    // "exercised" by a row that never reaches it. This mirrors the
+    // first-match resolution the SURFACE_RULES test above already uses, and
+    // for the same reason.
+    const firstExceptionFor = (file) =>
+      DOC_EXCEPTIONS.find((rule) => rule.patterns.some((p) => globToRegExp(p).test(file)))
     for (const rule of DOC_EXCEPTIONS) {
       for (const pattern of rule.patterns) {
         const hit = ROUTING_MATRIX.some((row) =>
-          row.files.some((f) => globToRegExp(pattern).test(f) && row.expect.length > 0),
+          row.files.some(
+            (f) =>
+              globToRegExp(pattern).test(f) && firstExceptionFor(f) === rule && row.expect.length > 0,
+          ),
         )
-        assert.ok(hit, `doc exception ${pattern} has no row asserting what it routes to`)
+        assert.ok(
+          hit,
+          `doc exception ${pattern} has no row that RESOLVES to it — a row matching the ` +
+            'pattern but resolving to an earlier arm does not exercise this one.',
+        )
       }
     }
   })

@@ -24,7 +24,24 @@
     "           what makes `jobs` a CHECKED claim rather than an assertion:",
     "           scripts/ci/root-guard-ownership.test.mjs reads .github/workflows/ci.yml",
     "           and fails if a named job does not actually run one of these.",
+    "           Two shapes (#2743): a bare name is a ROOT package.json script",
+    "           (`lint:deps`); `<script> -w <workspace>` is that WORKSPACE's",
+    "           (`test -w packages/sdk`), for a guard whose only real check is a",
+    "           package's own suite and which therefore has no root script to",
+    "           hang ownership on. Both are validated against the package.json",
+    "           that must define them. Every owning job's block must contain AT",
+    "           LEAST ONE entry as a whole `npm run <entry>` command -- not every",
+    "           entry in every block, since frontend_checks legitimately runs",
+    "           `test -w packages/frontend` and never `test -w packages/sdk`.",
     "  reason   Why this ownership, in a sentence someone can disagree with.",
+    "",
+    "NOT ONLY GUARDS (#2727). An entry may also be a CANONICAL SOURCE whose",
+    "pinned copies live in other packages -- same failure shape, since the",
+    "copy's pin test runs only in the copy's own job. For such an entry",
+    "`runsVia` names a script the owning job genuinely runs, but it is not",
+    "always the whole proof: where a derivation cannot be read back, the job",
+    "is ROUTED so its own pin test runs, and `runsVia` is the routing hook",
+    "that makes the ownership expressible and checkable here.",
     "",
     "EXACT PATHS ONLY, deliberately. The epic asks for exact paths before glob",
     "semantics, and a guard manifest is where a too-clever glob does the most",
@@ -207,6 +224,42 @@
         "lint:migration-constraint-scope:test"
       ],
       "reason": "The guard's own fixtures, and they are load-bearing rather than decoration: with the repo already clean, neutering the guard's scope predicate left it GREEN (measured). These tests are the half that can go red, including a fixture in the multi-line shape a hand-written grep missed."
+    },
+    {
+      "path": "packages/sdk/src/agent-guidance.ts",
+      "jobs": [
+        "sdk",
+        "cli",
+        "frontend"
+      ],
+      "runsVia": [
+        "lint:runbook-parity"
+      ],
+      "reason": "The canonical agent runbook, and the source of several pinned derivations that live in other packages so those packages stay installable alone. Two are FULL-TEXT copies (packages/cli/src/agent-guidance-text.ts, packages/frontend/public/for-agents.md) and lint:runbook-parity verifies both. The frontend holds two more that it cannot: src/lib/agent-onboarding-prompt.ts copies one constant, and src/lib/agent-skill-bundle.ts embeds text composed from four of them via sdk/src/skill-content.ts -- resolved text, not an extractable literal. Each derivation is byte-pinned by a test in ITS OWN package's job, and before #2727 an SDK-only change routed code, sdk, backend, connect, mcp, mcp_server and signer: neither cli nor frontend, so none of those pin tests ran. #2713 edited this file and left the CLI copy stale; the frontend copy survived only because that PR happened to touch frontend files too. dev did not even go red -- cli_checks was skipped, so the stale copy was simply carried until an unrelated backend PR (#2719) regenerated it. All three jobs are named so every pin test runs on a change here."
+    },
+    {
+      "path": "packages/cli/scripts/sync-agent-guidance.mjs",
+      "jobs": [
+        "sdk",
+        "cli",
+        "frontend"
+      ],
+      "runsVia": [
+        "lint:runbook-parity"
+      ],
+      "reason": "The generator and verifier for the runbook copies above. It lives under packages/cli/ but reads packages/sdk/, so a change here can break a check that any of the three jobs running lint:runbook-parity performs -- and these rules match before the packages/cli/* arm, so without the explicit cli in jobs a change to this file would stop routing the CLI's own suite (#2727)."
+    },
+    {
+      "path": "packages/sdk/src/skill-content.ts",
+      "jobs": [
+        "sdk",
+        "frontend"
+      ],
+      "runsVia": [
+        "test -w packages/sdk",
+        "test -w packages/frontend"
+      ],
+      "reason": "The canonical generic payment skill, and the second SDK source with a cross-package pin. packages/frontend/src/lib/agent-skill-bundle.ts keeps a deliberately decoupled inline copy so the frontend deploys standalone, and packages/frontend/src/lib/__tests__/agent-skill-bundle.test.ts imports THIS file directly to assert byte-for-byte parity -- a test that runs only in frontend_checks. #2727 closed the same hole for agent-guidance.ts and left this one open (#2743): an SDK-only change here routed sdk but not frontend, so mutating a heading exited 0 on lint:runbook-parity (which reads only the two full-text runbook copies, and this is not one of them) while agent-skill-bundle.test.ts failed in a job that never ran. That copy is resolved text composed at build time, so no readable-back lint can cover it; the frontend's own suite is the check, which is why runsVia names it by workspace rather than inventing a second spelling of a check frontend_checks already runs."
     }
   ]
 }

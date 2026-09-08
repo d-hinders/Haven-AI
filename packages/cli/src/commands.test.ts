@@ -758,6 +758,7 @@ describe('haven login — device flow', () => {
     const api = deviceApi([])
     await run(['login', '--no-wait', '--json'], { ...deps(api), out: (l) => lines.push(l) })
     expect(JSON.parse(lines[0]).device_code).toBe(START.device_code)
+    expect(JSON.parse(lines[0]).interval).toBe(START.interval)
   })
 
   it('--poll performs ONE round and exits 0 when approved — the same success object as the blocking path (#2618)', async () => {

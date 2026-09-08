@@ -2589,6 +2589,11 @@ export type components = {
              * @description Agent-readable product docs.
              */
             docs?: string;
+            /**
+             * Format: uri
+             * @description Capability manifest on the configured dashboard origin.
+             */
+            manifest: string;
             auth: {
                 /** @description How an agent credential is presented. */
                 agent: string;
@@ -2608,6 +2613,8 @@ export type components = {
             /** Format: uri */
             openapi_url: string;
             chains: {
+                /** @description Canonical Haven default chain id. */
+                default: number;
                 deployable: number[];
                 supported: number[];
             };

@@ -49,7 +49,7 @@ export interface DiscoveryFacts {
   connector_package: string
   cli_package: string
   openapi_url: string
-  chains: { deployable: number[]; supported: readonly number[] }
+  chains: { default: number; deployable: number[]; supported: readonly number[] }
 }
 
 /**
@@ -91,7 +91,7 @@ export interface CapabilityManifest {
   summary: string
   human_only_steps: readonly string[]
   dashboard: Record<string, string>
-  api: { base: string | null; openapi: string | null; root: string | null }
+  api: { base: string | null; openapi: string | null; openapi_mirror: string | null; root: string | null }
   hosted_mcp: { url: string | null; note?: string; auth: string; signer: string }
   packages: Record<string, { name: string; channel?: string; one_liner?: string }>
   chains: { deployable: number[]; supported: readonly ManifestChainEntry[] } | null
@@ -182,6 +182,9 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
       // an honest answer rather than a guessed URL.
       base: apiBase,
       openapi: facts?.openapi_url ?? null,
+      openapi_mirror: facts
+        ? 'The dashboard-relative /api/openapi.json is the same document, proxied from this backend URL.'
+        : null,
       root: apiBase,
     },
     hosted_mcp: {
@@ -213,6 +216,7 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
     // is worse than a shorter list.
     chains: facts
       ? {
+          default: facts.chains.default,
           deployable: facts.chains.deployable,
           supported: facts.chains.supported
             .map((id) => manifestChainEntry(id))

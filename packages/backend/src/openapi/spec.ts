@@ -5999,7 +5999,7 @@ export const openapiSpec = {
       },
       ApiRootDocument: {
         type: 'object',
-        required: ['name', 'openapi', 'auth', 'health'],
+        required: ['name', 'openapi', 'auth', 'health', 'manifest'],
         properties: {
           name: { type: 'string', enum: ['haven-api'] },
           description: { type: 'string' },
@@ -6011,6 +6011,11 @@ export const openapiSpec = {
               'names the dev backend and a request through the frontend proxy names the proxy.',
           },
           docs: { type: 'string', format: 'uri', description: 'Agent-readable product docs.' },
+          manifest: {
+            type: 'string',
+            format: 'uri',
+            description: 'Capability manifest on the configured dashboard origin.',
+          },
           auth: {
             type: 'object',
             required: ['agent', 'owner'],
@@ -6041,8 +6046,9 @@ export const openapiSpec = {
           openapi_url: { type: 'string', format: 'uri' },
           chains: {
             type: 'object',
-            required: ['deployable', 'supported'],
+            required: ['default', 'deployable', 'supported'],
             properties: {
+              default: { type: 'integer', description: 'Canonical Haven default chain id.' },
               deployable: { type: 'array', items: { type: 'integer' } },
               supported: { type: 'array', items: { type: 'integer' } },
             },

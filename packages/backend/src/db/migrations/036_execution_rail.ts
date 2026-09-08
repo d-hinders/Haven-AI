@@ -50,7 +50,9 @@ export async function up(client: PoolClient): Promise<void> {
     DO $$
     BEGIN
       IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'user_safes_execution_rail_check'
+        SELECT 1 FROM pg_constraint c
+        JOIN pg_namespace n ON n.oid = c.connamespace
+        WHERE c.conname = 'user_safes_execution_rail_check' AND n.nspname = current_schema()
       ) THEN
         ALTER TABLE user_safes
           ADD CONSTRAINT user_safes_execution_rail_check

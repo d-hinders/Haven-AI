@@ -156,7 +156,7 @@ test('emptyCoversNote: a `#` inside the reason text survives', () => {
 // The fixture is a throwaway tree with the script copied into it, so the
 // REPO_ROOT it derives from its own location is the fixture's; the real
 // `docs/` is never scanned. See scripts/test-support/guard-cli.mjs.
-import { runGuard } from "../test-support/guard-cli.mjs";
+import { runGuard } from "../test-support/guard-cli.mjs"
 import { GOVERNED_PACKAGE_DOCS, EXEMPT_PACKAGE_DOCS } from "./package-docs.mjs";
 
 const GOOD = `---
@@ -180,23 +180,23 @@ last-verified: "2026-09-08"
  * here, so this fixture cannot drift out of sync with the rows it satisfies.
  */
 function baseFixture(extra = {}) {
-  const files = {};
+  const files = {}
   for (const root of ["CLAUDE.md", "AGENTS.md", "README.md", "ABOUT_HAVEN.md"])
-    files[root] = GOOD;
-  files["docs/area/thing.md"] = GOOD;
+    files[root] = GOOD
+  files["docs/area/thing.md"] = GOOD
   for (const entry of GOVERNED_PACKAGE_DOCS) {
-    files[entry.doc] = "# governed package doc\n";
+    files[entry.doc] = "# governed package doc\n"
     for (const glob of entry.covers) {
       // One concrete file per glob: `a/b/**` is satisfied by `a/b/index.ts`,
       // an exact path by itself. A governed row whose glob resolves to nothing
       // is an error, so this is what keeps the ACCEPT path accepting.
       files[glob.endsWith("/**") ? `${glob.slice(0, -3)}/index.ts` : glob] =
-        "// fixture\n";
+        "// fixture\n"
     }
   }
   for (const path of Object.keys(EXEMPT_PACKAGE_DOCS))
-    files[path] = "# exempt package doc\n";
-  return { ...files, ...extra };
+    files[path] = "# exempt package doc\n"
+  return { ...files, ...extra }
 }
 
 const OPTS = { also: ["docs/package-docs.mjs"] };
@@ -205,13 +205,13 @@ test("CLI: a valid tree exits 0 and says how much it checked", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
     ...OPTS,
     files: baseFixture(),
-  });
+  })
   assert.equal(status, 0);
   // The COUNTS are asserted, not just the ✓. A walker pointed at the wrong
   // root prints the same tick over zero files; `5 docs` is 4 root docs plus
   // the one under `docs/`, and 15 is 8 governed + 7 exempt.
-  assert.match(out, /✓ Front-matter valid across 5 docs\./);
-  assert.match(out, /boundary declared for 15 file\(s\): 8 governed, 7 exempt/);
+  assert.match(out, /✓ Front-matter valid across 5 docs\./)
+  assert.match(out, /boundary declared for 15 file\(s\): 8 governed, 7 exempt/)
 });
 
 test("CLI: a doc missing `owner` exits 1 and names the key and the file", () => {
@@ -220,12 +220,12 @@ test("CLI: a doc missing `owner` exits 1 and names the key and the file", () => 
     files: baseFixture({
       "docs/area/thing.md": GOOD.replace('owner: "platform"\n', ""),
     }),
-  });
+  })
   assert.equal(status, 1);
   // The header proves the refusal ran to its report rather than crashing on
   // the way there -- a stack trace also exits 1 and also contains the path.
-  assert.match(out, /✗ Front-matter validation failed \(1 issue\(s\)\):/);
-  assert.match(out, /docs\/area\/thing\.md: missing required key `owner`/);
+  assert.match(out, /✗ Front-matter validation failed \(1 issue\(s\)\):/)
+  assert.match(out, /docs\/area\/thing\.md: missing required key `owner`/)
 });
 
 test("CLI: an unparseable front-matter block exits 1 (the fail-open the chain depends on)", () => {
@@ -234,10 +234,10 @@ test("CLI: an unparseable front-matter block exits 1 (the fail-open the chain de
     files: baseFixture({
       "docs/area/thing.md": '---\nowner: "platform"\n\n# no closing fence\n',
     }),
-  });
-  assert.equal(status, 1);
-  assert.match(out, /✗ Front-matter validation failed/);
-  assert.match(out, /docs\/area\/thing\.md: /);
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ Front-matter validation failed/)
+  assert.match(out, /docs\/area\/thing\.md: /)
 });
 
 test("CLI: a `covers` glob resolving to no files exits 1", () => {
@@ -249,13 +249,13 @@ test("CLI: a `covers` glob resolving to no files exits 1", () => {
         'covers:\n  - "packages/nowhere/src/**"',
       ),
     }),
-  });
-  assert.equal(status, 1);
-  assert.match(out, /✗ Front-matter validation failed/);
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ Front-matter validation failed/)
   assert.match(
     out,
     /`covers` glob "packages\/nowhere\/src\/\*\*" resolves to no files/,
-  );
+  )
 });
 
 test("CLI: the retired inline `#` chain is refused by name (#2637)", () => {
@@ -267,8 +267,35 @@ test("CLI: the retired inline `#` chain is refused by name (#2637)", () => {
         'last-verified: "2026-09-08"  # 2026-09-07 something; 2026-09-06 something else',
       ),
     }),
-  });
-  assert.equal(status, 1);
-  assert.match(out, /carries a retired inline `#` chain/);
-  assert.match(out, /migrate-chain-to-list\.mjs/);
+  })
+  assert.equal(status, 1)
+  assert.match(out, /carries a retired inline `#` chain/)
+  assert.match(out, /migrate-chain-to-list\.mjs/)
 });
+
+test('CLI: a THROW inside main() still exits non-zero (the second refusal)', () => {
+  // The four cases above all reach `if (errors.length) { …; process.exit(1) }`.
+  // There is a SECOND refusal -- `main().catch(err => { console.error(err);
+  // process.exit(1) })` -- and it decides what happens when the scan itself
+  // BREAKS rather than finding a violation. Because `.catch` HANDLES the
+  // rejection, dropping that `process.exit(1)` does not fall back to Node's
+  // unhandled-rejection exit code: the process prints a stack and exits 0.
+  // Review measured exactly that, with the whole suite staying 241/241 green
+  // -- this slice's own thesis, one refusal further out.
+  //
+  // `docs:check` is `validate-frontmatter && … && covers-gaps`, so a step 1
+  // that exits 0 on a crash hands the chain to the guards whose fail-open
+  // reasoning cites step 1 having already refused.
+  //
+  // A fixture with no `docs/` directory makes `walk()` reject with ENOENT,
+  // which is the shape a missing or unreadable doc takes in practice.
+  const { status, out } = runGuard('docs/validate-frontmatter.mjs', {
+    ...OPTS,
+    files: { 'README.md': '# no docs directory here\n' },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /ENOENT/)
+  // And it must not be mistaken for either a clean run or a clean refusal.
+  assert.doesNotMatch(out, /✓ Front-matter valid/)
+  assert.doesNotMatch(out, /Front-matter validation failed/)
+})

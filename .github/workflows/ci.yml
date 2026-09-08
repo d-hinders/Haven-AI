@@ -119,6 +119,18 @@ jobs:
       - name: Release-bump lockfile self-test
         run: node --test scripts/release-bump.test.mjs
 
+      # #2724: the release-scope measurement runs on a release-cutter's machine
+      # for the same reason the bump does, and gets its self-test here for the
+      # same reason too. It is the instrument that decides what a promotion's
+      # CASP shard claims was published, and its whole value is in REFUSING —
+      # on an unbuilt package, on a source file it cannot resolve — rather than
+      # reporting an empty scope. An instrument whose refusals are untested can
+      # start answering "nothing shipped" vacuously, which is the one answer a
+      # release author acts on by doing nothing. Dependency-free (node builtins
+      # and git), so it belongs on this job rather than behind a surface flag.
+      - name: Release-scope measurement self-test
+        run: node --test scripts/release-scope.test.mjs
+
   sdk_checks:
     name: SDK checks
     needs: changes

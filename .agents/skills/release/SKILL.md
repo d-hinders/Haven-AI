@@ -215,6 +215,25 @@ not as permission.
 
 What it leaves to you:
 
+- **Re-measure the scope at the door, and amend the record if it moved.** The
+  tarballs are built from `main`'s tree **at promotion time**; the shard and the
+  Supported Runtime Manifest note were written back at *Satisfy The Contract-Doc
+  Gate*, against a different tree. Anything merged to `dev` in between publishes
+  inside this release without appearing in its record.
+
+  ```sh
+  npm run build                # the shipped set is read out of dist/
+  npm run release:scope        # origin/main..origin/dev
+  ```
+
+  Build first — it refuses outright on an unbuilt package rather than guessing.
+  Compare its shipped delta against what the shard claims and amend the shard
+  when they disagree. **Never hand-count the diff** — that is the judgement this
+  step exists to enforce, and on 0.1.36-alpha.0 hand-counting got the scope wrong
+  four separate ways. The script's semantics, its exit codes and what it refuses
+  are `scripts/README.md` § *`release-scope.mjs`*; the operator checklist is
+  `promoting-dev-to-main.md`. Read them there rather than from here (#2724).
+
 - It calls the promotion a human step; it does not say whose. **Confirm the user
   wants it** before opening one — cutting the release and shipping it to
   production are two decisions, and only the first is yours.

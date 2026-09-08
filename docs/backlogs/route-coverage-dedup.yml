@@ -1,7 +1,7 @@
 # Code-quality track: finish the address-regex dedup + close route-level
 # coverage gaps on non-money-path surfaces.
 # Driven by the autonomous PR loop — see docs/contributing/autonomous-pr-loop.md
-# and the cadence doc docs/contributing/code-quality-loop.md.
+# and the cadence reference .agents/skills/quality-scan/references/discovery-method.md.
 #
 # Discovery (2026-06-25): after the code-quality-hardening track (Fortnox /
 # reporting / contacts, PRs #539–#543) and the address-validation-dedup track

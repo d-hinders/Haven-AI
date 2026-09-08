@@ -18,6 +18,16 @@ following its **Epics** section, which is what gets the `epic` label and the
 sub-issue links right. A finding filed without those is a tracking issue nothing
 can query and `ship-next` cannot pull from.
 
+## References
+
+- [`references/dimensions.md`](references/dimensions.md) — the seven wave
+  dimensions a run probes, numbered. `Probed clean:` cites these by number.
+- [`references/discovery-method.md`](references/discovery-method.md) — the
+  code-quality discovery method: how to run a pass, the discovery prompts, the
+  coverage summary and the verification baseline. Moved here from
+  `docs/contributing/code-quality-loop.md` by #2640 so the method sits with the
+  skill that performs it. Read it before a full-repository sweep.
+
 ## Scope
 
 Bare invocation sweeps the whole repository. An argument narrows it:

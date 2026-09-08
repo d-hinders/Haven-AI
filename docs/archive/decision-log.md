@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: archived
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-09-07"
+last-verified: "2026-09-08" # #2640: ONE cross-reference added under § *The closures, in order*. Twelve files now point at this file's `#1440` anchor for "the closure sequence" (two of them, `README.md` and `ABOUT_HAVEN.md`, added in this same change; a first draft of this note said "nine", the count taken before the change it describes). That section listed #1984/#1986/#1987-89/#2259/#2055 but not #2020 or #2413 — both live in the newer § *retirement is deletion, not accommodation* above it, so a reader following the anchor scrolled AWAY from two of the seven. Found by review, not by a gate: nothing in `docs:check` validates what is AT an anchor. Scope: that one paragraph; no historical entry was edited, and this log's records stay as written. Prior: "2026-09-07"
 ---
 
 # Decision Log
@@ -175,6 +175,15 @@ cannot spend.
   410 interim); the INSERT helpers died with
   `infra/repositories/approval-requests.ts`; migration 070 dropped the
   `approval_requests` table itself.
+
+Two later closures are recorded ABOVE this section rather than in this list,
+because they were separate owner decisions and this log runs newest-first:
+**#2020** made `GET /machine-payments/allowances` answer 410, reversing #1986's
+left-readable half, and **#2413** stopped Haven rendering legacy accounts at all
+— both under [retirement is deletion, not
+accommodation](#2026-09-02--retirement-is-deletion-not-accommodation-2413). A
+reader sent to this anchor for "the closure sequence" needs those two as well
+(#2640).
 
 ### What deliberately survives, and why
 

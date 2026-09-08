@@ -498,7 +498,8 @@ async function main() {
     // narrowed to match the check.
     const b = loaded.baseline
     if (b === null || typeof b !== 'object' || Array.isArray(b)) {
-      throw new TypeError(`expected a JSON object, got ${Array.isArray(b) ? 'an array' : b === null ? 'null' : typeof b}`)
+      const shape = Array.isArray(b) ? 'an array' : b === null ? 'null' : typeof b
+      throw new TypeError(`expected a JSON object, got ${shape}`)
     }
   } catch (err) {
     // The headline says "unusable" rather than "not JSON": this also catches a

@@ -89,6 +89,15 @@ jobs:
       - name: Dist-freshness guard self-test
         run: node --test scripts/check-dist-freshness.test.mjs
 
+      # #2728: the design lint's self-test has the same problem #1206 describes,
+      # for a different reason — it lives under packages/frontend/scripts, and
+      # that package's `test` script is vitest, which does not collect a
+      # `node:test` .mjs file. Written and green locally, it would have run
+      # NOWHERE. Dependency-free (the guard imports only node builtins and two
+      # scripts/lib helpers), so it belongs here with its siblings.
+      - name: Design-lint guard self-test
+        run: node --test packages/frontend/scripts/design-lint.test.mjs
+
       # #1526: internal @haven_ai/* ranges must match how the consuming package
       # RESOLVES them — published packages pin a concrete version, private
       # workspace consumers use "*". Belongs on EVERY PR for the same reason as

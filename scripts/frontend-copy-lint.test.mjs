@@ -400,15 +400,42 @@ test('CLI: `--update` DOES write when the count fell', () => {
   assert.equal(JSON.parse(wrote[BASE])[PAGE], undefined)
 })
 
-test('CLI: `--update` on an EMPTY baseline still writes -- the first-run allowance', () => {
-  // Deliberate, and the one case in which growth is written: it is how a
-  // baseline gets created at all. Pinned so a future tightening of the refusal
-  // cannot take it away silently -- the refusal is `Object.keys(baseline)
-  // .length === 0 ? [] : newViolations(...)`, and only the first half of that
-  // is load-bearing here.
-  const { status, wrote } = runGuard('frontend-copy-lint.mjs', {
+test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first run', () => {
+  // #2728, review finding, and the sharper half of the defect.
+  //
+  // The refusal used to be keyed on `Object.keys(baseline).length === 0`. But
+  // `{}` is what `writeBaseline` PRODUCES the moment a gate reaches zero debt,
+  // so the guard switched itself off on the first successful cleanup -- and
+  // the cleanup is the step the gate's own message tells you to run. Not
+  // hypothetical: `packages/frontend/design-lint-baseline.json` is `{}` today.
+  //
+  // The allowance is now keyed on the baseline FILE not existing, which is the
+  // state it always meant.
+  const { status, out, wrote } = runGuard('frontend-copy-lint.mjs', {
     also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
     files: scaffold({ [PAGE]: copy('Haven runs a policy engine for you.'), [BASE]: '{}' }),
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote[BASE], '{}')
+})
+
+test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
+  // The other half, and the reason the case above is not simply a tightening
+  // that breaks baseline creation: with no baseline file at all, `--update` is
+  // how the baseline comes into existence, and it still works.
+  //
+  // `scaffold` supplies the baseline by default, so this fixture removes it --
+  // the omission IS the fixture. The guard's own third self-check refuses a
+  // missing baseline on a PLAIN run, so this exercises a path only `--update`
+  // reaches.
+  const files = scaffold({ [PAGE]: copy('Haven runs a policy engine for you.') })
+  delete files[BASE]
+  const { status, wrote } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files,
     args: ['--update'],
     readBack: [BASE],
   })

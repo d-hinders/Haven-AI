@@ -55,6 +55,7 @@ import {
   hasShrunk,
   writeBaseline,
   readBaseline,
+  loadBaseline,
   updateRefusals,
 } from './lib/ratchet.mjs'
 
@@ -200,14 +201,14 @@ export { updateRefusals }
 
 async function main() {
   const counts = await scanAll()
-  const baseline = readBaseline(BASELINE_PATH)
+  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
   const t = total(counts)
   console.log(
     `wire-type gauge: ${t.types} hand-written wire shape(s) across ${t.files} file(s).`,
   )
 
   if (process.argv.includes('--update')) {
-    const violations = updateRefusals(counts, baseline)
+    const violations = updateRefusals(counts, baseline, { firstRun })
     if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)

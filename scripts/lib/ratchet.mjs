@@ -57,18 +57,36 @@ export function writeBaseline(path, counts) {
  * only read: an update may TIGHTEN the baseline, never raise it. Returns the
  * violations that block the write ([] when the write is allowed).
  *
- * The first-run case (no baseline yet) is deliberately allowed -- that is how
- * the baseline gets created. It is the ONLY case in which growth is written.
+ * `firstRun` -- and NOT "the baseline is empty" -- is what opens the one
+ * allowance, because those are different states and conflating them disables
+ * the guard permanently (#2728, found by review). `writeBaseline` PRODUCES
+ * `{}` whenever a gate reaches zero debt, so a gate keyed on emptiness is one
+ * successful cleanup away from accepting anything forever -- and the cleanup
+ * is the step every one of these gates tells you to run. It is not
+ * hypothetical: `packages/frontend/design-lint-baseline.json` is `{}` today.
+ * The allowance now means the baseline FILE does not exist yet, which is the
+ * state it was always meant to describe. Use `loadBaseline()` to get both.
  *
  * This lives here rather than in one gate because `--update` is the command a
  * gate's own failure message sends you to, so a gate that omits the check
- * turns its remedy into a laundering step (#2728). Three of the four gates had
- * a line-for-line copy of this decision and the fourth had none at all --
- * exactly the duplication this module's header says it exists to prevent.
+ * turns its remedy into a laundering step. Of the five gates on this module,
+ * three had a line-for-line copy of this decision and TWO had none at all
+ * (`frontend-copy-lint`, the subject of #2728, and `design-lint`, which review
+ * found by reading the importer list rather than the issue) -- exactly the
+ * duplication this module's header says it exists to prevent.
  */
-export function updateRefusals(counts, baseline) {
-  if (Object.keys(baseline).length === 0) return []
+export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
+  if (firstRun) return []
   return newViolations(counts, baseline)
+}
+
+/**
+ * Read a baseline and say whether the file existed. The pair matters: `{}` is
+ * both what an absent file reads as and what a fully-cleaned gate writes, and
+ * only one of those may accept growth. See `updateRefusals`.
+ */
+export function loadBaseline(path) {
+  return { baseline: readBaseline(path), firstRun: !existsSync(path) }
 }
 
 /** Read the baseline, or {} when none exists yet. */

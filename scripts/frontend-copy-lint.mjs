@@ -59,6 +59,7 @@ import {
   hasShrunk,
   writeBaseline,
   readBaseline,
+  loadBaseline,
   updateRefusals,
 } from './lib/ratchet.mjs'
 import { isEscaped } from './lib/lint-escapes.mjs'
@@ -430,18 +431,20 @@ async function main() {
   const update = process.argv.includes('--update')
   const { counts, details, fileCount } = await scanAll()
 
-  const baseline = readBaseline(BASELINE_PATH)
+  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
 
   if (update) {
     // #2728: this branch used to write unconditionally, with no comparison at
     // all -- so `npm run lint:copy:update`, the command the failure message
     // below sends you to, absorbed ANY amount of new banned copy silently. Its
-    // three sibling ratchets have refused to raise since they were written;
-    // this one never did. That matters more here than in the others, because
+    // sibling ratchets on `lib/ratchet.mjs` had refused to raise since they
+    // were written; this one never did -- and neither did `design-lint`, the
+    // fifth consumer, which review found by reading the importer list rather
+    // than the issue text. Both are closed here. That matters more here than
     // what this gate protects is user-facing product copy: #2246 removed two
     // phrases from the frontend precisely because they were a disclosed
     // compliance gap, and this lint is what stops them coming back.
-    const violations = updateRefusals(counts, baseline)
+    const violations = updateRefusals(counts, baseline, { firstRun })
     if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
@@ -474,8 +477,10 @@ async function main() {
     }
     console.log(
       `\nSee docs/product/copy-guidelines.md; add \`// ${IGNORE}\` for a legitimate advanced ` +
-        `surface, or — only for a reviewed, intentional change — run ` +
-        `\`npm run lint:copy:update\` to rewrite the baseline.`,
+        `surface, or rewrite the copy. Since #2728 \`npm run lint:copy:update\` REFUSES to ` +
+        `raise the baseline, so it is not a way past this message: run it after a genuine ` +
+        `reduction to tighten the ratchet. A reviewed, intentional addition is an edit to ` +
+        `the baseline file in its own commit, where a reviewer sees the number change.`,
     )
     process.exit(1)
   }

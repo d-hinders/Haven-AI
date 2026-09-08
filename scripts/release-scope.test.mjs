@@ -527,6 +527,28 @@ test('deleted-source lines are reported as attributed, not merged into the headl
   assert.equal(report.shipped.inferred.removed, 30)
 })
 
+test('test-support DIRECTORIES get the same answer whether modified or deleted', () => {
+  // Round-3 nit N1: the name alternatives were anchored at end-of-path, so they
+  // matched only a FILE named test-helpers.ts. `__mocks__` is essentially always
+  // a directory, so that alternative could never fire, and the status-dependent
+  // contradiction finding D removed was still live for the directory forms.
+  for (const rel of ['__mocks__/viem.ts', 'test-support/build.ts']) {
+    const modified = runScope({
+      base: { [`packages/alpha/src/${rel}`]: 'export const m = 1\n' },
+      changes: { [`packages/alpha/src/${rel}`]: 'export const m = 2\n' },
+      args: ['--json'],
+    })
+    const deleted = runScope({
+      base: { [`packages/alpha/src/${rel}`]: 'export const m = 1\n' },
+      remove: [`packages/alpha/src/${rel}`],
+      args: ['--json'],
+    })
+    assert.deepEqual(shippedFiles(modified.stdout), [], `${rel} modified: not shipped`)
+    assert.deepEqual(shippedFiles(deleted.stdout), [], `${rel} deleted: also not shipped`)
+    assert.equal(JSON.parse(modified.stdout).unresolved.length, 0, `${rel}: not unresolved either`)
+  }
+})
+
 test('a test-support module gets the same answer whether modified or deleted', () => {
   // Review finding D: test-helpers.ts is not `.test.ts`, so it used to be
   // unresolved when modified and SHIPPED when deleted — same file, opposite

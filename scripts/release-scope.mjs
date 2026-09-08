@@ -280,13 +280,24 @@ function classify(changedFiles, packages) {
     // Test-support modules are not tarball content. `test-helpers.ts` is not
     // `.test.ts`, so without this a MODIFIED one landed in `unresolved` while a
     // DELETED one was counted as shipped — the same file, opposite answers,
-    // decided only by change status (review finding D). This is a naming
-    // heuristic and is deliberately narrow: it only routes a file that is ALREADY
-    // absent from every bundle, so it can never remove something the build says
-    // it consumed.
+    // decided only by change status (review finding D).
+    //
+    // This is a naming heuristic, and the limit is worth stating precisely
+    // because an earlier version of this comment overstated it. On the MODIFIED
+    // path it is safe by construction: `bundled.has(file)` is checked first, so
+    // it only ever routes a file the build already says it did not consume. On
+    // the DELETED path there is no such protection — a deleted file cannot be in
+    // the head tree's sourcemaps either way, so here the name is the sole
+    // decider, and a genuinely bundled module named `test-helpers.ts` would be
+    // dropped. Implausible, not impossible.
+    //
+    // Directory forms carry a trailing slash, matching how `__tests__/` is
+    // handled above; without it `__mocks__` could never fire, since it is
+    // essentially always a directory.
     const isTest =
       /(\.test\.[cm]?[jt]sx?$)|(^|\/)__tests__\//.test(file) ||
-      /(^|\/)(test-helpers?|test-support|__mocks__)(\.[cm]?[jt]sx?)?$/.test(file.replace(/\.[cm]?[jt]sx?$/, '$&'))
+      /(^|\/)(test-helpers?|test-support|__mocks__)(\.[cm]?[jt]sx?)?$/.test(file) ||
+      /(^|\/)(test-helpers?|test-support|__mocks__)\//.test(file)
 
     // A DELETED source cannot be in head's sourcemaps, because it does not exist
     // at head. Absence carries no information here, so the sourcemap evidence
@@ -366,7 +377,6 @@ function changedFilesInRange(base, head) {
   return raw.split('\n').map((line) => {
     const parts = line.split('\t')
     const status = parts[0][0] // R100 -> R; take the letter only
-    // A rename reports old and new paths; the new path is what exists at head.
     // R (rename) and C (copy) both report old and new; the new path is what
     // exists at head. Copies need `diff.renames = copies`, unset here, so this is
     // dormant — but reading parts[1] for a C would name the SOURCE file, which is

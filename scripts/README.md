@@ -561,3 +561,10 @@ sourcemaps at all, so its removal is counted as shipped.
 The exclusions are printed, counted and grouped by reason rather than dropped
 silently: an exclusion nobody can see is indistinguishable from a file the
 instrument failed to notice.
+
+**One stated limit.** A source file that MOVES between two published packages is
+recorded once, as the net content change, not as a removal from one tarball and
+an addition to the other. Measured on `84bd719a`, where `skill-content.ts` moved
+`connect` → `sdk`: the delta reads +13/−9, while connect's tarball actually lost
+87 lines and sdk's gained 87. The content answer is the right one for a record of
+what changed; it is not an answer about what each tarball did.

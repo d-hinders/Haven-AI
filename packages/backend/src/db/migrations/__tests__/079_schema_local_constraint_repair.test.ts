@@ -56,6 +56,40 @@ describeDb('migrations create their constraints in THIS schema (#2702)', () => {
     expect(await constraintsOnUserSafes()).toContain('user_safes_execution_rail_check')
   })
 
+  it('the XOR constraint 018/079 declare is present, and enforced', async () => {
+    // The FIFTH site, missed on the first pass because its query spans four
+    // lines and the grep that claimed "zero remaining" was line-oriented.
+    // Measured before the repair: 193 schemas held `machine_payment_evidence`,
+    // zero held this. It is a business invariant — exactly one of
+    // `payment_intent_id` / `approval_request_id` may be non-null — so a schema
+    // without it accepts evidence rows that reference both, or neither.
+    const { rows } = await db.query<{ conname: string }>(
+      `SELECT c.conname FROM pg_constraint c
+        WHERE c.conrelid = 'machine_payment_evidence'::regclass`,
+    )
+    expect(rows.map((r) => r.conname)).toContain(
+      'machine_payment_evidence_one_payment_reference',
+    )
+
+    // Its DEFINITION, not just its name. A constraint can exist under the right
+    // name and check the wrong thing, and a name-only assertion is the same
+    // shape of weakness as the `conname`-only lookup this whole issue is about.
+    //
+    // Asserted this way rather than by inserting a violating row: the table has
+    // NOT NULL columns whose values are not this test's subject, and a first
+    // draft that inserted `(NULL, NULL)` failed on `agent_id` before it ever
+    // reached the CHECK — a red that proved nothing. The sibling test below
+    // carries the does-it-actually-refuse claim on the UNIQUE constraint, where
+    // a minimal valid row is cheap to build.
+    const { rows: def } = await db.query<{ def: string }>(
+      `SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c
+        WHERE c.conrelid = 'machine_payment_evidence'::regclass
+          AND c.conname = 'machine_payment_evidence_one_payment_reference'`,
+    )
+    expect(def[0]?.def).toMatch(/payment_intent_id IS NOT NULL/)
+    expect(def[0]?.def).toMatch(/approval_request_id IS NOT NULL/)
+  })
+
   it('the UNIQUE constraint actually REJECTS a duplicate', async () => {
     // The constraint existing in the catalog and the constraint being enforced
     // are different claims, and this issue is about a schema that looked right

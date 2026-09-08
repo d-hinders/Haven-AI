@@ -3,8 +3,8 @@ import type { PoolClient } from 'pg'
 export const version = '079_schema_local_constraint_repair'
 
 /**
- * Re-add the two `user_safes` constraints that a schema-blind idempotency
- * check skipped (#2702).
+ * Re-add the three constraints that a schema-blind idempotency check skipped
+ * (#2702).
  *
  * ## What went wrong
  *
@@ -22,18 +22,34 @@ export const version = '079_schema_local_constraint_repair'
  * `(user_id, safe_address, chain_id)` and an out-of-range `account_type` that
  * production rejects.
  *
- * The four checks are now schema-qualified, which stops it recurring. That
- * alone does not help any schema already created: `schema_migrations` records
- * 000, 036 and 041 as applied, so they never re-run. This migration is the
- * repair half.
+ * A FIFTH site was missed on the first pass and found by review:
+ * `018_machine_payment_approval_evidence_refs.ts` spreads the same query over
+ * four lines, so the hand-written single-line grep used to claim "zero
+ * remaining" could not see it. Measured: 193 schemas hold
+ * `machine_payment_evidence`, **zero** hold
+ * `machine_payment_evidence_one_payment_reference` — a business XOR invariant
+ * (exactly one of `payment_intent_id` / `approval_request_id` non-null). That
+ * is why `scripts/lint-migration-constraint-scope.mjs` now gates the pattern
+ * structurally instead of by grep.
+ *
+ * All five checks are now anchored on `conrelid` rather than `conname` alone,
+ * which stops it recurring. That alone does not help any schema already
+ * created: `schema_migrations` records 000, 018, 036 and 041 as applied, so
+ * they never re-run. This migration is the repair half.
  *
  * ## Why this is safe on production
  *
  * Both constraints already exist in the production schema — that is precisely
  * why the blind check kept matching — so both branches below are no-ops there.
- * The `NOT EXISTS` guards are themselves schema-qualified, so this migration
- * cannot re-add a constraint a schema already has, and it cannot be satisfied
- * by some other schema's copy the way the originals were.
+ * The `NOT EXISTS` guards are anchored on `conrelid`, so this migration cannot
+ * re-add a constraint a schema already has, and it cannot be satisfied by some
+ * other schema's copy the way the originals were.
+ *
+ * `conrelid` rather than `nspname = current_schema()`, on review: the latter is
+ * the first EXISTING schema on `search_path`, while `ALTER TABLE t` resolves to
+ * the first schema CONTAINING `t`. Those diverge on a multi-element
+ * `search_path` — demonstrated — and a guard answering about schema A while the
+ * DDL acts on schema B fails with 42710 instead of doing the right thing.
  *
  * ## The failure mode this deliberately does not hide
  *
@@ -49,9 +65,8 @@ export async function up(client: PoolClient): Promise<void> {
     DO $$ BEGIN
       IF NOT EXISTS (
         SELECT 1 FROM pg_constraint c
-        JOIN pg_namespace n ON n.oid = c.connamespace
         WHERE c.conname = 'user_safes_user_id_safe_address_chain_id_key'
-          AND n.nspname = current_schema()
+          AND c.conrelid = 'user_safes'::regclass
       ) THEN
         ALTER TABLE user_safes ADD CONSTRAINT user_safes_user_id_safe_address_chain_id_key
           UNIQUE (user_id, safe_address, chain_id);
@@ -61,13 +76,27 @@ export async function up(client: PoolClient): Promise<void> {
     DO $$ BEGIN
       IF NOT EXISTS (
         SELECT 1 FROM pg_constraint c
-        JOIN pg_namespace n ON n.oid = c.connamespace
         WHERE c.conname = 'user_safes_account_type_check'
-          AND n.nspname = current_schema()
+          AND c.conrelid = 'user_safes'::regclass
       ) THEN
         ALTER TABLE user_safes
           ADD CONSTRAINT user_safes_account_type_check
           CHECK (account_type IN ('safe', 'delegator_hybrid'));
+      END IF;
+    END $$;
+
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conname = 'machine_payment_evidence_one_payment_reference'
+          AND c.conrelid = 'machine_payment_evidence'::regclass
+      ) THEN
+        ALTER TABLE machine_payment_evidence
+          ADD CONSTRAINT machine_payment_evidence_one_payment_reference
+          CHECK (
+            (payment_intent_id IS NOT NULL AND approval_request_id IS NULL)
+            OR (payment_intent_id IS NULL AND approval_request_id IS NOT NULL)
+          );
       END IF;
     END $$;
   `)

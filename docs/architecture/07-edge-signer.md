@@ -28,8 +28,10 @@ covers:
   - docs/architecture/04-x402-payment-sequence.md
   - docs/architecture/06-hosted-mcp-connect-flow.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-09-03"
+  - packages/backend/src/modules/x402/delegation-authorize.ts
+last-verified: "2026-09-08"
 verified:
+  - "#2756: the no-approval-path clause carried BOTH halves of the pre-#2706 mechanism split — it put the EIP-3009 leg on the gas-estimation revert (false since #2706 on a healthy read) and said the erc7710 pre-check happens \"before any chain call\" (false in a different way: the pre-check IS an `eth_call` against the enforcer's storage; what it precedes is the REDEMPTION). Rewritten per scheme, with the fail-open consequence stated for each — and the two are NOT symmetric: the 3009 leg falls through to prepare and the enforcer answers 502, while the erc7710 branch prepares nothing and hands back `201 pending_signature` WITH `sign_data`, the #1993 shape #2082 closed, reappearing exactly when the read degrades. Also adds the `covers:` entry for `packages/backend/src/modules/x402/delegation-authorize.ts` this document lacked — which is WHY the drift survived here while #2706's own doc pass corrected `04-x402-payment-sequence.md`, whose `packages/backend/src/modules/x402/**` glob implicated it. An uncoupled doc is a doc no gate can speak for. Verified: the erc7710 branch's own 502s are build and deploy failures, not enforcer refusals, so \"no erc7710 path lets the enforcer adjudicate at authorize\" is the accurate form and \"erc7710 never 502s\" would not be. Scope: that ONE clause and the `covers:` line. Nothing else in this document was re-verified."
   - "#2482: re-verified, NOT edited (the covers: relationship to `06-hosted-mcp-connect-flow.md` only). #2482 updated doc 6's connect-flow step 3 and manual-fallback paragraph; this doc names doc 6 in `covers:` but its body carries no manual-credential or warning-gating claims, and the custody invariants it covers were re-read against the diff and are unchanged. Scope: that one covers relationship. Nothing else re-verified in this pass."
   - "#2341: re-verified, EDITED (the two decomposed-x402 flow diagrams only). The erc7710 diagram told the agent to retry \"setting BOTH PAYMENT-SIGNATURE + X-PAYMENT\" — the instruction that produces HTTP 431 on that scheme, since an erc7710 header carries the delegation chain. Now PAYMENT-SIGNATURE alone. The EIP-3009 diagram directly above says the same thing and is CORRECT there, and is deliberately left saying it — the pair now reads as a contrast rather than a repetition. Nothing else in this doc re-verified in this pass."
   - "#2130: the direct-payment (`haven_pay`/`haven_send`) orchestration section told the agent an over-budget result carries `payload_hash: null` and to \"wait for the user to approve and execute the Safe payment\". No approval can arrive on any rail, and this file already said so two sections below — the \"Hosted x402 approval resume is not completable through the edge-signer tools\" paragraph, corrected at #2055/#2082 (cited by section rather than line number, because this very edit shifted it seven lines and a line citation drifts on the next one too) — one doc, two sections, opposite claims. Replaced with what `POST /payments` actually does, verified against `routes/payments.ts`: a caveat rejection surfaces as 502 with the database untouched, and no budget delegation at all is a 403; no intent row, no payload_hash, nothing to poll. Scope: that one paragraph in the direct-payment orchestration; the x402 legs, the signing-scheme dispatch, custody invariants and key-confinement claims were NOT re-verified in this pass."
@@ -298,10 +300,21 @@ confirms, so call `haven_settle_mcp_tool` promptly. If the payment window
 expires, re-run `haven_pay_mcp_tool` with the same idempotency key. Hosted x402
 approval resume is not completable through the edge-signer tools — and since
 #2055 there is no approval path on any rail to fall back to: the legacy queue
-is deleted, and the delegation rail refuses over-budget instead of queueing —
-on-chain (a gas-estimation revert) for direct payments and the EIP-3009 leg,
-and since #2082 through an off-chain remaining-budget pre-check, before any
-chain call, on erc7710.
+is deleted, and the delegation rail refuses over-budget instead of queueing.
+The mechanism differs by path, and both halves of the old sentence here were
+stale (#2756). On a healthy budget read, BOTH x402 schemes refuse at a
+remaining-budget pre-check — erc7710 since #2082, the EIP-3009 funding leg
+since #2706 — and only `POST /payments` still reaches the enforcer
+unconditionally, as a gas-estimation revert. The pre-check is itself an
+`eth_call` against the enforcer's storage, so what it precedes is the
+REDEMPTION, not every chain call.
+
+Both pre-checks fail open on a degraded read, and there the two schemes part
+company: the 3009 leg falls through to prepare, where the enforcer refuses and
+authorize answers `502`; the erc7710 branch prepares nothing, so it hands back
+`201 pending_signature` WITH `sign_data` — the #1993 shape #2082 closed,
+reappearing exactly when the read degrades. On erc7710 a degraded read is the
+alarming outcome, not a reassuring one.
 `haven_settle_mcp_tool` confirms the funding transaction before delivering the
 already signed header to the merchant.
 

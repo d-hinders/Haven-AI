@@ -18,6 +18,7 @@ covers:
   - docs/bug-reports/_run-report-template.md
 last-verified: "2026-09-08"
 verified:
+  - "#2756: two more sites in the #420 material, both stale in the same direction the #2738 rounds kept finding. (1) The over-budget bullet said the off-chain 403 is erc7710's mechanism specifically — false since #2706 gave the EIP-3009 leg the same pre-check — so a tester on a 3009 merchant was told to expect a revert reason that no longer arrives on a healthy read. (2) It said the pre-check happens \"before any chain call\"; the pre-check IS an `eth_call` against the enforcer's storage, and what it precedes is the REDEMPTION. The #2738 round-2 entry above corrected that phrase in the note below and then had to walk it back two lines later in the SAME sentence; the sentence is now written once, correctly, instead of asserted and qualified. Scope: those two spots. Nothing else in this file was re-verified."
   - "#2738 (round 2): the #420 note's fail-open sentence generalised the EIP-3009 story onto BOTH x402 schemes — \"a degraded read falls through to prepare and you get the enforcer's 502 after all\". False for erc7710, which prepares nothing (`delegation-authorize.ts` says so in its own comment): its failed-open outcome is `201 pending_signature` WITH `sign_data`, the #1993 shape #2082 closed at authorize. So the note told an operator to shrug at the one erc7710 outcome worth escalating. Corrected per scheme. Also corrected in the same sentence: \"before any chain call\" — the pre-check IS a chain read of the enforcer's storage; what it precedes is the REDEMPTION. Found by review of PR #2753, which caught it because it swept the fall-through phrasing family rather than the negation family my own sweep used. Scope: THAT ONE parenthetical, again. Nothing else re-verified."
   - "#2738: the #420 forced-edge-case note corrected AGAIN, and the repeat is the finding. It said an over-budget refusal is `an on-chain gas-estimation revert on direct payments and the EIP-3009 leg`, with the 403 pre-check scoped to erc7710. Since #2706 (PR #2719) the EIP-3009 leg refuses at the same pre-check, so an operator forcing this on either x402 path hunts for a revert reason that does not exist. That is item (3) of this file's own #2140 entry, one path across: #2082 corrected the note for erc7710 and #2140 corrected step 6 for erc7710, and both passes left the EIP-3009 clause standing because it was true when they ran. Found by review of PR #2753. Scope: THAT ONE parenthetical. The coverage table, the #419 steps, the environment tables and the live-spec wiring were NOT re-verified."
   - "#2422: step 3 of the #419 agent-connection procedure hardcoded `npx @haven_ai/connect@alpha` while instructing a tester to run the connector \"in that environment\" — and this runbook's own `covers:` includes `.github/workflows/qa-dev.yml`, so \"that environment\" is routinely the DEV backend. Since #2422 the dist-tag is per-deployment (`HAVEN_CONNECTOR_CHANNEL`), so the literal is conditionally wrong exactly where this doc is used; the step now names the package the environment's own setup response returns, and gains the `-y` the real `buildConnectorCommand` emits. Scope: that ONE step ONLY — no other step, env table or expectation in this runbook was re-read or re-verified in this pass."
@@ -123,8 +124,9 @@ deliberately, not an unreachable one.
    have the agent do a small allowed action (e.g. a direct `haven_pay` within budget
    or an x402 call). Expect it to settle. An over-budget payment is **refused before
    it becomes signable**, by a different mechanism per path — see the #420 edge-case
-   note below; on erc7710 it is an off-chain `403` before any chain call, so do not
-   expect an on-chain revert reason there. Either way the delegation rail has no
+   note below; on BOTH x402 schemes it is an off-chain `403` before the redemption
+   (erc7710 since #2082, the EIP-3009 leg since #2706), so do not expect an
+   on-chain revert reason on either. Either way the delegation rail has no
    approval queue (#1440), so a queued approval is a FAILURE here, not an expected
    outcome.
 
@@ -153,11 +155,12 @@ Note edge cases worth forcing: over-budget (**refused before it becomes
 signable** — the approval queue died with the Safe rail, #1440 — though by
 different mechanisms per path: an on-chain gas-estimation revert on direct
 payments only, and an off-chain remaining-budget pre-check returning HTTP 403
-`delegation_budget_exceeded` before any chain call on **both** x402 schemes —
+`delegation_budget_exceeded` before the REDEMPTION on **both** x402 schemes —
 erc7710 since #2082, the EIP-3009 leg since #2706 (PR #2719), so on a healthy
-budget read neither x402 path produces a revert reason to record. The pre-check
-is itself a chain READ of the enforcer's storage — what it precedes is the
-redemption, not every chain call. Both pre-checks FAIL OPEN on a degraded read,
+budget read neither x402 path produces a revert reason to record. Not "before
+any chain call": the pre-check is itself an `eth_call` against the enforcer's
+storage, and an earlier version of this sentence said the wrong thing and then
+corrected itself two lines later. Both pre-checks FAIL OPEN on a degraded read,
 and there the schemes differ: on the 3009 leg you get the enforcer's 502 after
 all, so a 502 there is a flapping RPC before it is a regression (see
 agent-qa.md's #2511 entry); on erc7710, which prepares nothing, you get

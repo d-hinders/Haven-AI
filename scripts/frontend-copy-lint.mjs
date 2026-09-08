@@ -58,7 +58,6 @@ import {
   newViolations,
   hasShrunk,
   writeBaseline,
-  readBaseline,
   loadBaseline,
   updateRefusals,
 } from './lib/ratchet.mjs'

@@ -91,9 +91,11 @@ jobs:
 
       # #2728: the design lint's self-test has the same problem #1206 describes,
       # for a different reason — it lives under packages/frontend/scripts, and
-      # that package's `test` script is vitest, which does not collect a
-      # `node:test` .mjs file. Written and green locally, it would have run
-      # NOWHERE. Dependency-free (the guard imports only node builtins and two
+      # that package's `test` script is vitest, whose config includes only
+      # `src/**/__tests__/**/*.test.{ts,tsx}` — so a `node:test` .mjs file
+      # outside `src/` is not collected. (The operative reason is that glob,
+      # not the runner: widen it and this comment goes stale.) Written and
+      # green locally, the file would have run NOWHERE. Dependency-free (the guard imports only node builtins and two
       # scripts/lib helpers), so it belongs here with its siblings.
       - name: Design-lint guard self-test
         run: node --test packages/frontend/scripts/design-lint.test.mjs

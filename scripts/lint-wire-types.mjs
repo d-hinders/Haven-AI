@@ -54,7 +54,6 @@ import {
   newViolations,
   hasShrunk,
   writeBaseline,
-  readBaseline,
   loadBaseline,
   updateRefusals,
 } from './lib/ratchet.mjs'
@@ -195,8 +194,11 @@ const REMEDY =
   '  // ui-local: <why this is not a wire shape, at least 20 chars>'
 
 // Re-exported, not redefined: the decision moved to `lib/ratchet.mjs` in #2728
-// so all four ratcheting gates share one copy. This module keeps the name in
-// its own export surface because callers and tests already import it here.
+// so all FIVE gates on that module share one copy. This module keeps the name
+// in its own export surface because callers and tests already import it here.
+// (An earlier draft of this comment said four. The count was the whole
+// blocking finding of that review, and this line was the one site the
+// correction sweep missed -- which is why the sweep is now a grep, not a list.)
 export { updateRefusals }
 
 async function main() {

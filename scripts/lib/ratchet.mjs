@@ -3,8 +3,11 @@
 // design-lint (#855) and copy-lint (#902) each carried a near line-for-line
 // copy of the same ratchet: a committed baseline of existing debt
 // (file → key → count) that may only SHRINK — new occurrences, or growth of
-// an existing count, fail. This module is the single implementation; a third
-// ratcheting gate should import it rather than clone either script.
+// an existing count, fail. This module is the single implementation; a further
+// ratcheting gate should import it rather than clone either script. There are
+// FIVE as of #2728 — design-lint, copy-lint, the wire-type ratchet, the
+// db-mock ratchet and the retired-rail prose ratchet — and the two that had
+// cloned instead of imported were the two missing a `--update` refusal.
 //
 // The `key` dimension is whatever the gate counts per file: a rule id for
 // design-lint, a banned phrase for copy-lint.
@@ -86,7 +89,18 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * only one of those may accept growth. See `updateRefusals`.
  */
 export function loadBaseline(path) {
-  return { baseline: readBaseline(path), firstRun: !existsSync(path) }
+  // ONE `existsSync`, feeding both halves. Calling `readBaseline(path)` (which
+  // does its own) and then `!existsSync(path)` leaves a window in which the two
+  // disagree, and one direction of that disagreement is unsafe: a file deleted
+  // between the calls yields a parsed, non-empty baseline paired with
+  // `firstRun: true`, so `updateRefusals` returns [] and growth is accepted.
+  // Narrow, but this is a guard whose entire job is to refuse -- and the defect
+  // it was written for was also "two states that look alike" (review nit).
+  const exists = existsSync(path)
+  return {
+    baseline: exists ? JSON.parse(readFileSync(path, 'utf8')) : {},
+    firstRun: !exists,
+  }
 }
 
 /** Read the baseline, or {} when none exists yet. */

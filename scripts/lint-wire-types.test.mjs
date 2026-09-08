@@ -146,7 +146,7 @@ test('--update allows a shrink, and allows the very first write', () => {
   // emptiness switched the refusal off on the first successful cleanup. The
   // second assertion below is the one that used to say `[]`.
   assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}, { firstRun: true }), [])
-  assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}).length, 1)
+  assert.equal(updateRefusals({ 'a.ts': { Any: 9 } }, {}).length, 1)
 })
 
 // --- The CLI path (#2721, epic #2720)

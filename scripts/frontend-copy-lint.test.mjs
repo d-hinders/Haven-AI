@@ -353,8 +353,10 @@ test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => 
   //
   // The branch used to be `if (update) { writeBaseline(...); return }` -- no
   // comparison at all -- so the command the failure message sends you to was
-  // the one that laundered the failure. Its three siblings on the same
-  // `lib/ratchet.mjs` had refused to raise since they were written.
+  // the one that laundered the failure. Of the five gates on the same
+  // `lib/ratchet.mjs`, three refused to raise and TWO did not -- this one and
+  // `packages/frontend/scripts/design-lint.mjs`, a blocking frontend gate that
+  // review found by reading the importer list rather than the issue text.
   //
   // The fixture is the SAME tree the hole test used, so the two are directly
   // comparable: exit 0 + growth written, then exit 1 + baseline untouched.

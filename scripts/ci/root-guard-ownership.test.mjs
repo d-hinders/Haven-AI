@@ -22,7 +22,13 @@ import assert from 'node:assert/strict'
 import { readFileSync, existsSync, globSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ROOT_GUARDS, ROOT_GUARD_RULES, OUTPUT_NAMES, globToRegExp } from './change-classifier.mjs'
+import {
+  ROOT_GUARDS,
+  ROOT_GUARD_RULES,
+  OUTPUT_NAMES,
+  globToRegExp,
+  classifyChangedFiles,
+} from './change-classifier.mjs'
 import { ROUTING_MATRIX } from './routing-matrix.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -46,12 +52,24 @@ const packageJson = JSON.parse(read('package.json'))
  * `frontend_checks` already performs, which ci.yml's own visual-baseline
  * comment warns against ("two spellings of one check is how they drift").
  *
- * This is a tightening, not a loosening. A bare name was checked against one
- * file; a workspace name is checked against the workspace's package.json AND
- * against the workspace directory existing, so `test -w packages/typo` fails
- * here rather than silently matching nothing in ci.yml. Both forms still have
- * to appear verbatim as `npm run <entry>` in every owning job's block — that
- * check is unchanged and is what makes `jobs` a claim about ci.yml.
+ * Two axes, and they move in OPPOSITE directions — cite both, or this comment
+ * becomes precedent for something it does not say (#2743, nit B):
+ *
+ *   - RESOLUTION is stricter. A bare name was checked against one file; a
+ *     workspace name is checked against that workspace's package.json AND
+ *     against the workspace existing, so `test -w packages/typo` fails loudly
+ *     here instead of silently matching nothing in ci.yml.
+ *   - GRANULARITY is coarser. A bare name pins one CI step; a workspace name
+ *     pins a whole suite, and a suite stays present however its contents
+ *     change. So the workspace form cannot, by itself, prove the guarded file
+ *     is still covered — deleting the parity test would leave this entry
+ *     green and covering nothing. What closes that is the separate
+ *     cross-package-import test below, which asserts the LINK rather than the
+ *     command. Prefer a root script whenever one honestly exists.
+ *
+ * Both forms still have to appear as the whole `npm run <entry>` command in
+ * every owning job's block — see `jobRuns`, which is what makes `jobs` a claim
+ * about ci.yml rather than an assertion.
  */
 export function resolveRunsVia(entry) {
   const workspace = entry.match(/^(\S+) -w (\S+)$/)
@@ -77,6 +95,26 @@ function jobBlock(jobKey) {
   const rest = lines.slice(start + 1)
   const end = rest.findIndex((l) => /^  [a-z_]+:$/.test(l))
   return (end === -1 ? rest : rest.slice(0, end)).join('\n')
+}
+
+/**
+ * Does this job block run `npm run <entry>` — as the WHOLE command, not as a
+ * prefix of a longer one?
+ *
+ * Anchored deliberately (#2743, nit A). A bare `includes` was harmless while
+ * every runsVia was a root script name, because none is a prefix of another.
+ * The workspace form makes the prefix reachable: ci.yml's backend_checks runs
+ *
+ *     npm run test -w packages/backend -- src/openapi/spec.test.ts
+ *
+ * which an unanchored match would report as running a hypothetical
+ * `test -w packages/backend` guard, when it executes one unrelated spec file.
+ * Nothing at head is wrong -- that step is inside the job that would own it
+ * anyway -- but the sharp edge belongs to whoever adds the next entry, not to
+ * them discovering it.
+ */
+function jobRuns(block, entry) {
+  return block.split('\n').some((line) => line.trimEnd().endsWith(`npm run ${entry}`))
 }
 
 /** The ci.yml job key for an output flag — `backend` -> `backend_checks`. */
@@ -177,7 +215,7 @@ describe('the manifest describes reality', () => {
         const key = jobKeyFor(job)
         const block = jobBlock(key)
         assert.ok(block, `ci.yml has no job "${key}" for the "${job}" flag`)
-        const runs = guard.runsVia.filter((script) => block.includes(`npm run ${script}`))
+        const runs = guard.runsVia.filter((entry) => jobRuns(block, entry))
         assert.ok(
           runs.length > 0,
           `${guard.path} names "${job}" as an owner, but ci.yml's ${key} runs none of ` +
@@ -212,7 +250,7 @@ describe('the manifest describes reality', () => {
         // command would otherwise leave this test silently covering less, which
         // is the failure shape this whole file exists to prevent.
         assert.ok(block, `ci.yml has no job "${jobKeyFor(flag)}" — see the convention test above`)
-        const runsIt = guard.runsVia.some((script) => block.includes(`npm run ${script}`))
+        const runsIt = guard.runsVia.some((entry) => jobRuns(block, entry))
         if (!runsIt) continue
         assert.ok(
           guard.jobs.includes(flag),
@@ -273,6 +311,101 @@ describe('runsVia resolution (#2743)', () => {
         const { manifest, scripts } = resolveRunsVia(entry)
         assert.notEqual(scripts, null, `${guard.path}: ${entry} names a missing ${manifest}`)
       }
+    }
+  })
+})
+
+describe('cross-package source imports route the importing job (#2743)', () => {
+  // THE class-closing test, and the reason #2743 exists at all.
+  //
+  // #2727 registered `packages/sdk/src/agent-guidance.ts` after the CLI copy
+  // went stale. #2743 registered `packages/sdk/src/skill-content.ts` after
+  // review found the identical hole one file over. Registering instances one
+  // at a time is how a boundary gets crossed twice, so this asserts the
+  // BOUNDARY: whenever a package's source reaches ACROSS into another
+  // package's `src/`, a change to the imported file must route the importing
+  // package's job -- otherwise the pin lives in a suite that does not run.
+  //
+  // Deliberately mechanism-agnostic. It asserts the classifier's OUTPUT, not
+  // that a manifest entry exists, because there are two legitimate ways to
+  // satisfy it and only one of them is this manifest:
+  //   - dependency fan-out (`.github/package-dependencies.json`) -- which is
+  //     how `packages/signer/src/settlement-child.test.ts` is covered for the
+  //     SDK fixture it imports, with no manifest entry and none needed;
+  //   - a root-guard ownership entry -- which is what the frontend needs,
+  //     because it declares no dependency on the SDK (that decoupling is the
+  //     whole reason its copies are inline).
+  // A test keyed on the manifest would demand a redundant entry for the
+  // signer case and would still miss a future package that has neither.
+
+  const SRC_IMPORT = /from\s+'((?:\.\.\/)+[a-z0-9-]+\/src\/[^']+)'/g
+  /** `packages/mcp-server` -> the `mcp_server` output flag. */
+  const flagFor = (pkgDir) => pkgDir.replace(/-/g, '_')
+
+  /** Resolve an extensionless TS import the way the bundlers do. */
+  function resolveSource(repoRelative) {
+    for (const ext of ['', '.ts', '.tsx', '.mts', '.mjs', '.js', '/index.ts']) {
+      if (existsSync(path.join(ROOT, repoRelative + ext))) return repoRelative + ext
+    }
+    return null
+  }
+
+  /** Every cross-package `src/` import in the repository, resolved. */
+  function crossPackageImports() {
+    const found = []
+    for (const file of globSync('packages/*/src/**/*.{ts,tsx,mts,mjs}', { cwd: ROOT })) {
+      const importer = file.split('/')[1]
+      for (const [, spec] of read(file).matchAll(SRC_IMPORT)) {
+        // Resolve the relative specifier against the importing file, then keep
+        // it only if it escaped into a DIFFERENT package.
+        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec))
+        if (!target.startsWith('packages/')) continue
+        const imported = target.split('/')[1]
+        if (imported === importer) continue
+        found.push({ file, importer, imported, target })
+      }
+    }
+    return found
+  }
+
+  test('the sweep finds the known imports — the instrument can say yes', () => {
+    // The positive control. Without it, a regex that silently stopped matching
+    // would turn every assertion below into a vacuous pass over an empty list,
+    // which is the exact failure shape this whole file exists to prevent.
+    const found = crossPackageImports()
+    assert.ok(found.length >= 4, `expected the known cross-package imports, saw ${found.length}`)
+    const targets = new Set(found.map((f) => f.target))
+    for (const known of [
+      'packages/sdk/src/agent-guidance',
+      'packages/sdk/src/skill-content',
+      'packages/sdk/src/__fixtures__/settlement-delegation-payload.json',
+    ]) {
+      assert.ok(targets.has(known), `the sweep no longer sees ${known} — has the regex drifted?`)
+    }
+  })
+
+  test('every cross-package import resolves to a real file', () => {
+    for (const { file, target } of crossPackageImports()) {
+      assert.ok(resolveSource(target), `${file} imports ${target}, which resolves to no file`)
+    }
+  })
+
+  test('a change to the imported file routes the IMPORTING package’s job', () => {
+    for (const { file, importer, target } of crossPackageImports()) {
+      const resolved = resolveSource(target)
+      const flag = flagFor(importer)
+      assert.ok(
+        OUTPUT_NAMES.includes(flag),
+        `${file} lives in packages/${importer}, which maps to no output flag`,
+      )
+      assert.equal(
+        classifyChangedFiles([resolved])[flag],
+        true,
+        `${file} pins ${resolved}, but a change to that file does not route "${flag}" — ` +
+          `so the pin lives in a suite the change never runs. Give ${resolved} a ` +
+          '.github/root-guard-ownership.json entry naming that job, or declare the ' +
+          'dependency in .github/package-dependencies.json if the packages really do depend.',
+      )
     }
   })
 })

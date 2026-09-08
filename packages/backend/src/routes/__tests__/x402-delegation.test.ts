@@ -550,8 +550,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       // pre-check that read some other grant would refuse (or admit) for a
       // budget the funding redemption is not chained under.
       primeFundingLeg()
-      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },
@@ -563,8 +563,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
     it('POSITIVE CONTROL: a within-budget funding authorize is unchanged — 201 with a signable child', async () => {
       primeFundingLeg()
       mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
-      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },
@@ -580,8 +580,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       // enforcer would not have made.
       primeFundingLeg()
       mockReadRemaining.mockResolvedValue({ remainingAtomic: '100000', fromChain: true })
-      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },
@@ -593,8 +593,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
     it('FAILS OPEN: a degraded read never refuses — prepare runs and the enforcer stays the gate', async () => {
       primeFundingLeg()
       mockReadRemaining.mockResolvedValue({ remainingAtomic: '1', fromChain: false })
-      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },
@@ -607,8 +607,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
     it('FAILS OPEN: a THROWN read never refuses either', async () => {
       primeFundingLeg()
       mockReadRemaining.mockRejectedValue(new Error('rpc exploded'))
-      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },
@@ -622,8 +622,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       // the read, so a reader returning malformed values degrades to skip.
       primeFundingLeg()
       mockReadRemaining.mockResolvedValue({ remainingAtomic: 'not-a-number', fromChain: true })
-      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      mockPrepareFunding.mockResolvedValue(PREPARED)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },

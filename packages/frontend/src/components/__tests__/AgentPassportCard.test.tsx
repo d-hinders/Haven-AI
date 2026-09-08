@@ -168,14 +168,11 @@ describe('AgentPassportCard (#1072)', () => {
     expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
   })
 
-  it('keeps a legacy record readable without offering passport issuance', () => {
-    mockUseAgentPassport.mockReturnValue(state())
-    render(<AgentPassportCard agentId="agent-1" canIssue={false} />)
-    expect(screen.getByText(/historical agent record has no passport/i)).toBeInTheDocument()
-    expect(screen.getByText(/not an active Haven control/i)).toBeInTheDocument()
-    expect(screen.queryByText(/revocable at any time/i)).toBeNull()
-    expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
-  })
+  // The 'keeps a legacy record readable without offering passport issuance'
+  // test lived here and exercised the deleted `canIssue={false}` prop — a
+  // branch no caller ever passed (#2673: the only render site passes neither
+  // prop, and #2413 removed the legacy rail that motivated it), with copy
+  // asserting legacy records "remain readable". Both removed together.
 
   it('renders standing and anchor honestly for an anchored passport', () => {
     mockUseAgentPassport.mockReturnValue(state({

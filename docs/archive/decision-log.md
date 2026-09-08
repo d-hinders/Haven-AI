@@ -24,11 +24,12 @@ Two caveats a reader should carry. Some entries describe code in the present
 tense — the surviving `rails/allowance-module.ts` exports, the open routes — and
 because this doc is `archived` with `covers: []` it is outside **both** the
 coupling gate and the weekly staleness audit, so **nothing re-checks those
-sentences when the code moves**; verify against the code before relying on one.
-Closing that properly — citing the test behind each such claim, or dating it — is
-[#2670](https://github.com/d-hinders/Haven-AI/issues/2670). And the move out of `CLAUDE.md` was not perfectly lossless: three
-passages were judged obsolete rather than relocated, and are named where they
-belong below.
+sentences when the code moves**. Each such claim now names the test that asserts
+it or carries an as-of date (#2670); those pointers are a starting point, not a
+control — the doc still sits outside both gates, so verify against the code
+before relying on one. And the move out of `CLAUDE.md` was not perfectly
+lossless: three passages were judged obsolete rather than relocated, and are
+named where they belong below.
 
 ## Index
 
@@ -86,14 +87,14 @@ effectively for good:
   list and the two dashboard lists — filter to `account_type =
   'delegator_hybrid'`, so `GET /user/safes` returns no legacy account and the
   agent list returns none of their agents. `RetiredRailNotice` is deleted along
-  with every `account_type` branch behind it.
+  with every `account_type` branch behind it (the filter is asserted by `packages/backend/src/infra/repositories/__tests__/legacy-account-funnel.test.ts`).
 
 Read the readability promise as history: the rows are untouched and a direct
 database query still finds them, but no account, agent or dashboard surface
 displays them and nothing on-chain changed. **`GET /transactions` is NOT among
 the six** — neither `LIST_BASIC_SAFES_FOR_USER_SQL` nor
 `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` carries a rail predicate, so
-transaction history still spans every account and agent row and legacy names
+transaction history still spans every account and agent row (asserted by `packages/backend/src/routes/__tests__/transactions.test.ts`) and legacy names
 still render in that screen's picklists (#2669, found by review after the first
 sweep read "no Haven surface" as complete). Dropping the rows outright remains a separate, still-open
 decision, blocked on `payment_intents`' RESTRICT foreign key.
@@ -104,7 +105,7 @@ Passport issuance was never gated by rail, so a legacy-rail agent could hold
 one — and a retired rail cannot transact, so there is no spending for a contract
 to govern. The owner decided on 2026-08-27 that issuance is delegation-rail
 only. Passports **already issued** on a legacy account are deliberately left
-alone and report `policyEnforcedOnchain: false`; no sweep was authorised.
+alone and report `policyEnforcedOnchain: false` (asserted by `packages/backend/src/modules/passport/__tests__/passport-controls-rail.test.ts`); no sweep was authorised.
 
 ## 2026-08-21 — the reviewer pass runs on every PR
 
@@ -129,7 +130,7 @@ the ordinary one.
 
 What it does **not** change: the backend still selects the scheme from the
 authorize request's payTo shape and clients still say so explicitly with
-`settlementScheme` (#1360); and merchants have not caught up — facilitator-side
+`settlementScheme` (#1360, asserted by `packages/backend/src/modules/x402/__tests__/scheme-selection.test.ts`); and merchants have not caught up — facilitator-side
 erc7710 support is still thin, which is why the 3009 bridge stays. What changes
 is which scheme a *client* reaches for first when the merchant supports both.
 Epic #1450 makes that reachable from the SDK, the local signer and the hosted
@@ -149,14 +150,14 @@ cannot spend.
 - **#1984 shut the INFLOW.** All four Safe inflows answer HTTP 410 —
   `POST /safe/deploy` (passkey-owned), `POST /user/safes/deploy`
   (wallet-owned), `POST /user/safes` (import) and the legacy `PUT /user/safe`
-  link. Signup provisions a passkey-owned Hybrid DeleGator unconditionally via
+  link (asserted by `packages/backend/src/routes/__tests__/safe-inflow-retired.test.ts`). Signup provisions a passkey-owned Hybrid DeleGator unconditionally via
   `POST /accounts/hybrid`; the `NEXT_PUBLIC_DELEGATION_ONBOARDING` dark-launch
   flag of #886 is gone with the fork it used to choose.
 - **#1986 shut the SPEND.** An account marked
   `execution_rail='allowance_module'` — or carrying no Safe row at all, which
   resolves the same way — gets HTTP 410 from `POST /payments`,
   `POST /payments/:id/sign`, `POST /x402/authorize`, `POST /x402` and
-  `POST /machine-payments/send`, fail-closed with nothing written. The refusal
+  `POST /machine-payments/send`, fail-closed with nothing written (asserted by `packages/backend/src/routes/__tests__/allowance-rail-retired.test.ts`). The refusal
   precedes the allowance read, so no chain call is made and no intent row is
   written.
 - **#1987/#1988/#1989 deleted the machinery.** The AllowanceModule execution
@@ -198,9 +199,9 @@ This is the half a sweep gets wrong in the direction of overclaiming.
   Sweep moves stranded delegate balances *back* to the user's account; closing
   funds recovery alongside spending would strand exactly the money this
   retirement exists to make safe. It is also shared with the live #946
-  EIP-3009 bridge, so it is not residue of the retired rail.
-- **`POST /safe/exec`**, owner-signed and relayed for gas only.
-- **The typed rail seam** (`rails/execution-rail.ts`), for reversibility.
+  EIP-3009 bridge, so it is not residue of the retired rail (the routes are asserted by `packages/backend/src/routes/__tests__/machine-payments-sweep.test.ts`).
+- **`POST /safe/exec`**, owner-signed and relayed for gas only (asserted by `packages/backend/src/routes/__tests__/safe-exec.test.ts`).
+- **The typed rail seam** (`rails/execution-rail.ts`), for reversibility (asserted by `packages/backend/src/rails/__tests__/execution-rail.test.ts`).
 
 ### Legacy passkey-Safe recovery (#1229) — narrowed by #1989
 
@@ -209,7 +210,7 @@ preventive: a second owner added while the first passkey still worked, via
 **Approvers**. That surface is deleted with the rest of the Safe-creation
 machinery — Haven neither signs nor now constructs an owner change.
 
-What this does and does not mean. `POST /safe/exec` stays **open**, so any
+What this does and does not mean. `POST /safe/exec` stays **open** (asserted by `packages/backend/src/routes/__tests__/safe-exec.test.ts`), so any
 owner-signed Safe transaction — moving funds out included — still executes, and
 a passkey already enrolled as an on-chain owner still authorises there against
 the Safe's live owner list (the `credential_id` field migration 056 made
@@ -256,7 +257,7 @@ asymmetry was recorded as an open question and closed by PR #1420 on
 2026-08-14, taking option 1 on the issue: **match `remove_owner`**.
 
 Both actions now refuse exactly one thing — the removal that would leave the
-account with **no signer at all** — mirroring the `CannotRemoveLastSigner`
+account with **no signer at all** (asserted by `packages/backend/src/routes/__tests__/hybrid-signers.test.ts`) — mirroring the `CannotRemoveLastSigner`
 invariant the account enforces on-chain
 (`packages/backend/src/rails/hybrid-signer-actions.ts`). There is no Haven-side
 ≥2 floor on either action, on any chain.
@@ -277,9 +278,9 @@ recommendation**, because a wall at onboarding blocked the one-Face-ID flow at
 the moment a user has nothing at risk. Nothing refuses a single-signer account
 now: not provisioning, not grant activation, not `remove_owner`.
 `modules/accounts/mainnet-gate.ts` classifies
-(`needsBackupSignerRecommendation`) rather than gates, and
+(`needsBackupSignerRecommendation`, asserted by `packages/backend/src/modules/accounts/__tests__/mainnet-gate.test.ts`) rather than gates, and
 `user_safes.single_signer_waiver_at` (migration 046) is recorded as history,
-required for nothing.
+required for nothing (as of 2026-09-07).
 
 The consequence is delivered where a human can read it: the dashboard requires
 an explicit confirmation naming what is lost before it calls. An
@@ -315,7 +316,7 @@ funding-leg rail. The session-rail clause is unchanged.
 The Smart Sessions / ERC-7579 session-key rail is retired outright: its backend
 modules are deleted, and accounts still marked `execution_rail='session_key'`
 get HTTP 410 (fail-closed, nothing written) from `POST /payments` and the x402
-machine-payment path. The session-rail `agent_recipients` table and route were
+machine-payment path (asserted by `packages/backend/src/routes/__tests__/payments-session-rail.test.ts`). The session-rail `agent_recipients` table and route were
 dropped in #880, dead after this retirement.
 
 Reference for the retired rail:
@@ -362,7 +363,7 @@ discipline preserved every evidence row.
 ## The `agent_allowances` mirror is gone (#2020 / #2263)
 
 The `allowances` array on an agent has been a derived **view** since #1090,
-projected from the agent's active `agent_delegations` rows. The
+projected from the agent's active `agent_delegations` rows (asserted by `packages/backend/src/infra/repositories/__tests__/agents-allowances-retired.test.ts`). The
 `agent_allowances` table was a mirror of it: #2020 deleted its last writer
 (`copySetupAllowancesToAgent`) and #2263's migration 075 dropped the table
 itself, so there is no mirror left to be out of step with the view.
@@ -373,7 +374,7 @@ human-decimal (`rails/delegation-budget-view.ts` builds it with
 atomic. The OpenAPI spec names them apart as `allowanceHumanAmount` /
 `allowanceAtomicAmount` (#2295) and, since #2408, **tells them apart**:
 `formatTokenValue` emits only `"0"` or `<integer>.<2–6 fraction digits>`, so the
-human pattern is `^(0|[0-9]+\.[0-9]{2,6})$` and rejects an atomic `"500"`. `"0"`
+human pattern is `^(0|[0-9]+\.[0-9]{2,6})$` and rejects an atomic `"500"` (asserted by `packages/backend/src/openapi/spec.test.ts`). `"0"`
 is the one value both shapes share, and it is genuinely the same number in both.
 
 Two things this does **not** license: a consumer must never *sniff* the shape at
@@ -384,7 +385,7 @@ slipping through.
 
 ## Base became the runtime default, not only the documented one (#990)
 
-`DEFAULT_CHAIN_ID` in `@haven_ai/core` is the single home for it. Migration
+`DEFAULT_CHAIN_ID` in `@haven_ai/core` is the single home for it (asserted by `packages/backend/src/__tests__/chain-default-guard.test.ts`). Migration
 `034_base_default_chain` set the `user_safes`, `payment_intents` and
 `approval_requests` column defaults to Base for future rows — existing rows keep
 their stored chain, so a live Gnosis Safe stays on Gnosis. A guard test flags
@@ -396,12 +397,12 @@ quoted, default bindings, ternaries, `if (!x) x =` conditional assignment, SQL
 itself, not a closed guarantee.
 
 Two deliberate exceptions survive. `routes/hybrid-accounts.ts` still defaults to
-Base **Sepolia** (`chain_id ?? 84532`) — a leftover of the #745 dark-launch
+Base **Sepolia** (`chain_id ?? 84532`, the sanctioned fallback the `packages/backend/src/__tests__/chain-default-guard.test.ts` allowlist permits) — a leftover of the #745 dark-launch
 wiring, **not** a live dark launch: #1984 removed
 `NEXT_PUBLIC_DELEGATION_ONBOARDING` and onboarding is unconditional, so callers
 pass the chain explicitly and the fallback is vestigial. And
 `HAVEN_DEPLOY_CHAIN_IDS` (#679) separately scopes which chains a deployment will
-*serve* — a default is what you get when you say nothing; the served set is what
+*serve* (as of 2026-09-07) — a default is what you get when you say nothing; the served set is what
 you may ask for.
 
 ## The closing keyword reaches three surfaces (#2276 / #2320 / #2382)

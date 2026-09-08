@@ -8,9 +8,10 @@ import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
 
 /**
- * State and async orchestration for the agents panel. Legacy Safe accounts
- * remain readable, but all agent authority actions belong to the delegation
- * rail. The panel deliberately has no on-chain Safe transaction path.
+ * State and async orchestration for the agents panel. All accounts the panel
+ * can render are on the delegation rail (#2413 filters the account list to
+ * `delegator_hybrid`), and all agent authority actions belong to that rail.
+ * The panel deliberately has no on-chain Safe transaction path.
  */
 export function useAgentPanelState() {
   const { activeSafe } = useAuth()

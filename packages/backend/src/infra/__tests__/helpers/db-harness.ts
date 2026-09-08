@@ -787,6 +787,74 @@ export async function assertWorkerSchemaAtHead(): Promise<void> {
 }
 
 /**
+ * Revert a migration for the duration of one test body and guarantee the
+ * restore runs, whatever the assertions do (#2621).
+ *
+ * ```ts
+ * await withMigrationReverted(
+ *   () => down(db as never),
+ *   async () => {
+ *     expect(await tableExists('x')).toBe(true)
+ *     return await columnNames('x')     // the body's value is returned
+ *   },
+ *   () => up(db as never),
+ * )
+ * ```
+ *
+ * ## The shape this replaces
+ *
+ * ```ts
+ * await down(db as never)
+ * expect(...)                       // ← an assertion failing here skips the restore
+ * await up(db as never)
+ * ```
+ *
+ * `resetDb()` empties ROWS and never creates or drops a table, so a revert
+ * that never reaches its restore leaves the worker schema off migration head —
+ * and worker schemas are created `IF NOT EXISTS`, so they outlive the run
+ * (#2616). Before this helper the leak needed only one assertion to fail in the
+ * middle, or a `-t` filter selecting the reverting test without the restoring
+ * one. A `finally` closes both routes, which is why the files that already had
+ * that shape (`070_drop_approval_requests`, `075_drop_inert_safe_rail_schema`)
+ * are the model and the five that lacked it are what #2621 is about.
+ *
+ * ## Why the restore is a function and not a value
+ *
+ * `up`/`down` are the migration's own exports, passed unchanged, so a call site
+ * cannot drift from what the runner actually runs — the failure mode this repo
+ * has twice hit with DDL hand-copied into tests.
+ *
+ * ## What `assertWorkerSchemaAtHead()` will NOT catch here
+ *
+ * That guard diffs TABLE NAMES (`readSchemaShape()` reads `pg_tables`). So it
+ * sees the leaks that matter most — the table-restoring reverts of `071` and
+ * `073`, whose missed restore leaves a table the head says is gone — and that
+ * is where this helper pays in guard-visible coin. It cannot see the other two
+ * classes this repo's migrations also contain: a data-only `up()` that is
+ * nothing but an `UPDATE` (`059_retire_mpp_demo_catalog`,
+ * `062_normalize_price_display`) cannot put the schema off head at all, and
+ * an index-only revert (`072_payment_intents_settlement_indexes`, whose
+ * `down()`/`up()` are DROP/CREATE INDEX) leaves drift that is real but
+ * invisible to a name diff — the same shape-blindness #2625 files for
+ * columns, arriving for indexes through the same door. In the data-only files
+ * the helper's worth is the uniformity of the rule plus exception safety; in
+ * `072` it prevents the drift itself, since nothing downstream would have
+ * detected it.
+ */
+export async function withMigrationReverted<T>(
+  revert: () => Promise<unknown>,
+  body: () => Promise<T>,
+  restore: () => Promise<unknown>,
+): Promise<T> {
+  await revert()
+  try {
+    return await body()
+  } finally {
+    await restore()
+  }
+}
+
+/**
  * A foreign-key edge inside the worker schema: `child` references `parent`.
  * Only edges whose BOTH ends live in the worker schema are modelled — an
  * edge pointing out of the schema constrains nothing about the order in

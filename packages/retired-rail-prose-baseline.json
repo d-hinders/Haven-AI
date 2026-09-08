@@ -1,0 +1,107 @@
+{
+  "packages/backend/src/db/migrations/069_drop_safe_approver_metadata.ts": {
+    "stays-readable": 1
+  },
+  "packages/backend/src/domain/chain-client.ts": {
+    "either-rail": 1
+  },
+  "packages/backend/src/infra/chain/token-address-guard.ts": {
+    "both-rails": 1
+  },
+  "packages/backend/src/infra/repositories/__tests__/agents-allowances-retired.test.ts": {
+    "both-rails": 1
+  },
+  "packages/backend/src/infra/repositories/__tests__/legacy-account-funnel.test.ts": {
+    "both-rails": 1
+  },
+  "packages/backend/src/middleware/agentAuth.ts": {
+    "stays-readable": 1
+  },
+  "packages/backend/src/modules/agents/__tests__/rekey-characterization.test.ts": {
+    "still-readable": 1
+  },
+  "packages/backend/src/modules/agents/rekey-guards.ts": {
+    "import-only": 1
+  },
+  "packages/backend/src/modules/mpp/allowances.ts": {
+    "readable-here": 1
+  },
+  "packages/backend/src/modules/mpp/challenge.ts": {
+    "remain-readable": 1
+  },
+  "packages/backend/src/modules/reporting/__tests__/feed-rail-parity.test.ts": {
+    "both-rails": 2
+  },
+  "packages/backend/src/modules/x402/settlement-observed.ts": {
+    "both-rails": 1
+  },
+  "packages/backend/src/openapi/spec.ts": {
+    "remain-readable": 1
+  },
+  "packages/backend/src/rails/__tests__/execution-rail.test.ts": {
+    "stays-readable": 1
+  },
+  "packages/backend/src/rails/execution-rail.ts": {
+    "stays-readable": 1
+  },
+  "packages/backend/src/routes/__tests__/allowance-rail-retired.test.ts": {
+    "stays-readable": 1
+  },
+  "packages/backend/src/routes/__tests__/payments.test.ts": {
+    "readable-but": 1
+  },
+  "packages/backend/src/routes/payments.ts": {
+    "stays-readable": 1
+  },
+  "packages/core/src/api-types.ts": {
+    "remain-readable": 1
+  },
+  "packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
+    "both-rails": 1
+  },
+  "packages/frontend/src/app/(authenticated)/agents/page.tsx": {
+    "remain-readable": 1
+  },
+  "packages/frontend/src/app/(authenticated)/custody/page.tsx": {
+    "both-rails": 2,
+    "remain-readable": 1
+  },
+  "packages/frontend/src/components/AgentPanel.tsx": {
+    "stays-readable": 1
+  },
+  "packages/frontend/src/components/__tests__/AgentPassportCard.test.tsx": {
+    "remain-readable": 1
+  },
+  "packages/frontend/src/components/agent-panel/AgentCard.tsx": {
+    "stays-readable": 1
+  },
+  "packages/frontend/src/components/agent-panel/RemoveAgentDialog.tsx": {
+    "remain-readable": 1,
+    "stays-readable": 1
+  },
+  "packages/frontend/src/components/connect-agent/ConnectionVerificationFooter.tsx": {
+    "both-rails": 1,
+    "rail-conditional": 1
+  },
+  "packages/frontend/src/components/ui/CopyButton.tsx": {
+    "still-readable": 1
+  },
+  "packages/frontend/src/hooks/useAgents.ts": {
+    "stays-readable": 1
+  },
+  "packages/frontend/src/lib/__tests__/agent-credential.test.ts": {
+    "both-rails": 1
+  },
+  "packages/frontend/src/lib/transaction-labels.ts": {
+    "stays-readable": 1
+  },
+  "packages/qa-agent/src/scenarios/x402-delegation-3009.ts": {
+    "either-rail": 1
+  },
+  "packages/sdk/src/types.ts": {
+    "remain-readable": 1
+  },
+  "packages/sdk/src/x402.test.ts": {
+    "both-rails": 1
+  }
+}

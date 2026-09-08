@@ -1,0 +1,218 @@
+{
+  "packages/backend/src/db/migrations/069_drop_safe_approver_metadata.ts": {
+    "stays-readable": {
+      "category": "route-db-readability",
+      "note": "Migration documents why it drops the approver metadata while the epic's explicit 'Accounts/history stay READABLE' requirement keeps payment history intact."
+    }
+  },
+  "packages/backend/src/domain/chain-client.ts": {
+    "either-rail": {
+      "category": "live-rail-architecture",
+      "note": "True statement that the chain-client ports are not 'the same operation on either rail' — the two rails are distinct and both live."
+    }
+  },
+  "packages/backend/src/infra/chain/token-address-guard.ts": {
+    "both-rails": {
+      "category": "live-rail-architecture",
+      "note": "The guard fails loudly and identically on both rails; both rails are live and share the guard."
+    }
+  },
+  "packages/backend/src/infra/repositories/__tests__/agents-allowances-retired.test.ts": {
+    "both-rails": {
+      "category": "test-instrument",
+      "note": "Test seeds and asserts both rails; the legacy row is asserted below, so the phrase is a fixture description, not a product claim."
+    }
+  },
+  "packages/backend/src/infra/repositories/__tests__/legacy-account-funnel.test.ts": {
+    "both-rails": {
+      "category": "test-instrument",
+      "note": "Every case seeds BOTH rails for the same user so a pass cannot be attributed to one rail; a fixture description."
+    }
+  },
+  "packages/backend/src/middleware/agentAuth.ts": {
+    "stays-readable": {
+      "category": "archived-agents",
+      "note": "Archived agents (#1401/#1402) keep their records readable in the dashboard; the auth middleware preserves that access."
+    }
+  },
+  "packages/backend/src/modules/agents/__tests__/rekey-characterization.test.ts": {
+    "still-readable": {
+      "category": "test-instrument",
+      "note": "Characterization test asking whether the meter is still readable after a revoke; an assertion target, not a product claim."
+    }
+  },
+  "packages/backend/src/modules/agents/rekey-guards.ts": {
+    "import-only": {
+      "category": "owner-decision-quote",
+      "note": "Block-quotes the #1694 owner decision verbatim ('Legacy AllowanceModule is import-only'); quoting a dated decision is not a stale claim."
+    }
+  },
+  "packages/backend/src/modules/mpp/allowances.ts": {
+    "readable-here": {
+      "category": "mpp_demo",
+      "note": "The retired mpp_demo endpoint returns the 410 verbatim; nothing is read here. Part of the mpp_demo family (#1328)."
+    }
+  },
+  "packages/backend/src/modules/mpp/challenge.ts": {
+    "remain-readable": {
+      "category": "mpp_demo",
+      "note": "Historical mpp_demo payment/receipt/evidence/status rows remain readable; the mpp_demo family (#1328) really does stay readable."
+    }
+  },
+  "packages/backend/src/modules/reporting/__tests__/feed-rail-parity.test.ts": {
+    "both-rails": {
+      "category": "test-instrument",
+      "note": "Feed-rail parity test: a re-sync of both rails must leave exactly one row and one push each; a fixture/assertion description."
+    }
+  },
+  "packages/backend/src/modules/x402/settlement-observed.ts": {
+    "both-rails": {
+      "category": "live-rail-architecture",
+      "note": "On EIP-3009 (both rails) Haven submits a transaction and learns the hash; both rails are live settlement paths."
+    }
+  },
+  "packages/backend/src/openapi/spec.ts": {
+    "remain-readable": {
+      "category": "mpp_demo",
+      "note": "OpenAPI description of the retired mpp_demo endpoint (410, fail-closed); the mpp_demo family (#1328)."
+    }
+  },
+  "packages/backend/src/rails/__tests__/execution-rail.test.ts": {
+    "stays-readable": {
+      "category": "test-instrument",
+      "note": "Asserts the queued approval 'stays readable, and it can still be rejected'; an assertion target."
+    }
+  },
+  "packages/backend/src/rails/execution-rail.ts": {
+    "stays-readable": {
+      "category": "live-rail-architecture",
+      "note": "The execution rail's contract: the queued approval stays readable and can still be rejected; a live behaviour statement."
+    }
+  },
+  "packages/backend/src/routes/__tests__/allowance-rail-retired.test.ts": {
+    "stays-readable": {
+      "category": "route-db-readability",
+      "note": "Cites the epic's explicit 'Accounts/history stay READABLE' requirement for payment history; the route/DB-level readability the screen-vs-route distinction (#2669) established."
+    }
+  },
+  "packages/backend/src/routes/__tests__/payments.test.ts": {
+    "readable-but": {
+      "category": "test-instrument",
+      "note": "Asserts the legacy sign path is readable but never executable after retirement; an assertion target."
+    }
+  },
+  "packages/backend/src/routes/payments.ts": {
+    "stays-readable": {
+      "category": "route-db-readability",
+      "note": "Historical rows stay readable, never actionable — the route/DB-level readability that is true under the screen-vs-route distinction (#2669)."
+    }
+  },
+  "packages/core/src/api-types.ts": {
+    "remain-readable": {
+      "category": "mpp_demo",
+      "note": "Generated mirror of the OpenAPI mpp_demo endpoint description; the mpp_demo family (#1328)."
+    }
+  },
+  "packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
+    "both-rails": {
+      "category": "past-tense-history",
+      "note": "Past-tense narration: '#1083 gave Send to BOTH rails. #1989 (epic #1440) took it' — history, not a present claim."
+    }
+  },
+  "packages/frontend/src/app/(authenticated)/agents/page.tsx": {
+    "remain-readable": {
+      "category": "archived-agents",
+      "note": "Live user-facing subtitle: historical agent records remain readable. Verified true — archived agents (#1401/#1402) stay under Removed with their history."
+    }
+  },
+  "packages/frontend/src/app/(authenticated)/custody/page.tsx": {
+    "both-rails": {
+      "category": "live-rail-architecture",
+      "note": "Both rails live in the same user.safes list, so the branch is per account; and the card chrome is shared by both rails. True of the current architecture."
+    },
+    "remain-readable": {
+      "category": "past-tense-history",
+      "note": "A #2673 correction note quoting what the OLD text said ('while legacy accounts remain readable') and why it is gone; past-tense, not a present claim."
+    }
+  },
+  "packages/frontend/src/components/AgentPanel.tsx": {
+    "stays-readable": {
+      "category": "archived-agents",
+      "note": "#1402: Removed = archived agents; history stays readable, Restore returns list placement only."
+    }
+  },
+  "packages/frontend/src/components/__tests__/AgentPassportCard.test.tsx": {
+    "remain-readable": {
+      "category": "test-instrument",
+      "note": "Test comment noting the 'remain readable' assertion was removed together with the legacy record; an assertion description."
+    }
+  },
+  "packages/frontend/src/components/agent-panel/AgentCard.tsx": {
+    "stays-readable": {
+      "category": "archived-agents",
+      "note": "History stays readable; restoring never re-enables spending — the archived-agent (#1401/#1402) contract."
+    }
+  },
+  "packages/frontend/src/components/agent-panel/RemoveAgentDialog.tsx": {
+    "remain-readable": {
+      "category": "archived-agents",
+      "note": "The agent moves to Removed, where every payment and record remains readable; the archived-agent (#1401/#1402) contract."
+    },
+    "stays-readable": {
+      "category": "archived-agents",
+      "note": "Archive (#1401) — the agent moves to Removed; history stays readable. The archived-agent contract."
+    }
+  },
+  "packages/frontend/src/components/connect-agent/ConnectionVerificationFooter.tsx": {
+    "both-rails": {
+      "category": "live-rail-architecture",
+      "note": "The approval step's footer is shared by both rails (#1073); both rails are live."
+    },
+    "rail-conditional": {
+      "category": "live-rail-architecture",
+      "note": "The Safe-specific 'Approvals required' row is rail-conditional; a true statement about the current dual-rail UI."
+    }
+  },
+  "packages/frontend/src/components/ui/CopyButton.tsx": {
+    "still-readable": {
+      "category": "ui-affordance",
+      "note": "The phrase matches but the referent is the copied value ('still readable and selectable either way'), not an agent record — a UI affordance, not a rail claim."
+    }
+  },
+  "packages/frontend/src/hooks/useAgents.ts": {
+    "stays-readable": {
+      "category": "archived-agents",
+      "note": "#1402: removal is an archive; the row and its history stay readable under Removed."
+    }
+  },
+  "packages/frontend/src/lib/__tests__/agent-credential.test.ts": {
+    "both-rails": {
+      "category": "test-instrument",
+      "note": "The credential note is written once for both rails; a fixture description in a test."
+    }
+  },
+  "packages/frontend/src/lib/transaction-labels.ts": {
+    "stays-readable": {
+      "category": "mpp_demo",
+      "note": "Historical mpp_demo rows stay readable by design; the mpp_demo family (#1328)."
+    }
+  },
+  "packages/qa-agent/src/scenarios/x402-delegation-3009.ts": {
+    "either-rail": {
+      "category": "test-instrument",
+      "note": "QA scenario: a merchant-side settlement tx on either rail; a fixture description."
+    }
+  },
+  "packages/sdk/src/types.ts": {
+    "remain-readable": {
+      "category": "mpp_demo",
+      "note": "Historical mpp_demo rows, which remain readable; the mpp_demo family (#1328)."
+    }
+  },
+  "packages/sdk/src/x402.test.ts": {
+    "both-rails": {
+      "category": "test-instrument",
+      "note": "3009-only merchant -> 3009 on BOTH rails, byte-identical option; a test assertion."
+    }
+  }
+}

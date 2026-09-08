@@ -202,13 +202,14 @@ export const ROUTING_MATRIX = [
   },
 
   // ─── Guards outside packages/ that police a package ────────────────────────
-  // Seven guards, ten files, grouped into four SURFACE_RULES entries — the three
-  // counts differ, so it is worth being explicit. The guards are: the
-  // dependency-cruiser rule set, dep-lint, the db-mock ratchet, the API-type
-  // generator, the shared ratchet engine, the wire-type ratchet, and the
-  // network-map pin test. Four of them ship a self-test as a separate file,
-  // which is where ten files come from; rules that share a target package are
-  // collapsed into one entry, which is where four comes from.
+  // Nine guards, twelve files, grouped into five SURFACE_RULES entries — the
+  // three counts differ, so it is worth being explicit. The guards are: the
+  // dependency-cruiser rule set, dep-lint, the db-mock ratchet, the retired-rail
+  // prose ratchet, the API-type generator, the shared ratchet engine, the
+  // wire-type ratchet, and the network-map pin test. Five of them ship a
+  // self-test as a separate file, which is where twelve files come from; rules
+  // that share a target package are collapsed into one entry, which is where
+  // five comes from.
   //
   // Each exists because the guard lives outside the tree it polices and only
   // that package's job runs it: without the arm, a PR that ONLY weakens the
@@ -239,6 +240,18 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/db-mock-ratchet.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
+    files: ['scripts/retired-rail-prose-ratchet.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The shrink-only retired-rail prose ratchet (#2685) polices all of packages/** but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/retired-rail-prose-ratchet.test.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',

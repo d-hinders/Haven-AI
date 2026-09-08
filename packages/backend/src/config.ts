@@ -31,18 +31,44 @@ function optionalEnv(key: string, fallback: string): string {
 }
 
 /**
- * Parse TRUST_PROXY_HOPS defensively (#1670). The failure mode this guards is
- * SILENT disarming: the auth rate-limit tier deliberately returns no limit at
- * 0 hops, so a value that fails to parse — pasted with quotes, a stray word,
- * "true" — would leave the front door unthrottled while the operator believes
- * it is protected, and nothing would say so. Quotes and whitespace are
- * stripped (dashboard paste artefacts); anything else non-numeric warns
- * LOUDLY at boot and disarms, because guessing a hop count is worse than
- * refusing one — `true` in particular is the spoofable Fastify mode this
- * setting exists to avoid, and must never be coerced into a count.
+ * Parse TRUST_PROXY_HOPS defensively (#1670, boot-unset warning added #2630).
+ * The failure mode this guards is SILENT disarming: the auth rate-limit tier
+ * deliberately returns no limit at 0 hops, so a value that fails to parse —
+ * pasted with quotes, a stray word, "true" — would leave the front door
+ * unthrottled while the operator believes it is protected, and nothing would
+ * say so. Quotes and whitespace are stripped (dashboard paste artefacts);
+ * anything else non-numeric warns LOUDLY at boot and disarms, because
+ * guessing a hop count is worse than refusing one — `true` in particular is
+ * the spoofable Fastify mode this setting exists to avoid, and must never be
+ * coerced into a count.
+ *
+ * ## The unset case also warns now (#2630)
+ *
+ * #2630 found `TRUST_PROXY_HOPS` unset on the production backend: every other
+ * required piece of payment infrastructure is fail-closed
+ * (`DELEGATION_RAIL_BUNDLER_URL` throws at startup when unset), but this
+ * variable was fail-open AND silent — production had booted without it for an
+ * unknown length of time with nothing anywhere saying so. The owner decision
+ * (folded into #2630 rather than filed separately) is: stay fail-open, but
+ * stop being silent — the same `warnPublicRpc` shape #2615 established for an
+ * unset RPC endpoint, applied here. Branches on the RAW value, not the
+ * resolved one: a deliberately-configured `TRUST_PROXY_HOPS=0` is an operator
+ * choice and stays silent, exactly as a garbage value that resolves to the
+ * same 0 does NOT (it gets the louder, different, "not a non-negative
+ * integer" message below) — unset and "invalid" are distinct operator
+ * mistakes and get distinct messages.
  */
 export function parseTrustProxyHops(raw: string | undefined): number {
-  if (raw === undefined || raw.trim() === '') return 0
+  if (raw === undefined || raw.trim() === '') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'TRUST_PROXY_HOPS is not set — treating it as 0: the proxy stays UNTRUSTED and the ' +
+      'per-IP auth rate limits (signup, login, device_start, device_lookup, device_token) stay ' +
+      'DISARMED. Set TRUST_PROXY_HOPS to the number of trusted proxy hops in front of this ' +
+      'process (Railway terminates in exactly one edge proxy, so that is usually 1) to arm them.',
+    )
+    return 0
+  }
   const cleaned = raw.trim().replace(/^["']+|["']+$/g, '').trim()
   const hops = Number(cleaned)
   if (!Number.isFinite(hops) || !Number.isInteger(hops) || hops < 0) {

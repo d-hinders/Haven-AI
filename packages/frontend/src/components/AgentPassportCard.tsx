@@ -36,8 +36,6 @@ interface Props {
   agentId: string
   /** Revoked agents cannot issue — mirrors the backend's fail-closed 409. */
   agentRevoked?: boolean
-  /** Legacy Safe records remain readable, but cannot issue new attestations. */
-  canIssue?: boolean
 }
 
 function headlineBadge(
@@ -73,7 +71,7 @@ function standingBadge(standing: 'active' | 'suspended' | 'revoked' | 'unknown')
   return { label: 'Unknown', tone: 'neutral' }
 }
 
-export default function AgentPassportCard({ agentId, agentRevoked = false, canIssue = true }: Props) {
+export default function AgentPassportCard({ agentId, agentRevoked = false }: Props) {
   const { passport, standing, loading, loadError, issuing, issueError, issuePassport, refetch } = useAgentPassport(agentId)
 
   if (loading && !passport && !standing) {
@@ -119,9 +117,8 @@ export default function AgentPassportCard({ agentId, agentRevoked = false, canIs
         <div>
           <h2 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h2>
           <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-            {canIssue
-              ? 'A signed record that this agent was issued by Haven, bound to this wallet, and revocable at any time.'
-              : 'A historical signed record for this agent. It is readable here but is not an active Haven control.'}
+            A signed record that this agent was issued by Haven, bound to this wallet, and
+            revocable at any time.
           </p>
         </div>
         <StatusBadge tone={headline.tone} className="shrink-0">
@@ -198,11 +195,10 @@ export default function AgentPassportCard({ agentId, agentRevoked = false, canIs
       ) : (
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-[var(--v2-ink-2)]">
-            {canIssue
-              ? 'This agent has no passport. Issuing one is optional and does not change what it can spend.'
-              : 'This historical agent record has no passport. New passport issuance is unavailable on the retired Safe rail.'}
+            This agent has no passport. Issuing one is optional and does not change what it can
+            spend.
           </p>
-          {canIssue && !agentRevoked ? (
+          {!agentRevoked ? (
             <Button size="sm" variant="ghost" onClick={() => void issuePassport()} disabled={issuing}>
               {issuing ? 'Issuing…' : 'Issue a passport'}
             </Button>

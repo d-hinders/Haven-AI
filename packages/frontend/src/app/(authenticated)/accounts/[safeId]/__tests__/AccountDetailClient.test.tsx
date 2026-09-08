@@ -9,7 +9,6 @@ const mockUsePreferences = vi.fn()
 const mockUseContacts = vi.fn()
 const mockUseAgents = vi.fn()
 const mockUseSafeDetails = vi.fn()
-const mockUseRetiredRailOwnerAccess = vi.fn()
 const mockUsePortfolio = vi.fn()
 const mockUseBalances = vi.fn()
 const mockUseTransactionsFeed = vi.fn()
@@ -49,9 +48,9 @@ vi.mock('@/hooks/useSafeDetails', () => ({
   useSafeDetails: () => mockUseSafeDetails(),
 }))
 
-vi.mock('@/hooks/useRetiredRailOwnerAccess', () => ({
-  useRetiredRailOwnerAccess: () => mockUseRetiredRailOwnerAccess(),
-}))
+// The `useRetiredRailOwnerAccess` mock lived here; removed by #2673 with the
+// hook itself (#2413 deleted it) — it mocked a module that no longer exists,
+// so it propped nothing up.
 
 vi.mock('@/hooks/usePortfolio', () => ({
   usePortfolio: () => mockUsePortfolio(),
@@ -189,10 +188,6 @@ describe('AccountDetailClient', () => {
       },
       loading: false,
       error: null,
-    })
-    mockUseRetiredRailOwnerAccess.mockReturnValue({
-      ...mockUseSafeDetails(),
-      ownerAccess: 'unknown',
     })
     mockUsePortfolio.mockReturnValue({
       totalUsd: 42,

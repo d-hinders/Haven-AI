@@ -104,10 +104,9 @@
  * Auth: an `haven_token` + `haven_active_safe_id` are seeded in localStorage
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
- * are answered by a route-keyed POPULATED dataset (a funded account, three
- * agents on both rails, transactions, contacts, agent activity + spend
- * stats) so
- * lists, tables and amounts render realistically — that's what the
+ * are answered by a route-keyed POPULATED dataset (a funded account, two
+ * agents both on the delegation rail, transactions, contacts, agent activity +
+ * spend stats) so lists, tables and amounts render realistically — that's what the
  * design-reviewer pass judges. Anything not explicitly keyed falls back to a
  * benign empty shape — which carries every collection key the hooks read, so
  * an unkeyed endpoint degrades to "empty" instead of crashing the route
@@ -1992,9 +1991,8 @@ export const SCENARIOS = {
    * | `status` | `'paused'` | pausing is a Haven-side status flip; it neither writes nor clears `mcp_server_name` (`infra/repositories/agents.ts:472-481` — "This UPDATE never touches mcp_server_name"). |
    * | `delegate_address` | `null` | orthogonal: a pre-column legacy artefact on this agent, unrelated to the wiring label. Unchanged from the shared fixture. |
    *
-   * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` and
-   * `agent-ops` already carry recorded names, which is why they are not
-   * overridden here.
+   * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` already
+   * carries a recorded name, which is why it is not overridden here.
    */
   'mcp-name-all-recorded': {
     description:
@@ -2014,13 +2012,19 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
 
       // Wait for EVERY card, not the first: the claim is about the whole list,
-      // so a capture that raced the third card would be evidence of nothing —
+      // so a capture that raced the second card would be evidence of nothing —
       // and "no note" is exactly what a half-rendered list also looks like.
-      for (const name of ['Research agent', 'Ops agent', 'Data-feed agent']) {
+      // #2687: 'Ops agent' was in this list and is not an agent — it is a
+      // transaction's `agentName` (`:396`). `getByText(exact)` on /agents could
+      // never match it, so this loop was a guaranteed 20s timeout. Removing it
+      // does NOT make this scenario pass: it fails earlier, rendering 33 chars
+      // with no `#main-content`, measured against a warm server that captured
+      // `agents` cleanly in the same session. Tracked as #2689.
+      for (const name of ['Research agent', 'Data-feed agent']) {
         await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
       }
-      // Positive control for the absence: the three recorded names are on
-      // screen, so the list really did render its MCP row.
+      // Positive control for the absence: both recorded names are on screen,
+      // so the list really did render its MCP row.
       await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'list')
@@ -2812,83 +2816,16 @@ export const SCENARIOS = {
   // the whole point of the change is that those two renders must differ, and a
   // reviewer has to see both side by side.
   ...connectorRepairHintScenarios(),
-  'retired-rail-account': {
-    description:
-      'Account detail for a LEGACY Safe account after the rail retirement (#1989) — RetiredRailNotice present, no Send action',
-    // #1989's design review named this gap: `RetiredRailNotice` is the one
-    // surface the slice ADDS, and no existing capture can show it. Every other
-    // account fixture is `delegator_hybrid`, which by construction renders the
-    // Send button and never renders the notice — so the shared fixture proves
-    // the opposite of what this scenario is for.
-    //
-    // The ONE override is `account_type: 'safe'`, spread from the shared
-    // fixture, exactly as the legacy-account connect scenario does it. The
-    // account is otherwise identical, which is what makes the pair readable:
-    // the same account on the other rail.
-    api(apiPath) {
-      if (apiPath === '/auth/me') {
-        return {
-          ...FIXTURE_USER,
-          wallet_address: APPROVER_WALLET,
-          safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }],
-        }
-      }
-      if (apiPath === '/user/safes') {
-        return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
-      }
-      if (apiPath === '/agents') {
-        return {
-          agents: FIXTURE_AGENTS.map((agent) =>
-            agent.safe_id === FIXTURE_SAFE.id
-              ? { ...agent, account_type: 'safe', allowances: [] }
-              : agent,
-          ),
-        }
-      }
-      if (apiPath === `/safe/${FIXTURE_SAFE.safe_address}/details`) {
-        return {
-          address: FIXTURE_SAFE.safe_address,
-          owners: [APPROVER_WALLET, APPROVER_UNKNOWN],
-          threshold: 2,
-          nonce: 12,
-        }
-      }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
-        waitUntil: 'networkidle',
-        timeout: 60_000,
-      })
-      await dismissMobileSidebar(page, vp)
-
-      const main = page.locator('main')
-      await main.waitFor({ timeout: 30_000 })
-
-      // The subject.
-      await page
-        .getByText(/Haven no longer sends payments from this account/)
-        .waitFor({ timeout: 20_000 })
-
-      // The READ boundary, asserted on the render rather than argued: the
-      // account is still fully readable next to the notice. Without these the
-      // capture could be filed for a page that failed to load its data and
-      // showed the notice over skeletons.
-      await page.getByRole('heading', { name: FIXTURE_SAFE.name }).waitFor({ timeout: 20_000 })
-      await page.getByRole('button', { name: 'Receive' }).waitFor({ timeout: 20_000 })
-
-      // The negative half, and the reason this scenario is evidence at all.
-      // A notice proves a notice; it does not prove the spend affordance is
-      // gone. If a regression rendered Send ALONGSIDE the notice, every wait
-      // above would still pass and the PNG would be filed under this name.
-      await refuseIfPresent(
-        page.getByRole('button', { name: 'Send', exact: true }),
-        'retired-rail-account · Send button',
-      )
-
-      await shoot(main, 'account')
-    },
-  },
+  // The 'retired-rail-account' (#1989) scenario lived here. Removed by #2673:
+  // its subject (`RetiredRailNotice`) was deleted by #2413, and the run FAILED
+  // rather than no-oped — both viewports timed out waiting for the notice's
+  // copy ("Haven no longer sends payments from this account"), which no
+  // component renders any more (measured 2026-09-07 against dev e151b1dc).
+  // Its fixture contract in `src/__tests__/screenshot-fixture.test.ts` went
+  // with it, per the same rule the 'send-review' removal recorded there: a
+  // fixture contract for a scenario that no longer exists is a guard over the
+  // empty set. Legacy-account rendering evidence now lives only in the
+  // retired-rail-recovery scenarios, which capture REAL reachable states.
   'retired-rail-recovery': sweepRecoveryScenario(
     'Recover funds route with an eligible USDC balance and full agent/network/destination context (#2258)',
     undefined,
@@ -3237,7 +3174,8 @@ export const SCENARIOS = {
     // modal under capture changes.
     //
     // #2202: this used to DROP `account_type` rather than set it. `railOf`
-    // reads the two identically (`lib/custody-rail.ts:37-38`), so nothing
+    // read the two identically at the time (it is deleted since #2413, and
+    // `lib/custody-rail.ts` now only records its removal), so nothing
     // rendered differently — but an ABSENT `account_type` is not a state the
     // API can serve: the column is `NOT NULL DEFAULT 'safe'`
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field

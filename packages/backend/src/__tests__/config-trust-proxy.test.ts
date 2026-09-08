@@ -14,12 +14,38 @@ describe('parseTrustProxyHops (#1670)', () => {
     expect(parseTrustProxyHops('2')).toBe(2)
   })
 
-  it('unset and empty mean untrusted, with no warning — that is the default, not an error', () => {
+  it('unset and empty mean untrusted, and now WARN (#2630) — production ran silently disarmed', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(parseTrustProxyHops(undefined)).toBe(0)
     expect(parseTrustProxyHops('')).toBe(0)
     expect(parseTrustProxyHops('  ')).toBe(0)
+    expect(warn).toHaveBeenCalledTimes(3)
+    for (const call of warn.mock.calls) {
+      const message = String(call[0])
+      expect(message).toMatch(/TRUST_PROXY_HOPS is not set/)
+      expect(message).toMatch(/DISARMED/)
+    }
+    warn.mockRestore()
+  })
+
+  it('a deliberately-configured value stays SILENT even when it resolves to the same disarmed 0 (#2630)', () => {
+    // The branch keys on the RAW value, not the resolved one — an operator
+    // who explicitly wrote "0" made a choice, unlike one who wrote nothing.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseTrustProxyHops('0')).toBe(0)
+    expect(parseTrustProxyHops('"0"')).toBe(0)
     expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('MUTATION PROOF: unset and "invalid" get DIFFERENT messages, not a shared one (#2630)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    parseTrustProxyHops(undefined)
+    parseTrustProxyHops('true')
+    const [unsetMsg, invalidMsg] = warn.mock.calls.map((c) => String(c[0]))
+    expect(unsetMsg).toMatch(/TRUST_PROXY_HOPS is not set/)
+    expect(invalidMsg).toMatch(/TRUST_PROXY_HOPS is set to "true", which is not a non-negative integer/)
+    expect(unsetMsg).not.toBe(invalidMsg)
     warn.mockRestore()
   })
 

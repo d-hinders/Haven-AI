@@ -104,9 +104,10 @@ test('docs:check count: every step appears in the check-inventory table', () => 
 
 test('docs:check order: package.json runs the validators in the documented order', () => {
   // The documented teaching order; the guard pins the exact prefix so a
-  // reorder or an unaccounted sixth validator is a conscious edit, not drift.
-  // States green across the #2665 boundary: exactly the four-step pre-#2665
-  // chain, or that chain with ui-gate-wording.mjs appended as the fifth step.
+  // reorder or an unaccounted seventh validator is a conscious edit, not drift.
+  // The four-step prefix is fixed; beyond it, the ratcheting guards run in the
+  // order they were added — ui-gate-wording.mjs (#2657), then covers-gaps.mjs
+  // (#2679). A new validator is still a conscious doc+test edit (#2666).
   const prefix = [
     'validate-frontmatter.mjs',
     'validate-agent-skills.mjs',
@@ -118,8 +119,8 @@ test('docs:check order: package.json runs the validators in the documented order
   if (names.length > prefix.length) {
     assert.deepEqual(
       names.slice(prefix.length),
-      ['ui-gate-wording.mjs'],
-      'the only step allowed beyond the documented four is #2657 ui-gate-wording.mjs — a new validator is a conscious doc+test edit (see #2666)',
+      ['ui-gate-wording.mjs', 'covers-gaps.mjs'].slice(0, names.length - prefix.length),
+      'beyond the documented four, the allowed steps are #2657 ui-gate-wording.mjs then #2679 covers-gaps.mjs, in that order — a new validator is a conscious doc+test edit (see #2666)',
     )
   }
 })

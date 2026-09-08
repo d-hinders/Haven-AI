@@ -4,8 +4,9 @@ status: current
 covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
-last-verified: "2026-09-03"
+last-verified: "2026-09-08"
 verified:
+  - "2026-09-08 full-repo run appended (PARTIAL — dimension 1 and sizing only). Finding: 33 of 44 guard self-tests never run their script as a process and 13 guards keep a refusal in `main()` those tests cannot reach; approved as epic #2720 with slices #2721/#2722/#2723. The entry says plainly that block 1 was NOT a systematic mutation sweep — a per-guard harness was attempted and abandoned, and the two cited survivals come from this week's own PR work — because the conventions ask a later run to diff against recorded numbers, and a number gathered one way must not be read as gathered another. Blocks 2-7 are each marked NOT TAKEN or partial by number, per the #2501 rule that an untaken block must be distinguishable from a clean one. Two entries reworded on the `covers:` gap check's own finding against this file: it reads a path in prose as a claim about that file, so the remedy-2 rewrite names the check by behaviour and the measurement block by its npm script — a second false-positive class after the fenced-example one, noted for #2678 rather than baselined here. Body entries above unchanged."
   - "#2501 (second pass, after spec review on the issue): `covers:` gains `references/dimensions.md`, where the seven measurement blocks now live; the measurement-block bullet no longer names a `scripts/quality/` that does not exist; the wave-dimension bullet points at the reference file. Re-read in this pass: the front-matter, the Entry conventions list, and the 2026-08-19 entry's `Probed clean:` guard-mutation line (it keeps its name — block 1 is that dimension made executable). No dated entry edited; nothing appended."
   - "#2501: header only — the entry conventions gain the wave-dimension coverage bullet (`Probed clean:` names every Method § *Wave dimensions* block by number, so an untaken block is distinguishable from a clean one). No body entry re-verified; nothing appended."
   - "#1882: front-matter only — the `last-verified` chain had DROPPED `#1442`. A whole-entry silent replacement, not a compression: `be5bf280` (PR #1560, 2026-08-18) overwrote the 2026-08-14 run's entry with the 2026-08-18 run's. Restored verbatim from `be5bf280^` at the chain tail. Nothing in the body was re-verified in this pass. #1602: entry conventions added (measurement blocks `command → number`, mandatory `Probed clean:` baselines); dispositions now appended by ship-next's closeout when a scan-born epic closes."
@@ -227,3 +228,86 @@ connect-flow, #1585 Codex feedback) drained the pool.
   interim/until mentions of which 6 are the stale refs above.
 
 **Disposition: n/a** — nothing reported for decision.
+
+## 2026-09-08 — full repo (partial: dimension 1 and sizing only)
+
+**Finding: a guard's self-test exercises the functions it exports, not the path
+CI runs.** 33 of 44 guard self-tests never run their script as a process, and 13
+guards keep a refusal in `main()` that those tests cannot reach. A guard in that
+shape can lose its refusal entirely and stay green.
+
+Measured against `origin/dev` at `1671d2bf`:
+
+- guard/gate scripts →
+  `ls scripts/*.mjs scripts/ci/*.mjs scripts/docs/*.mjs | grep -v '\.test\.'` → **44**
+- self-tests that never spawn the script →
+  `grep -LE "spawnSync|execFileSync|execSync|child_process" scripts/*.test.mjs scripts/{ci,docs}/*.test.mjs | wc -l` → **33**
+- self-tests that do → same grep, `-l` → **11**
+- refusal-bearing guards whose tests cannot reach `main()` → for each
+  non-spawning test's sibling script, count
+  `process.exit(1)|process.exitCode = 1|throw new Error` after the last
+  `^export ` → **13**
+
+**Demonstrated cost — two survivals in one week, both by execution, both caught
+by review rather than CI:**
+
+- **#2690** — the `covers:` gap check's `--update` rise-refusal and its
+  legacy-format error live only in `main()`. Mutated to `if (false)`, the suite stayed **22/22 green**
+  and `docs:check` green.
+- **#2704** — `lint-migration-constraint-scope.mjs` was green under
+  `isScoped() → return true`, because the repo happened to be clean.
+
+A third, same week, is the shape a function-level test cannot see by
+construction: the reaper's host guard read `new URL(url).hostname` while `pg`
+dials the host `pg-connection-string` resolves, so `?host=prod-db` walked past
+it.
+
+**Remedy exists and is proven in-repo.** The `covers:` gap check's own
+self-test moved from the 33 to the 11 on 2026-09-08 by driving the real CLI
+against a throwaway baseline; both mutations above now redden. (Named by
+behaviour rather than by path: this check flagged the first draft of this entry
+for asserting things about tracked files a ledger's `covers:` has no business
+reaching — remedy 2, delete the claim, which is the one #2678 prefers.)
+
+**Disposition: approved 2026-09-08** — epic #2720, slices #2721 (`scripts/`, 8
+guards), #2722 (`scripts/ci/`, 3, `qa-freshness` first because it gates
+promotion), #2723 (`scripts/docs/`, 2, after checking #2678 has not taken them).
+Drive with `ship-next epic=#2720`. Becomes `shipped` when the epic closes.
+
+**Excluded this run:** the 2026-07 real-DB finding (`shipped`), the 2026-08-14
+API-contract finding (epic #1442), the 2026-08-18 outbound-lifecycle finding
+(`shipped`, epic #1554). None re-surfaced; no evidence any has worsened.
+
+**Probed clean** (dimension → command → number):
+
+- Sizing → `ls scripts/*.mjs scripts/{ci,docs}/*.mjs | wc -l` → 44 guard scripts,
+  44 `*.test.mjs` files, but 13 scripts with no sibling test at all — recorded as
+  a baseline, not reported: "add tests here" without a structural thesis is under
+  the bar.
+- block 1 **Guard falsifiability by execution** → this run's finding. NOT a
+  systematic mutation sweep: a per-guard harness was attempted and abandoned
+  (`process.exit(1)` occurs 0–3× per script, so one pattern does not fit), and
+  the two survivals cited are from this week's own PR work rather than from a
+  sample. Weaker evidence than the block asks for, and the finding says so.
+- block 2 **Contract-doc `covers:` completeness** → NOT TAKEN this run. Owned by
+  #2679, shipped 2026-09-08; baseline `npm run docs:covers-gaps` → 128 pairs
+  across 39 of 72 governed docs. (Named by npm script, not by file path — the
+  check reads a path in prose as a claim about that file and cannot tell a
+  measurement command from an assertion. Second false-positive class after the
+  fenced-`covers:`-example one it already documents; worth a line on #2678
+  rather than a baselined gap here.)
+- block 3 **Stale numbers in prose** → NOT TAKEN this run.
+- block 4 **Retired-vocabulary residue** → NOT TAKEN this run. A ratchet now
+  exists (`npm run lint:retired-rail-prose`, #2685) and is green on `dev`.
+- block 5 **Merge-method drift on `dev`** → NOT TAKEN this run.
+- block 6 **Nets with holes** → partially, and it produced a `new-task` rather
+  than an epic line: the migrations CODEOWNERS gate is configured
+  `require_code_owner_review=true` with `required_approving_review_count=0`,
+  which GitHub does not enforce. Filed as #2705, reproduced on a live PR.
+- block 7 **Chain health** → NOT TAKEN as a finding, but re-measured while
+  assessing #2681: 78 of 78 governed docs are on the one-entry-per-line list
+  after #2637 (`ae7a3563`), 0 on the old single line; chain is 508 KB /
+  76,670 words, 13.4% of all tracked Markdown bytes. Recorded because #2681's
+  body carries the pre-#2637 figures.
+- Incident clustering → NOT TAKEN as a systematic sweep this run.
+- Comment archaeology → NOT TAKEN this run.

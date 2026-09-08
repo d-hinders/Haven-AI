@@ -10,7 +10,7 @@
  * why BOTH files carry it on every run rather than one file trying to
  * orchestrate true simultaneity.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../../db.js'
 import { describeDb, initDbHarness, resetDb, WORKER_SCHEMA } from '../db-harness.js'
 
@@ -24,6 +24,14 @@ describeDb('db-harness parallel isolation (#1220)', () => {
          note TEXT
        )`,
     )
+  })
+
+  // Since #2625: db-harness.ts now auto-registers `assertWorkerSchemaAtHead()`
+  // at the root of every real-DB file, so this file's own scratch table has
+  // to go back to migration head like any other schema mutation — the
+  // cross-worker isolation proof only needs it WHILE this file's tests run.
+  afterAll(async () => {
+    await db.query('DROP TABLE IF EXISTS harness_smoke')
   })
 
   beforeEach(async () => {

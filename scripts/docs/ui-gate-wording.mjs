@@ -486,21 +486,14 @@ async function main() {
   // (#2747, review finding). Name it instead.
   let loaded
   try {
+    // The shape check this gate carried in #2747 lived here. It moved into
+    // `loadBaseline` in #2759, where it covers all six gates and one more case
+    // this one never reached: an OBJECT baseline holding a non-numeric COUNT,
+    // which `count > allowed` reads as false and so silently allows everything
+    // for that key. Proven dead before removing it rather than assumed —
+    // neutering the local check changed nothing, because `loadBaseline` throws
+    // first. An unreachable guard is a guard that cannot fail.
     loaded = loadBaseline(BASELINE_PATH)
-    // `JSON.parse` ACCEPTS `null`, `[]`, `"x"` and `3`, and none of them is a
-    // baseline. Review measured what they did: `null` reached the engine and
-    // threw a raw `TypeError` (the same defect the catch below exists to stop,
-    // one shape over), and the others read as an empty baseline — so a real
-    // baseline of 1 was silently ignored and `--update` on a clean tree
-    // overwrote the corrupt file, which is exactly the silent repair this
-    // branch claims to have removed. Fail-closed in every case, but the CLAIM
-    // was wrong, so the check is widened to match it rather than the sentence
-    // narrowed to match the check.
-    const b = loaded.baseline
-    if (b === null || typeof b !== 'object' || Array.isArray(b)) {
-      const shape = Array.isArray(b) ? 'an array' : b === null ? 'null' : typeof b
-      throw new TypeError(`expected a JSON object, got ${shape}`)
-    }
   } catch (err) {
     // The headline says "unusable" rather than "not JSON": this also catches a
     // permissions failure, where "not readable as JSON" would misdirect (N1).

@@ -151,7 +151,18 @@
         "lint:db-mocks",
         "lint:wire-types"
       ],
-      "reason": "The shared ratchet ENGINE, backing both the backend db-mock gate and the frontend wire-type gate (#1447). Routing it to one job would leave the other gate unguarded, which is the whole reason two jobs are named here."
+      "reason": "The shared ratchet ENGINE, backing SIX gates as of #2747: the backend db-mock and retired-rail-prose ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, and scripts/docs/ui-gate-wording. An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason two jobs are named here."
+    },
+    {
+      "path": "scripts/lib/ratchet.test.mjs",
+      "jobs": [
+        "backend",
+        "frontend"
+      ],
+      "runsVia": [
+        "lint:ratchet:test"
+      ],
+      "reason": "The engine's own self-test, which did not exist until #2759 — six gates imported the module and each gate's suite covered only the paths that gate happens to take, so the engine's contract was tested by nobody. Both surface jobs, mirroring the engine above: a weakening reachable from either surface must run it."
     },
     {
       "path": "scripts/lint-wire-types.mjs",

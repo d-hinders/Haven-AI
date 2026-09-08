@@ -219,3 +219,25 @@ test('CLI: a MISSING baseline file still writes -- the real first-run allowance'
   assert.equal(status, 0)
   assert.match(wrote['packages/backend/db-mock-baseline.json'], /"positional": 3/)
 })
+
+test('CLI: a baseline whose count is not a number is refused, not silently obeyed', () => {
+  // #2759, driven through a gate OTHER than the one where the defect was found,
+  // because the fix is in the shared engine and a single-gate proof would not
+  // show that.
+  //
+  // `newViolations` does `count > allowed`, and `3 > "x"` is false — so before
+  // this, the entry disabled itself and the gate reported a clean bill of
+  // health over a live violation. `hasShrunk` was false for the same reason, so
+  // not even the "residue shrank" hint fired. The read boundary now refuses it
+  // and names the file and key.
+  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SCANNED]: withMocks(3),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { positional: 'x' } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /\[positional\] is "x", not a number/)
+  assert.match(out, /packages\/backend\/src\/x\.test\.ts/)
+})

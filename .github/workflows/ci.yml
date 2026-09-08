@@ -279,6 +279,7 @@ jobs:
         run: |
           npm run lint:db-mocks
           npm run lint:db-mocks:test
+          npm run lint:ratchet:test
 
       - name: Retired-rail prose ratchet (#2685)
         # Blocking, shrink-only baseline over the retired-rail prose phrase
@@ -531,6 +532,7 @@ jobs:
         run: |
           npm run lint:wire-types
           npm run lint:wire-types:test
+          npm run lint:ratchet:test
 
       # #2318. The OWNING invocation, and the reason it is here rather than
       # only beside the pixel gate: a pull request that touches nothing but

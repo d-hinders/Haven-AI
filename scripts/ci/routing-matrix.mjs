@@ -393,15 +393,29 @@ export const ROUTING_MATRIX = [
     why: 'Generates the API types the backend spec check compares against.',
   },
   {
+    files: ['scripts/lib/ratchet.test.mjs'],
+    expect: ['code', 'backend', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'The shared engine\'s own self-test (#2759). It routes to BOTH surfaces for the same ' +
+      'reason the engine does: a weakening reachable from either one must run it. Measured, ' +
+      'not assumed — before its entry in .github/root-guard-ownership.json the classifier ' +
+      'reported every flag false for this path, so the file would have run nowhere and been ' +
+      'weakenable without running. The manifest entry IS the routing rule; this row records ' +
+      'what that produces.',
+  },
+  {
     files: ['scripts/lib/ratchet.mjs'],
     expect: ['code', 'backend', 'frontend'],
     kind: CONTRACT,
     why:
-      'The shared ratchet engine backs FIVE gates as of #2728: the backend db-mock gate, the ' +
+      'The shared ratchet engine backs SIX gates as of #2747: the backend db-mock gate, the ' +
       'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
-      'lint, and packages/frontend/scripts/design-lint.mjs — which the first draft of this ' +
-      'row missed, and which had the same missing `--update` refusal the copy lint did. All ' +
-      'five now share one `updateRefusals`. Weakening the module must run both surfaces; ' +
+      'lint, packages/frontend/scripts/design-lint.mjs — which an earlier draft of this row ' +
+      'missed, and which had the same missing `--update` refusal the copy lint did — and ' +
+      'scripts/docs/ui-gate-wording.mjs. All six share one `updateRefusals`; the count is ' +
+      'pinned by scripts/lib/ratchet.test.mjs rather than trusted, because this row has now ' +
+      'been stale twice. Weakening the module must run both surfaces; ' +
       'routing it to one would leave the other unguarded. Copy lint and design lint are ' +
       'covered regardless (frontend-copy-lint.yml is unconditional, design lint is a blocking ' +
       'frontend job), so this row understates the blast radius rather than overstating it.',

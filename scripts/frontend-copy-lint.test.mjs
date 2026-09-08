@@ -353,7 +353,7 @@ test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => 
   //
   // The branch used to be `if (update) { writeBaseline(...); return }` -- no
   // comparison at all -- so the command the failure message sends you to was
-  // the one that laundered the failure. Of the five gates on the same
+  // the one that laundered the failure. Of the five gates then on the same
   // `lib/ratchet.mjs`, three refused to raise and TWO did not -- this one and
   // `packages/frontend/scripts/design-lint.mjs`, a blocking frontend gate that
   // review found by reading the importer list rather than the issue text.

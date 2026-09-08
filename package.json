@@ -50,6 +50,7 @@
     "lint:wire-types:update": "node scripts/lint-wire-types.mjs --update",
     "lint:wire-types:test": "node --test scripts/lint-wire-types.test.mjs",
     "lint:db-mocks:test": "node --test scripts/db-mock-ratchet.test.mjs",
+    "lint:ratchet:test": "node --test scripts/lib/ratchet.test.mjs",
     "lint:deps": "node scripts/dep-lint.mjs",
     "lint:deps:test": "node --test scripts/dep-lint.test.mjs",
     "lint:runbook-parity": "node packages/cli/scripts/sync-agent-guidance.mjs --check",

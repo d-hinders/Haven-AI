@@ -52,6 +52,25 @@ export function writeBaseline(path, counts) {
   return json
 }
 
+/**
+ * The `--update` guard, as a pure function so it can be tested rather than
+ * only read: an update may TIGHTEN the baseline, never raise it. Returns the
+ * violations that block the write ([] when the write is allowed).
+ *
+ * The first-run case (no baseline yet) is deliberately allowed -- that is how
+ * the baseline gets created. It is the ONLY case in which growth is written.
+ *
+ * This lives here rather than in one gate because `--update` is the command a
+ * gate's own failure message sends you to, so a gate that omits the check
+ * turns its remedy into a laundering step (#2728). Three of the four gates had
+ * a line-for-line copy of this decision and the fourth had none at all --
+ * exactly the duplication this module's header says it exists to prevent.
+ */
+export function updateRefusals(counts, baseline) {
+  if (Object.keys(baseline).length === 0) return []
+  return newViolations(counts, baseline)
+}
+
 /** Read the baseline, or {} when none exists yet. */
 export function readBaseline(path) {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}

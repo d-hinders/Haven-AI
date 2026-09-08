@@ -290,7 +290,14 @@ export const ROUTING_MATRIX = [
     files: ['scripts/lib/ratchet.mjs'],
     expect: ['code', 'backend', 'frontend'],
     kind: CONTRACT,
-    why: 'The shared ratchet engine backs BOTH the backend db-mock gate and the frontend wire-type gate (#1447). Weakening it must run both — routing it to one would leave the other unguarded.',
+    why:
+      'The shared ratchet engine backs FOUR gates as of #2728: the backend db-mock gate, the ' +
+      'frontend wire-type gate (#1447), the retired-rail prose ratchet, and the frontend copy ' +
+      'lint — the last of which moved onto it when its hand-written `--update` branch (which ' +
+      'had no refusal at all) was replaced by the shared `updateRefusals`. Weakening the module ' +
+      'must run both surfaces; routing it to one would leave the other unguarded. The copy ' +
+      'lint is covered regardless because frontend-copy-lint.yml is unconditional, so this ' +
+      'row understates the blast radius rather than overstating it.',
   },
   {
     files: ['scripts/lint-wire-types.mjs'],

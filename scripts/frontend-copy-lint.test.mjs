@@ -348,26 +348,21 @@ test('CLI: an occurrence already in the baseline is tolerated', () => {
   assert.equal(status, 0)
 })
 
-test('CLI: HOLE — `--update` writes new banned copy in without any refusal', () => {
-  // #2728, pinned where it actually lives. This guard's three siblings on the
-  // same `lib/ratchet.mjs` all refuse to raise; this one does not compare
-  // against the baseline at all — `if (update) { writeBaseline(...); return }`.
+test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => {
+  // #2728, and this test replaces the one that pinned the hole.
   //
-  // So the command the failure message sends you to is the one that launders
-  // the failure: the plain run refuses this exact tree, and `--update` absorbs
-  // it. That matters more here than elsewhere, because this gate exists for
-  // user-facing product copy and #2246 removed two phrases from the frontend
-  // precisely because they were a disclosed compliance gap.
+  // The branch used to be `if (update) { writeBaseline(...); return }` -- no
+  // comparison at all -- so the command the failure message sends you to was
+  // the one that laundered the failure. Its three siblings on the same
+  // `lib/ratchet.mjs` had refused to raise since they were written.
   //
-  // Asserting what it DOES, not what it should. The fix and this test's
-  // replacement belong to #2728.
-  const grown = scaffold({
-    [PAGE]: copy('Haven runs a policy engine for you.'),
-    [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 0 } }),
-  })
+  // The fixture is the SAME tree the hole test used, so the two are directly
+  // comparable: exit 0 + growth written, then exit 1 + baseline untouched.
+  const before = JSON.stringify({ [PAGE]: { 'policy engine': 0 } })
+  const grown = scaffold({ [PAGE]: copy('Haven runs a policy engine for you.'), [BASE]: before })
   const shared = { also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'], files: grown }
 
-  // The plain run refuses it — so the growth is real, not a fixture artifact.
+  // The plain run refuses it -- so the growth is real, not a fixture artifact.
   assert.equal(runGuard('frontend-copy-lint.mjs', shared).status, 1)
 
   const { status, out, wrote } = runGuard('frontend-copy-lint.mjs', {
@@ -375,8 +370,48 @@ test('CLI: HOLE — `--update` writes new banned copy in without any refusal', (
     args: ['--update'],
     readBack: [BASE],
   })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  // The file and the numbers, not just the headline: a refusal that cannot say
+  // WHAT grew sends the reader back to the plain run to find out.
+  assert.match(out, /page\.tsx \[policy engine\]: 0 → 1/)
+  // "writes nothing" is checked, not claimed -- a guard that printed the
+  // refusal after writing would still have laundered the copy.
+  assert.equal(wrote[BASE], before)
+})
+
+test('CLI: `--update` DOES write when the count fell', () => {
+  // The accept half. Without it the refusal above is also satisfied by an
+  // `--update` that refuses everything, which would break the ratchet in the
+  // other direction: debt could never be tightened after a real cleanup.
+  const { status, out, wrote } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Your agents pay within the rules you set.'),
+      [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 3 } }),
+    }),
+    args: ['--update'],
+    readBack: [BASE],
+  })
   assert.equal(status, 0)
   assert.match(out, /baseline written/)
-  // And it really wrote the growth in, rather than merely exiting 0.
-  assert.match(wrote[BASE] ?? '', /"policy engine": 1/)
+  // The written file, not the console line: a `writeBaseline` resolving its
+  // path against the wrong root prints this and writes nothing.
+  assert.equal(JSON.parse(wrote[BASE])[PAGE], undefined)
+})
+
+test('CLI: `--update` on an EMPTY baseline still writes -- the first-run allowance', () => {
+  // Deliberate, and the one case in which growth is written: it is how a
+  // baseline gets created at all. Pinned so a future tightening of the refusal
+  // cannot take it away silently -- the refusal is `Object.keys(baseline)
+  // .length === 0 ? [] : newViolations(...)`, and only the first half of that
+  // is load-bearing here.
+  const { status, wrote } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({ [PAGE]: copy('Haven runs a policy engine for you.'), [BASE]: '{}' }),
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.match(wrote[BASE], /"policy engine": 1/)
 })

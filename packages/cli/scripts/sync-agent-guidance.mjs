@@ -38,8 +38,9 @@
  * resolved text, not an extractable literal, so no check here can read it
  * back. Those are covered by routing: the manifest names `frontend` as an
  * owner of the canonical source, so their own pin tests run on a change to
- * `agent-guidance.ts` (#2727). A change to `skill-content.ts` alone still does
- * not route `frontend` — see #2743.
+ * `agent-guidance.ts` (#2727) — and `skill-content.ts`, which the skill bundle
+ * is pinned to as well, carries its own manifest entry for the same reason
+ * (#2743). Routing, not this script, is what covers both.
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -98,7 +99,6 @@ export async function readCanonicalRunbook() {
 }
 
 const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
-const runbook = await readCanonicalRunbook()
 
 const header = `/**
  * The agent onboarding runbook — GENERATED, do not edit by hand.
@@ -116,6 +116,16 @@ const header = `/**
 `
 
 if (invokedDirectly) {
+  // Read INSIDE the guard, not at module scope (review nit, #2743).
+  // `readCanonicalRunbook` evaluates the SDK source through `new Function`, and
+  // scripts/ci/root-guard-ownership.test.mjs imports GENERATED_COPIES from this
+  // file. At module scope that eval ran on import, so a future `import`
+  // statement in agent-guidance.ts — anything `new Function` cannot eval —
+  // would fail the ENTIRE ci_config_checks suite with a SyntaxError pointing at
+  // a package source, far from anything the suite is about. Every use of
+  // `runbook` is in this block already, so the move costs nothing.
+  const runbook = await readCanonicalRunbook()
+
   if (process.argv.includes('--check')) {
     const drifted = []
     for (const copy of GENERATED_COPIES) {

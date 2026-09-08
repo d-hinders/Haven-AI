@@ -63,19 +63,28 @@ const PRECHECK_403 = {
   status: 403,
   data: {
     error:
-      "This x402 payment of 5.6165 USDC exceeds the agent's remaining budget for this period " +
-      '(4.6165 USDC, short by 1.00).',
+      "This x402 payment of 2.00 USDC exceeds the agent's remaining budget for this period " +
+      '(1.00 USDC, short by 1.00).',
     error_code: 'delegation_budget_exceeded',
+    phase: 'authorize',
+    next_action: 'ask_owner_to_raise_budget',
     remaining_atomic: '1000000',
     shortfall_atomic: '1000000',
+    merchant_address: MERCHANT.toLowerCase(),
   },
 }
 
-/** A within-budget authorize, offered as signable — the control this leg gained in #2738. */
+/**
+ * A within-budget authorize, offered as signable — the control this leg gained
+ * in #2738. `eip712_userop` is what the 3009 FUNDING leg returns
+ * (`delegation-authorize.ts`); erc7710 returns `eip712_delegation`. The two are
+ * distinguishable, and the leg now checks, so this fixture must carry the 3009
+ * value or the control test would be asserting the sibling's shape.
+ */
 const OFFERED = {
   ok: true,
   status: 201,
-  data: { payment_id: 'x_ok', status: 'pending_signature', sign_data: { signature_scheme: 'eip712_delegation' } },
+  data: { payment_id: 'x_ok', status: 'pending_signature', sign_data: { signature_scheme: 'eip712_userop' } },
 }
 
 /** The refusal the OLD leg was accepting as proof (#1986's retirement 410). */
@@ -123,6 +132,13 @@ function allowances(remaining: string, fromChain = true) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // `clearAllMocks` clears CALLS, not queued `mockResolvedValueOnce` values. A
+  // case that returns early on a precondition leaves its queue unconsumed, and
+  // the next case silently reads it as its own responses — measured: the
+  // restored FALLBACK case below made the signable-intent case pass on the
+  // leftovers. `mockReset` empties the queue.
+  mockAuthorizeX402.mockReset()
+  mockCreatePayment.mockReset()
   mockGetAgent.mockResolvedValue({ ok: true, status: 200, data: { delegate_address: DELEGATE } })
   mockGetAllowances.mockResolvedValue(allowances('1000000'))
 })
@@ -252,6 +268,28 @@ describe('x402-over-budget-rejected (POST /x402/authorize)', () => {
     expect(r.detail).toMatch(/control: a within-budget 3009 authorize was NOT offered/)
   })
 
+  it('FAILS when the control was dispatched to erc7710, not the 3009 funding leg', async () => {
+    // #2738, and this case exists because the guard SURVIVED its first
+    // mutation: I added the signature_scheme check and nothing reddened when I
+    // removed it again.
+    //
+    // The failure it pins is real. A dispatch regression routing a
+    // `settlementScheme: 'eip3009'` request onto the erc7710 branch passes
+    // twice over: the control gets a signable CHILD delegation, and the
+    // over-budget call hits the erc7710 pre-check on the SAME delegation, so
+    // `error_code` and `remaining_atomic` both match. The leg would report
+    // green having never touched the funding path it names.
+    mockAuthorizeX402
+      .mockResolvedValueOnce({
+        ...OFFERED,
+        data: { ...OFFERED.data, sign_data: { signature_scheme: 'eip712_delegation' } },
+      })
+      .mockResolvedValueOnce(PRECHECK_403)
+    const r = await x402OverBudgetRejected.run(ctx)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/did not select the 3009 funding leg/)
+  })
+
   it('FAILS on the rail-retirement 410 — the exact false green from 2026-08-25', async () => {
     then(RETIREMENT_410)
     const r = await x402OverBudgetRejected.run(ctx)
@@ -293,6 +331,19 @@ describe('x402-over-budget-rejected (POST /x402/authorize)', () => {
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/expected HTTP 403/)
+  })
+
+  it('FAILS rather than guessing when the budget read is a FALLBACK', async () => {
+    // Restored: this case was dropped when the leg moved to the two-call shape,
+    // and review measured the loss — deleting the scenario's
+    // `if ('error' in budget)` precondition left 18/18 green with it gone, and
+    // reddened on `dev` with it present. A leg that asks for "over budget"
+    // against a GUESSED budget is asking for an arbitrary number.
+    mockGetAllowances.mockResolvedValue(allowances('1000000', false))
+    then(PRECHECK_403)
+    const r = await x402OverBudgetRejected.run(ctx)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/FALLBACK/)
   })
 
   it('FAILS when the over-budget authorize IS turned into a signable intent', async () => {

@@ -1,9 +1,13 @@
 /**
  * #420 invariant (PRICE_EXCEEDS_MAX) on the **preferred** scheme (#2082).
  *
- * Its sibling `x402-over-budget-rejected` drives the EIP-3009 funding shape,
- * where authorize prepares a redemption and the caveat enforcer refuses during
- * gas estimation. That leg was deliberately pinned to 3009 by #2016 because on
+ * Its sibling `x402-over-budget-rejected` drives the EIP-3009 funding shape.
+ * That leg USED to reach a prepared redemption, where the caveat enforcer
+ * refused during gas estimation; since #2706 (PR #2719) the same fail-fast
+ * pre-check this file describes runs on the funding shape too, so both legs
+ * now assert a typed 403 and neither reaches the enforcer at authorize. The
+ * on-chain proof for the rail lives in `over-budget-refused`, on
+ * `POST /payments` (#2738). That leg was deliberately pinned to 3009 by #2016 because on
  * **erc7710** — the scheme #1450 made preferred — an over-budget authorize
  * returned 201 `pending_signature` WITH `sign_data` for any amount. The
  * invariant's own words were false on the path most payments take, and #2016

@@ -38,6 +38,12 @@
  * Neither half alone proves the invariant. Read them together, and do not
  * retire `over-budget-refused` without moving its enforcer assertion first.
  *
+ * What the pair does NOT restore, said plainly rather than left to be
+ * discovered: the on-chain refusal of an x402 3009 FUNDING redemption is now
+ * observed by nothing, and cannot be — after #2706 no client-side call reaches
+ * the enforcer on that path. `over-budget-refused` covers a different
+ * entrypoint on the same delegation. The coverage is gone, not relocated.
+ *
  * **erc7710 direct settlement** (`payTo` = the merchant): authorize builds a
  * settlement CHILD delegation and returns 201 `pending_signature` WITH
  * `sign_data`, for any amount. The budget is enforced when the merchant
@@ -92,11 +98,25 @@ export const x402OverBudgetRejected: Scenario = {
     // budget: without this, a backend refusing every x402 authorize — a
     // misconfigured merchant URL, a retired rail, a dead delegation — reads
     // exactly like a working enforcement.
-    const control = await api.authorizeX402({ ...shape, amount: '1000' })
+    const control = await api.authorizeX402({ ...shape, amount: '1' })
     if (!control.data.sign_data) {
       return fail(
         'control: a within-budget 3009 authorize was NOT offered as signable ' +
           `(HTTP ${control.status}: ${control.data.error ?? ''}) — a refusal below would prove nothing`,
+      )
+    }
+    // And it must have been dispatched to the FUNDING leg. The 3009 shape
+    // returns `eip712_userop`; erc7710 returns `eip712_delegation`. Without
+    // this, a dispatch regression routing this request onto the erc7710 branch
+    // passes twice over: the control gets a signable child, and the over-budget
+    // call hits the erc7710 pre-check on the SAME delegation, so the
+    // `error_code` and `remaining_atomic` both match and the leg reports green
+    // having never touched the funding path. The sibling has always carried
+    // the mirror of this guard; this leg did not (review finding, #2738).
+    if (control.data.sign_data.signature_scheme !== 'eip712_userop') {
+      return fail(
+        'control: authorize did not select the 3009 funding leg — signature_scheme was ' +
+          `${control.data.sign_data.signature_scheme}, so this leg would be asserting the erc7710 path`,
       )
     }
 

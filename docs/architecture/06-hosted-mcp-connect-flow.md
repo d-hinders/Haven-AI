@@ -19,8 +19,10 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
-last-verified: "2026-09-07"
+  - packages/backend/src/modules/x402/delegation-authorize.ts
+last-verified: "2026-09-08"
 verified:
+  - "#2738: the § *On the live delegation rail there is no middle branch* paragraph stated the pre-#2706 refusal shape as LIVE behaviour, in the present tense, in an LLM-facing architecture doc — an agent reading it waits for a `502` a healthy backend has not sent since 2026-09-08. Both x402 shapes now pre-check the live remaining budget at authorize and answer `403 delegation_budget_exceeded`; erc7710 since #2082, the EIP-3009 funding shape since #2706 (PR #2719). The fail-open carve-out is stated rather than implied, because a degraded read still reaches the enforcer and the `502` is then correct rather than a regression. Also adds the `covers:` entry for `packages/backend/src/modules/x402/delegation-authorize.ts` that this document never had — which is WHY the drift survived: #2706's doc pass corrected `04-x402-payment-sequence.md` and missed this file, and no gate could say so. Found by review of PR #2753. Scope: THAT ONE paragraph and the `covers:` line. Nothing else in this document was re-verified — not the connect flow, not the topology sections, not the hosted-MCP sequence."
   - "#2669: \"`ConnectAgentModal` shows the retired-rail notice\" re-read and EDITED — false at this commit: `ConnectAgentModal.tsx` returns 0 hits for `retired|RetiredRail|account_type` (control on the same file: `Agent`, 4 hits) and #2413 deleted the notice. The flow is unreachable for a legacy account rather than refused by one. Scope: that one sentence. A later round narrowed \"no Haven surface displays them\" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row."
   - "#2528: step 4's enumeration of what registration sends was complete when written and is not any more — it gains `run_mode`, and the step now also names the `approval_url` the response returns. An enumeration is the shape that goes stale silently: nothing fails when a field is added, the list simply stops being the list. The two claims around it were re-read and BOTH still hold verbatim — no private key or plaintext API key is registered (the new field is two literal strings), and step 5's \"the user approves with one signature and that signature is the authority\" is untouched, because `approval_url` is a link to the page where that signature happens and not a substitute for it. Scope: step 4 only. NOT re-verified: the topology sections, the tool-union list, the sweep-authorization claims, or steps 1-3 and 6."
   - "#2551: EDITED — step 3 of *Current connection flow* gains one sentence: the connector checks for an existing-agent wiring collision before generating the key, and a declined or refused run reaches neither key generation nor registration (step 4). Re-derived from `packages/connect/src/runtime.ts` on this branch (the check sits after `resolveSetup` and the slug checks, before `generateKey` and `registerSetup`). Scope: that step only; steps 1-2 and 4-6, the trust boundary, the payment and x402 sections and the tool surfaces were NOT re-verified in this pass."
@@ -202,11 +204,23 @@ sweep.
 - `amount > remaining + delegate balance` was rejected as insufficient coverage.
 
 **On the live delegation rail there is no middle branch.** An over-budget
-amount is refused outright and nothing is queued: on the EIP-3009 shape the
-redemption is estimated, so the caveat enforcer's refusal surfaces as a `502`
-with no intent row; on erc7710 authorize pre-checks the live remaining budget
-and answers `403 delegation_budget_exceeded` (#2082). The legacy rail answers
-`410` before either (#1986). No branch of any of them returns a funding hash.
+amount is refused outright and nothing is queued. **Both** x402 shapes now
+pre-check the live remaining budget at authorize and answer
+`403 delegation_budget_exceeded` — erc7710 since #2082, the EIP-3009 funding
+shape since #2706. Both pre-checks **fail open**: a degraded on-chain read
+proceeds to prepare, where the redemption is estimated and the caveat
+enforcer's refusal surfaces as a `502` with no intent row, which is also what
+`POST /payments` still does on every request. The legacy rail answers `410`
+before either (#1986). No branch of any of them returns a funding hash.
+
+This paragraph described the EIP-3009 `502` as live behaviour for two days
+after #2706 changed it. #2706's own doc pass corrected
+`04-x402-payment-sequence.md` and missed this file, and nothing bound them —
+this document had no `covers:` entry for
+`packages/backend/src/modules/x402/delegation-authorize.ts`, so `docs:check`
+had nothing to say when that file changed under it. The entry is added in the
+same pass that found the drift, which is the only reason the correction is not
+the kind that has to be made twice. Found by review of PR #2753 (#2738).
 
 **That 410 is RAIL-SCOPED, and the scope is the correction** — the banner above
 says hosted keyless x402 does not run on the LEGACY rail, not that it fails for

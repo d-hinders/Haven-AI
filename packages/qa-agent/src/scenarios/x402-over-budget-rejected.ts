@@ -18,8 +18,10 @@
  * redemption, so the budget caveat was enforced during gas estimation and an
  * over-budget call came back HTTP 502 carrying the enforcer's revert reason.
  * Since #2706 (landed as PR #2719) a typed 403 pre-check refuses BEFORE any
- * prepare, field-for-field the erc7710 body, so the enforcer never speaks on
- * this path. That is deliberate and this leg now asserts the new shape.
+ * prepare, field-for-field the erc7710 body, so on a healthy budget read the
+ * enforcer is never asked. It IS asked when the read degrades — see the
+ * fail-open note below, which is the whole reason a 502 here has two causes.
+ * That is deliberate and this leg now asserts the new shape.
  *
  * ── Where the enforcer proof went, stated rather than dropped ──────────
  *
@@ -45,9 +47,14 @@
  *
  * Gone from the SUITE, not from the system, and the difference is load-bearing:
  * the pre-check FAILS OPEN by design (#2706, inherited from #2082). A degraded
- * budget read (`fromChain: false`), a thrown one or an unparseable one all mean
- * "no usable measurement" and proceed to prepare, where the enforcer still
- * refuses with the 502. So the enforcer remains reachable on this path — only
+ * budget read means "no usable measurement" and proceeds to prepare, where the
+ * enforcer still refuses with the 502. `fromChain: false` is the whole
+ * fall-through set in practice: `readRemainingBudget` catches client
+ * construction, the environment lookup, the `delegation_json` parse and the
+ * enforcer call in ONE try, so an unparseable delegation, a missing period
+ * caveat and an unsupported chain all collapse into it. (`delegation-authorize`
+ * also wraps the call in a try, but the reader never throws — that catch is
+ * defensive only, and this note says so rather than implying a second path.) So the enforcer remains reachable on this path — only
  * when the read degrades, which is why this leg asserts 403 and why a 502 here
  * has two causes, not one. An earlier draft of this note said no client-side
  * call reaches the enforcer at all; that was false, and
@@ -80,9 +87,19 @@ export const x402OverBudgetRejected: Scenario = {
   // claim an operator reads next to a green row. It said "refused by the
   // on-chain caveat enforcer" until #2738: three passes rewrote every prose
   // site and left the string the tool actually publishes.
+  //
+  // Deliberately says nothing about WHERE the refusal happens. A run-report
+  // invariant is a claim about the SYSTEM, and the mechanism is not stable:
+  // it was the enforcer until #2706, is the pre-check on a healthy read, and
+  // is the enforcer again when that read degrades. Naming a mechanism here is
+  // how this string went stale the first time. The sibling
+  // `x402-erc7710-over-budget-rejected` has stayed mechanism-agnostic for the
+  // same reason; the assertions below carry the mechanism, where a change
+  // reddens them instead of quietly publishing a false row.
   invariant:
-    'An x402 priced call above the agent budget is refused at the budget pre-check on the ' +
-    'EIP-3009 funding leg, before any prepare and never turned into a signable intent.',
+    'An x402 priced call above the agent budget is refused on the EIP-3009 funding leg, ' +
+    'never turned into a signable intent — while a within-budget call on the same shape is ' +
+    'still offered.',
   async run(ctx: ScenarioContext) {
     if (!ctx.cfg.delegationAgentApiKey) {
       return skip('QA_DELEGATION_AGENT_API_KEY not set — the x402 budget check lives on the delegation rail since #2016')

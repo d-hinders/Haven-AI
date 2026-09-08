@@ -30,6 +30,10 @@ vi.mock('../lib/haven-api.js', () => ({
 const { overBudgetRefused } = await import('./over-budget-refused.js')
 const { x402OverBudgetRejected } = await import('./x402-over-budget-rejected.js')
 
+// Mirrors the scenario's own constants, so the fixture's `asset`/`network`
+// are the values a real run would carry rather than plausible-looking ones.
+const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+const NETWORK = 'eip155:84532'
 const DELEGATE = '0x' + 'a3'.repeat(20)
 const MERCHANT = '0x' + 'cc'.repeat(20)
 
@@ -76,10 +80,17 @@ const PRECHECK_403 = {
     phase: 'insufficient_funds',
     next_action: 'fund_safe_or_raise_allowance',
     rail: 'x402',
+    chain_id: 84532,
+    token: 'USDC',
+    asset: USDC,
+    network: NETWORK,
+    amount: '2.00',
+    amount_atomic: '2000000',
     remaining: '1.00',
     remaining_atomic: '1000000',
     shortfall: '1.00',
     shortfall_atomic: '1000000',
+    resource_url: 'https://example.test/resource',
     merchant_address: MERCHANT.toLowerCase(),
   },
 }
@@ -334,13 +345,19 @@ describe('x402-over-budget-rejected (POST /x402/authorize)', () => {
   it('FAILS on the pre-#2719 enforcer 502 — the pre-check no longer runs', async () => {
     // Deliberately red. Since #2706 the refusal happens BEFORE prepare, so a
     // 502 carrying the enforcer's revert reason means the pre-check was
-    // bypassed or deleted and the call reached gas estimation after all. The
-    // enforcer's own guarantee is not lost: `over-budget-refused` still drives
-    // the chain path and still asserts the revert reason.
+    // bypassed, deleted, OR failed open on a degraded budget read — all three
+    // reach gas estimation, and only the first two are regressions. The leg's
+    // own failure text names both causes for exactly that reason. The
+    // enforcer's own guarantee is not lost either way: `over-budget-refused`
+    // still drives the chain path and still asserts the revert reason.
     then(ENFORCER_502)
     const r = await x402OverBudgetRejected.run(ctx)
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/expected HTTP 403/)
+    // The two-cause suffix, pinned rather than trusted: it exists so a flapping
+    // RPC is not triaged as a deleted pre-check, and an unpinned message is how
+    // this leg's `invariant:` string went stale in the first place.
+    expect(r.detail).toMatch(/failed OPEN to prepare/)
   })
 
   it('FAILS rather than guessing when the budget read is a FALLBACK', async () => {

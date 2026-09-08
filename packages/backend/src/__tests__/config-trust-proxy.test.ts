@@ -28,12 +28,30 @@ describe('parseTrustProxyHops (#1670)', () => {
     warn.mockRestore()
   })
 
-  it('a deliberately-configured value stays SILENT even when it resolves to the same disarmed 0 (#2630)', () => {
-    // The branch keys on the RAW value, not the resolved one — an operator
-    // who explicitly wrote "0" made a choice, unlike one who wrote nothing.
+  it('explicitly-set 0 now WARNS too, with its OWN message (#2667) — the disarmed state is the hazard, not a spelling', () => {
+    // Inverted from #2630's silence pin: the tier returns NO limit at 0 hops
+    // (middleware/rate-limit.ts), so "the operator chose 0" is not a
+    // configuration to respect — there is no deployment where it is the
+    // intended posture. Both raw spellings resolve to 0 and both warn.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(parseTrustProxyHops('0')).toBe(0)
     expect(parseTrustProxyHops('"0"')).toBe(0)
+    expect(warn).toHaveBeenCalledTimes(2)
+    for (const call of warn.mock.calls) {
+      const message = String(call[0])
+      expect(message).toMatch(/explicitly set to/)
+      expect(message).toMatch(/resolves to 0/)
+      expect(message).toMatch(/DISARMED/)
+    }
+    warn.mockRestore()
+  })
+
+  it('a deliberately-configured NON-zero value stays SILENT — the #2630 convention survives #2667', () => {
+    // #2667 narrows the silence convention to values that CONFIGURE the tier.
+    // 1 and 2 do; they stay quiet, exactly as #2630 pinned.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseTrustProxyHops('1')).toBe(1)
+    expect(parseTrustProxyHops('2')).toBe(2)
     expect(warn).not.toHaveBeenCalled()
     warn.mockRestore()
   })
@@ -46,6 +64,41 @@ describe('parseTrustProxyHops (#1670)', () => {
     expect(unsetMsg).toMatch(/TRUST_PROXY_HOPS is not set/)
     expect(invalidMsg).toMatch(/TRUST_PROXY_HOPS is set to "true", which is not a non-negative integer/)
     expect(unsetMsg).not.toBe(invalidMsg)
+    warn.mockRestore()
+  })
+
+  it('MUTATION PROOF: all three disarmed spellings get THREE DIFFERENT messages (#2667)', () => {
+    // Unset / explicitly-0 / garbage are three distinct operator situations
+    // with three distinct remedies. The proof is PAIRWISE: every message
+    // matches its own sentinel fragments and none matches a sibling's, so
+    // merging any two messages into one — or pointing the explicit-0 branch at
+    // either neighbour's string — reddens exactly this test.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    parseTrustProxyHops(undefined)
+    parseTrustProxyHops('0')
+    parseTrustProxyHops('"0"')
+    parseTrustProxyHops('true')
+    const messages = warn.mock.calls.map((c) => String(c[0]))
+    expect(messages).toHaveLength(4)
+    const [unsetMsg, zeroMsg0, zeroMsgQuoted, invalidMsg] = messages
+    // Own-sentinel matches: each message names its own situation. The quoted
+    // spelling embeds JSON.stringify('"0"') = "\"0\"" (the serializer escapes
+    // the inner quotes), so it is matched by substring, not regex.
+    expect(unsetMsg).toMatch(/TRUST_PROXY_HOPS is not set/)
+    expect(zeroMsg0).toMatch(/explicitly set to "0", which resolves to 0/)
+    expect(zeroMsgQuoted).toContain('\\"0\\"')
+    expect(zeroMsgQuoted).toMatch(/which resolves to 0/)
+    expect(invalidMsg).toMatch(/is set to "true", which is not a non-negative integer/)
+    // Pairwise: no message carries a sibling's sentinel.
+    expect(zeroMsg0).not.toMatch(/not set/)
+    expect(zeroMsgQuoted).not.toMatch(/not set/)
+    expect(unsetMsg).not.toMatch(/explicitly set to/)
+    expect(invalidMsg).not.toMatch(/explicitly set to/)
+    expect(unsetMsg).not.toMatch(/not a non-negative integer/)
+    expect(zeroMsg0).not.toMatch(/not a non-negative integer/)
+    expect(zeroMsgQuoted).not.toMatch(/not a non-negative integer/)
+    // And the two zero spellings differ only in what the operator actually wrote.
+    expect(zeroMsg0).not.toBe(zeroMsgQuoted)
     warn.mockRestore()
   })
 

@@ -142,3 +142,72 @@ test('--update allows a shrink, and allows the very first write', () => {
   assert.deepEqual(updateRefusals({}, baseline), [])
   assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}), [])
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The cases above test the detection. The refusals — growth past the baseline,
+// and `--update` declining to RAISE it — live in `main()` and no exported
+// function reaches them. That is the shape that survived mutation with a green
+// suite elsewhere in this repo (#2690).
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const HOOK = 'packages/frontend/src/hooks/useThing.ts'
+const snake = (n) =>
+  `export type T = {\n` + Array.from({ length: n }, (_, i) => `  api_key_${i}: string`).join('\n') + `\n}\n`
+
+test('CLI: growth past the baseline exits non-zero and names the file', () => {
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: { [HOOK]: snake(3), 'packages/frontend/wire-type-baseline.json': '{}' },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /hand-written wire shapes grew/)
+  assert.match(out, /useThing\.ts/)
+})
+
+test('CLI: a tree with no hand-written shapes exits 0', () => {
+  // The control. A refusal test alone passes against a guard that refuses
+  // everything.
+  const { status } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      'packages/frontend/src/hooks/useThing.ts': 'export type T = { camelCase: string }\n',
+      'packages/frontend/wire-type-baseline.json': '{}',
+    },
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [HOOK]: snake(3),
+      'packages/frontend/wire-type-baseline.json': JSON.stringify({ [HOOK]: { PrepareResponse: 1 } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+})
+
+test('CLI: HOLE — `--update` accepts a brand-new file with any count', () => {
+  // Pinning what the guard DOES, not what it should do. The plain run refuses
+  // this exact tree ("hand-written wire shapes grew"), but `--update` — the
+  // command the failure message tells you to run — writes it in silently. So
+  // the ratchet is shrink-only per existing ENTRY and not per corpus: new debt
+  // in a new file enters without a refusal.
+  //
+  // Found by driving the CLI, which is this slice's whole point: no exported
+  // function reaches this asymmetry. Shared by every ratchet on
+  // `lib/ratchet.mjs` — measured on db-mock, wire-types and retired-rail-prose.
+  // Filed separately; not fixed here, because #2721's scope is the tests.
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: { [HOOK]: snake(3), 'packages/frontend/wire-type-baseline.json': '{}' },
+  })
+  assert.equal(status, 0)
+  assert.match(out, /baseline written/)
+})

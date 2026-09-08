@@ -273,3 +273,77 @@ test('the REAL src/lib tree has no unscanned prose-shaped file', async () => {
     `add these to SCAN_FILES (or CONVENTION_EXEMPT with a reason): ${gaps.join(', ')}`,
   )
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The cases above test the term matching and the escape handling. The refusal
+// — new banned copy beyond the ratcheting baseline — lives in `main()`, and no
+// exported function reaches it. That is the line deciding whether a pull
+// request lands, and the shape that survived mutation elsewhere with a green
+// suite (#2690).
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const PAGE = 'packages/frontend/src/app/page.tsx'
+const BASE = 'packages/frontend/copy-lint-baseline.json'
+const copy = (text) => `export default function P() {\n  return <p>${text}</p>\n}\n`
+
+// Both SCAN_DIRS must contain something: the guard REFUSES a scan directory
+// that matches no files ("repoint it, do not leave it matching nothing"), which
+// is its own positive control against a lint quietly reporting on an empty set.
+// A fixture supplying only `app/` trips that refusal and would have looked like
+// the copy rule firing.
+const OTHER = 'packages/frontend/src/components/Thing.tsx'
+
+// The guard carries THREE self-checks that fire before any copy rule, and each
+// one caught a draft of this fixture: a SCAN_DIRS entry matching no files, a
+// SCAN_FILES allowlist entry that does not exist, and (below) the baseline.
+// They are the guard's own positive controls — it refuses to report on a set it
+// could not actually read — so the fixture has to satisfy them before the rule
+// under test is even reached. `SCAN_FILES` is imported rather than restated, so
+// this scaffold cannot drift from the allowlist it exists to satisfy.
+const allowlisted = Object.fromEntries(
+  SCAN_FILES.map((rel) => [rel, 'export const x = 1\n']),
+)
+const scaffold = (files) => ({
+  ...allowlisted,
+  [OTHER]: copy('Nothing to see.'),
+  ...files,
+})
+
+test('CLI: a new banned term beyond the baseline exits non-zero and names it', () => {
+  const { status, out } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({ [PAGE]: copy('Haven runs a policy engine for you.'), [BASE]: '{}' }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /NEW banned product-copy terms/)
+  assert.match(out, /policy engine/)
+  // The file AND the position: a message naming only the term sends the
+  // reader searching the whole tree for it.
+  assert.match(out, /page\.tsx:\d+:\d+/)
+})
+
+test('CLI: copy with no banned term exits 0', () => {
+  // The control. Without it the case above passes against a lint that
+  // refuses everything.
+  const { status } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({ [PAGE]: copy('Your agents pay within the rules you set.'), [BASE]: '{}' }),
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: an occurrence already in the baseline is tolerated', () => {
+  // The ratchet half: this lint is shrink-only, so an existing occurrence must
+  // NOT fail the build. A refusal test alone cannot tell a working ratchet
+  // from a lint that fires on every hit.
+  const { status } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Haven runs a policy engine for you.'),
+      [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 1 } }),
+    }),
+  })
+  assert.equal(status, 0)
+})

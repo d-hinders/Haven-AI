@@ -106,3 +106,71 @@ test('no phantom baseline entries — every entry names a file the scan still co
       'iterates the baseline). Run: node scripts/db-mock-ratchet.mjs --update',
   )
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The cases above test the counting and the ratchet arithmetic. Neither
+// reaches `main()`, where this guard's two refusals live: growth past the
+// baseline, and `--update` declining to RAISE it. Those are the lines that
+// decide whether a pull request lands, and the exact shape that survived
+// mutation elsewhere in this repo with a green suite (#2690).
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const SCANNED = 'packages/backend/src/x.test.ts'
+const withMocks = (n) =>
+  `vi.mock('../db.js')\n` + Array.from({ length: n }, () => 'mockResolvedValueOnce()').join('\n')
+
+test('CLI: growth past the baseline exits non-zero and names the file', () => {
+  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SCANNED]: withMocks(3),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /positional DB mocking grew/)
+  assert.match(out, /x\.test\.ts/)
+})
+
+test('CLI: a tree at or under the baseline exits 0', () => {
+  // The control: without it the case above passes against a ratchet that
+  // refuses everything.
+  const { status } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SCANNED]: withMocks(1),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } }),
+    },
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => {
+  // A shrink-only ratchet whose `--update` quietly accepts growth is not a
+  // ratchet. This refusal lives only in `main()`.
+  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [SCANNED]: withMocks(3),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 1 } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+})
+
+test('CLI: `--update` DOES write when the count fell', () => {
+  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [SCANNED]: withMocks(1),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { 'db-mock': 1, positional: 5 } }),
+    },
+  })
+  assert.equal(status, 0)
+  assert.match(out, /baseline written/)
+})

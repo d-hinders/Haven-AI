@@ -6,7 +6,7 @@ covers:
   - .agents/skills/quality-scan/references/dimensions.md
 last-verified: "2026-09-08"
 verified:
-  - "2026-09-08 full-repo run appended (PARTIAL — dimension 1 and sizing only). Finding: 33 of 44 guard self-tests never run their script as a process and 13 guards keep a refusal in `main()` those tests cannot reach; approved as epic #2720 with slices #2721/#2722/#2723. The entry says plainly that block 1 was NOT a systematic mutation sweep — a per-guard harness was attempted and abandoned, and the two cited survivals come from this week's own PR work — because the conventions ask a later run to diff against recorded numbers, and a number gathered one way must not be read as gathered another. Blocks 2-7 are each marked NOT TAKEN or partial by number, per the #2501 rule that an untaken block must be distinguishable from a clean one. Two entries reworded on the `covers:` gap check's own finding against this file: it reads a path in prose as a claim about that file, so the remedy-2 rewrite names the check by behaviour and the measurement block by its npm script — a second false-positive class after the fenced-example one, noted for #2678 rather than baselined here. Body entries above unchanged."
+  - "2026-09-08 full-repo run appended (PARTIAL — dimension 1 and sizing only). Finding: 33 of 44 guard self-tests never run their script as a process and 13 guards keep a refusal in `main()` those tests cannot reach; approved as epic #2720 with slices #2721/#2722/#2723. The entry says plainly that block 1 was NOT a systematic mutation sweep — a per-guard harness was attempted and abandoned, and the two cited survivals come from this week's own PR work — because the conventions ask a later run to diff against recorded numbers, and a number gathered one way must not be read as gathered another. Blocks 2-7 are each marked NOT TAKEN or partial by number, per the #2501 rule that an untaken block must be distinguishable from a clean one. Two entries reworded on the `covers:` gap check's own finding against this file: it reads a path in prose as a claim about that file, so the remedy-2 rewrite names the check by behaviour and the measurement block by its npm script — a second false-positive class after the fenced-example one, noted for #2678 rather than baselined here. Body entries above unchanged. Corrected 2026-09-08 after review, in this same pass rather than as a second entry: three figures did not survive re-derivation. (1) The chain-size line named the wrong denominator --- 13.4% was measured against `docs/**` + root, not against all tracked Markdown (which excludes ~560 KB under `packages/**` and `.agents/**`) --- and it was the ONE figure in the entry with no command beside it, which is what let it through; re-measured with a recorded instrument to 511 KB / 77,142 words, 12.1%. (2) The recorded non-spawning grep was blind to the very remedy it baselines: the fix PRs route spawns through a shared `guard-cli.mjs` helper, so at `940834f5` --- dev with ten of thirteen guards already remediated --- the narrow pattern still reads 33, unmoved, while the pattern following the helper reads 23. `|guard-cli` added, with that measurement recorded beside it. (3) The sizing command printed 88 (guards AND tests) for a stated 44; the filtered form used four lines above now appears here too. Also appended, per the append-only rule rather than by editing: the 2026-09-08 disposition for slices #2721/#2723 merging, and the disposition line the 2026-08-14 finding has been owed since epic #1442 closed on 2026-08-15. Nothing else in the body was re-verified in this pass."
   - "#2501 (second pass, after spec review on the issue): `covers:` gains `references/dimensions.md`, where the seven measurement blocks now live; the measurement-block bullet no longer names a `scripts/quality/` that does not exist; the wave-dimension bullet points at the reference file. Re-read in this pass: the front-matter, the Entry conventions list, and the 2026-08-19 entry's `Probed clean:` guard-mutation line (it keeps its name — block 1 is that dimension made executable). No dated entry edited; nothing appended."
   - "#2501: header only — the entry conventions gain the wave-dimension coverage bullet (`Probed clean:` names every Method § *Wave dimensions* block by number, so an untaken block is distinguishable from a clean one). No body entry re-verified; nothing appended."
   - "#1882: front-matter only — the `last-verified` chain had DROPPED `#1442`. A whole-entry silent replacement, not a compression: `be5bf280` (PR #1560, 2026-08-18) overwrote the 2026-08-14 run's entry with the 2026-08-18 run's. Restored verbatim from `be5bf280^` at the chain tail. Nothing in the body was re-verified in this pass. #1602: entry conventions added (measurement blocks `command → number`, mandatory `Probed clean:` baselines); dispositions now appended by ship-next's closeout when a scan-born epic closes."
@@ -110,6 +110,11 @@ the boundaries.**
 **Disposition: approved by the owner 2026-08-14 → epic #1442** (backlog; no
 `code-quality` label yet, so the loop will not pick the slices up until queued).
 Becomes `shipped` when the epic closes.
+
+**2026-09-08:** epic #1442 CLOSED 2026-08-15, so this finding is `shipped`. The
+line was owed on the day the epic closed and is 24 days late — recorded here
+rather than by editing the line above, per the append-only rule. Found by the
+review of the 2026-09-08 entry, which is the pass that re-read this section.
 
 **Excluded this run:** the 2026-07 real-DB finding — its ratchet reads 62
 mocks / 465 calls against the 1,059 recorded above, i.e. materially improved,
@@ -241,8 +246,19 @@ Measured against `origin/dev` at `1671d2bf`:
 - guard/gate scripts →
   `ls scripts/*.mjs scripts/ci/*.mjs scripts/docs/*.mjs | grep -v '\.test\.'` → **44**
 - self-tests that never spawn the script →
-  `grep -LE "spawnSync|execFileSync|execSync|child_process" scripts/*.test.mjs scripts/{ci,docs}/*.test.mjs | wc -l` → **33**
+  `grep -LE "spawnSync|execFileSync|execSync|child_process|guard-cli" scripts/*.test.mjs scripts/{ci,docs}/*.test.mjs | wc -l` → **33**
 - self-tests that do → same grep, `-l` → **11**
+
+  > **The `|guard-cli` term is not optional, and it was missing from the first
+  > draft of this line.** The remedy PRs route their spawns through a shared
+  > helper (`scripts/test-support/guard-cli.mjs`, #2721) rather than calling
+  > `spawnSync` in each test, and the narrower pattern does not follow it. So a
+  > future run re-running the recorded command verbatim reads the epic as having
+  > shipped nothing. Measured at `940834f5` — dev with #2739 and #2740 already
+  > merged, i.e. ten of the thirteen guards remediated: the narrow pattern still
+  > says **33**, unmoved, while the pattern above says **23**. This is the
+  > instrument counting itself: the number a ledger records is only a baseline
+  > if the command that produced it can still see the thing it measured.
 - refusal-bearing guards whose tests cannot reach `main()` → for each
   non-spawning test's sibling script, count
   `process.exit(1)|process.exitCode = 1|throw new Error` after the last
@@ -274,13 +290,18 @@ guards), #2722 (`scripts/ci/`, 3, `qa-freshness` first because it gates
 promotion), #2723 (`scripts/docs/`, 2, after checking #2678 has not taken them).
 Drive with `ship-next epic=#2720`. Becomes `shipped` when the epic closes.
 
+**2026-09-08 (later the same day):** slices #2721 (PR #2739, eight guards under
+`scripts/`, plus the shared `scripts/test-support/guard-cli.mjs` harness) and
+#2723 (PR #2740, `scripts/docs/`) MERGED. #2722 (`scripts/ci/`) remains, and
+the epic stays open. Appended rather than edited, per the convention above.
+
 **Excluded this run:** the 2026-07 real-DB finding (`shipped`), the 2026-08-14
 API-contract finding (epic #1442), the 2026-08-18 outbound-lifecycle finding
 (`shipped`, epic #1554). None re-surfaced; no evidence any has worsened.
 
 **Probed clean** (dimension → command → number):
 
-- Sizing → `ls scripts/*.mjs scripts/{ci,docs}/*.mjs | wc -l` → 44 guard scripts,
+- Sizing → `ls scripts/*.mjs scripts/{ci,docs}/*.mjs | grep -v '\.test\.' | wc -l` → 44 guard scripts,
   44 `*.test.mjs` files, but 13 scripts with no sibling test at all — recorded as
   a baseline, not reported: "add tests here" without a structural thesis is under
   the bar.
@@ -306,8 +327,19 @@ API-contract finding (epic #1442), the 2026-08-18 outbound-lifecycle finding
   which GitHub does not enforce. Filed as #2705, reproduced on a live PR.
 - block 7 **Chain health** → NOT TAKEN as a finding, but re-measured while
   assessing #2681: 78 of 78 governed docs are on the one-entry-per-line list
-  after #2637 (`ae7a3563`), 0 on the old single line; chain is 508 KB /
-  76,670 words, 13.4% of all tracked Markdown bytes. Recorded because #2681's
-  body carries the pre-#2637 figures.
+  after #2637 (`ae7a3563`), 0 on the old single line; chain is 511 KB /
+  77,142 words at `1671d2bf` — **12.1% of all tracked Markdown bytes**, or
+  13.5% counting only `docs/**` plus the root gravity files. Recorded because
+  #2681's body carries the pre-#2637 figures.
+  The first draft of this line said `508 KB / 76,670 words, 13.4% of all
+  tracked Markdown bytes`, which was the only figure in this entry with no
+  command beside it — and review could not reproduce it. 13.4% was real but
+  measured against `docs/**` + root, not against all tracked Markdown, which
+  excludes ~560 KB under `packages/**` and `.agents/**`. Corrected against a
+  recorded instrument: sum each doc's `verified:` block from the ref's own
+  blobs (`git ls-tree -r --name-only <ref>` → for each `*.md`, the lines from
+  `verified:` to the end of the front-matter) and divide by the byte sum of the
+  same file list. A size figure quoted without its denominator is not a
+  measurement, and this block deliberately retired size as a finding.
 - Incident clustering → NOT TAKEN as a systematic sweep this run.
 - Comment archaeology → NOT TAKEN this run.

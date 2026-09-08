@@ -652,7 +652,10 @@ gap this check exists to close, one pass over.
 
 Route the merge:
 
-- **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
+- **Direct migration implementation (`db/migrations/*.ts`):** leave the pull request
+  for independent code-owner approval and merge (`.github/CODEOWNERS`). The
+  author's own approval does not satisfy it; migration tests under `__tests__/`
+  do not need code-owner approval.
 - **Frontend UI:** a **`blocking`** or **`should-fix`** UX, copy, or design-system
   finding from either review pass pauses auto-merge; a **`nit`** does not (#2636 — fix
   it in place when it is a one-line change, else file it with its screenshot). Severity

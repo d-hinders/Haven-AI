@@ -1,10 +1,12 @@
 // Regression guard for the narrow irreversible-schema CODEOWNERS rule (#2698).
 //
 // GitHub, not this test, is the authority that evaluates CODEOWNERS patterns.
-// The required live positive/negative PR evidence for #2698 verifies that
-// behavior before this change merges. This guard deliberately pins the reviewed rule so a future broad
-// directory pattern or a removed rule cannot silently reintroduce the false
-// positive (or remove protection for real migration implementations).
+// This exact-text guard is the pre-merge control. #2698 requires real
+// `dev`-base positive and negative PR probes after the rule merges, because
+// GitHub evaluates CODEOWNERS from the pull request's base branch. This guard
+// deliberately pins the reviewed rule so a future broad directory pattern or a
+// removed rule cannot silently reintroduce the false positive (or remove
+// protection for real migration implementations).
 //
 // Run with: node --test scripts/ci/codeowners.test.mjs
 // (also collected by the ci_config_checks job's scripts/ci/*.test.mjs glob)

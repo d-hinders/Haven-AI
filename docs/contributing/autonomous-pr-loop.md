@@ -10,8 +10,9 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-09-07"
+last-verified: "2026-09-08"
 verified:
+  - "#2698: the money-path safety model, migration-review guidance, ruleset inventory, and loop constraints re-read — CODEOWNERS now gates direct migration implementation `.ts` files only, excluding `__tests__/`. No other claim re-verified."
   - "#2636: EDITED, scope = ONE bullet in § *Reviewer-gated auto-merge* — the frontend addition said a UI finding \"even a nit-level one\" pauses the loop, which #2636 makes false; it now names `blocking`/`should-fix` as the pausing severities and points at the playbook for the table rather than restating it. Found by a repo-wide sweep for the blanket-pause wording, not by the issue's file list, which did not name this file: leaving it would have left two contradicting merge rules. #1968's clearing rule in the same bullet is unchanged and was re-read. Scope: that ONE bullet. NOT re-verified: the ruleset inventory, the money-path safety model, the flake signatures, or the verdict-line bullet below it."
   - "#2633: § *One-time GitHub setup*, step 3 (the ruleset inventory) REWRITTEN against the live API after epic #2632's owner steps O1/O2 landed on 2026-09-07 — three active rulesets now, not two: a new `dev`-only \"Dev merge\" (22449193) pins `dev` to squash, \"Haven automerge rules\" (18021461) dropped the up-to-date policy and *Design visual regression*, and \"Dev gate\" (18134280) gained *Design visual regression* and *Frontend browser smoke*. Adds the union/intersection composition rule, an effective-per-branch table (`dev` 15 contexts / not strict / squash only; `main` 19 / strict / merge commit only) and a paragraph on what strict-off does and does not change (`BEHIND` mergeable, `DIRTY` still blocking, no revert of intervening commits, semantic conflicts surfacing on the push-to-`dev` run). Verified with `for id in $(gh api repos/d-hinders/Haven-AI/rulesets --jq '.[].id'); do gh api .../rulesets/$id; done` plus `rules/branches/{dev,main}`; two counts in the first draft were wrong against that output (`main` carries two pull-request rules, not three) and are corrected from it. Scope: ONLY step 3. NOT re-verified: the money-path safety model, § *Merge policy A*, the flake signatures, or the operator-verify/closing-keyword paragraphs."
   - "#2499: the `haven-doc-reviewer` bullet in the agent list re-read against `.agents/skills/haven-agent-workflow/references/doc-reviewer.md` as rewritten in the same PR and EDITED by one clause: it conditioned the pass on the diff touching `covers:`-mapped code. The role derives its scope from the diff's claims and the `covers:`-implicated set is the floor. Scope: that ONE bullet; nothing else in this file was re-verified in this pass."
@@ -224,9 +225,10 @@ PR go through before handing it the whole queue.
   (#1024). The label still selects `money.md` and its characterization-test
   bar; it no longer pauses the merge. See "Money-path safety model" below for
   what replaced the pause, **and for what that replacement does not cover**.
-- A **DB-migration** PR (`db/migrations/`) additionally needs an **independent
-  code-owner approval in GitHub** — it's the one class still hard-gated by
-  `.github/CODEOWNERS` (migrations are irreversible in prod).
+- A PR changing a **direct migration implementation file**
+  (`db/migrations/*.ts`) additionally needs an **independent code-owner approval
+  in GitHub** — it's the one class still hard-gated by `.github/CODEOWNERS`
+  (migrations are irreversible in prod; `__tests__/` is not a schema change).
 - Auto-merge does not bypass anything: GitHub still requires all configured
   status checks. If CI fails, the merge simply doesn't happen.
 
@@ -235,9 +237,11 @@ PR go through before handing it the whole queue.
 Two gates, both **automatic** and both applying to every PR however it was
 opened ([#1024](https://github.com/d-hinders/Haven-AI/issues/1024)):
 
-1. **`.github/CODEOWNERS`** on `/packages/backend/src/db/migrations/` — an
-   irreversible schema change needs an approval from a collaborator **other than
-   the author** (GitHub's self-approval rule). This is the one hard human gate.
+1. **`.github/CODEOWNERS`** on direct migration implementation files
+   (`/packages/backend/src/db/migrations/*.ts`) — an irreversible schema change
+   needs an approval from a collaborator **other than the author** (GitHub's
+   self-approval rule). Migration tests under `__tests__/` are not production
+   schema changes and are outside this gate. This is the one hard human gate.
 2. **Money-flow QA freshness** (`dev-gate.yml` → the `qa-freshness` job) — a
    `dev → main` promotion is refused unless a green `qa-dev` run exists on `dev`
    inside `QA_FRESHNESS_HOURS` (default 30h).
@@ -392,8 +396,8 @@ longer blocks the merge on a human saying yes.
 
 ## Reviewing a migration PR (for code owners)
 
-DB-migration PRs are the only ones GitHub will request a code-owner review on.
-If you're asked to review one:
+PRs changing direct migration implementation files are the only ones GitHub will
+request a code-owner review on. If you're asked to review one:
 - It has already passed CI **and** haven-reviewer — your review is the human
   circuit-breaker for an irreversible schema change.
 - Confirm the migration is **additive / reversible-in-practice** (no destructive
@@ -529,11 +533,13 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
        at which "nothing untested reaches prod" is enforced.
    - **Required approvals: 0** at the repo level — this is the hands-off lever.
      Your safety comes from CI + haven-reviewer + the automatic `qa-freshness`
-     promotion gate, plus the code-owner gate below for migrations.
+     promotion gate, plus the code-owner gate below for direct migration
+     implementation files.
    - ☑ **Require review from Code Owners** — keep this on. With the current
-     `.github/CODEOWNERS` it bites only **DB migrations** (the one hard-gated
-     class); every other path flows on green CI. Widen `.github/CODEOWNERS` if you
-     want more paths hard-gated again.
+     `.github/CODEOWNERS` it bites only **direct migration implementation files**
+     (the one hard-gated class); every other path, including migration tests,
+     flows on green CI. Widen `.github/CODEOWNERS` if you want more paths
+     hard-gated again.
 
    **Effective per branch** (the union/intersection above, applied):
 
@@ -704,16 +710,18 @@ least twice.
 - Deciding what to build — defining a well-scoped task or epic sub-issue — once. (Writing the issue text itself is automatable via `new-task`; deciding *which* work to queue is the human call.)
 - Answering when haven-reviewer flags something **blocking/ambiguous**, or a
   genuine product/architecture/security decision comes up.
-- **Code-owner-reviewing migration PRs** in GitHub (the one hard gate), and
-  **promoting `dev → main`**, which is where money-path verification now lands.
+- **Code-owner-reviewing PRs that change direct migration implementation files**
+  in GitHub (the one hard gate), and **promoting `dev → main`**, which is where
+  money-path verification now lands.
 - Unblocking CI the loop can't fix after a couple of attempts.
 
 ## Constraints to know
 
 - **Sequential.** Each item branches off `dev`, so the loop waits for the
   prior PR to merge before starting the next. Wall-clock ≈ sum of CI times.
-  A migration awaiting code-owner merge **pauses** the loop (later items build
-  on it). Merge it, or tell the loop to skip ahead, to resume.
+  A direct migration implementation change awaiting code-owner merge **pauses**
+  the loop (later items build on it). Merge it, or tell the loop to skip ahead,
+  to resume.
 - **Session lifetime.** A self-paced loop lives only while the session is
   running. Webhooks wake it on CI *failures* and review comments, but **not** on
   CI *success* or the merge itself, so between PRs it polls PR state. For a long

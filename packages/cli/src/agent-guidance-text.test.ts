@@ -67,14 +67,19 @@ describe('haven guide text (#2525)', () => {
     // requests. It did anyway, and the reason is worth knowing: the classifier
     // reads its file list from a TWO-dot `git diff BASE_SHA HEAD_SHA` against
     // `pull_request.base.sha` (`change-classifier.mjs`, `changedFilesCommand`),
-    // so a pull request whose base moved inherits everyone else's commits.
-    // Measured on #2705's probe: 2 files three-dot (`cli:false`), 16 two-dot,
-    // and among those 16 were root `package.json` and `.github/workflows/ci.yml`
-    // from other people's merges — full-matrix files, so every surface routed
-    // and `CLI checks` ran on a pull request that touched no CLI file. Since
-    // #2632 turned the up-to-date rule off on `dev`, bases move constantly, so
-    // this is the common case rather than the exotic one. Note also the shape
-    // of the miss: the
+    // so a pull request whose base moved inherits every commit that landed in
+    // between. Measured on PR #2718 (`base.sha 789822b8`, head `5f1173f2`, its
+    // own diff 2 files): three-dot 2 files -> `cli:false`; two-dot 16 files ->
+    // `full:true` and every surface, because among the 16 were root
+    // `package.json` and `.github/workflows/ci.yml` — both matched by the first
+    // `SURFACE_RULES` arm, whose `full` surface fans out to every package job.
+    // They came from ONE unrelated merge (`789822b8`, #2704) landing on `dev`
+    // after the branch point, and `CLI checks` duly ran, and failed, on a pull
+    // request touching no CLI file. Frequency is NOT measured — that is n=1 —
+    // and the divergence is not #2632's doing either: it exists whenever
+    // anything lands on `dev` between the branch point and the run, which the
+    // up-to-date rule never prevented on a pre-merge run. Filed as #2727.
+    // Note also the shape of the miss: the
     // regeneration alone does not make this test pass, because these two
     // figures are asserted by hand and a content change invalidates them too.
     // Both halves have to move together.

@@ -1,8 +1,8 @@
 /**
- * The two `globals.css` tokens the installed-app shell needs OUTSIDE a
- * stylesheet (#2729): the web manifest's `theme_color` / `background_color`
- * and the `<meta name="theme-color">` the root layout emits, plus the warning
- * tone the dev icon's badge is painted in.
+ * The three `globals.css` tokens the installed-app shell needs OUTSIDE a
+ * stylesheet (#2729): the web manifest's `theme_color` / `background_color`,
+ * the `<meta name="theme-color">` the root layout emits, and the warning tone
+ * the dev icon's badge is painted in.
  *
  * A manifest is JSON and a `<meta>` is an attribute value — neither can say
  * `var(--v2-brand)`, so the values have to exist as strings here. They are NOT

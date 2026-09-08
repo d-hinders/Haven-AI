@@ -92,6 +92,9 @@ export function buildWebManifest(environment: string): MetadataRoute.Manifest {
     display: 'standalone',
     background_color: BRAND_COLOURS.background,
     theme_color: BRAND_COLOURS.brand,
+    // `any`, never `maskable`: a maskable icon is cropped to the launcher's
+    // shape, and the dev badge lives in the bottom 24% — the part a circular
+    // mask eats first. Letterboxing on Android is the cheaper failure.
     icons: [APP_ICONS.small, APP_ICONS.large].map((icon) => ({
       src: icon.path,
       sizes: `${icon.size}x${icon.size}`,

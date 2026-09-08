@@ -13,11 +13,15 @@ import { installedAppIdentity } from '@/lib/installed-app'
  * would show as a second, smaller rounding inside Apple's.
  *
  * A non-production environment gets a badge band across the bottom in the
- * warning tone `EnvBadge` uses, carrying the environment's name, so the dev
- * and prod installs are told apart on the home screen at a glance and the
- * presenter never opens the wrong one (owner decision 2026-09-07). Not a
- * `'use client'` module: `ImageResponse` needs the element tree itself, and a
- * client reference would hand it an opaque placeholder.
+ * `--v2-warning` tone, carrying the environment's name, so the dev and prod
+ * installs are told apart on the home screen at a glance and the presenter
+ * never opens the wrong one (owner decision 2026-09-07). The band is the
+ * INVERSE of `EnvBadge`'s pairing on purpose — solid warning fill with white
+ * ink, where the chip is soft fill with warning ink: white on `#b54708` is
+ * 5.4 : 1 and still reads at 40 px, and a soft fill would not carry the word
+ * at home-screen size (`haven-design-reviewer`, #2729, measured and declined
+ * as a nit). Not a `'use client'` module: `ImageResponse` needs the element
+ * tree itself, and a client reference would hand it an opaque placeholder.
  */
 /**
  * The drawing's measurements, in pixels, for one canvas size. Exported so the
@@ -30,6 +34,12 @@ import { installedAppIdentity } from '@/lib/installed-app'
  * path's 8 × 9 as hard box sizes with no cap overhang on a 24-unit field and
  * came out a third too small — `haven-design-reviewer` measured it at 33% of
  * the tile against `HavenMark`'s 50%.
+ *
+ * Two deliberate departures from that arithmetic, so nobody "corrects" them:
+ * the height is `0.47` rather than the exact `11 / 24 = 0.458` — the design
+ * pass's own target, a hair taller, measured at 0.469–0.472 across the three
+ * sizes — and the stroke is `0.092` of the canvas against `HavenMark`'s
+ * `2 / 24 = 0.083`, thickened ~10% because a hairline vanishes at 40 px.
  *
  * With a badge across the bottom band, a flex-centred child with
  * `marginBottom: m` moves up by `m / 2`, and the centre of the field that
@@ -50,6 +60,10 @@ export function appIconGeometry(size: number, badged: boolean) {
 export function AppIconArtwork({ size, environment }: { size: number; environment: string }) {
   const { badge } = installedAppIdentity(environment)
   const { stroke, uprightHeight, crossbarWidth, badgeHeight, markLift } = appIconGeometry(size, badge !== null)
+  // ~0.7 em per glyph plus 0.08 em of tracking, held inside 90% of the width.
+  const badgeFontSize = badge
+    ? Math.round(Math.min(badgeHeight * 0.62, (size * 0.9) / (badge.length * 0.78)))
+    : 0
 
   return (
     <div
@@ -110,6 +124,12 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
       {badge ? (
         <div
           style={{
+            // Height-bound normally; width-bound for a long environment name
+            // ("pull-request-preview"), counting the letter spacing, which at
+            // twenty characters is a fifth of the line. `badgeFontSize` is
+            // pixel-identical to the old fixed formula for "DEV" at all
+            // three sizes; the pixel test renders the long case.
+
             position: 'absolute',
             left: 0,
             right: 0,
@@ -120,11 +140,9 @@ export function AppIconArtwork({ size, environment }: { size: number; environmen
             justifyContent: 'center',
             background: BRAND_COLOURS.warning,
             color: BRAND_COLOURS.background,
-            // Bounded by the band's width as well as its height, so a long
-            // environment name ("preview-42") shrinks rather than overflows.
-            fontSize: Math.round(Math.min(badgeHeight * 0.62, (size * 0.9) / (badge.length * 0.7))),
+            fontSize: badgeFontSize,
             fontWeight: 700,
-            letterSpacing: Math.round(size * 0.0125),
+            letterSpacing: Math.round(badgeFontSize * 0.08),
           }}
         >
           {badge}

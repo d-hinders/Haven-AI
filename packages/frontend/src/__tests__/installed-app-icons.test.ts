@@ -115,8 +115,9 @@ function hexToRgb(hex: string): Rgb {
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]
 }
 
-async function renderPng(file: keyof typeof ICON_ROUTES, environment: string): Promise<Png> {
+async function renderPng(file: keyof typeof ICON_ROUTES, environment: string | undefined): Promise<Png> {
   vi.resetModules()
+  // `undefined` deletes the key — the production convention is UNSET, not empty.
   vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', environment)
   const route = await ICON_ROUTES[file]()
   const response: Response = route.default()
@@ -170,7 +171,7 @@ describe('rendered home-screen icons (#2729)', () => {
 
   describe.each(CASES)('%s', (file, size) => {
     it('production: brand field, white H at HavenMark proportion, no band', async () => {
-      const png = await renderPng(file, '')
+      const png = await renderPng(file, undefined)
       expect([png.width, png.height]).toEqual([size, size])
       expect(pixel(png, 2, 2)).toEqual(BRAND)
       expect(pixel(png, size - 3, size - 3)).toEqual(BRAND)
@@ -187,6 +188,10 @@ describe('rendered home-screen icons (#2729)', () => {
       // that is 10 × 11 of 24. A third of the tile is the defect, not a pass.
       expect(mark.width / size).toBeGreaterThan(0.4)
       expect(mark.height / size).toBeGreaterThan(0.45)
+      // And a ceiling, so the symmetric defect (an H that swallows the tile,
+      // which every centring check would still pass) fails too.
+      expect(mark.width / size).toBeLessThan(0.6)
+      expect(mark.height / size).toBeLessThan(0.6)
       // Centred both ways.
       expect(Math.abs(mark.minX - (size - 1 - mark.maxX))).toBeLessThanOrEqual(2)
       expect(Math.abs(mark.minY - (size - 1 - mark.maxY))).toBeLessThanOrEqual(2)
@@ -214,6 +219,21 @@ describe('rendered home-screen icons (#2729)', () => {
       const text = boundingBox(png, BG, bandTop, size)
       expect(text.width).toBeGreaterThan(size * 0.2)
       expect(Math.abs(text.minX - (size - 1 - text.maxX))).toBeLessThanOrEqual(3)
+    })
+
+    it('a long environment name shrinks to fit the band instead of overflowing it', async () => {
+      const png = await renderPng(file, 'pull-request-preview')
+      const geometry = appIconGeometry(size, true)
+      const bandTop = size - geometry.badgeHeight
+      const text = boundingBox(png, BG, bandTop, size)
+      // Inside the canvas with a margin on both sides, and vertically inside the band.
+      expect(text.minX).toBeGreaterThan(size * 0.02)
+      expect(text.maxX).toBeLessThan(size * 0.98)
+      expect(text.minY).toBeGreaterThanOrEqual(bandTop)
+      expect(text.maxY).toBeLessThan(size)
+      // And it is the whole word, not a clipped one: wider than the three-letter badge.
+      const dev = boundingBox(await renderPng(file, 'dev'), BG, bandTop, size)
+      expect(text.width).toBeGreaterThan(dev.width)
     })
   })
 })

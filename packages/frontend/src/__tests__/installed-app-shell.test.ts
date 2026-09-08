@@ -1,0 +1,141 @@
+import { readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { BRAND_COLOURS } from '@/lib/brand-colours'
+
+/**
+ * The installed-app shell as wired, not as built (#2729).
+ *
+ * `lib/__tests__/installed-app.test.ts` proves the builders. This file proves
+ * two things about the app that uses them:
+ *
+ * 1. **No service worker, deliberately.** iOS and Chrome both install without
+ *    one, and an app-cache worker is the one way to show a stale build
+ *    mid-demo. The scan below is the instrument; it is first shown finding a
+ *    planted registration (so its "none" means something), then run over the
+ *    app.
+ * 2. **The root layout follows the environment.** `layout.tsx` is imported
+ *    twice, under the production convention (variable unset) and under `dev`,
+ *    and its `metadata` / `viewport` exports are read back — the "Haven Dev"
+ *    on a phone's home screen comes from this module evaluating with the
+ *    build's variable, and a layout that hard-coded "Haven" would pass every
+ *    builder test.
+ */
+
+const FRONTEND_ROOT = path.resolve(__dirname, '../..')
+const SELF = path.resolve(__filename)
+
+// Anything that registers or ships a service worker. Camel-case
+// `serviceWorker` is the DOM API and the only way to register one; the rest
+// are the libraries that would do it on the app's behalf. Prose saying
+// "service worker" (with the space) is deliberately not matched — this file's
+// own reason for existing is written in that prose.
+const SERVICE_WORKER_PATTERN = /serviceWorker|workbox|serwist|next-pwa/
+const SERVICE_WORKER_FILENAMES = /^(sw|service-worker|serviceworker)\.(m?js|ts)$/i
+const TEXT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.html', '.md', '.txt'])
+
+interface Hit {
+  file: string
+  line: number
+}
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules' || entry === '.next' || entry === '.screenshots') continue
+    const full = path.join(dir, entry)
+    if (statSync(full).isDirectory()) walk(full, out)
+    else out.push(full)
+  }
+  return out
+}
+
+/** Every registration-shaped line, and every file named like a worker. */
+function scanForServiceWorker(roots: string[], exclude: string[] = []): Hit[] {
+  const hits: Hit[] = []
+  for (const root of roots) {
+    for (const file of walk(root)) {
+      if (exclude.includes(path.resolve(file))) continue
+      if (SERVICE_WORKER_FILENAMES.test(path.basename(file))) hits.push({ file, line: 0 })
+      if (!TEXT_EXTENSIONS.has(path.extname(file))) continue
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((text, index) => {
+          if (SERVICE_WORKER_PATTERN.test(text)) hits.push({ file, line: index + 1 })
+        })
+    }
+  }
+  return hits
+}
+
+describe('no service worker (#2729)', () => {
+  it('the scan finds a planted registration and a planted worker file — the instrument can say yes', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'haven-sw-control-'))
+    try {
+      writeFileSync(path.join(dir, 'register.ts'), "navigator.serviceWorker.register('/sw.js')\n")
+      writeFileSync(path.join(dir, 'sw.js'), 'self.addEventListener("install", () => {})\n')
+      const hits = scanForServiceWorker([dir])
+      expect(hits).toEqual(
+        expect.arrayContaining([
+          { file: path.join(dir, 'register.ts'), line: 1 },
+          { file: path.join(dir, 'sw.js'), line: 0 },
+        ]),
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('nothing under src/ or public/ registers or ships one', () => {
+    const hits = scanForServiceWorker(
+      [path.join(FRONTEND_ROOT, 'src'), path.join(FRONTEND_ROOT, 'public')],
+      // This file names the pattern in order to search for it.
+      [SELF],
+    )
+    expect(hits).toEqual([])
+  })
+
+  it('no PWA tooling is a dependency', () => {
+    const pkg = JSON.parse(readFileSync(path.join(FRONTEND_ROOT, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    const names = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
+    expect(names.filter((name) => SERVICE_WORKER_PATTERN.test(name))).toEqual([])
+  })
+})
+
+vi.mock('next/font/google', () => ({ Inter: () => ({ className: 'inter' }) }))
+vi.mock('@/app/providers', () => ({ default: ({ children }: { children: unknown }) => children }))
+vi.mock('@/components/DiscoverySourceCapture', () => ({ default: () => null }))
+
+async function loadLayout(environment: string) {
+  vi.resetModules()
+  vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', environment)
+  return import('@/app/layout')
+}
+
+describe('root layout wiring (#2729)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('under the production convention (variable unset) the install is "Haven"', async () => {
+    const layout = await loadLayout('')
+    expect(layout.metadata.applicationName).toBe('Haven')
+    expect(layout.metadata.appleWebApp).toMatchObject({ capable: true, title: 'Haven' })
+    expect(layout.metadata.other).toMatchObject({ 'apple-mobile-web-app-capable': 'yes' })
+  })
+
+  it('under NEXT_PUBLIC_HAVEN_ENV=dev the same module names the install "Haven Dev"', async () => {
+    const layout = await loadLayout('dev')
+    expect(layout.metadata.applicationName).toBe('Haven Dev')
+    expect(layout.metadata.appleWebApp).toMatchObject({ title: 'Haven Dev' })
+  })
+
+  it('exports the viewport with the brand theme colour, and does not lose the existing title', async () => {
+    const layout = await loadLayout('')
+    expect(layout.viewport).toMatchObject({ themeColor: BRAND_COLOURS.brand, width: 'device-width', initialScale: 1 })
+    expect(layout.metadata.title).toBe('Haven, agent payments within your rules')
+  })
+})

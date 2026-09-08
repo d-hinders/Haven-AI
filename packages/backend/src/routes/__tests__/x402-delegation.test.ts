@@ -483,15 +483,13 @@ describe('x402 delegation-rail settlement (#830)', () => {
     })
   })
 
-  // ── #2706 characterization: the EIP-3009 funding leg, BEFORE the fix ──────
-  // money.md §2: pin the behaviour being changed before changing it. Today an
-  // over-budget 3009 authorize collapses a deliberate policy refusal and a
-  // genuine bundler outage into one untyped 502 carrying the raw viem/bundler
-  // dump — the sibling branch (erc7710, #2082) refuses the same condition with
-  // a typed, actionable 403 BEFORE any prepare. These tests are written
-  // against the 502 world; the #2706 commit flips the over-budget case to the
-  // typed 403 and keeps the genuine-failure 502 pins below.
-  describe('EIP-3009 funding-leg budget refusal (#2706 — characterization first)', () => {
+  // ── #2706: the EIP-3009 funding leg now refuses like erc7710 (#2082) ──────
+  // The characterization pins this block replaces lived one commit earlier
+  // (bdc62d0c): an over-budget funding authorize 502'd with the raw viem dump.
+  // Now the same condition produces #2082's typed 403 BEFORE any prepare —
+  // field-for-field the sibling body — while genuine bundler/infrastructure
+  // failures keep the 502. Fail-open posture is inherited verbatim.
+  describe('EIP-3009 funding-leg budget refusal (#2706)', () => {
     function primeFundingLeg() {
       mockSelect.mockResolvedValue({
         delegation_hash: `0x${'12'.repeat(32)}`,
@@ -500,7 +498,9 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
     }
 
-    it('CHARACTERIZATION: an over-budget funding authorize 502s with the raw error — the untyped refusal #2706 replaces', async () => {
+    it('REGRESSION: an over-budget funding authorize is refused 403 typed, BEFORE any prepare — nothing written', async () => {
+      // Mutant detector: delete the funding-leg pre-check and prepare runs,
+      // its enforcer revert collapses into the untyped 502, and this fails.
       primeFundingLeg()
       mockReadRemaining.mockResolvedValue({ remainingAtomic: '50000', fromChain: true }) // 0.05 USDC
       mockPrepareFunding.mockRejectedValueOnce(
@@ -511,32 +511,56 @@ describe('x402 delegation-rail settlement (#830)', () => {
         headers: { authorization: 'Bearer sk_agent_test' },
         payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, amount: '100000' }),
       })
-      // The pre-#2706 contract: policy refusal = infrastructure failure = one
-      // 502 with a raw dump. Nothing written either way.
-      expect(res.statusCode).toBe(502)
-      expect(res.json().error).toMatch(/funding authorization failed/)
-      expect(res.json().details).toContain('transfer-amount-exceeded')
+      expect(res.statusCode).toBe(403)
+      const body = res.json()
+      expect(body.error_code).toBe('delegation_budget_exceeded')
+      expect(body.sign_data).toBeUndefined()
+      expect(body.payment_id).toBeUndefined()
+      expect(mockPrepareFunding).not.toHaveBeenCalled()
       expect(mockCreateIntent).not.toHaveBeenCalled()
     })
 
-    it('CHARACTERIZATION: a genuine bundler failure 502s with the raw error, database untouched', async () => {
-      // This pin SURVIVES #2706: the typed refusal must not swallow the real
-      // failure mode — a bundler outage keeps its 502.
+    it('the refusal matches the #2082 erc7710 body field-for-field', async () => {
       primeFundingLeg()
-      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
-      mockPrepareFunding.mockRejectedValueOnce(new Error('bundler: aa_sendUserOperation timeout'))
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '50000', fromChain: true })
       const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, amount: '100000' }),
+      })
+      expect(res.json()).toMatchObject({
+        error_code: 'delegation_budget_exceeded',
+        phase: 'insufficient_funds',
+        next_action: 'fund_safe_or_raise_allowance',
+        rail: 'x402',
+        token: 'USDC',
+        amount_atomic: '100000',
+        remaining_atomic: '50000',
+        shortfall_atomic: '50000',
+        chain_id: 84532,
+        // On the funding leg payTo is the delegate EOA; the merchant is the
+        // separate field, so the refusal names MERCHANT, not the funding target.
+        merchant_address: MERCHANT.toLowerCase(),
+      })
+      expect(res.json().error).toMatch(/no approval queue on the delegation rail/)
+    })
+
+    it('the read is keyed on the SELECTED funding delegation, and on the agent chain', async () => {
+      // The prepare after this pre-check re-selects the same delegation — a
+      // pre-check that read some other grant would refuse (or admit) for a
+      // budget the funding redemption is not chained under.
+      primeFundingLeg()
+      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },
         payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
       })
-      expect(res.statusCode).toBe(502)
-      expect(res.json().error).toMatch(/funding authorization failed/)
-      expect(res.json().details).toContain('aa_sendUserOperation timeout')
-      expect(mockCreateIntent).not.toHaveBeenCalled()
+      expect(mockReadRemaining).toHaveBeenCalledWith(84532, JSON.stringify(signedBudget), '100000')
     })
 
-    it('CHARACTERIZATION: a within-budget funding authorize is 201 with a signable child', async () => {
+    it('POSITIVE CONTROL: a within-budget funding authorize is unchanged — 201 with a signable child', async () => {
       primeFundingLeg()
       mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
       mockPrepareFunding.mockResolvedValueOnce(PREPARED)
@@ -550,10 +574,23 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json().sign_data.signature_scheme).toBe('eip712_userop')
     })
 
-    it('CHARACTERIZATION: a degraded budget read does not refuse the funding leg', async () => {
-      // fromChain:false is a fallback number, never a measurement — refusing
-      // on it would turn an RPC outage into a stopped agent. The enforcer
-      // stays the gate.
+    it('spends the LAST of the budget: remaining exactly equal to the amount is allowed', async () => {
+      // `<`, never `<=` — same boundary as #2082. Refusing equality would
+      // strand the final payment of every period behind a refusal the
+      // enforcer would not have made.
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '100000', fromChain: true })
+      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(201)
+    })
+
+    it('FAILS OPEN: a degraded read never refuses — prepare runs and the enforcer stays the gate', async () => {
       primeFundingLeg()
       mockReadRemaining.mockResolvedValue({ remainingAtomic: '1', fromChain: false })
       mockPrepareFunding.mockResolvedValueOnce(PREPARED)
@@ -567,7 +604,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json().sign_data).toBeDefined()
     })
 
-    it('CHARACTERIZATION: a THROWN budget read does not refuse the funding leg either', async () => {
+    it('FAILS OPEN: a THROWN read never refuses either', async () => {
       primeFundingLeg()
       mockReadRemaining.mockRejectedValue(new Error('rpc exploded'))
       mockPrepareFunding.mockResolvedValueOnce(PREPARED)
@@ -578,6 +615,58 @@ describe('x402 delegation-rail settlement (#830)', () => {
         payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
       })
       expect(res.statusCode).toBe(201)
+    })
+
+    it('FAILS OPEN: an UNPARSEABLE remaining value never refuses either', async () => {
+      // BigInt() throws on garbage; the parse lives inside the same guard as
+      // the read, so a reader returning malformed values degrades to skip.
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: 'not-a-number', fromChain: true })
+      mockPrepareFunding.mockResolvedValueOnce(PREPARED)
+      mockCreateIntent.mockResolvedValueOnce({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(201)
+    })
+
+    it('a NULL selection skips the pre-check — the no-fundable-delegation 403 below keeps its own wording', async () => {
+      // selectDelegation returning null must NOT be read as "budget fine":
+      // the null-handling after the pre-check answers 403 with the
+      // open-budget-specific message, and this block must never preempt it.
+      mockSelect.mockResolvedValue(null)
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(403)
+      expect(res.json().error).toMatch(/no delegation able to fund/)
+      expect(res.json().error_code).toBeUndefined()
+      expect(mockReadRemaining).not.toHaveBeenCalled()
+      // prepare still runs — with a null selection it resolves null and the
+      // null-handling above answers; the pre-check merely skips its read.
+      expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
+    })
+
+    it('a genuine bundler failure STILL 502s with the raw error — #2706 does not swallow it', async () => {
+      // The typed refusal is for policy, not for infrastructure. Collapsing a
+      // bundler outage into the budget taxonomy would tell a retrying agent
+      // to ask its owner to raise a budget that is fine.
+      primeFundingLeg()
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      mockPrepareFunding.mockRejectedValueOnce(new Error('bundler: aa_sendUserOperation timeout'))
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(502)
+      expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(res.json().details).toContain('aa_sendUserOperation timeout')
+      expect(mockCreateIntent).not.toHaveBeenCalled()
     })
   })
 
@@ -848,8 +937,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockPrepareFunding).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n,
     )
-    // The erc7710 selector was never consulted:
-    expect(mockSelect).not.toHaveBeenCalled()
+    // The erc7710 SELECTOR for the merchant was never consulted (#2706 note:
+    // the funding leg now calls selectDelegation itself, keyed on the funding
+    // target — asserted above via the budget read).
+    expect(mockSelect).not.toHaveBeenCalledWith(
+      'agent-1', USDC, MERCHANT.toLowerCase(),
+    )
   })
 
   it('3009-mode requires merchantPayTo — the ledger must record the real merchant', async () => {

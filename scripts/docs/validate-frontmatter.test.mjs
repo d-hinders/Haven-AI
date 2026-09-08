@@ -142,3 +142,179 @@ test('emptyCoversNote: a `#` inside the reason text survives', () => {
   const raw = '---\ncovers: []  # narrative — see #1993 for why\n---\n'
   assert.equal(emptyCoversNote(raw), 'narrative — see #1993 for why')
 })
+// --- CLI: the refusals in `main()` (#2723, slice 3 of epic #2720) ------------
+//
+// Everything above calls `parseFrontMatter` / `globToRegExp` / `emptyCoversNote`
+// directly. `main()` is what `npm run docs:check` step 1 executes, and its
+// refusal -- `if (errors.length) { …; process.exit(1) }` -- is not reachable
+// from any of them. That matters more here than for most guards:
+// `covers-gaps.mjs` says in its own comment that it may fail open on an
+// unparseable doc BECAUSE this step already refused it. If this refusal is
+// lost, several downstream guards become fail-open by inheritance instead of
+// by design, and every one of them still reports green.
+//
+// The fixture is a throwaway tree with the script copied into it, so the
+// REPO_ROOT it derives from its own location is the fixture's; the real
+// `docs/` is never scanned. See scripts/test-support/guard-cli.mjs.
+import { runGuard } from "../test-support/guard-cli.mjs"
+import { GOVERNED_PACKAGE_DOCS, EXEMPT_PACKAGE_DOCS } from "./package-docs.mjs"
+
+const GOOD = `---
+owner: "platform"
+status: current
+covers: []  # narrative — no code mirror by design
+last-verified: "2026-09-08"
+---
+
+# A Doc
+`
+
+/**
+ * The minimum tree `main()` accepts.
+ *
+ * `checkPackageDocBoundary` carries its own positive control: a scan that
+ * enumerates ZERO `packages/**` Markdown files reports an error rather than a
+ * pass (#2088). So a fixture holding only `docs/` cannot reach exit 0 at all,
+ * and the accept path has to carry the whole boundary. Both sets and every
+ * `covers` glob are read from the guard's own constants rather than copied
+ * here, so this fixture cannot drift out of sync with the rows it satisfies.
+ */
+function baseFixture(extra = {}) {
+  const files = {}
+  for (const root of ["CLAUDE.md", "AGENTS.md", "README.md", "ABOUT_HAVEN.md"])
+    files[root] = GOOD
+  files["docs/area/thing.md"] = GOOD
+  for (const entry of GOVERNED_PACKAGE_DOCS) {
+    files[entry.doc] = "# governed package doc\n"
+    for (const glob of entry.covers) {
+      // One concrete file per glob: `a/b/**` is satisfied by `a/b/index.ts`,
+      // an exact path by itself. A governed row whose glob resolves to nothing
+      // is an error, so this is what keeps the ACCEPT path accepting.
+      files[glob.endsWith("/**") ? `${glob.slice(0, -3)}/index.ts` : glob] =
+        "// fixture\n"
+    }
+  }
+  for (const path of Object.keys(EXEMPT_PACKAGE_DOCS))
+    files[path] = "# exempt package doc\n"
+  return { ...files, ...extra }
+}
+
+const OPTS = { also: ["docs/package-docs.mjs"] }
+
+test("CLI: a valid tree exits 0 and says how much it checked", () => {
+  const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture(),
+  })
+  assert.equal(status, 0)
+  // The COUNTS are asserted, not just the ✓. A walker pointed at the wrong
+  // root prints the same tick over zero files; `5 docs` is 4 root docs plus
+  // the one under `docs/`, and 15 is 8 governed + 7 exempt.
+  assert.match(out, /✓ Front-matter valid across 5 docs\./)
+  assert.match(out, /boundary declared for 15 file\(s\): 8 governed, 7 exempt/)
+})
+
+test("CLI: a doc missing `owner` exits 1 and names the key and the file", () => {
+  const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({
+      "docs/area/thing.md": GOOD.replace('owner: "platform"\n', ""),
+    }),
+  })
+  assert.equal(status, 1)
+  // The header proves the refusal ran to its report rather than crashing on
+  // the way there -- a stack trace also exits 1 and also contains the path.
+  assert.match(out, /✗ Front-matter validation failed \(1 issue\(s\)\):/)
+  assert.match(out, /docs\/area\/thing\.md: missing required key `owner`/)
+})
+
+test("CLI: an unparseable front-matter block exits 1 (the fail-open the chain depends on)", () => {
+  const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({
+      "docs/area/thing.md": '---\nowner: "platform"\n\n# no closing fence\n',
+    }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ Front-matter validation failed/)
+  assert.match(out, /docs\/area\/thing\.md: /)
+})
+
+test("CLI: a `covers` glob resolving to no files exits 1", () => {
+  const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({
+      "docs/area/thing.md": GOOD.replace(
+        "covers: []  # narrative — no code mirror by design",
+        'covers:\n  - "packages/nowhere/src/**"',
+      ),
+    }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ Front-matter validation failed/)
+  assert.match(
+    out,
+    /`covers` glob "packages\/nowhere\/src\/\*\*" resolves to no files/,
+  )
+})
+
+test("CLI: the retired inline `#` chain is refused by name (#2637)", () => {
+  const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({
+      "docs/area/thing.md": GOOD.replace(
+        'last-verified: "2026-09-08"',
+        'last-verified: "2026-09-08"  # 2026-09-07 something; 2026-09-06 something else',
+      ),
+    }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /carries a retired inline `#` chain/)
+  assert.match(out, /migrate-chain-to-list\.mjs/)
+})
+
+test('CLI: a THROW inside main() still exits non-zero (the second refusal)', () => {
+  // The four cases above all reach `if (errors.length) { …; process.exit(1) }`.
+  // There is a SECOND refusal -- `main().catch(err => { console.error(err);
+  // process.exit(1) })` -- and it decides what happens when the scan itself
+  // BREAKS rather than finding a violation. Because `.catch` HANDLES the
+  // rejection, dropping that `process.exit(1)` does not fall back to Node's
+  // unhandled-rejection exit code: the process prints a stack and exits 0.
+  // Review measured exactly that, with the whole suite staying 241/241 green
+  // -- this slice's own thesis, one refusal further out.
+  //
+  // `docs:check` is `validate-frontmatter && … && covers-gaps`, so a step 1
+  // that exits 0 on a crash hands the chain to the guards whose fail-open
+  // reasoning cites step 1 having already refused.
+  //
+  // A fixture with no `docs/` directory makes `walk()` reject with ENOENT,
+  // which is the shape a missing or unreadable doc takes in practice.
+  const { status, out } = runGuard('docs/validate-frontmatter.mjs', {
+    ...OPTS,
+    files: { 'README.md': '# no docs directory here\n' },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /ENOENT/)
+  // And it must not be mistaken for either a clean run or a clean refusal.
+  assert.doesNotMatch(out, /✓ Front-matter valid/)
+  assert.doesNotMatch(out, /Front-matter validation failed/)
+})
+
+test('CLI: a NON-ENOENT throw inside main() also exits non-zero', () => {
+  // The case above pins ONE crash shape. Review showed that is narrower than
+  // it reads: narrow the handler to `if (err.code === 'ENOENT') process.exit(1)`
+  // and that case alone stays green, while a permission error, a failed
+  // dynamic import, or a TypeError from a future bug all exit 0. So the
+  // handler is driven a second time through a completely different shape --
+  // `package-docs.mjs` is deliberately NOT copied, so main()'s
+  // `await import('./package-docs.mjs')` rejects with ERR_MODULE_NOT_FOUND
+  // AFTER the whole scan has already succeeded.
+  //
+  // Deliberately no `also:` here. That omission IS the fixture.
+  const { status, out } = runGuard('docs/validate-frontmatter.mjs', {
+    files: baseFixture(),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /ERR_MODULE_NOT_FOUND|Cannot find module/)
+  assert.doesNotMatch(out, /✓ Front-matter valid/)
+})

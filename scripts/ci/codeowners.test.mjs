@@ -1,8 +1,8 @@
 // Regression guard for the narrow irreversible-schema CODEOWNERS rule (#2698).
 //
 // GitHub, not this test, is the authority that evaluates CODEOWNERS patterns.
-// The live positive/negative PR evidence recorded for #2698 verifies that
-// behavior. This guard deliberately pins the reviewed rule so a future broad
+// The required live positive/negative PR evidence for #2698 verifies that
+// behavior before this change merges. This guard deliberately pins the reviewed rule so a future broad
 // directory pattern or a removed rule cannot silently reintroduce the false
 // positive (or remove protection for real migration implementations).
 //

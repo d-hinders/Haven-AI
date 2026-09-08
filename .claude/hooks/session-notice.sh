@@ -29,7 +29,7 @@ find "${TMPDIR:-/tmp}" -maxdepth 1 -name '.claude-ship-next-scratch-*' -mtime +0
 jq -n '{
   hookSpecificOutput: {
     hookEventName: "SessionStart",
-    additionalContext: "Haven shipping: /ship-next (.agents/skills/ship-next/SKILL.md) is the DEFAULT ROUTE, not a mandate (#1025) — working differently is allowed. The mechanical standards are CI required checks either way. What the route adds is the layer no check performs: the independent review passes, the covers: doc-reviewer step, playbook routing, and closeout evidence — skip it and you own an equivalent review yourself. Merge routing still matters: a /packages/backend/src/db/migrations/ diff needs an INDEPENDENT code-owner approval, which the PR author cannot supply for their own PR. A PreToolUse hook warns, but does not block, when a PR is opened outside the route."
+    additionalContext: "Haven shipping: /ship-next (.agents/skills/ship-next/SKILL.md) is the DEFAULT ROUTE, not a mandate (#1025) — working differently is allowed. The mechanical standards are CI required checks either way. What the route adds is the layer no check performs: the independent review passes, the covers: doc-reviewer step, playbook routing, and closeout evidence — skip it and you own an equivalent review yourself. Merge routing still matters: a direct /packages/backend/src/db/migrations/*.ts implementation diff needs an INDEPENDENT code-owner approval; a migration test under __tests__/ does not. The PR author cannot supply their own required approval. A PreToolUse hook warns, but does not block, when a PR is opened outside the route."
   }
 }' 2>/dev/null || exit 0
 

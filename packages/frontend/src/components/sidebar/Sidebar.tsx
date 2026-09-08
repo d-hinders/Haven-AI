@@ -152,6 +152,38 @@ export default function Sidebar() {
   ]
 
   // Outside-click to close kebab popover
+  /*
+    Keep the drawer's state honest when the viewport CROSSES the breakpoint
+    (#2586).
+
+    `collapsed` was decided once, in the `useState` initialiser above, and never
+    again. Below `lg` the drawer is `fixed inset-y-0 left-0` and only
+    `-translate-x-full` keeps it off screen, so a window that STARTS at desktop
+    width and then narrows leaves the drawer sitting on top of the page at
+    `translate-x-0` — its footer row, the account link and the `User menu`
+    kebab included. That is the overlap #2586 reports, and it obscures a real
+    clickable link on the `/agents` empty state.
+
+    It reproduces only after a CROSSING, which is why a fresh capture at 390
+    looks clean and why no visual baseline could have caught it: the capture
+    harness sets the viewport BEFORE it navigates, so the initialiser already
+    sees the narrow width. Measured, with a positive control that a fresh mount
+    at 390 does collapse — so the unchanged result on resize is the missing
+    listener, not a probe that cannot see anything.
+
+    `matchMedia` rather than a `resize` listener: it fires on the crossing
+    itself, not on every intermediate pixel, so there is no per-frame work
+    while a window is being dragged. Both directions are synced — going wide
+    releases it (harmless, since `lg:translate-x-0` pins the drawer open at
+    desktop regardless) so that a later narrowing is a real crossing again.
+  */
+  useEffect(() => {
+    const query = window.matchMedia(`(max-width: ${DESKTOP_BREAKPOINT_PX - 1}px)`)
+    const sync = (e: MediaQueryListEvent | MediaQueryList) => setCollapsed(e.matches)
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
+
   useEffect(() => {
     if (!menuOpen) return
     const handler = (e: MouseEvent) => {

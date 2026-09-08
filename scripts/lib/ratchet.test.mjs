@@ -92,8 +92,13 @@ test('assertUsableBaseline: a negative or fractional count is ALLOWED through', 
 test('the importer count in the comments matches the real importer list', () => {
   // #2759. The engine's header, its `updateRefusals` docstring,
   // `lint-wire-types.mjs`, `frontend-copy-lint.test.mjs` and the routing-matrix
-  // row ALL carried a hand-written "FIVE gates" for a week after #2747 added
-  // the sixth. Five copies of one number is five chances to be wrong, and the
+  // row ALL carried a hand-written "FIVE gates" for 46 minutes after #2747
+  // added the sixth (20:12 to 20:58; the wording itself dates from #2728 at
+  // 17:46, so ~3h for the sites that predate it). An earlier draft said "a
+  // week" — a duration nobody had measured, asserted inside the argument
+  // against unmeasured figures, and it survived the commit that claimed to
+  // have corrected it in both places because the edit had no assertion behind
+  // it. Five copies of one number is five chances to be wrong, and the
   // repo already made this argument once, about `docs:check`'s validator count
   // (#2666: derive it, do not write it).
   //
@@ -146,7 +151,10 @@ test('refusal(): a malformed baseline throws WITHOUT frames, a real bug keeps th
   //
   // Half one: the refusal is presented as a refusal. Its stack is exactly the
   // message, so the four gates with no entrypoint catch print that line rather
-  // than a `node:internal` dump whose frames all sit inside this module.
+  // than a dump whose frames all sit inside this module. Node's own framing
+  // (`triggerUncaughtException`, the version footer) is still there — measured,
+  // and an earlier draft of this comment said it was not. Removing that
+  // framing needs an entrypoint catch, which is #2761.
   let thrown
   try {
     assertUsableBaseline({ 'a.md': { r: 'x' } }, 'b.json')

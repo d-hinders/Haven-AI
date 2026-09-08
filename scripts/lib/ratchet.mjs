@@ -77,9 +77,9 @@ export function writeBaseline(path, counts) {
  *
  * This lives here rather than in one gate because `--update` is the command a
  * gate's own failure message sends you to, so a gate that omits the check
- * turns its remedy into a laundering step. Of the five gates on this module
- * AT THE TIME (six today),
- * three had a line-for-line copy of this decision and TWO had none at all
+ * turns its remedy into a laundering step. Of the five gates on this module at
+ * the time (six today), three had a line-for-line copy of this decision and
+ * TWO had none at all
  * (`frontend-copy-lint`, the subject of #2728, and `design-lint`, which review
  * found by reading the importer list rather than the issue) -- exactly the
  * duplication this module's header says it exists to prevent.
@@ -118,11 +118,18 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * FOUR of the six gates have no catch at their entrypoint at all -- `db-mock`,
  * `wire-types`, `retired-rail-prose` and `design-lint` call `main()` bare, so a
  * throw becomes an uncaught exception with Node's own framing. The two that do
- * catch (`frontend-copy-lint`, `ui-gate-wording`) print the message. Either
- * way the frames run `assertUsableBaseline` -> `loadBaseline` -> the gate's
- * `main`, which for a malformed baseline is noise around the one line the
- * operator needs -- and it is why the "the error can name the FILE" argument
- * landed in two gates of six until review said so (#2759).
+ * catch (`frontend-copy-lint`, `ui-gate-wording`) print the message. Without
+ * the replacement below the frames WOULD run `assertUsableBaseline` ->
+ * `loadBaseline` -> the gate's `main`, which for a malformed baseline is noise
+ * around the one line the operator needs -- and it is why the "the error can
+ * name the FILE" argument landed in two gates of six until review said so
+ * (#2759).
+ *
+ * Who it actually helps, since this paragraph is justifying the construct by
+ * naming them: the four bare gates, and `frontend-copy-lint`, whose
+ * `console.error(err)` would otherwise print the frames. NOT `ui-gate-wording`
+ * — it wraps its own baseline read and prints `err.message` with a remedy, so
+ * for this error the replacement is a no-op there.
  *
  * An earlier version of this comment said five gates inherit a
  * `main().catch(...)`, which is both the wrong number and self-contradictory.

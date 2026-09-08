@@ -133,3 +133,65 @@ test("buildDoc's `covers: []` line satisfies the empty-covers reason rule", () =
     'docs:new scaffolds a `covers: []` with no readable reason — docs:check would reject its own scaffold',
   )
 })
+// --- CLI: the refusal in `main()` (#2723, slice 3 of epic #2720) -------------
+//
+// Every test above calls an exported function. `main()` is what
+// `npm run docs:new` executes, and its one refusal -- the catch that turns a
+// `createDoc` throw into a non-zero exit and a `✗` line -- is not reachable
+// from any of them. `createDoc` throwing proves `createDoc`; only running the
+// process proves the command a contributor gets an exit code from.
+//
+// The fixture is a throwaway tree with the script copied into it, so the
+// REPO_ROOT the script derives from its own location is the fixture's and the
+// real repo is never written to. See scripts/test-support/guard-cli.mjs.
+import { runGuard } from "../test-support/guard-cli.mjs"
+
+test("CLI: scaffolds a new doc and exits 0", () => {
+  const { status, out, wrote } = runGuard("docs/new-doc.mjs", {
+    args: ["docs/area/thing.md", "--owner", "platform", "--title", "A Thing"],
+    readBack: ["docs/area/thing.md"],
+  })
+  assert.equal(status, 0)
+  // The success line names the path, so a guard that scaffolded SOMEWHERE ELSE
+  // cannot satisfy this -- and the read-back proves a file exists there at all.
+  assert.match(out, /✓ Scaffolded docs\/area\/thing\.md/)
+  const written = wrote["docs/area/thing.md"]
+  assert.match(written, /^---\n/)
+  assert.match(written, /owner: "platform"/)
+  assert.match(written, /# A Thing/)
+  // The scaffold must satisfy the validator it is scaffolding for.
+  assert.equal(parseFrontMatter(written).ok, true)
+})
+
+test("CLI: refuses to overwrite an existing file (non-zero AND the message)", () => {
+  const { status, out, wrote } = runGuard("docs/new-doc.mjs", {
+    args: ["docs/area/thing.md"],
+    files: { "docs/area/thing.md": "ORIGINAL CONTENT\n" },
+    readBack: ["docs/area/thing.md"],
+  })
+  assert.equal(status, 1)
+  assert.match(
+    out,
+    /✗ refusing to overwrite existing file: docs\/area\/thing\.md/,
+  )
+  // Exit code and message both, plus the thing they are ABOUT: a refusal that
+  // printed correctly after clobbering the file would still be a data-loss bug.
+  assert.equal(wrote["docs/area/thing.md"], "ORIGINAL CONTENT\n")
+})
+
+test("CLI: refuses a non-Markdown target", () => {
+  const { status, out } = runGuard("docs/new-doc.mjs", {
+    args: ["docs/area/thing.txt"],
+  })
+  assert.equal(status, 1)
+  assert.match(
+    out,
+    /✗ target must be a Markdown file \(got "docs\/area\/thing\.txt"\)/,
+  )
+})
+
+test("CLI: refuses a missing target path", () => {
+  const { status, out } = runGuard("docs/new-doc.mjs", { args: [] })
+  assert.equal(status, 1)
+  assert.match(out, /✗ a target path is required, e\.g\. `npm run docs:new -- docs\/area\/thing\.md`/)
+})

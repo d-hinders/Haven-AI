@@ -89,6 +89,17 @@ jobs:
       - name: Dist-freshness guard self-test
         run: node --test scripts/check-dist-freshness.test.mjs
 
+      # #2728: the design lint's self-test has the same problem #1206 describes,
+      # for a different reason — it lives under packages/frontend/scripts, and
+      # that package's `test` script is vitest, whose config includes only
+      # `src/**/__tests__/**/*.test.{ts,tsx}` — so a `node:test` .mjs file
+      # outside `src/` is not collected. (The operative reason is that glob,
+      # not the runner: widen it and this comment goes stale.) Written and
+      # green locally, the file would have run NOWHERE. Dependency-free (the guard imports only node builtins and two
+      # scripts/lib helpers), so it belongs here with its siblings.
+      - name: Design-lint guard self-test
+        run: node --test packages/frontend/scripts/design-lint.test.mjs
+
       # #1526: internal @haven_ai/* ranges must match how the consuming package
       # RESOLVES them — published packages pin a concrete version, private
       # workspace consumers use "*". Belongs on EVERY PR for the same reason as
@@ -119,6 +130,18 @@ jobs:
       - name: Release-bump lockfile self-test
         run: node --test scripts/release-bump.test.mjs
 
+      # #2724: the release-scope measurement runs on a release-cutter's machine
+      # for the same reason the bump does, and gets its self-test here for the
+      # same reason too. It is the instrument that decides what a promotion's
+      # CASP shard claims was published, and its whole value is in REFUSING —
+      # on an unbuilt package, on a source file it cannot resolve — rather than
+      # reporting an empty scope. An instrument whose refusals are untested can
+      # start answering "nothing shipped" vacuously, which is the one answer a
+      # release author acts on by doing nothing. Dependency-free (node builtins
+      # and git), so it belongs on this job rather than behind a surface flag.
+      - name: Release-scope measurement self-test
+        run: node --test scripts/release-scope.test.mjs
+
   sdk_checks:
     name: SDK checks
     needs: changes
@@ -139,6 +162,18 @@ jobs:
 
       - name: Network-map pins (#1478)
         run: npm run lint:network-pins
+
+      # #2727: the two FULL-TEXT copies of packages/sdk/src/agent-guidance.ts
+      # are verified here, in the job that owns the canonical source — and the
+      # one that runs on a change to it even without the manifest row, via the
+      # generic packages/sdk/* arm. It does NOT cover the frontend's
+      # partial copies (agent-onboarding-prompt.ts, agent-skill-bundle.ts),
+      # which is why that file also routes `frontend` so their own pin tests
+      # run. #2713 edited the runbook and left the CLI copy stale; dev did not
+      # even go red, because `cli_checks` was skipped -- the stale copy was
+      # simply carried until an unrelated backend PR (#2719) regenerated it.
+      - name: Generated runbook copies are in sync (#2727)
+        run: npm run lint:runbook-parity
 
       - name: Type-check SDK
         run: npm run typecheck -w packages/sdk
@@ -166,6 +201,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # #2727: the same parity check sdk_checks and frontend_checks run. This
+      # job owns it because the generated copy is its file; sdk_checks because
+      # the canonical source is, and that job always runs when it changes.
+      - name: Generated runbook copies are in sync (#2727)
+        run: npm run lint:runbook-parity
 
       - name: Type-check CLI
         run: npm run typecheck -w packages/cli
@@ -251,6 +292,8 @@ jobs:
         run: |
           npm run lint:retired-rail-prose
           npm run lint:retired-rail-prose:test
+          npm run lint:migration-constraint-scope
+          npm run lint:migration-constraint-scope:test
 
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the
@@ -503,6 +546,28 @@ jobs:
         run: |
           npm run visual:baselines
           npm run visual:baselines:test
+
+      # #2727: the frontend holds THREE pinned derivations of
+      # packages/sdk/src/agent-guidance.ts — public/for-agents.md and
+      # src/lib/agent-onboarding-prompt.ts directly, and
+      # src/lib/agent-skill-bundle.ts via skill-content.ts, which interpolates
+      # four of this file's sentence constants (so "pinned to" means that file
+      # for the bundle, and this one for the other two) —
+      # and only the first is checkable by lint:runbook-parity. This job is
+      # named an owner of that source so the other two pin tests below actually
+      # run on a change to agent-guidance.ts; the check here is what makes that
+      # ownership expressible in root-guard-ownership.json.
+      #
+      # Still scoped to agent-guidance.ts, and still NOT the same as "any
+      # SDK-only change" — but the gap that phrasing was hedging is closed.
+      # packages/sdk/src/skill-content.ts, which agent-skill-bundle.ts is also
+      # pinned to, now routes `frontend` through its own manifest entry (#2743)
+      # whose runsVia includes `test -w packages/frontend`: the tests below ARE the
+      # check for it, rather than a second spelling of them added up here.
+      # A future SDK source with a cross-package pin needs its own entry too;
+      # neither this step nor that one covers the whole package.
+      - name: Generated runbook copies are in sync (#2727)
+        run: npm run lint:runbook-parity
 
       - name: Run frontend unit tests
         run: npm run test -w packages/frontend

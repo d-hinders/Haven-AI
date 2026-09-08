@@ -96,7 +96,12 @@ export const ROUTING_MATRIX = [
     files: ['CLAUDE.md'],
     expect: ['code', 'backend'],
     kind: CONTRACT,
-    why: 'The ONE Markdown exception. CLAUDE.md mirrors the API surface table and chain registry that packages/backend/src/docs-drift pins, so a CLAUDE.md-only edit must run the backend suite or the drift test never guards it.',
+    why:
+      'The FIRST Markdown exception, and no longer the only one — #2743 added two more for ' +
+      'packages/frontend/public/, so this row states its own case rather than a count. ' +
+      'CLAUDE.md mirrors the API surface table and chain registry that ' +
+      'packages/backend/src/docs-drift pins, so a CLAUDE.md-only edit must run the backend ' +
+      'suite or the drift test never guards it.',
   },
 
   // ─── One workspace, one job ────────────────────────────────────────────────
@@ -227,6 +232,107 @@ export const ROUTING_MATRIX = [
     why: 'The dependency-boundary gate itself (#982).',
   },
   {
+    files: ['packages/sdk/src/agent-guidance.ts'],
+    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer'],
+    kind: CONTRACT,
+    why:
+      'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
+      'stay installable alone — the CLI a full-text copy, the frontend a full-text copy PLUS two ' +
+      'partial ones (agent-onboarding-prompt.ts, agent-skill-bundle.ts) — and each is byte-pinned ' +
+      'by a test in its own job. Before this row, an SDK-only change reached neither cli nor ' +
+      'frontend, so none of those tests ran: #2713 edited this file and left the CLI copy stale, ' +
+      'and dev did not even go red — cli_checks was skipped, so the stale copy was carried until ' +
+      'an unrelated backend PR (#2719) regenerated it. lint:runbook-parity covers the two ' +
+      'full-text copies from every job that owns the source; the ' +
+      'partial ones are not readable back, so frontend is ROUTED rather than checked. That is the ' +
+      'reason both jobs are here, and why removing either silently uncovers a pin test.',
+  },
+  {
+    files: ['packages/cli/scripts/sync-agent-guidance.mjs'],
+    expect: [
+      'code',
+      'sdk',
+      'cli',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+    ],
+    kind: CONTRACT,
+    why:
+      'The generator/verifier for those copies (#2727). It lives under packages/cli/ but reads ' +
+      'packages/sdk/ and is run by all three jobs that check a copy, so all three own it. The ' +
+      'explicit cli matters: root-guard rules match before the packages/cli/* arm, so omitting ' +
+      "it would stop a change here routing the CLI's own suite — a rule that quietly narrows " +
+      'what it was added to widen.',
+  },
+  {
+    files: ['packages/frontend/public/402.md'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'The GENERAL public/ arm (#2743), and the row that reaches it — the for-agents.md row ' +
+      'below matches the same glob but resolves to the specific arm ordered before it, so ' +
+      'without this row the general arm had no fixture that actually exercised it. 402.md is ' +
+      'authored rather than generated, advertised from llms.txt and 402/index.html, and its ' +
+      'content is asserted by discovery-artifacts.test.ts — a frontend-only test, which is why ' +
+      '`frontend` is the surface that matters and why routing nothing left it unchecked.',
+  },
+  {
+    files: ['packages/frontend/public/for-agents.md'],
+    expect: [
+      'code',
+      'sdk',
+      'cli',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+    ],
+    kind: CONTRACT,
+    why:
+      'The served runbook (#2743) — a GENERATED artifact that happens to be Markdown, so the ' +
+      'DOC_ONLY `*.md` arm swallowed it and a hand-edit routed NOTHING, not even `code`. Its ' +
+      'sibling copy packages/cli/src/agent-guidance-text.ts routed `cli`, and its NON-MARKDOWN ' +
+      'siblings in public/ routed `frontend` — the other Markdown file there, 402.md, was ' +
+      'swallowed too, which is why DOC_EXCEPTIONS also carries a general arm for the ' +
+      'directory. #2727 routed the SOURCE; this row routes the COPY, the other direction. ' +
+      'As above, only `sdk`, `cli` and `frontend` are decided by the arm — the other five come ' +
+      'from `dependentsOf(sdk)` — and `cli`/`frontend` are named by hand because both declare ' +
+      '`dependsOn: []` and fan-out structurally cannot reach them.',
+  },
+  {
+    files: ['packages/sdk/src/skill-content.ts'],
+    expect: [
+      'code',
+      'sdk',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+    ],
+    kind: CONTRACT,
+    why:
+      'The canonical generic payment skill (#2743). The frontend keeps a decoupled inline copy ' +
+      'so it can deploy standalone, and agent-skill-bundle.test.ts imports THIS file to assert ' +
+      'byte parity — a test that runs only in frontend_checks. #2727 closed this shape for ' +
+      'agent-guidance.ts and left this file behind: sdk routed, frontend did not, so a mutation ' +
+      'here failed a test in a job that never ran. Of the eight surfaces, only `sdk` and ' +
+      '`frontend` are decided here: backend, connect, mcp, mcp_server and signer arrive by ' +
+      '`dependentsOf(sdk)` fanning out through .github/package-dependencies.json. That is also ' +
+      'why an entry was the ONLY available mechanism — `frontend` and `cli` both declare ' +
+      '`dependsOn: []`, so no SDK change can ever reach either by propagation, which is what ' +
+      'made them the two surfaces both #2727 and #2743 had to name by hand. `cli` is absent ' +
+      'here for a product reason on top of that: the CLI holds no copy of the skill, only of ' +
+      'the runbook.',
+  },
+  {
     files: ['scripts/dep-lint.test.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,
@@ -243,6 +349,30 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend'],
     kind: CONTRACT,
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
+    files: ['scripts/test-support/guard-cli.mjs'],
+    expect: [],
+    kind: CONTRACT,
+    why:
+      'The harness the guard self-tests drive their CLI through (#2721). It routes NOWHERE ' +
+      'itself — the classifier reports every flag false — and is covered today only because ' +
+      'ci_config_checks and frontend-copy-lint.yml are unconditional and three of its consumers ' +
+      'run there. Recorded for the same reason .github/root-guard-ownership.json is: the ' +
+      'coverage is incidental, and it evaporates silently the day a consumer moves off an ' +
+      'unconditional job (#1624).',
+  },
+  {
+    files: ['scripts/lint-migration-constraint-scope.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'Refuses an unanchored pg_constraint lookup in packages/backend/src/db/migrations/** (#2702); it lives under scripts/ but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-migration-constraint-scope.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: "The guard's own fixtures — the half that can go red, since the guard reports on an already-clean repo (#2702).",
   },
   {
     files: ['scripts/retired-rail-prose-ratchet.mjs'],
@@ -266,7 +396,15 @@ export const ROUTING_MATRIX = [
     files: ['scripts/lib/ratchet.mjs'],
     expect: ['code', 'backend', 'frontend'],
     kind: CONTRACT,
-    why: 'The shared ratchet engine backs BOTH the backend db-mock gate and the frontend wire-type gate (#1447). Weakening it must run both — routing it to one would leave the other unguarded.',
+    why:
+      'The shared ratchet engine backs FIVE gates as of #2728: the backend db-mock gate, the ' +
+      'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
+      'lint, and packages/frontend/scripts/design-lint.mjs — which the first draft of this ' +
+      'row missed, and which had the same missing `--update` refusal the copy lint did. All ' +
+      'five now share one `updateRefusals`. Weakening the module must run both surfaces; ' +
+      'routing it to one would leave the other unguarded. Copy lint and design lint are ' +
+      'covered regardless (frontend-copy-lint.yml is unconditional, design lint is a blocking ' +
+      'frontend job), so this row understates the blast radius rather than overstating it.',
   },
   {
     files: ['scripts/lint-wire-types.mjs'],

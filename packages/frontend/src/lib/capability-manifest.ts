@@ -94,7 +94,11 @@ export interface CapabilityManifest {
   api: { base: string | null; openapi: string | null; openapi_mirror: string | null; root: string | null }
   hosted_mcp: { url: string | null; note?: string; auth: string; signer: string }
   packages: Record<string, { name: string; channel?: string; one_liner?: string }>
-  chains: { deployable: number[]; supported: readonly ManifestChainEntry[] } | null
+  chains: {
+    default: number
+    deployable: number[]
+    supported: readonly ManifestChainEntry[]
+  } | null
   /** How an agent tags a hand-off link it drove, so the funnel can measure it. */
   attribution: { query: string; purpose: string }
   docs: Record<string, string>

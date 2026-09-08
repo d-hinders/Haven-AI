@@ -215,6 +215,25 @@ not as permission.
 
 What it leaves to you:
 
+- **Re-measure the scope at the door, and amend the record if it moved.** The
+  tarballs are built from `main`'s tree **at promotion time**; the shard and the
+  Supported Runtime Manifest note were written back at *Satisfy The Contract-Doc
+  Gate*, against a different tree. Anything merged to `dev` in between publishes
+  inside this release without appearing in its record.
+
+  ```sh
+  npm run build                # the shipped set is read out of dist/
+  npm run release:scope        # origin/main..origin/dev
+  ```
+
+  Build first — it refuses outright on an unbuilt package rather than guessing.
+  Compare its shipped delta against what the shard claims and amend the shard
+  when they disagree. **Never hand-count the diff** — that is the judgement this
+  step exists to enforce, and on 0.1.36-alpha.0 hand-counting got the scope wrong
+  four separate ways. The script's semantics, its exit codes and what it refuses
+  are `scripts/README.md` § *`release-scope.mjs`*; the operator checklist is
+  `promoting-dev-to-main.md`. Read them there rather than from here (#2724).
+
 - It calls the promotion a human step; it does not say whose. **Confirm the user
   wants it** before opening one — cutting the release and shipping it to
   production are two decisions, and only the first is yours.
@@ -235,6 +254,26 @@ for p in sdk signer mcp connect cli; do npm view @haven_ai/$p dist-tags --json; 
 
 Every package must show the new version on **both** `alpha` and `latest`.
 
+**Poll it; never diagnose off a single read.** The registry lags a successful
+publish by *minutes*, not seconds — on the 0.1.36-alpha.0 release `@haven_ai/mcp`
+did not appear until ~4.5 minutes after `npm publish` returned its `+ …` line
+([#2660](https://github.com/d-hinders/Haven-AI/issues/2660)). The npm CLI makes
+this worse: #2660's measurement had to be taken over HTTP because the CLI's own
+metadata cache served a stale dist-tags document, reporting the *previous*
+release's tags long after the registry itself was current. Read it over HTTP, or
+force the CLI past its cache, and repeat for several minutes before concluding
+anything is wrong:
+
+```sh
+for p in sdk signer mcp connect cli; do
+  curl -s "https://registry.npmjs.org/-/package/@haven_ai/$p/dist-tags"; echo
+done
+# or, through the CLI: npm view @haven_ai/<pkg> dist-tags --json --prefer-online
+```
+
+A single early read looks exactly like a stranded tag. An operator who "heals"
+on that reading moves a tag that was about to be correct on its own.
+
 **`latest` moving onto a prerelease is correct, and this line used to say the
 opposite.** It read "`latest` must be unchanged for a prerelease", which was
 true until [#2536](https://github.com/d-hinders/Haven-AI/issues/2536) and has
@@ -253,12 +292,52 @@ fail without aborting the others, so a summary glance is not enough.
 [#2647](https://github.com/d-hinders/Haven-AI/issues/2647) the `latest` move is
 its own `main`-only job, `promote-tags`, so a promotion can be **half green** —
 every package live under `alpha`, `latest` unmoved. If it is red: the versions
-ARE published, so the remedy is to re-run that one job, **never** to cut another
-version. The job names its own likely cause in its error output; the mechanism
+ARE published, so the remedy is usually to re-run that one job, **never** to cut
+another version (the subsection below covers the cases where the re-run cannot
+heal). The job names its own likely cause in its error output; the mechanism
 and why it had to be a separate job are in `.github/workflows/publish.yml`'s
 header comment, which is where they stay current.
 
 Report what published, and name anything that did not.
+
+### When the `promote-tags` re-run cannot heal `latest`
+
+Re-running that one job works because GitHub's *re-run failed jobs* reuses the
+successful `publish` job's outputs, so the nomination list the tag move needs is
+still there. That makes the remedy exact on a **current** run and wrong on two
+other paths, which are easy to reach for and which the buttons do not
+distinguish:
+
+- **Re-running the WHOLE workflow heals nothing.** Every version is already on
+  npm, so the publish job takes its "already published" branch and `continue`s
+  before nominating; `promote-tags` gets an empty list and is skipped outright
+  (`if: needs.publish.outputs.promote != ''`). That is deliberate, not a bug to
+  work around — tying the move to a publish *this run performed* is what stops a
+  re-run dragging `latest` backwards.
+- **Re-running the failed job on a SUPERSEDED run moves `latest` backwards.**
+  The property that makes the remedy work is the same one that makes it
+  dangerous here: the preserved nomination list names *that run's* versions, so
+  if a later promotion has since published and promoted a newer release, the
+  re-run points `latest` at the older one. Do not use it on a superseded run,
+  whether or not GitHub still offers the button.
+
+In those cases the move is a hand-run operator step, using the same
+`npm dist-tag add` command documented in
+[`scripts/README.md`](../../../scripts/README.md) § *Manual fallback* — including
+the credential note that it needs a granular npm token, not the OIDC identity
+`publish.yml` publishes with. Do not duplicate the command here; read it there.
+
+**The move is forward-only.** Read the live dist-tags first (with the polling
+discipline above) and advance `latest` only to a version *higher* than the one it
+currently holds. Moving it backwards ships users an older build with nothing
+reporting an error, and unlike the workflow path nothing checks this for you.
+
+**There is deliberately no mechanical heal, and that is an owner decision** —
+option 1 on [#2660](https://github.com/d-hinders/Haven-AI/issues/2660)
+(2026-09-08): a dispatch-only job that could move `latest` without a publish
+would reintroduce exactly the surface #2656 removed, so a stranded tag catches up
+at the next release that publishes, and an operator moves it by hand when that
+window matters.
 
 ## Guardrails
 

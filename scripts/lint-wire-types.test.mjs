@@ -140,5 +140,81 @@ test('--update refuses to raise the baseline', () => {
 test('--update allows a shrink, and allows the very first write', () => {
   const baseline = { 'packages/frontend/src/hooks/useContacts.ts': { Contact: 1 } }
   assert.deepEqual(updateRefusals({}, baseline), [])
-  assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}), [])
+  // The first-write allowance is keyed on `firstRun`, NOT on the baseline being
+  // empty (#2728). Those are different states: `{}` is what an absent file
+  // reads as AND what this gate writes once its debt reaches zero, so keying on
+  // emptiness switched the refusal off on the first successful cleanup. The
+  // second assertion below is the one that used to say `[]`.
+  assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}, { firstRun: true }), [])
+  assert.equal(updateRefusals({ 'a.ts': { Any: 9 } }, {}).length, 1)
+})
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The cases above test the detection. The refusals — growth past the baseline,
+// and `--update` declining to RAISE it — live in `main()` and no exported
+// function reaches them. That is the shape that survived mutation with a green
+// suite elsewhere in this repo (#2690).
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const HOOK = 'packages/frontend/src/hooks/useThing.ts'
+const snake = (n) =>
+  `export type T = {\n` + Array.from({ length: n }, (_, i) => `  api_key_${i}: string`).join('\n') + `\n}\n`
+
+test('CLI: growth past the baseline exits non-zero and names the file', () => {
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: { [HOOK]: snake(3), 'packages/frontend/wire-type-baseline.json': '{}' },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /hand-written wire shapes grew/)
+  assert.match(out, /useThing\.ts/)
+})
+
+test('CLI: a tree with no hand-written shapes exits 0', () => {
+  // The control. A refusal test alone passes against a guard that refuses
+  // everything.
+  const { status } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      'packages/frontend/src/hooks/useThing.ts': 'export type T = { camelCase: string }\n',
+      'packages/frontend/wire-type-baseline.json': '{}',
+    },
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [HOOK]: snake(3),
+      'packages/frontend/wire-type-baseline.json': JSON.stringify({ [HOOK]: { PrepareResponse: 1 } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+})
+
+test('CLI: `--update` refuses a brand-new file when the baseline is not empty', () => {
+  // Corrected on review. An earlier version of this case asserted the OPPOSITE
+  // and called it a hole, on a fixture with an EMPTY baseline — which is a
+  // documented deliberate first-run allowance (`updateRefusals` returns [] for
+  // `{}`), already pinned by the unit test above. With any real baseline a new
+  // file compares against 0, so its first occurrence IS growth and IS refused.
+  // Measured both ways before rewriting this.
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [HOOK]: snake(1),
+      'packages/frontend/wire-type-baseline.json': JSON.stringify({
+        'packages/frontend/src/hooks/other.ts': { PrepareResponse: 1 },
+      }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
 })

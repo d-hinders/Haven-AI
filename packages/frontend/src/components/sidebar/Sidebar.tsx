@@ -151,7 +151,69 @@ export default function Sidebar() {
     },
   ]
 
-  // Outside-click to close kebab popover
+  // Keep the drawer honest across the `lg` breakpoint (#2586)
+  /*
+    Keep the drawer's state honest when the viewport CROSSES the breakpoint
+    (#2586).
+
+    `collapsed` was decided once, in the `useState` initialiser above, and never
+    again. Below `lg` the drawer is `fixed inset-y-0 left-0` and only
+    `-translate-x-full` keeps it off screen, so a window that STARTS at desktop
+    width and then narrows leaves the drawer sitting on top of the page at
+    `translate-x-0` — its footer row, the account link and the `User menu`
+    kebab included. That is the overlap #2586 reports, and it obscures a real
+    clickable link on the `/agents` empty state.
+
+    It reproduces only after a CROSSING, which is why a fresh capture at 390
+    looks clean and why no visual baseline could have caught it: the capture
+    harness sets the viewport BEFORE it navigates, so the initialiser already
+    sees the narrow width. Measured, with a positive control that a fresh mount
+    at 390 does collapse — so the unchanged result on resize is the missing
+    listener, not a probe that cannot see anything.
+
+    `matchMedia` rather than a `resize` listener: it fires on the crossing
+    itself, not on every intermediate pixel, so there is no per-frame work
+    while a window is being dragged. Both directions are synced — going wide
+    releases it (harmless, since `lg:translate-x-0` pins the drawer open at
+    desktop regardless) so that a later narrowing is a real crossing again.
+
+    The query is `min-width: 1024px` — Tailwind's OWN `lg` — and the result is
+    negated, rather than the more obvious `max-width: 1023px` (review finding).
+    Those two are not complements. At a fractional CSS viewport in [1023, 1024),
+    which Windows display scaling and Chrome page zoom produce routinely, BOTH
+    are false: measured at cssWidth 1023.2, `(min-width:1024px)` false and
+    `(max-width:1023px)` false. With `max-width` the listener would then report
+    "not mobile" while `lg:static` / `lg:translate-x-0` do not apply — so
+    widening 390 -> 1023.2 would set `collapsed = false` and park the drawer on
+    the page. That is worse than the bug being fixed: a REGRESSION at a width
+    the old initialiser (`1023 < 1024`) handled correctly. Asking the same
+    question the stylesheet asks cannot drift from it.
+
+    `sync(query)` runs once at subscribe time, not only on later events —
+    because the initialiser above and this query can DISAGREE at mount, on the
+    same device, with no crossing involved. `window.innerWidth` is rounded;
+    the media query is not. Measured in Chromium at
+    `--force-device-scale-factor=1.1` with a device width of 1023:
+    `window.innerWidth` reads 1024 — so the initialiser says desktop — while
+    `(min-width: 1024px)` is false and `lg` does not apply. Without this line
+    the drawer would sit over the page from first paint at that width, and
+    nothing would correct it until the next real crossing.
+
+    An earlier version of this comment justified the line by SSR instead:
+    the initialiser returns `false` on the server, so a phone would hydrate
+    open. That is wrong — React re-runs a `useState` initialiser on the client
+    during hydration, so the client reaches the right value before this effect
+    runs. The rounding case is the one that is provable, and it is what
+    `Sidebar.test.tsx` pins.
+  */
+  useEffect(() => {
+    const query = window.matchMedia(`(min-width: ${DESKTOP_BREAKPOINT_PX}px)`)
+    const sync = (e: MediaQueryListEvent | MediaQueryList) => setCollapsed(!e.matches)
+    sync(query)
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
+
   useEffect(() => {
     if (!menuOpen) return
     const handler = (e: MouseEvent) => {

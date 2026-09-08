@@ -5,11 +5,19 @@
  * That leg USED to reach a prepared redemption, where the caveat enforcer
  * refused during gas estimation; since #2706 (PR #2719) the same fail-fast
  * pre-check this file describes runs on the funding shape too, so both legs
- * now assert a typed 403 on a healthy budget read. Neither reaches the enforcer
- * at authorize in that case — but both pre-checks FAIL OPEN on a degraded read
- * and fall through to prepare, where the enforcer still rules. The on-chain
- * proof for the rail lives in `over-budget-refused`, on `POST /payments`
- * (#2738). That leg was deliberately pinned to 3009 by #2016 because on
+ * now assert a typed 403 on a healthy budget read, and neither reaches the
+ * enforcer at authorize in that case.
+ *
+ * Both pre-checks FAIL OPEN on a degraded read, and there the two schemes part
+ * company. The 3009 leg falls through to prepare, where the enforcer still
+ * rules and answers a 502. THIS branch prepares nothing — it re-delegates a
+ * narrowed child — so a failed-open over-budget request comes back
+ * `201 pending_signature` WITH `sign_data`, which is the #1993 shape this file
+ * exists to prevent, reappearing precisely when the budget read degrades. No
+ * erc7710 path reaches the enforcer at authorize at all.
+ *
+ * The on-chain proof for the rail lives in `over-budget-refused`, on
+ * `POST /payments` (#2738). That leg was deliberately pinned to 3009 by #2016 because on
  * **erc7710** — the scheme #1450 made preferred — an over-budget authorize
  * returned 201 `pending_signature` WITH `sign_data` for any amount. The
  * invariant's own words were false on the path most payments take, and #2016

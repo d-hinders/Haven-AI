@@ -91,11 +91,18 @@ export async function up(client: PoolClient): Promise<void> {
         WHERE c.conname = 'machine_payment_evidence_one_payment_reference'
           AND c.conrelid = 'machine_payment_evidence'::regclass
       ) THEN
+        -- VERBATIM from 018, not a rewrite. An earlier draft expressed the same
+        -- XOR in an IS NOT NULL / IS NULL form: semantically identical,
+        -- textually different, so a schema repaired here would carry a
+        -- different constraint definition than a freshly migrated one. Caught
+        -- by CI, because the test asserted the repair's own wording while a
+        -- fresh CI schema gets 018's. A repair that makes two schemas differ
+        -- is the class of defect this whole issue is about.
         ALTER TABLE machine_payment_evidence
           ADD CONSTRAINT machine_payment_evidence_one_payment_reference
           CHECK (
-            (payment_intent_id IS NOT NULL AND approval_request_id IS NULL)
-            OR (payment_intent_id IS NULL AND approval_request_id IS NOT NULL)
+            (CASE WHEN payment_intent_id IS NULL THEN 0 ELSE 1 END) +
+            (CASE WHEN approval_request_id IS NULL THEN 0 ELSE 1 END) = 1
           );
       END IF;
     END $$;

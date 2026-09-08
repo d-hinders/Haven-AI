@@ -86,8 +86,15 @@ describeDb('migrations create their constraints in THIS schema (#2702)', () => {
         WHERE c.conrelid = 'machine_payment_evidence'::regclass
           AND c.conname = 'machine_payment_evidence_one_payment_reference'`,
     )
-    expect(def[0]?.def).toMatch(/payment_intent_id IS NOT NULL/)
-    expect(def[0]?.def).toMatch(/approval_request_id IS NOT NULL/)
+    // Both column names AND the XOR's `= 1` shape, which is 018's canonical
+    // wording. Asserted against 018 rather than against 079's own SQL: the
+    // first draft matched the repair's phrasing, passed locally where 079 had
+    // created the constraint, and failed on a fresh CI schema where 018 had.
+    // That divergence was a real defect in 079, not a bad assertion — the two
+    // now emit byte-identical definitions.
+    expect(def[0]?.def).toMatch(/payment_intent_id IS NULL/)
+    expect(def[0]?.def).toMatch(/approval_request_id IS NULL/)
+    expect(def[0]?.def).toMatch(/=\s*1\)?\s*\)?$/)
   })
 
   it('the UNIQUE constraint actually REJECTS a duplicate', async () => {

@@ -10,7 +10,9 @@
 // that had cloned instead of imported were the two missing a `--update`
 // refusal. That count is ASSERTED against the real importer list by
 // `ratchet.test.mjs` rather than maintained by hand: it said FIVE here and in
-// four other places for a week after the sixth landed (#2759).
+// four other places until #2759 (#2747 landed at 20:12 and this at 20:58 the
+// same evening -- 46 minutes, not the "week" an earlier draft of this comment
+// asserted without measuring it).
 //
 // The `key` dimension is whatever the gate counts per file: a rule id for
 // design-lint, a banned phrase for copy-lint.
@@ -113,12 +115,20 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
 /**
  * A refusal, not a crash — so it is presented as one.
  *
- * Five of the six gates have no catch around their baseline read: they inherit
- * `main().catch((err) => { console.error(err); process.exit(1) })`, which dumps
- * a `node:internal` stack whose frames all point inside this module. For a
- * malformed baseline that is noise around the one line the operator needs, and
- * it is why the "the error can name the FILE" argument landed in exactly one
- * gate until review said so (#2759).
+ * FOUR of the six gates have no catch at their entrypoint at all -- `db-mock`,
+ * `wire-types`, `retired-rail-prose` and `design-lint` call `main()` bare, so a
+ * throw becomes an uncaught exception with Node's own framing. The two that do
+ * catch (`frontend-copy-lint`, `ui-gate-wording`) print the message. Either
+ * way the frames run `assertUsableBaseline` -> `loadBaseline` -> the gate's
+ * `main`, which for a malformed baseline is noise around the one line the
+ * operator needs -- and it is why the "the error can name the FILE" argument
+ * landed in two gates of six until review said so (#2759).
+ *
+ * An earlier version of this comment said five gates inherit a
+ * `main().catch(...)`, which is both the wrong number and self-contradictory.
+ * The review that caught it put the number at one; measuring the six
+ * entrypoints gives two. Counted here rather than restated, which is the
+ * lesson this whole file is now carrying.
  *
  * Replacing `stack` is deliberate rather than clever: this error reports a bad
  * INPUT FILE, and where it was thrown from tells the reader nothing. A genuine

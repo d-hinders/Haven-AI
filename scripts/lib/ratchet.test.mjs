@@ -8,9 +8,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { newViolations, hasShrunk, assertUsableBaseline } from './ratchet.mjs'
+import { fileURLToPath } from 'node:url'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { newViolations, hasShrunk, assertUsableBaseline, readBaseline } from './ratchet.mjs'
 
-const REPO_ROOT = new URL('../..', import.meta.url).pathname
+// `fileURLToPath`, not `.pathname`: the latter percent-encodes, so a checkout
+// under a path containing a space (or `#`, or `%`) makes `git -C` fail with
+// "cannot change to '.../space%20check/'". Measured. Every other REPO_ROOT in
+// scripts/ already uses `fileURLToPath`; this was the one exception.
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 // ── The defect: a non-numeric count silently allows everything ──────────────
 
@@ -91,11 +99,26 @@ test('the importer count in the comments matches the real importer list', () => 
   //
   // A comment cannot compute, so the number stays written — but it stops being
   // unchecked. Add or remove a gate and this reddens, naming the drift.
-  const out = execFileSync(
-    'git',
-    ['-C', REPO_ROOT, 'grep', '-l', '--', "from '.*lib/ratchet.mjs'", '--', '*.mjs'],
-    { encoding: 'utf-8' },
-  )
+  //
+  // What it does NOT catch, said rather than implied (review): the grep matches
+  // a COMMENTED-OUT import, so a gate that stops importing while leaving the
+  // line behind still counts; the `*.mjs` pathspec makes a future `.ts`/`.js`
+  // gate invisible; and `git grep` sees TRACKED files only, so an unstaged new
+  // gate is invisible locally though not in CI. Each is a narrower hole than
+  // the hand-written number this replaces, and none is worth a parser here.
+  // `git grep` exits 1 on zero matches, which would surface a total-loss
+  // regression as an opaque execFileSync error instead of this test's own
+  // assertion. Catch it and let the deepEqual below do the reporting.
+  let out = ''
+  try {
+    out = execFileSync(
+      'git',
+      ['-C', REPO_ROOT, 'grep', '-l', '--', "from '.*lib/ratchet.mjs'", '--', '*.mjs'],
+      { encoding: 'utf-8' },
+    )
+  } catch (err) {
+    if (err.status !== 1) throw err
+  }
   const importers = out
     .trim()
     .split('\n')
@@ -112,4 +135,54 @@ test('the importer count in the comments matches the real importer list', () => 
   ])
   // The count the prose claims, in one place, next to the list that proves it.
   assert.equal(importers.length, 6, 'the comments say SIX gates import this engine')
+})
+
+// ── The two guards #2759's own review found untested ────────────────────────
+
+test('refusal(): a malformed baseline throws WITHOUT frames, a real bug keeps them', () => {
+  // Review measured that deleting the `err.stack` replacement reddened 0 of
+  // 522 tests. A guard nothing observes is the defect this engine's own history
+  // is made of, so both halves are pinned here.
+  //
+  // Half one: the refusal is presented as a refusal. Its stack is exactly the
+  // message, so the four gates with no entrypoint catch print that line rather
+  // than a `node:internal` dump whose frames all sit inside this module.
+  let thrown
+  try {
+    assertUsableBaseline({ 'a.md': { r: 'x' } }, 'b.json')
+  } catch (err) {
+    thrown = err
+  }
+  assert.ok(thrown instanceof TypeError, 'still a TypeError, so existing handling is unchanged')
+  assert.equal(thrown.stack, `TypeError: ${thrown.message}`)
+  assert.doesNotMatch(thrown.stack, /at assertUsableBaseline/)
+
+  // Half two, and the one that makes the trick defensible: a genuine BUG in
+  // this module is not a refusal and must keep its frames. Without this, the
+  // helper could be widened to swallow everything and nothing would notice.
+  assert.throws(
+    () => assertUsableBaseline({ get bad() { throw new ReferenceError('boom') } }),
+    (err) => err instanceof ReferenceError && /at /.test(err.stack),
+  )
+})
+
+test('readBaseline validates too — the second read path', () => {
+  // No gate calls `readBaseline` today, which is exactly why review flagged the
+  // validation added to it as unproven: reverting it reddened 0 of 522, because
+  // the hole would sit in a function no current caller touches. That is the
+  // same argument the PR used to justify validating it, applied to the guard
+  // itself.
+  const dir = mkdtempSync(join(tmpdir(), 'ratchet-read-'))
+  try {
+    const file = join(dir, 'baseline.json')
+    writeFileSync(file, JSON.stringify({ 'a.md': { r: 'x' } }))
+    assert.throws(() => readBaseline(file), /\[r\] is "x", not a number/)
+
+    writeFileSync(file, JSON.stringify({ 'a.md': { r: 2 } }))
+    assert.deepEqual(readBaseline(file), { 'a.md': { r: 2 } })
+    // And an absent file is still {} rather than a refusal.
+    assert.deepEqual(readBaseline(join(dir, 'missing.json')), {})
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

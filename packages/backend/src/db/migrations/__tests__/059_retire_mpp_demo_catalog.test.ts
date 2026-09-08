@@ -6,6 +6,8 @@
  * refresh-probe exclusion is proven against Postgres, not a mocked rows array.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Temporary #2698 dev-base CODEOWNERS probe: test-only changes must not require owners.
 import db from '../../../db.js'
 import {
   assertWorkerSchemaAtHead,

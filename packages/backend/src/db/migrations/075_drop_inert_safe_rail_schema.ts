@@ -169,3 +169,6 @@ export async function down(client: PoolClient): Promise<void> {
       ALTER COLUMN execution_rail SET DEFAULT 'allowance_module';
   `)
 }
+
+// Probe for #2705 — comment-only, never merged. Verifies whether GitHub
+// requires a code-owner approval on this path. Closed immediately after.

@@ -569,5 +569,7 @@ instrument failed to notice.
 recorded once, as the net content change, not as a removal from one tarball and
 an addition to the other. Measured on `84bd719a`, where `skill-content.ts` moved
 `connect` → `sdk`: the delta reads +13/−9, while connect's tarball actually lost
-87 lines and sdk's gained 87. The content answer is the right one for a record of
-what changed; it is not an answer about what each tarball did.
+83 lines and sdk's gained 87 — the file grew by four in the move, which is
+exactly why the net is +13/−9 rather than nothing. The content answer is the
+right one for a record of what changed; it is not an answer about what each
+tarball did.

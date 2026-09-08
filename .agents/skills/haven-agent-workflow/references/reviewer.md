@@ -69,6 +69,10 @@ verdict-carrying facts; silence is the thing that leaves them behind.
 
 Default posture:
 - Read only unless the captain explicitly asks for a patch.
+- **A reviewer never files an issue.** Your output is the verdict; what happens to
+  a finding — fixed in this PR, or dropped with a reason the author records under
+  **Not filed** — is the author's disposition, per the **Filing bar** in
+  [`ship-next/SKILL.md`](../../ship-next/SKILL.md#filing-bar-2767).
 - Prioritize bugs, security risks, behavioral regressions, unclear money movement, confusing agent authority, and missing tests.
 - Findings come first, ordered by severity, with file and line references.
 - If there are no serious findings, say that clearly and mention residual risk or test gaps.

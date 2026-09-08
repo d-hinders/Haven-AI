@@ -274,7 +274,7 @@ jobs:
             exit 1
           fi
           echo "all legs executed -- full coverage"
-      - name: File (or update) a failure issue
+      - name: File (or update) the standing failure issue
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -303,7 +303,11 @@ jobs:
           BODY=$(printf '%s\n' \
             "The deterministic money-flow QA run (\`qa-dev.yml\`) failed." \
             "" \
-            "- **Trigger:** \`${TRIGGER}\`" \
+            "This is the ONE standing tracker for \`qa-dev\` failures (#2767): a new" \
+            "failure reopens it and lands as a comment here, never as a new issue. Close" \
+            "it once a run is green; the next failure reopens it under this same number." \
+            "" \
+            "- **Latest trigger:** \`${TRIGGER}\`" \
             "- **Run:** ${RUN_URL}" \
             "- **When:** $(date -u '+%Y-%m-%d %H:%M UTC')" \
             "" \
@@ -312,12 +316,25 @@ jobs:
             "\`docs/operations/agent-qa.md\` → Troubleshooting. A transient testnet/RPC" \
             "flake can be cleared by re-dispatching the workflow; a real regression should" \
             "get its own bug report under \`docs/bug-reports/\`.")
-          EXISTING=$(gh issue list --label qa-failure --state open --limit 1 --json number -q '.[0].number // empty')
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body "Another \`qa-dev\` failure (trigger: \`${TRIGGER}\`) — ${RUN_URL}"
-            echo "Commented on existing qa-failure issue #${EXISTING}"
+          # #2767: the upsert keyed on --state open while triage closes each issue once
+          # green, so every close guaranteed the NEXT failure filed a new ticket — 12
+          # dated "qa-dev money-flow failed (…)" issues in the 8 days to 2026-09-08.
+          # Keyed on the title across ALL states now (the docs-audit.yml upsert pattern):
+          # a closed standing issue is reopened, not duplicated.
+          TITLE="qa-dev money-flow: standing failure tracker"
+          STANDING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 1 \
+            --search "in:title \"$TITLE\" label:qa-failure" \
+            --json number -q '.[0].number // empty')
+          if [ -n "$STANDING" ]; then
+            # Reopen is idempotent-safe here: on an already-open tracker it errors
+            # harmlessly and `|| true` carries on — the edit + comment below are what
+            # carry the failure record either way.
+            gh issue reopen "$STANDING" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
+            gh issue edit "$STANDING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+            gh issue comment "$STANDING" --repo "$GITHUB_REPOSITORY" --body "Another \`qa-dev\` failure (trigger: \`${TRIGGER}\`) — ${RUN_URL}"
+            echo "Updated standing qa-failure issue #${STANDING}"
           else
-            gh issue create --label qa-failure \
-              --title "qa-dev money-flow failed ($(date -u '+%Y-%m-%d'))" \
+            gh issue create --repo "$GITHUB_REPOSITORY" --label qa-failure \
+              --title "$TITLE" \
               --body "$BODY"
           fi

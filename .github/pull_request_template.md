@@ -32,9 +32,19 @@
 - If skipped, reason:
 - Headless equivalent, if browser verification was skipped:
 
-## Intentionally Left Out
+## Filed and Not filed
 
-- _List out-of-scope items or follow-ups._
+Every finding the session made ends in exactly one of three dispositions
+(fixed in this PR, dropped here, or filed below — the five checks a filing
+must clear are the **Filing bar** in `ship-next` § *Rework caps*). Fill both
+lists; a true zero is a good outcome, a silent omission is not.
+
+- **Not filed** (n, then one line per dropped finding: what, where, why it does
+  not carry its weight):
+  - _n = 0_
+- **Filed** (n, then each filed issue linked, and each carrying its reproduction
+  at a SHA in its own body — a filing without a repro is not a pass):
+  - _n = 0_
 
 ## Generated Artifacts And Handoffs
 

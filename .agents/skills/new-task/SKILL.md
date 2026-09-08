@@ -67,6 +67,11 @@ encodes have to be applied by hand; that is what the rest of this section is for
 ## Backlog And Shipping
 
 - Default to backlog-only: do not add `code-quality`.
+- **A defect-type task clears the [Filing bar](../ship-next/SKILL.md#filing-bar-2767)
+  before it is queued** (#2767): a reproduction at a SHA in the body — a command, a
+  failing test, a screenshot — plus the bar's other four checks. No repro, no issue:
+  say so and stop, or hand the finding to the session that found it to finish in
+  place. This is the bar for defects; feature and epic tasks are unaffected.
 - When the requester passes `--ship` or clearly asks to ship now, add `code-quality` and continue with [ship-next](../ship-next/SKILL.md).
 - To queue an existing backlog issue later, add `code-quality` or make it an epic sub-issue.
 

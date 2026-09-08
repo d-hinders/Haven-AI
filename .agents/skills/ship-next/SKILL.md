@@ -295,8 +295,12 @@ do not restate them here.
    prove one. PR #2492 (#2423) lists three commits no pass saw; that disclosure is the
    only alternative to the re-run, and it is a disclosure, not a clearance.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
-4. Record applied and deferred findings with reasons. When a deferred finding is filed
-   as its own issue **and must land before something already queued**, write
+4. Record applied findings with reasons, and record what you did **not** file: every
+   finding that ends *Not filed* (see **Filing bar**) gets one line under **Not filed**
+   in the PR body — what, where, why it does not carry its weight. A dropped finding
+   is a legitimate outcome; a silently dropped one is not.
+   When the one finding a round produced is filed as its own issue **and must land
+   before something already queued**, write
    `Depends on #<new issue>` into the **queued issue's** body as part of filing it.
    Stating the constraint only in the new issue's prose does not bind anything: the
    selector's BLOCKED check reads outbound references from the candidate it is about
@@ -351,10 +355,11 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    - **Non-converging:** two successive rounds have each found a **new site of the
      same class** — one more copy of the same retired claim, one more caller missing
      the same check, one more doc restating the same number. Run **exactly one more
-     round**. If it finds only more of that class, stop **chasing**: file a follow-up
-     issue naming the class and the sweep command that would enumerate it (the
-     positive-control form in *Acceptance Gate*), quote its number in the PR body,
-     and open. If it finds a defect of a **different class**, the count resets to
+     round**. If it finds only more of that class, stop **chasing**: run the sweep
+     command that enumerates the class (the positive-control form in *Acceptance
+     Gate*) and **finish the class in this PR** — filing the class instead of running
+     it is not an exit (#2767). The only alternative to finishing it is dropping the
+     residue under **Not filed**, with the sweep output quoted as the reason. If it finds a defect of a **different class**, the count resets to
      zero — **even if that round also found more of the same class.** This costs
      at most one round over the naive stop-after-two, and that round is the price
      of not cutting a PR off before its worst bug. PR #2467 (#2422) is the case,
@@ -368,9 +373,10 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      alongside more of the same — reset again.
    - **Nits-only (#2636):** the round returned findings, and every one of them is a
      `nit` — the reviewer's label, never the author's re-reading of it. Stop
-     **looping**: fix in place the ones that are genuinely one-line changes, file the
-     rest as follow-up issues with their evidence attached, quote the numbers in the
-     PR body, and open. A nits-only round does not earn another round, because the
+     **looping**: fix in place the ones that are genuinely one-line changes and drop
+     the rest under **Not filed** — one line each, evidence quoted, in the PR body —
+     and open. Do not file them (#2767): a nits-only round that ends in filed issues
+     is a finding against this session, not a deliverable. A nits-only round does not earn another round, because the
      next round's findings would be nits about nits. This is the same rule
      [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui)
      states for the rendered pass — one rule, read from either end, and the severity
@@ -384,7 +390,7 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    Either exit, including whether the trigger really held, still clears through the
    same reviewer. This ends the fix loop, never the review: it is not a licence to
    merge over an uncleared finding, and the reviewer accepting the documented residue
-   or the filed follow-up is the exit, exactly as *Independent Review* step 2 requires.
+   or the recorded *Not filed* drop is the exit, exactly as *Independent Review* step 2 requires.
 3. **A check must cover the scope of the claim written from it.** Before writing
    "appears nowhere in backend production code" into a doc, run the check over
    the scope the sentence names — `packages/`, not `packages/backend/src`, since
@@ -399,6 +405,37 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    transcript.** A bound, not a ban: quote what a later reader needs in order to
    know what was cleared and what was not, including every limit the reviewer put on
    their own clearance, in the reviewer's words (*Independent Review* step 2).
+
+### Filing bar (#2767)
+
+Every finding a session makes during a ticket — from its own work, a reviewer
+pass, a sweep, or a guard — ends in exactly one of three dispositions:
+**fixed in this PR** (the default for every `blocking` and `should-fix` finding
+and every residue of the session's own diff), **dropped with a reason** (one line
+under **Not filed** in the PR body: what, where, why it does not carry its
+weight), or **filed** — and filing clears all five checks below. No cap on
+filing; the bar applies to every issue. A finding about the tooling itself is
+fixed in place or dropped, and filed only when a **required** check is wrong.
+
+1. **Product defect or missing product behaviour** — a user, an agent, or an
+   operator hits it — **or a required check is wrong**: red for a false reason,
+   or green over a real defect. Nothing else qualifies. A doc claim, a self-test,
+   wording, a chain entry, the routing of a non-required job: fix in place or drop.
+2. **A reproduction at a SHA** in the body: a command, a failing test, or a
+   screenshot. No repro, no issue.
+3. **Not residue of this PR's own change.** Finishing your own change is
+   disposition one, not an issue.
+4. **One PR's worth**, naming its files (the templates already demand this).
+5. **Not a duplicate, and not a "still" of an open issue.** A "still" widens the
+   existing issue's net in the PR that found it, or reopens it; it never files a
+   sibling.
+
+**An issue filed to end a round is a finding against the session, not a
+deliverable.** Dropping is a legitimate outcome; dropping silently is not. The
+trade is deliberate: a PR that finishes the class it found is larger than one
+that files the class, and that is the cost chosen over a backlog that refills
+itself. This section is the single statement of the bar; the role references and
+the templates point here.
 
 ## Commit And Pull Request
 
@@ -658,7 +695,8 @@ Route the merge:
   do not need code-owner approval.
 - **Frontend UI:** a **`blocking`** or **`should-fix`** UX, copy, or design-system
   finding from either review pass pauses auto-merge; a **`nit`** does not (#2636 — fix
-  it in place when it is a one-line change, else file it with its screenshot). Severity
+  it in place when it is a one-line change, else drop it under **Not filed** with its
+  screenshot recorded in the PR body). Severity
   is the reviewer's label, never the author's re-reading of it, and the table is in
   [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui).
   Clearing a pausing finding does **not** need a second human ack (#1968): fix the finding,
@@ -842,6 +880,14 @@ Leave the issue open until the pull request merges. Report the issue, pull reque
 Report an open `qa-failure` when selection found one — one line naming the issue and
 that `dev → main` is gated by it. The user decides what to do about it; the loop's job
 is to stop it being invisible.
+
+**Filed and Not filed (#2767).** The closeout (and the PR body it summarises) carries two
+lines: `Filed: n`, each filed issue linked and each carrying its reproduction at a SHA
+in its own body, and `Not filed: n`, each with its one-line drop reason. Both are
+zero-able and a true zero is a good outcome; a closeout naming a filed issue that has
+no repro is **unfinished**, and a finding dropped without a line is a silent loss. The
+five checks a finding must clear before it can sit under `Filed:` are the
+**Filing bar** in *Rework caps*.
 
 **Record what a reviewer reproduced per mutation cell, never as a total (#2423).**
 Three drafts of one PR body said twelve, fourteen and sixteen for the same mutation

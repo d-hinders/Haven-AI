@@ -44,10 +44,61 @@ jobs:
           list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev)
           ts=$(date -u +%FT%TZ)
 
+          # #2767: the two inflow figures the filing bar is steered by, printed into the
+          # digest with the commands that produce them. Advisory: a gh hiccup must not
+          # fail the digest — the pending-promotion tracker is the load-bearing half.
+          W_START=$(date -u -d '7 days ago' +%Y-%m-%d)
+          FILED_N=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 500 \
+            --search "created:>=$W_START" --json number --jq 'length' 2>/dev/null || echo '')
+          CLOSED_N=$(gh issue list --repo "$GITHUB_REPOSITORY" --state closed --limit 500 \
+            --search "closed:>=$W_START" --json number --jq 'length' 2>/dev/null || echo '')
+          MERGED_N=$(gh pr list --repo "$GITHUB_REPOSITORY" --state merged --base dev --limit 500 \
+            --search "merged:>=$W_START" --json number --jq 'length' 2>/dev/null || echo '')
+          PRODUCT_N=$(gh pr list --repo "$GITHUB_REPOSITORY" --state merged --base dev --limit 500 \
+            --search "merged:>=$W_START" --json title \
+            --jq '[.[] | select(.title | test("^(fix|feat|perf)\\b")) | select(.title | test("^(fix|feat|perf)\\((ci|qa|docs|doc|deps|build|release|tooling|lint|scripts|hooks|style|chore|test)\\)") | not)] | length' 2>/dev/null || echo '')
+
           if [ "$count" -eq 0 ]; then
-            body=$(printf '✅ **dev and main are in sync** — nothing awaiting promotion.\n\n_Updated %s by the promotion-digest workflow._' "$ts")
+            body=$(printf '%s\n' \
+              '✅ **dev and main are in sync** — nothing awaiting promotion.' \
+              '' \
+              "_Updated ${ts} by the promotion-digest workflow._")
           else
-            body=$(printf '**%s commit(s) on `dev` not yet in prod (`main`).** Promote with a `dev → main` PR.\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$count" "$list" "$ts")
+            body=$(printf '%s\n' \
+              "**${count} commit(s) on \`dev\` not yet in prod (\`main\`).** Promote with a \`dev → main\` PR." \
+              '' \
+              "${list}" \
+              '' \
+              "_Updated ${ts} by the promotion-digest workflow._")
+          fi
+
+          # Append the metrics block only when every figure computed; an empty from a
+          # `|| echo ''` fallback means the API blipped, and the section is skipped
+          # whole rather than printed half-wrong. Each row carries its own command.
+          if [ -n "$FILED_N" ] && [ -n "$CLOSED_N" ] && [ -n "$MERGED_N" ] && [ -n "$PRODUCT_N" ]; then
+            metrics=$(printf '%s\n' \
+              '' \
+              '## Filing-bar metrics (#2767)' \
+              '' \
+              'Issue inflow per issue closed, and product share of merges — the two' \
+              "figures the filing bar is steered by, over the last 7 days (\`--search\` window from ${W_START})." \
+              '' \
+              '| Figure | Value | Window |' \
+              '|---|---|---|' \
+              "| Issues filed per issue closed | ${FILED_N} / ${CLOSED_N} | created:>${W_START} / closed:>${W_START} |" \
+              "| Product PRs as a share of merges | ${PRODUCT_N} / ${MERGED_N} | merged:>${W_START}, base dev; product = conventional \`fix\`/\`feat\`/\`perf\` outside a tooling scope |" \
+              '' \
+              '_Baselines (2026-09-08): ~1.0 and 36 %. Targets: under 0.3 and above 60 %._' \
+              '' \
+              '_Commands (from the repo root; the source of each number above):_' \
+              '' \
+              '```bash' \
+              "gh issue list --repo ${GITHUB_REPOSITORY} --state all --limit 500 --search \"created:>=${W_START}\" --json number --jq length" \
+              "gh issue list --repo ${GITHUB_REPOSITORY} --state closed --limit 500 --search \"closed:>=${W_START}\" --json number --jq length" \
+              "gh pr list --repo ${GITHUB_REPOSITORY} --state merged --base dev --limit 500 --search \"merged:>=${W_START}\" --json number --jq length" \
+              "gh pr list --repo ${GITHUB_REPOSITORY} --state merged --base dev --limit 500 --search \"merged:>=${W_START}\" --json title --jq '[.[] | select(.title | test(\"^(fix|feat|perf)\\b\")) | select(.title | test(\"^(fix|feat|perf)\\((ci|qa|docs|doc|deps|build|release|tooling|lint|scripts|hooks|style|chore|test)\\)\") | not)] | length'" \
+              '```')
+            body=$(printf '%s\n%s\n' "$body" "$metrics")
           fi
 
           # Self-heal the label so the workflow works even before labels.yml syncs.

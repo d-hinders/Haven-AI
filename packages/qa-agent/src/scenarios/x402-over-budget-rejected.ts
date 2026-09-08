@@ -65,9 +65,18 @@
  * the read degrades, the pre-check fails open, nothing reverts, and authorize
  * answers 201 with `sign_data`: the signability guard below fails the leg.
  * Upstream of that, this leg's own precondition refuses to run at all against a
- * fallback read. The green cannot survive that mutation on either branch, which
- * is what makes `error_code` + `remaining_atomic` equivalent in force to the
- * decoded enforcer name.
+ * fallback read. The green cannot survive that mutation on either branch.
+ *
+ * **What the 403 branch does NOT witness, stated because it is a real trade.**
+ * The old 502 assertion witnessed an actual revert. The 403 witnesses the
+ * enforcer's STORAGE. Against #2016's mutation — delete the caveat — those are
+ * equivalent, per the paragraph above. Against a narrower one — caveat present
+ * and readable, but the redemption no longer actually reverts, because the
+ * enforcer was upgraded or the DelegationManager stopped invoking it — they are
+ * not: this leg would go green on the pre-check while the chain-side gate was
+ * gone. It has to make that trade, because on this path the product no longer
+ * ordinarily produces a revert to witness. The erc7710 sibling's doc row states
+ * the same limit in the same words.
  *
  * A future reader trimming the `fromChain` guard in that reader would break
  * this coupling silently, which is why it is written down here.
@@ -79,9 +88,12 @@
  * only through `POST /payments/:id/sign`. A control here would cost a sponsored
  * gas estimation and leave an unsigned `pending_signature` row per run.
  *
- * The real reason is that the ordered run already contains one: `run.ts` puts
- * `within-budget-settle` first, and `x402-delegation-3009` is a full
- * within-budget authorize → sign → settle on THIS EXACT shape. The sibling
+ * The real reason is that the ordered run already contains one, though LATER in
+ * the run rather than inline: `run.ts` puts `within-budget-settle` first, and
+ * `x402-delegation-3009` — a full within-budget authorize → sign → settle on
+ * THIS EXACT shape — runs at index 5 to this leg's index 3. So the suite proves
+ * the shape can pay, but not before this leg reports, which is the one thing an
+ * inline control would add. The sibling
  * embeds its own control because its scheme has no such leg. Duplicating it
  * here would buy nothing the suite does not already prove.
  *

@@ -31,6 +31,7 @@ covers:
   - packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts
   - packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts
   - packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts
+  - packages/backend/src/infra/chain/delegation-budget-reader.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
@@ -38,7 +39,7 @@ satisfied-by:
   - docs/regulatory/casp-changelog/**
 last-verified: "2026-09-08"
 verified:
-  - "#2756: the #2082 rationale's closing sentence — \"The EIP-3009 branch is deliberately untouched — it already refuses at authorize, and a second pre-check there would be a second source of truth for one condition\" — was #2082's reasoning and #2706 overturned it. The 3009 branch now carries exactly that second pre-check. Present tense, stating that a check does not exist where it does, fourteen lines below the clause #2753 re-tensed in this same file for the same reason — a correction that stopped at a paragraph boundary. Rewritten to record what the sentence said, why it was true, and how the \"second source of truth\" worry was actually answered: by the fail-open posture, so there is one authority and one convenience rather than two authorities. Verified against `delegation-authorize.ts` as it stands: the 3009 pre-check sits above `prepareDelegationPayment`, the erc7710 pre-check above `buildSettlementDelegation`. Scope: THAT ONE paragraph. Nothing else in this document was re-verified."
+  - "#2756: the #2082 rationale's closing sentence — \"The EIP-3009 branch is deliberately untouched — it already refuses at authorize, and a second pre-check there would be a second source of truth for one condition\" — was #2082's reasoning and #2706 overturned it. The 3009 branch now carries exactly that second pre-check. Present tense, stating that a check does not exist where it does, fourteen lines below the clause #2753 re-tensed in this same file for the same reason — a correction that stopped at a paragraph boundary. Rewritten to record what the sentence said, why it was true, and how the \"second source of truth\" worry was actually answered: by the fail-open posture, so there is one authority and one convenience rather than two authorities. Verified against `delegation-authorize.ts` as it stands: the 3009 pre-check sits above `prepareDelegationPayment`, the erc7710 pre-check above `buildSettlementDelegation`. The cost rationale is attributed to #2706 rather than #2082, which a first draft got wrong: #2082 argued about WHEN the refusal arrives, and only #2706 makes the read-vs-bundler cost argument, in that block's own words. Also adds `packages/backend/src/infra/chain/delegation-budget-reader.ts` to `covers:`, since the paragraph names `readRemainingBudget` and its fallback by name and nothing coupled this doc to that file — the same uncoupled-doc defect this issue exists to close, found by review one file over. Scope: THAT ONE paragraph and the `covers:` line. Nothing else in this document was re-verified."
   - "#2738: one clause in the #2082 narrative used the present tense for a shape that changed under it — `POST /payments` and the EIP-3009 shape \"estimate a redemption and so surface the enforcer's refusal as a 502\", inside a sentence otherwise scoped to \"Previously\". True of `POST /payments`, false of the 3009 shape since #2706 (PR #2719) added the same pre-check erc7710 got. Re-tensed, with today's state named. The fail-open paragraph at §322-328 was re-read and is accurate as written. Found by review of PR #2753. Scope: THAT ONE clause. Nothing else in this document was re-verified."
   - "#2706: EDITED, scope = the #2121 refusal-shape blockquote only. It stated the EIP-3009 refusal surfaces as an untyped `502` with no intent row and named the typed `403 delegation_budget_exceeded` as erc7710-only — false since this change, which extends the #2082 pre-check to the funding leg. The block now states the typed 403 for the funding leg WITH the inherited fail-open carve-out (degraded/thrown read proceeds to prepare, where the enforcer revert still answers the 502) and links #2706. Read against `packages/backend/src/modules/x402/delegation-authorize.ts` as changed on this branch. The `satisfied-by:` casp-changelog shard also covers this edit, kept for the review trail. Scope: that ONE blockquote. NOT re-verified: the two-leg diagram, the SDK funding-leg module list, the resume sections, or any other sequence step."
   - "#2680 (slice 2, epic #2678): exhaustive-set claims dispositioned — five claims now cite their pins by path: the preflight one-call-per-surface (tools.test.ts ROUND-TRIP BUDGET, existing), the max_amount XOR (strict-tool-input.test.ts, existing), the retry_original_x402_request single producer (x402-resume-producer-pin.test.ts, pre-existing from this branch and now cited), the erc7710 confirm only-door (erc7710-confirm-seam-census-pin.test.ts, NEW), the resume-gate two-site roster (resume-gate-call-census-pin.test.ts, NEW), and the settlement-verifier eight-check roster (settlement-verifier-roster-pin.test.ts, NEW). Left as prose with reasons: the L645/L871/L904/L1193 remaining matches are historical narrative or inside already-pinned sentences; no claim found false. Scope: those six pointer insertions + one broken relative link fixed (../../../packages -> ../../packages at the ROUND-TRIP BUDGET cite). NOT re-verified: the rest of the body."
@@ -1104,14 +1105,18 @@ The flow is a two-call variant of `/x402/authorize`:
    is the same posture as #1145's fallback and #1319's `remaining_is_from_chain`
    honesty flag.
 
-   **That last sentence used to read "The EIP-3009 branch is deliberately
+   **This paragraph used to close with "The EIP-3009 branch is deliberately
    untouched — it already refuses at authorize, and a second pre-check there
    would be a second source of truth for one condition."** That was #2082's
    reasoning and #2706 overturned it: the 3009 branch now carries exactly that
    second pre-check (`delegation-authorize.ts`, the block above
-   `prepareDelegationPayment`), for the reason #2082 gave for erc7710 — a
-   refusal that arrives before any redemption is prepared costs one indexed
-   read instead of a bundler round trip. The "second source of truth" worry was
+   `prepareDelegationPayment`). The reason is #2706's own and differs from
+   #2082's, because the two legs started from different places: #2082 argued
+   about WHEN the refusal arrives (on erc7710 it landed four round trips later,
+   after the agent had signed and settled), while the 3009 leg already refused
+   at authorize — so what #2706 bought there is COST, "one extra indexed read
+   ahead of a bundler call that costs orders of magnitude more" in that block's
+   own words. The "second source of truth" worry was
    answered by the fail-open posture rather than by abstaining: on a degraded
    read the pre-check yields and the enforcer still rules, so there is one
    authority and one convenience, not two authorities (#2756).

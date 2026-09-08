@@ -18,7 +18,8 @@
  * "27/27 with zero skips" is a materially different claim from "green", and
  * until now only a human who went looking could make it. Now the run makes it.
  */
-import { readdir, readFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -32,6 +33,13 @@ import {
   unacknowledgedFailureMessage,
   type DbMode,
 } from './src/infra/__tests__/helpers/db-availability.js'
+import {
+  readFingerprint,
+  REFERENCE_LOCK_KEY,
+  REFERENCE_PATH_ENV,
+  REFERENCE_SCHEMA,
+} from './src/infra/__tests__/helpers/schema-reference.js'
+import { applyTestEnvDefaults } from './src/infra/__tests__/helpers/test-env.js'
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'src')
 
@@ -64,7 +72,132 @@ async function countRealDbTestFiles(dir: string = SRC): Promise<number> {
   return total
 }
 
+/**
+ * Build the run's pristine schema reference and publish its fingerprint (#2622).
+ *
+ * Runs ONCE, in the main process, before a worker exists — which is the whole
+ * economy of the design. The alternative #2622 costed, dropping and recreating
+ * every worker schema, pays a full migration run per FILE (worker ids are file
+ * ordinals), so 63 of them per suite run here.
+ *
+ * The reference schema is dropped and recreated rather than reused. Reusing it
+ * would reproduce the very defect this closes one level up: a stale reference
+ * is worse than none, because every worker would then be compared against
+ * yesterday's drift and report clean.
+ *
+ * `DATABASE_URL` is repointed before the migration runner is imported, because
+ * `getPool()` is memoised and `config.ts` reads the URL at import time. The
+ * pool is ended in the `finally`, or vitest waits on an open handle.
+ */
+async function buildSchemaReference(url: string): Promise<void> {
+  // Before ANY import that reaches `config.ts`. Global setup runs ahead of
+  // setup files, so nothing has applied these yet and the migration runner
+  // would die on `Missing required environment variable: JWT_SECRET`.
+  applyTestEnvDefaults()
+  const pg = (await import('pg')).default
+
+  // SERIALISED across concurrent runs (review finding, blocking). The
+  // reference schema is a single fixed name and this whole sequence —
+  // drop, create, migrate, fingerprint — is destructive on it, so two runs
+  // against one Postgres raced. Reproduced on the first attempt: run A died
+  // in global setup with `42P06 schema "test_schema_reference" already
+  // exists`, before collecting a single test. This repo documents many
+  // worktrees against one database as the ordinary case, so that is not an
+  // exotic interleaving.
+  //
+  // The 42P06 was the BENIGN branch. Two worse ones live in the same window:
+  // B's `DROP ... CASCADE` landing mid-migration kills A with a
+  // relation-not-found from an arbitrary migration, and B's drop+create
+  // landing between A's migration and A's fingerprint read makes A publish a
+  // PARTIAL reference — which the empty-reference guard below cannot catch,
+  // and which would redden all 62 real-DB files with a wrong message carrying
+  // a destructive repair instruction.
+  //
+  // A lock rather than a per-run schema name, deliberately: the workers read
+  // the fingerprint from a FILE, not from the schema, so a later run
+  // rebuilding it cannot disturb a suite already running — while a per-run
+  // name would leave `--audit` with no persistent reference to compare
+  // against, and would strand one schema per run (#2622's own subject).
+  const holder = new pg.Client({ connectionString: url })
+  await holder.connect()
+  try {
+    await holder.query('SELECT pg_advisory_lock($1)', [REFERENCE_LOCK_KEY])
+    await holder.query(`DROP SCHEMA IF EXISTS ${REFERENCE_SCHEMA} CASCADE`)
+    await holder.query(`CREATE SCHEMA ${REFERENCE_SCHEMA}`)
+    await buildReferenceUnderLock(url, pg)
+  } finally {
+    // Releasing by ending the session: an advisory lock is session-scoped, so
+    // this cannot leak a held lock even if the body threw partway.
+    await holder.end()
+  }
+}
+
+/** The drop/create/migrate/read body, run while `REFERENCE_LOCK_KEY` is held. */
+async function buildReferenceUnderLock(url: string, pg: typeof import('pg').default): Promise<void> {
+  const scoped = new URL(url)
+  scoped.searchParams.set('options', `-c search_path=${REFERENCE_SCHEMA}`)
+  const previousUrl = process.env.DATABASE_URL
+  process.env.DATABASE_URL = scoped.toString()
+  try {
+    const { runMigrations } = await import('./src/db/migrate.js')
+    await runMigrations()
+  } finally {
+    // In the `finally`, because `runMigrations()` calls `getPool()` itself:
+    // a throw would otherwise leave a live memoised pool in the main process,
+    // which is what the docstring above always claimed this line prevented
+    // (review finding — it was inside the `try`, after the throwing call).
+    const { getPool } = await import('./src/db.js')
+    await getPool().end()
+    process.env.DATABASE_URL = previousUrl
+  }
+
+  // Read the reference through the SAME `search_path` shape the workers use
+  // (review finding, blocking). `information_schema.columns.column_default`
+  // renders `regclass` references RELATIVE TO THE READER'S search_path, so a
+  // plain connection reports `nextval('test_schema_reference.x_id_seq'::regclass)`
+  // where a worker bound to its own schema reports `nextval('x_id_seq'::regclass)`
+  // — two byte-identical schemas diffing as drifted. Measured directly on a
+  // scratch schema.
+  //
+  // Latent today only because every migration uses `uuid`/`gen_random_uuid()`
+  // (verified: zero `nextval` defaults in the reference). The first migration
+  // adding a `SERIAL`, a schema-local function default or an enum cast would
+  // turn EVERY real-DB file in every run red — with a message that is wrong and
+  // a repair (`DROP SCHEMA test_wN CASCADE`) that destroys work without helping,
+  // because the recreated schema renders the default the same way.
+  const reader = new pg.Client({ connectionString: scoped.toString() })
+  await reader.connect()
+  let fingerprint
+  try {
+    fingerprint = await readFingerprint(reader, REFERENCE_SCHEMA)
+  } finally {
+    await reader.end()
+  }
+  // A reference of zero tables is never right, and it is reachable: another
+  // session dropping `test_schema_reference` in the window between the
+  // migration run and this read leaves `readFingerprint` returning `[]` with no
+  // error, which would publish an empty reference and redden every real-DB file
+  // with "34 tables present that head does not have" — each advising a
+  // destructive `DROP SCHEMA`. Fail here instead (review finding).
+  if (fingerprint.length === 0) {
+    throw new Error(
+      `db-harness: the schema reference ${REFERENCE_SCHEMA} fingerprinted as EMPTY right after ` +
+        'its migration run. Something removed it concurrently — another session, or a manual ' +
+        'DROP. Re-run; if it repeats, the migration runner is not writing into that schema.',
+    )
+  }
+
+  const dir = await mkdtemp(path.join(tmpdir(), 'haven-schema-ref-'))
+  const file = path.join(dir, 'reference.json')
+  await writeFile(file, JSON.stringify(fingerprint))
+  // Workers inherit the main process's env, so this is the transport — verified
+  // rather than assumed: a probe set here was read back inside a worker.
+  process.env[REFERENCE_PATH_ENV] = file
+  referenceDir = dir
+}
+
 let verdict: { mode: DbMode; url: string } | null = null
+let referenceDir: string | null = null
 
 export async function setup(): Promise<void> {
   const url = resolveTestDatabaseUrl()
@@ -76,9 +209,12 @@ export async function setup(): Promise<void> {
   // narrowed run back into a proof, so there is no value in running it first.
   if (mode === 'fail-ci') throw new Error(ciFailureMessage(url))
   if (mode === 'fail-unacknowledged') throw new Error(unacknowledgedFailureMessage(url))
+
+  if (mode === 'run') await buildSchemaReference(url)
 }
 
 export async function teardown(): Promise<void> {
+  if (referenceDir) await rm(referenceDir, { recursive: true, force: true })
   if (!verdict) return
   const { mode, url } = verdict
 

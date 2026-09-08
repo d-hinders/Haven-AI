@@ -237,6 +237,13 @@ export function readChain(raw) {
  * Rather than teach each of them two shapes, this presents the list shape in
  * the legacy join so all of them stay correct with no change.
  *
+ * LIMIT, and it is load-bearing: the synthesis joins entries with the legacy
+ * ` Prior: ` separator, and **three entries in this corpus contain that literal
+ * in their own prose**. So the result is safe for anything that scans it —
+ * `issueRefs`, `CHAIN_RESET_RE`, `declaredResetIssues`, `checkChain` — and must
+ * NEVER be split back into entries with `chainEntries`, which would invent one
+ * per occurrence. For entry-level work read `readChain(raw).entries` instead.
+ *
  * Without it those tools read a migrated doc as `last-verified: "<date>"` with
  * no refs at all, and report the migration commit as having dropped every
  * entry in the repository — a permanent false BROKEN across ~78 docs, since

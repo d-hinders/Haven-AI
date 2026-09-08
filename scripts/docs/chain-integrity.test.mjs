@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, checkEntriesVerbatim, normalizeEntryText, chainNoteBody, readChain, entriesRefs, checkChainEntries } from './chain-integrity.mjs'
+import { lastVerifiedLine, issueRefs, checkChain, isPromotionPR, chainEntries, headOfEntry, checkEntriesVerbatim, normalizeEntryText, chainNoteBody, readChain, entriesRefs, checkChainEntries, chainTextOf } from './chain-integrity.mjs'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -486,4 +486,17 @@ test('#2637: a MULTI-REF head with only one ref surviving is ALTERED, not droppe
   assert.deepEqual(r.dropped, [], 'one surviving ref means rewritten, not removed')
   assert.equal(r.altered.length, 1)
   assert.equal(r.altered[0].head, '#2100/#2101(+#2098)')
+})
+
+test('#2637: chainTextOf is scan-safe but NOT re-splittable — three real entries contain "Prior:"', () => {
+  // Regression guard for a defect introduced by the history-tool fix itself and
+  // caught by probing the corpus rather than by review. The synthesis uses the
+  // legacy separator, so an entry whose prose contains `Prior:` splits into two.
+  const doc = LIST_DOC(['#1: talks about Prior: markers in prose', '#2: plain'])
+  // Scanning is correct — refs and markers are found regardless of separators.
+  assert.deepEqual(issueRefs(chainTextOf(doc)).sort(), ['#1', '#2'])
+  // Entry-level reading must go through readChain, which is exact.
+  assert.deepEqual(readChain(doc).entries.length, 2)
+  // And the trap this guards: re-splitting the synthesis invents an entry.
+  assert.equal(chainEntries(chainTextOf(doc)).length, 3)
 })

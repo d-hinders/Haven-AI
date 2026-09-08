@@ -54,6 +54,15 @@ describe('the committed evidence set', () => {
     expect(viewports.map((vp) => vp.name)).toEqual(['desktop', 'mobile'])
   })
 
+  it('holds exactly two WIDTHS: 1280 and 390 (#2680 pin)', () => {
+    // design-system.md § Viewport-driven defects states the set with a count —
+    // "`scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and
+    // 390" — and derives "every other width is invisible to the gate" from it.
+    // The name assertions above pin the entries; this pins the widths, so a
+    // third viewport or a width change reddens until the doc is edited.
+    expect(committed.map((vp) => vp.width).sort((a, b) => a - b)).toEqual([390, 1280])
+  })
+
   it('is not reachable through the override, so a request never degrades to it', () => {
     // The failure this exists to make impossible: a mistyped width that quietly
     // falls back to 1280/390 and hands a reviewer a "320px" capture of 390px.

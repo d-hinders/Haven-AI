@@ -38,8 +38,9 @@
  * resolved text, not an extractable literal, so no check here can read it
  * back. Those are covered by routing: the manifest names `frontend` as an
  * owner of the canonical source, so their own pin tests run on a change to
- * `agent-guidance.ts` (#2727). A change to `skill-content.ts` alone still does
- * not route `frontend` — see #2743.
+ * `agent-guidance.ts` (#2727) — and `skill-content.ts`, which the skill bundle
+ * is pinned to as well, carries its own manifest entry for the same reason
+ * (#2743). Routing, not this script, is what covers both.
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'

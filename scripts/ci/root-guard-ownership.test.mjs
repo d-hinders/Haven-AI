@@ -10,7 +10,8 @@
 // Four things are verified here that the routing tests cannot see:
 //   1. every guard file the manifest names actually exists;
 //   2. every job it names actually runs the guard, per ci.yml;
-//   3. every npm script it names actually exists;
+//   3. every npm script it names actually exists — in the ROOT package.json,
+//      or, for a `<script> -w <workspace>` entry, in that workspace's (#2743);
 //   4. every entry is exercised by a routing-matrix row.
 //
 // Run with: node --test scripts/ci/root-guard-ownership.test.mjs
@@ -28,6 +29,38 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
 const workflow = read('.github/workflows/ci.yml')
 const packageJson = JSON.parse(read('package.json'))
+
+/**
+ * Resolve one `runsVia` entry to the package.json that must define it.
+ *
+ * Two shapes, and the second is the one #2743 added:
+ *   `lint:deps`               -> the ROOT package.json
+ *   `test -w packages/sdk`    -> that WORKSPACE's package.json
+ *
+ * The workspace form exists because not every cross-package guard has a root
+ * script to hang ownership on. `packages/sdk/src/skill-content.ts` is pinned
+ * by `packages/frontend/src/lib/__tests__/agent-skill-bundle.test.ts`, which
+ * runs inside the frontend's own vitest — there is no root lint that reads it
+ * back, because the frontend's copy is text composed at build time. Inventing
+ * a root script that re-runs those tests would be a SECOND spelling of a check
+ * `frontend_checks` already performs, which ci.yml's own visual-baseline
+ * comment warns against ("two spellings of one check is how they drift").
+ *
+ * This is a tightening, not a loosening. A bare name was checked against one
+ * file; a workspace name is checked against the workspace's package.json AND
+ * against the workspace directory existing, so `test -w packages/typo` fails
+ * here rather than silently matching nothing in ci.yml. Both forms still have
+ * to appear verbatim as `npm run <entry>` in every owning job's block — that
+ * check is unchanged and is what makes `jobs` a claim about ci.yml.
+ */
+export function resolveRunsVia(entry) {
+  const workspace = entry.match(/^(\S+) -w (\S+)$/)
+  if (!workspace) return { script: entry, manifest: 'package.json', scripts: packageJson.scripts }
+  const [, script, dir] = workspace
+  const manifest = `${dir}/package.json`
+  if (!existsSync(path.join(ROOT, manifest))) return { script, manifest, scripts: null }
+  return { script, manifest, scripts: JSON.parse(read(manifest)).scripts ?? {} }
+}
 
 /**
  * Slice one job's block out of ci.yml.
@@ -119,10 +152,16 @@ describe('the manifest describes reality', () => {
   test('every runsVia names a real npm script', () => {
     for (const guard of ROOT_GUARDS) {
       assert.ok(guard.runsVia?.length > 0, `${guard.path} names no runsVia command`)
-      for (const script of guard.runsVia) {
+      for (const entry of guard.runsVia) {
+        const { script, manifest, scripts } = resolveRunsVia(entry)
         assert.ok(
-          script in packageJson.scripts,
-          `${guard.path} claims to run via "${script}", which is not a script in package.json`,
+          scripts !== null,
+          `${guard.path} claims to run via "${entry}", but there is no ${manifest} — ` +
+            'a workspace-scoped runsVia must name a real workspace.',
+        )
+        assert.ok(
+          script in scripts,
+          `${guard.path} claims to run via "${entry}", which is not a script in ${manifest}`,
         )
       }
     }
@@ -180,6 +219,59 @@ describe('the manifest describes reality', () => {
           `ci.yml's ${jobKeyFor(flag)} runs a ${guard.path} command, but the manifest does not ` +
             `name "${flag}" as an owner. A PR touching that guard would skip the job running it.`,
         )
+      }
+    }
+  })
+})
+
+describe('runsVia resolution (#2743)', () => {
+  // The workspace-scoped form is a TIGHTENING, and a tightening nothing
+  // observes can be reverted silently — which is exactly what review measured
+  // on #2728's sibling gates. So it is pinned here, not only exercised through
+  // whichever manifest entries happen to use it today.
+
+  test('a bare entry resolves against the ROOT package.json', () => {
+    const { script, manifest, scripts } = resolveRunsVia('lint:deps')
+    assert.equal(script, 'lint:deps')
+    assert.equal(manifest, 'package.json')
+    assert.ok('lint:deps' in scripts, 'the root manifest should define the control script')
+  })
+
+  test('a `-w` entry resolves against THAT WORKSPACE, not the root', () => {
+    const { script, manifest, scripts } = resolveRunsVia('test -w packages/frontend')
+    assert.equal(script, 'test')
+    assert.equal(manifest, 'packages/frontend/package.json')
+    assert.ok('test' in scripts)
+    // The distinguishing assertion: `test` exists in BOTH package.json files,
+    // so asserting its presence alone would pass against a resolver that never
+    // left the root. This pins the actual file that was read, and derives the
+    // difference rather than naming a script that could move between them.
+    assert.deepEqual(scripts, JSON.parse(read('packages/frontend/package.json')).scripts)
+    assert.ok(
+      Object.keys(scripts).some((k) => !(k in packageJson.scripts)),
+      'the two manifests must differ, or this test cannot tell which one was read',
+    )
+  })
+
+  test('a `-w` entry naming a workspace that does not exist is reported, not ignored', () => {
+    // The failure mode this replaces: a bare-name check would call
+    // `test -w packages/typo` "not a script in package.json" and a caller
+    // could not tell a typo'd script from a typo'd workspace. Worse, a lookup
+    // that silently returned {} would let the entry match nothing in ci.yml
+    // while still passing here.
+    const { manifest, scripts } = resolveRunsVia('test -w packages/does-not-exist')
+    assert.equal(manifest, 'packages/does-not-exist/package.json')
+    assert.equal(scripts, null, 'a missing workspace must be distinguishable from an empty one')
+  })
+
+  test('every workspace-scoped entry in the manifest names a directory that exists', () => {
+    // The generic form of the case above, over the real manifest — so a future
+    // entry with a typo'd workspace fails here rather than at the ci.yml match.
+    for (const guard of ROOT_GUARDS) {
+      for (const entry of guard.runsVia) {
+        if (!entry.includes(' -w ')) continue
+        const { manifest, scripts } = resolveRunsVia(entry)
+        assert.notEqual(scripts, null, `${guard.path}: ${entry} names a missing ${manifest}`)
       }
     }
   })

@@ -264,6 +264,27 @@ export const ROUTING_MATRIX = [
       'what it was added to widen.',
   },
   {
+    files: ['packages/sdk/src/skill-content.ts'],
+    expect: [
+      'code',
+      'sdk',
+      'frontend',
+      'backend',
+      'connect',
+      'mcp',
+      'mcp_server',
+      'signer',
+    ],
+    kind: CONTRACT,
+    why:
+      'The canonical generic payment skill (#2743). The frontend keeps a decoupled inline copy ' +
+      'so it can deploy standalone, and agent-skill-bundle.test.ts imports THIS file to assert ' +
+      'byte parity — a test that runs only in frontend_checks. #2727 closed this shape for ' +
+      'agent-guidance.ts and left this file behind: sdk routed, frontend did not, so a mutation ' +
+      'here failed a test in a job that never ran. `cli` is deliberately absent — the CLI holds ' +
+      'no copy of the skill, only of the runbook.',
+  },
+  {
     files: ['scripts/dep-lint.test.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

@@ -24,6 +24,13 @@
     "           what makes `jobs` a CHECKED claim rather than an assertion:",
     "           scripts/ci/root-guard-ownership.test.mjs reads .github/workflows/ci.yml",
     "           and fails if a named job does not actually run one of these.",
+    "           Two shapes (#2743): a bare name is a ROOT package.json script",
+    "           (`lint:deps`); `<script> -w <workspace>` is that WORKSPACE's",
+    "           (`test -w packages/sdk`), for a guard whose only real check is a",
+    "           package's own suite and which therefore has no root script to",
+    "           hang ownership on. Both are validated against the package.json",
+    "           that must define them, and both must appear verbatim as",
+    "           `npm run <entry>` in every owning job's block.",
     "  reason   Why this ownership, in a sentence someone can disagree with.",
     "",
     "NOT ONLY GUARDS (#2727). An entry may also be a CANONICAL SOURCE whose",
@@ -239,6 +246,18 @@
         "lint:runbook-parity"
       ],
       "reason": "The generator and verifier for the runbook copies above. It lives under packages/cli/ but reads packages/sdk/, so a change here can break a check that any of the three jobs running lint:runbook-parity performs -- and these rules match before the packages/cli/* arm, so without the explicit cli in jobs a change to this file would stop routing the CLI's own suite (#2727)."
+    },
+    {
+      "path": "packages/sdk/src/skill-content.ts",
+      "jobs": [
+        "sdk",
+        "frontend"
+      ],
+      "runsVia": [
+        "test -w packages/sdk",
+        "test -w packages/frontend"
+      ],
+      "reason": "The canonical generic payment skill, and the second SDK source with a cross-package pin. packages/frontend/src/lib/agent-skill-bundle.ts keeps a deliberately decoupled inline copy so the frontend deploys standalone, and packages/frontend/src/lib/__tests__/agent-skill-bundle.test.ts imports THIS file directly to assert byte-for-byte parity -- a test that runs only in frontend_checks. #2727 closed the same hole for agent-guidance.ts and left this one open (#2743): an SDK-only change here routed sdk but not frontend, so mutating a heading exited 0 on lint:runbook-parity (which reads only the two full-text runbook copies, and this is not one of them) while agent-skill-bundle.test.ts failed in a job that never ran. That copy is resolved text composed at build time, so no readable-back lint can cover it; the frontend's own suite is the check, which is why runsVia names it by workspace rather than inventing a second spelling of a check frontend_checks already runs."
     }
   ]
 }

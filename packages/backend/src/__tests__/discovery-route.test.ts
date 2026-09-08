@@ -2,6 +2,7 @@ import Fastify from 'fastify'
 import { describe, expect, it, vi } from 'vitest'
 import discoveryRoutes, { buildDiscoveryDocument } from '../routes/discovery.js'
 import { openapiSpec } from '../openapi/spec.js'
+import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 
 /**
  * `GET /discovery` (#2531).
@@ -71,6 +72,10 @@ describe('GET /discovery', () => {
     expect(doc.openapi_url).toBe('https://preview.test/openapi.json')
   })
 
+  it('reports the canonical default chain alongside the deployment chain lists', () => {
+    expect(buildDiscoveryDocument(req()).chains.default).toBe(DEFAULT_CHAIN_ID)
+  })
+
   it('answers 200 unauthenticated, and says caches must not share it', async () => {
     const app = Fastify({ logger: false })
     await app.register(discoveryRoutes)
@@ -96,5 +101,8 @@ describe('GET /discovery', () => {
     for (const key of Object.keys(doc)) {
       expect(schema.properties, `spec is missing ${key}`).toHaveProperty(key)
     }
+    const chains = schema.properties.chains as { properties: Record<string, unknown>; required: string[] }
+    expect(chains.required).toContain('default')
+    expect(chains.properties).toHaveProperty('default')
   })
 })

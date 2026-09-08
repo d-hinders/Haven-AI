@@ -153,7 +153,16 @@ describe('/for-agents.md (#2523)', () => {
     // because production lists a testnet beside its mainnets, so `environment`
     // alone would have let it call test funds real money (haven-design-reviewer
     // on the first wording).
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10600)
+    // 10600 -> 10700 for #2710 (the page is 10607 bytes at this commit).
+    // The manifest can name a deployment default, but a funded wallet is the
+    // authority for the actual receiving chain; this small clause says both
+    // instead of letting an agent turn a default into a transfer instruction.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10700)
+  })
+
+  it('treats chains.default as expected only and confirms funding after login', () => {
+    expect(served).toContain('`chains.default` as the deployment\'s expected chain')
+    expect(served).toContain('confirm that chain before you message your user')
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {

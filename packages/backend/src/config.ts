@@ -51,12 +51,38 @@ function optionalEnv(key: string, fallback: string): string {
  * unknown length of time with nothing anywhere saying so. The owner decision
  * (folded into #2630 rather than filed separately) is: stay fail-open, but
  * stop being silent — the same `warnPublicRpc` shape #2615 established for an
- * unset RPC endpoint, applied here. Branches on the RAW value, not the
- * resolved one: a deliberately-configured `TRUST_PROXY_HOPS=0` is an operator
- * choice and stays silent, exactly as a garbage value that resolves to the
- * same 0 does NOT (it gets the louder, different, "not a non-negative
- * integer" message below) — unset and "invalid" are distinct operator
- * mistakes and get distinct messages.
+ * unset RPC endpoint, applied here. It branched on the RAW value, not the
+ * resolved one, following the #2615 convention that a variable which is SET is
+ * a deliberate configuration: unset/empty and garbage warn, each with its own
+ * message, and a deliberately-set value stays quiet.
+ *
+ * ## The explicit 0 warns too now (#2667)
+ *
+ * That convention is right for `RPC_URL_BASE`, where a set value can name a
+ * real choice (a public endpoint someone picked on purpose). It is a weaker
+ * fit here, and #2667 says why: `0` is not a configuration of the rate-limit
+ * tier, it is the ABSENCE of one — the tier returns no limit at all at 0 hops
+ * (`middleware/rate-limit.ts`), so the only thing an operator can select with
+ * `TRUST_PROXY_HOPS=0` is "no front-door throttling, and no signal saying so".
+ * There is no deployment where that is the intended posture: behind Railway
+ * there is at least one edge hop, and in front of no proxy the variable is
+ * moot. So a fat-fingered `0` for `1`, or a `0` left behind while debugging,
+ * reproduced the exact state #2630's warning exists to flag — through a
+ * spelling that warning was blind to.
+ *
+ * It gets its OWN message, not the unset one: "not set" and "you set 0" are
+ * different operator situations with different remedies (the first may be
+ * nobody's intent at all; the second is a decision that needs reconsidering),
+ * and collapsing them would let a `0` paste masquerade as a missing variable
+ * in the logs. Three disarmed spellings, three distinct messages — pinned by
+ * the pairwise-distinctness mutation proof in
+ * `__tests__/config-trust-proxy.test.ts`.
+ *
+ * Boot behaviour is UNCHANGED: every path below still returns 0 and nothing
+ * throws. Refusing to boot on `0` in production was the stronger option on
+ * #2667 and is deliberately NOT taken here, for the same reason #2615 item 3
+ * answered its own fail-open/fail-closed question as fail-open: an operator
+ * decision, not a warning PR.
  */
 export function parseTrustProxyHops(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === '') {
@@ -77,6 +103,18 @@ export function parseTrustProxyHops(raw: string | undefined): number {
       `TRUST_PROXY_HOPS is set to ${JSON.stringify(raw)}, which is not a non-negative integer — ` +
       'treating it as 0: the proxy stays UNTRUSTED and the per-IP auth rate limits stay DISARMED. ' +
       'Set a plain hop count (e.g. 1), never "true".',
+    )
+    return 0
+  }
+  if (hops === 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `TRUST_PROXY_HOPS is explicitly set to ${JSON.stringify(raw)}, which resolves to 0 — the proxy ` +
+      'stays UNTRUSTED and the per-IP auth rate limits (signup, login, device_start, device_lookup, ' +
+      'device_token) stay DISARMED, exactly as if the variable were unset. There is no deployment ' +
+      'where 0 is the intended posture (#2667): set the real hop count (Railway terminates in exactly ' +
+      'one edge proxy, so that is usually 1) to arm them, or remove the variable if no proxy fronts ' +
+      'this process.',
     )
     return 0
   }

@@ -13,8 +13,8 @@ describe('haven guide text (#2525)', () => {
   it('is byte-for-byte the canonical SDK runbook', async () => {
     const canonical = (await readCanonicalRunbook()) as string
     expect(HAVEN_AGENT_RUNBOOK_MD).toBe(canonical)
-    // Both figures, because they differ and each gets quoted somewhere: 10,224
-    // UTF-8 bytes, 10,141 UTF-16 code units. The em-dashes are the gap — the
+    // Both figures, because they differ and each gets quoted somewhere: 10,543
+    // UTF-8 bytes, 10,458 UTF-16 code units. The em-dashes are the gap — the
     // same units confusion #2562 fixed in the docs chain gate. Moved by #2526
     // (device-code login in step 1), by #2534, whose step-2 sentence names
     // `haven wallets funding`, by #2591, by #2539, whose "Budget changes
@@ -52,8 +52,22 @@ describe('haven guide text (#2525)', () => {
     // release shard's SDK-delta claim was reviewed against the merged string.
     // Caught before publication: 0.1.35-alpha.0 predates #2617, so the run-on
     // never reached npm.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10225)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10142)
+    //
+    // +318 bytes / +316 UTF-16 units by #2713 (Closes #2709), which appended a
+    // sentence to step 2: read `/.well-known/haven.json` before telling the
+    // user which deployment they are on — `environment` says whether it is
+    // `production`, each `chains.supported` entry says whether that chain is a
+    // `testnet`, and real money is at stake only on a non-testnet chain of a
+    // production deployment. That PR edited the SDK runbook WITHOUT running
+    // `node packages/cli/scripts/sync-agent-guidance.mjs`, so this suite went
+    // red on `dev` itself and stayed red for every pull request in the
+    // repository until #2705's probe surfaced it — `CLI checks` is a required
+    // context on both `dev` and `main`. Note the shape of the miss: the
+    // regeneration alone does not make this test pass, because these two
+    // figures are asserted by hand and a content change invalidates them too.
+    // Both halves have to move together.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(10543)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(10458)
   })
 
   it('keeps the CLI free of runtime dependencies', () => {

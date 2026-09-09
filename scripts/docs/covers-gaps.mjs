@@ -51,9 +51,10 @@
 //     against every tracked file (#2780), so `.claude/foo/Bar.ts` named as
 //     `Bar` IS caught while the same file named by path is not.
 //   - **A bare name that is ambiguous.** `Dockerfile` matches three tracked
-//     files and resolves to none; a name matching a component and its own test
-//     resolves to the component. Anything the non-test preference cannot settle
-//     is skipped rather than guessed.
+//     files and resolves to none. Anything matching more than one tracked file
+//     is skipped rather than guessed. (A component's own `Foo.test.tsx` does
+//     not make `Foo` ambiguous — see `resolveBareName` for why no tie-break is
+//     needed.)
 //   - **A path with no code extension**, or one outside `CODE_EXTENSIONS` —
 //     `Dockerfile`, `packages/backend/src/rails/` (a directory), a `.md` or
 //     `.png` file.
@@ -92,6 +93,18 @@
 //     block names `packages/backend/src/routes/payments.ts` as a placeholder,
 //     and it is in the baseline. The "a path is never a citation of itself"
 //     reasoning under the fence decision is false in exactly this case.
+//   - **A bare-resolved gap depends on BASENAME UNIQUENESS, and losing it
+//     reads as a shrink (#2780).** `resolveBareName` returns null on more than
+//     one candidate, so the day a second `Sidebar.tsx` lands anywhere in the
+//     repo, every bare-resolved gap for that name stops being reported — and
+//     `hasShrunk` then prints "Residue shrank, run `--update` to tighten",
+//     which locks the loss in. Measured: adding one file takes
+//     `ship-playbooks/frontend.md` from 31 gaps to 30, silently. This is the
+//     shape of the two bypasses below, so it is listed with them rather than
+//     left for someone to rediscover; the exposure is the 38 pairs #2780
+//     accepted, and it is widest for the generic names among them (`Modal`,
+//     `Table`, `Sidebar`, `EmptyState`). The ambiguity policy is still right —
+//     guessing would be worse — but the ratchet consequence is not free.
 //   - **`status: archived` is an unguarded bypass.** Nothing constrains that
 //     value outside `docs/archive/` (`docs/operations/session-rail-vendor-ops.md`
 //     is a live precedent), so one word in a doc's front matter removes it and

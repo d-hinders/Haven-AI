@@ -287,15 +287,7 @@ Drive with `ship-next epic=#2720`. Becomes `shipped` when the epic closes.
 **2026-09-08 (later the same day):** slices #2721 (PR #2739, eight guards under
 `scripts/`, plus the shared `scripts/test-support/guard-cli.mjs` harness) and
 #2723 (PR #2740, `scripts/docs/`) MERGED. #2722 (`scripts/ci/`) remains, and
-the epic stays open. One cost, found by the change catching its own pull request: this entry
-originally named two components in code spans as EXAMPLES of the token shape,
-and the gate read them as claims about those files. That is the same
-false-positive class block 2 above already records for paths — a measurement
-command read as an assertion — now widened to bare names. Remedy taken is the
-one #2678 prefers: delete the claim, since an illustration should not be a code
-span. Anyone writing about this gate should expect it.
-
-Appended rather than edited, per the convention above.
+the epic stays open. Appended rather than edited, per the convention above.
 
 **2026-09-09:** slice #2722 (`scripts/ci/`) ships in the pull request that adds
 this entry, taking the epic's own headline figure to **zero**. Re-running the
@@ -325,6 +317,19 @@ so the size was known rather than discovered as a wall of baseline entries, and
 the gate then reported the same 38 — two instruments agreeing. Accepted into the
 baseline with the explicit `--accept-new` override rather than by weakening the
 ratchet; the plain `--update` correctly refused the rise.
+
+One cost, found by the change catching its own pull request: the first draft of
+THIS entry named two components in code spans as EXAMPLES of the token shape,
+and the gate read them as claims about those files. That is the same
+false-positive class block 2 records for paths — a measurement command read as
+an assertion — now widened to bare names. Remedy taken is the one #2678 prefers:
+delete the claim, since an illustration should not be a code span. Anyone
+writing about this gate should expect it.
+
+A second, disclosed in `covers-gaps.mjs` rather than here because it is a
+property of the check: a bare-resolved gap depends on basename uniqueness, and a
+second file with the same basename makes the gap vanish while `hasShrunk`
+reports progress.
 
 Appended rather than edited, per the convention above.
 

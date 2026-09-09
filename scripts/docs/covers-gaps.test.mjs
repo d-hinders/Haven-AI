@@ -385,10 +385,10 @@ test('#2780: a `.test.tsx` sibling does not make a bare name ambiguous', () => {
   )
 })
 
-test('#2780: an ambiguity the non-test preference cannot settle stays UNRESOLVED', () => {
-  // `Dockerfile` is the real corpus case: several tracked files, none of them a
-  // test, so there is nothing to prefer. Guessing would produce a `covers:`
-  // entry nobody can justify.
+test('#2780: a name matching more than one tracked file stays UNRESOLVED', () => {
+  // `Dockerfile` is the real corpus case, and the only one: three tracked
+  // files, none of them a test. Guessing would produce a `covers:` entry
+  // nobody can justify.
   assert.equal(resolveBareName('Dockerfile', TRACKED), null)
 })
 
@@ -413,8 +413,12 @@ test('#2780: a file named BOTH ways is reported once, at its first mention', () 
   assert.equal(gaps[0].line, 7)
 })
 
-test('#2780: the bare regex requires at least four characters after the capital', () => {
-  // `Foo` and shorter are far more likely to be prose than a filename; the
-  // threshold is the reason `Base`, `Haven` and `USDC` do not get resolved.
+test('#2780: the bare regex requires three characters after the capital', () => {
+  // `Env` and shorter are far more likely to be prose than a filename.
+  //
+  // Note what this threshold does NOT do, since an earlier version of this
+  // comment claimed it: `Base`, `Haven` and `USDC` all MATCH the regex. They
+  // are not resolved because no tracked file bears those names — the
+  // `git ls-files` intersection is what stops them, not the length.
   assert.deepEqual([...'`Env` `EnvBadge`'.matchAll(BARE_TOKEN_RE)].map((m) => m[1]), ['EnvBadge'])
 })

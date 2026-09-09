@@ -400,3 +400,68 @@ describe('revokeAll (#1402 remove step 1)', () => {
     })
   })
 })
+
+describe('useDelegationBudget visible-only polling (#2732)', () => {
+  beforeEach(() => {
+    mockGet.mockReset()
+    mockPost.mockReset()
+    mockSigner.mockReset()
+    mockSigner.mockReturnValue(null)
+    mockOnDevice.mockReset()
+    mockOnDevice.mockReturnValue(false)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('a failed silent tick keeps the budget rows and does not flip budgetsError', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.budgets).toEqual([])
+    expect(result.current.budgetsError).toBe(false)
+    const callsAfterMount = mockGet.mock.calls.length
+
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) return Promise.reject(new Error('500 mid-demo'))
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+
+    // The tick fetched only budgets (the device signer set is NOT polled).
+    expect(mockGet.mock.calls.length).toBe(callsAfterMount + 1)
+    expect(mockGet.mock.calls[callsAfterMount][0]).toContain('/delegations')
+    expect(result.current.budgets).toEqual([])
+    expect(result.current.budgetsError).toBe(false)
+  })
+
+  it('a successful silent tick refreshes the budget rows', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/delegations')) {
+        return Promise.resolve({
+          delegations: [{ id: 'd1', status: 'active', budget_atomic: '1000000' }],
+        })
+      }
+      if (url.endsWith('/account-signers')) return Promise.resolve(PASSKEY_SIGNERS)
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.budgets).toHaveLength(1)
+    expect(result.current.budgetsError).toBe(false)
+  })
+})

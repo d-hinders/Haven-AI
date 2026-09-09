@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockApiGet = vi.fn()
 
@@ -88,5 +88,50 @@ describe('useDashboardOverview', () => {
     expect(result.current.data?.transactions[0]?.hash).toBe('0xnew')
     expect(mockApiGet).toHaveBeenCalledTimes(2)
     expect(mockApiGet).toHaveBeenCalledWith('/dashboard/overview')
+  })
+})
+
+describe('useDashboardOverview visible-only polling (#2732)', () => {
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('a successful silent tick swaps in fresh data with no loading flag and no user action', async () => {
+    mockApiGet.mockResolvedValueOnce(overview('0xgood'))
+    const { result } = renderHook(() => useDashboardOverview())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.loading).toBe(false)
+    expect(result.current.data?.transactions[0]?.hash).toBe('0xgood')
+
+    mockApiGet.mockResolvedValueOnce(overview('0xnew'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.data?.transactions[0]?.hash).toBe('0xnew')
+    expect(result.current.loading).toBe(false)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('a failed silent tick keeps the last good overview: no error, no skeleton, no data wipe', async () => {
+    mockApiGet.mockResolvedValueOnce(overview('0xgood'))
+    const { result } = renderHook(() => useDashboardOverview())
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockRejectedValueOnce(new Error('500'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.data?.transactions[0]?.hash).toBe('0xgood')
+    expect(result.current.error).toBeNull()
+    expect(result.current.loading).toBe(false)
   })
 })

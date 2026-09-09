@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import { useAuth } from '@/context/AuthContext'
 import type {
   PortfolioResponse,
@@ -53,7 +54,7 @@ export function useAggregatedPortfolio(): AggregatedPortfolioReturn {
   const balanceRefsRef = useRef(balanceRefs)
   balanceRefsRef.current = balanceRefs
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
     const safes = balanceRefsRef.current
     if (safes.length === 0) {
@@ -64,27 +65,28 @@ export function useAggregatedPortfolio(): AggregatedPortfolioReturn {
     }
 
     try {
-      setLoading(true)
+      // #2732: silent visible-poll ticks must not flash the skeleton.
+      if (!silent) setLoading(true)
       const results = await Promise.all(
         safes.map((safe) =>
           api.get<PortfolioResponse>(
             `/portfolio/${safe.address}?chain_id=${encodeURIComponent(String(safe.chainId))}`,
-          ).catch(() => ({
-            totalUsd: 0,
-            totalEur: 0,
-            breakdown: [],
-          })),
+          ).catch(() => null),
         ),
       )
 
-      let usd = 0
-      let eur = 0
-      for (const r of results) {
-        usd += r.totalUsd
-        eur += r.totalEur
-      }
-
       if (generationRef.current === generation) {
+        // #2732: a silent tick with ANY failed Safe keeps the last good
+        // totals — per-Safe failures fall back to zeros, and summing those
+        // would visibly wipe the number mid-demo. Non-silent keeps the
+        // existing zero-fallback behaviour.
+        if (silent && results.some((r) => r === null)) return
+        let usd = 0
+        let eur = 0
+        for (const r of results) {
+          usd += r?.totalUsd ?? 0
+          eur += r?.totalEur ?? 0
+        }
         setTotalUsd(usd)
         setTotalEur(eur)
       }
@@ -106,12 +108,17 @@ export function useAggregatedPortfolio(): AggregatedPortfolioReturn {
 
     setLoading(true)
     fetchAll()
-    const interval = setInterval(fetchAll, 60_000)
     return () => {
       generationRef.current += 1
-      clearInterval(interval)
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // #2732: the 60s interval moved into the shared visible-only policy — 10s
+  // while visible, immediate fetch on return-to-visible, zero fetches while
+  // hidden. Silent ticks never flip `loading` back on.
+  useVisiblePolling(() => {
+    void fetchAll(true)
+  })
 
   return { totalUsd, totalEur, loading, refetch: fetchAll }
 }
@@ -135,7 +142,7 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
   const balanceRefsRef = useRef(balanceRefs)
   balanceRefsRef.current = balanceRefs
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
     const safes = balanceRefsRef.current
     if (safes.length === 0) {
@@ -146,8 +153,12 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
     }
 
     try {
-      setLoading(true)
-      setError(null)
+      // #2732: silent visible-poll ticks must not flash the skeleton, and
+      // must not clear a visible error banner until they actually succeed.
+      if (!silent) {
+        setLoading(true)
+        setError(null)
+      }
       const results = await Promise.all(
         safes.map(async (safe) => {
           try {
@@ -164,6 +175,10 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
       if (generationRef.current !== generation) return
 
       if (results.some((result) => result.error !== null)) {
+        // A failed silent tick keeps the last good balances and any visible
+        // error exactly as it was — this per-Safe failure class must not
+        // wipe the row the presenter is pointing at (#2732).
+        if (silent) return
         setBalances([])
         setError('Failed to load balances')
         return
@@ -188,8 +203,9 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
       }
 
       setBalances(Array.from(merged.values()))
+      if (silent) setError(null)
     } catch (err) {
-      if (generationRef.current === generation) {
+      if (generationRef.current === generation && !silent) {
         setError(err instanceof Error ? err.message : 'Failed to load balances')
       }
     } finally {
@@ -210,12 +226,17 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
 
     setLoading(true)
     fetchAll()
-    const interval = setInterval(fetchAll, 60_000)
     return () => {
       generationRef.current += 1
-      clearInterval(interval)
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // #2732: the 60s interval moved into the shared visible-only policy — 10s
+  // while visible, immediate fetch on return-to-visible, zero fetches while
+  // hidden. Silent ticks never flip `loading` back on.
+  useVisiblePolling(() => {
+    void fetchAll(true)
+  })
 
   return { balances, loading, error, refetch: fetchAll }
 }
@@ -256,7 +277,7 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
   const balanceRefsRef = useRef(balanceRefs)
   balanceRefsRef.current = balanceRefs
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
     const safes = balanceRefsRef.current
     if (safes.length === 0) {
@@ -268,8 +289,12 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
     }
 
     try {
-      setLoading(true)
-      setError(null)
+      // #2732: silent visible-poll ticks must not flash the skeleton, and
+      // must not clear a visible error banner until they actually succeed.
+      if (!silent) {
+        setLoading(true)
+        setError(null)
+      }
 
       const results = await Promise.all(
         safes.map(async (safe) => {
@@ -287,6 +312,9 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
       if (generationRef.current !== generation) return
 
       if (results.some((result) => result.error !== null)) {
+        // A failed silent tick keeps the last good transactions and any
+        // visible error exactly as it was (#2732).
+        if (silent) return
         setTransactions([])
         setTotal(0)
         setError('Failed to load transactions')
@@ -314,8 +342,9 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
 
       setTransactions(all.slice(0, limit))
       setTotal(totalCount)
+      if (silent) setError(null)
     } catch (err) {
-      if (generationRef.current === generation) {
+      if (generationRef.current === generation && !silent) {
         setError(err instanceof Error ? err.message : 'Failed to load transactions')
       }
     } finally {
@@ -337,13 +366,17 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
 
     setLoading(true)
     fetchAll()
-    // Poll every 60s like the other aggregated hooks
-    const interval = setInterval(fetchAll, 60_000)
     return () => {
       generationRef.current += 1
-      clearInterval(interval)
     }
   }, [key, fetchAll])
+
+  // #2732: the 60s interval moved into the shared visible-only policy — 10s
+  // while visible, immediate fetch on return-to-visible, zero fetches while
+  // hidden. Silent ticks never flip `loading` back on.
+  useVisiblePolling(() => {
+    void fetchAll(true)
+  })
 
   return { transactions, loading, error, total, refetch: fetchAll }
 }

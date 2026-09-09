@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Address } from 'viem'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import { useActiveSigner, hasPasskeyCredentialOnDevice, credentialIdFromKeyId } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import type { AccountSigners, DelegationMessage } from '@/lib/delegationPasskeySigner'
@@ -168,17 +169,27 @@ export function useDelegationBudget(
   // reads as "still loading" and renders as nothing at all — so an API
   // failure looked identical to a first paint, and the page's "Add budget"
   // button scrolled to an empty div with no error anywhere.
-  const reload = useCallback(async () => {
-    if (!enabled) return
-    try {
-      const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
-      setBudgets(res.delegations)
-      setBudgetsError(false)
-    } catch {
-      setBudgets(null)
-      setBudgetsError(true)
-    }
-  }, [agentId, enabled])
+  //
+  // #2732: the `silent` variant (visible-only polling) must change no visible
+  // state on a failed tick — `setBudgetsError(true)` flips the card to its
+  // error branch, and one swallowed 500 mid-demo would wipe the budget rows
+  // the presenter is pointing at. Success still refreshes the rows and
+  // clears a stale error flag.
+  const reload = useCallback(
+    async (silent = false) => {
+      if (!enabled) return
+      try {
+        const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
+        setBudgets(res.delegations)
+        setBudgetsError(false)
+      } catch {
+        if (silent) return
+        setBudgets(null)
+        setBudgetsError(true)
+      }
+    },
+    [agentId, enabled],
+  )
 
   // The signer set feeds pickSigningPath (#1086): the DEVICE picks which of
   // the account's signers to use — never the account's shape. A failed fetch
@@ -207,6 +218,15 @@ export function useDelegationBudget(
     void reload()
     void reloadSigners()
   }, [enabled, reload, reloadSigners])
+
+  // #2732 visible-only polling — budgets only. The signer set is a DEVICE
+  // fact, not payment state; polling it every 10s would churn the signing
+  // path under an active grant/revoke ceremony. Only `reload` is silent;
+  // grant/revoke/revokeAll keep calling `reload()` non-silently after they
+  // mutate, so their error surfaces are unchanged.
+  useVisiblePolling(() => {
+    void reload(true)
+  })
 
   // The signing path is a DEVICE decision, not an account-shape decision:
   // an account with both an owner and passkeys signs with whichever is

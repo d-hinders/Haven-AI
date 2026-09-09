@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import type { ApiSchema } from '@haven_ai/core'
 
 /**
@@ -71,6 +72,13 @@ export function useAgents() {
   useEffect(() => {
     fetchAgents()
   }, [fetchAgents])
+
+  // #2732 visible-only polling — reuses the hook's existing `silent` flag
+  // (one flag per hook): no skeleton, and a failed tick leaves the last
+  // good agent list untouched.
+  useVisiblePolling(() => {
+    void fetchAgents({ silent: true })
+  })
 
   const createAgent = useCallback(
     async (params: CreateAgentParams): Promise<Agent> => {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import type { BalancesResponse, BalanceItem } from '@/types/transactions'
 
 interface UseBalancesReturn {
@@ -25,7 +26,7 @@ export function useBalances(
   const [error, setError] = useState<string | null>(null)
   const generationRef = useRef(0)
 
-  const fetchBalances = useCallback(async () => {
+  const fetchBalances = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
 
     if (!safeAddress) {
@@ -41,8 +42,13 @@ export function useBalances(
     }
 
     try {
-      setLoading(true)
-      setError(null)
+      // #2732: silent visible-poll ticks must not flash the skeleton, and
+      // must not clear a visible error banner until they actually succeed —
+      // a failed tick changes no visible state at all.
+      if (!silent) {
+        setLoading(true)
+        setError(null)
+      }
       const chainQuery = chainId === undefined ? '' : `?chain_id=${encodeURIComponent(String(chainId))}`
       const data = await api.get<BalancesResponse>(
         `/balances/${safeAddress}${chainQuery}`,
@@ -53,9 +59,12 @@ export function useBalances(
             ? data.balances
             : data.balances.map((balance) => ({ ...balance, chainId })),
         )
+        if (silent) setError(null)
       }
     } catch (err) {
-      if (generationRef.current === generation) {
+      // A failed silent tick keeps the last good balances and any visible
+      // error exactly as it was.
+      if (generationRef.current === generation && !silent) {
         setError(err instanceof Error ? err.message : 'Failed to load balances')
       }
     } finally {
@@ -82,13 +91,17 @@ export function useBalances(
 
     fetchBalances()
 
-    // Refresh every 60 seconds
-    const interval = setInterval(fetchBalances, 60_000)
     return () => {
       generationRef.current += 1
-      clearInterval(interval)
     }
   }, [enabled, fetchBalances, safeAddress])
+
+  // #2732: the 60s interval moved into the shared visible-only policy — 10s
+  // while visible, immediate fetch on return-to-visible, zero fetches while
+  // hidden. Silent ticks never flip `loading` back on.
+  useVisiblePolling(() => {
+    void fetchBalances(true)
+  })
 
   return { balances, loading, error, refetch: fetchBalances }
 }

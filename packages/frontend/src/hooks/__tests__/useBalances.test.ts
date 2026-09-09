@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockApiGet = vi.fn()
 
@@ -96,5 +96,66 @@ describe('useBalances', () => {
         chainId: 8453,
       },
     ])
+  })
+})
+
+describe('useBalances visible-only polling (#2732)', () => {
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    mockApiGet.mockResolvedValue(BALANCES)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('a successful silent tick refreshes balances without the loading flag', async () => {
+    const { result } = renderHook(() => useBalances(SAFE_ADDRESS))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.loading).toBe(false)
+
+    mockApiGet.mockResolvedValueOnce({
+      balances: [{ ...BALANCES.balances[0], balance: '2000000', formatted: '2.00' }],
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.balances[0]?.balance).toBe('2000000')
+    expect(result.current.loading).toBe(false)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('a failed silent tick keeps the last good balances and any visible error exactly as it was', async () => {
+    const { result } = renderHook(() => useBalances(SAFE_ADDRESS))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.balances[0]?.balance).toBe('1000000')
+
+    mockApiGet.mockRejectedValueOnce(new Error('500'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.balances[0]?.balance).toBe('1000000')
+    expect(result.current.error).toBeNull()
+    expect(result.current.loading).toBe(false)
+
+    // An already-VISIBLE error is not wiped by another failed tick either.
+    mockApiGet
+      .mockRejectedValueOnce(new Error('500'))
+      .mockRejectedValueOnce(new Error('500'))
+    await act(async () => {
+      result.current.refetch()
+      await Promise.resolve()
+    })
+    expect(result.current.error).toBe('500')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.error).toBe('500')
+    expect(result.current.balances[0]?.balance).toBe('1000000')
   })
 })

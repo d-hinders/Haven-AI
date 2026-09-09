@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import type { PortfolioResponse, PortfolioBreakdown } from '@/types/transactions'
 
 interface UsePortfolioReturn {
@@ -28,7 +29,7 @@ export function usePortfolio(
   const [error, setError] = useState<string | null>(null)
   const generationRef = useRef(0)
 
-  const fetchPortfolio = useCallback(async () => {
+  const fetchPortfolio = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
 
     if (!safeAddress) {
@@ -41,8 +42,12 @@ export function usePortfolio(
     }
 
     try {
-      setLoading(true)
-      setError(null)
+      // #2732: silent visible-poll ticks must not flash the skeleton, and
+      // must not clear a visible error banner until they actually succeed.
+      if (!silent) {
+        setLoading(true)
+        setError(null)
+      }
       const chainQuery = chainId === undefined ? '' : `?chain_id=${encodeURIComponent(String(chainId))}`
       const data = await api.get<PortfolioResponse>(
         `/portfolio/${safeAddress}${chainQuery}`,
@@ -51,9 +56,12 @@ export function usePortfolio(
         setTotalUsd(data.totalUsd)
         setTotalEur(data.totalEur)
         setBreakdown(data.breakdown)
+        if (silent) setError(null)
       }
     } catch (err) {
-      if (generationRef.current === generation) {
+      // A failed silent tick keeps the last good totals and any visible
+      // error exactly as it was.
+      if (generationRef.current === generation && !silent) {
         setError(err instanceof Error ? err.message : 'Failed to load portfolio')
       }
     } finally {
@@ -71,12 +79,18 @@ export function usePortfolio(
     }
 
     fetchPortfolio()
-    const interval = setInterval(fetchPortfolio, 60_000)
+
     return () => {
       generationRef.current += 1
-      clearInterval(interval)
     }
   }, [fetchPortfolio, safeAddress])
+
+  // #2732: the 60s interval moved into the shared visible-only policy — 10s
+  // while visible, immediate fetch on return-to-visible, zero fetches while
+  // hidden. Silent ticks never flip `loading` back on.
+  useVisiblePolling(() => {
+    void fetchPortfolio(true)
+  })
 
   return { totalUsd, totalEur, breakdown, loading, error, refetch: fetchPortfolio }
 }

@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -825,6 +825,27 @@ run title says which status fired it (`post-deploy <sha> → Haven AI / dev
 (in_progress)`), and the gate's log line says why it skipped. The concurrency
 group moved from the workflow to the **money-flow job** so those skipped runs
 never hold it.
+
+**Read the `money-flow` JOB's conclusion, never the run's.** A run whose
+money-flow job skipped has run-level conclusion `success`, so in the Actions
+list it is a green tick — and it satisfies nothing, because the gate admits a
+run only when that job concluded `success`. This is the shape of a wrong answer
+that looks like the right one, and the skipped runs above are the common case
+rather than an edge: on 2026-09-09, runs `34340710137`, `34340672917` and
+`34339884272` were each `success` at run level with `money-flow: skipped`. Check
+it with
+
+```bash
+gh api repos/d-hinders/Haven-AI/actions/runs/<id>/jobs \
+  --jq '.jobs[] | "\(.name): \(.conclusion)"'
+```
+
+A second consequence, and the reason a release author cannot simply wait: while
+`dev` is busy, each new deployment de-duplicates the previous one's second
+`success`, so the automatic post-deploy runs keep skipping and waiting for one
+to satisfy `qa-freshness` never converges. Dispatch the harness instead —
+[`promoting-dev-to-main.md`](./promoting-dev-to-main.md) has the release-side
+procedure.
 
 #### Provenance — why a curl can no longer mute the alarm (#2271)
 

@@ -99,7 +99,19 @@ outbound-queue surfaces. A checker that under-reports here is worse than no
 checker, because an empty result is what tells you to skip the run.
 
 If the output is non-empty, dispatch **Actions → "QA — money-flow (dev)" → Run
-workflow** on `dev` before you run the bump. It must be dispatched on `dev`:
+workflow** on `dev` before you run the bump.
+
+Dispatching is the norm during a release, not a fallback — **waiting for the
+automatic post-deploy run is not an alternative to it.** While `dev` is active,
+each new deployment de-duplicates the previous one's second `success`, so those
+runs keep skipping and never converge. And a skipped run's **run-level**
+conclusion is `success`, which is a green tick in the Actions list that
+satisfies nothing: the gate reads the `money-flow` **job**. Read that field, not
+the run's. The mechanism and the one-line check live in
+`docs/operations/agent-qa.md` § *Automation & gating* — do not restate the
+selector rules here.
+
+It must be dispatched on `dev`:
 the gate admits a `workflow_dispatch` run only when its branch label is `dev`
 AND its commit is an ancestor of the promotion head (#2404 — `selectGreenRun`
 in `scripts/ci/qa-freshness.mjs`), so a run on any other ref does not satisfy
@@ -214,6 +226,13 @@ not as permission.
 
 What it leaves to you:
 
+- **Hold `dev` while the promotion PR is open.** The PR's head is the `dev`
+  branch, not a pinned SHA, so anything merged moves it: 19 required contexts go
+  pending, `qa-freshness` re-checks coverage rather than only recency, and the
+  promoted scope changes under the record. The hold lifts the moment the
+  promotion merges. `docs/operations/promoting-dev-to-main.md`
+  § *The promotion window* owns the rule and what to do when something must land
+  anyway.
 - **Re-measure the scope at the door, and amend the record if it moved.** The
   tarballs are built from `main`'s tree **at promotion time**; the shard and the
   Supported Runtime Manifest note were written back at *Satisfy The Contract-Doc

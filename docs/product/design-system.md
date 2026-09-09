@@ -81,6 +81,7 @@ covers:
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
+  - packages/frontend/src/components/haven/DirectionMark.tsx
 last-verified: "2026-09-09"
 ---
 
@@ -1084,8 +1085,26 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
 - **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (no dashboard-send path sets it today), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
 - Sticky header on desktop.
-- A narrow container hides secondary columns and keeps icon, activity, amount, and external link readable.
-- Date and Amount are sortable; amount sorting uses the raw transaction value, never the formatted display string.
+- A narrow container hides secondary columns and keeps icon, activity and
+  external link readable. The amount stays readable too, but below `md` it is no
+  longer a column: it rides under the title inside the activity cell (#2734).
+- **A stacked amount hangs under the START of the title, never right-aligned.**
+  This is the rule both mobile transaction rows follow, written down here
+  because #2734 shipped the other way first and a design review reversed it:
+  right alignment is a property of a column of numbers, and a stacked amount is
+  not a column — aligning it right leaves one cell carrying two alignment rails.
+  How much indent that takes differs by component and is not part of the rule:
+  `TransactionActivityRow` needs `pl-11` because its `DirectionMark` is a
+  sibling in the same box, while `TransactionsTable`'s mark is its own `<td>`,
+  so its `px-4` content edge already is the title's text start.
+- The stacked amount is nested inside the **activity** cell, so a call site
+  passing `amount` without `activity` would lose the amount entirely below `md`.
+  All three call sites include both today.
+- Date and Amount are sortable **at `md` and up**; amount sorting uses the raw
+  transaction value, never the formatted display string. Both headers are
+  `revealAt="md"`, and there is no sort control outside the header row, so below
+  `md` the table does not sort at all — a side effect of #2734 recorded rather
+  than absorbed, and open as #2790.
 - Empty state renders inside the table with the correct column span.
 
 Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.

@@ -116,6 +116,11 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
         <div className="space-y-1.5">
           <Skeleton variant="text" className="h-3 w-40 max-w-full" />
           <Skeleton variant="text" className="h-2 w-56 max-w-full" />
+          {/* The amount line the loaded row now carries below `md` (#2734).
+              Without it the row grows ~24px when the data arrives — the
+              collapse would have removed a horizontal shift and added a
+              vertical one. */}
+          <Skeleton variant="text" className={`h-3 w-20 ${tableHideFromClass('md')}`} />
         </div>
       </td>
     ),
@@ -135,7 +140,14 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
       </td>
     ),
     amount: (key) => (
-      <td key={key} className={`px-2 ${padY} text-right md:px-4`}>
+      // Collapsed below `md` in step with the real cell and the header
+      // (#2734). Scoped precisely, because the first version of this comment
+      // claimed more than the change does: it removes the HORIZONTAL mismatch
+      // (measured at 390px — skeleton 52/62/…/186/40 against loaded
+      // 52/138/…/110/40 before, identical 52/248/…/40 after). It does not by
+      // itself fix the vertical one; the activity skeleton gains a third line
+      // for that.
+      <td key={key} className={`${tableColumnClass('md')} px-4 ${padY} text-right`}>
         <Skeleton className="h-4 w-20 ml-auto" />
       </td>
     ),
@@ -263,12 +275,20 @@ export default function TransactionsTable({
             />
           ) : null}
           {showCol('amount') ? (
+            // `revealAt="md"` follows the body cell (#2734). NOTE the cost,
+            // which is real and is recorded rather than absorbed: `date` is
+            // already `revealAt="md"`, so Amount was the LAST sortable header
+            // visible below `md`, and there is no sort control outside this
+            // header row. Sorting is therefore a desktop affordance now. That
+            // is a capability change, not a layout one, and it is tracked in
+            // #2790 rather than decided here.
             <Table.SortableHeaderCell
               label="Amount"
               direction={directionOf('amount')}
               onSort={() => handleSort('amount')}
               tooltip={sortTooltip}
               align="right"
+              revealAt="md"
               sticky={isSticky}
               className="w-[110px]"
             />
@@ -394,6 +414,39 @@ export default function TransactionsTable({
                         {movement}
                       </div>
                     ) : null}
+                    {/* The amount, riding under the title while its own column
+                        is collapsed (#2734) — the same `tableHideFromClass`
+                        idiom the movement line above uses, and the shape the
+                        dashboard's "Recent transactions" preview already
+                        renders, so the two screens stop disagreeing.
+
+                        Left-aligned, hanging under the start of the title.
+                        #2734 asked for "right-aligned" and this shipped that
+                        way first; the design review reversed it, and the
+                        reasoning is the rule rather than a preference: right
+                        alignment is a property of a COLUMN OF NUMBERS, and
+                        below `md` the amount is no longer a column. Keeping it
+                        would leave one cell with two alignment rails — title
+                        and movement line left, the added line right.
+
+                        The shared rule with `TransactionActivityRow` (the
+                        dashboard's stacked row, below `sm`) is "the amount
+                        hangs under the START of the title". There it needs
+                        `pl-11` to get there, because its direction mark is a
+                        sibling inside the same box; here the mark is its own
+                        `<td>`, so this cell's `px-4` content edge already IS
+                        the title's text start. Copying `pl-11` across would
+                        indent it twice. */}
+                    {showCol('amount') ? (
+                      <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
+                        <Amount
+                          value={tx.valueFormatted}
+                          symbol={tx.asset}
+                          direction={tx.direction}
+                          failed={tx.isError}
+                        />
+                      </div>
+                    ) : null}
                   </td>
                 ) : null}
 
@@ -418,12 +471,20 @@ export default function TransactionsTable({
                 ) : null}
 
                 {showCol('amount') ? (
-                  // Same narrower gutter below md (#1772). Here it does not
-                  // widen the activity column — the width is fixed — it gives
-                  // the amount itself 94px of content box instead of 78, which
-                  // is the difference between "-25.00 USDC" on one line and
-                  // wrapped onto two.
-                  <td className={`w-[110px] px-2 ${padY} text-right md:px-4`}>
+                  // Below `md` this column is COLLAPSED and the amount rides
+                  // under the title instead (#2734) — see the activity cell
+                  // above. The column costs 110px plus its gutters out of a
+                  // ~343px row, and the activity column is the only flexible
+                  // one, so that width comes straight off the title and the
+                  // movement line: measured at 390px the title had ~117px and
+                  // wrapped to "Agent payment / by Research / agent".
+                  //
+                  // The gutter comment this replaces (#1772, `px-2` buying the
+                  // amount 94px of content box instead of 78) applied to the
+                  // narrow rendering that no longer exists; `md:px-4` is now
+                  // the only stage this cell is visible at, so `px-4` is
+                  // unconditional.
+                  <td className={`${tableColumnClass('md')} w-[110px] px-4 ${padY} text-right`}>
                     <Amount
                       value={tx.valueFormatted}
                       symbol={tx.asset}

@@ -185,7 +185,7 @@ reasons, and none was fixed in that PR:
   `packages/mcp-server/src/**`; it was 30 of 46 when #2323 counted) — every
   entry in the runtime `globs` list (33) except the two its own `EXEMPT` map
   carves out (`infra/chain/**`, `infra/repositories/**`, both deferred to the
-  doc owner under #1899), and **none of the 14 `controlGlobs`**, which the test
+  doc owner under #1899), and **none of the 15 `controlGlobs`**, which the test
   deliberately leaves out as CI configuration the doc reasons about
   individually. Within that set it asserts every matched tracked file is also
   matched by some `covers:` glob. There is **no** assertion in the other
@@ -514,14 +514,20 @@ re-verification pass had read and had *not* re-verified, and
 `scripts/docs/chain-integrity.mjs` ran three checks on every PR — no prior entry
 dropped (#1843), no entry duplicated (#2477), every prior entry byte-verbatim in
 the new list (#2504). #2637 moved the chain from one hand-packed comment line to
-a `verified:` list, one entry per line, so concurrent PRs merged without
-conflict and the byte ceiling (#2477, #2562) went away.
+a `verified:` list, one entry per line. That did not make concurrent entries
+merge — two branches inserting different lines at the same anchor still conflict
+in git's line merge, measured both orderings — but it turned the conflict into a
+two-line hunk resolved by keeping both, instead of one rewritten multi-KB line;
+and the byte ceiling (#2477, #2562) went away.
 
 **Why it was retired.** The chain recorded what a session *said* it re-read; it
-could be satisfied by writing a sentence, and it caught no stale claim — the
-600-issue retrospective found every one was caught by an independent read and
-none by a gate. It had grown to 76,670 words across the governed set, larger on
-`CLAUDE.md` than the manual it annotated, loaded into every session and every
+could be satisfied by writing a sentence, and it never asserted a note was true;
+the retrospective's evidence points the same way — across the three skill PRs
+(#2499, #2500, #2501) every wrong claim was caught by an independent read and
+none by a gate. It had grown to 76,670 words across the governed set when #2681
+re-measured it on 2026-09-08 (`npm run docs:measure` at that tree; the metric now
+reports 0), larger on `CLAUDE.md` than the manual it annotated — and on
+`CLAUDE.md` and `AGENTS.md` that annotation loaded into every session and every
 reviewer pass. The question it stood in for — *is this claim still true* — is
 answered by the `covers:` gap check ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679))
 and by the test-pinned claims that [#2680](https://github.com/d-hinders/Haven-AI/issues/2680)
@@ -535,8 +541,9 @@ moved out of prose, neither of which a sentence can satisfy.
 - Every chain was moved **verbatim** to
   `docs/archive/last-verified-chains-2026-09.md`, one combined archive grouped
   by doc. `scripts/docs/retire-verified-chains.mjs` did the move and asserts
-  byte equality; its test pins the archive by hash, so a silent edit to the
-  history is a red docs test rather than a green nothing.
+  byte equality; its test pins the section count and each section's inline
+  SHA-256 marker, so a deleted section or an edited block is a red docs test
+  rather than a green nothing.
 - `git log -p -- <doc>` still holds every entry with the diff it accompanied.
   That, plus a grep over the archive, is the forensic path the chain used to
   provide inline.

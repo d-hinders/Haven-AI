@@ -286,9 +286,11 @@ guard exists to catch, while this job has no `paths:` filter and always does.
 `scripts/docs/chain-integrity.mjs` was the fourth step until
 [#2681](https://github.com/d-hinders/Haven-AI/issues/2681) retired the
 `last-verified` chain (see [`last-verified` chain integrity](#last-verified-chain-integrity-1843)
-below for what it was). `validate-frontmatter.mjs` now does the only chain-related
-work: it **rejects** a `verified:` block or an inline annotation on the
-`last-verified:` scalar, naming the archive that holds the historical entries.
+below for what it was). Of the `docs:check` steps, only `validate-frontmatter.mjs`
+still touches the chain: it **rejects** a `verified:` block or an inline annotation
+on the `last-verified:` scalar, naming the archive that holds the historical
+entries. The archive itself is guarded by `retire-verified-chains.mjs verify()`,
+run from the docs unit tests.
 
 ## Docs served to agents (#2532)
 
@@ -387,10 +389,12 @@ report on every PR or auto-merge deadlocks waiting for a run that never happens
 setup). Add **Docs front-matter & agent skills** to the "Haven automerge rules"
 ruleset for the blocking column above to be true.
 
-The archive-integrity probe runs with the docs unit tests rather than as a
-required workflow job. It verifies the hash-pinned historical archive and that
-no current front matter reintroduces a retired `verified:` block; the required
-job remains focused on current documentation contracts.
+The archive-integrity probe (`retire-verified-chains.mjs verify()`, driven by
+its test) runs in the docs unit tests — which are the *Test the docs validators*
+step of the same required job, `if: always()` and without `continue-on-error` —
+so a hash mismatch in the historical archive or a reintroduced `verified:` block
+fails the required check like any other docs test. It is not a separate
+`docs:check` step.
 
 ### Empty-coverage disposition (#2681)
 
@@ -524,9 +528,10 @@ and the byte ceiling (#2477, #2562) went away.
 could be satisfied by writing a sentence, and it never asserted a note was true;
 the retrospective's evidence points the same way — across the three skill PRs
 (#2499, #2500, #2501) every wrong claim was caught by an independent read and
-none by a gate. It had grown to 76,670 words across the governed set when #2681
-re-measured it on 2026-09-08 (`npm run docs:measure` at that tree; the metric now
-reports 0), larger on `CLAUDE.md` than the manual it annotated — and on
+none by a gate. It had grown to 74,442 words (504,844 bytes) across the 72
+governed docs — `npm run docs:measure` at `1671d2bf`, the 2026-09-08 tree #2681's
+re-measure names; the metric now reports 0 by construction, since the splitter
+returns an empty chain — larger on `CLAUDE.md` than the manual it annotated, and on
 `CLAUDE.md` and `AGENTS.md` that annotation loaded into every session and every
 reviewer pass. The question it stood in for — *is this claim still true* — is
 answered by the `covers:` gap check ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679))

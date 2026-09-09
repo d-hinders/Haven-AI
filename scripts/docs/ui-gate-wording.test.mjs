@@ -395,16 +395,29 @@ test('CLI: `--update` DOES write when the residue fell', () => {
   assert.equal(JSON.parse(wrote[BASE])[DOC], undefined)
 })
 
-test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
-  const { status, wrote } = runGuard(GATE, {
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
+  const shared = {
     also: ALSO,
     gitInit: true,
     files: { [DOC]: RETIRED },
-    args: ['--update'],
     readBack: [BASE],
+  }
+  const refused = runGuard(GATE, { ...shared, args: ['--update'] })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote[BASE], null)
+
+  const accepted = runGuard(GATE, { ...shared, args: ['--update', '--accept-new'] })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote[BASE], /"blanket-merge-pause": 1/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const { status, wrote } = runGuard(GATE, {
+    also: ALSO, gitInit: true, files: { [DOC]: CORRECTED }, args: ['--update'], readBack: [BASE],
   })
   assert.equal(status, 0)
-  assert.match(wrote[BASE], /"blanket-merge-pause": 1/)
+  assert.deepEqual(JSON.parse(wrote[BASE]), {})
 })
 
 test('CLI: an unparseable baseline names the remedy instead of throwing a stack', () => {
@@ -422,6 +435,7 @@ test('CLI: an unparseable baseline names the remedy instead of throwing a stack'
   assert.equal(status, 1)
   assert.match(out, /is unusable as a baseline/)
   assert.match(out, /Delete the file and re-run with `--update`/)
+  assert.match(out, /`--update --accept-new`/)
   // And it must not read as the ratchet refusing growth, which is a different
   // failure with a different fix.
   assert.doesNotMatch(out, /refuses to RAISE/)

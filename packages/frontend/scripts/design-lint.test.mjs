@@ -90,6 +90,26 @@ test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first ru
   assert.equal(wrote[BASE], '{}')
 })
 
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
+  const shared = { also: ALSO, files: tree({ [COMP]: withDrift }), readBack: [BASE] }
+  const refused = runGuard(SCRIPT, { ...shared, args: ['--update'] })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote[BASE], null)
+
+  const accepted = runGuard(SCRIPT, { ...shared, args: ['--update', '--accept-new'] })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote[BASE], /"raw-palette": 1/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const { status, wrote } = runGuard(SCRIPT, {
+    also: ALSO, files: tree({}), args: ['--update'], readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.deepEqual(JSON.parse(wrote[BASE]), {})
+})
+
 test('CLI: `--update` DOES write when the drift is gone', () => {
   // The accept half: a refusal that refuses everything breaks the ratchet in
   // the other direction, so debt could never be tightened after a cleanup.

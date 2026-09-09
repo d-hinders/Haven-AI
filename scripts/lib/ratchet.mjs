@@ -36,6 +36,17 @@ export function newViolations(counts, baseline) {
   return failures
 }
 
+export const ACCEPT_NEW_BASELINE_FLAG = '--accept-new'
+
+/** Shared operator guidance for the exceptional, reviewed first write. */
+export function firstRunRefusalMessage(firstRun) {
+  if (!firstRun) return null
+  return (
+    '\nThe baseline file is missing and the scan found debt. Review that debt, then rerun ' +
+    `with \`--update ${ACCEPT_NEW_BASELINE_FLAG}\` to initialize a non-empty baseline.`
+  )
+}
+
 /** True when any baselined count is higher than what the tree now has — the
  *  signal to tighten the ratchet with --update. */
 export function hasShrunk(counts, baseline) {
@@ -72,8 +83,10 @@ export function writeBaseline(path, counts) {
  * successful cleanup away from accepting anything forever -- and the cleanup
  * is the step every one of these gates tells you to run. It is not
  * hypothetical: `packages/frontend/design-lint-baseline.json` is `{}` today.
- * The allowance now means the baseline FILE does not exist yet, which is the
- * state it was always meant to describe. Use `loadBaseline()` to get both.
+ * The allowance now means a missing baseline FILE may be initialized
+ * automatically only when the scan is empty. Initializing a non-empty baseline
+ * is an explicit reviewed action (`--update --accept-new`). Use
+ * `loadBaseline()` to distinguish a missing file from an existing `{}`.
  *
  * This lives here rather than in one gate because `--update` is the command a
  * gate's own failure message sends you to, so a gate that omits the check
@@ -84,9 +97,14 @@ export function writeBaseline(path, counts) {
  * found by reading the importer list rather than the issue) -- exactly the
  * duplication this module's header says it exists to prevent.
  */
-export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
-  if (firstRun) return []
-  return newViolations(counts, baseline)
+export function updateRefusals(
+  counts,
+  baseline,
+  { firstRun = false, acceptNew = false } = {},
+) {
+  const violations = newViolations(counts, baseline)
+  if (firstRun && (acceptNew || violations.length === 0)) return []
+  return violations
 }
 
 /**
@@ -282,15 +300,17 @@ export function assertUsableBaseline(baseline, path = 'baseline') {
 
 /**
  * Read a baseline and say whether the file existed. The pair matters: `{}` is
- * both what an absent file reads as and what a fully-cleaned gate writes, and
- * only one of those may accept growth. See `updateRefusals`.
+ * both what an absent file reads as and what a fully-cleaned gate writes, but
+ * only the absent-file state may use the explicit first-run override. See
+ * `updateRefusals`.
  */
 export function loadBaseline(path) {
   // ONE `existsSync`, feeding both halves. Calling `readBaseline(path)` (which
   // does its own) and then `!existsSync(path)` leaves a window in which the two
-  // disagree, and one direction of that disagreement is unsafe: a file deleted
-  // between the calls yields a parsed, non-empty baseline paired with
-  // `firstRun: true`, so `updateRefusals` returns [] and growth is accepted.
+  // disagree: a file deleted between the calls yields a parsed, non-empty
+  // baseline paired with `firstRun: true`. That misclassifies an existing
+  // baseline as a first run, produces incorrect operator guidance and would
+  // let an explicit `acceptNew` waive growth against the parsed baseline.
   // Narrow, but this is a guard whose entire job is to refuse -- and the defect
   // it was written for was also "two states that look alike" (review nit).
   const exists = existsSync(path)

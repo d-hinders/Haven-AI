@@ -137,7 +137,7 @@ test('--update refuses to raise the baseline', () => {
   assert.equal(updateRefusals(grown, baseline).length, 1)
 })
 
-test('--update allows a shrink, and allows the very first write', () => {
+test('--update allows a shrink, while a non-empty first write needs acceptance', () => {
   const baseline = { 'packages/frontend/src/hooks/useContacts.ts': { Contact: 1 } }
   assert.deepEqual(updateRefusals({}, baseline), [])
   // The first-write allowance is keyed on `firstRun`, NOT on the baseline being
@@ -145,7 +145,12 @@ test('--update allows a shrink, and allows the very first write', () => {
   // reads as AND what this gate writes once its debt reaches zero, so keying on
   // emptiness switched the refusal off on the first successful cleanup. The
   // second assertion below is the one that used to say `[]`.
-  assert.deepEqual(updateRefusals({ 'a.ts': { Any: 9 } }, {}, { firstRun: true }), [])
+  assert.equal(updateRefusals({ 'a.ts': { Any: 9 } }, {}, { firstRun: true }).length, 1)
+  assert.deepEqual(
+    updateRefusals({ 'a.ts': { Any: 9 } }, {}, { firstRun: true, acceptNew: true }),
+    [],
+  )
+  assert.deepEqual(updateRefusals({}, {}, { firstRun: true }), [])
   assert.equal(updateRefusals({ 'a.ts': { Any: 9 } }, {}).length, 1)
 })
 
@@ -200,10 +205,10 @@ test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
 
 test('CLI: `--update` refuses a brand-new file when the baseline is not empty', () => {
   // Corrected on review. An earlier version of this case asserted the OPPOSITE
-  // and called it a hole, on a fixture with an EMPTY baseline — which is a
-  // documented deliberate first-run allowance (`updateRefusals` returns [] for
-  // `{}`), already pinned by the unit test above. With any real baseline a new
-  // file compares against 0, so its first occurrence IS growth and IS refused.
+  // and called it a hole, on a fixture with an EMPTY baseline. An existing
+  // `{}` is not a first run and refuses debt; only a missing baseline paired
+  // with an empty scan is frictionless, as pinned above. With any real baseline
+  // a new file compares against 0, so its first occurrence IS growth and IS refused.
   // Measured both ways before rewriting this.
   const { status, out } = runGuard('lint-wire-types.mjs', {
     also: ['lib/ratchet.mjs'],
@@ -217,6 +222,29 @@ test('CLI: `--update` refuses a brand-new file when the baseline is not empty', 
   })
   assert.equal(status, 1)
   assert.match(out, /--update refuses to RAISE the baseline/)
+})
+
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
+  const base = 'packages/frontend/wire-type-baseline.json'
+  const shared = { also: ['lib/ratchet.mjs'], files: { [HOOK]: snake(2) }, readBack: [base] }
+  const refused = runGuard('lint-wire-types.mjs', { ...shared, args: ['--update'] })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote[base], null)
+
+  const accepted = runGuard('lint-wire-types.mjs', { ...shared, args: ['--update', '--accept-new'] })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote[base], /"T": 1/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const base = 'packages/frontend/wire-type-baseline.json'
+  const { status, wrote } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'], files: { [HOOK]: 'export type T = { camelCase: string }\n' },
+    args: ['--update'], readBack: [base],
+  })
+  assert.equal(status, 0)
+  assert.deepEqual(JSON.parse(wrote[base]), {})
 })
 
 test('CLI: a malformed baseline prints one line, not a node:internal banner', () => {

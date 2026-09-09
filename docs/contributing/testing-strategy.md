@@ -10,8 +10,9 @@ covers:
   - packages/backend/vitest.setup.ts
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
+  - scripts/lib/ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Backend testing strategy: the real-database rule
@@ -740,7 +741,10 @@ Counts, not coverage, deliberately: a coverage percentage can be satisfied
 without proving anything and rewards touching whatever is easiest; these
 counts measure the thing that actually hurts. After a legitimate reduction,
 lock it in with `node scripts/db-mock-ratchet.mjs --update` (it refuses to
-ratchet upward). Rare, justified exceptions: a file-level
+ratchet upward). If the baseline file is genuinely new, an empty scan writes
+it directly; a non-empty scan requires review and the explicit
+`--update --accept-new` first-run override. That override cannot raise an
+existing baseline. Rare, justified exceptions: a file-level
 `// db-mock-exempt: <reason>` with a reason of at least 20 characters — a
 suite that characterizes the exact SQL text sent is the canonical example.
 

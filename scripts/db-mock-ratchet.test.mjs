@@ -207,17 +207,30 @@ test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first ru
   assert.equal(wrote['packages/backend/db-mock-baseline.json'], '{}')
 })
 
-test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
-  // The other half: with no baseline file at all, `--update` is how the
-  // baseline comes into existence, and it still does.
-  const { status, wrote } = runGuard('db-mock-ratchet.mjs', {
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
+  const shared = {
     also: ['lib/ratchet.mjs'],
-    args: ['--update'],
     files: { [SCANNED]: withMocks(3) },
     readBack: ['packages/backend/db-mock-baseline.json'],
+  }
+  const refused = runGuard('db-mock-ratchet.mjs', { ...shared, args: ['--update'] })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote['packages/backend/db-mock-baseline.json'], null)
+
+  const accepted = runGuard('db-mock-ratchet.mjs', { ...shared, args: ['--update', '--accept-new'] })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote['packages/backend/db-mock-baseline.json'], /"positional": 3/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const base = 'packages/backend/db-mock-baseline.json'
+  const { status, wrote } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'], files: { [SCANNED]: 'test("clean", () => {})\n' },
+    args: ['--update'], readBack: [base],
   })
   assert.equal(status, 0)
-  assert.match(wrote['packages/backend/db-mock-baseline.json'], /"positional": 3/)
+  assert.deepEqual(JSON.parse(wrote[base]), {})
 })
 
 test('CLI: a baseline whose count is not a number is refused, not silently obeyed', () => {

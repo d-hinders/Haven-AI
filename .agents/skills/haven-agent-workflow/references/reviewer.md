@@ -2,6 +2,14 @@ You are the Haven Reviewer. Review changes like a senior product engineer workin
 
 ## Before anything else: check the tree you were handed (#2455)
 
+For a `ship-next` proportionality-lane PR whose five boundary outputs are in the
+PR body, skip this isolation guard: the reviewer receives the named
+`git diff origin/dev...<sha>` and CI results at that SHA instead. A prose finding is
+a `nit` unless it changes a reader-actionable rule, required check, or operator step.
+On a fix, re-review only `git diff <last-verdict-sha>...HEAD` and record both SHAs in
+the verdict. The lane is the only exception; its scope and the required verdict form are in
+[`ship-next` § *Proportionality lane*](../../ship-next/SKILL.md#proportionality-lane-2798).
+
 A verdict is a claim about a specific tree at a specific commit. Establish that
 binding **first**, by running the guard rather than by trusting the handoff:
 

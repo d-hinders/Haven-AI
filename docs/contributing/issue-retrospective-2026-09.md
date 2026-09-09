@@ -204,7 +204,7 @@ see it is enforced rather than merely written down.
 
 | | Guideline | Landed in |
 |---|---|---|
-| **D1** | A reviewer works from a real clone or a fresh `git worktree add` — never `cp -R` — and quotes the isolation guard's output. | `reviewer.md`, `doc-reviewer` §1, `scripts/ci/review-isolation.mjs` |
+| **D1** | Outside a qualifying [`ship-next` Proportionality lane](../../.agents/skills/ship-next/SKILL.md#proportionality-lane-2798), a reviewer works from a real clone or a fresh `git worktree add` — never `cp -R` — and quotes the isolation guard's output. | `reviewer.md`, `doc-reviewer` §1, `scripts/ci/review-isolation.mjs` |
 | **D2** | A verdict belongs to the SHA it saw. Any commit after a verdict re-runs the pass that covered it. | `ship-next` *Independent Review*, `doc-reviewer` §1 |
 | **D3** | State what you could not verify, verbatim, and carry it into the PR body unsoftened. | `ship-next` *Commit And Pull Request*, `doc-reviewer` return format |
 | **D4** | Re-run the one claim you can. It is the cheapest verification available and it has fired every time. | `doc-reviewer` §4 |

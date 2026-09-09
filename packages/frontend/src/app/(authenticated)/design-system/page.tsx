@@ -1430,9 +1430,10 @@ export default function DesignSystemPage() {
                     wraps this showcase's longer names.
                     What the two deferred columns cost is NOT the same, and
                     the difference is worth naming rather than smoothing over.
-                    The DATE is not dropped at any width — it rides under the
-                    Amount until the `xl` stage, the same place the narrow
-                    layout puts it, and it is hidden by
+                    The DATE rides under the Amount between the `md` and `xl`
+                    stages. Below `md` it is dropped with the Amount column
+                    itself (#2792) — the narrow layout no longer carries it,
+                    which is what the component does too. It is hidden by
                     `tableHideFromClass('xl')` so it can never disagree with
                     the column it stands in for. The INITIATOR genuinely is
                     dropped between the two stages. For two of the three demo
@@ -1450,13 +1451,15 @@ export default function DesignSystemPage() {
                     that title is "Failed payment by Research assistant" and
                     #2357 did not touch it.
                     SCOPE: "the title already says it" holds in the `md`->`xl`
-                    band ONLY. BELOW `md` the Activity cell is `max-w-0` +
-                    `truncate` (see the `<td>` below), so the titles ellipsise
-                    to "Agent payme…" / "Failed payme…" and the `by <agent>`
-                    clause is cut off with them — measured on the 390px
-                    capture. The narrow layout therefore loses the initiator
-                    for ALL THREE rows, not just the first: there the column
-                    is dropped AND the title cannot stand in for it. Raised by
+                    band, and since #2792 it holds below `md` as well. The
+                    reading quoted here was "Agent payme…" / "Failed payme…",
+                    measured on a 390px capture when the Activity cell was
+                    138px and the title ellipsised. Collapsing the Amount
+                    column took the cell to 248px and the title now WRAPS, so
+                    the `by <agent>` clause survives and the narrow layout no
+                    longer loses the initiator. Re-measured on the 390px
+                    capture of this branch rather than left as prose: the
+                    instrument moved, so the reading had to be retaken. Raised by
                     `haven-design-reviewer` on #2448, against the rendered
                     mobile capture rather than from the source.
                     For the first row it is a real loss — a human-initiated payment's
@@ -1574,11 +1577,14 @@ export default function DesignSystemPage() {
                       columns purely from content, so capping one collapses it.
                       Do not drop the `md:` here. */}
                   <td className="max-w-0 px-4 py-4 align-middle md:max-w-none">
-                    {/* `truncate` + `flex-wrap` mirror TransactionsTable
-                        exactly (#1772). Without `truncate` the `max-w-0`
-                        above word-wraps instead of ellipsising, so the
-                        showcase would teach a shape the real component does
-                        not have. */}
+                    {/* `break-words` + `flex-wrap` mirror TransactionsTable
+                        below `md`. This said `truncate` until #2792, on the
+                        reasoning that wrapping "would teach a shape the real
+                        component does not have" — which was true when the
+                        component ellipsised below `md` and stopped being true
+                        when #2734 gave it `break-words` and a 248px cell. The
+                        premise inverted and the class did not follow it, which
+                        is how a showcase drifts while looking deliberate. */}
                     {/* `md:flex-nowrap` for the same reason as `md:max-w-none`
                         above: this showcase's desktop titles WRAP to two
                         lines, so a wrapping flex row pushed the Failed badge
@@ -1586,12 +1592,13 @@ export default function DesignSystemPage() {
                         gate measured it — 17746 -> 17758 — after the first
                         attempt at this fix. Desktop must not move at all. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-                      {/* Ellipsise below md, wrap normally at md and up — the
-                          `md:` half restores this showcase's original desktop
-                          rendering byte for byte, so only the mobile baseline
-                          moves. */}
+                      {/* Wrap below md (matching the component), wrap at md
+                          and up (this showcase's own desktop shape). The `md:`
+                          half is untouched, so desktop stays byte-identical —
+                          only the narrow rendering changes, and it changes
+                          TOWARDS the component. */}
                       <p
-                        className="truncate text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
+                        className="break-words text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
                         title={row.title}
                       >
                         {row.title}

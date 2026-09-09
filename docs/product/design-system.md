@@ -1209,25 +1209,39 @@ So `Table.HeaderCell` / `Table.SortableHeaderCell` take **`revealAt="md" | "xl"`
 
 - **Container-keying makes DOM mount order a layout input**, which viewport-keying never did. `Sidebar` is `dynamic(ssr:false)`, so for the frames before its chunk mounts the shell hands the table ~256px it is about to take back. Measured two ways. Deterministically (stage with the sidebar in layout vs `display: none`, fixed viewport): `/transactions` is same-stage at 768/1024/1100/1279/1280, so no mount transition can change its column set. By timing, at low load: the `/design-system` showcase paints **seven** columns at a 1034px container and collapses to **five** at 794px roughly **106ms** later at a 1100px viewport (98ms at 1279px); 1024px is same-stage. Accepted on an internal showcase route where the whole page shifts 240px in the same window — but check it before keying a **new** surface on the container.
 
-Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it (this table keeps the date under the Amount until the `xl` stage, the same place the narrow layout puts it).
+Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it — this table moves the date under the Amount for the `md`→`xl` band. Note the limit of that example, since it was written before #2792: below `md` the Amount column collapses too and the date goes with it, so the narrow layout drops the date rather than relocating it. Moving beats dropping where there is somewhere to move to.
 
 **`TransactionsTable.tsx` still reveals everything at the single `md` stage, and must not be restructured to match the showcase's two.** It is also a seven-column table and it escapes measure starvation a different way, by **truncating its title to one line instead of wrapping it**. Re-measured under the container keying: one line at every width, 89.6px at 768px *and* at 1024px (ellipsised, with the full string on the `title` attribute), 225.1px at 1280px — so the defect above simply does not arise there. The staging rule is about tables whose flexible cell *wraps*. Restructuring `TransactionsTable` for consistency with a showcase would be a change against a defect measurement says is absent, which is the trap § *Local hint marker* already warns about. What #1999 did change there is only the *key*: the same columns collapse at the same widths, from the container instead of the viewport.
 
 **Where the two DO now agree: the amount column collapses below `md` in both**
 ([#2734](https://github.com/d-hinders/Haven-AI/issues/2734) for the component,
 [#2792](https://github.com/d-hinders/Haven-AI/issues/2792) for the showcase),
-with the amount riding under the title and the date going with it. That is the
-one axis worth keeping in step, because it is the shape this document teaches:
-the showcase carried the old column for one merge and
+with the amount riding under the title and the date going with it. The showcase
+carried the old column for one merge and
 `e2e/table-container-collapse.spec.ts` measured the gap — 3 surviving body cells
-at a 717px container on `/transactions`, still 4 here — which is why that
-assertion is the check that they agree rather than a number about one of them.
+at a 717px container on `/transactions`, still 4 here.
+
+**Scope that assertion honestly: it counts surviving CELLS.** It is the check
+that the two tables collapse the same number of columns, and nothing more. It
+cannot see the amount stacked in the wrong place, an alignment divergence, or
+the title-wrap inversion #2792 found and fixed — the showcase ellipsised below
+`md` while the component wrapped, at the same 248px cell, so both tables passed
+this spec while rendering different rows. A green tick here is not a statement
+that the two render alike.
 
 Two axes still diverge **on purpose**, and neither is drift: the showcase stages
 in two steps (`md` + `xl`) where the component reveals at one, per the paragraph
 above; and the component carries its narrow widths unconditionally into desktop
 while the showcase hands them back with `md:w-auto`, because the showcase sizes
 its columns from content and the component does not.
+
+Do not read that `md:w-auto` as a pattern to copy. It is a **viewport**-keyed
+width on a table whose collapse is **container**-keyed, and it is harmless only
+because this shell makes the two coincide (container ≥ 718px ⟺ viewport ≥ 768px).
+Under a container resize that does not track the viewport they split — the exact
+trap the paragraphs above spend three passes warning about. A new
+container-keyed table takes `tableColumnClass` / `tableHideFromClass`, never a
+`md:` width.
 
 Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390 (pinned by [`packages/frontend/src/__tests__/capture-viewports.test.ts`](../../packages/frontend/src/__tests__/capture-viewports.test.ts), #2680). So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard — see `e2e/transaction-title-measure.spec.ts`, which asserts the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation. `e2e/table-container-collapse.spec.ts` therefore holds the viewport fixed and resizes the query container itself, in both halves (header labels and body cells) at once.
 

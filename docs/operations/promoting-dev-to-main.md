@@ -6,9 +6,10 @@ covers:
   - .github/workflows/publish.yml
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
+  - .agents/skills/release/SKILL.md
   - docs/operations/dev-environment.md
   - scripts/release-scope.mjs
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Promoting `dev → main` (production release)
@@ -70,6 +71,45 @@ for how the environments are wired, see
       rebuilding reflexively. Do not hand-count the diff
       ([#2724](https://github.com/d-hinders/Haven-AI/issues/2724)).
 
+## The promotion window: `dev` is held
+
+From the moment the promotion PR is **opened** until it **merges**, `dev` is
+held: do not merge feature or release PRs into `dev` during the window
+([#2725](https://github.com/d-hinders/Haven-AI/issues/2725)). Nothing
+technically enforces this — GitHub will happily accept dev merges — which is
+exactly why it has to be written down.
+
+The reason the window exists is the shape of the promotion PR: its **head is
+the `dev` branch**, not a pinned SHA. Anything merged to `dev` while the PR is
+open moves that head and becomes part of the promotion, at three costs:
+
+1. **All 19 required contexts on `main` go pending again** and must re-run
+   green before the promotion can merge.
+2. **`qa-freshness` re-evaluates coverage, not just recency**: a new commit
+   touching a money-path file the green QA run did not cover turns the gate
+   red, and clearing it takes another dispatched money-flow run.
+3. **The promoted scope silently changes** — the release-record trap
+   [#2724](https://github.com/d-hinders/Haven-AI/issues/2724) documents: the
+   tarballs are built from `main`'s tree at promotion time, so the extra
+   commits publish inside this release whether or not the release record
+   names them.
+
+A code-owner-gated promotion can also sit waiting on a human for an unbounded
+time — reviews are not on a CI clock — so the window is routinely **longer
+than the CI duration suggests**. Plan the hold around that, not around the
+green checks.
+
+**If something must land on `dev` anyway**, treat it as reopening the
+preparation rather than an exception to ride through: re-measure the release
+scope (the item above), re-dispatch **QA — money-flow (dev)**, and expect a
+full re-run of the required contexts.
+
+**The hold lifts the moment the promotion merges.** The tarballs were built
+from `main` at that point, so subsequent merges to `dev` only deploy to the
+dev environment and publish `0.0.0-dev.*` snapshots under the `dev` dist-tag —
+neither can reach the released version (see the *npm* item above for the
+channel split).
+
 ## Open and review the PR (base `main`, head `dev`)
 
 - [ ] Skim the **cumulative diff since the last promotion**. Since #1024 removed
@@ -81,7 +121,12 @@ for how the environments are wired, see
       `qa-dev` run, naming the offending commits. You no longer have to verify
       this by hand — if the gate is green, the run covered the money path. If it
       fails, re-run *QA — money-flow (dev)* rather than reaching for
-      `qa-override`.
+      `qa-override`. Read the result at the **`money-flow` job's** conclusion,
+      never the run's: a run the post-deploy gate skipped still concludes
+      `success` at run level, so a green tick in the Actions list can mean
+      nothing ran ([#2725](https://github.com/d-hinders/Haven-AI/issues/2725);
+      the gate's semantics live in
+      [`agent-qa.md`](./agent-qa.md) § *Automation & gating*).
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a
       **prod DB snapshot** exists before they run on deploy.

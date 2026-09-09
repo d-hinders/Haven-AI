@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -825,6 +825,27 @@ run title says which status fired it (`post-deploy <sha> → Haven AI / dev
 (in_progress)`), and the gate's log line says why it skipped. The concurrency
 group moved from the workflow to the **money-flow job** so those skipped runs
 never hold it.
+
+Two properties of those skipped runs matter to anyone reading the Actions
+list, and both bite hardest while a release is being cut:
+
+- **A skipped run is a green tick that satisfies nothing.** GitHub reports the
+  run-level conclusion as `success` when the `gate` job skips the harness
+  (measured on `ci.yml` run 33604474457, jobs `skipped=7,success=7`), so the
+  Actions list shows a green tick for a run in which nothing ran. Wherever a
+  run is inspected, read the **`money-flow` job's** conclusion
+  (`gh run view <id> --json jobs`), never the run's — the freshness gate reads
+  the job for the same reason, and a green run with a skipped `money-flow` job
+  is the failure mode the job rule exists to close.
+- **While `dev` is busy, the automatic path can stall indefinitely.** The
+  de-duplication rule above skips a run whenever its deployment is no longer
+  the newest for the environment, so while merges are landing on `dev` in
+  quick succession the automatic post-deploy runs get skipped — waiting for
+  one to satisfy `qa-freshness` never converges. On the 0.1.36-alpha.0
+  promotion the harness had to be dispatched manually at 04:30 for exactly
+  this reason ([#2725](https://github.com/d-hinders/Haven-AI/issues/2725)). A
+  manual `workflow_dispatch` run on `dev` is legitimate coverage (see *The
+  dev → main freshness gate* below), so dispatch rather than wait.
 
 #### Provenance — why a curl can no longer mute the alarm (#2271)
 

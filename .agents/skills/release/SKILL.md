@@ -98,12 +98,29 @@ rather than a wildcard, hiding the entire delegation-rail, rekey, relayer and
 outbound-queue surfaces. A checker that under-reports here is worse than no
 checker, because an empty result is what tells you to skip the run.
 
+Green at run level is not evidence either: a run whose `money-flow` job was
+skipped by `qa-dev.yml`'s post-deploy de-duplication gate still concludes
+`success` at run level, so in the Actions list a green tick can mean "nothing
+ran" (#2273). Wherever a run is inspected during a release, read the
+**`money-flow` job's** conclusion (`gh run view <id> --json jobs`), never the
+run's — a green run with a skipped `money-flow` job is the failure mode. The
+gate's full selection rules are owned by
+[`docs/operations/agent-qa.md`](../../../docs/operations/agent-qa.md) §
+*Automation & gating*; read them there rather than restating them here.
+
 If the output is non-empty, dispatch **Actions → "QA — money-flow (dev)" → Run
-workflow** on `dev` before you run the bump. It must be dispatched on `dev`:
-the gate admits a `workflow_dispatch` run only when its branch label is `dev`
-AND its commit is an ancestor of the promotion head (#2404 — `selectGreenRun`
-in `scripts/ci/qa-freshness.mjs`), so a run on any other ref does not satisfy
-the gate.
+workflow** on `dev` before you run the bump — and treat dispatching as the
+norm during a release, not the fallback. The automatic triggers are not an
+alternative while `dev` is busy: a post-deploy run is skipped whenever its
+triggering `deployment_status` is not the newest deployment for the
+environment (#2273), so while merges are landing on `dev` the automatic runs
+get skipped indefinitely and waiting for one to satisfy `qa-freshness` never
+converges — on the 0.1.36-alpha.0 promotion the harness had to be dispatched
+manually at 04:30 for exactly this reason (#2725). It must be dispatched on
+`dev`: the gate admits a `workflow_dispatch` run only when its branch label is
+`dev` AND its commit is an ancestor of the promotion head (#2404 —
+`selectGreenRun` in `scripts/ci/qa-freshness.mjs`), so a run on any other ref
+does not satisfy the gate.
 
 ## Choose The Version
 
@@ -206,6 +223,13 @@ Publishing happens on the `dev → main` promotion. **Follow
 `branch-and-release-flow.md` § *Promotion to production*** — it owns the
 sequence, the BEHIND/sync-back rule, and why both merge with a merge commit
 rather than a squash. Do not restate it; read it.
+
+While the promotion PR is open, **`dev` is held**: the window runs from
+opening the PR to merging it, and a dev merge inside it re-runs every required
+context, re-opens money-flow coverage, and silently widens the promoted scope
+(#2725). The rule and what to do when something must land anyway live in
+[`docs/operations/promoting-dev-to-main.md`](../../../docs/operations/promoting-dev-to-main.md#the-promotion-window-dev-is-held)
+§ *The promotion window*.
 
 Since #2165 the merge-method half is enforced by the `Dev gate` ruleset rather
 than by you remembering it: a PR based on `main` can only be merge-merged. Treat

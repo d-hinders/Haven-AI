@@ -19,7 +19,6 @@ covers:
   - packages/frontend/scripts/serve-docs.mjs
   - packages/frontend/src/lib/__tests__/served-docs.test.ts
   - scripts/frontend-copy-lint.mjs
-  - scripts/docs/chain-entry-codec-census-pin.test.mjs
   - scripts/lib/ratchet.mjs
 last-verified: "2026-09-08"
 ---

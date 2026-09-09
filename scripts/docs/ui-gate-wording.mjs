@@ -52,6 +52,8 @@
 // Usage:
 //   node scripts/docs/ui-gate-wording.mjs            # check (runs in docs:check)
 //   node scripts/docs/ui-gate-wording.mjs --update   # rewrite the baseline
+//   node scripts/docs/ui-gate-wording.mjs --update --accept-new
+//                                                      # reviewed non-empty first write
 //
 // See docs/contributing/docs-quality-system.md.
 import { readFile } from 'node:fs/promises'
@@ -68,6 +70,8 @@ import {
   newViolations,
   hasShrunk,
   updateRefusals,
+  ACCEPT_NEW_BASELINE_FLAG,
+  firstRunRefusalMessage,
   loadBaseline,
   writeBaseline,
   runGate,
@@ -465,6 +469,7 @@ function sortedViolations(counts, baseline) {
 
 async function main() {
   const update = process.argv.includes('--update')
+  const acceptNew = process.argv.includes(ACCEPT_NEW_BASELINE_FLAG)
   // A corrupt baseline used to be REPAIRED by `--update`, which read nothing
   // and overwrote. Reading it first is what makes the refusal possible, so the
   // repair path is gone and a `SyntaxError` with a raw stack is not a remedy
@@ -486,9 +491,9 @@ async function main() {
     console.error(
       '\nUntil #2747 `--update` overwrote it without reading, so a corrupt file repaired ' +
         'itself silently. It no longer can — the refusal has to read the baseline to compare ' +
-        'against it. Delete the file and re-run with `--update` to regenerate it from the ' +
-        'current tree, which is the first-run path. Note that this same step will baseline ' +
-        'any debt the tree currently carries, so read the regenerated file before committing it.',
+        'against it. Delete the file and re-run with `--update`; an empty scan regenerates it ' +
+        'directly. If the scan finds debt, review it and explicitly use `--update --accept-new` ' +
+        'to initialize the non-empty baseline.',
     )
     process.exit(1)
   }
@@ -505,10 +510,11 @@ async function main() {
     // all -- so the command the message below sends you to absorbed any amount
     // of retired wording silently, on a gate that runs inside `docs:check`.
     // Same shape as #2728's, on the sixth consumer of the shared engine.
-    const violations = updateRefusals(counts, baseline, { firstRun })
+    const violations = updateRefusals(counts, baseline, { firstRun, acceptNew })
     if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      if (firstRun) console.error(firstRunRefusalMessage(firstRun))
       console.error(
         '\nThese rules were RETIRED. Growth is a reviewed decision, not a ratchet step: ' +
           'correct the sentence, or add the allow marker on a line that genuinely quotes the ' +

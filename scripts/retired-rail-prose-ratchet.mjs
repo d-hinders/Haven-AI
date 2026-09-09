@@ -35,6 +35,8 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  ACCEPT_NEW_BASELINE_FLAG,
+  firstRunRefusalMessage,
   runGate,
 } from './lib/ratchet.mjs'
 
@@ -112,15 +114,17 @@ function totals(counts) {
 async function main() {
   const counts = await scanAll()
   const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
+  const acceptNew = process.argv.includes(ACCEPT_NEW_BASELINE_FLAG)
   const t = totals(counts)
   console.log(`retired-rail prose gauge: ${t.hits} phrase hit(s) across ${t.files} file(s).`)
 
   if (process.argv.includes('--update')) {
     // #2728: see db-mock-ratchet -- an empty baseline is not a first run.
-    const violations = updateRefusals(counts, baseline, { firstRun })
+    const violations = updateRefusals(counts, baseline, { firstRun, acceptNew })
     if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      if (firstRun) console.error(firstRunRefusalMessage(firstRun))
       console.error(
         'Growth is a reviewed decision: remove the stale prose, or — if the occurrence is ' +
           'genuinely legitimate — hand-add it to BOTH the baseline and the justifications ' +

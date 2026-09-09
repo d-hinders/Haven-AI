@@ -12,13 +12,34 @@ import { fileURLToPath } from 'node:url'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { newViolations, hasShrunk, assertUsableBaseline, readBaseline, runGate } from './ratchet.mjs'
+import {
+  newViolations,
+  hasShrunk,
+  updateRefusals,
+  assertUsableBaseline,
+  readBaseline,
+  runGate,
+} from './ratchet.mjs'
 
 // `fileURLToPath`, not `.pathname`: the latter percent-encodes, so a checkout
 // under a path containing a space (or `#`, or `%`) makes `git -C` fail with
 // "cannot change to '.../space%20check/'". Measured. Every other REPO_ROOT in
 // scripts/ already uses `fileURLToPath`; this was the one exception.
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
+
+test('updateRefusals: first-run initialization requires explicit acceptance only for debt', () => {
+  const debt = { 'a.md': { rule: 2 } }
+  assert.deepEqual(updateRefusals({}, {}, { firstRun: true }), [])
+  assert.equal(updateRefusals(debt, {}, { firstRun: true }).length, 1)
+  assert.deepEqual(updateRefusals(debt, {}, { firstRun: true, acceptNew: true }), [])
+})
+
+test('updateRefusals: --accept-new cannot waive growth on an existing baseline', () => {
+  const baseline = { 'a.md': { rule: 1 } }
+  const growth = { 'a.md': { rule: 2 } }
+  assert.equal(updateRefusals(growth, baseline, { acceptNew: true }).length, 1)
+  assert.deepEqual(updateRefusals({}, baseline, { acceptNew: true }), [])
+})
 
 // ── The defect: a non-numeric count silently allows everything ──────────────
 

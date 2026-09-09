@@ -47,8 +47,9 @@
 // CONVENTION_EXEMPT for what that check can and cannot do.
 //
 //   node scripts/frontend-copy-lint.mjs            # check against the baseline
-//   node scripts/frontend-copy-lint.mjs --update   # rewrite the baseline (shrink
-//                                                   # or a reviewed, intentional add)
+//   node scripts/frontend-copy-lint.mjs --update   # tighten, or create an empty baseline
+//   node scripts/frontend-copy-lint.mjs --update --accept-new
+//                                                  # reviewed non-empty first write only
 
 import { readFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -60,6 +61,8 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  ACCEPT_NEW_BASELINE_FLAG,
+  firstRunRefusalMessage,
   runGate,
 } from './lib/ratchet.mjs'
 import { isEscaped } from './lib/lint-escapes.mjs'
@@ -429,6 +432,7 @@ async function scanAll() {
 
 async function main() {
   const update = process.argv.includes('--update')
+  const acceptNew = process.argv.includes(ACCEPT_NEW_BASELINE_FLAG)
   const { counts, details, fileCount } = await scanAll()
 
   const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
@@ -444,10 +448,11 @@ async function main() {
     // what this gate protects is user-facing product copy: #2246 removed two
     // phrases from the frontend precisely because they were a disclosed
     // compliance gap, and this lint is what stops them coming back.
-    const violations = updateRefusals(counts, baseline, { firstRun })
+    const violations = updateRefusals(counts, baseline, { firstRun, acceptNew })
     if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      if (firstRun) console.error(firstRunRefusalMessage(firstRun))
       console.error(
         `\nGrowth is a reviewed decision, not a ratchet step. Rewrite the copy ` +
           `(see docs/product/copy-guidelines.md), or add \`// ${IGNORE}\` on a ` +

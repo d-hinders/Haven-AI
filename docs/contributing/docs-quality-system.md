@@ -149,8 +149,12 @@ backend vitest job, so a PR touching no backend surface never runs it.
 
 The shrink-only gates share `scripts/lib/ratchet.mjs`, which validates a
 baseline's shape on read (#2759) and runs each gate's `main` through `runGate`
-so a refusal reaches an operator as one line (#2761). `covers-gaps.mjs` keeps
-its own comparison because its baseline stores gap **files** rather than counts.
+so a refusal reaches an operator as one line (#2761). On a true first run,
+`--update` creates an empty baseline without ceremony; if the scan finds debt,
+initialization refuses until the operator reviews it and explicitly reruns with
+`--update --accept-new` (#2758). That flag cannot raise an existing baseline.
+`covers-gaps.mjs` keeps its own comparison because its baseline stores gap
+**files** rather than counts.
 
 Adding **Docs front-matter & agent skills**, and the `Contract-doc coupling`
 job, to the "Haven automerge rules" ruleset's required checks — without a paths

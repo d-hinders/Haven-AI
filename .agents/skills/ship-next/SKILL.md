@@ -419,13 +419,47 @@ PR body: Markdown is not executed, so the reviewer instead reviews the named
 Run and paste the output of all five boundary commands into the PR body. Any
 non-passing output means the normal workflow applies.
 
-| Boundary | Command | Passing output |
-|---|---|---|
-| B1 — Markdown only | `git diff --name-only origin/dev...HEAD` | Every listed path ends in `.md`. |
-| B2 — no `covers:` reach | `npm run docs:coupling` and `node scripts/docs/coupling-gate.mjs` | The strict run names no contract doc; the advisory list is empty or names only docs edited by the diff. |
-| B3 — no measured number added | `git diff origin/dev...HEAD \| grep '^+' \| grep -vE '^\+\+\+' \| grep -E '\b[0-9]{2,}\b' \| grep -vE '#[0-9]+\|[0-9]{4}-[0-9]{2}-[0-9]{2}'` | No output. |
-| B4 — no command added | `git diff origin/dev...HEAD \| grep '^+' \| grep -vE '^\+\+\+' \| grep -E '^\+\s*(\`\`\`\|npm run\|node \|npx \|gh \|git )'` | No output. |
-| B5 — not money-path | `node scripts/ci/money-path-classify.mjs` | Reports not money-path. |
+**B1 — Markdown only.**
+
+```bash
+git diff --name-only origin/dev...HEAD
+```
+
+Every listed path ends in `.md`.
+
+**B2 — no `covers:` reach.**
+
+```bash
+npm run docs:coupling
+node scripts/docs/coupling-gate.mjs
+```
+
+The strict run names no contract doc; the advisory list is empty or names only
+docs edited by the diff.
+
+**B3 — no measured number added.**
+
+```bash
+git diff origin/dev...HEAD | grep '^+' | grep -vE '^\+\+\+' | grep -E '\b[0-9]{2,}\b' | grep -vE '#[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}'
+```
+
+No output.
+
+**B4 — no command added.**
+
+```bash
+git diff origin/dev...HEAD | grep '^+' | grep -vE '^\+\+\+' | grep -E '^\+\s*(\`\`\`|npm run|node |npx |gh |git )'
+```
+
+No output.
+
+**B5 — not money-path.**
+
+```bash
+node scripts/ci/money-path-classify.mjs
+```
+
+Reports not money-path.
 
 The short form is the existing PR template with sections deleted, not a second
 template file: keep **Review Status** (the verdict line), **Not filed** / **Filed**,

@@ -97,7 +97,7 @@ export default function AgentPanel() {
         // status bar in the installed shell. Nothing here is interactive
         // (`pointer-events-none`), so this is legibility rather than
         // reachability — and unchanged where the insets are 0.
-        <div className="fixed right-[max(1rem,var(--v2-safe-right))] top-[max(1rem,var(--v2-safe-top))] z-[var(--v2-z-panel)] pointer-events-none">
+        <div className="fixed right-[max(1rem,var(--v2-safe-right))] top-[calc(1rem+var(--v2-safe-top))] z-[var(--v2-z-panel)] pointer-events-none">
           <div className="rounded-lg border border-danger/20 bg-white px-4 py-3 shadow-modal">
             <div className="flex items-center gap-2">
               <div className="w-5 h-5 rounded-full bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] flex items-center justify-center flex-shrink-0">

@@ -45,7 +45,7 @@ export default function AuthenticatedShell({
           */}
           <a
             href="#main-content"
-            className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-popover focus:outline-none focus:ring-2 focus:ring-white/80"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-[max(1rem,var(--v2-safe-top))] focus:left-[max(1rem,var(--v2-safe-left))] focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-popover focus:outline-none focus:ring-2 focus:ring-white/80"
           >
             Skip to main content
           </a>
@@ -60,7 +60,10 @@ export default function AuthenticatedShell({
             there would take momentum scrolling with it, which is the one thing
             a phone must keep.
           */}
-          <div className="flex h-screen overscroll-none bg-[var(--v2-bg)] text-[var(--v2-ink)] overflow-hidden">
+          <div
+            data-app-frame=""
+            className="flex h-screen overscroll-none bg-[var(--v2-bg)] text-[var(--v2-ink)] overflow-hidden"
+          >
             <Sidebar />
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
               <TopBar />

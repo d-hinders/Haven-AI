@@ -43,7 +43,7 @@ export function SiteHeader() {
     <header
       data-v2-header
       style={onDarkSection ? { backgroundColor: 'rgba(30, 27, 75, 0.88)' } : undefined}
-      className={`sticky top-0 z-30 backdrop-blur transition-colors duration-200 ${
+      className={`sticky top-0 z-30 pt-[var(--v2-safe-top)] backdrop-blur transition-colors duration-200 ${
         onDarkSection
           ? 'border-b border-transparent shadow-none'
           : 'bg-white/95 border-b border-[var(--v2-border)]'

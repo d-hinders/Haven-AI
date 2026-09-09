@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - docs/product/**
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Frontend playbook

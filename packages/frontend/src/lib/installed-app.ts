@@ -119,8 +119,8 @@ export function installedAppMetadata(
       capable: true,
       title: identity.name,
       // `default` keeps the status bar opaque and readable over the app's own
-      // top bar. Safe-area insets and the standalone chrome are #2730's slice;
-      // `viewport-fit: cover` deliberately does not land here.
+      // top bar. `viewport-fit: cover` (#2730) belongs to the viewport export
+      // below, not to this metadata block.
       statusBarStyle: 'default',
     },
     // Next 15 renders `capable` as the standard `mobile-web-app-capable` only.

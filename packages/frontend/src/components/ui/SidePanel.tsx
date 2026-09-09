@@ -80,7 +80,12 @@ export function SidePanel({
         <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
 
         {footer ? (
-          <div className="border-t border-[var(--v2-border)] px-5 py-4">{footer}</div>
+          <div
+            data-side-panel-footer=""
+            className="border-t border-[var(--v2-border)] px-5 py-4"
+          >
+            {footer}
+          </div>
         ) : null}
       </div>
     </div>

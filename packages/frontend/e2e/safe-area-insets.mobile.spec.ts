@@ -175,9 +175,12 @@ async function shellGeometry(page: Page) {
       headerLeft: header ? Math.round(header.getBoundingClientRect().left) : null,
       mainPaddingBottom: main ? getComputedStyle(main).paddingBottom : null,
       mainOverscroll: main ? getComputedStyle(main).overscrollBehaviorY : null,
-      frameOverscroll: main?.parentElement?.parentElement
-        ? getComputedStyle(main.parentElement.parentElement).overscrollBehaviorY
-        : null,
+      // By attribute, not `parentElement.parentElement`: a wrapper inserted
+      // between `<main>` and the frame would silently retarget the assertion.
+      frameOverscroll: (() => {
+        const frame = main?.closest('[data-app-frame]')
+        return frame ? getComputedStyle(frame).overscrollBehaviorY : null
+      })(),
       toggleTop: toggle ? Math.round(toggle.getBoundingClientRect().top) : null,
       viewportHeight: window.innerHeight,
     }
@@ -247,23 +250,25 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
 
       // And the scroll region can be brought clear of the indicator, which is
       // the only thing its bottom padding can promise.
-      if (overflows) {
-        // Wait for the route's own content before measuring its scroll box.
-        // These screens fetch client-side, so the shell exists (the toggle is
-        // up) a beat before there is anything in `<main>` to scroll — the same
-        // trap as #1771's `contentRegionFound`, where a box that has not been
-        // filled yet measures 0 and reads as "fits".
-        await expect
-          .poll(
-            () =>
-              page.evaluate(() => {
-                const m = document.getElementById('main-content')
-                return m ? m.scrollHeight - m.clientHeight : 0
-              }),
-            { message: `${route} must render content into #main-content`, timeout: 15_000 },
-          )
-          .toBeGreaterThan(0)
-      }
+      // Wait for the route's own content on EVERY route before measuring its
+      // scroll box. These screens fetch client-side, so the shell exists (the
+      // toggle is up) a beat before there is anything in `<main>` — the #1771
+      // trap, where a box that has not been filled yet measures 0 and reads as
+      // "fits". Waiting only on the `overflows: true` branch, which is what the
+      // first version did, left the `false` rows asserting that an UNRENDERED
+      // page does not scroll: true, vacuous, and green through any regression.
+      // So the wait is on content existing, which both branches share, rather
+      // than on overflow, which is the thing under test.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const m = document.getElementById('main-content')
+              return m ? m.innerText.trim().length : 0
+            }),
+          { message: `${route} must render content into #main-content`, timeout: 15_000 },
+        )
+        .toBeGreaterThan(30)
 
       const atEnd = await controlsUnderIndicatorAtScrollEnd(page, INSET_BOTTOM)
       expect(atEnd.scrolled, 'the authenticated shell must expose #main-content').toBe(true)
@@ -345,7 +350,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
       return {
         paddingTop: style.paddingTop,
         paddingBottom: style.paddingBottom,
-        hasFooter: !!el.querySelector('.border-t'),
+        hasFooter: !!el.querySelector('[data-side-panel-footer]'),
         lowestControlBottom: Math.round(
           Math.max(...controls.map((c) => c.getBoundingClientRect().bottom)),
         ),
@@ -443,8 +448,10 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(dialog.found, 'the open dialog must be wrapped by a safe-area overlay').toBe(true)
     if (!dialog.found) return
 
-    // `max(1rem, inset)`: the 47px inset beats the gutter, the 34px one beats
-    // it too, and on a device with neither the overlay is still `p-4`.
+    // This overlay sets NO `--v2-safe-gutter`, so each side is `max(0px,
+    // inset)` — exactly the inset, and `padding: 0` on a device with neither.
+    // (`ui/Modal`, which does set a 1rem gutter, is the other case, and the
+    // inset test in `modal-action-row-reachability.spec.ts` covers it.)
     expect(dialog.paddingTop).toBe(`${INSET_TOP}px`)
     expect(dialog.paddingBottom).toBe(`${INSET_BOTTOM}px`)
     expect(dialog.panelTop).toBeGreaterThanOrEqual(INSET_TOP)

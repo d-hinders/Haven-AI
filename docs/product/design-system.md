@@ -6,6 +6,8 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/AuthenticatedShell.tsx
+  - packages/frontend/e2e/safe-area-insets.mobile.spec.ts
+  - packages/frontend/src/components/ui/Toast.tsx
   - packages/frontend/src/app/layout.tsx
   - packages/frontend/src/lib/brand-colours.ts
   - packages/frontend/src/lib/installed-app.ts
@@ -343,10 +345,20 @@ lose its 24px entirely rather than fall back to it.
 side by `max(var(--v2-safe-gutter, 0px), <that side's inset>)`. **Its contract
 is to set `--v2-safe-gutter`, never a `p-*` utility alongside it** — the class
 is longhand CSS declared after `@tailwind utilities`, so a Tailwind padding
-utility of equal specificity silently loses. `ui/Modal` sets a `1rem` gutter
-(what its `p-4` was); the overlays that never had a gutter set none. A panel
-that also sets its own `max-h` has to subtract the same `max(gutter, inset)` per
-side, or it reserves height the wrapper's padding has already taken.
+utility of equal specificity silently loses. The gutter also INHERITS, so a
+`.v2-safe-overlay` rendered inside an open `ui/Modal` picks up that modal's
+`1rem` without asking for it — nothing nests that way today, and anything that
+starts to should set its own. An overlay that had a `p-4` gutter sets
+`--v2-safe-gutter: 1rem` to keep it; the ones that never had a gutter set none.
+
+A panel that also sets its own `max-h` must subtract at least each side's inset,
+or it reserves height the wrapper's padding has already taken. How much depends
+on what the ceiling is measured from: a ceiling measured off `100vh` subtracts
+the full `max(gutter, inset)` per side, while one based on `90vh` or
+`100vh-2rem` subtracts the raw insets, which is enough because its base already
+leaves the gutter. A panel with **no** ceiling at all is the case to watch: the
+available box shrinks by the insets, and with `items-center` and nothing to
+clamp it an over-tall panel overflows both ends with no scroll path.
 
 `ui/SidePanel` is the deliberate exception: it is flush to three screen edges by
 design, so a gutter on its wrapper would un-flush it at every width. Its insets
@@ -431,8 +443,8 @@ The authenticated app uses one stable product shell:
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: 56px blurred white header. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
-- Main content: scrolls inside the shell, with `p-6 lg:p-8` and a skip link targeting `main#main-content`.
+- Top bar: 56px blurred white header; below `lg` it grows by `--v2-safe-top` (§ *Safe areas*). Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
+- Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
 
 ### PageHeader
 
@@ -921,7 +933,7 @@ guesses about `Modal` wrong:
 | Box | What it is | Scrolls? |
 |---|---|---|
 | The wrapper | `fixed inset-0 … v2-safe-overlay` with a `1rem` gutter (`p-4` until #2730; still 1rem a side wherever the safe-area insets are 0), and it carries `role="dialog"` | **No.** `overflow: visible`, `position: fixed`. It reports ~4px of `scrollHeight` overflow from its own padding that `scrollTop` can never consume |
-| The panel | `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]` — the same `100vh-2rem` off a notched device — `overflow-hidden`, `flex flex-col` | No |
+| The panel | `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]` — exactly `100vh-2rem` wherever the insets are 0, and more taken off on a notched device — `overflow-hidden`, `flex flex-col` | No |
 | The body | `[data-modal-body]` — `min-h-0 flex-1 overflow-y-auto` | **Yes. This is the only scroller**, pinned by [`packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts`](../../packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts) (#2680). |
 
 Two consequences, both of which have already cost real time:

@@ -281,7 +281,11 @@ export default function TransactionsTable({
             // visible below `md`, and there is no sort control outside this
             // header row. Sorting is therefore a desktop affordance now. That
             // is a capability change, not a layout one, and it is tracked in
-            // #2790 rather than decided here.
+            // #2790 and DECIDED there (owner, 2026-09-09): sorting is an
+            // `md`+ affordance, kept safe by the default being newest-first and
+            // the sort state being component-local. Do not add a mobile sort
+            // control here — the rule and its reasoning live in
+            // `docs/product/design-system.md` § Transaction tables.
             <Table.SortableHeaderCell
               label="Amount"
               direction={directionOf('amount')}

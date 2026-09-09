@@ -124,7 +124,7 @@ Each row names the script, workflow or runner that reports it. The `docs.yml`
 rows run on **every** pull request: that trigger carries **no `paths:` filter**,
 because a required check must report on every PR or auto-merge deadlocks waiting
 for a run that never happens (#933; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md)
-§ One-time GitHub setup). Doc/config drift is the exception — it rides the
+§ One-time GitHub setup). Doc/config drift is surface-gated — it rides the
 backend vitest job, so a PR touching no backend surface never runs it.
 
 | Check | Tool | Blocking? |

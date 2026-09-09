@@ -445,3 +445,28 @@ test('CLI: a baseline that parses but is not an object is refused too', () => {
     assert.match(out, /is unusable as a baseline/)
   }
 })
+
+test('CLI: an unreadable scanned file prints one line, not a node:internal banner', () => {
+  // #2761. This gate's conversion to `runGate` was mutation-INVISIBLE until
+  // this case: every other failure here goes through `main`'s own try/catch
+  // around `loadBaseline`, which prints its named remedy and never reaches the
+  // entrypoint. So reverting `runGate('ui-gate-wording', main)` to a bare
+  // `main()` reddened nothing — measured by review, 0 of 252.
+  //
+  // The path that DOES reach it: a tracked Markdown file the scan cannot read.
+  // `git ls-files` lists it, `readFile` throws EACCES outside the guarded
+  // block, and before #2761 that arrived as Node's uncaught-exception banner.
+  const { status, out } = runGuard(GATE, {
+    also: ALSO,
+    gitInit: true,
+    files: { [DOC]: CORRECTED, [BASE]: '{}' },
+    chmod: { [DOC]: 0o000 },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ ui-gate-wording: /)
+  assert.match(out, /EACCES/)
+  assert.doesNotMatch(out, /node:internal/)
+  assert.doesNotMatch(out, /triggerUncaughtException/)
+  // An unreadable file is an operator condition, not a crash report.
+  assert.doesNotMatch(out, /failed:/)
+})

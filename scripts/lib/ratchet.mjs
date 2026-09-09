@@ -90,6 +90,141 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
 }
 
 /**
+ * Run a gate's `main` as the CLI, and present a failure the way a gate should.
+ *
+ * Four of the six gates on this module called `main()` bare (#2761), so an
+ * operator-facing condition — a malformed baseline, an unreadable file, a
+ * permissions error — arrived as Node's uncaught-exception banner:
+ *
+ *     node:internal/modules/run_main:107
+ *         triggerUncaughtException(
+ *         ^
+ *     [TypeError: …/db-mock-baseline.json: "x.test.ts" [positional] is "3", …]
+ *
+ *     Node.js v24.17.0
+ *
+ * #2759 made the message the whole error TEXT; this removes the framing around
+ * it. A helper rather than four copies for the reason #2728 and #2747 both
+ * landed on: a decision copied N times is a decision that drifts, and each of
+ * those issues was one gate that had drifted out of a set the others were in.
+ *
+ * ## Why it does not just print `err.message`
+ *
+ * A REFUSAL and a BUG want opposite treatment. `refusal()` below strips the
+ * stack because its frames point inside this module and tell the operator
+ * nothing. A genuine bug wants exactly those frames. So the split is made on
+ * the evidence rather than on a flag: an error carrying stack FRAMES is a bug
+ * and is printed whole; a frameless one is a refusal and prints as one line.
+ *
+ * `Promise.resolve().then(() => main())` rather than `main().catch(...)`, because
+ * `design-lint`'s `main` is synchronous and a sync throw would escape the
+ * latter before any handler existed.
+ */
+export function runGate(name, main) {
+  // `runGate(main)` — the one-arg call #2761's own text proposes — bound `name`
+  // to the function and left `main` undefined, and `.then(undefined)` PASSES
+  // THE VALUE THROUGH rather than failing: the process exited 0 having printed
+  // nothing and never entered the gate. A blocking CI job that is a silent
+  // no-op reporting success, introduced by the helper written to end exactly
+  // that class (#2728, #2747, #2759). Found by review; measured before and
+  // after.
+  //
+  // Two defences, and they are INDEPENDENT rather than belt-and-braces —
+  // measured: with this check deleted, `.then(() => main())` alone still gives
+  // `✗ () => {} failed: TypeError: main is not a function` and exit 1. So the
+  // arity check does not buy loudness, which the chained call already provides.
+  // It buys the MESSAGE: a miswired call is named as a miswired call, with the
+  // signature, instead of as a TypeError about an identifier the author did not
+  // write. That is worth a synchronous throw here, which does reach Node's
+  // banner — but only for an authoring error no operator can produce, and CI
+  // catches it on the first run of the PR that introduces it.
+  if (typeof main !== 'function') {
+    throw new TypeError(
+      `runGate: ${typeof name === 'function' ? 'called with one argument' : `\`${name}\``} did not ` +
+        'pass a function — the signature is runGate(name, main)',
+    )
+  }
+  Promise.resolve()
+    // `() => main()` rather than `.then(main)`: the second silently accepts a
+    // non-callable, the first turns it into a TypeError the catch below reports.
+    .then(() => main())
+    .catch((err) => {
+      // A REFUSAL and a BUG want opposite treatment, and the split is made on
+      // evidence rather than a flag a caller could forget to set.
+      //
+      // An fs errno is the exception that proves it: an EACCES on a baseline
+      // carries frames, so the frames heuristic alone filed the most
+      // operator-facing condition in #2761's acceptance criteria as a crash,
+      // complete with an errno dump. It is a fact about the environment, not a
+      // defect in this code, so it is classified as a refusal by its `code`.
+      // `--update` WRITES, so the write path's codes belong here as much as the
+      // read path's: a read-only filesystem, a full disk or an exceeded quota
+      // is a permissions error in every sense #2761's acceptance criteria mean,
+      // and all of them printed as crashes with an errno dump until review
+      // measured them.
+      //
+      // `ELOOP` is here because a first version of this comment excluded it as
+      // "not reachable from a `git ls-files` scan set" — a reason that is true
+      // of exactly ONE of the six gates. The other five walk the tree
+      // themselves (`readdir`/`statSync`), and a self-referential symlink gives
+      // `ELOOP` from both `statSync` and `readFileSync`; measured. A stated
+      // reason that holds for one sixth of the callers is worse than no reason,
+      // because the next reader takes it as settled.
+      const OPERATOR_ERRNO = new Set([
+        'EACCES',
+        'EPERM',
+        'ENOENT',
+        'EISDIR',
+        'ENOTDIR',
+        'EMFILE',
+        'ENFILE',
+        'EROFS',
+        'ENOSPC',
+        'EDQUOT',
+        'ELOOP',
+        'ENAMETOOLONG',
+      ])
+      const isOperatorCondition = typeof err?.code === 'string' && OPERATOR_ERRNO.has(err.code)
+      const hasFrames = typeof err?.stack === 'string' && /\n\s+at /.test(err.stack)
+      if (hasFrames && !isOperatorCondition) console.error(`✗ ${name} failed:`, err)
+      else console.error(`✗ ${name}: ${err?.message ?? err}`)
+      process.exit(1)
+    })
+}
+
+/**
+ * A refusal, not a crash — so it is presented as one.
+ *
+ * All six gates now run their `main` through `runGate` (#2761), which prints a
+ * frameless error as one line. Without the replacement below the frames WOULD
+ * run `assertUsableBaseline` -> `loadBaseline` -> the gate's `main`, which for
+ * a malformed baseline is noise around the one line the operator needs -- and
+ * it is why the "the error can name the FILE" argument landed in two gates of
+ * six until review said so (#2759).
+ *
+ * This paragraph described the pre-#2761 entrypoints in the present tense
+ * ("FOUR of the six gates have no catch at all", "the two that do catch print
+ * the message") until #2761 made all six identical and did not update it --
+ * six lines below its own insertion, in a comment that already carried a note
+ * about a previous miscount of the same set. Found by review, again.
+ *
+ * An earlier version of this comment said five gates inherit a
+ * `main().catch(...)`, which is both the wrong number and self-contradictory.
+ * The review that caught it put the number at one; measuring the six
+ * entrypoints gives two. Counted here rather than restated, which is the
+ * lesson this whole file is now carrying.
+ *
+ * Replacing `stack` is deliberate rather than clever: this error reports a bad
+ * INPUT FILE, and where it was thrown from tells the reader nothing. A genuine
+ * bug inside this module still throws normally and keeps its frames.
+ */
+function refusal(message) {
+  const err = new TypeError(message)
+  err.stack = `TypeError: ${message}`
+  return err
+}
+
+/**
  * Refuse a baseline the comparison cannot use, at the READ boundary rather than
  * in the comparison (#2759).
  *
@@ -112,41 +247,6 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * numeric, so this is a pure tightening rather than a build someone else has to
  * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
  */
-/**
- * A refusal, not a crash — so it is presented as one.
- *
- * FOUR of the six gates have no catch at their entrypoint at all -- `db-mock`,
- * `wire-types`, `retired-rail-prose` and `design-lint` call `main()` bare, so a
- * throw becomes an uncaught exception with Node's own framing. The two that do
- * catch (`frontend-copy-lint`, `ui-gate-wording`) print the message. Without
- * the replacement below the frames WOULD run `assertUsableBaseline` ->
- * `loadBaseline` -> the gate's `main`, which for a malformed baseline is noise
- * around the one line the operator needs -- and it is why the "the error can
- * name the FILE" argument landed in two gates of six until review said so
- * (#2759).
- *
- * Who it actually helps, since this paragraph is justifying the construct by
- * naming them: the four bare gates, and `frontend-copy-lint`, whose
- * `console.error(err)` would otherwise print the frames. NOT `ui-gate-wording`
- * — it wraps its own baseline read and prints `err.message` with a remedy, so
- * for this error the replacement is a no-op there.
- *
- * An earlier version of this comment said five gates inherit a
- * `main().catch(...)`, which is both the wrong number and self-contradictory.
- * The review that caught it put the number at one; measuring the six
- * entrypoints gives two. Counted here rather than restated, which is the
- * lesson this whole file is now carrying.
- *
- * Replacing `stack` is deliberate rather than clever: this error reports a bad
- * INPUT FILE, and where it was thrown from tells the reader nothing. A genuine
- * bug inside this module still throws normally and keeps its frames.
- */
-function refusal(message) {
-  const err = new TypeError(message)
-  err.stack = `TypeError: ${message}`
-  return err
-}
-
 export function assertUsableBaseline(baseline, path = 'baseline') {
   if (baseline === null || typeof baseline !== 'object' || Array.isArray(baseline)) {
     const shape = Array.isArray(baseline) ? 'an array' : baseline === null ? 'null' : typeof baseline

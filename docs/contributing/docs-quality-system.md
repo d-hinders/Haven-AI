@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/lib/__tests__/served-docs.test.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Documentation-quality system
@@ -382,7 +382,7 @@ Run by `.github/workflows/docs.yml` on **every** pull request:
 | Agent-facing README section, six copies ([#2533](https://github.com/d-hinders/Haven-AI/issues/2533)) | `scripts/docs/validate-readme-agent-section.mjs` | **Blocking** |
 | `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843), [#2477](https://github.com/d-hinders/Haven-AI/issues/2477), [#2504](https://github.com/d-hinders/Haven-AI/issues/2504)) | `scripts/docs/chain-integrity.mjs` | **Blocking** |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
-| Retired UI merge-gate wording ([#2657](https://github.com/d-hinders/Haven-AI/issues/2657)) | `scripts/docs/ui-gate-wording.mjs` | **Blocking** — and since [#2747](https://github.com/d-hinders/Haven-AI/issues/2747) its `--update` **refuses to raise** the baseline, like the OTHER five gates on `scripts/lib/ratchet.mjs` it now imports from rather than cloning. `covers-gaps.mjs` is the deliberate seventh: it keeps its own `hasShrunk` because its baseline stores gap FILES rather than counts, and it already refuses a rise (`--accept-new` is the explicit override, [#2679](https://github.com/d-hinders/Haven-AI/issues/2679)). Since [#2759](https://github.com/d-hinders/Haven-AI/issues/2759) the shared engine validates the baseline's SHAPE on read, so a malformed entry fails loudly instead of allowing everything for that key |
+| Retired UI merge-gate wording ([#2657](https://github.com/d-hinders/Haven-AI/issues/2657)) | `scripts/docs/ui-gate-wording.mjs` | **Blocking** — and since [#2747](https://github.com/d-hinders/Haven-AI/issues/2747) its `--update` **refuses to raise** the baseline, like the OTHER five gates on `scripts/lib/ratchet.mjs` it now imports from rather than cloning. `covers-gaps.mjs` is the deliberate seventh: it keeps its own `hasShrunk` because its baseline stores gap FILES rather than counts, and it already refuses a rise (`--accept-new` is the explicit override, [#2679](https://github.com/d-hinders/Haven-AI/issues/2679)). Since [#2759](https://github.com/d-hinders/Haven-AI/issues/2759) the shared engine validates the baseline's SHAPE on read, so a malformed entry fails loudly instead of allowing everything for that key — and since [#2761](https://github.com/d-hinders/Haven-AI/issues/2761) all six gates run their `main` through the engine's `runGate`, so that failure reaches an operator as one line rather than wrapped in Node's uncaught-exception banner |
 | `covers:` gaps — a doc naming a file its `covers:` cannot reach ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679)) | `scripts/docs/covers-gaps.mjs` | **Blocking** (shrink-only baseline) |
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**`) | Advisory |

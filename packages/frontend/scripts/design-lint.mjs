@@ -41,6 +41,7 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  runGate,
 } from '../../../scripts/lib/ratchet.mjs'
 import { isEscaped } from '../../../scripts/lib/lint-escapes.mjs'
 import path from 'path'
@@ -530,5 +531,5 @@ function main() {
 
 // Run only as a CLI (the pure scanner is imported by tests).
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main()
+  runGate('design-lint', main)
 }

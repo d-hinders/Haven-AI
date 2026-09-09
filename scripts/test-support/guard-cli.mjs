@@ -27,6 +27,7 @@
 // like a clean run. `realpathSync` is what stops this helper from certifying
 // silence as success.
 import {
+  chmodSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
@@ -60,6 +61,7 @@ export function runGuard(
     linkNodeModules = false,
     gitInit = false,
     mtimes = {},
+    chmod = {},
     readBack = [],
   } = {},
 ) {
@@ -107,6 +109,13 @@ export function runGuard(
       execFileSync('git', ['-c', 'core.excludesFile=/dev/null', '-C', root, 'add', '-f', '--', ...paths], {
         stdio: ['ignore', 'ignore', 'inherit'],
       })
+    }
+    // Permissions, where a guard's behaviour on an UNREADABLE file is the thing
+    // under test (#2761). Applied after the writes and before the run; the
+    // `finally` below removes the root, and `rmSync` is unaffected by a 000
+    // file's own mode because the containing directory stays writable.
+    for (const [rel, mode] of Object.entries(chmod)) {
+      chmodSync(join(root, rel), mode)
     }
     // Explicit mtimes where a guard compares them (review finding, blocking).
     // Relying on write ORDER is not enough: file-creation order is stable but

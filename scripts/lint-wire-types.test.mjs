@@ -218,3 +218,20 @@ test('CLI: `--update` refuses a brand-new file when the baseline is not empty', 
   assert.equal(status, 1)
   assert.match(out, /--update refuses to RAISE the baseline/)
 })
+
+test('CLI: a malformed baseline prints one line, not a node:internal banner', () => {
+  // #2761 — the last of the six. This gate's entrypoint was a bare `await
+  // main()`, so an operator with a hand-edited baseline got Node's
+  // uncaught-exception banner wrapped around the one line that mattered.
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [HOOK]: snake(1),
+      'packages/frontend/wire-type-baseline.json': JSON.stringify({ [HOOK]: { T: 'x' } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ lint-wire-types: /)
+  assert.match(out, /\[T\] is "x", not a number/)
+  assert.doesNotMatch(out, /node:internal/)
+})

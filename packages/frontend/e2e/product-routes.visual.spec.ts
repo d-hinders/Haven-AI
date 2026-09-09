@@ -31,19 +31,26 @@
  * and the `Table` primitive's only product consumer at scale. Neither had a
  * pixel of coverage.
  *
- * **`/agents` is rejected on flake, not on value.** Its render fires a real
- * `readContract` against a chain that does not exist in the harness
- * (`useOnChainAllowances.ts:48`), which surfaces as
- * `ContractFunctionExecutionError: The contract function "isModuleEnabled"
- * returned no data ("0x")`. `haven-api.ts` already allow-lists that error, so
- * the flow tests pass — but a whole-page BASELINE would be photographing a
- * screen whose content depends on how a network call outside the fixture
- * happens to resolve. It also already carries four element-scoped baselines and
- * is the single most actively edited screen in the repo, so it is the worst
- * marginal churn for the smallest marginal gain. A flaky blocking visual check
- * is worse than a narrow one: it trains everyone to re-run red checks, which is
- * the habit that lets a real failure through (#2329; #2354 records a case where
- * load alone caused a failure).
+ * **`/agents` and `/agents/agent-research` are covered from #2733.** The 2026-09-07
+ * `still-loading` failure that kept the detail route out of this gate probed a
+ * phantom fixture id — one that existed only inside two scenario payloads and
+ * one unit test, never served by any fixture; the seeded fixture agents were
+ * `agent-research` and `agent-retired` all along, and `AgentDetailClient`
+ * renders its not-found branch for any other id, which the harness correctly
+ * refused as still-loading. With the phantom id gone (#2733) the route captures
+ * populated. The original `/agents` objection — a whole-page baseline
+ * photographing a live `readContract` against a chain that does not exist in
+ * the harness — named `useOnChainAllowances.ts`, deleted by #2331; the
+ * objection's subject no longer exists, and the harness's own refusal of
+ * half-rendered captures (the `minChars` floor below, plus
+ * `assertCaptureNotBlank`) is the remaining defence against a mid-load frame
+ * ever standing as a baseline. `/agents` carries four element-scoped baselines
+ * and is the most actively edited screen in the repo, so these two routes ship
+ * MOBILE-only by decision: the mobile composition is what #2733 tunes and what
+ * nothing else measured, desktop adds a second re-bless tax on the repo's
+ * hottest screen without a defect pointing at it, and the overflow class a
+ * desktop baseline would catch is guarded by boolean measurement in
+ * `agent-detail.mobile.spec.ts` (#1858's standing argument).
  *
  * **`/accounts` is rejected on fixture fidelity, and this is #2225.** That
  * issue is filed against `scripts/screenshot.mjs`, whose `fixtureFor` keys
@@ -104,7 +111,11 @@
  * `docs/contributing/ship-playbooks/frontend.md` §4.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import {
+  mockHavenApi,
+  seedAuthenticatedSession,
+  serveAgentDetailResponses,
+} from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
 // the screenshot evidence (#896) and the /design-system gate (#897).
@@ -121,18 +132,25 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
 }>
 
 /**
- * Desktop only, and stated as a decision rather than an omission.
+ * Desktop only for the two #2318 routes, and stated as a decision rather than
+ * an omission.
  *
- * The mobile renderings of these two routes are worth covering and are NOT
- * covered here. Doubling the baselines doubles what every unrelated change to
- * either screen has to re-bless, and #1944's standing reasoning is that a new
- * blocking baseline is paid for forever. Mobile layout on these routes is
- * meanwhile guarded by the non-pixel specs that measure overflow directly
+ * The mobile renderings of those two routes were NOT covered here. Doubling
+ * the baselines doubles what every unrelated change to either screen has to
+ * re-bless, and #1944's standing reasoning is that a new blocking baseline is
+ * paid for forever. Mobile layout on those routes is meanwhile guarded by the
+ * non-pixel specs that measure overflow directly
  * (`transaction-row.mobile.spec.ts`, `table-container-collapse.spec.ts`) —
  * a boolean assertion, which #1858 is the standing evidence is the STRONGER
  * instrument for overflow, since an overflow photographs perfectly happily.
+ *
+ * #2733 inverts that choice for the two routes it adds: the mobile
+ * composition is the thing that issue tunes and the thing nothing else
+ * measured, so those two ship MOBILE-only (see the header note above).
  */
 const DESKTOP = VIEWPORTS.find((vp) => vp.name === 'desktop')
+/** The committed mobile evidence width — 390, per `evidence-viewports.mjs`. */
+const MOBILE = VIEWPORTS.find((vp) => vp.name === 'mobile')
 
 /**
  * ── The budget, measured on these captures rather than inherited (#2318) ─────
@@ -229,7 +247,33 @@ const ANCHOR_TIMEOUT_MS = 60_000
  * the route's real content and `/transactions` legitimately renders 320
  * characters while `/settings` renders 1,407.
  */
-const ROUTES = [
+type ProductRoute = {
+  path: string
+  slug: string
+  minChars: number
+  /**
+   * Rendered only at the committed MOBILE width (390). The #2318 routes ship
+   * desktop-only and the #2733 routes ship mobile-only — see the header —
+   * so every route here renders at exactly one committed width.
+   */
+  mobileOnly?: boolean
+  /** The route's own H1 — present only once the client component has data. */
+  anchor: (page: Page) => Locator
+  /**
+   * The literal the frozen clock must produce somewhere in the content, when
+   * the fixture carries a relative timestamp. Routes whose visible stamps are
+   * static strings omit it.
+   */
+  frozenRelativeTime?: string
+  /**
+   * Register `serveAgentDetailResponses` for this route — the detail-page
+   * reads (`passport`, `delegate-balance`, per-agent activity/stats) that the
+   * shared fixture falls through on. The agent id is `agent-research`.
+   */
+  serveDetailResponses?: boolean
+}
+
+const ROUTES: ProductRoute[] = [
   {
     path: '/dashboard',
     slug: 'dashboard',
@@ -267,7 +311,42 @@ const ROUTES = [
      */
     frozenRelativeTime: '3mo ago',
   },
-] as const
+
+  /**
+   * #2733: whole-page MOBILE baselines for the agents list and the agent
+   * detail page — the screen the demo lingers on and the composition this
+   * issue tunes. See the header for why these two ship mobile-only.
+   *
+   * `/agents` needs no `frozenRelativeTime` by measurement: the e2e fixture
+   * agent carries no `mcp_last_seen_at`, so `formatAgentLastActivity` renders
+   * the STATIC string "No activity yet" — there is no relative timestamp to
+   * pin, and the freeze stays on as cheap insurance for anything else on the
+   * shell that might read the clock.
+   *
+   * `/agents/agent-research` renders its pins inside the fixture-seeded
+   * content: `Created` is `timeAgo` off the agent's fixed `created_at`
+   * (4mo at `FROZEN_NOW`, from the 2026-05-02 fixture timestamp) and
+   * `Last activity` is the passport/activity rows' own static content —
+   * `4mo ago` is the frozen-clock literal this route's determinism hangs on.
+   */
+  {
+    path: '/agents',
+    slug: 'agents-list',
+    minChars: 200,
+    mobileOnly: true,
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Agents', exact: true }),
+  },
+  {
+    path: '/agents/agent-research',
+    slug: 'agent-detail-research',
+    minChars: 700,
+    mobileOnly: true,
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Research agent', exact: true }),
+    frozenRelativeTime: '4mo ago',
+    /** Serves the four detail-page reads the shared fixture falls through on. */
+    serveDetailResponses: true,
+  },
+]
 
 /**
  * The capture would bake a mid-load frame into the baseline and then match it
@@ -289,20 +368,26 @@ test.describe('product-route visual regression', () => {
   )
 
   for (const route of ROUTES) {
-    test(`${route.path} renders pixel-stable (desktop)`, async ({ page }) => {
-      if (!DESKTOP) {
+    test(`${route.path} renders pixel-stable (${route.mobileOnly ? 'mobile' : 'desktop'})`, async ({ page }) => {
+      const vp = route.mobileOnly ? MOBILE : DESKTOP
+      const axis = route.mobileOnly ? 'mobile' : 'desktop'
+      if (!vp) {
         throw new Error(
-          'visual gate: evidence-viewports.mjs carries no viewport named "desktop", ' +
-            'so these baselines cannot be captured at a committed width',
+          `visual gate: evidence-viewports.mjs carries no viewport named ` +
+            `"${route.mobileOnly ? 'mobile' : 'desktop'}", so ${route.path} ` +
+            `cannot be captured at a committed width`,
         )
       }
 
       // BEFORE `goto`: the page reads `Date.now()` during its first render.
       await page.clock.setFixedTime(FROZEN_NOW)
       await mockHavenApi(page)
+      if (route.serveDetailResponses) {
+        await serveAgentDetailResponses(page, 'agent-research')
+      }
       await seedAuthenticatedSession(page)
 
-      await page.setViewportSize({ width: DESKTOP.width, height: DESKTOP.height })
+      await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto(route.path)
 
       const main = page.locator('#main-content')
@@ -363,11 +448,11 @@ test.describe('product-route visual regression', () => {
       await unclipScrollShell(page)
       const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
       await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {
-        label: `${route.path} · desktop`,
-        viewportDevicePx: DESKTOP.height * devicePixelRatio,
+        label: `${route.path} · ${axis}`,
+        viewportDevicePx: vp.height * devicePixelRatio,
       })
 
-      await expect(page).toHaveScreenshot(`${route.slug}-desktop.png`, {
+      await expect(page).toHaveScreenshot(`${route.slug}-${axis}.png`, {
         fullPage: true,
         animations: 'disabled',
         caret: 'hide',

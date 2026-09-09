@@ -897,7 +897,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           install_status: Record<string, unknown>
         }
         const second = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
-        expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-fixture-1' })
+        expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-research' })
         expect(first.install_status).toMatchObject({
           manual_credential_fallback: true,
           local_mcp_configured: false,
@@ -923,7 +923,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // `pickSigningPath` returns null on an empty signer set, which flips
         // BudgetGrantAction to its not-ready branch — a capture of the wrong
         // screen under the approve screen's filename.
-        const signers = approve.api('/agents/agent-fixture-1/account-signers', 'GET') as {
+        const signers = approve.api('/agents/agent-research/account-signers', 'GET') as {
           passkeys: unknown[]
         }
         expect(signers.passkeys).toHaveLength(1)

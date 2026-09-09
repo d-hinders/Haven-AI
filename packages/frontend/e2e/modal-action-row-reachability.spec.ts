@@ -202,6 +202,85 @@ test.describe('contacts dialog — action row reachability (#1946)', () => {
     }
   }
 
+  /**
+   * The same reachability question with a home indicator under the dialog
+   * (#2730). `env(safe-area-inset-*)` cannot be emulated in Chromium, so the
+   * shell reads `--v2-safe-*` and this overrides those — the arithmetic under
+   * test is the real stylesheet's, run by a real engine.
+   *
+   * Deliberately in THIS file rather than a parallel spec: the defect is not a
+   * new one, it is #1946's defect with 34 fewer pixels of viewport. A dialog
+   * whose action row is reachable at 390x844 and unreachable once the bottom
+   * 34px belong to the OS has regressed exactly what this file exists to hold.
+   */
+  test('the action row stays reachable with a home indicator under the dialog (#2730)', async ({
+    page,
+  }) => {
+    const INSET_BOTTOM = 34
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openAddContact(page)
+    await page.addStyleTag({
+      content: `:root{--v2-safe-top:0px;--v2-safe-bottom:${INSET_BOTTOM}px}`,
+    })
+    await OVERFLOW_STATES[1].force(page)
+
+    const overlay = await page.evaluate(() => {
+      // `closest()` from the open dialog, never a document-wide lookup: the
+      // gutterless overlays compute `max(0px, 34px)` — the SAME 34px this
+      // assertion expects — so a first-match query would read some other
+      // overlay and pass while `ui/Modal` had lost the class entirely. That is
+      // not hypothetical; it is the false green the sibling mobile spec
+      // produced. `role="dialog"` is on `ui/Modal`'s own wrapper, so `closest()`
+      // resolves to the very node under test.
+      const el = document.querySelector('[role="dialog"]')?.closest('.v2-safe-overlay') as
+        | HTMLElement
+        | null
+      return el ? getComputedStyle(el).paddingBottom : null
+    })
+    // CONTROL: the override reached the stylesheet. Everything below is
+    // trivially true against a 0 inset, so without this the test would keep
+    // passing through a rename of the variable it is about.
+    expect(overlay, 'the modal overlay must consume --v2-safe-bottom').toBe(`${INSET_BOTTOM}px`)
+
+    // The panel's ceiling must subtract exactly what the wrapper's padding
+    // reserves — `max(gutter, inset)` per side, not `gutter + inset`. The first
+    // version added them, which left the panel 32px shorter than the box it sits
+    // in: conservative, so no reachability assertion could see it. This one can.
+    const ceiling = await page.evaluate(() => {
+      // Walk up from the scroll body to the first ancestor that actually
+      // declares a ceiling, rather than matching a class: `[data-modal-body]`'s
+      // nearest `.flex-col` is the cue wrapper, which has no max-height, and a
+      // selector that finds the wrong element reads `none` and would have to be
+      // debugged rather than trusted.
+      let el = document.querySelector('[data-modal-body]')?.parentElement ?? null
+      while (el && getComputedStyle(el).maxHeight === 'none') el = el.parentElement
+      return el ? getComputedStyle(el).maxHeight : null
+    })
+    expect(
+      ceiling,
+      'the panel ceiling is the viewport minus max(1rem, inset) per side',
+    ).toBe(`${844 - 16 - INSET_BOTTOM}px`)
+
+    const m = await reachability(page)
+    expect(m.found).toBe(true)
+    if (!m.found) return
+
+    expect(m.insideScrollBody, 'the action row must not be inside [data-modal-body]').toBe(false)
+    expect(m.hiddenBelowViewport, 'no part of the submit button may sit below the viewport').toBe(0)
+    expect(m.hitTestsToSelf, 'the submit button must be hit-testable').toBe(true)
+    expect(m.enabled, 'the save-error state leaves the button pressable').toBe(true)
+
+    // The assertion the inset adds: on screen is not enough — the bottom 34px
+    // are the home indicator's, and a button there is swiped, not tapped.
+    const clearsIndicator = await page.evaluate((inset) => {
+      const submit = Array.from(document.querySelectorAll('[role="dialog"] button')).find(
+        (b) => (b as HTMLButtonElement).type === 'submit',
+      ) as HTMLElement
+      return submit.getBoundingClientRect().bottom <= window.innerHeight - inset
+    }, INSET_BOTTOM)
+    expect(clearsIndicator, 'the submit button must clear the home indicator band').toBe(true)
+  })
+
   test('the footer submit button still owns the form in the body', async ({ page }) => {
     // The footer renders outside the body, so the submit button is no longer a
     // DESCENDANT of the `<form>`. It reaches it by the HTML `form` attribute —

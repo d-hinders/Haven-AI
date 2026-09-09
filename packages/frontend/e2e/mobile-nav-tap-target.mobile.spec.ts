@@ -28,6 +28,14 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
  * bar), so the hit rectangle is y 6-50. The x is unchanged at `left-4`, on
  * purpose — see the alignment block below.
  *
+ * #2730 rewrote both as `top-[calc(0.75rem+var(--v2-safe-top))]` and
+ * `left-[max(1rem,var(--v2-safe-left))]`; both resolve to the same 12px and
+ * 16px wherever the safe-area insets are 0, which is every viewport this spec
+ * runs at, so every number above still verifies. The centring also survives a
+ * non-zero top inset on a real phone, because `TopBar` grows by that same
+ * inset: the bar's content band becomes inset..inset+56 and the toggle's centre
+ * inset+28.
+ *
  * Pixel conventions, because the two readings differ by one and both appear
  * below: a 44px-wide box spanning x 10-54 has its LAST HITTING PIXEL at x=53.
  * `hit.right` in the measurement is that last hitting pixel (53); "right edge

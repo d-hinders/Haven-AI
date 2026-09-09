@@ -37,9 +37,13 @@ export default function DashboardActionPickerModal({
       : 'Choose account to add funds to'
 
   return (
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
+    // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has
+    // never had one, so every side is exactly its safe-area inset — 0 in any
+    // browser without a notch, and the clearance the home indicator needs in
+    // the installed shell.
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-modal max-h-[90vh] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-modal max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <div>
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">{title}</h2>

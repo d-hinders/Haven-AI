@@ -5,6 +5,9 @@ covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
+  - packages/frontend/src/components/AuthenticatedShell.tsx
+  - packages/frontend/e2e/safe-area-insets.mobile.spec.ts
+  - packages/frontend/src/components/ui/Toast.tsx
   - packages/frontend/src/app/layout.tsx
   - packages/frontend/src/lib/brand-colours.ts
   - packages/frontend/src/lib/installed-app.ts
@@ -308,6 +311,62 @@ the token exists to make continuation legible in one specific way, and it stops
 meaning that if it becomes a general-purpose edge shadow. See § *Modal* →
 scroll-continuation cue.
 
+### Safe areas — the notch and the home indicator ([#2730](https://github.com/d-hinders/Haven-AI/issues/2730))
+
+Four tokens, and the rule is that nothing calls `env()` directly:
+
+```css
+--v2-safe-top:    env(safe-area-inset-top, 0px);
+--v2-safe-right:  env(safe-area-inset-right, 0px);
+--v2-safe-bottom: env(safe-area-inset-bottom, 0px);
+--v2-safe-left:   env(safe-area-inset-left, 0px);
+```
+
+They are non-zero only where the viewport is `viewport-fit=cover` — set on the
+root viewport export for the installed app (#2729) — and the page therefore
+paints under the status bar and the home indicator. **Every consuming rule takes
+the larger of the padding it already had and the inset** (`max(1.5rem,
+var(--v2-safe-left))`), or adds them where they mean different things
+(`calc(1.5rem + var(--v2-safe-bottom))`: 24px the content wants, plus clearance
+the device demands). Both forms collapse to the previous value where the insets
+are 0, which is every desktop and every gate — that is what lets this land
+without moving a baseline.
+
+**Read the token, never `env()`.** The indirection is not tidiness: Chromium
+exposes no way to emulate a safe area, so a Playwright assertion written against
+a raw `env()` asserts against a permanent 0 and cannot fail. Overriding these
+four custom properties reproduces a real notch's arithmetic against the real
+stylesheet, which is what `e2e/safe-area-insets.mobile.spec.ts` does. The `0px`
+fallback is load-bearing for a second reason: a bare `env()` in a browser
+without that inset resolves to an empty token, which makes the surrounding
+`calc()` invalid and drops the declaration to its initial value — `<main>` would
+lose its 24px entirely rather than fall back to it.
+
+`.v2-safe-overlay` is the shared form for a full-screen overlay: it pads each
+side by `max(var(--v2-safe-gutter, 0px), <that side's inset>)`. **Its contract
+is to set `--v2-safe-gutter`, never a `p-*` utility alongside it** — the class
+is longhand CSS declared after `@tailwind utilities`, so a Tailwind padding
+utility of equal specificity silently loses. The gutter also INHERITS, so a
+`.v2-safe-overlay` rendered inside an open `ui/Modal` picks up that modal's
+`1rem` without asking for it — nothing nests that way today, and anything that
+starts to should set its own. An overlay that had a `p-4` gutter sets
+`--v2-safe-gutter: 1rem` to keep it; the ones that never had a gutter set none.
+
+A panel that also sets its own `max-h` must subtract at least each side's inset,
+or it reserves height the wrapper's padding has already taken. How much depends
+on what the ceiling is measured from: a ceiling measured off `100vh` subtracts
+the full `max(gutter, inset)` per side, while one based on `90vh` or
+`100vh-2rem` subtracts the raw insets, which is enough because its base already
+leaves the gutter. A panel with **no** ceiling at all is the case to watch: the
+available box shrinks by the insets, and with `items-center` and nothing to
+clamp it an over-tall panel overflows both ends with no scroll path.
+
+`ui/SidePanel` is the deliberate exception: it is flush to three screen edges by
+design, so a gutter on its wrapper would un-flush it at every width. Its insets
+go on the panel, where `box-sizing: border-box` takes them out of the scroll
+body between the header and footer rows — not on the rows themselves, because
+`footer` is optional and the only shipped caller passes none.
+
 ### Layering (z-index) ([#1749](https://github.com/d-hinders/Haven-AI/issues/1749))
 
 Every stacking layer has a named token. **Reach for a token, never a fresh number.**
@@ -316,6 +375,7 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 --v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
 --v2-z-sticky:         20;   /* sticky table headers */
 --v2-z-chrome:        100;   /* TopBar */
+--v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
 --v2-z-nav-scrim:     130;   /* mobile drawer scrim */
 --v2-z-nav-drawer:    140;   /* mobile drawer */
@@ -328,7 +388,7 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 
 The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it slides over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar, and its scrim exists to dim everything behind it — the bar included. Let the bar win and the drawer is decapitated, the scrim dims all but the top strip, and the toggle (which sits *inside* that strip by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
 
-Tiers are spaced by 10 so a new layer lands between two without renumbering. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the top bar can hang down across the bar's band on a phone, and under the nav tiers because the drawer the bar opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
 
 That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.mobile.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
@@ -384,8 +444,8 @@ The authenticated app uses one stable product shell:
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: 56px blurred white header. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
-- Main content: scrolls inside the shell, with `p-6 lg:p-8` and a skip link targeting `main#main-content`.
+- Top bar: 56px blurred white header; below `lg` it grows by `--v2-safe-top` (§ *Safe areas*). Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
+- Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
 
 ### PageHeader
 
@@ -873,8 +933,8 @@ guesses about `Modal` wrong:
 
 | Box | What it is | Scrolls? |
 |---|---|---|
-| The wrapper | `fixed inset-0 … p-4`, and it carries `role="dialog"` | **No.** `overflow: visible`, `position: fixed`. It reports ~4px of `scrollHeight` overflow from its own padding that `scrollTop` can never consume |
-| The panel | `max-h-[calc(100vh-2rem)]`, `overflow-hidden`, `flex flex-col` | No |
+| The wrapper | `fixed inset-0 … v2-safe-overlay` with a `1rem` gutter (`p-4` until #2730; still 1rem a side wherever the safe-area insets are 0), and it carries `role="dialog"` | **No.** `overflow: visible`, `position: fixed`. It reports ~4px of `scrollHeight` overflow from its own padding that `scrollTop` can never consume |
+| The panel | `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]` — exactly `100vh-2rem` wherever the insets are 0, and more taken off on a notched device — `overflow-hidden`, `flex flex-col` | No |
 | The body | `[data-modal-body]` — `min-h-0 flex-1 overflow-y-auto` | **Yes. This is the only scroller**, pinned by [`packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts`](../../packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts) (#2680). |
 
 Two consequences, both of which have already cost real time:

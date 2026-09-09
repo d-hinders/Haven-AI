@@ -81,14 +81,19 @@ export default function EditAgentModal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center p-4 v2-modal-backdrop">
+    // `v2-safe-overlay` + a 1rem gutter is `p-4` that also clears the notch and
+    // the home indicator (#2730), unchanged wherever the insets are 0. This
+    // wrapper paints its own backdrop rather than nesting one, which is why the
+    // first sweep missed it: the grep that enumerated the overlays excluded
+    // every line carrying `v2-modal-backdrop`.
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem] v2-modal-backdrop">
       <div className="absolute inset-0" onClick={step !== 'saving' ? handleClose : undefined} />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Edit agent"
-        className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-white shadow-modal"
       >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>

@@ -3922,7 +3922,7 @@ async function main() {
             await scenarioPage.waitForTimeout(200)
             // Re-measure BEFORE re-shooting. Growing the viewport only helps a
             // scroller whose cap is viewport-relative (`ui/Modal`'s
-            // `max-h-[calc(100vh-2rem)]`, `ui/SidePanel`'s full-height body). A
+            // `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]`, `ui/SidePanel`'s full-height body). A
             // box with its own fixed `max-h` keeps clipping however tall the
             // window gets, and the whole point of this change is that the
             // difference must be visible instead of assumed.

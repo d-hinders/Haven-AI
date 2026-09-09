@@ -168,7 +168,7 @@ export default function OnboardingClient() {
         }}
       />
 
-      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
+      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md pt-[var(--v2-safe-top)]">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link
             href="/"

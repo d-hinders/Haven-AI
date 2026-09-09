@@ -694,7 +694,11 @@ function RenameModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
+    // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has
+    // never had one, so every side is exactly its safe-area inset — 0 in any
+    // browser without a notch, and the clearance the home indicator needs in
+    // the installed shell.
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
       <div
         ref={panelRef}

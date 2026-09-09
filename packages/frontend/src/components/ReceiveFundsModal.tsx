@@ -83,14 +83,18 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
+    // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has
+    // never had one, so every side is exactly its safe-area inset — 0 in any
+    // browser without a notch, and the clearance the home indicator needs in
+    // the installed shell.
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="receive-funds-title"
-        className="relative mx-4 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative mx-4 max-h-[calc(100vh-2rem-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
       >
         <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-4">
           <div>

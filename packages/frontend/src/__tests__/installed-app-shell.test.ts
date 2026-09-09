@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BRAND_COLOURS } from '@/lib/brand-colours'
+import { INSTALLED_APP_VIEWPORT } from '@/lib/installed-app'
 
 /**
  * The installed-app shell as wired, not as built (#2729).
@@ -167,5 +168,20 @@ describe('root layout wiring (#2729)', () => {
     const layout = await loadLayout(undefined)
     expect(layout.viewport).toMatchObject({ themeColor: BRAND_COLOURS.brand, width: 'device-width', initialScale: 1 })
     expect(layout.metadata.title).toBe('Haven, agent payments within your rules')
+  })
+
+  it('the layout really exports the viewport that opts into the full screen (#2730)', async () => {
+    // Distinct from the same assertion in `lib/__tests__/installed-app.test.ts`:
+    // that one pins the CONSTANT, this one pins what the layout hands Next —
+    // and the first version of this test did NOT, it re-asserted the constant
+    // and was a byte-for-byte duplicate of the other file's assertion. A layout
+    // that stopped spreading `INSTALLED_APP_VIEWPORT`, or hand-wrote its own
+    // object, would leave the constant correct and the page without
+    // `viewport-fit`, at which point every safe-area inset is 0 on a real phone
+    // and this whole slice is inert. That is the linchpin, so it is read off
+    // the loaded layout module rather than off the import.
+    const layout = await loadLayout(undefined)
+    expect(layout.viewport).toMatchObject({ viewportFit: 'cover' })
+    expect(layout.viewport.viewportFit).toBe(INSTALLED_APP_VIEWPORT.viewportFit)
   })
 })

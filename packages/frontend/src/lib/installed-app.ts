@@ -119,8 +119,8 @@ export function installedAppMetadata(
       capable: true,
       title: identity.name,
       // `default` keeps the status bar opaque and readable over the app's own
-      // top bar. Safe-area insets and the standalone chrome are #2730's slice;
-      // `viewport-fit: cover` deliberately does not land here.
+      // top bar. `viewport-fit: cover` (#2730) belongs to the viewport export
+      // below, not to this metadata block.
       statusBarStyle: 'default',
     },
     // Next 15 renders `capable` as the standard `mobile-web-app-capable` only.
@@ -136,9 +136,25 @@ export function installedAppMetadata(
  * exactly what Next injects by default — the product already lays out at
  * device width on a phone, verified on the deployed dev app — so this moves
  * no baseline; it exists to carry `themeColor` without a hand-written tag.
+ *
+ * `viewportFit: 'cover'` (#2730) is the half that is NOT inert: it extends the
+ * page under the notch and the home indicator, which is what makes the status
+ * bar read as part of the app rather than as a letterbox above it — and it is
+ * also what makes `env(safe-area-inset-*)` report anything but 0. The two ship
+ * together on purpose. Every rule that consumes those insets goes through
+ * `--v2-safe-*` in `globals.css`; `cover` without them would put controls under
+ * the notch, which is the defect #2730 exists to prevent rather than cause.
+ *
+ * Inert in every gate this repository runs — headless Chromium has no notch,
+ * so all four insets resolve to 0 and every rule computes what it computed
+ * before. NOT inert in a normal Safari tab on a notched phone: with `cover`,
+ * Safari reports a real bottom inset in portrait and real left/right insets in
+ * landscape, and the rules apply there too. That is correct and wanted; the
+ * point is only that no gate in this repository can see it.
  */
 export const INSTALLED_APP_VIEWPORT: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  viewportFit: 'cover',
   themeColor: BRAND_COLOURS.brand,
 }

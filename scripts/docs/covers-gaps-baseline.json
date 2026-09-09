@@ -144,9 +144,6 @@
     "packages/backend/src/openapi/spec.test.ts",
     "scripts/release-bump.mjs"
   ],
-  "docs/contributing/testing-strategy.md": [
-    "scripts/lib/ratchet.mjs"
-  ],
   "docs/exit/README.md": [
     "packages/backend/src/rails/delegation-contracts.ts"
   ],
@@ -206,7 +203,6 @@
     "packages/mcp-server/src/strict-tool-input.test.ts",
     "packages/sdk/src/agent-guidance.test.ts",
     "packages/sdk/src/skill-content.test.ts",
-    "scripts/frontend-copy-lint.mjs",
     "scripts/frontend-copy-lint.test.mjs"
   ],
   "docs/product/design-review.md": [

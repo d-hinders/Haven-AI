@@ -116,6 +116,11 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
         <div className="space-y-1.5">
           <Skeleton variant="text" className="h-3 w-40 max-w-full" />
           <Skeleton variant="text" className="h-2 w-56 max-w-full" />
+          {/* The amount line the loaded row now carries below `md` (#2734).
+              Without it the row grows ~24px when the data arrives — the
+              collapse would have removed a horizontal shift and added a
+              vertical one. */}
+          <Skeleton variant="text" className={`h-3 w-20 ${tableHideFromClass('md')}`} />
         </div>
       </td>
     ),
@@ -136,9 +141,12 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
     ),
     amount: (key) => (
       // Collapsed below `md` in step with the real cell and the header
-      // (#2734). A skeleton column the loaded rows do not have is a layout
-      // shift on every page load, and it is invisible to a screenshot taken
-      // after the data arrives.
+      // (#2734). Scoped precisely, because the first version of this comment
+      // claimed more than the change does: it removes the HORIZONTAL mismatch
+      // (measured at 390px — skeleton 52/62/…/186/40 against loaded
+      // 52/138/…/110/40 before, identical 52/248/…/40 after). It does not by
+      // itself fix the vertical one; the activity skeleton gains a third line
+      // for that.
       <td key={key} className={`${tableColumnClass('md')} px-4 ${padY} text-right`}>
         <Skeleton className="h-4 w-20 ml-auto" />
       </td>
@@ -412,17 +420,25 @@ export default function TransactionsTable({
                         dashboard's "Recent transactions" preview already
                         renders, so the two screens stop disagreeing.
 
-                        Full-width and right-aligned, per the issue's
-                        acceptance criterion. Noting the tension rather than
-                        resolving it silently: the same issue says to align
-                        with the dashboard's "Recent transactions" stacked
-                        shape, and that one renders the amount LEFT-aligned at
-                        a `pl-11` indent (`TransactionActivityRow`, below
-                        `sm`). The two sentences cannot both be satisfied. The
-                        checkable criterion wins here and the design reviewer
-                        can settle which shape both screens should share. */}
+                        Left-aligned, hanging under the start of the title.
+                        #2734 asked for "right-aligned" and this shipped that
+                        way first; the design review reversed it, and the
+                        reasoning is the rule rather than a preference: right
+                        alignment is a property of a COLUMN OF NUMBERS, and
+                        below `md` the amount is no longer a column. Keeping it
+                        would leave one cell with two alignment rails — title
+                        and movement line left, the added line right.
+
+                        The shared rule with `TransactionActivityRow` (the
+                        dashboard's stacked row, below `sm`) is "the amount
+                        hangs under the START of the title". There it needs
+                        `pl-11` to get there, because its direction mark is a
+                        sibling inside the same box; here the mark is its own
+                        `<td>`, so this cell's `px-4` content edge already IS
+                        the title's text start. Copying `pl-11` across would
+                        indent it twice. */}
                     {showCol('amount') ? (
-                      <div className={`mt-1 text-sm text-right ${tableHideFromClass('md')}`}>
+                      <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
                         <Amount
                           value={tx.valueFormatted}
                           symbol={tx.asset}

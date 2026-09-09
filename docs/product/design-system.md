@@ -81,6 +81,7 @@ covers:
   - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
+  - packages/frontend/src/components/haven/DirectionMark.tsx
 last-verified: "2026-09-09"
 ---
 
@@ -1087,6 +1088,18 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - A narrow container hides secondary columns and keeps icon, activity and
   external link readable. The amount stays readable too, but below `md` it is no
   longer a column: it rides under the title inside the activity cell (#2734).
+- **A stacked amount hangs under the START of the title, never right-aligned.**
+  This is the rule both mobile transaction rows follow, written down here
+  because #2734 shipped the other way first and a design review reversed it:
+  right alignment is a property of a column of numbers, and a stacked amount is
+  not a column — aligning it right leaves one cell carrying two alignment rails.
+  How much indent that takes differs by component and is not part of the rule:
+  `TransactionActivityRow` needs `pl-11` because its `DirectionMark` is a
+  sibling in the same box, while `TransactionsTable`'s mark is its own `<td>`,
+  so its `px-4` content edge already is the title's text start.
+- The stacked amount is nested inside the **activity** cell, so a call site
+  passing `amount` without `activity` would lose the amount entirely below `md`.
+  All three call sites include both today.
 - Date and Amount are sortable **at `md` and up**; amount sorting uses the raw
   transaction value, never the formatted display string. Both headers are
   `revealAt="md"`, and there is no sort control outside the header row, so below

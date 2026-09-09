@@ -45,7 +45,13 @@ describe('Sidebar', () => {
     const labels = ['Money', 'Agent tools', 'Admin'].map((l) => screen.getByText(l))
     expect(labels).toHaveLength(3)
     // Core loop order and routes unchanged (scoped to the nav — the logo also links to /dashboard):
-    const links = Array.from(document.querySelector('nav')!.querySelectorAll('a')).map((a) =>
+    // Scoped to the DRAWER's landmark by name (#2731). `querySelector('nav')`
+    // took the first `<nav>` in the DOM, and the mobile tab bar now renders
+    // before this one — the assertion silently started measuring four tab
+    // routes instead of the drawer's eight.
+    const links = Array.from(
+      document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a'),
+    ).map((a) =>
       a.getAttribute('href'),
     )
     const nav = links.filter((href) =>

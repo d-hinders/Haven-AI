@@ -68,27 +68,19 @@ export default function TopBar({ actionSlot }: TopBarProps) {
       */}
       <div className="flex items-center gap-3 min-w-0 mr-3">
         {/*
-          Spacer for the mobile hamburger. The toggle is `fixed` (#1749) so it
-          consumes no layout at all — this box is the ONLY thing keeping the
-          bar's own content out from under it, and it is therefore load-bearing
-          rather than cosmetic.
+          The mobile hamburger's spacer is GONE (#2731), and its absence is the
+          point: the toggle moved out of this bar's band entirely and became
+          the tab bar's "More" slot at the bottom of the screen, so there is no
+          longer a fixed control overlapping this row to reserve room for.
 
-          `shrink-0` is the load-bearing half (#1767). A bare `w-8` is a flex
-          item with the default `flex-shrink: 1`, and this row is
-          over-subscribed on a phone: at 390px the spacer was the only
-          compressible item, so it collapsed to width 0 and the toggle painted
-          straight over `NetworkSwitcher` — measured, the toggle's 44px hit
-          area (#1766) swallowed the chip's leading 18px of tap area. The bar
-          reserved the room at 768px and up, where nothing needed reserving,
-          and gave it away on every real phone.
-
-          The 32px it stops giving away has to come from somewhere in an
-          over-subscribed row: it comes out of `NetworkSwitcher`, which is the
-          widest item here and the only one that can truncate. See the note on
-          its root `min-w-0`. `e2e/mobile-nav-tap-target.mobile.spec.ts`
-          asserts this box's MEASURED width, not its class.
+          What that gives back is 32px on a phone, and it goes where it was
+          taken from — `NetworkSwitcher`, the widest item here and the only one
+          that could truncate to pay for the spacer (#1767). If a fixed control
+          is ever reintroduced over this row, the reservation has to come back
+          with it; a bare `w-8` is not enough, it needs `shrink-0`, because this
+          row is over-subscribed at 390px and an unshrunk spacer collapses to
+          zero and lets the control paint over the chip.
         */}
-        <div className="w-8 shrink-0 lg:hidden" />
         <EnvBadge />
         <NetworkSwitcher />
         {back && (

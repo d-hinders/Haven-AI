@@ -398,3 +398,91 @@ test.describe('mobile viewport', () => {
   // and the hit-test came with it, under a real touch pointer rather than a
   // mouse in a narrow window.
 })
+
+/**
+ * The bottom tab bar drives navigation below `lg` (#2731).
+ *
+ * Geometry lives in `mobile-nav-tap-target.mobile.spec.ts`; this file asks the
+ * behavioural half — does tapping a tab go where it says, does the bar say
+ * WHICH tab you are on, and does that survive a detail route. The last one is
+ * the interesting case: `/agents/agent-research` is not `/agents`, and a naive
+ * equality check leaves the bar showing nothing selected on exactly the screen
+ * the demo spends its time on.
+ */
+test.describe('bottom tab bar (#2731)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+  })
+
+  test('tapping a tab navigates, and the bar says which tab you are on', async ({ page }) => {
+    await page.goto('/dashboard')
+    const bar = page.locator('[data-mobile-tab-bar]')
+    await bar.waitFor()
+
+    // The bar renders four tabs; More is a sibling, by stacking-context
+    // necessity (see `MobileTabBar`). Asserted so a fifth link appearing in
+    // here — the obvious "just add More to the grid" edit — is caught.
+    await expect(bar.getByRole('link')).toHaveCount(4)
+    await expect(bar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    await bar.getByRole('link', { name: 'Transactions' }).click()
+    await page.waitForURL('**/transactions')
+    await expect(bar.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    // Exactly one, not "at least one": two lit tabs is the failure a
+    // `startsWith` without a boundary produces.
+    await expect(bar.locator('a[aria-current="page"]')).toHaveCount(1)
+  })
+
+  test('a detail route lights its hub tab', async ({ page }) => {
+    await page.goto('/agents/agent-research')
+    const bar = page.locator('[data-mobile-tab-bar]')
+    await bar.waitFor()
+    await expect(bar.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page')
+    await expect(bar.locator('a[aria-current="page"]')).toHaveCount(1)
+  })
+
+  test('More opens the drawer, and keeps the name the harness waits on', async ({ page }) => {
+    await page.goto('/dashboard')
+    // `Open sidebar` is not decoration: `dismissMobileSidebar` in
+    // `scripts/screenshot.mjs` waits on this exact name from 25 call sites,
+    // and `e2e/fixtures/haven-api.ts` has a twin. #2731 moved the control and
+    // deliberately did not rename it.
+    const more = page.getByRole('button', { name: 'Open sidebar' })
+    await more.click()
+    await expect(
+      page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Catalog' }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Close sidebar' }).click()
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
+  })
+
+  test('a toast renders clear of the bar', async ({ page }) => {
+    await page.goto('/dashboard')
+    const bar = page.locator('[data-mobile-tab-bar]')
+    await bar.waitFor()
+    // Drive a real toast rather than injecting one: the offset is a class on
+    // the live container, and a hand-built element would be measured instead
+    // of it.
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('haven:test-toast'))
+    })
+    const toast = page.locator('[role="status"]').first()
+    const boxes = await page.evaluate(() => {
+      const b = document.querySelector('[data-mobile-tab-bar]')!.getBoundingClientRect()
+      const t = document.querySelector('[role="status"]')!.getBoundingClientRect()
+      return { barTop: Math.round(b.top), toastBottom: Math.round(t.bottom) }
+    })
+    expect(toast).toBeDefined()
+    // The container, not a rendered toast — it is `fixed` and always present,
+    // so this measures the offset itself and does not depend on a toast being
+    // open at the moment of reading.
+    expect(boxes.toastBottom).toBeLessThanOrEqual(boxes.barTop)
+  })
+})

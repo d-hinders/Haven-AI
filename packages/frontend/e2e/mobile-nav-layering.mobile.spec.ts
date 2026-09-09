@@ -141,7 +141,11 @@ async function expectNavigationReachable(page: Page) {
   //    "intercepts pointer events" rather than silently passing.
   await open.click()
 
-  const nav = page.getByRole('navigation')
+  // Scoped to the DRAWER's landmark (#2731). The shell has two navigation
+  // landmarks now — the drawer and the bottom tab bar — and a bare
+  // `getByRole('navigation')` is a strict-mode violation rather than a
+  // silent wrong answer, which is the good failure mode.
+  const nav = page.getByRole('navigation', { name: 'All sections' })
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toBeVisible()
 
   // 3. The drawer owns its own top band. It is `inset-y-0`, so its 56px logo
@@ -222,7 +226,9 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
     // hamburger onto the desktop shell.
     test('no mobile toggle renders at 1024px', async ({ page }) => {
       await page.goto('/dashboard')
-      await expect(page.getByRole('navigation').getByRole('link', { name: 'Dashboard' })).toBeVisible()
+      await expect(
+        page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Dashboard' }),
+      ).toBeVisible()
       await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeHidden()
       await expect(page.getByRole('button', { name: 'Close sidebar' })).toBeHidden()
     })
@@ -335,17 +341,36 @@ test.describe('the drawer leaves the screen when the viewport narrows (#2586)', 
     //    — the `fixed inset-0` scrim included, which would obscure the entire
     //    page. So the element is named and required to be inside `<main>`.
     const hit = await page.evaluate(() => {
-      const top = document.elementFromPoint(24, window.innerHeight - 40)
       const aside = document.querySelector('aside')
+      const bar = document.querySelector('[data-mobile-tab-bar]')
+      const barH = bar ? Math.round(bar.getBoundingClientRect().height) : 0
+      // ABOVE the tab bar (#2731). The probe used to sit 40px off the bottom,
+      // which was page content then and is the bar's own band now — the bar is
+      // 56px tall and `fixed`. Reading the old coordinate would have reported
+      // "the page is covered" about chrome that is supposed to be there, which
+      // is a false defect rather than a missed one, but still a spec measuring
+      // the wrong box.
+      const top = document.elementFromPoint(24, window.innerHeight - barH - 40)
+      // ...and the bar's OWN band, which is new ground this spec should hold:
+      // after the drawer leaves, the bottom strip must belong to the tab bar
+      // and not to the drawer that just slid out of it.
+      const inBar = bar ? document.elementFromPoint(24, window.innerHeight - barH / 2) : null
       return {
         insideDrawer: !!(top && aside?.contains(top)),
         insidePageContent: !!top?.closest('main'),
         // Named so a failure says WHAT is covering the page rather than just
         // `true` — the first question anyone asks next.
         topElement: top?.tagName.toLowerCase() ?? null,
+        barBandIsTheBar: !!(inBar && bar?.contains(inBar)),
+        barBandInsideDrawer: !!(inBar && aside?.contains(inBar)),
       }
     })
-    expect(hit).toMatchObject({ insideDrawer: false, insidePageContent: true })
+    expect(hit).toMatchObject({
+      insideDrawer: false,
+      insidePageContent: true,
+      barBandIsTheBar: true,
+      barBandInsideDrawer: false,
+    })
 
     // 3. The symptom #2586 actually reported, asserted on the element it named:
     //    the empty state's footer link must be reachable, not clipped by

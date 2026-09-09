@@ -213,6 +213,15 @@
      the drawer and its scrim (130/140) have to cover the bar so "More" is not
      painted over by the navigation it opened. */
   --v2-z-tab-bar: 105;
+
+  /* The bottom tab bar's height (#2731), as a token because three places need
+     the same number and two of them are not the bar: `<main>`'s scroll region
+     reserves it so the last row does not sit under the bar, and the toast
+     container lifts by it so the payoff notification is not hidden behind the
+     thing everyone is looking at. The safe-area inset is NOT folded in here —
+     it is added at each site, because the bar pads itself with it while the
+     others clear the bar and the inset together. */
+  --v2-tab-bar-h: 3.5rem;
   --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet) */
   --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
   --v2-z-nav-drawer: 140; /* mobile drawer itself */

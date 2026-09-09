@@ -19,12 +19,13 @@ import {
   Users,
 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { MobileTabBar } from './MobileTabBar'
 import { useAuth } from '@/context/AuthContext'
 import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Tooltip } from '@/components/ui/Tooltip'
 
-interface NavItem {
+export interface NavItem {
   label: string
   href: string
   icon: React.ReactNode
@@ -47,7 +48,14 @@ const icons = {
   custody: <Icon icon={BadgeCheck} className="w-full h-full" />,
 }
 
-const baseNavItems: NavItem[] = [
+/**
+ * Exported for `MobileTabBar` (#2731), which picks its four tabs from this list
+ * **by `href`**, never by position — the bar's order differs from the drawer's
+ * and an inserted entry would otherwise reorder it silently. The index reads
+ * inside `navGroups` below predate that and are left alone: they are grouped by
+ * cluster, not selected by route, so they are a different kind of read.
+ */
+export const baseNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: icons.dashboard },
   { label: 'Accounts', href: '/accounts', icon: icons.account },
   { label: 'Transactions', href: '/transactions', icon: icons.transactions },
@@ -291,12 +299,39 @@ export default function Sidebar() {
            The spacer's job is to keep the bar's content CLEAR of this control,
            not to be concentric with it; `left-4` is what clears it best.
       */}
+      {/*
+        The tab bar's fifth slot — "More" (#2731).
+
+        It is a SIBLING of `<MobileTabBar>` rather than a cell inside it, and
+        that is forced rather than chosen: the bar sits on the `--v2-z-tab-bar`
+        tier so the drawer and its scrim cover it, while this control sits on
+        the higher `--v2-z-nav-toggle` tier so the SAME button that opened the
+        drawer can close it while painted over the drawer. A child cannot climb
+        out of its parent's stacking context, so a control on the toggle tier
+        cannot be nested inside an element on the bar tier — it lives out here
+        and lands in the fifth column by geometry: `w-1/5` of the same bar, same
+        bottom edge, same height.
+
+        (The tier VALUES are deliberately not written out here. `z-index-scale`
+        greps this file for bare `z-<number>` and cannot tell a class from
+        prose — it read the numbers in an earlier draft of this comment as
+        violations. The scale itself is documented on `/design-system`.)
+
+        The accessible name is unchanged, and that is load-bearing rather than
+        incidental: `dismissMobileSidebar` in `scripts/screenshot.mjs` waits on
+        `getByRole('button', { name: 'Open sidebar' })` from 25 call sites, with
+        a twin in `e2e/fixtures/haven-api.ts`. Neither file is touched by
+        #2731 — one control, both roles, the #1749 pattern.
+      */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-[calc(0.75rem+var(--v2-safe-top))] left-[max(1rem,var(--v2-safe-left))] z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+        className="lg:hidden fixed bottom-0 right-0 z-[var(--v2-z-nav-toggle)] w-1/5 h-[calc(var(--v2-tab-bar-h)+var(--v2-safe-bottom))] pb-[var(--v2-safe-bottom)] flex flex-col items-center justify-center gap-1 border-t border-[var(--v2-border)] bg-[var(--v2-bg)] text-[11px] font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
       >
-        <Icon icon={Menu} className="w-4 h-4" />
+        <span className="h-5 w-5" aria-hidden="true">
+          <Icon icon={Menu} className="w-full h-full" />
+        </span>
+        <span aria-hidden="true">More</span>
       </button>
 
       {/*
@@ -316,6 +351,8 @@ export default function Sidebar() {
         paint. So this reuses the existing dim token instead, blur included in
         what it deliberately omits.
       */}
+      <MobileTabBar items={baseNavItems} />
+
       {!collapsed && (
         <div
           className="lg:hidden fixed inset-0 v2-modal-backdrop z-[var(--v2-z-nav-scrim)]"
@@ -356,7 +393,12 @@ export default function Sidebar() {
         </div>
 
         {/* Main nav — labeled clusters, core money loop first (#858) */}
-        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+        {/* Named because #2731 gave the shell a SECOND navigation. Two
+            unnamed `<nav>` landmarks are ambiguous to a screen reader and to
+            every `getByRole('navigation')` in the suite — `Sidebar.test.tsx`
+            was reading `document.querySelector('nav')` and silently started
+            measuring the tab bar instead of this drawer. */}
+        <nav aria-label="All sections" className="flex-1 px-3 py-4 overflow-y-auto">
           {navGroups.map((group, groupIndex) => (
             <div key={group.label} className={groupIndex > 0 ? 'mt-5' : ''}>
               <p className="v2-text-meta px-3 pb-1 uppercase tracking-wider text-[var(--v2-ink-3)]">

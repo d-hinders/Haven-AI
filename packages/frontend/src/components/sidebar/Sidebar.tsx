@@ -13,6 +13,7 @@ import {
   LayoutGrid,
   LogOut,
   Menu,
+  X,
   Settings,
   ShieldCheck,
   Store,
@@ -317,6 +318,24 @@ export default function Sidebar() {
         prose — it read the numbers in an earlier draft of this comment as
         violations. The scale itself is documented on `/design-system`.)
 
+        Two geometry facts, both found by review rather than predicted:
+
+        `bottom-[var(--v2-safe-bottom)]` + `h-[var(--v2-tab-bar-h)]`, NOT a
+        height of `calc(bar + inset)` with `pb-[inset]`. The padding version
+        kept the CONTENT out of the home-indicator band and left the BOX in it:
+        the button reached y=844 on a 393x844 device with a 34px inset, so the
+        fifth slot had 34px more tappable area than its four neighbours and a
+        tap in that band is read by iOS as a swipe-up. That is the exact defect
+        #2730 exists to prevent, reintroduced for one control — and
+        `safe-area-insets.mobile.spec.ts` caught it with an assertion nobody
+        had to change.
+
+        No `border-t` here. The bar draws one, this button is `border-box` and
+        paints over the bar's right fifth, so its own border landed one CSS
+        pixel below the bar's and the fifth slot showed a 2px top edge against
+        1px everywhere else — a visible step. Without it the bar's own border
+        runs unbroken underneath.
+
         The accessible name is unchanged, and that is load-bearing rather than
         incidental: `dismissMobileSidebar` in `scripts/screenshot.mjs` waits on
         `getByRole('button', { name: 'Open sidebar' })` from 25 call sites, with
@@ -326,12 +345,26 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed bottom-0 right-0 z-[var(--v2-z-nav-toggle)] w-1/5 h-[calc(var(--v2-tab-bar-h)+var(--v2-safe-bottom))] pb-[var(--v2-safe-bottom)] flex flex-col items-center justify-center gap-1 border-t border-[var(--v2-border)] bg-[var(--v2-bg)] text-[11px] font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
+        className="lg:hidden fixed bottom-[var(--v2-safe-bottom)] right-[var(--v2-safe-right)] z-[var(--v2-z-nav-toggle)] w-1/5 h-[var(--v2-tab-bar-h)] flex flex-col items-center justify-center gap-1 bg-[var(--v2-bg)] text-[11px] font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
       >
+        {/* The visible state follows the drawer (#2731 review). It used to
+            read "More" with a hamburger in BOTH states while the accessible
+            name flipped to `Close sidebar` — a sighted user got no affordance
+            that the control now closes something, and the visible label no
+            longer appeared in the accessible name at all (WCAG 2.5.3 Label in
+            Name).
+
+            The open state satisfies that rule now ("Close" is inside "Close
+            sidebar"). The CLOSED state deliberately does not: "More" is not
+            inside "Open sidebar". That pairing is #2731's own specification —
+            the tab is called More, and the accessible name must stay exactly
+            `Open sidebar` because `dismissMobileSidebar` matches it as a whole
+            string from 25 call sites. Recorded rather than quietly resolved,
+            because resolving it means changing one of those two decisions. */}
         <span className="h-5 w-5" aria-hidden="true">
-          <Icon icon={Menu} className="w-full h-full" />
+          <Icon icon={collapsed ? Menu : X} className="w-full h-full" />
         </span>
-        <span aria-hidden="true">More</span>
+        <span aria-hidden="true">{collapsed ? 'More' : 'Close'}</span>
       </button>
 
       {/*

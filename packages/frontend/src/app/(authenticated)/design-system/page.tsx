@@ -687,7 +687,7 @@ export default function DesignSystemPage() {
             untouched — it counts bare `open` inside inert wrappers, and this is
             neither.
           */}
-          <MobileTabBar items={baseNavItems} presentational />
+          <MobileTabBar items={baseNavItems} presentational activeHref="/agents" />
         </Card>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
           Three surfaces reserve the bar&rsquo;s height from the{' '}

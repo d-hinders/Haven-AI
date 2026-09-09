@@ -463,26 +463,32 @@ test.describe('bottom tab bar (#2731)', () => {
     await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
   })
 
-  test('a toast renders clear of the bar', async ({ page }) => {
-    await page.goto('/dashboard')
-    const bar = page.locator('[data-mobile-tab-bar]')
-    await bar.waitFor()
-    // Drive a real toast rather than injecting one: the offset is a class on
-    // the live container, and a hand-built element would be measured instead
-    // of it.
-    await page.evaluate(() => {
-      window.dispatchEvent(new CustomEvent('haven:test-toast'))
+  // Both bands, because the offset is carried by THREE variants and only one
+  // of them is exercised at the project's own width. `sm:bottom-…` already
+  // existed on the toast container and overrides the base, so a bar offset
+  // applied only to the base is silently lost between 640px and 1023px — a bug
+  // this PR shipped and fixed, which nothing would have caught: the project
+  // viewport is 393, and 393 reads the BASE variant. 700 is the width that
+  // reads `sm`.
+  for (const width of [390, 700] as const) {
+    test(`the toast region clears the bar at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.goto('/dashboard')
+      const bar = page.locator('[data-mobile-tab-bar]')
+      await bar.waitFor()
+
+      // The CONTAINER, not a rendered toast. An earlier revision of this test
+      // dispatched a `haven:test-toast` event and said it was "driving a real
+      // toast"; nothing listens for that event, so it drove nothing and the
+      // comment was the only part that was false. The container is `fixed` and
+      // always present, and it is what carries the offset — so measure it, and
+      // say that is what is being measured.
+      const boxes = await page.evaluate(() => {
+        const b = document.querySelector('[data-mobile-tab-bar]')!.getBoundingClientRect()
+        const t = document.querySelector('[role="status"]')!.getBoundingClientRect()
+        return { barTop: Math.round(b.top), toastBottom: Math.round(t.bottom) }
+      })
+      expect(boxes.toastBottom).toBeLessThanOrEqual(boxes.barTop)
     })
-    const toast = page.locator('[role="status"]').first()
-    const boxes = await page.evaluate(() => {
-      const b = document.querySelector('[data-mobile-tab-bar]')!.getBoundingClientRect()
-      const t = document.querySelector('[role="status"]')!.getBoundingClientRect()
-      return { barTop: Math.round(b.top), toastBottom: Math.round(t.bottom) }
-    })
-    expect(toast).toBeDefined()
-    // The container, not a rendered toast — it is `fixed` and always present,
-    // so this measures the offset itself and does not depend on a toast being
-    // open at the moment of reading.
-    expect(boxes.toastBottom).toBeLessThanOrEqual(boxes.barTop)
-  })
+  }
 })

@@ -2,6 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Menu } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import type { NavItem } from './Sidebar'
 
 /**
@@ -49,11 +51,19 @@ export function isActiveRoute(pathname: string, href: string): boolean {
 export function MobileTabBar({
   items,
   presentational = false,
+  activeHref,
 }: {
   items: NavItem[]
   presentational?: boolean
+  /**
+   * Overrides the route for the illustration on `/design-system`, where
+   * `usePathname()` matches no tab and every slot would render inactive — the
+   * one state a design-system entry for a tab bar exists to teach.
+   */
+  activeHref?: string
 }) {
-  const pathname = usePathname() ?? ''
+  const livePath = usePathname() ?? ''
+  const pathname = activeHref ?? livePath
   const tabs = TAB_ROUTES.map((href) => items.find((i) => i.href === href)).filter(
     (i): i is NavItem => i !== undefined,
   )
@@ -66,7 +76,7 @@ export function MobileTabBar({
       className={`grid grid-cols-5 border-t border-[var(--v2-border)] bg-[var(--v2-bg)] ${
         presentational
           ? 'relative w-full'
-          : 'lg:hidden fixed bottom-0 inset-x-0 z-[var(--v2-z-tab-bar)] pb-[var(--v2-safe-bottom)]'
+          : 'lg:hidden fixed bottom-0 inset-x-0 z-[var(--v2-z-tab-bar)] pb-[var(--v2-safe-bottom)] pl-[var(--v2-safe-left)] pr-[var(--v2-safe-right)]'
       }`}
     >
       {tabs.map((item) => {
@@ -83,10 +93,34 @@ export function MobileTabBar({
             <span className="h-5 w-5" aria-hidden="true">
               {item.icon}
             </span>
-            <span>{item.label}</span>
+            {/* `min-w-0` + `truncate` because the grid cell is the constraint,
+                not the text: at 320px a cell is 64px and "Transactions" renders
+                67.8px at 11px, so it broke OUT of its cell and closed the gap
+                to "Accounts" to 5.2px. The step down to 10px below 360px is
+                what makes it fit (61.6px) rather than merely clip — truncation
+                alone would ellipsise the widest label on the narrowest phone in
+                the support matrix, which is the one that can least afford to
+                lose the word. */}
+            <span className="min-w-0 max-w-full truncate px-0.5 max-[359px]:text-[10px]">
+              {item.label}
+            </span>
           </Link>
         )
       })}
+      {/* The fifth slot, ILLUSTRATION ONLY. The live bar leaves this cell empty
+          and `Sidebar` paints the real control into it from outside, because
+          that control has to outrank the drawer it opens. There is no drawer
+          here, so the showcase can simply fill the cell — otherwise the
+          illustration renders four tabs in a five-column grid and reads as a
+          broken bar rather than as an explanation of why More is a sibling. */}
+      {presentational ? (
+        <span className="flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-[11px] font-medium text-[var(--v2-ink-3)]">
+          <span className="h-5 w-5" aria-hidden="true">
+            <Icon icon={Menu} className="w-full h-full" />
+          </span>
+          <span className="min-w-0 max-w-full truncate px-0.5 max-[359px]:text-[10px]">More</span>
+        </span>
+      ) : null}
     </nav>
   )
 }

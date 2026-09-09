@@ -910,10 +910,13 @@ describe('partitionVersionOnly (#2164)', () => {
 describe('qa-freshness CLI (#2722)', () => {
   const GLOBS = JSON.stringify({ globs: ['packages/backend/src/payments/**'] })
 
-  // `run list` and `api …/jobs` are the only two calls the guard makes. The
-  // stand-in answers both, and exits 64 on anything else so a guard that starts
-  // asking a third question fails loudly here instead of silently reaching the
-  // network from a test.
+  // `run list` and `api …/actions/runs/<id>/jobs` are the only two calls the
+  // guard makes. The stand-in answers those two SHAPES and exits 64 on anything
+  // else, so a guard that starts asking a different question -- a new command,
+  // or the same command against a drifted endpoint -- fails loudly here instead
+  // of being handed a plausible answer. Matching on `args[0]` alone was the
+  // first version and was too loose: swapping the jobs endpoint for a garbage
+  // path left all five cases below green (measured).
   const GH_SHIM = `#!${process.execPath}
 const { execFileSync } = require('node:child_process')
 const args = process.argv.slice(2)
@@ -936,7 +939,7 @@ if (args[0] === 'run' && args[1] === 'list') {
   }
   process.exit(0)
 }
-if (args[0] === 'api') {
+if (args[0] === 'api' && args.some((a) => a.includes('/actions/runs/') && a.endsWith('/jobs'))) {
   process.stdout.write(JSON.stringify({ jobs: [{ name: 'money-flow', conclusion: 'success', steps: [] }] }))
   process.exit(0)
 }

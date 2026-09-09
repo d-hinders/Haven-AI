@@ -295,7 +295,6 @@ test('CLI: an undeclared full refresh exits non-zero and says so (#2722)', () =>
       'packages/frontend/e2e/__screenshots__/dashboard.png': 'PNG-BYTES-v1\n',
     },
     gitInit: true,
-    binOnPath: false,
     env: {
       UPDATE_MODE: 'all',
       EXPECTED_BASELINES: '',
@@ -325,4 +324,21 @@ test('CLI: the same moved baseline under `changed` is reported and exits 0 (#272
   // that exits 1 on every input.
   assert.equal(status, 0, out)
   assert.doesNotMatch(out, /::error::/)
+})
+
+test('CLI: a crash inside main() is caught and still exits non-zero (#2722)', () => {
+  // No `gitInit`, so `collectChanges`'s `git status` is fatal. That reaches the
+  // top-level catch -- the guard's other refusal, and one this file claimed was
+  // unreachable without a seam until a review showed it is one line away.
+  //
+  // It also proves the `changed`-mode accept case above is not vacuous: that
+  // case passes because the audit ran and found nothing to block, not because
+  // the scan silently saw zero files.
+  const { status, out } = runGuard('ci/baseline-audit.mjs', {
+    files: { 'packages/frontend/e2e/__screenshots__/dashboard.png': 'PNG-BYTES-v1\n' },
+    env: { UPDATE_MODE: 'changed' },
+  })
+  assert.equal(status, 1, out)
+  assert.match(out, /::error::baseline-audit crashed:/)
+  assert.match(out, /not a git repository/)
 })

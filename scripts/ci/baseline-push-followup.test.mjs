@@ -480,7 +480,7 @@ describe('baseline-push-followup CLI (#2722)', () => {
   const GH_SHIM = `#!${process.execPath}
 const args = process.argv.slice(2)
 const joined = args.join(' ')
-if (args[0] === 'pr') { process.stdout.write('[{"number":7}]'); process.exit(0) }
+if (args[0] === 'pr' && args[1] === 'list') { process.stdout.write('[{"number":7}]'); process.exit(0) }
 if (args[0] === 'api') {
   // Order matters: a POST/PATCH also targets a /comments path, so the write
   // must be recognised before the read.

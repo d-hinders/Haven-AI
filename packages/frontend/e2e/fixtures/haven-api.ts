@@ -577,6 +577,195 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
   })
 }
 
+/**
+ * Flesh out `/agents/:id` for an agent id that IS in the shared list but has
+ * no detail-page handlers of its own (#2733).
+ *
+ * The shared fixture serves the agent DETAIL page's reads fully only for the
+ * list it was seeded around: `GET /agents/:id/passport` and
+ * `GET /agents/:id/delegate-balance` fall through to `fulfillUnmockedRoute`
+ * (a 599 that the visual gate fails on), and there is no
+ * `GET /agents/:id/activity|stats` handler at all — the page renders
+ * "No activity yet" because `useAgentActivity` swallows the failure rather
+ * than because the fixture answered it. `serveAgentDetailResponses` overlays
+ * exactly those four reads, AFTER `mockHavenApi` (later-registered routes
+ * win), so a baseline of `/agents/<id>` photographs a fully-answered screen:
+ *
+ *  - a delegate balance with recoverable USDC, the shape that renders the
+ *    recoverable-funds banner (the #2194 incident state);
+ *  - an anchored passport (#1072), the richer of the two passport states;
+ *  - one confirmed x402 payment and one read-only MCP tool call, so the
+ *    activity table and the audit-trail panel both render content;
+ *  - stats matching those rows, so the two StatBlocks do not read 0 beside a
+ *    non-empty activity table.
+ *
+ * Scoped deliberately: everything else keeps falling back to the shared
+ * fixture, so the agents LIST and every unrelated surface are untouched.
+ */
+export async function serveAgentDetailResponses(page: Page, agentId: string) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() !== 'GET') return route.fallback()
+
+    if (path === '/agents') {
+      // The detail page resolves its agent from the LIST read
+      // (`AgentDetailClient` finds the id in `useAgents()`), and the shared
+      // fixture seeds that list with `agent-e2e` only — an overlay answering
+      // the detail reads but not the list would render the not-found branch.
+      // Extend the list with the researched agent rather than replace it, so
+      // the connect-flow rows the shared list exists for are untouched.
+      await fulfillJson(route, {
+        agents: [
+          testAgent,
+          {
+            ...testAgent,
+            id: agentId,
+            created_at: '2026-05-02T10:00:00.000Z',
+            allowances: [
+              {
+                id: 'dlg-e2e-1',
+                agent_id: agentId,
+                token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                token_symbol: 'USDC',
+                allowance_amount: '250.000000',
+                reset_period_min: 10_080,
+              },
+            ],
+          },
+        ],
+      })
+      return
+    }
+
+    if (path === `/agents/${agentId}/delegate-balance`) {
+      await fulfillJson(route, {
+        delegate_address: '0x3333333333333333333333333333333333333333',
+        safe_address: testSafeAddress,
+        chain_id: testSafe.chain_id,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '8.00',
+        usdc_atomic: '8000000',
+        usdc_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        sweep_min_usdc: '0.01',
+      })
+      return
+    }
+
+    if (path === `/agents/${agentId}/passport`) {
+      await fulfillJson(route, {
+        passport: {
+          status: 'anchored',
+          assurance_level: 0,
+          attestation_uid: `0x${'22'.repeat(32)}`,
+          tx_hash: `0x${'c3'.repeat(32)}`,
+          chain_id: testSafe.chain_id,
+          attempts: 1,
+          last_error: null,
+          requested_at: '2026-06-02T10:05:00.000Z',
+          anchored_at: '2026-06-02T10:05:12.000Z',
+        },
+        standing: {
+          agentId,
+          standing: 'active',
+          anchor: 'anchored',
+          attestationUid: `0x${'22'.repeat(32)}`,
+          chainLagging: false,
+          revocationConfirmedAt: null,
+        },
+      })
+      return
+    }
+
+    if (path === `/agents/${agentId}/delegations`) {
+      // One ACTIVE delegation — the spend authority row the budget card and
+      // the page summary both read. 250.00 USDC per week, recipient-pinned,
+      // mirroring the screenshot harness's `dlg-1` shape so both capture
+      // paths describe the same authority.
+      await fulfillJson(route, {
+        delegations: [
+          {
+            id: 'dlg-e2e-1',
+            chain_id: testSafe.chain_id,
+            token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            recipient_address: testRecipientAddress,
+            delegation_hash: `0x${'4d'.repeat(32)}`,
+            version: 1,
+            status: 'active',
+            budget_atomic: '250000000',
+            period_seconds: 604_800,
+            start_date: '2026-06-02T10:00:00.000Z',
+            expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+            created_at: '2026-06-02T10:00:00.000Z',
+          },
+        ],
+      })
+      return
+    }
+
+    if (path === `/agent-activity/${agentId}/activity`) {
+      await fulfillJson(route, {
+        activity: [
+          {
+            type: 'payment',
+            id: 'pay-e2e-1',
+            agent_id: agentId,
+            agent_name: testAgent.name,
+            token: 'USDC',
+            token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            amount_raw: '25000000',
+            amount: '25.00',
+            to: testRecipientAddress,
+            reason: null,
+            status: 'confirmed',
+            tx_hash: `0x${'a1'.repeat(32)}`,
+            source: 'x402',
+            x402_resource_url: 'https://api.example.dev/reports',
+            x402_merchant_address: testRecipientAddress,
+            chain_id: testSafe.chain_id,
+            safe_id: testSafe.id,
+            safe_address: testSafeAddress,
+            safe_name: testSafe.name,
+            explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
+            confirmed_at: '2026-07-10T08:20:00.000Z',
+            payment_proof_status: 'payment_confirmed',
+            payment_flow_status: 'confirming_merchant',
+            payment_attention_reason: null,
+            created_at: '2026-07-10T08:18:00.000Z',
+          },
+          {
+            type: 'mcp_tool_call',
+            id: 'call-e2e-1',
+            agent_id: agentId,
+            agent_name: testAgent.name,
+            tool_name: 'haven_pay_x402_quote',
+            payment_id: 'pay-e2e-1',
+            result_status: 'ok',
+            next_action: 'settle',
+            error_code: null,
+            status_code: 200,
+            created_at: '2026-07-10T08:17:00.000Z',
+          },
+        ],
+      })
+      return
+    }
+
+    if (path === `/agent-activity/${agentId}/stats`) {
+      await fulfillJson(route, {
+        all_time: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        today: [{ token: 'USDC', total_spent: '0.00', tx_count: 0 }],
+        this_week: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        pending_approvals: 0,
+      })
+      return
+    }
+
+    return route.fallback()
+  })
+}
+
 export async function seedAuthenticatedSession(page: Page) {
   await page.addInitScript(
     ({ tokenKey, activeSafeKey }) => {

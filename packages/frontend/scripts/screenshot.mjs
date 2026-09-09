@@ -1834,7 +1834,10 @@ function connectorRepairHintScenarios() {
       if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
         return {
           setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-1',
+          // #2733: was a phantom fixture id — an id no fixture ever served.
+          // This scenario describes the Research agent, so it keys on
+          // FIXTURE_AGENTS' own 'agent-research'.
+          agent_id: 'agent-research',
           status: 'connected_local',
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
@@ -1872,7 +1875,7 @@ function connectorRepairHintScenarios() {
           approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
-      if (apiPath === '/agents/agent-fixture-1/account-signers') {
+      if (apiPath === '/agents/agent-research/account-signers') {
         return {
           account_address: FIXTURE_SAFE.safe_address,
           chain_id: FIXTURE_SAFE.chain_id,
@@ -2731,7 +2734,7 @@ export const SCENARIOS = {
       if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
         return {
           setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-1',
+          agent_id: 'agent-research',
           status: 'connected_local',
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
@@ -2773,7 +2776,7 @@ export const SCENARIOS = {
       }
       // A reachable signer, or `ready` is false and the screen shows the
       // connect-wallet fallback instead of the Approve button this issue is about.
-      if (apiPath === '/agents/agent-fixture-1/account-signers') {
+      if (apiPath === '/agents/agent-research/account-signers') {
         return {
           account_address: FIXTURE_SAFE.safe_address,
           chain_id: FIXTURE_SAFE.chain_id,
@@ -2894,7 +2897,7 @@ export const SCENARIOS = {
       if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
         return {
           setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-1',
+          agent_id: 'agent-research',
           status: 'active',
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: null },

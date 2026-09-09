@@ -39,7 +39,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
@@ -59,7 +59,9 @@ export function runGuard(
     args = [],
     env = {},
     linkNodeModules = false,
+    binOnPath = false,
     gitInit = false,
+    gitCommit = false,
     mtimes = {},
     chmod = {},
     readBack = [],
@@ -94,7 +96,7 @@ export function runGuard(
     // list instead of through `main()`. `git add` is given the fixture's own
     // paths explicitly rather than `-A`, so the index holds exactly what the
     // test wrote.
-    if (gitInit) {
+    if (gitInit || gitCommit) {
       const paths = Object.keys(files)
       if (!paths.length) {
         throw new Error('runGuard: gitInit with no files stages nothing, so a git-enumerating guard reports a clean scan over ZERO files — the false pass this option exists to close')
@@ -109,6 +111,34 @@ export function runGuard(
       execFileSync('git', ['-c', 'core.excludesFile=/dev/null', '-C', root, 'add', '-f', '--', ...paths], {
         stdio: ['ignore', 'ignore', 'inherit'],
       })
+    }
+    // A guard that asks git about HEAD -- ancestry, a two-dot diff, the blob a
+    // file had before it changed -- gets a fatal error in a repo with no
+    // commits, and several of them read that error as "no answer" and fail
+    // closed. That is the right direction but the wrong test: it exercises the
+    // unreadable-git path, never the one CI runs. So `gitCommit` gives the
+    // fixture a real HEAD. Identity is passed with `-c` rather than taken from
+    // the machine, because a contributor with no `user.email` set otherwise
+    // sees every such case fail for a reason that is not the guard's.
+    // `gitCommit` implies `gitInit` rather than refusing without it: an
+    // implication cannot be got wrong, and an error path no suite exercises is
+    // one more untested refusal in a helper that exists to end untested
+    // refusals.
+    //
+    // The `-c` flags are the same defence the staging step above documents,
+    // extended to the two settings that break a COMMIT rather than an add:
+    // a global `commit.gpgsign=true` fails the fixture with `gpg failed to sign
+    // the data`, and a global `core.hooksPath` runs a contributor's own
+    // pre-commit hook inside the fixture. Both were reproduced; either one
+    // reddens every case here for a reason that is not the guard's.
+    if (gitCommit) {
+      execFileSync('git', [
+        '-c', 'user.name=Guard Fixture',
+        '-c', 'user.email=fixture@example.invalid',
+        '-c', 'commit.gpgsign=false',
+        '-c', 'core.hooksPath=/dev/null',
+        '-C', root, 'commit', '-q', '-m', 'fixture',
+      ], { stdio: ['ignore', 'ignore', 'inherit'] })
     }
     // Permissions, where a guard's behaviour on an UNREADABLE file is the thing
     // under test (#2761). Applied after the writes and before the run; the
@@ -127,10 +157,22 @@ export function runGuard(
     for (const [rel, seconds] of Object.entries(mtimes)) {
       utimesSync(join(root, rel), seconds, seconds)
     }
+    // A guard that shells out to a command it does not own (`gh`, say) can only
+    // be driven offline by putting a stand-in ahead of the real one on PATH.
+    // The fixture root is not known to the caller before this function runs, so
+    // the prepend happens here rather than through `env` -- a caller writing a
+    // relative PATH entry would be depending on cwd resolution, which is a
+    // silent no-op wherever it does not hold.
+    // Prepended to whatever PATH the caller set rather than written into a
+    // separate object: with a later `...env` spread a caller passing both
+    // `binOnPath` and `env.PATH` would silently get the REAL command back --
+    // the same silent no-op this option exists to avoid.
+    const baseEnv = { ...process.env, ...env }
+    if (binOnPath) baseEnv.PATH = `${join(root, 'bin')}${delimiter}${baseEnv.PATH ?? ''}`
     const res = spawnSync(process.execPath, [join(root, 'scripts', script), ...args], {
       encoding: 'utf-8',
       cwd: root,
-      env: { ...process.env, ...env },
+      env: baseEnv,
       // A hung guard should name itself rather than burn the job's ceiling.
       timeout: 120_000,
     })

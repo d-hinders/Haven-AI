@@ -1164,15 +1164,23 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
   decision 2026-09-09, #2790). Date and Amount are sortable at `md` and up;
   amount sorting uses the raw transaction value, never the formatted display
   string. Both headers are `revealAt="md"` and there is no sort control outside
-  the header row, so below `md` the table does not sort.
+  the header row, so below `md` the table offers no way to re-sort. (It is still
+  sorted — by the default below — it just cannot be changed.)
 
   Written down because its absence looks like a bug to the next reader. What
   makes it safe rather than merely accepted: the default is
   `{ column: 'date', direction: 'desc' }` — newest first — and the sort state is
   component-local, neither persisted nor in the URL, so a phone always lands on
   a deterministic order and can never be stranded in an unexplained one. The
-  only path to a hidden active sort is resizing a desktop window past 718px
-  mid-session.
+  only path to a hidden active sort is narrowing the window below **768px**
+  mid-session — the viewport at which this shell's table container drops under
+  the 718px `md` stage. Note which number is which: 718px is the CONTAINER
+  stage, and the first draft of this sentence attached it to a window width,
+  contradicting the sawtooth measured two subsections below. "Desktop" was wrong
+  too — a tablet rotating landscape to portrait across 768px is the same event.
+  A resize does preserve the sort: `sort` is `useState` inside the table and the
+  collapse is pure container-query CSS, so nothing remounts and the rows keep
+  their order while the header is gone.
 
   **Do not add a mobile sort control on suspicion.** The reason this is a
   decision is that #2734 removed the last sortable header below `md` as a side

@@ -33,6 +33,54 @@ covers:
   - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/components/__tests__/WalletButton.test.tsx
+  - packages/frontend/e2e/accounts-card-tap-target.mobile.spec.ts
+  - packages/frontend/e2e/agent-card-fit-measure.spec.ts
+  - packages/frontend/e2e/agent-card-mcp-chip-measure.spec.ts
+  - packages/frontend/e2e/marketing-cta-focus.spec.ts
+  - packages/frontend/e2e/mobile-nav-layering.mobile.spec.ts
+  - packages/frontend/e2e/mobile-nav-tap-target.mobile.spec.ts
+  - packages/frontend/e2e/modal-action-row-reachability.spec.ts
+  - packages/frontend/e2e/modal-scroll-cue.spec.ts
+  - packages/frontend/e2e/table-container-collapse.spec.ts
+  - packages/frontend/e2e/transaction-title-measure.spec.ts
+  - packages/frontend/scripts/design-lint.mjs
+  - packages/frontend/scripts/evidence-viewports.mjs
+  - packages/frontend/scripts/full-page-capture.mjs
+  - packages/frontend/src/__tests__/compiled-colour-utilities.test.ts
+  - packages/frontend/src/__tests__/design-token-alpha.test.ts
+  - packages/frontend/src/__tests__/focus-ring.test.ts
+  - packages/frontend/src/__tests__/shadow-token.test.ts
+  - packages/frontend/src/__tests__/showcase-overlay-guard.test.ts
+  - packages/frontend/src/__tests__/token-contrast.test.ts
+  - packages/frontend/src/__tests__/z-index-scale.test.ts
+  - packages/frontend/src/app/(authenticated)/accounts/AccountsOverviewClient.tsx
+  - packages/frontend/src/app/(authenticated)/contacts/page.tsx
+  - packages/frontend/src/components/AgentPanel.tsx
+  - packages/frontend/src/components/ConfirmDialog.tsx
+  - packages/frontend/src/components/InfoModal.tsx
+  - packages/frontend/src/components/NetworkSwitcher.tsx
+  - packages/frontend/src/components/__tests__/wallet-popover-presentational-guard.test.ts
+  - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
+  - packages/frontend/src/components/ui/__tests__/Modal.test.tsx
+  - packages/frontend/src/components/ui/__tests__/Tooltip.test.tsx
+  - packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts
+  - packages/frontend/src/hooks/useScrollEdgeCue.ts
+  - packages/frontend/src/lib/__tests__/installed-app.test.ts
+  - scripts/ci/visual-baseline-inventory.mjs
+  - scripts/lib/lint-escapes.mjs
+  - packages/frontend/src/app/(authenticated)/profile/ProfileClient.tsx
+  - packages/frontend/src/components/ComingSoonModal.tsx
+  - packages/frontend/src/components/DashboardOnboardingGuide.tsx
+  - packages/frontend/src/components/ErrorBoundary.tsx
+  - packages/frontend/src/components/NetworkPill.tsx
+  - packages/frontend/src/components/OnchainActionGate.tsx
+  - packages/frontend/src/components/ReceiveFundsModal.tsx
+  - packages/frontend/src/components/agent-panel/McpServerName.tsx
+  - packages/frontend/src/components/haven/Address.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/DashboardClient.tsx
+  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/connect-agent/CopyBlock.tsx
+  - packages/frontend/src/components/connect-agent/SetupStates.tsx
 last-verified: "2026-09-09"
 ---
 

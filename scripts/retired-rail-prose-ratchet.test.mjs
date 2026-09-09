@@ -230,3 +230,20 @@ test('CLI: a MISSING baseline file still writes -- the real first-run allowance'
   assert.equal(status, 0)
   assert.match(wrote[BASE], /stays-readable/)
 })
+
+test('CLI: a malformed baseline prints one line, not a node:internal banner', () => {
+  // #2761, same shape as db-mock's — this gate's entrypoint was byte-identical
+  // to it before the conversion, and the acceptance criteria ask for a case per
+  // gate rather than one case and an argument by similarity.
+  const { status, out } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SRC]: '// stays readable\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 'x' } }),
+      [JUST]: '{}',
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ retired-rail-prose-ratchet: /)
+  assert.doesNotMatch(out, /node:internal/)
+})

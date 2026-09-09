@@ -241,3 +241,26 @@ test('CLI: a baseline whose count is not a number is refused, not silently obeye
   assert.match(out, /\[positional\] is "x", not a number/)
   assert.match(out, /packages\/backend\/src\/x\.test\.ts/)
 })
+
+test('CLI: a malformed baseline prints one line, not a node:internal banner', () => {
+  // #2761, and the reason it is measured as a PROCESS: the defect was entirely
+  // in how Node frames an uncaught throw, which no unit test can see. Before
+  // this, the four bare-`main()` gates answered an operator with
+  // `node:internal/modules/run_main:107 / triggerUncaughtException( / ^` and a
+  // version footer wrapped around the message.
+  const { status, out } = runGuard('db-mock-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SCANNED]: withMocks(1),
+      'packages/backend/db-mock-baseline.json': JSON.stringify({ [SCANNED]: { positional: 'x' } }),
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ db-mock-ratchet: /)
+  assert.match(out, /\[positional\] is "x", not a number/)
+  // The framing, which is the whole finding.
+  assert.doesNotMatch(out, /node:internal/)
+  assert.doesNotMatch(out, /triggerUncaughtException/)
+  // And a refusal is not reported as a crash.
+  assert.doesNotMatch(out, /failed:/)
+})

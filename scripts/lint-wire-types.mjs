@@ -56,6 +56,7 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  runGate,
 } from './lib/ratchet.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -247,5 +248,5 @@ async function main() {
 
 // Run only as a CLI (the pure scanner is imported by tests).
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  await main()
+  runGate('lint-wire-types', main)
 }

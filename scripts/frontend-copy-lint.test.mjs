@@ -444,3 +444,22 @@ test('CLI: a MISSING baseline file still writes -- the real first-run allowance'
   assert.equal(status, 0)
   assert.match(wrote[BASE], /"policy engine": 1/)
 })
+
+test('CLI: a malformed baseline prints one line, and no longer dumps the error object', () => {
+  // #2761. This gate DID have an entrypoint catch, but it was `console.error(err)`
+  // — which prints a stack for a bug and an inspected object for a refusal.
+  // `runGate` splits those: a frameless refusal is one line, a bug keeps frames.
+  const { status, out } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Your agents pay within the rules you set.'),
+      [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 'x' } }),
+    }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ frontend-copy-lint: /)
+  assert.match(out, /\[policy engine\] is "x", not a number/)
+  assert.doesNotMatch(out, /node:internal/)
+  // The old shape printed `[TypeError: …]` via util.inspect; the message is bare now.
+  assert.doesNotMatch(out, /\[TypeError:/)
+})

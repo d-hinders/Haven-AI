@@ -60,6 +60,7 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  runGate,
 } from './lib/ratchet.mjs'
 import { isEscaped } from './lib/lint-escapes.mjs'
 
@@ -495,8 +496,5 @@ async function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main().catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
+  runGate('frontend-copy-lint', main)
 }

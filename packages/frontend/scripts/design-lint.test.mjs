@@ -103,3 +103,21 @@ test('CLI: `--update` DOES write when the drift is gone', () => {
   assert.match(out, /baseline written/)
   assert.equal(JSON.parse(wrote[BASE])[COMP], undefined)
 })
+
+test('CLI: a malformed baseline prints one line — and this gate has a SYNC main', () => {
+  // #2761. The other five gates have an async `main`; this one is synchronous,
+  // which is why `runGate` uses `Promise.resolve().then(main)` rather than
+  // `main().catch(...)` — the latter lets a sync throw escape before any
+  // handler exists. So this gate is not a fifth copy of the same case: it is
+  // the one that would still print a node:internal banner under the obvious
+  // implementation.
+  const { status, out } = runGuard(SCRIPT, {
+    also: ALSO,
+    files: tree({ [BASE]: JSON.stringify({ [COMP]: { 'raw-palette': 'x' } }) }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ design-lint: /)
+  assert.match(out, /\[raw-palette\] is "x", not a number/)
+  assert.doesNotMatch(out, /node:internal/)
+  assert.doesNotMatch(out, /triggerUncaughtException/)
+})

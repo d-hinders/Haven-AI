@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { newViolations, hasShrunk, assertUsableBaseline, readBaseline } from './ratchet.mjs'
+import { newViolations, hasShrunk, assertUsableBaseline, readBaseline, runGate } from './ratchet.mjs'
 
 // `fileURLToPath`, not `.pathname`: the latter percent-encodes, so a checkout
 // under a path containing a space (or `#`, or `%`) makes `git -C` fail with
@@ -194,3 +194,80 @@ test('readBaseline validates too — the second read path', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// ── runGate: a refusal and a bug want opposite treatment (#2761) ────────────
+
+test('runGate: a frameless refusal prints one line; a bug keeps its frames', async () => {
+  // Driven through the real gates below as processes; this pins the DECISION,
+  // which is made on evidence (does the error carry stack frames?) rather than
+  // on a flag a caller could forget to set.
+  const seen = []
+  const origErr = console.error
+  const origExit = process.exit
+  console.error = (...a) => seen.push(a)
+  process.exit = () => {}
+  try {
+    // A refusal: `refusal()` strips the stack because its frames point inside
+    // the engine and tell the operator nothing.
+    runGate('g', () => {
+      throw assertRefusal()
+    })
+    await new Promise((r) => setImmediate(r))
+    assert.equal(seen.length, 1)
+    assert.deepEqual(seen[0], ['✗ g: boom'])
+
+    // A bug: the frames ARE the diagnosis, so the whole error goes out and the
+    // wording says `failed` rather than naming a condition.
+    seen.length = 0
+    runGate('g', () => {
+      throw new ReferenceError('nope')
+    })
+    await new Promise((r) => setImmediate(r))
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0][0], '✗ g failed:')
+    assert.ok(seen[0][1] instanceof ReferenceError)
+  } finally {
+    console.error = origErr
+    process.exit = origExit
+  }
+})
+
+test('runGate: a SYNCHRONOUS throw is caught — design-lint has no async main', async () => {
+  // `main().catch(...)` would let a sync throw escape before any handler
+  // existed, which is why this uses `Promise.resolve().then(main)`. design-lint
+  // is the gate that makes this not hypothetical: its `main` is synchronous.
+  //
+  // The await before the restore is not incidental: the handler runs on a
+  // microtask, so restoring in a bare `finally` hands the real `process.exit`
+  // back BEFORE it fires and kills the test run. Measured — that is exactly
+  // what a first version of this test did.
+  const origErr = console.error
+  const origExit = process.exit
+  const seen = []
+  let exited
+  console.error = (...a) => seen.push(a)
+  process.exit = (c) => {
+    exited = c
+  }
+  try {
+    assert.doesNotThrow(() =>
+      runGate('g', () => {
+        throw new Error('sync')
+      }),
+    )
+    assert.equal(exited, undefined, 'nothing has exited yet — the handler is deferred')
+    await new Promise((r) => setImmediate(r))
+    assert.equal(exited, 1, 'and then it does')
+    assert.equal(seen[0][0], '✗ g failed:')
+  } finally {
+    console.error = origErr
+    process.exit = origExit
+  }
+})
+
+/** A frameless error of the shape `refusal()` produces. */
+function assertRefusal() {
+  const err = new TypeError('boom')
+  err.stack = 'TypeError: boom'
+  return err
+}

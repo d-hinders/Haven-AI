@@ -113,6 +113,48 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
  */
 /**
+ * Run a gate's `main` as the CLI, and present a failure the way a gate should.
+ *
+ * Four of the six gates on this module called `main()` bare (#2761), so an
+ * operator-facing condition — a malformed baseline, an unreadable file, a
+ * permissions error — arrived as Node's uncaught-exception banner:
+ *
+ *     node:internal/modules/run_main:107
+ *         triggerUncaughtException(
+ *         ^
+ *     [TypeError: …/db-mock-baseline.json: "x.test.ts" [positional] is "3", …]
+ *
+ *     Node.js v24.17.0
+ *
+ * #2759 made the message the whole error TEXT; this removes the framing around
+ * it. A helper rather than four copies for the reason #2728 and #2747 both
+ * landed on: a decision copied N times is a decision that drifts, and each of
+ * those issues was one gate that had drifted out of a set the others were in.
+ *
+ * ## Why it does not just print `err.message`
+ *
+ * A REFUSAL and a BUG want opposite treatment. `refusal()` below strips the
+ * stack because its frames point inside this module and tell the operator
+ * nothing. A genuine bug wants exactly those frames. So the split is made on
+ * the evidence rather than on a flag: an error carrying stack FRAMES is a bug
+ * and is printed whole; a frameless one is a refusal and prints as one line.
+ *
+ * `Promise.resolve().then(main)` rather than `main().catch(...)`, because
+ * `design-lint`'s `main` is synchronous and a sync throw would escape the
+ * latter before any handler existed.
+ */
+export function runGate(name, main) {
+  Promise.resolve()
+    .then(main)
+    .catch((err) => {
+      const hasFrames = typeof err?.stack === 'string' && /\n\s+at /.test(err.stack)
+      if (hasFrames) console.error(`✗ ${name} failed:`, err)
+      else console.error(`✗ ${name}: ${err?.message ?? err}`)
+      process.exit(1)
+    })
+}
+
+/**
  * A refusal, not a crash — so it is presented as one.
  *
  * FOUR of the six gates have no catch at their entrypoint at all -- `db-mock`,

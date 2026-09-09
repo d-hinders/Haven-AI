@@ -70,6 +70,7 @@ import {
   updateRefusals,
   loadBaseline,
   writeBaseline,
+  runGate,
 } from '../lib/ratchet.mjs'
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -555,9 +556,8 @@ async function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main().catch((err) => {
-    // Fail closed: a broken gate that passes is the defect one layer up.
-    console.error('ui-gate-wording error:', err)
-    process.exit(1)
-  })
+  // Fail closed: a broken gate that passes is the defect one layer up. The
+  // named remedy for a bad baseline lives in `main`'s own try/catch and never
+  // reaches this one.
+  runGate('ui-gate-wording', main)
 }

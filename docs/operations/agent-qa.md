@@ -831,7 +831,8 @@ list, and both bite hardest while a release is being cut:
 
 - **A skipped run is a green tick that satisfies nothing.** GitHub reports the
   run-level conclusion as `success` when the `gate` job skips the harness
-  (measured on `ci.yml` run 33604474457, jobs `skipped=7,success=7`), so the
+  (measured on qa-dev run 34340710137: `gate` job `success`, `money-flow` job
+  `skipped`, run-level `success`), so the
   Actions list shows a green tick for a run in which nothing ran. Wherever a
   run is inspected, read the **`money-flow` job's** conclusion
   (`gh run view <id> --json jobs`), never the run's — the freshness gate reads
@@ -872,7 +873,7 @@ them is a string a caller supplies:
   `moneyFlowJobConclusion` the promotion gate uses since #2404). The job check
   is not decoration: a run whose `gate` job refused the harness is reported by
   GitHub with run-level conclusion **`success`** and the job `skipped`
-  (measured on `ci.yml` run 33604474457), and every deploy leaves two or three
+  (measured on qa-dev run 34340710137), and every deploy leaves two or three
   such runs at a SHA that *is* in the Railway index. Judged at run level they
   are fresh post-deploy greens in which nothing ran, and the newest of them
   could mask a real harness failure at the same SHA. A `workflow_dispatch` at

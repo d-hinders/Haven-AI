@@ -6,7 +6,6 @@ covers:
   - .github/workflows/publish.yml
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
-  - .agents/skills/release/SKILL.md
   - docs/operations/dev-environment.md
   - scripts/release-scope.mjs
 last-verified: "2026-09-09"

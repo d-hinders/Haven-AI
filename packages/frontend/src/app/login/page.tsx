@@ -143,7 +143,14 @@ export default function LoginPage() {
         }}
       />
 
-      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
+      {/*
+        Safe-area inset (#2730). `viewport-fit=cover` is on the ROOT viewport
+        export, so its blast radius is every route, not just the authenticated
+        shell — and this is the first screen a freshly installed app shows, and
+        every launch after a session expires. Without the padding the brand link
+        renders under the status bar. Unchanged where the inset is 0.
+      */}
+      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md pt-[var(--v2-safe-top)]">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
           <Link
             href="/"

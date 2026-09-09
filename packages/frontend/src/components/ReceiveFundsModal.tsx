@@ -94,7 +94,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="receive-funds-title"
-        className="relative mx-4 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative mx-4 max-h-[calc(100vh-2rem-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
       >
         <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-4">
           <div>

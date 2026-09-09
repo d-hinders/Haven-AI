@@ -310,7 +310,13 @@
  * Padding on the fixed wrapper rather than a margin on the panel, because the
  * panel is `max-h`-constrained against the wrapper's content box: padding
  * shrinks what the panel may fill, so a tall dialog stops above the home
- * indicator instead of running under it.
+ * indicator instead of running under it. A panel that sets its own `max-h` has
+ * to subtract the same `max(gutter, inset)` per side — `ui/Modal` does.
+ *
+ * CONTRACT: set `--v2-safe-gutter`, never a `p-*` utility alongside this class.
+ * These are longhand declarations in plain CSS after `@tailwind utilities`, so
+ * they outrank a Tailwind padding utility of equal specificity and the `p-*`
+ * would silently do nothing.
  */
 .v2-safe-overlay {
   padding-top: max(var(--v2-safe-gutter, 0px), var(--v2-safe-top));

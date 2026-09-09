@@ -145,8 +145,12 @@ export function installedAppMetadata(
  * `--v2-safe-*` in `globals.css`; `cover` without them would put controls under
  * the notch, which is the defect #2730 exists to prevent rather than cause.
  *
- * Inert outside a standalone context: Safari with its own chrome reports zero
- * insets, so this changes nothing in a normal browser tab or in any gate.
+ * Inert in every gate this repository runs — headless Chromium has no notch,
+ * so all four insets resolve to 0 and every rule computes what it computed
+ * before. NOT inert in a normal Safari tab on a notched phone: with `cover`,
+ * Safari reports a real bottom inset in portrait and real left/right insets in
+ * landscape, and the rules apply there too. That is correct and wanted; the
+ * point is only that no gate in this repository can see it.
  */
 export const INSTALLED_APP_VIEWPORT: Viewport = {
   width: 'device-width',

@@ -15,15 +15,23 @@ const widthClasses = {
 
 type ModalWidth = keyof typeof widthClasses
 
-// The panel's ceiling, minus the insets the wrapper's padding now reserves
+// The panel's ceiling, minus exactly what the wrapper's padding reserves
 // (#2730). Without the subtraction a tall dialog fills `100vh - 2rem` inside a
 // box that is shorter than that by the notch plus the home indicator, and the
 // overflow lands on the footer — the action row #1946 moved out of the scroll
-// body precisely so it could not be pushed off screen. Both terms are 0 in a
-// browser with no insets, so this is the same arithmetic it has always been.
+// body precisely so it could not be pushed off screen.
+//
+// `max(gutter, inset)` per side, mirroring `.v2-safe-overlay`'s own rule, NOT
+// `gutter + inset`. The first version added them, which double-counted by up to
+// the gutter on a notched phone and left the panel 32px shorter than the box it
+// sits in. It erred conservative — no overflow, so no test could see it — which
+// is exactly why the arithmetic has to match the padding it claims to mirror
+// rather than merely be smaller than it. Both `max()` terms are the gutter
+// where the insets are 0, so this stays `100vh - 2rem` on every desktop.
 const maxHeightClasses = {
-  default: 'max-h-[calc(100vh-2rem-var(--v2-safe-top)-var(--v2-safe-bottom))]',
-  tight: 'max-h-[calc(100vh-24px-var(--v2-safe-top)-var(--v2-safe-bottom))]',
+  default:
+    'max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]',
+  tight: 'max-h-[calc(100vh-max(12px,var(--v2-safe-top))-max(12px,var(--v2-safe-bottom)))]',
 } as const
 
 type ModalMaxHeight = keyof typeof maxHeightClasses

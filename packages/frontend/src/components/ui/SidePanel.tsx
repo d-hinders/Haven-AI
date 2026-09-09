@@ -41,18 +41,26 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : 'Details'}
-        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-modal pr-[var(--v2-safe-right)]"
+        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-modal pt-[var(--v2-safe-top)] pr-[var(--v2-safe-right)] pb-[var(--v2-safe-bottom)]"
       >
         {/*
-          The panel is flush to three screen edges by design, so the insets go
-          on its ROWS rather than on the wrapper (#2730) — a gutter around the
-          wrapper would un-flush it at every width, insets or not. Header pads
-          down from the notch, footer up from the home indicator, and the panel
-          itself pads in from a landscape notch on the right, which is the side
-          it is anchored to. Each is `max(<the row's own padding>, <inset>)`, so
-          all three are unchanged wherever the insets are 0.
+          The panel is flush to three screen edges by design (#2730), so a
+          gutter around the WRAPPER is wrong — it would un-flush the panel at
+          every width, insets or not. The insets go on the panel itself, where
+          `box-sizing: border-box` takes them out of the `flex-1 overflow-y-auto`
+          body between the two rows: the header ends up below the notch, the
+          content ends above the home indicator, and the panel pads in from a
+          landscape notch on the right, which is the side it is anchored to.
+
+          On the panel rather than on the header and footer rows, which is where
+          the first version put them, because `footer` is OPTIONAL and the only
+          shipped caller — `TransactionDetailPanel` — passes none. A footer-row
+          inset is dead code at every real call site, and `/transactions` is one
+          of the routes the acceptance criteria name; the scroll body's own
+          `py-5` was what actually met the home indicator. Found by review, and
+          now covered by `safe-area-insets.mobile.spec.ts`.
         */}
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4 pt-[max(1rem,var(--v2-safe-top))]">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h2>
             {subtitle ? (
@@ -72,9 +80,7 @@ export function SidePanel({
         <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
 
         {footer ? (
-          <div className="border-t border-[var(--v2-border)] px-5 py-4 pb-[max(1rem,var(--v2-safe-bottom))]">
-            {footer}
-          </div>
+          <div className="border-t border-[var(--v2-border)] px-5 py-4">{footer}</div>
         ) : null}
       </div>
     </div>

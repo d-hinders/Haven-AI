@@ -225,13 +225,41 @@ test.describe('contacts dialog — action row reachability (#1946)', () => {
     await OVERFLOW_STATES[1].force(page)
 
     const overlay = await page.evaluate(() => {
-      const el = document.querySelector('.v2-safe-overlay') as HTMLElement | null
+      // `closest()` from the open dialog, never a document-wide lookup: the
+      // gutterless overlays compute `max(0px, 34px)` — the SAME 34px this
+      // assertion expects — so a first-match query would read some other
+      // overlay and pass while `ui/Modal` had lost the class entirely. That is
+      // not hypothetical; it is the false green the sibling mobile spec
+      // produced. `role="dialog"` is on `ui/Modal`'s own wrapper, so `closest()`
+      // resolves to the very node under test.
+      const el = document.querySelector('[role="dialog"]')?.closest('.v2-safe-overlay') as
+        | HTMLElement
+        | null
       return el ? getComputedStyle(el).paddingBottom : null
     })
     // CONTROL: the override reached the stylesheet. Everything below is
     // trivially true against a 0 inset, so without this the test would keep
     // passing through a rename of the variable it is about.
     expect(overlay, 'the modal overlay must consume --v2-safe-bottom').toBe(`${INSET_BOTTOM}px`)
+
+    // The panel's ceiling must subtract exactly what the wrapper's padding
+    // reserves — `max(gutter, inset)` per side, not `gutter + inset`. The first
+    // version added them, which left the panel 32px shorter than the box it sits
+    // in: conservative, so no reachability assertion could see it. This one can.
+    const ceiling = await page.evaluate(() => {
+      // Walk up from the scroll body to the first ancestor that actually
+      // declares a ceiling, rather than matching a class: `[data-modal-body]`'s
+      // nearest `.flex-col` is the cue wrapper, which has no max-height, and a
+      // selector that finds the wrong element reads `none` and would have to be
+      // debugged rather than trusted.
+      let el = document.querySelector('[data-modal-body]')?.parentElement ?? null
+      while (el && getComputedStyle(el).maxHeight === 'none') el = el.parentElement
+      return el ? getComputedStyle(el).maxHeight : null
+    })
+    expect(
+      ceiling,
+      'the panel ceiling is the viewport minus max(1rem, inset) per side',
+    ).toBe(`${844 - 16 - INSET_BOTTOM}px`)
 
     const m = await reachability(page)
     expect(m.found).toBe(true)

@@ -218,12 +218,21 @@ export function Toaster() {
 
   return (
     <>
+      {/*
+        Safe-area insets (#2730). A toast is the one interactive surface pinned
+        to the bottom edge, and `bottom-4` put the lower ~18px of every card —
+        including its `Dismiss notification` button — inside the home
+        indicator's band, where the OS reads a press as a swipe-up rather than a
+        tap. Each side is `max(<the value it had>, <inset>)`, so nothing moves
+        where the insets are 0. Both regions carry it: an assertive toast is no
+        less pressable than a polite one.
+      */}
       {/* Polite region — info + success */}
       <div
         role="status"
         aria-live="polite"
         aria-atomic="false"
-        className="pointer-events-none fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
+        className="pointer-events-none fixed bottom-[max(1rem,var(--v2-safe-bottom))] left-[max(1rem,var(--v2-safe-left))] right-[max(1rem,var(--v2-safe-right))] sm:bottom-[max(1.5rem,var(--v2-safe-bottom))] sm:right-[max(1.5rem,var(--v2-safe-right))] sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
       >
         {politeToasts.map((item) => (
           <div key={item.id} className="pointer-events-auto w-full sm:w-auto">
@@ -237,7 +246,7 @@ export function Toaster() {
         role="alert"
         aria-live="assertive"
         aria-atomic="true"
-        className="pointer-events-none fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
+        className="pointer-events-none fixed bottom-[max(1rem,var(--v2-safe-bottom))] left-[max(1rem,var(--v2-safe-left))] right-[max(1rem,var(--v2-safe-right))] sm:bottom-[max(1.5rem,var(--v2-safe-bottom))] sm:right-[max(1.5rem,var(--v2-safe-right))] sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
         style={{ marginBottom: politeToasts.length > 0 ? `${politeToasts.length * 60}px` : undefined }}
       >
         {assertiveToasts.map((item) => (

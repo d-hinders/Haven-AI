@@ -43,7 +43,22 @@ const INSET_BOTTOM = 34
 /** 390x844 is the iPhone the demo runs on (#2736), not Pixel 5's 393x727. */
 const VIEWPORT = { width: 390, height: 844 }
 
-const ROUTES = ['/dashboard', '/agents', '/transactions'] as const
+/**
+ * The three routes the acceptance criteria name, with whether each one's
+ * content actually OVERFLOWS `<main>` at this viewport under the mocked
+ * fixture. That flag is not bookkeeping: the scroll-to-end check is the only
+ * assertion that exercises `<main>`'s bottom padding as geometry, and on a
+ * route whose content fits there is nothing near the bottom to find, so the
+ * check passes having proved nothing. Measured, not assumed — `/dashboard`
+ * overflows, `/agents` and `/transactions` do not, because the fixture seeds
+ * two agents and a handful of transactions. So `/dashboard` carries the
+ * geometry and all three carry the padding readback.
+ */
+const ROUTES = [
+  { path: '/dashboard', overflows: true },
+  { path: '/agents', overflows: false },
+  { path: '/transactions', overflows: false },
+] as const
 
 /**
  * Overrides the four inset variables on `:root`. Appended to <head>, so it
@@ -186,7 +201,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(await page.evaluate(() => navigator.maxTouchPoints)).toBeGreaterThan(0)
   })
 
-  for (const route of ROUTES) {
+  for (const { path: route, overflows } of ROUTES) {
     test(`${route}: the shell reserves both bands and puts no control in them`, async ({
       page,
     }) => {
@@ -232,9 +247,37 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
 
       // And the scroll region can be brought clear of the indicator, which is
       // the only thing its bottom padding can promise.
+      if (overflows) {
+        // Wait for the route's own content before measuring its scroll box.
+        // These screens fetch client-side, so the shell exists (the toggle is
+        // up) a beat before there is anything in `<main>` to scroll — the same
+        // trap as #1771's `contentRegionFound`, where a box that has not been
+        // filled yet measures 0 and reads as "fits".
+        await expect
+          .poll(
+            () =>
+              page.evaluate(() => {
+                const m = document.getElementById('main-content')
+                return m ? m.scrollHeight - m.clientHeight : 0
+              }),
+            { message: `${route} must render content into #main-content`, timeout: 15_000 },
+          )
+          .toBeGreaterThan(0)
+      }
+
       const atEnd = await controlsUnderIndicatorAtScrollEnd(page, INSET_BOTTOM)
       expect(atEnd.scrolled, 'the authenticated shell must expose #main-content').toBe(true)
       if (!atEnd.scrolled) return
+      // Asserted, never merely reported — it was computed and left unread in
+      // the first version, which is what a review caught. Both directions are
+      // pinned: a route declared to overflow must, or its geometry check below
+      // is vacuous; a route declared not to must NOT, because the day the
+      // fixture grows it should be promoted to carrying the geometry rather
+      // than silently continuing to prove less than the table claims.
+      expect(
+        atEnd.scrollable,
+        `${route} is declared overflows: ${overflows} at ${VIEWPORT.width}x${VIEWPORT.height}; the table in ROUTES no longer matches the fixture`,
+      ).toBe(overflows)
       expect(
         atEnd.offenders,
         `scrolled to the end, ${route} leaves no control under the home indicator`,
@@ -273,7 +316,98 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
   })
 
   /**
-   * `ReceiveFundsModal` is one of the four overlays that build their own
+   * `ui/SidePanel` on `/transactions` — an acceptance route, and the surface
+   * where the first version of this change was wrong: the inset sat on the
+   * OPTIONAL footer row, and `TransactionDetailPanel`, the only shipped caller,
+   * passes no footer. So the clearance was dead code at the one call site that
+   * exists, and the panel's scroll body met the home indicator with 20px of its
+   * own padding. Nothing here covered it, which is why it took a review.
+   */
+  test('the transaction detail panel clears both bands, with no footer to pad', async ({
+    page,
+  }) => {
+    await page.goto('/transactions')
+    await page.getByRole('button', { name: /View details for/ }).first().click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await applyInsets(page)
+
+    const panel = await page.evaluate(() => {
+      const el = document.querySelector('[role="dialog"]') as HTMLElement
+      const style = getComputedStyle(el)
+      const body = el.querySelector('.overflow-y-auto') as HTMLElement | null
+      if (body) body.scrollTop = body.scrollHeight
+      const controls = Array.from(el.querySelectorAll<HTMLElement>('a[href], button')).filter(
+        (c) => {
+          const r = c.getBoundingClientRect()
+          return r.width > 1 && r.height > 1 && r.bottom > 0 && r.top < window.innerHeight
+        },
+      )
+      return {
+        paddingTop: style.paddingTop,
+        paddingBottom: style.paddingBottom,
+        hasFooter: !!el.querySelector('.border-t'),
+        lowestControlBottom: Math.round(
+          Math.max(...controls.map((c) => c.getBoundingClientRect().bottom)),
+        ),
+        viewportHeight: window.innerHeight,
+      }
+    })
+
+    // CONTROL first, and it is on the PANEL — the element that has to carry the
+    // inset whether or not a footer exists.
+    expect(panel.paddingTop).toBe(`${INSET_TOP}px`)
+    expect(panel.paddingBottom).toBe(`${INSET_BOTTOM}px`)
+    // Pins the shape the defect depended on: this caller renders no footer, so
+    // a footer-row inset would be unreachable here. If a footer ever arrives,
+    // this line fails and whoever adds it re-reads the reasoning above.
+    expect(panel.hasFooter, 'TransactionDetailPanel renders no footer row').toBe(false)
+    expect(panel.lowestControlBottom).toBeLessThanOrEqual(panel.viewportHeight - INSET_BOTTOM)
+  })
+
+  /**
+   * `ui/Toast` — the other surface pinned to the bottom edge, and the one that
+   * appears after most write actions, so its dismiss button is the control most
+   * likely to land in the home indicator's band.
+   *
+   * Driven from the Receive-funds modal's "Copy address", which raises a real
+   * toast on `/dashboard`. The obvious trigger — `/design-system`'s "Show
+   * toast" button — was measured and rejected: that route is ~1,575 elements
+   * and compiling it in `next dev` starved every other test in this project,
+   * turning the whole file red with `page.goto` timeouts rather than with
+   * anything about safe areas.
+   */
+  test('a toast clears the home indicator', async ({ page }) => {
+    await openReceiveFundsModal(page)
+    await applyInsets(page)
+    await page.getByRole('button', { name: 'Copy address' }).click()
+    await expect(page.getByText('Address copied').last()).toBeVisible()
+
+    const toast = await page.evaluate(() => {
+      const region = document.querySelector('[role="status"][aria-live="polite"]') as HTMLElement
+      const dismiss = region.querySelector(
+        '[aria-label="Dismiss notification"]',
+      ) as HTMLElement | null
+      return {
+        bottom: getComputedStyle(region).bottom,
+        regionBottom: Math.round(region.getBoundingClientRect().bottom),
+        dismissBottom: dismiss ? Math.round(dismiss.getBoundingClientRect().bottom) : null,
+        viewportHeight: window.innerHeight,
+      }
+    })
+
+    // CONTROL: the region consumes the inset rather than its old flat 1rem.
+    expect(toast.bottom, 'the toast region must consume --v2-safe-bottom').toBe(
+      `${INSET_BOTTOM}px`,
+    )
+    expect(toast.regionBottom).toBeLessThanOrEqual(toast.viewportHeight - INSET_BOTTOM)
+    // The half that matters: a dismiss button inside the band is read by the OS
+    // as a swipe-up, not a tap.
+    expect(toast.dismissBottom).not.toBeNull()
+    expect(toast.dismissBottom!).toBeLessThanOrEqual(toast.viewportHeight - INSET_BOTTOM)
+  })
+
+  /**
+   * `ReceiveFundsModal` is one of the overlays that build their own
    * `fixed inset-0` wrapper rather than going through `ui/Modal` — so this is
    * the bespoke-wrapper path, and `ui/Modal`'s own path is covered by the inset
    * case in `modal-action-row-reachability.spec.ts`, which opens a real

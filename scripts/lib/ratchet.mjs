@@ -127,7 +127,17 @@ export function runGate(name, main) {
   // nothing and never entered the gate. A blocking CI job that is a silent
   // no-op reporting success, introduced by the helper written to end exactly
   // that class (#2728, #2747, #2759). Found by review; measured before and
-  // after. Two defences, because this one is not allowed to come back:
+  // after.
+  //
+  // Two defences, and they are INDEPENDENT rather than belt-and-braces —
+  // measured: with this check deleted, `.then(() => main())` alone still gives
+  // `✗ () => {} failed: TypeError: main is not a function` and exit 1. So the
+  // arity check does not buy loudness, which the chained call already provides.
+  // It buys the MESSAGE: a miswired call is named as a miswired call, with the
+  // signature, instead of as a TypeError about an identifier the author did not
+  // write. That is worth a synchronous throw here, which does reach Node's
+  // banner — but only for an authoring error no operator can produce, and CI
+  // catches it on the first run of the PR that introduces it.
   if (typeof main !== 'function') {
     throw new TypeError(
       `runGate: ${typeof name === 'function' ? 'called with one argument' : `\`${name}\``} did not ` +
@@ -147,7 +157,22 @@ export function runGate(name, main) {
       // operator-facing condition in #2761's acceptance criteria as a crash,
       // complete with an errno dump. It is a fact about the environment, not a
       // defect in this code, so it is classified as a refusal by its `code`.
-      const OPERATOR_ERRNO = new Set(['EACCES', 'EPERM', 'ENOENT', 'EISDIR', 'ENOTDIR', 'EMFILE'])
+      // `--update` WRITES, so the write path's codes belong here as much as the
+      // read path's: a read-only filesystem or a full disk is a permissions
+      // error in every sense #2761's acceptance criteria mean, and both printed
+      // as crashes with an errno dump until review measured them. `ELOOP` and
+      // `ENAMETOOLONG` are deliberately absent — neither is reachable from a
+      // `git ls-files` scan set.
+      const OPERATOR_ERRNO = new Set([
+        'EACCES',
+        'EPERM',
+        'ENOENT',
+        'EISDIR',
+        'ENOTDIR',
+        'EMFILE',
+        'EROFS',
+        'ENOSPC',
+      ])
       const isOperatorCondition = typeof err?.code === 'string' && OPERATOR_ERRNO.has(err.code)
       const hasFrames = typeof err?.stack === 'string' && /\n\s+at /.test(err.stack)
       if (hasFrames && !isOperatorCondition) console.error(`✗ ${name} failed:`, err)

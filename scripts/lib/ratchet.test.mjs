@@ -301,6 +301,19 @@ test('runGate: an fs errno is an operator condition, not a crash', async () => {
     await new Promise((r) => setImmediate(r))
     assert.equal(seen.length, 1)
     assert.deepEqual(seen[0], ["✗ g: EACCES: permission denied, open '/x/baseline.json'"])
+    // The WRITE path's codes too: `--update` calls `writeBaseline`, so a
+    // read-only filesystem or a full disk is the same class of operator
+    // condition and printed as a crash until review measured it.
+    for (const code of ['EROFS', 'ENOSPC']) {
+      seen.length = 0
+      const w = new Error(`${code}: simulated`)
+      w.code = code
+      runGate('g', () => {
+        throw w
+      })
+      await new Promise((r) => setImmediate(r))
+      assert.deepEqual(seen[0], [`✗ g: ${code}: simulated`])
+    }
     // A bug that happens to carry a `code` is still a bug: the classification
     // is by errno VALUE, not by the presence of the field.
     seen.length = 0

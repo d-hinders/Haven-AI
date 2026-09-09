@@ -20,6 +20,9 @@
     "test:e2e:desktop": "playwright test --project=chromium-desktop",
     "test:e2e:mobile": "playwright test --project=chromium-mobile",
     "test:e2e:gate": "playwright test --project=chromium-desktop --project=chromium-mobile",
+    "test:e2e:desktop:built": "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=ci-placeholder npm run build && CI=1 playwright test --project=chromium-desktop",
+    "test:e2e:mobile:built": "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=ci-placeholder npm run build && CI=1 playwright test --project=chromium-mobile",
+    "test:e2e:gate:built": "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=ci-placeholder npm run build && CI=1 playwright test --project=chromium-desktop --project=chromium-mobile",
     "test:e2e:full": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report ../../output/playwright/html-report"

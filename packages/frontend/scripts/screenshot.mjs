@@ -90,6 +90,24 @@
  * `--scenario=<name>` (comma-separated); `--scenario=all` runs every one.
  * See SCENARIOS below for the registry.
  *
+ * ── Installed-shell metadata (#2735) ────────────────────────────────────────
+ * The run also proves the installed-app shell (#2729/#2765) survived whatever
+ * the branch changed: `/manifest.webmanifest` is fetched and its identity
+ * keys (id, name, display, start_url, scope) checked, and the root
+ * document's HTML is probed for the iOS meta tags
+ * (`apple-mobile-web-app-capable`, `apple-mobile-web-app-title`,
+ * `apple-mobile-web-app-status-bar-style`) plus the
+ * `viewport-fit=cover` viewport. This is the headless HALF of the
+ * installed-shell evidence — a missing tag or a wrong `id` fails the run —
+ * while everything Playwright structurally cannot attest (standalone
+ * launch, login persistence, safe-area compositing on a real notch) stays
+ * in the operator checklist in `docs/product/mobile-demo.md`.
+ * Expected values are read from `src/lib/installed-app.ts` through the
+ * environment the run actually captured (a fixture that hard-codes the
+ * manifest identity is a fixture that silently stops matching the shell
+ * the day `installedAppIdentity` moves). Recorded per-run in the capture
+ * manifest under `installed_shell`.
+ *
  * ── Browsers ────────────────────────────────────────────────────────────────
  * Uses Playwright's pre-installed Chromium. When the cached build does not
  * match the pinned Playwright version — the usual symptom is a launch error
@@ -157,6 +175,9 @@ import {
   worktreeIdentity,
   writeIdentityMarker,
 } from './capture-identity.mjs'
+// The EXPECTED installed-shell identity is transpiled from the app's own
+// source (#2735), never restated here — see the docblock section above.
+import { loadInstalledAppExpectations } from './installed-app-source.mjs'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
 const PUBLIC_DIR = path.join(ROOT, 'public')
@@ -182,6 +203,131 @@ const DEVICE_SCALE_FACTOR = 2
 export const SEED_STORAGE_KEYS = {
   token: 'haven_token',
   activeSafe: 'haven_active_safe_id',
+}
+
+// ── Installed-shell metadata check (#2735) ───────────────────────────────────
+// The manifest identity and iOS meta the #2729 shell must serve. The EXPECTED
+// side is derived from the same pure functions the app ships
+// (`src/lib/installed-app.ts`), not restated as literals — restating them here
+// would let the harness pass while the shell drifted, the exact failure mode
+// the fixture section above warns about for contract addresses.
+
+/** The environment this run's server was built with (read from the served page). */
+function environmentFromHtml(html) {
+  const match = html.match(/<meta name="apple-mobile-web-app-title" content="([^"]*)"/)
+  if (!match) return null
+  // The title is "Haven" on production and "Haven <Env>" otherwise, and
+  // `titleCase` in installed-app.ts capitalizes each word — invert it. The
+  // environment itself is lower-case per `havenEnvironment()`.
+  const title = match[1]
+  if (title === 'Haven') return 'production'
+  return title.replace(/^Haven\s+/, '').toLowerCase() || null
+}
+
+/**
+ * Parse the served manifest + root HTML into the observed installed-shell
+ * state. Pure and exported so the verdict half can be tested without a
+ * browser or a dev server. `manifestBody` is the raw `/manifest.webmanifest`
+ * response text (or null when the route did not answer); `html` is the root
+ * document's HTML (or null).
+ */
+export function observeInstalledShell({ manifestBody, html }) {
+  const manifest = manifestBody == null ? null : (() => {
+    try {
+      return JSON.parse(manifestBody)
+    } catch {
+      return undefined // present but not JSON — a different defect from absent
+    }
+  })()
+  const meta = {}
+  if (html != null) {
+    for (const name of [
+      'apple-mobile-web-app-capable',
+      'apple-mobile-web-app-title',
+      'apple-mobile-web-app-status-bar-style',
+    ]) {
+      const m = html.match(new RegExp(`<meta name="${name}" content="([^"]*)"`, 'i'))
+      meta[name] = m ? m[1] : null
+    }
+    const viewport = html.match(/<meta name="viewport" content="([^"]*)"/i)
+    meta.viewport = viewport ? viewport[1] : null
+  }
+  return {
+    manifest_present: manifestBody != null,
+    manifest_parse_error: manifest === undefined,
+    manifest: manifest === undefined ? null : manifest,
+    environment: html != null ? environmentFromHtml(html) : null,
+    meta: html != null ? meta : null,
+  }
+}
+
+/**
+ * The verdict: what the observed state must satisfy for the run to call the
+ * installed-shell evidence green. Each failure names the tag/key it did not
+ * find, with the file that owns it — the same "the record says WHERE to look"
+ * shape the deletion report uses.
+ */
+export function installedShellProblems(observed, { expectedManifest, environment, expectedTitle }) {
+  const problems = []
+  if (!observed.manifest_present) {
+    problems.push(
+      'manifest: /manifest.webmanifest did not answer — the manifest route (packages/frontend/src/app/manifest.ts) is missing or the server is not the app shell',
+    )
+  } else if (observed.manifest_parse_error) {
+    problems.push('manifest: /manifest.webmanifest answered but is not JSON')
+  } else {
+    const m = observed.manifest
+    for (const [key, expected] of Object.entries(expectedManifest)) {
+      const actual = m?.[key]
+      const equal =
+        typeof expected === 'object' && expected !== null
+          ? JSON.stringify(actual) === JSON.stringify(expected)
+          : actual === expected
+      if (!equal) {
+        problems.push(
+          `manifest.${key}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual ?? null)} — identity is built in packages/frontend/src/lib/installed-app.ts (buildWebManifest)`,
+        )
+      }
+    }
+  }
+  if (observed.meta == null) {
+    problems.push(
+      'ios meta: the root document could not be read — cannot attest the installed-shell meta tags',
+    )
+  } else {
+    if (observed.environment !== environment) {
+      problems.push(
+        `ios meta (environment): expected "${environment}" from apple-mobile-web-app-title, got ${JSON.stringify(observed.environment)} — read via installedAppMetadata in packages/frontend/src/lib/installed-app.ts`,
+      )
+    }
+    for (const [name, expected] of [
+      ['apple-mobile-web-app-capable', 'yes'],
+      ['apple-mobile-web-app-status-bar-style', 'default'],
+    ]) {
+      if (observed.meta[name] !== expected) {
+        problems.push(
+          `ios meta: <meta name="${name}"> expected "${expected}", got ${JSON.stringify(observed.meta[name])} — emitted by installedAppMetadata in packages/frontend/src/lib/installed-app.ts`,
+        )
+      }
+      // The title IS the environment carrier on the home-screen label, so the
+      // inversion check above is not enough on its own: a title like "Haven
+      // Production" inverts back to `production` and would slip through while
+      // the label a phone actually shows has drifted. Compare the tag itself
+      // against the source-derived expectation too (#2735).
+      if (observed.meta['apple-mobile-web-app-title'] !== expectedTitle) {
+        problems.push(
+          `ios meta: <meta name="apple-mobile-web-app-title"> expected ${JSON.stringify(expectedTitle)}, got ${JSON.stringify(observed.meta['apple-mobile-web-app-title'])} — emitted by installedAppMetadata in packages/frontend/src/lib/installed-app.ts`,
+        )
+      }
+    }
+    const vp = observed.meta.viewport ?? ''
+    if (!/viewport-fit\s*=\s*cover/.test(vp) || !/width\s*=\s*device-width/.test(vp)) {
+      problems.push(
+        `viewport meta: expected device-width + viewport-fit=cover, got ${JSON.stringify(observed.meta.viewport)} — declared in INSTALLED_APP_VIEWPORT in packages/frontend/src/lib/installed-app.ts`,
+      )
+    }
+  }
+  return problems
 }
 
 // Always shoot the design system; add caller routes (comma-separated).
@@ -3677,6 +3823,12 @@ async function main() {
   // process holding this worktree's port.
   let server
   let port = null
+  // The installed-shell observation and its verdict (#2735), populated after
+  // the server identity is proven. Declared here because the capture manifest,
+  // the summary and the exit gate are all further down main(); empty `problems`
+  // means the served manifest and iOS meta matched what the app source declares.
+  let observedShell = null
+  let installedShellProblems_ = []
 
   // Sync on purpose: an awaited promise does not settle before the process
   // leaves on a throw or a signal, and the first refusal this guard ever
@@ -3743,6 +3895,20 @@ async function main() {
       identity.identity_verified = true
       console.log(`screenshot: server identity verified — ${BASE_URL} is this worktree's app`)
     }
+    // The installed-shell check runs against the PROVEN server, before any
+    // capture: the metadata is shell state, not capture state, and a run that
+    // failed it should not spend minutes shooting PNGs it will have to re-shoot
+    // once the tag is fixed (#2735).
+    const shellExpectations = await loadInstalledAppExpectations()
+    const [manifestResponse, rootResponse] = await Promise.all([
+      fetch(`${BASE_URL}/manifest.webmanifest`),
+      fetch(`${BASE_URL}/`),
+    ])
+    observedShell = observeInstalledShell({
+      manifestBody: manifestResponse.ok ? await manifestResponse.text() : null,
+      html: rootResponse.ok ? await rootResponse.text() : null,
+    })
+    installedShellProblems_ = installedShellProblems(observedShell, shellExpectations)
   } catch (err) {
     teardown()
     throw err
@@ -4028,6 +4194,11 @@ async function main() {
           ? `${ARCHIVE_DIR_NAME}/${retention.archived}`
           : null,
         pruned_runs: retention.pruned,
+        // Installed-app shell evidence (#2735): what the served manifest and
+        // iOS meta actually were this run. Non-empty `problems` means the run
+        // FAILED even when every PNG is perfect — a screenshot of a phone
+        // that can no longer install the app is not evidence the demo works.
+        installed_shell: observedShell,
       },
       null,
       2,
@@ -4185,6 +4356,20 @@ async function main() {
       `captured from ${BASE_URL}${identity.identity_verified === true ? ' (identity verified)' : ' (identity NOT verified)'}.`,
   )
   console.log(`  Full record: ${path.relative(ROOT, MANIFEST)}`)
+  // Installed-shell metadata check (#2735) — the summary line the acceptance
+  // criterion names. The full observation sits in the capture manifest; the
+  // verdict prints here so a reader of the run log sees the shell state next
+  // to the captures it belongs to.
+  if (installedShellProblems_.length > 0) {
+    console.log(`\n✗ Installed-shell metadata check FAILED (${installedShellProblems_.length} problem(s)) — the screenshots show an app a phone may no longer install:`)
+    for (const problem of installedShellProblems_) console.log(`  ${problem}`)
+    console.log('  (expected identity is derived from packages/frontend/src/lib/installed-app.ts at run time;')
+    console.log('   operator-only shell checks live in the device checklist in docs/product/mobile-demo.md)')
+  } else {
+    console.log(
+      `✓ Installed-shell metadata check passed — manifest (id: ${observedShell.manifest?.id ?? 'n/a'}, display: ${observedShell.manifest?.display ?? 'n/a'}) and iOS meta match the app source (env: ${observedShell.environment ?? 'n/a'}).`,
+    )
+  }
   console.log('\nAttach these to the PR (or reference them in the Browser Verification section).')
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like
@@ -4208,6 +4393,15 @@ async function main() {
     // code does not survive a pipe.
     STALE_BUSY_DECLARATIONS.length > 0 &&
       `${STALE_BUSY_DECLARATIONS.length} stale busy-tolerance declaration(s)`,
+    // Installed-shell metadata (#2735) — GATING, same reasoning: "npm run
+    // screenshot" is the artifact future PRs are told to read for the shell
+    // state; a run that exits 0 while the manifest id or an iOS meta tag has
+    // drifted records a green claim the manifest contradicts. The playwright-
+    // unattestable half (standalone launch, login persistence, safe-area
+    // compositing) stays in the operator checklist — this gate is only the
+    // metadata, which is exactly what the harness CAN see.
+    installedShellProblems_.length > 0 &&
+      `${installedShellProblems_.length} installed-shell metadata problem(s)`,
   ].filter(Boolean)
   if (failures.length > 0) {
     printRunResult(false, failures.join('; '))

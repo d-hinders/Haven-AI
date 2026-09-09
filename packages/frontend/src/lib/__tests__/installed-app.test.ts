@@ -120,15 +120,31 @@ describe('installedAppMetadata and viewport', () => {
     expect(installedAppMetadata(PRODUCTION_ENVIRONMENT).appleWebApp).toMatchObject({ title: 'Haven' })
   })
 
-  it('carries themeColor from the brand token and restates the default viewport, nothing more', () => {
+  it('carries themeColor from the brand token, the default viewport, and viewport-fit (#2730)', () => {
     expect(INSTALLED_APP_VIEWPORT).toEqual({
       width: 'device-width',
       initialScale: 1,
+      viewportFit: 'cover',
       themeColor: cssToken('--v2-brand'),
     })
-    // `viewport-fit: cover` is #2730's; landing it here would change the
-    // standalone chrome under a slice that promised to move no baseline.
-    expect(INSTALLED_APP_VIEWPORT).not.toHaveProperty('viewportFit')
+  })
+
+  it('viewport-fit and the safe-area rules are one change, and neither is safe alone (#2730)', () => {
+    // #2729 asserted `not.toHaveProperty('viewportFit')` here, deliberately, so
+    // that the day it appeared somebody had to come back to this file. This is
+    // that visit. `cover` is what extends the page under the notch and the home
+    // indicator — and therefore what makes `env(safe-area-inset-*)` report
+    // anything but 0 — so shipping it without the padding puts controls under
+    // the status bar, and shipping the padding without it leaves the padding
+    // permanently 0. The stylesheet half is asserted here rather than left to
+    // prose: `globals.css` must declare all four insets, and it is what every
+    // rule and every Playwright inset test reads.
+    expect(INSTALLED_APP_VIEWPORT.viewportFit).toBe('cover')
+    for (const side of ['top', 'right', 'bottom', 'left']) {
+      expect(GLOBALS_CSS, `--v2-safe-${side} must read env(safe-area-inset-${side})`).toContain(
+        `--v2-safe-${side}: env(safe-area-inset-${side}, 0px);`,
+      )
+    }
   })
 })
 

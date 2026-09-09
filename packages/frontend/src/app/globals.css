@@ -151,6 +151,39 @@
   --v2-table-row-border: #e6ebf1;
   --v2-table-row-hover: #f0f4f9;
 
+  /* ── Safe-area insets (#2730, epic #2736) ─────────────────────────────────
+     The four `env(safe-area-inset-*)` readings, declared ONCE, so that every
+     rule that clears the notch or the home indicator reads a variable instead
+     of repeating an `env()` call.
+
+     Two reasons it is a variable rather than an inline `env()`:
+
+     1. **`env()` cannot be emulated, a variable can.** Chromium exposes no way
+        to set a safe-area inset, so a Playwright spec asserting "nothing sits
+        under the home indicator" against a raw `env()` would be asserting
+        against a permanent 0 — a check that cannot fail. Overriding these four
+        custom properties on `:root` gives the same arithmetic a real notch
+        produces, which is what `e2e/safe-area-insets.mobile.spec.ts` and the
+        inset case in `e2e/modal-action-row-reachability.spec.ts` do.
+     2. One place to read when asking what the shell thinks the insets are.
+
+     The `0px` fallback is load-bearing in the same way: `env()` with no
+     fallback resolves to an EMPTY token in a browser that has no such inset,
+     which makes `calc(1.5rem + var(--v2-safe-bottom))` invalid rather than
+     `1.5rem`, and an invalid `calc` drops the whole declaration. With the
+     fallback, every browser without a notch — every desktop, and every gate
+     this repository runs — computes exactly the padding it computed before
+     this change, so no baseline moves.
+
+     The insets are only non-zero in a standalone / fullscreen context whose
+     viewport is `viewport-fit=cover` (set in `lib/installed-app.ts`), which is
+     the installed-app shell #2729 landed. In Safari's normal browser chrome
+     they are 0 and everything below is inert. */
+  --v2-safe-top: env(safe-area-inset-top, 0px);
+  --v2-safe-right: env(safe-area-inset-right, 0px);
+  --v2-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --v2-safe-left: env(safe-area-inset-left, 0px);
+
   /* ── Layering scale (#1749) ────────────────────────────────────────────────
      Named tiers for everything that stacks. Reach for a token, never a fresh
      number: #1749 was a `z-[100]` header and a `z-[60]` sidebar toggle picked
@@ -173,6 +206,13 @@
   --v2-z-content: 10; /* in-flow overlaps: badges, gradient washes */
   --v2-z-sticky: 20; /* sticky table headers */
   --v2-z-chrome: 100; /* TopBar — the app shell's own bar */
+  /* The bottom tab bar (#2730, used by #2731) — the shell's OTHER bar, and the
+     one tier the scale's spacing-by-10 was left room for. Between chrome and
+     chrome-popover deliberately: a popover anchored in the top bar can extend
+     down over the bar's band on a phone and must not be clipped by it, while
+     the drawer and its scrim (130/140) have to cover the bar so "More" is not
+     painted over by the navigation it opened. */
+  --v2-z-tab-bar: 105;
   --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet) */
   --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
   --v2-z-nav-drawer: 140; /* mobile drawer itself */
@@ -257,6 +297,26 @@
 
 .v2-tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The gutter a full-screen overlay keeps between its panel and the screen edge,
+ * widened to clear the notch and the home indicator (#2730).
+ *
+ * `--v2-safe-gutter` is the overlay's OWN minimum, which each side takes only
+ * when it is larger than that side's inset — so `ui/Modal`, which sets 1rem,
+ * renders byte-identically wherever the insets are 0 (every desktop, every
+ * gate), and the overlays that have never had a gutter set none and stay at 0.
+ * Padding on the fixed wrapper rather than a margin on the panel, because the
+ * panel is `max-h`-constrained against the wrapper's content box: padding
+ * shrinks what the panel may fill, so a tall dialog stops above the home
+ * indicator instead of running under it.
+ */
+.v2-safe-overlay {
+  padding-top: max(var(--v2-safe-gutter, 0px), var(--v2-safe-top));
+  padding-right: max(var(--v2-safe-gutter, 0px), var(--v2-safe-right));
+  padding-bottom: max(var(--v2-safe-gutter, 0px), var(--v2-safe-bottom));
+  padding-left: max(var(--v2-safe-gutter, 0px), var(--v2-safe-left));
 }
 
 .v2-modal-backdrop {

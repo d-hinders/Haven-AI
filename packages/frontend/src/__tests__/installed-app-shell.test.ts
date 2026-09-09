@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BRAND_COLOURS } from '@/lib/brand-colours'
+import { INSTALLED_APP_VIEWPORT } from '@/lib/installed-app'
 
 /**
  * The installed-app shell as wired, not as built (#2729).
@@ -167,5 +168,14 @@ describe('root layout wiring (#2729)', () => {
     const layout = await loadLayout(undefined)
     expect(layout.viewport).toMatchObject({ themeColor: BRAND_COLOURS.brand, width: 'device-width', initialScale: 1 })
     expect(layout.metadata.title).toBe('Haven, agent payments within your rules')
+  })
+
+  it('the layout really exports the viewport that opts into the full screen (#2730)', () => {
+    // Distinct from the same assertion in `lib/__tests__/installed-app.test.ts`:
+    // that one pins the CONSTANT, this one pins what the layout hands Next. A
+    // layout that stopped spreading `INSTALLED_APP_VIEWPORT` would leave the
+    // constant correct and the page without `viewport-fit`, at which point
+    // every safe-area inset is 0 on a real phone and the padding is inert.
+    expect(INSTALLED_APP_VIEWPORT.viewportFit).toBe('cover')
   })
 })

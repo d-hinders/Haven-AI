@@ -15,9 +15,15 @@ const widthClasses = {
 
 type ModalWidth = keyof typeof widthClasses
 
+// The panel's ceiling, minus the insets the wrapper's padding now reserves
+// (#2730). Without the subtraction a tall dialog fills `100vh - 2rem` inside a
+// box that is shorter than that by the notch plus the home indicator, and the
+// overflow lands on the footer — the action row #1946 moved out of the scroll
+// body precisely so it could not be pushed off screen. Both terms are 0 in a
+// browser with no insets, so this is the same arithmetic it has always been.
 const maxHeightClasses = {
-  default: 'max-h-[calc(100vh-2rem)]',
-  tight: 'max-h-[calc(100vh-24px)]',
+  default: 'max-h-[calc(100vh-2rem-var(--v2-safe-top)-var(--v2-safe-bottom))]',
+  tight: 'max-h-[calc(100vh-24px-var(--v2-safe-top)-var(--v2-safe-bottom))]',
 } as const
 
 type ModalMaxHeight = keyof typeof maxHeightClasses
@@ -132,11 +138,14 @@ export function Modal({
   if (!open) return null
 
   return (
+    // `v2-safe-overlay` + a 1rem gutter is `p-4` that also clears the notch and
+    // the home indicator (#2730): each side takes whichever of the two is
+    // larger, so nothing moves where the insets are 0.
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem]"
     >
       <div
         className="absolute inset-0 v2-modal-backdrop"

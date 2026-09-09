@@ -45,7 +45,14 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     // composite. It looked fine only because --v2-bg is white and the page behind
     // it is the same white. `bg-bg` reads the channel token --v2-bg-rgb through
     // <alpha-value>, so the modifier compiles. See tailwind.config.js's colours.
-    <header className="relative z-[var(--v2-z-chrome)] h-14 flex items-center px-6 lg:px-8 border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md flex-shrink-0">
+    // Safe-area insets (#2730). Below `lg` only, and all three arithmetic
+    // forms collapse to the previous value when the insets are 0 — the bar
+    // GROWS by the top inset rather than padding its content into the same
+    // 56px, so the status bar sits over the bar's own background instead of
+    // over the first row of controls; the horizontal pair keep the `px-6`
+    // gutter and only widen it on a landscape phone, where the notch eats one
+    // side. `lg:` is untouched, so the desktop render is byte-identical.
+    <header className="relative z-[var(--v2-z-chrome)] h-14 max-lg:h-[calc(3.5rem+var(--v2-safe-top))] max-lg:pt-[var(--v2-safe-top)] flex items-center px-6 lg:px-8 max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md flex-shrink-0">
       {/*
         Left region: hamburger spacer + optional back-link.
 

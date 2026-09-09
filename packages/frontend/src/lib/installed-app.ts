@@ -136,9 +136,21 @@ export function installedAppMetadata(
  * exactly what Next injects by default — the product already lays out at
  * device width on a phone, verified on the deployed dev app — so this moves
  * no baseline; it exists to carry `themeColor` without a hand-written tag.
+ *
+ * `viewportFit: 'cover'` (#2730) is the half that is NOT inert: it extends the
+ * page under the notch and the home indicator, which is what makes the status
+ * bar read as part of the app rather than as a letterbox above it — and it is
+ * also what makes `env(safe-area-inset-*)` report anything but 0. The two ship
+ * together on purpose. Every rule that consumes those insets goes through
+ * `--v2-safe-*` in `globals.css`; `cover` without them would put controls under
+ * the notch, which is the defect #2730 exists to prevent rather than cause.
+ *
+ * Inert outside a standalone context: Safari with its own chrome reports zero
+ * insets, so this changes nothing in a normal browser tab or in any gate.
  */
 export const INSTALLED_APP_VIEWPORT: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  viewportFit: 'cover',
   themeColor: BRAND_COLOURS.brand,
 }

@@ -294,7 +294,7 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed top-3 left-4 z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+        className="lg:hidden fixed top-[calc(0.75rem+var(--v2-safe-top))] left-[max(1rem,var(--v2-safe-left))] z-[var(--v2-z-nav-toggle)] w-8 h-8 flex items-center justify-center rounded-md bg-[var(--v2-bg)] border border-[var(--v2-border)] text-[var(--v2-ink-2)] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       >
         <Icon icon={Menu} className="w-4 h-4" />
       </button>
@@ -323,8 +323,24 @@ export default function Sidebar() {
         />
       )}
 
+      {/*
+        Safe-area insets on the drawer (#2730), below `lg` only — at `lg` this
+        is a static column inside the shell and the shell's own chrome already
+        clears the screen edges.
+
+        The drawer is `inset-y-0 h-screen` and, in an installed standalone
+        context, `h-screen` is the WHOLE screen: its logo band would sit under
+        the status bar and its footer row — the account link and the `User
+        menu` kebab, which #2586 already had to rescue once — under the home
+        indicator. Padding on the `<aside>` itself rather than on the two rows
+        it protects, because the middle `<nav>` is `flex-1 overflow-y-auto`:
+        with `box-sizing: border-box` the padding comes out of the scroll
+        region's height, so both ends clear their obstruction and the scroll
+        region absorbs the difference. `pl` covers the landscape notch, where
+        the drawer is on the eaten side.
+      */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-[var(--v2-z-nav-drawer)] w-[240px] h-screen lg:h-full bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-[var(--v2-z-nav-drawer)] w-[240px] h-screen lg:h-full max-lg:pt-[var(--v2-safe-top)] max-lg:pb-[var(--v2-safe-bottom)] max-lg:pl-[var(--v2-safe-left)] bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
           collapsed ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
         }`}
       >

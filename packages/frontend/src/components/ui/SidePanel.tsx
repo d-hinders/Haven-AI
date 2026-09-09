@@ -41,9 +41,18 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : 'Details'}
-        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-modal"
+        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-modal pr-[var(--v2-safe-right)]"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4">
+        {/*
+          The panel is flush to three screen edges by design, so the insets go
+          on its ROWS rather than on the wrapper (#2730) — a gutter around the
+          wrapper would un-flush it at every width, insets or not. Header pads
+          down from the notch, footer up from the home indicator, and the panel
+          itself pads in from a landscape notch on the right, which is the side
+          it is anchored to. Each is `max(<the row's own padding>, <inset>)`, so
+          all three are unchanged wherever the insets are 0.
+        */}
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4 pt-[max(1rem,var(--v2-safe-top))]">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h2>
             {subtitle ? (
@@ -63,7 +72,9 @@ export function SidePanel({
         <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
 
         {footer ? (
-          <div className="border-t border-[var(--v2-border)] px-5 py-4">{footer}</div>
+          <div className="border-t border-[var(--v2-border)] px-5 py-4 pb-[max(1rem,var(--v2-safe-bottom))]">
+            {footer}
+          </div>
         ) : null}
       </div>
     </div>

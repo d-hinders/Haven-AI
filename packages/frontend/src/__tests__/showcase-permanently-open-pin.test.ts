@@ -49,7 +49,7 @@ describe('permanently-open showcase census (#2680 pin)', () => {
         }
         return false
       })
-    expect(bare.map(({ n }) => n).sort((a, b) => a - b)).toEqual([1942, 1976])
+    expect(bare.map(({ n }) => n).sort((a, b) => a - b)).toEqual([1943, 1977])
     // And both belong to WalletPopover renders.
     for (const { n } of bare) {
       const up = lines.slice(0, n).reverse().find((l) => /<([A-Za-z][A-Za-z0-9]*)/.test(l))

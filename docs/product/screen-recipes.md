@@ -389,8 +389,11 @@ Money and risk clarity:
   resource hostname, so an x402 row and an ordinary agent payment read the same
   at the title and are told apart by those two surfaces.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
-- Keep amount in its own cell; date and the external-details link are separate
-  columns or controls.
+- Keep amount in its own cell **at `md` and up**; date and the external-details
+  link are separate columns or controls. Below `md` the amount column collapses
+  and the amount rides under the title inside the activity cell (#2734) — its
+  110px was coming straight off the title, which is the only flexible column,
+  and the title wrapped to three lines at 390px as a result.
 - Full history table sorting must use raw transaction values for amount sorting and `aria-sort` on sortable headers.
 - On mobile, preserve direction, activity/movement, amount, and the
   external-details link. Secondary columns, including date and initiator, may

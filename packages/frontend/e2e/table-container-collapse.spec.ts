@@ -143,8 +143,12 @@ test('/transactions: the collapse follows the CONTAINER while the viewport stand
   expect(starved.containerWidth, 'the container really is 717px wide').toBe(717)
   expect(
     starved.bodyCells,
-    'a 717px container collapses three columns out of the body row even though the viewport is 1440px',
-  ).toBe(4)
+    'a 717px container collapses four columns out of the body row even though the viewport is 1440px',
+    // 4 -> 3 with #2734: `amount` now collapses below `md` too, so a starved
+    // container drops initiator, fromTo, date AND amount. The 718px sibling
+    // below is unchanged and is what keeps this from being a number nobody
+    // can justify.
+  ).toBe(3)
   expect(
     starved.columns,
     'and Table.Head collapses wholesale below the md stage, as it does at a narrow viewport',

@@ -272,8 +272,8 @@ export default function TransactionsTable({
             // already `revealAt="md"`, so Amount was the LAST sortable header
             // visible below `md`, and there is no sort control outside this
             // header row. Sorting is therefore a desktop affordance now. That
-            // is a capability change, not a layout one, and it is tracked
-            // separately rather than decided here.
+            // is a capability change, not a layout one, and it is tracked in
+            // #2790 rather than decided here.
             <Table.SortableHeaderCell
               label="Amount"
               direction={directionOf('amount')}

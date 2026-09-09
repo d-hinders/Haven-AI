@@ -259,7 +259,11 @@ test(`${route}: the amount rides under the title below md, and the title stops w
   // with rows, and it has no title `<p>`, so waiting on the role measured the
   // skeleton and produced zero readings. The zero-guard below caught it, which
   // is the only reason this is a comment and not a false green.
-  await page.waitForSelector('tbody tr td p', { timeout: 60_000 })
+  // 30s, deliberately under the 60s test timeout in `playwright.config.ts`. At
+  // 60s the action can never fire first, so a missing selector reports an
+  // unattributable "Test timeout of 60000ms exceeded" instead of naming what it
+  // waited for — measured twice on a cold `next dev` compile.
+  await page.waitForSelector('tbody tr td p', { timeout: 30_000 })
 
   const rows = await page.evaluate(() => {
     const visible = (el: Element) => el.getClientRects().length > 0
@@ -279,16 +283,27 @@ test(`${route}: the amount rides under the title below md, and the title stops w
         // Anchor on the rendered currency text, not on a class or a component
         // name: this file's own lesson is that a probe written against the
         // shape it was made for finds nothing after the shape changes.
-        const amount = Array.from(tr.querySelectorAll('*')).filter(
+        // Excluding the title `<p>` is load-bearing, not tidiness. This takes
+        // the FIRST visible leaf in document order and the title precedes the
+        // stacked amount inside the same cell — so a fixture title containing
+        // "USDC" or "ETH" (a token name, an `ETHGlobal`-style merchant) would
+        // resolve to the title and make `amountInTitleCell` trivially true.
+        // The structural half would then be unable to fail while still
+        // reporting green, which is the one thing this test exists to prevent.
+        const amounts = Array.from(tr.querySelectorAll('*')).filter(
           (el) =>
             visible(el) &&
+            el !== p &&
+            !el.contains(p) &&
             el.children.length === 0 &&
-            /USDC|ETH/.test((el.textContent ?? '').trim()),
-        )[0]
+            /^[-+]?[\d,.]+\s*(USDC|ETH)$/.test((el.textContent ?? '').trim()),
+        )
+        const amount = amounts[0]
         return {
           text: (p.textContent ?? '').trim(),
           lines,
           cellWidth: titleCell ? +titleCell.getBoundingClientRect().width.toFixed(1) : 0,
+          amountMatches: amounts.length,
           amountVisible: amount !== undefined,
           amountInTitleCell: amount !== undefined && amount.closest('td') === titleCell,
         }
@@ -296,7 +311,9 @@ test(`${route}: the amount rides under the title below md, and the title stops w
       .filter((r): r is NonNullable<typeof r> => r !== null)
   })
 
-  // Zero rows would pass every assertion below. Make the reading visible.
+  // Zero rows would pass every assertion below. Note the narrower guarantee:
+  // rows whose title `<p>` is missing map to null and are dropped, so this
+  // proves "at least one row was measured", not "every rendered row was".
   expect(rows.length).toBeGreaterThan(0)
 
   // `expect.soft` so ONE run reports every property that broke. With hard
@@ -306,6 +323,12 @@ test(`${route}: the amount rides under the title below md, and the title stops w
   // line count was never reached.
   for (const row of rows) {
     expect.soft(row.amountVisible, `no amount rendered for "${row.text}"`).toBe(true)
+    // Exactly one VISIBLE amount: the column copy below `md` is `display:none`
+    // and must stay that way. Two visible matches would mean the column did
+    // not collapse and the stacked copy was added on top of it.
+    expect
+      .soft(row.amountMatches, `${row.amountMatches} visible amounts in "${row.text}"`)
+      .toBe(1)
     expect
       .soft(row.lines, `"${row.text}" wraps to ${row.lines} lines at 390px`)
       .toBeLessThanOrEqual(2)

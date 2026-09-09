@@ -11,7 +11,7 @@ covers:
   - docs/operations/package-dev-channel.md
   - packages/backend/src/openapi/spec.test.ts
   - docs/quality/issue-classification-2026-09.csv
-last-verified: "2026-09-09" # #2798: re-read D1; the normal isolation rule now has one bounded proportionality-lane exception.
+last-verified: "2026-09-09"
 ---
 
 # The 600-issue retrospective (2026-09-03)

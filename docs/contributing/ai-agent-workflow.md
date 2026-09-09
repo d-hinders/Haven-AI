@@ -11,7 +11,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
   - scripts/ci/review-isolation.mjs
-last-verified: "2026-09-09" # #2798: re-read Review Isolation for the bounded proportionality-lane exception; its normal worktree guard remains unchanged.
+last-verified: "2026-09-09"
 ---
 
 # Haven AI Agent Workflow

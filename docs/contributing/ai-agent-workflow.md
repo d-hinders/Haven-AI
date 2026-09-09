@@ -11,7 +11,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
   - scripts/ci/review-isolation.mjs
-last-verified: "2026-09-08"
+last-verified: "2026-09-09" # #2798: re-read Review Isolation for the bounded proportionality-lane exception; its normal worktree guard remains unchanged.
 ---
 
 # Haven AI Agent Workflow
@@ -330,7 +330,11 @@ Avoid worktrees for multiple agents editing the same feature surface. That usual
 
 ## Review Isolation ([#2455](https://github.com/d-hinders/Haven-AI/issues/2455))
 
-An independent reviewer works from its own copy of the tree, so the builder can keep working without invalidating the verdict. **Make that copy with `git worktree add` or `git clone`. Never `cp -R` a worktree.**
+Except for a `ship-next` PR that passes every [Proportionality lane](../../.agents/skills/ship-next/SKILL.md#proportionality-lane-2798)
+boundary, an independent reviewer works from its own copy of the tree so the builder
+can keep working without invalidating the verdict. A qualifying lane verdict binds to
+its named SHA, `git diff origin/dev...<sha>`, and CI results instead. **Make every
+other review copy with `git worktree add` or `git clone`. Never `cp -R` a worktree.**
 
 `cp -R` is not a copy of a repository. A linked worktree's `.git` is a **file** containing `gitdir: <parent>/.git/worktrees/<name>`, and copying it copies the pointer — so the copy's HEAD, index and refs are still the builder's. Its **files** are frozen; its **git** is live. In one session that produced a blocking finding reporting a paragraph as reverted when it was untouched, and a caveat reporting assertions as stripped when they had been added — the same skew read in both directions ([#2415](https://github.com/d-hinders/Haven-AI/issues/2415), [#2444](https://github.com/d-hinders/Haven-AI/issues/2444), [#2421](https://github.com/d-hinders/Haven-AI/issues/2421)). Both reviewers behaved correctly; the mechanism misled them.
 

@@ -388,7 +388,7 @@ Run by `.github/workflows/docs.yml` on **every** pull request:
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**`) | Advisory |
 
-All six blocking scripts need no npm dependencies and finish in seconds, which is why the
+All five blocking scripts need no npm dependencies and finish in seconds, which is why the
 `pull_request` trigger carries **no `paths:` filter** — a required check must
 report on every PR or auto-merge deadlocks waiting for a run that never happens
 (the #933 lesson; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md) §One-time

@@ -11,6 +11,21 @@
 // Mutation-proven for #2680: adding a bare `open` to a showcase element inside
 // an inert wrapper (a second permanently-open illustration) reddens;
 // restoring the file turns it green, byte-identical.
+//
+// Re-proven for #2800 in BOTH directions, because the count and the tag loop
+// catch different things: a third bare `open` under `WalletPopover` reddens the
+// count ("length of 2 but got 3"), and one under `InfoModal` reddens the tag
+// loop ("expected 'InfoModal' to be 'WalletPopover'").
+//
+// KNOWN LIMIT, found by a mutation that SURVIVED before it was diagnosed: the
+// inert lookup below walks at most 12 lines up, so a bare `open` placed deeper
+// than that inside a long inert wrapper is not counted at all. The first
+// attempt at the second mutation landed 18 lines below its wrapper, passed, and
+// looked like a hole in the guard until the placement was checked. It is a real
+// limit of the census — a third illustration buried deep in a wrapper would be
+// missed — and it is recorded rather than widened here, because a larger window
+// starts swallowing the state-driven previews the filter below exists to
+// exclude.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -49,13 +64,20 @@ describe('permanently-open showcase census (#2680 pin)', () => {
         }
         return false
       })
-    // Absolute line numbers, so they move whenever anything above them does —
-    // 1943/1977 -> 1972/2006 when #2792 added comments 400 lines up. The census
-    // itself did not change: still exactly two, still both `WalletPopover`,
-    // still both inert-wrapped. Updated rather than loosened, because
-    // narrowing someone else's guard is not this PR's business; #2800 proposes
-    // the count-plus-tag form that would not need touching.
-    expect(bare.map(({ n }) => n).sort((a, b) => a - b)).toEqual([1972, 2006])
+    // A COUNT, not positions (#2800). This asserted `[1943, 1977]` and then
+    // `[1972, 2006]`, because absolute line numbers in a ~2000-line page move
+    // whenever anything above them does — the second time from comments added
+    // 400 lines earlier, in a section with no relationship to `WalletPopover`.
+    //
+    // The positions never carried the guard. #2680's job is that a SECOND
+    // statically-held-open showcase reddens, and that is caught here by the
+    // count, and below by the tag loop: a third bare `open` inside an inert
+    // wrapper makes this 3, and one under a different component fails the
+    // `toBe('WalletPopover')` check. What the line numbers added was a red
+    // build on unrelated edits — and an invitation to paste the new numbers in
+    // without checking whether the census had actually changed, which is a
+    // guard training people to update it thoughtlessly.
+    expect(bare, 'exactly two permanently-open illustrations').toHaveLength(2)
     // And both belong to WalletPopover renders.
     for (const { n } of bare) {
       const up = lines.slice(0, n).reverse().find((l) => /<([A-Za-z][A-Za-z0-9]*)/.test(l))

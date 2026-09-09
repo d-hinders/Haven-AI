@@ -309,7 +309,16 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/backend/src/routes/payments.ts',
       'packages/backend/src/rails/execution-rail.ts',
     ],
-    'last-verified': '2026-08-27',
+    // #2756: the over-budget discriminator paragraph re-read against
+    // `delegation-authorize.ts` and corrected — both x402 legs refuse at a
+    // pre-check before the REDEMPTION, not "before any chain call" (the
+    // pre-check is itself an `eth_call` against the enforcer's storage), and
+    // the revert-reason discriminator applies to `over-budget-refused` alone.
+    // The body was also edited substantively by #2753 while this date said
+    // 2026-08-27; a manifest entry is this file's equivalent of a chain, so it
+    // drifts the same way a `last-verified` does. Scope: that paragraph and
+    // the scenario-table rows it names. Nothing else in that README re-read.
+    'last-verified': '2026-09-08',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',

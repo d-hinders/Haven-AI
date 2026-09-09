@@ -63,8 +63,10 @@ erc7710 branch cannot pass as this leg.
 The third discriminator differs by path, and since #2706 that split matters:
 `over-budget-refused` still reaches the chain, so it (3) decodes the
 ABI-encoded revert reason and requires it to **name a caveat enforcer**
-(`lib/revert-reason.ts`). Both x402 legs are refused at a pre-check before any
-chain call, so there is no revert reason to decode; they instead require the
+(`lib/revert-reason.ts`). Both x402 legs are refused at a pre-check before the
+REDEMPTION — the pre-check is itself an `eth_call` against the enforcer's
+storage, so "before any chain call" would be wrong — and there is therefore no
+revert reason to decode; they instead require the
 typed `error_code: delegation_budget_exceeded` and a `remaining_atomic` equal
 to the live on-chain read — a pre-check answering from a different delegation
 refuses correctly by accident. Asserting only the status is the defect #2016

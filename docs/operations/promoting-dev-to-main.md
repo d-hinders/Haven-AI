@@ -73,8 +73,10 @@ for how the environments are wired, see
 ## The promotion window — `dev` is held while the PR is open
 
 **From opening the promotion PR until it merges, do not merge anything into
-`dev`.** The PR's head is the `dev` *branch*, not a pinned SHA, so anything that
-lands moves it, with three consequences:
+`dev`.** Nothing technically enforces the hold — GitHub will happily accept
+merges into `dev` while the promotion PR is open — which is exactly why this
+window is written down. The PR's head is the `dev` *branch*, not a pinned SHA,
+so anything that lands moves it, with three consequences:
 
 1. The required contexts on `main` are re-evaluated at the new head. Each one
    that applies re-runs and must go green; the rest report `skipped`, which

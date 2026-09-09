@@ -871,7 +871,10 @@ them is a string a caller supplies:
   `moneyFlowJobConclusion` the promotion gate uses since #2404). The job check
   is not decoration: a run whose `gate` job refused the harness is reported by
   GitHub with run-level conclusion **`success`** and the job `skipped`
-  (measured on `ci.yml` run 33604474457), and every deploy leaves two or three
+  (measured on qa-dev run `34340710137`, 2026-09-09: event `deployment_status`,
+  head branch `dev`, jobs `gate: success` + `money-flow: skipped`, run-level
+  conclusion `success` — the run the job-vs-run block above cites, so both
+  citations measure the same shape), and every deploy leaves two or three
   such runs at a SHA that *is* in the Railway index. Judged at run level they
   are fresh post-deploy greens in which nothing ran, and the newest of them
   could mask a real harness failure at the same SHA. A `workflow_dispatch` at

@@ -34,7 +34,7 @@ covers:
   - packages/frontend/src/hooks/useSafeOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -395,7 +395,12 @@ key works from the backup device (`hybridPasskeyToSignWith` in `lib/signer.ts` �
 since #1933 the one place the credential is chosen, called by
 `lib/delegationPasskeySigner.ts`, which inlined a second copy of the rule until
 then; `pickSigningPath` in `hooks/useDelegationBudget.ts`
-chooses the *path*, passkey versus EOA, and never the credential). `passkeys[0]`
+chooses the *path*, passkey versus EOA, and never the credential). Since #2732
+the hook also runs one background reader — a visible-only poll of the read-only
+`GET /agents/:id/delegations` whose failed ticks leave the last rendered budgets
+untouched (no error-branch flip) — while the signer set is deliberately **not**
+polled: it is fetched on mount and refreshed after explicit signer changes,
+never on a timer. `passkeys[0]`
 survives as the fallback for the case where **no** device marker matches — a
 cleared or never-written marker — and that fallback is safe rather than a
 loophole: the marker is a local hint, so the worst it costs is a ceremony the

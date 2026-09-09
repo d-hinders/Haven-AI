@@ -1,5 +1,5 @@
-import { renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockApiGet = vi.fn()
 const mockUseAuth = vi.fn()
@@ -213,5 +213,104 @@ describe('aggregated portfolio hooks', () => {
     expect(result.current.transactions).toEqual([])
     expect(result.current.total).toBe(0)
     expect(result.current.error).toBe('Failed to load transactions')
+  })
+})
+
+describe('aggregated portfolio hooks — visible-only polling (#2732)', () => {
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    mockUseAuth.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('useAggregatedPortfolio: a failed silent tick keeps the last good totals instead of wiping them to zero', async () => {
+    mockSafes([
+      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    mockApiGet.mockResolvedValue({ totalUsd: 42, totalEur: 38, breakdown: [] })
+    const { result } = renderHook(() => useAggregatedPortfolio())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.totalUsd).toBe(42)
+
+    mockApiGet.mockRejectedValue('unreachable')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.totalUsd).toBe(42)
+    expect(result.current.totalEur).toBe(38)
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('useAggregatedBalances: a failed silent tick keeps the last good balances', async () => {
+    mockSafes([
+      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    mockApiGet.mockResolvedValue({ balances: [usdc('1000000')] })
+    const { result } = renderHook(() => useAggregatedBalances())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.balances).toHaveLength(1)
+
+    mockApiGet.mockRejectedValue('unreachable')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.balances).toHaveLength(1)
+    expect(result.current.balances[0]?.balance).toBe('1000000')
+    expect(result.current.error).toBeNull()
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('useAggregatedTransactions: a failed silent tick keeps the last good transactions', async () => {
+    mockSafes([
+      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    mockApiGet.mockResolvedValue({
+      transactions: [transaction('0xgood')],
+      total: 1,
+      page: 1,
+      limit: 10,
+      pages: 1,
+    })
+    const { result } = renderHook(() => useAggregatedTransactions())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.transactions).toHaveLength(1)
+
+    mockApiGet.mockRejectedValue('unreachable')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.transactions).toHaveLength(1)
+    expect(result.current.transactions[0]?.hash).toBe('0xgood')
+    expect(result.current.error).toBeNull()
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('useAggregatedPortfolio: a successful silent tick refreshes totals without the loading flag', async () => {
+    mockSafes([
+      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+    ])
+    mockApiGet.mockResolvedValue({ totalUsd: 42, totalEur: 38, breakdown: [] })
+    const { result } = renderHook(() => useAggregatedPortfolio())
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockResolvedValue({ totalUsd: 50, totalEur: 45, breakdown: [] })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.totalUsd).toBe(50)
+    expect(result.current.totalEur).toBe(45)
+    expect(result.current.loading).toBe(false)
   })
 })

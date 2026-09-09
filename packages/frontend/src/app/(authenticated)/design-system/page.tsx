@@ -1488,7 +1488,12 @@ export default function DesignSystemPage() {
                 <Table.HeaderCell align="left" revealAt="xl">Initiator</Table.HeaderCell>
                 <Table.HeaderCell align="left" revealAt="md">From / To</Table.HeaderCell>
                 <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} revealAt="xl" />
-                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" />
+                {/* `revealAt="md"` renders identically today — the header row
+                    is already `display: none` below the md stage — but this
+                    document's own rule is "header and body must be converted
+                    together, always", and a body cell on a stage its header
+                    does not name is the #1774 shape one layer down. */}
+                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" revealAt="md" />
                 <Table.HeaderCell srLabel="External details" className="w-8" />
               </tr>
             </Table.Head>
@@ -1596,6 +1601,16 @@ export default function DesignSystemPage() {
                     <div className={`mt-1 ${tableHideFromClass('md')}`}>
                       <TransactionMovement from={row.from} to={row.to} />
                     </div>
+                    {/* The amount, riding under the title while its own column
+                        is collapsed (#2792). LEFT-aligned, hanging under the
+                        start of the title — the rule in this document's own
+                        § Transaction tables, which #2734 shipped the other way
+                        first and a design review reversed: right alignment is
+                        a property of a column of numbers, and a stacked amount
+                        is not a column. */}
+                    <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
+                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
+                    </div>
                   </td>
                   <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] ${tableColumnClass('xl')}`}>
                     {row.initiator}
@@ -1606,7 +1621,14 @@ export default function DesignSystemPage() {
                   <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] ${tableColumnClass('xl')}`}>
                     {row.date}
                   </td>
-                  <td className="w-[110px] px-2 py-4 align-middle text-right md:w-auto md:px-4">
+                  {/* Collapsed below `md`, in step with `TransactionsTable`
+                      (#2734/#2792). The 110px this column cost came straight
+                      out of Activity — the only flexible column — and that is
+                      what the showcase is here to demonstrate. The date rider
+                      goes with it, which is correct rather than incidental:
+                      the real table shows no date below `md` either, so the
+                      two now agree at every stage instead of at most of them. */}
+                  <td className={`px-4 py-4 align-middle text-right ${tableColumnClass('md')}`}>
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>

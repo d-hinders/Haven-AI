@@ -1213,6 +1213,22 @@ Pinning the `md`+ columns instead of staging them is the tempting alternative an
 
 **`TransactionsTable.tsx` still reveals everything at the single `md` stage, and must not be restructured to match the showcase's two.** It is also a seven-column table and it escapes measure starvation a different way, by **truncating its title to one line instead of wrapping it**. Re-measured under the container keying: one line at every width, 89.6px at 768px *and* at 1024px (ellipsised, with the full string on the `title` attribute), 225.1px at 1280px — so the defect above simply does not arise there. The staging rule is about tables whose flexible cell *wraps*. Restructuring `TransactionsTable` for consistency with a showcase would be a change against a defect measurement says is absent, which is the trap § *Local hint marker* already warns about. What #1999 did change there is only the *key*: the same columns collapse at the same widths, from the container instead of the viewport.
 
+**Where the two DO now agree: the amount column collapses below `md` in both**
+([#2734](https://github.com/d-hinders/Haven-AI/issues/2734) for the component,
+[#2792](https://github.com/d-hinders/Haven-AI/issues/2792) for the showcase),
+with the amount riding under the title and the date going with it. That is the
+one axis worth keeping in step, because it is the shape this document teaches:
+the showcase carried the old column for one merge and
+`e2e/table-container-collapse.spec.ts` measured the gap — 3 surviving body cells
+at a 717px container on `/transactions`, still 4 here — which is why that
+assertion is the check that they agree rather than a number about one of them.
+
+Two axes still diverge **on purpose**, and neither is drift: the showcase stages
+in two steps (`md` + `xl`) where the component reveals at one, per the paragraph
+above; and the component carries its narrow widths unconditionally into desktop
+while the showcase hands them back with `md:w-auto`, because the showcase sizes
+its columns from content and the component does not.
+
 Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390 (pinned by [`packages/frontend/src/__tests__/capture-viewports.test.ts`](../../packages/frontend/src/__tests__/capture-viewports.test.ts), #2680). So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard — see `e2e/transaction-title-measure.spec.ts`, which asserts the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation. `e2e/table-container-collapse.spec.ts` therefore holds the viewport fixed and resizes the query container itself, in both halves (header labels and body cells) at once.
 
 ### Sections (`Section`)

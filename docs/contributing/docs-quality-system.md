@@ -120,12 +120,12 @@ empty candidate set is reported as "nothing was checked" and fails closed under
 
 ## The gates
 
-Every row runs on **every** pull request except the weekly audit, and each
-names the workflow or runner that reports it. The `pull_request` trigger of
-`.github/workflows/docs.yml` carries **no `paths:` filter**: a required check
-must report on every PR or auto-merge deadlocks waiting for a run that never
-happens (#933; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md)
-§ One-time GitHub setup).
+Each row names the script, workflow or runner that reports it. The `docs.yml`
+rows run on **every** pull request: that trigger carries **no `paths:` filter**,
+because a required check must report on every PR or auto-merge deadlocks waiting
+for a run that never happens (#933; see [`autonomous-pr-loop.md`](autonomous-pr-loop.md)
+§ One-time GitHub setup). Doc/config drift is the exception — it rides the
+backend vitest job, so a PR touching no backend surface never runs it.
 
 | Check | Tool | Blocking? |
 | --- | --- | --- |

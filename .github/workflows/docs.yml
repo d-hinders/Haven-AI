@@ -67,20 +67,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # `docs:check` now includes the #1843 chain-integrity check, which
-          # compares each changed doc's `last-verified` line against the merge
-          # base. A shallow clone has no base commit to read, and the check
-          # fails closed in CI rather than reporting a clean bill of health.
+          # The #1843 chain-integrity check was the stated reason for this and
+          # is RETIRED (#2681, #2775): nothing `docs:check` runs reads git
+          # history any more — `ui-gate-wording` and `covers-gaps` use
+          # `git ls-files`, which a shallow clone answers.
+          #
+          # Kept anyway, and deliberately NOT dropped in #2776: the one
+          # remaining git dependency is `coupling-gate.test.mjs`, which does
+          # `git rev-parse HEAD` and computes a three-dot range against itself.
+          # That looks shallow-safe by inspection and was not PROVEN so, and the
+          # cost of being wrong is a required check breaking on somebody else's
+          # PR. Whether depth 1 suffices is an open question with a cheap answer
+          # for anyone willing to run it.
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
 
-      # Every doc has valid front-matter, every `covers` glob resolves, no
-      # changed doc dropped an entry from its `last-verified` chain, portable
-      # agent skills plus client adapters stay aligned, and — since #2657 — no
-      # live doc sentence restates either UI merge-gate rule #2636 retired.
+      # Every doc has valid front-matter, every `covers` glob resolves,
+      # portable agent skills plus client adapters stay aligned, no live doc
+      # sentence restates either UI merge-gate rule #2636 retired (#2657), and
+      # no governed doc names a file its `covers:` cannot reach (#2679). The
+      # `last-verified` chain check that used to be in this list retired with
+      # the chain itself (#2681, #2775).
       # Dependency-free, so no `npm ci` is needed.
       #
       # #2657 hangs off `docs:check` rather than off a new workflow or a new
@@ -91,17 +101,15 @@ jobs:
       # like its neighbours, and this job has no `paths:` filter on
       # `pull_request`, so it sees every PR.
       #
-      # BASE_SHA/HEAD_SHA are set only for `pull_request`. On a `push` to
-      # main/dev the chain check sees neither and skips loudly: there is no
-      # base to compare against and nobody to act on a finding. Adding it to this job
+      # Adding it to this job
       # rather than to a new one is deliberate: **Docs front-matter & agent
       # skills** is already a required check, so the rule is enforced the day
       # it merges instead of the day someone remembers to edit the ruleset
       # (the #933 shape, one step removed).
       - name: Validate docs and agent skills
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # No `env:` here since #2776: BASE_SHA/HEAD_SHA were read by the
+        # retired chain check. `coupling-gate.mjs` still reads them, but it runs
+        # in docs-coupling.yml, not this job — verified by grep, not assumed.
         run: npm run docs:check
 
       # Unit tests for the documentation and agent-skill validators.
@@ -114,7 +122,7 @@ jobs:
       # could only ever be prose — and it lost the first time it was used, on
       # the merge of PR #2272. The rule now has a mechanism.
       #
-      # It lives on THIS job for the reason the chain check above does: **Docs
+      # It lives on THIS job for the reason the retired chain check did: **Docs
       # front-matter & agent skills** is already a required status check, so the
       # rule is enforced the day it merges rather than the day someone remembers
       # to edit the ruleset. `Repo CI config checks` — where the rest of

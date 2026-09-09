@@ -174,7 +174,9 @@ the control that reads the body.
 **Where else the self-satisfying shape lives**, surveyed under #2323 so it is not
 re-derived. "Same shape" means: the artifact that satisfies a check is written by
 the person the check is aimed at. Three of the four are left as they are, with
-reasons, and none was fixed in that PR:
+reasons, and none was fixed in that PR; the fourth was retired outright with
+the chain it guarded (#2681, #2775) and is kept below because the pattern it
+illustrated is what this survey is about:
 
 - **`covers:` front-matter** — the author declares which code a doc describes,
   and `validate-frontmatter.mjs` only checks that each glob resolves to at least
@@ -205,6 +207,13 @@ reasons, and none was fixed in that PR:
   prior line surviving into the new one — which is a property no other check
   here asks about. Nothing replaced it; the argument for retiring it is that a
   date beside an unread entry was evidence of nothing.
+- **`EXEMPT_PACKAGE_DOCS`** (`package-docs.mjs`) — a `packages/**` Markdown file
+  leaves the system by its author writing a reason string, and check (4b)
+  verifies only that the string is non-empty. Same shape, small blast radius: the
+  boundary itself is visible and enumerated, which was #2088's whole point.
+- **The advisory coupling job** — always exits 0 by design. It is not
+  self-certifying, but it is the reason #2323's fix is a report rather than a
+  block, and its strength is bounded by whether a human reads the comment.
 
 - `covers` is **required** but may be empty (`covers: []`) for narrative docs
   with no direct code mirror (indexes, research, archives, process prose). Keep
@@ -257,8 +266,7 @@ file and is dependency-free like the other `scripts/docs/*` tools.
 ### Validate locally
 
 ```bash
-npm run docs:check   # front-matter + covers globs, agent skills, README agent section, last-verified chains, retired UI merge-gate wording
-npm run docs:chain   # just the chain check, against origin/dev
+npm run docs:check   # front-matter + covers globs, agent skills, README agent section, retired UI merge-gate wording, covers: gaps
 npm run docs:test    # unit tests for the docs and agent-skill validators
 ```
 

@@ -424,25 +424,37 @@ test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first ru
   assert.equal(wrote[BASE], '{}')
 })
 
-test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
-  // The other half, and the reason the case above is not simply a tightening
-  // that breaks baseline creation: with no baseline file at all, `--update` is
-  // how the baseline comes into existence, and it still works.
-  //
-  // `scaffold` supplies the baseline by default, so this fixture removes it --
-  // the omission IS the fixture. The guard's own third self-check refuses a
-  // missing baseline on a PLAIN run, so this exercises a path only `--update`
-  // reaches.
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
   const files = scaffold({ [PAGE]: copy('Haven runs a policy engine for you.') })
   delete files[BASE]
-  const { status, wrote } = runGuard('frontend-copy-lint.mjs', {
+  const refused = runGuard('frontend-copy-lint.mjs', {
     also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
     files,
     args: ['--update'],
     readBack: [BASE],
   })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote[BASE], null)
+
+  const accepted = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files,
+    args: ['--update', '--accept-new'],
+    readBack: [BASE],
+  })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote[BASE], /"policy engine": 1/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const files = scaffold({ [PAGE]: copy('Your Haven wallet stays in your control.') })
+  delete files[BASE]
+  const { status, wrote } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'], files, args: ['--update'], readBack: [BASE],
+  })
   assert.equal(status, 0)
-  assert.match(wrote[BASE], /"policy engine": 1/)
+  assert.deepEqual(JSON.parse(wrote[BASE]), {})
 })
 
 test('CLI: a malformed baseline prints one line, and no longer dumps the error object', () => {

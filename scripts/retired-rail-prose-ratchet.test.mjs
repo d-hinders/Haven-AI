@@ -220,15 +220,31 @@ test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first ru
   assert.equal(wrote[BASE], '{}')
 })
 
-test('CLI: a MISSING baseline file still writes -- the real first-run allowance', () => {
-  const { status, wrote } = runGuard('retired-rail-prose-ratchet.mjs', {
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
+  const shared = {
     also: ['lib/ratchet.mjs'],
-    args: ['--update'],
     files: { [SRC]: '// stays readable\n// stays readable\n', [JUST]: '{}' },
     readBack: [BASE],
+  }
+  const refused = runGuard('retired-rail-prose-ratchet.mjs', { ...shared, args: ['--update'] })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote[BASE], null)
+
+  const accepted = runGuard('retired-rail-prose-ratchet.mjs', {
+    ...shared, args: ['--update', '--accept-new'],
+  })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote[BASE], /stays-readable/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const { status, wrote } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'], args: ['--update'],
+    files: { [SRC]: '// current language\n', [JUST]: '{}' }, readBack: [BASE],
   })
   assert.equal(status, 0)
-  assert.match(wrote[BASE], /stays-readable/)
+  assert.deepEqual(JSON.parse(wrote[BASE]), {})
 })
 
 test('CLI: a malformed baseline prints one line, not a node:internal banner', () => {

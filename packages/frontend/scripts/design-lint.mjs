@@ -31,8 +31,9 @@
  * /design-system.
  *
  *   node scripts/design-lint.mjs            # check against the baseline
- *   node scripts/design-lint.mjs --update   # rewrite the baseline (shrink or
- *                                           # intentional, reviewed growth)
+ *   node scripts/design-lint.mjs --update   # tighten, or create an empty baseline
+ *   node scripts/design-lint.mjs --update --accept-new
+ *                                           # reviewed non-empty first write only
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
 import {
@@ -41,6 +42,8 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  ACCEPT_NEW_BASELINE_FLAG,
+  firstRunRefusalMessage,
   runGate,
 } from '../../../scripts/lib/ratchet.mjs'
 import { isEscaped } from '../../../scripts/lib/lint-escapes.mjs'
@@ -466,6 +469,7 @@ function iconCensus() {
 function main() {
   if (process.argv.includes('--icons')) return iconCensus()
   const update = process.argv.includes('--update')
+  const acceptNew = process.argv.includes(ACCEPT_NEW_BASELINE_FLAG)
   const { counts, details } = scanAll()
   const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
 
@@ -480,10 +484,11 @@ function main() {
     // Reproduced before the fix: a component with two raw-palette hex literals
     // fails the plain run naming the file, and `--update` exits 0 and writes
     // the violations into the baseline.
-    const violations = updateRefusals(counts, baseline, { firstRun })
+    const violations = updateRefusals(counts, baseline, { firstRun, acceptNew })
     if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      if (firstRun) console.error(firstRunRefusalMessage(firstRun))
       console.error(
         '\nGrowth is a reviewed decision, not a ratchet step. Route the colour through a ' +
           'var(--v2-…) token or use the type ramp. If the exception is genuinely correct, ' +

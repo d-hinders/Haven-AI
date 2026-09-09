@@ -1,10 +1,9 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — no direct code mirror
+covers:
+  - docs/contributing/docs-quality-system.md
 last-verified: "2026-09-08"
-verified:
-  - "#2640: the Code-quality loop entry repointed at `.agents/skills/quality-scan/references/discovery-method.md`, where the method now lives; the old path is a redirect stub. Scope: that one list entry."
 ---
 
 # Haven Documentation

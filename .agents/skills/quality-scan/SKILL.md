@@ -140,9 +140,6 @@ scan would otherwise be empty, so the emptiness is explained.
       checks, and each gate's green-without-running exit branches. This is
       the *CI gate coverage vs. what is actually exercised* dimension made
       concrete (#2317, #2088, #2300, #1044).
-   7. **Chain health** — `last-verified` line length against
-      `chain-integrity.mjs`'s ceiling, in the guard's unit, and duplicate
-      entries (#2477).
 4. Read the comment archaeology: `TODO`s, issue-number references, and
    repeated warning comments are where a codebase names its own recurring
    pain. A warning copy-pasted across files is a structural finding announcing

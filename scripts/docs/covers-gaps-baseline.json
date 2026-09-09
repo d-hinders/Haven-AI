@@ -62,9 +62,6 @@
     "scripts/ci/operator-verify-close-guard.mjs",
     "scripts/ci/qa-freshness.mjs"
   ],
-  "docs/contributing/code-quality-loop.md": [
-    "packages/backend/src/openapi/spec.ts"
-  ],
   "docs/contributing/docs-quality-system.md": [
     ".github/money-path-globs.json",
     "packages/backend/src/routes/payments.ts",
@@ -86,13 +83,9 @@
     "packages/backend/dep-lint-callsite-ceiling.json",
     "packages/backend/scripts/db-schema-smoke.ts",
     "packages/backend/src/db/migrate.ts",
-    "packages/backend/src/openapi/spec.test.ts",
     "packages/core/src/api-types.ts",
     "scripts/ci/money-path.test.mjs",
     "scripts/dep-lint.mjs"
-  ],
-  "docs/contributing/ship-playbooks/docs.md": [
-    "scripts/docs/coupling-gate.mjs"
   ],
   "docs/contributing/ship-playbooks/frontend.md": [
     ".github/workflows/update-visual-baselines.yml",
@@ -107,7 +100,6 @@
     "scripts/frontend-copy-lint.mjs"
   ],
   "docs/contributing/ship-playbooks/money.md": [
-    ".github/money-path-globs.json",
     "scripts/ci/money-path-restatement-scan.mjs",
     "scripts/ci/money-path.test.mjs"
   ],
@@ -195,9 +187,6 @@
   "docs/quality/scan-ledger.md": [
     "packages/connect/src/runtime-manifest.ts",
     "scripts/generate-api-types.mjs"
-  ],
-  "docs/regulatory/casp-changelog/README.md": [
-    "scripts/docs/chain-integrity.mjs"
   ],
   "docs/regulatory/casp-risk-guardrails.md": [
     ".github/money-path-globs.json",

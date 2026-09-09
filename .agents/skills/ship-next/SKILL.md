@@ -311,12 +311,9 @@ do not restate them here.
    - **A parent doc cleared by a shard → advisory, and it is the one to read first (#2323).** The gate's own section is *"Parent docs cleared by a shard — body not re-read"*. The coupling requirement is genuinely satisfied and nothing blocks; what the shard does not do is prove anybody opened the parent, because the author of the change writes the shard. Re-read the named sections against the matched files. Leaving the parent untouched and saying so in the PR is a legitimate outcome — a rubber-stamped `last-verified` is worse than a stale one. Before #2323 the parent was not merely un-blocked here, it was **absent from the comment**, which is how #2274 (PR #2322) shipped a false CASP sentence past a green tick.
    - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
 
-   **Bump `last-verified` the conflict-free way** the docs-quality system prescribes —
-   the gate's own error message names it. Two concurrent PRs that both prepend an entry
-   to the same front-matter line conflict by construction, about nothing
-   ([#1496](https://github.com/d-hinders/Haven-AI/issues/1496): three such resolutions
-   in a day, each pure ceremony). Follow the current convention rather than the shape
-   of the line you find above yours.
+   **Update `last-verified` only after a genuine re-read.** It is a date, not
+   a change log: record the scope and evidence in the PR or a per-change record
+   rather than adding front-matter prose.
 
    Do not open the pull request while a `covers:`-mapped doc is left unreviewed. Report what the gate actually printed — "no covered docs implicated" is only evidence when the gate saw the candidate diff, which is why it now refuses to call an empty file set a pass.
 
@@ -486,9 +483,9 @@ reason is allowed; there is no cap on filing but the bar applies to every issue.
    Diff the merged result with the three-dot form *Independent Review* step 1
    already requires — a two-dot diff against a base that moved reports everyone
    else's additions as your deletions (a phantom-revert blocking finding on 3 Sep,
-   in the #2421 build session). A merge that touches a `last-verified` chain
-   interleaves it; the rule and its check are the docs-quality system's (#2477,
-   #2504), not this skill's.
+   in the #2421 build session). If a concurrent documentation change touches a
+   date-only `last-verified` field, retain the current date unless you re-read
+   that document; the evidence belongs in the PR or its per-change record.
 3. Commit conventionally using any attribution required by the active client or repository policy.
 4. Push the issue branch.
 5. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.

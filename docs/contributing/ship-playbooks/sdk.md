@@ -1,10 +1,13 @@
 ---
 owner: "@d-hinders"
 status: current
-covers: []  # narrative — process playbook
+covers:
+  - packages/sdk/**
+  - packages/signer/**
+  - packages/mcp/**
+  - packages/connect/**
+  - packages/cli/**
 last-verified: "2026-08-19"
-verified:
-  - "#1607: published set corrected to five (cli was missing), wildcard-pin rule updated to the #1526 two-direction form; every other claim re-read against the current release process and stands"
 ---
 
 # SDK / API / credentials playbook

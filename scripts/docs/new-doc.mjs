@@ -70,11 +70,6 @@ export function buildDoc({ relPath, owner, title, today = todayIso() } = {}) {
     `status: ${status}`,
     'covers: []  # narrative — list the code paths this doc describes, one per line',
     `last-verified: "${today}"`,
-    // #2637: the chain is a block list, one entry per line. A new doc starts
-    // with the entry that created it, so the shape is present from the first
-    // commit rather than being learned on the first re-verification.
-    'verified:',
-    `  - "#<issue>: created. Scope: <what this doc claims>."`,
     '---',
     '',
     `# ${heading}`,

@@ -39,9 +39,9 @@ const withCovers = docs.length - empty.length
 heading('#2678 measurement 1/4 — corpus and chain mass')
 row('governed docs (status not archived/research)', docs.length)
 row('governed body words', bodyWords.toLocaleString('en-US'))
-row('`last-verified` chain words', chainWords.toLocaleString('en-US'))
-row('chain bytes', chainBytes.toLocaleString('en-US'))
-row('chain share of governed prose', `${Math.round((chainWords / (bodyWords + chainWords)) * 100)}%`)
+row('live verification-chain words (retired)', chainWords.toLocaleString('en-US'))
+row('live verification-chain bytes (retired)', chainBytes.toLocaleString('en-US'))
+row('live verification-chain share of governed prose', `${Math.round((chainWords / (bodyWords + chainWords)) * 100)}%`)
 row('body words on lines carrying an issue ref', `${Math.round((issueRefWords / bodyWords) * 100)}%`)
 
 console.log('')
@@ -55,7 +55,7 @@ const claude = docs.find((d) => d.file === 'CLAUDE.md')
 if (claude) {
   console.log('')
   row('CLAUDE.md body words', words(claude.body).toLocaleString('en-US'))
-  row('CLAUDE.md chain bytes', Buffer.byteLength(claude.chain, 'utf8').toLocaleString('en-US'))
+  row('CLAUDE.md live verification-chain bytes', Buffer.byteLength(claude.chain, 'utf8').toLocaleString('en-US'))
 }
 
 console.log('')

@@ -6,8 +6,6 @@ covers:
   - packages/backend/src/modules/passport/receipt.ts
   - packages/backend/src/routes/passport-verify.ts
 last-verified: "2026-09-04"
-verified:
-  - "#2542: § Check the state now directs passport diagnostics to operator-only /health/ops with HAVEN_OPS_TOKEN; the public probe no longer exposes this configuration. The smoke procedure is otherwise unchanged."
 ---
 
 # Passport verification setup

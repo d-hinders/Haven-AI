@@ -258,7 +258,7 @@ test("CLI: a `covers` glob resolving to no files exits 1", () => {
   )
 })
 
-test("CLI: the retired inline `#` chain is refused by name (#2637)", () => {
+test("CLI: a retired inline verification annotation is refused (#2681)", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
     ...OPTS,
     files: baseFixture({
@@ -269,8 +269,16 @@ test("CLI: the retired inline `#` chain is refused by name (#2637)", () => {
     }),
   })
   assert.equal(status, 1)
-  assert.match(out, /carries a retired inline `#` chain/)
-  assert.match(out, /migrate-chain-to-list\.mjs/)
+  assert.match(out, /carries a retired inline annotation/)
+  assert.match(out, /last-verified-chains-2026-09\.md/)
+})
+
+test('parser: a retired verified block is rejected by name (#2681)', () => {
+  const r = parseFrontMatter(
+    '---\nowner: "@x"\nstatus: current\ncovers: []  # narrative\nlast-verified: "2026-09-08"\nverified:\n  - "#1: old record"\n---\n',
+  )
+  assert.equal(r.ok, false)
+  assert.match(r.error, /`verified:` is retired/)
 })
 
 test('CLI: a THROW inside main() still exits non-zero (the second refusal)', () => {

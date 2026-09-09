@@ -200,7 +200,12 @@ test('/design-system: both stages are container-keyed, and the second one is not
   // And the md stage, from the same fixed viewport.
   await setContainerWidth(page, 717)
   const narrow = await readShape(page)
-  expect(narrow.bodyCells, 'a 717px container collapses to the four-cell narrow layout').toBe(4)
+  // 4 -> 3 with #2792: the showcase's amount column now collapses below the md
+  // stage the way `TransactionsTable` does (#2734), so the narrow layout is
+  // direction / activity / link. This assertion IS the check that the two
+  // tables agree — it read 4 here and 3 on `/transactions` for as long as they
+  // did not.
+  expect(narrow.bodyCells, 'a 717px container collapses to the three-cell narrow layout').toBe(3)
   expect(narrow.columns, 'and the header row collapses with it').toEqual([])
 })
 

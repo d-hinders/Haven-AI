@@ -49,7 +49,13 @@ describe('permanently-open showcase census (#2680 pin)', () => {
         }
         return false
       })
-    expect(bare.map(({ n }) => n).sort((a, b) => a - b)).toEqual([1943, 1977])
+    // Absolute line numbers, so they move whenever anything above them does —
+    // 1943/1977 -> 1972/2006 when #2792 added comments 400 lines up. The census
+    // itself did not change: still exactly two, still both `WalletPopover`,
+    // still both inert-wrapped. Updated rather than loosened, because
+    // narrowing someone else's guard is not this PR's business; #2800 proposes
+    // the count-plus-tag form that would not need touching.
+    expect(bare.map(({ n }) => n).sort((a, b) => a - b)).toEqual([1972, 2006])
     // And both belong to WalletPopover renders.
     for (const { n } of bare) {
       const up = lines.slice(0, n).reverse().find((l) => /<([A-Za-z][A-Za-z0-9]*)/.test(l))

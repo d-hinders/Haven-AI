@@ -105,6 +105,16 @@ AND its commit is an ancestor of the promotion head (#2404 — `selectGreenRun`
 in `scripts/ci/qa-freshness.mjs`), so a run on any other ref does not satisfy
 the gate.
 
+Dispatch is the norm during a release, not the fallback. While merges are
+landing on `dev`, a run that looks green in the Actions list can be an
+automatic one whose harness skipped: two post-deploy runs on the same commit
+`06ae6cc8` both conclude `success` at run level, and only one of them actually
+ran `money-flow` (live-measured via the jobs API; the selector rules and that
+pair are owned by `docs/operations/agent-qa.md` § *Automation & gating* — read
+them there rather than restating them here). Manual dispatches on `dev` are
+routine, not an emergency measure: the 0.1.36-alpha.0 promotion leaned on one,
+`workflow_dispatch` at 04:32Z on 2026-09-08 (#2725).
+
 Dispatch rather than wait for the automatic post-deploy run: that run is bound
 to whatever commit was deployed, not to the head you are promoting. And when you
 inspect any run, read the **`money-flow` job's** conclusion — a run whose job

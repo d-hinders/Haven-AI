@@ -892,3 +892,227 @@ describe('partitionVersionOnly (#2164)', () => {
     assert.deepEqual(behavioural, [])
   })
 })
+
+// --- The CLI path (#2722, epic #2720) ---------------------------------------
+//
+// Everything above tests the pure core (`evaluate`, `selectGreenRun`, the
+// diff-shape helpers). What the promotion actually consumes is the PROCESS:
+// its exit code gates dev → main in dev-gate.yml, and `main()` keeps three
+// refusals the pure tests cannot reach:
+//
+//   1. the env refusal — no GITHUB_REPOSITORY / SOURCE_BRANCH, exit 1;
+//   2. the query refusal — a failing `gh run list` must exit 1 naming the
+//      query, not degrade into a clean-sounding "no run found";
+//   3. the evaluate refusal — every { ok: false } above, printed as
+//      `::error::` with exit 1.
+//
+// Refusals 1 and 2 need no repository state, so they run through the shared
+// slice-1 harness. Refusal 3's interesting instances (stale, and the
+// money-path-after-run block that is this gate's whole point) and the accept
+// path need `git merge-base --is-ancestor` and `git diff` to answer against
+// REAL commits — runGuard's gitInit stages files but never commits, so HEAD
+// never resolves, every run is refused as not-in-history, and the gate answers
+// no_run for every fixture. Rather than widen the shared harness (this issue's
+// diff is the three test files), runQaFreshnessCli extends the same
+// copy-into-a-throwaway-tree pattern with two commits and a stub `gh` on PATH.
+
+import { runGuard } from '../test-support/guard-cli.mjs'
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync, execFileSync } from 'node:child_process'
+import { delimiter, dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+
+const SCRIPTS_DIR = fileURLToPath(new URL('..', import.meta.url))
+
+const GLOBS_FIXTURE = JSON.stringify({ globs: ['packages/signer/**'] })
+const ENV_BASE = { GITHUB_REPOSITORY: 'haven/haven', SOURCE_BRANCH: 'dev' }
+
+// Stub `gh`, dispatched on argv shape. The guard calls the real
+// execFileSync('gh', ...); this answers the two shapes the gate uses —
+// `run list` and the jobs endpoint — from files the test wrote. An unhandled
+// shape exits 99, which the guard's catch turns into the query refusal, so a
+// fixture mistake cannot masquerade as an accept.
+const GH_STUB = `#!${process.execPath}
+const fs = require('node:fs')
+const a = process.argv.slice(2).join(' ')
+const dir = process.env.GH_STUB_DIR
+const out = (f) => process.stdout.write(fs.readFileSync(dir + '/' + f, 'utf8'))
+if (a.startsWith('run list')) return out('runs.json')
+if (a.includes('/jobs')) return out('jobs.json')
+console.error('gh-stub: unhandled argv: ' + a)
+process.exit(99)
+`
+
+/**
+ * Build the fixture, run `node scripts/ci/qa-freshness.mjs` in it, and return
+ * `{ status, out, baseSha, headSha }`. `rows` may be a function of the
+ * fixture's SHAs, because the run row must name a commit that exists in the
+ * fixture's history. `commits` (array of [path, body]) lands as a SECOND
+ * commit, so HEAD differs from the run's SHA — that diff is what
+ * money_path_after_run reasons about.
+ */
+function runQaFreshnessCli({ files = {}, env = ENV_BASE, rows = [], commits = [] } = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'qa-freshness-cli-')))
+  try {
+    mkdirSync(join(root, 'scripts', 'ci'), { recursive: true })
+    cpSync(join(SCRIPTS_DIR, 'ci/qa-freshness.mjs'), join(root, 'scripts', 'ci', 'qa-freshness.mjs'))
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, rel)), { recursive: true })
+      writeFileSync(join(root, rel), body)
+    }
+    const git = (...args) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' })
+    const commit = (msg) => {
+      git('-c', 'core.excludesFile=/dev/null', 'add', '-A')
+      git('-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', msg)
+    }
+    git('init', '-q')
+    commit('base')
+    const baseSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    let headSha = baseSha
+    if (commits.length) {
+      for (const [rel, body] of commits) {
+        mkdirSync(dirname(join(root, rel)), { recursive: true })
+        writeFileSync(join(root, rel), body)
+      }
+      commit('change')
+      headSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    }
+    const binDir = join(root, '.bin')
+    const stubDir = join(root, '.gh-stub')
+    mkdirSync(binDir, { recursive: true })
+    mkdirSync(stubDir, { recursive: true })
+    writeFileSync(join(binDir, 'gh'), GH_STUB, { mode: 0o755 })
+    const runRows = typeof rows === 'function' ? rows({ baseSha, headSha }) : rows
+    writeFileSync(join(stubDir, 'runs.json'), JSON.stringify(runRows))
+    writeFileSync(
+      join(stubDir, 'jobs.json'),
+      JSON.stringify({ jobs: [{ name: 'money-flow', conclusion: 'success' }] }),
+    )
+    const res = spawnSync(process.execPath, [join(root, 'scripts', 'ci', 'qa-freshness.mjs')], {
+      encoding: 'utf8',
+      cwd: root,
+      env: { ...process.env, ...env, GH_STUB_DIR: stubDir, PATH: `${binDir}${delimiter}${process.env.PATH}` },
+      timeout: 120_000,
+    })
+    if (res.error) throw res.error
+    return { status: res.status, out: `${res.stdout ?? ''}${res.stderr ?? ''}`, baseSha, headSha }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+test('CLI refusal 1 (env): no GITHUB_REPOSITORY/SOURCE_BRANCH exits 1 with the env refusal', () => {
+  // Through the shared harness: nothing here needs git history or gh — main()
+  // must refuse before either is touched.
+  const { status, out } = runGuard('ci/qa-freshness.mjs', {
+    env: { GITHUB_REPOSITORY: '', SOURCE_BRANCH: '' },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /::error::qa-freshness: GITHUB_REPOSITORY and SOURCE_BRANCH are required\./)
+})
+
+test('CLI refusal 2 (query): a failing `gh run list` exits 1 naming the query, not a clean no_run', () => {
+  // PATH holds an empty directory: `gh` does not exist, execFileSync throws,
+  // and the catch must exit 1 NAMING the query failure. Neuter that exit and
+  // the run degrades into evaluate's no_run — still exit 1, but the operator
+  // is told "no successful run found" about a CI system the gate never
+  // managed to ask. The doesNotMatch pins the difference.
+  const emptyPath = realpathSync(mkdtempSync(join(tmpdir(), 'qa-freshness-nogh-')))
+  try {
+    const { status, out } = runGuard('ci/qa-freshness.mjs', {
+      files: { '.github/money-path-globs.json': GLOBS_FIXTURE },
+      env: { ...ENV_BASE, PATH: emptyPath },
+    })
+    assert.equal(status, 1)
+    assert.match(out, /::error::qa-freshness: could not query workflow runs:/)
+    assert.doesNotMatch(out, /No successful/)
+  } finally {
+    rmSync(emptyPath, { recursive: true, force: true })
+  }
+})
+
+test('CLI refusal 3 (evaluate → no_run): an empty green-run window refuses by name', () => {
+  const { status, out } = runQaFreshnessCli({
+    files: { '.github/money-path-globs.json': GLOBS_FIXTURE },
+    rows: [],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /::error::No successful 'QA — money-flow \(dev\)' run found on dev\./)
+})
+
+test('CLI refusal 3 (evaluate → stale): a 40h-old covering run is refused through the CLI', () => {
+  // The release-bump case: the run exists, is admitted (event, ancestry
+  // against a real commit, money-flow job green) and covers HEAD — but it is
+  // older than the 30h window. FRESHNESS_HOURS is left unset on purpose: the
+  // default the workflow actually ships with is the bound being asserted.
+  const { status, out } = runQaFreshnessCli({
+    files: { '.github/money-path-globs.json': GLOBS_FIXTURE },
+    rows: ({ headSha }) => [
+      {
+        createdAt: new Date(Date.now() - 40 * HOUR).toISOString(),
+        headSha,
+        databaseId: 1,
+        event: 'deployment_status',
+        headBranch: null,
+      },
+    ],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /::error::Latest green qa-dev run is 40h old \(> 30h\)\./)
+})
+
+test('CLI refusal 3 (evaluate → money_path_after_run): money-path code the run never saw blocks promotion', () => {
+  // THE promotion-gate refusal: the run is green, fresh, and on a commit in
+  // the promoted history — but packages/signer/src/server.ts changed AFTER
+  // it. "Recency is not coverage" is the line a neutered gate would wave a
+  // money-path change through on, so it is asserted through the process, not
+  // only at the pure layer.
+  const { status, out } = runQaFreshnessCli({
+    files: { '.github/money-path-globs.json': GLOBS_FIXTURE },
+    commits: [
+      [
+        'packages/signer/src/server.ts',
+        "export const SIGNER_VERSION = '9.9.9'\nexport const spend = () => {}\n",
+      ],
+    ],
+    rows: ({ baseSha }) => [
+      {
+        createdAt: new Date().toISOString(),
+        headSha: baseSha,
+        databaseId: 7,
+        event: 'deployment_status',
+        headBranch: null,
+      },
+    ],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /::error::Money-path files changed AFTER the latest green QA run/)
+  assert.match(out, /packages\/signer\/src\/server\.ts/)
+  assert.match(out, /recency is not coverage/)
+})
+
+test('CLI accept: a fresh admitted run at HEAD with nothing changed since exits 0 and says so', () => {
+  // The positive control for every refusal above: a gate that refuses
+  // everything would satisfy all four refusal cases. The run here is REAL
+  // admitted evidence, not a clean-repo vacuity — the selector had to admit it
+  // by event, by a merge-base against a real commit, and by the money-flow
+  // job's conclusion read from the stubbed jobs API.
+  const { status, out } = runQaFreshnessCli({
+    files: { '.github/money-path-globs.json': GLOBS_FIXTURE },
+    rows: ({ headSha }) => [
+      {
+        createdAt: new Date().toISOString(),
+        headSha,
+        databaseId: 3,
+        event: 'deployment_status',
+        headBranch: null,
+      },
+    ],
+  })
+  assert.equal(status, 0)
+  assert.match(
+    out,
+    /✅ Money-flow QA green 0h ago \(within 30h\) at [0-9a-f]{40}, and no money-path files changed since\./,
+  )
+})

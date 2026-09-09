@@ -275,3 +275,59 @@ test('parseStatusZ leaves paths with spaces intact — `-z` does not quote them'
   // paths, and the audit would report a name that does not exist on disk.
   assert.deepEqual(parseStatusZ(' M a dir/b c.png\0'), [{ code: ' M', path: 'a dir/b c.png' }])
 })
+
+// --- The CLI path (#2722, epic #2720) ---------------------------------------
+//
+// `main()` is five lines and carries the only thing the workflow step consumes:
+// env in, report out, `process.exitCode = result.exitCode` — the wiring that
+// turns `auditBaselines`' verdict into a red or green step. It holds exactly
+// one refusal (exitCode 1 reaching the process) and one accept (exit 0), and
+// neither is reachable from the pure tests above: they hand `auditBaselines`
+// hand-built change arrays, so a `main()` that hard-coded `process.exitCode =
+// 0` — the #2690/#2704 shape — would leave this whole suite green while the
+// workflow step it serves could no longer fail at all.
+//
+// Driven through the shared slice-1 harness. `gitInit` is what makes the
+// fixture real: the guard enumerates its scan set with `git status` (not by
+// walking the tree), and runGuard stages exactly the files the test wrote, so
+// `collectChanges()` reports a genuine `A` entry with a genuine blob hash. The
+// audit runs against the fixture repo, never against this checkout.
+
+import { runGuard } from '../test-support/guard-cli.mjs'
+
+const BASELINE = 'packages/frontend/e2e/__screenshots__/agent-card-desktop.png'
+
+test('CLI refusal: mode `all` with nothing declared blocks the commit, exit 1', () => {
+  // The #2218 refusal: `all` rewrites without comparing, so an undeclared
+  // full refresh must stop the workflow BEFORE the commit step. The refusal
+  // is asserted in full — exit code AND the `::error::` the step log shows
+  // AND the outcome name — because exit 1 alone cannot tell "refused" from
+  // "crashed collecting changes".
+  const { status, out } = runGuard('ci/baseline-audit.mjs', {
+    gitInit: true,
+    files: { [BASELINE]: 'stamped-by-playwright\n' },
+    env: { UPDATE_MODE: 'all' },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /::error::Baseline audit blocked the commit \(undeclared-full-refresh\)\./)
+  assert.match(out, /❌ Mode `all` rewrites a baseline on ANY byte difference/)
+  // The refusal must hand back the exact list, so satisfying it is a paste:
+  assert.match(out, /agent-card-desktop\.png/)
+})
+
+test('CLI accept: mode `changed` with a moved baseline reports and exits 0', () => {
+  // The positive control: the ordinary one-dispatch path must NOT block —
+  // a guard that cried wolf on every regeneration would be routed around
+  // within a week, and routing around it means running --update-snapshots
+  // on laptops. Same staged-baseline fixture as the refusal, opposite
+  // verdict: only the mode differs.
+  const { status, out } = runGuard('ci/baseline-audit.mjs', {
+    gitInit: true,
+    files: { [BASELINE]: 'stamped-by-playwright\n' },
+    env: { UPDATE_MODE: 'changed' },
+  })
+  assert.equal(status, 0)
+  assert.match(out, /✅ 1 baseline\(s\) failed comparison and were regenerated\./)
+  assert.match(out, /agent-card-desktop\.png.*added/)
+  assert.doesNotMatch(out, /::error::/)
+})

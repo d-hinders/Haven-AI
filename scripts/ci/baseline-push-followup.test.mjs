@@ -465,3 +465,119 @@ describe('findStickyCommentId', () => {
     assert.equal(findStickyCommentId([{ id: 9, body: '<!-- haven:docs-coupling -->' }]), null)
   })
 })
+
+// --- The CLI path (#2722, epic #2720) ---------------------------------------
+//
+// The file's own header concedes it: "the thin IO wrappers below it … and
+// `main`'s sequencing are NOT unit-tested". `main()` is what the workflow runs,
+// and its one refusal is the exit: classify() returning `deadlocked` must
+// reach the process as `process.exitCode = 1` plus the `::error::` line. A
+// `main()` that dropped that assignment — the #2690/#2704 shape — would leave
+// every pure test above green while the workflow step went permanently green
+// on a deadlocked PR, which is precisely the outcome this file exists to make
+// impossible ("a green run that leaves a PR unmergeable is the least useful of
+// the three possible outcomes").
+//
+// Driven through the shared slice-1 harness, with a stub `gh` on PATH: the
+// deadlocked path needs `openPullRequests` to answer, and a real `gh` would
+// query d-hinders/Haven-AI. The stub also serves the parked-runs query, so the
+// deadlock path runs to its comment POST inside the 6×10s poll budget
+// (pollParkedRuns' own header warns a single immediate query usually loses —
+// an empty answer is the no-comment fallback shape, a different line with a
+// different meaning, and the stub's instant answer never races it).
+
+import { runGuard } from '../test-support/guard-cli.mjs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+// Stub `gh`, dispatched on argv shape. POSTs are appended to posts.log so a
+// test can assert the guard's WRITE, not only its print. An unhandled shape
+// exits 99, which openPullRequests turns into the worst-case `[{number:null}]`
+// — a fixture mistake therefore looks like a refused lookup, never like an
+// accept, and the POST assertions below cannot be satisfied by accident.
+const GH_STUB = `#!${process.execPath}
+const fs = require('node:fs')
+const a = process.argv.slice(2).join(' ')
+const dir = process.env.GH_STUB_DIR
+const out = (f) => process.stdout.write(fs.readFileSync(dir + '/' + f, 'utf8'))
+if (a.startsWith('api --method POST')) {
+  fs.appendFileSync(dir + '/posts.log', a + '\\n')
+  return process.stdout.write('')
+}
+if (a.startsWith('pr list')) return out('prs.json')
+if (a.includes('actions/runs?')) return out('parked.json')
+console.error('gh-stub: unhandled argv: ' + a)
+process.exit(99)
+`
+
+const PRS_OPEN = JSON.stringify([{ number: 12 }])
+const PRS_NONE = JSON.stringify([])
+const PARKED = JSON.stringify({
+  workflow_runs: [
+    { name: 'Backend checks', id: 42, conclusion: 'action_required', html_url: 'https://example/run/42' },
+  ],
+})
+
+/**
+ * Run the follow-up with the stub `gh` first on PATH. Returns
+ * `{ status, out, posts }` — posts is the log of every `gh api --method POST`
+ * the guard made (empty string when it made none).
+ */
+function runFollowupCli({ prs = PRS_OPEN, parked = PARKED, env = {} } = {}) {
+  const stubDir = realpathSync(mkdtempSync(join(tmpdir(), 'push-followup-gh-')))
+  try {
+    const binDir = join(stubDir, 'bin')
+    mkdirSync(binDir, { recursive: true })
+    writeFileSync(join(binDir, 'gh'), GH_STUB, { mode: 0o755 })
+    writeFileSync(join(stubDir, 'prs.json'), prs)
+    writeFileSync(join(stubDir, 'parked.json'), parked)
+    writeFileSync(join(stubDir, 'posts.log'), '')
+    const { status, out } = runGuard('ci/baseline-push-followup.mjs', {
+      env: {
+        GITHUB_REPOSITORY: 'haven/haven',
+        GITHUB_REF_NAME: 'update-visual-baselines',
+        PUSHED_SHA: 'abc123def4567890',
+        BASELINES_COMMITTED: 'true',
+        HAS_PUSH_TOKEN: 'false',
+        GH_STUB_DIR: stubDir,
+        PATH: `${binDir}${delimiter}${process.env.PATH}`,
+        ...env,
+      },
+    })
+    const posts = readFileSync(join(stubDir, 'posts.log'), 'utf8')
+    return { status, out, posts }
+  } finally {
+    rmSync(stubDir, { recursive: true, force: true })
+  }
+}
+
+test('CLI refusal: bot push + open PR exits 1, posts the sticky comment, and says so', () => {
+  // The deadlock. classify() says exitCode 1 + shouldComment; `main()` must
+  // (a) enumerate parked runs, (b) POST the comment, (c) set the exit. posts
+  // is the comment asserted at its transport, not just its log line: the
+  // comment carries the approve/re-run recovery, and it must be a sticky
+  // POST keyed on our marker (an update would mean a stale-comment mixup,
+  // a missing POST means the recovery never reached the PR).
+  const { status, out, posts } = runFollowupCli()
+  assert.equal(status, 1)
+  assert.match(out, /::error::\[deadlocked\] Pushed with GITHUB_TOKEN onto a branch with an open pull request\./)
+  assert.match(out, /Parked runs found: 1/)
+  assert.match(out, /Sticky comment created on #12\./)
+  assert.match(posts, /^api --method POST repos\/haven\/haven\/issues\/12\/comments -f body=/m)
+  assert.match(posts, /haven:baseline-push-followup/)
+  assert.match(posts, /Approve these 1 parked runs/)
+})
+
+test('CLI accept: no open PR is not a deadlock — exit 0 and no comment attempted', () => {
+  // The positive control for the refusal above: same bot push, same committed
+  // baselines, but the PR lookup answers empty. The documented reasoning: a
+  // PR opened LATER is attributed to its human opener, so the checks run
+  // normally. The empty posts log is the negative half of the assertion —
+  // nothing was commented anywhere.
+  const { status, out, posts } = runFollowupCli({ prs: PRS_NONE })
+  assert.equal(status, 0)
+  assert.match(out, /\[no-open-pr\] Pushed with GITHUB_TOKEN, but no pull request is open on this branch\./)
+  assert.doesNotMatch(out, /::error::/)
+  assert.equal(posts, '')
+})

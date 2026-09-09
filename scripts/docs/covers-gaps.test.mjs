@@ -16,6 +16,8 @@ import {
   newGaps,
   hasShrunk,
   lineOf,
+  BARE_TOKEN_RE,
+  resolveBareName,
 } from './covers-gaps.mjs'
 
 const TRACKED = new Set([
@@ -27,6 +29,13 @@ const TRACKED = new Set([
   '.github/workflows/dev-gate.yml',
   'package.json',
   'docs/product/design-system.md',
+  // #2780 bare-name fixtures
+  'packages/frontend/src/components/EnvBadge.tsx',
+  'packages/frontend/src/components/connect-agent/CopyBlock.tsx',
+  'packages/frontend/src/components/AddFundsModal.tsx',
+  'packages/frontend/src/components/__tests__/AddFundsModal.test.tsx',
+  'packages/frontend/Dockerfile',
+  'packages/backend/Dockerfile',
 ])
 
 const doc = (front, body) => `---\n${front}\n---\n\n${body}\n`
@@ -329,4 +338,87 @@ test('CLI: a legacy count-format baseline names the migration, not a TypeError',
   withTempBaseline('{\n  "CLAUDE.md": 3\n}\n', (p) => {
     assert.equal(runCli(['--update', '--accept-new'], p).status, 0)
   })
+})
+
+// ---------------------------------------------------------------------------
+// Bare component names (#2780).
+//
+// The path regex needs a `packages/`-style prefix, so a doc naming `EnvBadge`
+// was invisible to this check by documented design. Measured across the 72
+// governed docs before the change: 38 (doc, file) pairs in 12 docs.
+
+test('#2780: a backticked bare component name is resolved and reported', () => {
+  const raw = doc(
+    'owner: "@x"\nstatus: current\ncovers:\n  - packages/backend/src/routes/x402.ts',
+    'The chip is rendered by `EnvBadge`, never inline.',
+  )
+  assert.deepEqual(
+    uncovered(raw, TRACKED, ['packages/backend/src/routes/x402.ts']).map((g) => g.file),
+    ['packages/frontend/src/components/EnvBadge.tsx'],
+  )
+})
+
+test('#2780: a lowercase directory prefix disambiguates without breaking the match', () => {
+  const raw = doc('owner: "@x"\nstatus: current\ncovers: []', 'See `connect-agent/CopyBlock`.')
+  assert.deepEqual(
+    uncovered(raw, TRACKED, []).map((g) => g.file),
+    ['packages/frontend/src/components/connect-agent/CopyBlock.tsx'],
+  )
+})
+
+test('#2780: a bare name is only matched INSIDE backticks', () => {
+  // Without this, an ordinary capitalised word in prose that happens to share a
+  // filename resolves to that file and the doc is coupled to something its
+  // author never referenced.
+  const raw = doc('owner: "@x"\nstatus: current\ncovers: []', 'The EnvBadge is not a code span here.')
+  assert.equal(uncovered(raw, TRACKED, []).length, 0)
+})
+
+test('#2780: a `.test.tsx` sibling does not make a bare name ambiguous', () => {
+  // Not a tie-break: `AddFundsModal.test.tsx` is not `AddFundsModal` plus ONE
+  // extension, so it never enters the candidate set. This is what lets the
+  // resolver skip ambiguity instead of ranking it — asserted because a looser
+  // suffix match would silently start returning the test file.
+  assert.equal(
+    resolveBareName('AddFundsModal', TRACKED),
+    'packages/frontend/src/components/AddFundsModal.tsx',
+  )
+})
+
+test('#2780: a name matching more than one tracked file stays UNRESOLVED', () => {
+  // `Dockerfile` is the real corpus case, and the only one: three tracked
+  // files, none of them a test. Guessing would produce a `covers:` entry
+  // nobody can justify.
+  assert.equal(resolveBareName('Dockerfile', TRACKED), null)
+})
+
+test('#2780: an unresolvable bare name is skipped, not counted as a gap', () => {
+  const raw = doc('owner: "@x"\nstatus: current\ncovers: []', 'Built from the `Dockerfile`.')
+  assert.equal(uncovered(raw, TRACKED, []).length, 0)
+})
+
+test('#2780: a bare name a covers glob already reaches is NOT a gap', () => {
+  const raw = doc('owner: "@x"\nstatus: current\ncovers: []', 'The chip is `EnvBadge`.')
+  assert.equal(uncovered(raw, TRACKED, ['packages/frontend/src/components/**']).length, 0)
+})
+
+test('#2780: a file named BOTH ways is reported once, at its first mention', () => {
+  const raw = doc(
+    'owner: "@x"\nstatus: current\ncovers: []',
+    'First `EnvBadge`.\n\nThen `packages/frontend/src/components/EnvBadge.tsx`.',
+  )
+  const gaps = uncovered(raw, TRACKED, [])
+  assert.equal(gaps.length, 1)
+  assert.equal(gaps[0].file, 'packages/frontend/src/components/EnvBadge.tsx')
+  assert.equal(gaps[0].line, 7)
+})
+
+test('#2780: the bare regex requires three characters after the capital', () => {
+  // `Env` and shorter are far more likely to be prose than a filename.
+  //
+  // Note what this threshold does NOT do, since an earlier version of this
+  // comment claimed it: `Base`, `Haven` and `USDC` all MATCH the regex. They
+  // are not resolved because no tracked file bears those names — the
+  // `git ls-files` intersection is what stops them, not the length.
+  assert.deepEqual([...'`Env` `EnvBadge`'.matchAll(BARE_TOKEN_RE)].map((m) => m[1]), ['EnvBadge'])
 })

@@ -305,6 +305,34 @@ instrument that has not been shown able to return non-zero is not a result.
 
 Appended rather than edited, per the convention above.
 
+**2026-09-09 (later):** #2780 taught `covers-gaps.mjs` to resolve backticked
+bare component names, which its path regex could not see because it needs a
+`packages/`-style prefix. The block-2 reading of **128 pairs across 39 docs** above is
+a record of 2026-09-08 and is left as written; the reading after this change is
+**154 across 40**, from +38 newly visible pairs and −8 closed (4 in
+`design-system.md` by #2779, 4 in `docs-quality-system.md`).
+
+The +38 was measured with a read-only script BEFORE the gate changed, precisely
+so the size was known rather than discovered as a wall of baseline entries, and
+the gate then reported the same 38 — two instruments agreeing. Accepted into the
+baseline with the explicit `--accept-new` override rather than by weakening the
+ratchet; the plain `--update` correctly refused the rise.
+
+One cost, found by the change catching its own pull request: the first draft of
+THIS entry named two components in code spans as EXAMPLES of the token shape,
+and the gate read them as claims about those files. That is the same
+false-positive class block 2 records for paths — a measurement command read as
+an assertion — now widened to bare names. Remedy taken is the one #2678 prefers:
+delete the claim, since an illustration should not be a code span. Anyone
+writing about this gate should expect it.
+
+A second, disclosed in `covers-gaps.mjs` rather than here because it is a
+property of the check: a bare-resolved gap depends on basename uniqueness, and a
+second file with the same basename makes the gap vanish while `hasShrunk`
+reports progress.
+
+Appended rather than edited, per the convention above.
+
 **Excluded this run:** the 2026-07 real-DB finding (`shipped`), the 2026-08-14
 API-contract finding (epic #1442), the 2026-08-18 outbound-lifecycle finding
 (`shipped`, epic #1554). None re-surfaced; no evidence any has worsened.

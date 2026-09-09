@@ -47,6 +47,14 @@
 //     `.github/` are scanned (the issue's definition). Root files
 //     (`package.json`, `turbo.json`), `docs/**`, `.claude/**` and `.agents/**`
 //     are invisible to this check even when named and even when tracked.
+//     Note this bounds the PATH form only: a backticked bare name resolves
+//     against every tracked file (#2780), so `.claude/foo/Bar.ts` named as
+//     `Bar` IS caught while the same file named by path is not.
+//   - **A bare name that is ambiguous.** `Dockerfile` matches three tracked
+//     files and resolves to none. Anything matching more than one tracked file
+//     is skipped rather than guessed. (A component's own `Foo.test.tsx` does
+//     not make `Foo` ambiguous — see `resolveBareName` for why no tie-break is
+//     needed.)
 //   - **A path with no code extension**, or one outside `CODE_EXTENSIONS` —
 //     `Dockerfile`, `packages/backend/src/rails/` (a directory), a `.md` or
 //     `.png` file.
@@ -85,6 +93,18 @@
 //     block names `packages/backend/src/routes/payments.ts` as a placeholder,
 //     and it is in the baseline. The "a path is never a citation of itself"
 //     reasoning under the fence decision is false in exactly this case.
+//   - **A bare-resolved gap depends on BASENAME UNIQUENESS, and losing it
+//     reads as a shrink (#2780).** `resolveBareName` returns null on more than
+//     one candidate, so the day a second `Sidebar.tsx` lands anywhere in the
+//     repo, every bare-resolved gap for that name stops being reported — and
+//     `hasShrunk` then prints "Residue shrank, run `--update` to tighten",
+//     which locks the loss in. Measured: adding one file takes
+//     `ship-playbooks/frontend.md` from 31 gaps to 30, silently. This is the
+//     shape of the two bypasses below, so it is listed with them rather than
+//     left for someone to rediscover; the exposure is the 38 pairs #2780
+//     accepted, and it is widest for the generic names among them (`Modal`,
+//     `Table`, `Sidebar`, `EmptyState`). The ambiguity policy is still right —
+//     guessing would be worse — but the ratchet consequence is not free.
 //   - **`status: archived` is an unguarded bypass.** Nothing constrains that
 //     value outside `docs/archive/` (`docs/operations/session-rail-vendor-ops.md`
 //     is a live precedent), so one word in a doc's front matter removes it and
@@ -161,6 +181,60 @@ export const PATH_TOKEN_RE = new RegExp(
   'g',
 )
 
+/**
+ * Backticked component names — `EnvBadge`, `connect-agent/CopyBlock` — with no
+ * prefix and no extension. This is how the frontend docs actually name most of
+ * what they make claims about, and until #2780 it was invisible here: the path
+ * regex above needs a `packages/`-style prefix, so a doc could describe a
+ * component's behaviour in detail and never be implicated when it changed.
+ *
+ * Only inside backticks, deliberately. A bare CapCase word in prose is an
+ * English word often enough (`Haven`, `Base`, `Actions`) that matching outside
+ * code spans would resolve names the author never meant as file references.
+ * Lowercase directory segments are allowed in front, because that is how the
+ * docs disambiguate two components sharing a base name.
+ */
+export const BARE_TOKEN_RE = /`((?:[a-z][\w.-]*\/)*[A-Z][A-Za-z0-9]{3,})`/g
+
+/** Extensions a bare name may be wearing on disk. */
+const BARE_EXTENSIONS = ['.tsx', '.ts', '.mjs', '.js']
+
+/**
+ * The one tracked file a bare name refers to, or `null`.
+ *
+ * ## Ambiguity is resolved by NOT resolving it
+ *
+ * A name matches only as a whole final segment, optionally wearing one code
+ * extension. That is stricter than it looks and it does most of the work: a
+ * sibling `__tests__/Foo.test.tsx` does NOT collide with `Foo`, because
+ * `Foo.test.tsx` is not `Foo` plus one extension. Anything still matching more
+ * than one tracked file is skipped rather than guessed — a guess here would be
+ * a `covers:` entry nobody can justify, which is the noise #2773 argued
+ * against.
+ *
+ * An earlier version preferred the non-test candidate on a tie. It was deleted
+ * because a mutation proved it dead: replacing the whole preference with
+ * `return null` left the suite green, since the case it was written for cannot
+ * arise. The 12 files under `__tests__/` without a `.test.`/`.spec.` infix are
+ * all lowercase helpers (`helpers.ts`, `db-harness.ts`), which this regex never
+ * produces a token for.
+ *
+ * Measured across the 72 governed docs before any of this was written, because
+ * #2780 was filed on the assumption that ties would be constant: exactly ONE
+ * token is ambiguous, `Dockerfile`, and it resolves to nothing. The two
+ * examples the issue cited (`DashboardClient`, `AddFundsModal`) are named WITH
+ * their extension and a line suffix in the doc, so they were never in this
+ * class at all.
+ */
+export function resolveBareName(token, tracked) {
+  if (tracked.has(token)) return token
+  const hits = []
+  for (const f of tracked) {
+    if (f.endsWith('/' + token) || BARE_EXTENSIONS.some((e) => f.endsWith('/' + token + e))) hits.push(f)
+  }
+  return hits.length === 1 ? hits[0] : null
+}
+
 /** Every tracked file, as a Set for O(1) "is this real?" tests. */
 export function trackedFiles(root = REPO_ROOT) {
   const out = execFileSync('git', ['-C', root, 'ls-files', '-z'], {
@@ -196,9 +270,23 @@ export function lineOf(text, index) {
 export function namedFiles(raw, tracked) {
   const body = blankFrontMatter(raw)
   const seen = new Map()
+  // Both token shapes, merged in DOCUMENT ORDER (#2780). Collecting the path
+  // matches first and the bare ones after would report a file named both ways
+  // at whichever line the path form happens to sit on, even when the bare
+  // mention came first — a line number that points past the sentence a reader
+  // is being sent to read. Sorting by offset is what makes "the line of the
+  // FIRST mention" above true rather than approximately true.
+  const hits = []
   for (const m of body.matchAll(PATH_TOKEN_RE)) {
-    if (!tracked.has(m[0])) continue
-    if (!seen.has(m[0])) seen.set(m[0], lineOf(body, m.index))
+    if (tracked.has(m[0])) hits.push([m.index, m[0]])
+  }
+  for (const m of body.matchAll(BARE_TOKEN_RE)) {
+    const file = resolveBareName(m[1], tracked)
+    if (file) hits.push([m.index, file])
+  }
+  hits.sort((a, b) => a[0] - b[0])
+  for (const [index, file] of hits) {
+    if (!seen.has(file)) seen.set(file, lineOf(body, index))
   }
   return [...seen].map(([file, line]) => ({ file, line }))
 }

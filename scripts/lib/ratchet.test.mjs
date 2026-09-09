@@ -271,3 +271,48 @@ function assertRefusal() {
   err.stack = 'TypeError: boom'
   return err
 }
+
+test('runGate: a one-argument call THROWS rather than silently succeeding', () => {
+  // #2761 review, blocking. `runGate(main)` is the call the issue's own text
+  // proposes, and `.then(main)` accepted the non-callable, passed the value
+  // through, and exited 0 having never entered the gate — a blocking CI job
+  // that is a silent no-op reporting success.
+  assert.throws(() => runGate(() => {}), /did not pass a function/)
+  assert.throws(() => runGate('g', undefined), /`g` did not pass a function/)
+  assert.throws(() => runGate('g', 'not a function'), /did not pass a function/)
+})
+
+test('runGate: an fs errno is an operator condition, not a crash', async () => {
+  // EACCES carries frames, so the frames heuristic alone filed the most
+  // operator-facing condition in #2761's acceptance criteria as a bug —
+  // `failed:` plus three frames and an errno dump. It is a fact about the
+  // environment rather than a defect in this code.
+  const seen = []
+  const origErr = console.error
+  const origExit = process.exit
+  console.error = (...a) => seen.push(a)
+  process.exit = () => {}
+  try {
+    const err = new Error("EACCES: permission denied, open '/x/baseline.json'")
+    err.code = 'EACCES'
+    runGate('g', () => {
+      throw err
+    })
+    await new Promise((r) => setImmediate(r))
+    assert.equal(seen.length, 1)
+    assert.deepEqual(seen[0], ["✗ g: EACCES: permission denied, open '/x/baseline.json'"])
+    // A bug that happens to carry a `code` is still a bug: the classification
+    // is by errno VALUE, not by the presence of the field.
+    seen.length = 0
+    const bug = new ReferenceError('nope')
+    bug.code = 'ERR_SOMETHING_ELSE'
+    runGate('g', () => {
+      throw bug
+    })
+    await new Promise((r) => setImmediate(r))
+    assert.equal(seen[0][0], '✗ g failed:')
+  } finally {
+    console.error = origErr
+    process.exit = origExit
+  }
+})

@@ -90,29 +90,6 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
 }
 
 /**
- * Refuse a baseline the comparison cannot use, at the READ boundary rather than
- * in the comparison (#2759).
- *
- * `newViolations` does `count > allowed`, and `1 > "x"` is `false`. So an entry
- * whose value is a string, null, an array or an object silently disables
- * itself: the gate reports a clean bill of health over a live violation, and
- * `hasShrunk` stays quiet for the same reason, so not even the "residue shrank"
- * hint fires. Measured on `scripts/docs/ui-gate-wording.mjs` with
- * `{"docs/thing.md": {"blanket-merge-pause": "x"}}` — exit 0, "1 baselined
- * occurrence(s) remain", violation live.
- *
- * Validating here rather than inside `newViolations` is deliberate: it is one
- * place for all six gates, it keeps the comparison a pure numeric predicate,
- * and it puts the error where the file is named — a comparison that throws can
- * only say WHICH key, not which file it came from.
- *
- * This does not reach `scripts/docs/covers-gaps.mjs`, whose baseline stores gap
- * FILE ARRAYS by design and which does not import this module (#2679). Audited
- * before shipping: 155 entries across the six gates on this engine, all
- * numeric, so this is a pure tightening rather than a build someone else has to
- * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
- */
-/**
  * Run a gate's `main` as the CLI, and present a failure the way a gate should.
  *
  * Four of the six gates on this module called `main()` bare (#2761), so an
@@ -144,11 +121,36 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * latter before any handler existed.
  */
 export function runGate(name, main) {
+  // `runGate(main)` — the one-arg call #2761's own text proposes — bound `name`
+  // to the function and left `main` undefined, and `.then(undefined)` PASSES
+  // THE VALUE THROUGH rather than failing: the process exited 0 having printed
+  // nothing and never entered the gate. A blocking CI job that is a silent
+  // no-op reporting success, introduced by the helper written to end exactly
+  // that class (#2728, #2747, #2759). Found by review; measured before and
+  // after. Two defences, because this one is not allowed to come back:
+  if (typeof main !== 'function') {
+    throw new TypeError(
+      `runGate: ${typeof name === 'function' ? 'called with one argument' : `\`${name}\``} did not ` +
+        'pass a function — the signature is runGate(name, main)',
+    )
+  }
   Promise.resolve()
-    .then(main)
+    // `() => main()` rather than `.then(main)`: the second silently accepts a
+    // non-callable, the first turns it into a TypeError the catch below reports.
+    .then(() => main())
     .catch((err) => {
+      // A REFUSAL and a BUG want opposite treatment, and the split is made on
+      // evidence rather than a flag a caller could forget to set.
+      //
+      // An fs errno is the exception that proves it: an EACCES on a baseline
+      // carries frames, so the frames heuristic alone filed the most
+      // operator-facing condition in #2761's acceptance criteria as a crash,
+      // complete with an errno dump. It is a fact about the environment, not a
+      // defect in this code, so it is classified as a refusal by its `code`.
+      const OPERATOR_ERRNO = new Set(['EACCES', 'EPERM', 'ENOENT', 'EISDIR', 'ENOTDIR', 'EMFILE'])
+      const isOperatorCondition = typeof err?.code === 'string' && OPERATOR_ERRNO.has(err.code)
       const hasFrames = typeof err?.stack === 'string' && /\n\s+at /.test(err.stack)
-      if (hasFrames) console.error(`✗ ${name} failed:`, err)
+      if (hasFrames && !isOperatorCondition) console.error(`✗ ${name} failed:`, err)
       else console.error(`✗ ${name}: ${err?.message ?? err}`)
       process.exit(1)
     })
@@ -157,21 +159,18 @@ export function runGate(name, main) {
 /**
  * A refusal, not a crash — so it is presented as one.
  *
- * FOUR of the six gates have no catch at their entrypoint at all -- `db-mock`,
- * `wire-types`, `retired-rail-prose` and `design-lint` call `main()` bare, so a
- * throw becomes an uncaught exception with Node's own framing. The two that do
- * catch (`frontend-copy-lint`, `ui-gate-wording`) print the message. Without
- * the replacement below the frames WOULD run `assertUsableBaseline` ->
- * `loadBaseline` -> the gate's `main`, which for a malformed baseline is noise
- * around the one line the operator needs -- and it is why the "the error can
- * name the FILE" argument landed in two gates of six until review said so
- * (#2759).
+ * All six gates now run their `main` through `runGate` (#2761), which prints a
+ * frameless error as one line. Without the replacement below the frames WOULD
+ * run `assertUsableBaseline` -> `loadBaseline` -> the gate's `main`, which for
+ * a malformed baseline is noise around the one line the operator needs -- and
+ * it is why the "the error can name the FILE" argument landed in two gates of
+ * six until review said so (#2759).
  *
- * Who it actually helps, since this paragraph is justifying the construct by
- * naming them: the four bare gates, and `frontend-copy-lint`, whose
- * `console.error(err)` would otherwise print the frames. NOT `ui-gate-wording`
- * — it wraps its own baseline read and prints `err.message` with a remedy, so
- * for this error the replacement is a no-op there.
+ * This paragraph described the pre-#2761 entrypoints in the present tense
+ * ("FOUR of the six gates have no catch at all", "the two that do catch print
+ * the message") until #2761 made all six identical and did not update it --
+ * six lines below its own insertion, in a comment that already carried a note
+ * about a previous miscount of the same set. Found by review, again.
  *
  * An earlier version of this comment said five gates inherit a
  * `main().catch(...)`, which is both the wrong number and self-contradictory.
@@ -189,6 +188,29 @@ function refusal(message) {
   return err
 }
 
+/**
+ * Refuse a baseline the comparison cannot use, at the READ boundary rather than
+ * in the comparison (#2759).
+ *
+ * `newViolations` does `count > allowed`, and `1 > "x"` is `false`. So an entry
+ * whose value is a string, null, an array or an object silently disables
+ * itself: the gate reports a clean bill of health over a live violation, and
+ * `hasShrunk` stays quiet for the same reason, so not even the "residue shrank"
+ * hint fires. Measured on `scripts/docs/ui-gate-wording.mjs` with
+ * `{"docs/thing.md": {"blanket-merge-pause": "x"}}` — exit 0, "1 baselined
+ * occurrence(s) remain", violation live.
+ *
+ * Validating here rather than inside `newViolations` is deliberate: it is one
+ * place for all six gates, it keeps the comparison a pure numeric predicate,
+ * and it puts the error where the file is named — a comparison that throws can
+ * only say WHICH key, not which file it came from.
+ *
+ * This does not reach `scripts/docs/covers-gaps.mjs`, whose baseline stores gap
+ * FILE ARRAYS by design and which does not import this module (#2679). Audited
+ * before shipping: 155 entries across the six gates on this engine, all
+ * numeric, so this is a pure tightening rather than a build someone else has to
+ * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
+ */
 export function assertUsableBaseline(baseline, path = 'baseline') {
   if (baseline === null || typeof baseline !== 'object' || Array.isArray(baseline)) {
     const shape = Array.isArray(baseline) ? 'an array' : baseline === null ? 'null' : typeof baseline

@@ -289,6 +289,22 @@ Drive with `ship-next epic=#2720`. Becomes `shipped` when the epic closes.
 #2723 (PR #2740, `scripts/docs/`) MERGED. #2722 (`scripts/ci/`) remains, and
 the epic stays open. Appended rather than edited, per the convention above.
 
+**2026-09-09:** slice #2722 (`scripts/ci/`) ships in the pull request that adds
+this entry, taking the epic's own headline figure to **zero**. Re-running the
+recorded commands at that commit:
+
+- self-tests that never spawn → **19** (22 before this slice; the three that
+  moved are `qa-freshness`, `baseline-audit` and `baseline-push-followup`)
+- refusal-bearing guards whose tests cannot reach `main()` → **0**, down from 13
+  at the 2026-09-08 measurement
+
+The zero was checked against a positive control before being written here: the
+same command at the parent commit returns **3**, naming those three guards with
+3, 1 and 1 refusals — the counts this slice's issue predicted. A zero from an
+instrument that has not been shown able to return non-zero is not a result.
+
+Appended rather than edited, per the convention above.
+
 **Excluded this run:** the 2026-07 real-DB finding (`shipped`), the 2026-08-14
 API-contract finding (epic #1442), the 2026-08-18 outbound-lifecycle finding
 (`shipped`, epic #1554). None re-surfaced; no evidence any has worsened.

@@ -71,7 +71,13 @@ export function MobileTabBar({
   return (
     <nav
       aria-label={presentational ? undefined : 'Primary'}
-      aria-hidden={presentational ? true : undefined}
+      // `inert`, not `aria-hidden` (#2731 review). `aria-hidden` on a container
+      // of four focusable links is `aria-hidden-focus` / WCAG 4.1.2: a keyboard
+      // user tabs into something the accessibility tree says is not there, and
+      // is navigated off the showcase by an illustration. `inert` removes both
+      // the focusability and the tree entry, which is what "this is a picture"
+      // actually means.
+      {...(presentational ? { inert: '' as unknown as boolean } : {})}
       data-mobile-tab-bar=""
       className={`grid grid-cols-5 border-t border-[var(--v2-border)] bg-[var(--v2-bg)] ${
         presentational
@@ -86,7 +92,7 @@ export function MobileTabBar({
             key={item.href}
             href={item.href}
             aria-current={active ? 'page' : undefined}
-            className={`flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
+            className={`flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
               active ? 'text-[var(--v2-ink)]' : 'text-[var(--v2-ink-3)]'
             }`}
           >
@@ -94,14 +100,25 @@ export function MobileTabBar({
               {item.icon}
             </span>
             {/* `min-w-0` + `truncate` because the grid cell is the constraint,
-                not the text: at 320px a cell is 64px and "Transactions" renders
-                67.8px at 11px, so it broke OUT of its cell and closed the gap
-                to "Accounts" to 5.2px. The step down to 10px below 360px is
-                what makes it fit (61.6px) rather than merely clip — truncation
-                alone would ellipsise the widest label on the narrowest phone in
-                the support matrix, which is the one that can least afford to
-                lose the word. */}
-            <span className="min-w-0 max-w-full truncate px-0.5 max-[359px]:text-[10px]">
+                not the text: at 320px a cell is 64px and "Transactions" is
+                wider than that, so without this it broke OUT of its cell and
+                closed the gap to "Accounts" to 5.2px.
+
+                `text-xs` is `--v2-text-meta`, the ramp's smallest step and the
+                floor `design:lint` enforces. An earlier revision reached for
+                two arbitrary sub-12px sizes, which made the widest label FIT at
+                320 — and the micro-font ratchet allows zero of those. Since
+                #2728 `design:lint:update` refuses to raise that baseline, so
+                the choice is the ramp or a reviewed baseline edit, and a tab
+                label is not the place to spend that. (The sizes are described
+                rather than written here on purpose: the lint greps this file's
+                text and cannot tell a class from a comment about one.)
+
+                The cost is bounded and honest: at 320px "Transactions"
+                ellipsises. That is the narrowest phone in the support matrix
+                and the only width where it happens — at 390 the cell is 78px
+                and the label fits whole. */}
+            <span className="min-w-0 max-w-full truncate px-0.5">
               {item.label}
             </span>
           </Link>
@@ -114,11 +131,11 @@ export function MobileTabBar({
           illustration renders four tabs in a five-column grid and reads as a
           broken bar rather than as an explanation of why More is a sibling. */}
       {presentational ? (
-        <span className="flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-[11px] font-medium text-[var(--v2-ink-3)]">
+        <span className="flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium text-[var(--v2-ink-3)]">
           <span className="h-5 w-5" aria-hidden="true">
             <Icon icon={Menu} className="w-full h-full" />
           </span>
-          <span className="min-w-0 max-w-full truncate px-0.5 max-[359px]:text-[10px]">More</span>
+          <span className="min-w-0 max-w-full truncate px-0.5">More</span>
         </span>
       ) : null}
     </nav>

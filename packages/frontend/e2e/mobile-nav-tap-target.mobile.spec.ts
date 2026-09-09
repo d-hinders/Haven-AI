@@ -352,6 +352,10 @@ async function measureToggle(page: Page): Promise<Measurement> {
       // 210.61 — a coincidence of the current account name, one line away from
       // this suite rejecting a 6px gap elsewhere as too tight (#1767, raised in
       // design review). A floor is a decision; zero-by-luck is not.
+      // Starts at Infinity so `Math.min` works, but an EMPTY set must report
+      // null rather than Infinity — `expect(...).not.toBeNull()` passed on a
+      // set of zero controls otherwise, which is the guard's own comment
+      // describing something it did not do (#2731 review).
       let smallestBarGap = Number.POSITIVE_INFINITY
       const inBar = Array.from(
         header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]'),
@@ -455,7 +459,7 @@ async function measureToggle(page: Page): Promise<Measurement> {
         corners,
         neighbour,
         headerLeft: Math.round(headerBox.left),
-        smallestBarGap: Number.isFinite(smallestBarGap)
+        smallestBarGap: inBar.length >= 2 && Number.isFinite(smallestBarGap)
           ? Math.round(smallestBarGap * 100) / 100
           : null,
         /**
@@ -540,8 +544,11 @@ async function measureTabBar(page: import('@playwright/test').Page) {
         centre: at(moreBox.left + moreBox.width / 2, moreBox.top + moreBox.height / 2),
         topLeft: at(moreBox.left + 1, moreBox.top + 1),
         topRight: at(moreBox.right - 1, moreBox.top + 1),
-        bottomLeft: at(moreBox.left + 1, moreBox.top + half),
-        bottomRight: at(moreBox.right - 1, moreBox.top + half),
+        // `moreBox.bottom - 1`, not `top + half`. The old reading probed 22px
+        // into a 57px box, so the cross-shaped target this assertion exists to
+        // reject would have passed with its bottom 35px dead.
+        bottomLeft: at(moreBox.left + 1, moreBox.bottom - 1),
+        bottomRight: at(moreBox.right - 1, moreBox.bottom - 1),
       },
       // Flush to the bottom of the viewport, and spanning it.
       barBottomGap: Math.round(window.innerHeight - barBox.bottom),

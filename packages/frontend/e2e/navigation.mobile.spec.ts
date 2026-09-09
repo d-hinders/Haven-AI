@@ -424,6 +424,16 @@ test.describe('bottom tab bar (#2731)', () => {
     // necessity (see `MobileTabBar`). Asserted so a fifth link appearing in
     // here — the obvious "just add More to the grid" edit — is caught.
     await expect(bar.getByRole('link')).toHaveCount(4)
+    // ORDER, not just membership. "Selected by route, never by index" is the
+    // headline claim in the component, the doc and the showcase caption, and
+    // nothing tested it: replacing the route lookup with `items.slice(0, 4)`
+    // left every one of these tests green, because the SET of four routes is
+    // the same either way and only the order differs. The bar's order is not
+    // the drawer's, which is the whole reason the claim exists.
+    expect(
+      await bar.getByRole('link').evaluateAll((els) => els.map((e) => e.getAttribute('href'))),
+      'the bar reads baseNavItems by route, not by position',
+    ).toEqual(['/dashboard', '/agents', '/transactions', '/accounts'])
     await expect(bar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -485,7 +495,16 @@ test.describe('bottom tab bar (#2731)', () => {
       // say that is what is being measured.
       const boxes = await page.evaluate(() => {
         const b = document.querySelector('[data-mobile-tab-bar]')!.getBoundingClientRect()
-        const t = document.querySelector('[role="status"]')!.getBoundingClientRect()
+        // The TOASTER, not any `role="status"`. `/dashboard` renders its own
+        // status regions while loading, and `document.querySelector` takes the
+        // first in document order — measured at bottom 1212 on a 727px
+        // viewport, i.e. an in-page element well off screen, which made this
+        // flaky-red rather than wrong. The Toaster is the `fixed` polite
+        // region, which is how `safe-area-insets.mobile.spec.ts` already
+        // identifies it.
+        const t = Array.from(document.querySelectorAll('[role="status"][aria-live="polite"]'))
+          .filter((el) => getComputedStyle(el).position === 'fixed')[0]!
+          .getBoundingClientRect()
         return { barTop: Math.round(b.top), toastBottom: Math.round(t.bottom) }
       })
       expect(boxes.toastBottom).toBeLessThanOrEqual(boxes.barTop)

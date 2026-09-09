@@ -345,7 +345,7 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed bottom-[var(--v2-safe-bottom)] right-[var(--v2-safe-right)] z-[var(--v2-z-nav-toggle)] w-1/5 h-[var(--v2-tab-bar-h)] flex flex-col items-center justify-center gap-1 bg-[var(--v2-bg)] text-[11px] font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
+        className="lg:hidden fixed bottom-[var(--v2-safe-bottom)] right-[var(--v2-safe-right)] z-[var(--v2-z-nav-toggle)] w-1/5 h-[var(--v2-tab-bar-h)] flex flex-col items-center justify-center gap-1 bg-[var(--v2-bg)] text-xs font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
       >
         {/* The visible state follows the drawer (#2731 review). It used to
             read "More" with a hamburger in BOTH states while the accessible

@@ -241,16 +241,20 @@ export function Toaster() {
         1023px — the band where the bar is still rendered. The `sm` variant
         therefore carries the offset too, and `lg` is what drops it.
       
-        The safe-area inset stays inside the `max()` and the bar height is added
-        OUTSIDE it: the inset and the 1rem gutter are the same clearance measured
-        two ways, so the larger wins; the bar is a separate object to clear, so it
-        adds.
+        All three terms ADD, and the `max()` that used to wrap the inset is
+        gone. That form — `max(1rem, inset) + bar` — collapsed the gutter to
+        ZERO on a notched device: the bar already pads itself with the inset, so
+        the inset was doing double duty and at inset 34 the toast's bottom edge
+        and the bar's top edge both landed on 90px. The three terms have three
+        different owners — the toast's own gutter, the bar it must clear, and
+        the device band the bar itself sits above — so none of them substitutes
+        for another.
       */}
       <div
         role="status"
         aria-live="polite"
         aria-atomic="false"
-        className="pointer-events-none fixed bottom-[calc(max(1rem,var(--v2-safe-bottom))+var(--v2-tab-bar-h))] left-[max(1rem,var(--v2-safe-left))] right-[max(1rem,var(--v2-safe-right))] sm:bottom-[calc(max(1.5rem,var(--v2-safe-bottom))+var(--v2-tab-bar-h))] lg:bottom-[max(1.5rem,var(--v2-safe-bottom))] sm:right-[max(1.5rem,var(--v2-safe-right))] sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
+        className="pointer-events-none fixed bottom-[calc(var(--v2-tab-bar-h)+var(--v2-safe-bottom)+1rem)] left-[max(1rem,var(--v2-safe-left))] right-[max(1rem,var(--v2-safe-right))] sm:bottom-[calc(var(--v2-tab-bar-h)+var(--v2-safe-bottom)+1.5rem)] lg:bottom-[max(1.5rem,var(--v2-safe-bottom))] sm:right-[max(1.5rem,var(--v2-safe-right))] sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
       >
         {politeToasts.map((item) => (
           <div key={item.id} className="pointer-events-auto w-full sm:w-auto">
@@ -264,7 +268,7 @@ export function Toaster() {
         role="alert"
         aria-live="assertive"
         aria-atomic="true"
-        className="pointer-events-none fixed bottom-[calc(max(1rem,var(--v2-safe-bottom))+var(--v2-tab-bar-h))] left-[max(1rem,var(--v2-safe-left))] right-[max(1rem,var(--v2-safe-right))] sm:bottom-[calc(max(1.5rem,var(--v2-safe-bottom))+var(--v2-tab-bar-h))] lg:bottom-[max(1.5rem,var(--v2-safe-bottom))] sm:right-[max(1.5rem,var(--v2-safe-right))] sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
+        className="pointer-events-none fixed bottom-[calc(var(--v2-tab-bar-h)+var(--v2-safe-bottom)+1rem)] left-[max(1rem,var(--v2-safe-left))] right-[max(1rem,var(--v2-safe-right))] sm:bottom-[calc(var(--v2-tab-bar-h)+var(--v2-safe-bottom)+1.5rem)] lg:bottom-[max(1.5rem,var(--v2-safe-bottom))] sm:right-[max(1.5rem,var(--v2-safe-right))] sm:left-auto z-[var(--v2-z-toast)] flex flex-col items-end gap-2"
         style={{ marginBottom: politeToasts.length > 0 ? `${politeToasts.length * 60}px` : undefined }}
       >
         {assertiveToasts.map((item) => (

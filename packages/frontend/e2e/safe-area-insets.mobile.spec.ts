@@ -410,13 +410,21 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     })
 
     // CONTROL: the region consumes the inset rather than its old flat 1rem.
-    // #2731 added the tab bar to this offset. Three terms with three different
-    // owners — the toast's own 1rem gutter, the bar it must clear, and the
-    // device inset — and the first two ADD while the gutter and the inset take
-    // the larger of the two, which is why this reads `max(16, inset) + bar`.
+    // #2731 added the tab bar to this offset, and all three terms ADD. An
+    // earlier revision of this line read `max(16, inset) + bar`, which is what
+    // the CSS said at the time and was wrong in the same way: the bar already
+    // pads itself with the inset, so folding the inset into a `max()` with the
+    // gutter collapsed the gap between toast and bar to ZERO at inset 34 —
+    // both edges landed on 90px. Three owners, three terms.
     expect(toast.bottom, 'the toast region must clear the tab bar AND --v2-safe-bottom').toBe(
-      `${Math.max(16, INSET_BOTTOM) + TAB_BAR_H}px`,
+      `${TAB_BAR_H + INSET_BOTTOM + 16}px`,
     )
+    // ...and the gap is real, not zero-by-arithmetic. This is what the earlier
+    // form would have failed.
+    expect(
+      toast.regionBottom,
+      'the toast must clear the bar with a visible gutter, not touch it',
+    ).toBeLessThanOrEqual(toast.viewportHeight - INSET_BOTTOM - TAB_BAR_H)
     expect(toast.regionBottom).toBeLessThanOrEqual(toast.viewportHeight - INSET_BOTTOM)
     // The half that matters: a dismiss button inside the band is read by the OS
     // as a swipe-up, not a tap.

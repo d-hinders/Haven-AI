@@ -93,7 +93,13 @@ describe('Sidebar', () => {
     })
     render(<Sidebar />)
     expect(screen.queryByRole('link', { name: /Approvals/ })).toBeNull()
-    const hrefs = Array.from(document.querySelector('nav')!.querySelectorAll('a')).map((a) =>
+    // Scoped like the assertion above (#2731). This one was the more dangerous
+    // of the two: it is a NEGATIVE assertion, so pointing it at the tab bar
+    // made it unable to FAIL rather than merely wrong — the four tab routes
+    // never contain '/approvals' whatever the drawer does.
+    const hrefs = Array.from(
+      document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a'),
+    ).map((a) =>
       a.getAttribute('href'),
     )
     expect(hrefs).not.toContain('/approvals')

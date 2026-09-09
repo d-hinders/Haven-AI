@@ -65,22 +65,20 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      # A shallow clone is enough: the #1843 chain-integrity check that read
+      # the merge base was retired by #2681, and none of the five `docs:check`
+      # scripts reads git history (two call `git ls-files`, which reads the
+      # index, not history).
       - uses: actions/checkout@v4
-        with:
-          # `docs:check` now includes the #1843 chain-integrity check, which
-          # compares each changed doc's `last-verified` line against the merge
-          # base. A shallow clone has no base commit to read, and the check
-          # fails closed in CI rather than reporting a clean bill of health.
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
 
-      # Every doc has valid front-matter, every `covers` glob resolves, no
-      # changed doc dropped an entry from its `last-verified` chain, portable
-      # agent skills plus client adapters stay aligned, and — since #2657 — no
-      # live doc sentence restates either UI merge-gate rule #2636 retired.
+      # Every doc has valid front-matter, every `covers` glob resolves, no doc
+      # names a file its `covers:` cannot reach (#2679), portable agent skills
+      # plus client adapters stay aligned, and — since #2657 — no live doc
+      # sentence restates either UI merge-gate rule #2636 retired.
       # Dependency-free, so no `npm ci` is needed.
       #
       # #2657 hangs off `docs:check` rather than off a new workflow or a new
@@ -91,17 +89,14 @@ jobs:
       # like its neighbours, and this job has no `paths:` filter on
       # `pull_request`, so it sees every PR.
       #
-      # BASE_SHA/HEAD_SHA are set only for `pull_request`. On a `push` to
-      # main/dev the chain check sees neither and skips loudly: there is no
-      # base to compare against and nobody to act on a finding. Adding it to this job
-      # rather than to a new one is deliberate: **Docs front-matter & agent
-      # skills** is already a required check, so the rule is enforced the day
-      # it merges instead of the day someone remembers to edit the ruleset
-      # (the #933 shape, one step removed).
+      # No step here reads a base commit any more: BASE_SHA/HEAD_SHA fed the
+      # #1843 chain check, retired by #2681, and none of the five current
+      # scripts consults them. Adding a rule to this job rather than to a new
+      # one stays deliberate: **Docs front-matter & agent skills** is already a
+      # required check, so the rule is enforced the day it merges instead of
+      # the day someone remembers to edit the ruleset (the #933 shape, one
+      # step removed).
       - name: Validate docs and agent skills
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npm run docs:check
 
       # Unit tests for the documentation and agent-skill validators.
@@ -114,7 +109,7 @@ jobs:
       # could only ever be prose — and it lost the first time it was used, on
       # the merge of PR #2272. The rule now has a mechanism.
       #
-      # It lives on THIS job for the reason the chain check above does: **Docs
+      # It lives on THIS job for the reason the step above gives: **Docs
       # front-matter & agent skills** is already a required status check, so the
       # rule is enforced the day it merges rather than the day someone remembers
       # to edit the ruleset. `Repo CI config checks` — where the rest of

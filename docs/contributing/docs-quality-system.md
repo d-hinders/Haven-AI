@@ -67,11 +67,10 @@ satisfied-by:              # OPTIONAL (#1366): globs whose NEW files count as
                            # doc's lines. Declare it only when the doc has a
                            # real shard convention (see
                            # docs/regulatory/casp-changelog/README.md).
-last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
-verified:                    # REQUIRED once the doc has been re-verified once:
-  - "#2637: what this pass   # the chain, one entry per line, NEWEST FIRST.
-     checked, and what it    # Add yours at the top. Double-quoted; write it
-     did NOT re-verify."     # through quoteEntry, never by hand (#2637).
+                           # last-verified: YYYY-MM-DD a human last confirmed
+                           # accuracy. A bare date, nothing after it: the
+                           # validator refuses any `#` on this scalar (#2681).
+last-verified: "2026-06-28"
 ---
 ```
 
@@ -189,22 +188,21 @@ reasons, and none was fixed in that PR:
   `packages/mcp-server/src/**`; it was 30 of 46 when #2323 counted) — every
   entry in the runtime `globs` list (33) except the two its own `EXEMPT` map
   carves out (`infra/chain/**`, `infra/repositories/**`, both deferred to the
-  doc owner under #1899), and **none of the 14 `controlGlobs`**, which the test
+  doc owner under #1899), and **none of the 15 `controlGlobs`**, which the test
   deliberately leaves out as CI configuration the doc reasons about
   individually. Within that set it asserts every matched tracked file is also
   matched by some `covers:` glob. There is **no** assertion in the other
   direction, so an unrelated entry ADDED to `covers:` is checked by nothing —
   measured by appending a marketing-page glob and watching all 10 tests stay
   green. Nothing pins any other doc's `covers:` in either direction.
-- **The `last-verified` chain check** (`chain-integrity.mjs`) — the strongest
-  remaining instance. `checkChain` verifies **containment** (every issue
-  reference in the prior line survives into the new one) and nothing whatsoever
-  about whether the note is true; and the `chain-reset(#N)` escape hatch is
-  written by the author who wants the chain dropped. Its failure mode is
-  different from #2323's, though: losing history, not shipping a false claim.
-  It already applies #2323's lesson one level down — `CHAIN_RESET_RE` requires
-  the parenthesised issue number precisely so prose *about* a reset cannot excuse
-  a real one.
+- **The `last-verified` chain check** (`chain-integrity.mjs`, retired by
+  [#2681](https://github.com/d-hinders/Haven-AI/issues/2681)) — was the strongest
+  instance while it ran. It verified **containment** (every issue reference in
+  the prior entry survived into the new one) and nothing about whether the note
+  was true; the `chain-reset(#N)` escape hatch was written by the author who
+  wanted the chain dropped. Retired with the convention it guarded; the history
+  it protected is archived verbatim in
+  `docs/archive/last-verified-chains-2026-09.md`.
 - **`EXEMPT_PACKAGE_DOCS`** (`package-docs.mjs`) — a `packages/**` Markdown file
   leaves the system by its author writing a reason string, and check (4b)
   verifies only that the string is non-empty. Same shape, small blast radius: the
@@ -264,8 +262,7 @@ file and is dependency-free like the other `scripts/docs/*` tools.
 ### Validate locally
 
 ```bash
-npm run docs:check   # front-matter + covers globs, agent skills, README agent section, last-verified chains, retired UI merge-gate wording
-npm run docs:chain   # just the chain check, against origin/dev
+npm run docs:check   # front-matter + covers globs, agent skills, README agent section, retired UI merge-gate wording, covers gaps
 npm run docs:test    # unit tests for the docs and agent-skill validators
 ```
 
@@ -289,13 +286,14 @@ paragraph explains: `scripts/ci/change-classifier.mjs` routes a README-only
 change to NO surface, so the SDK job would not run for the single edit the
 guard exists to catch, while this job has no `paths:` filter and always does.
 
-`scripts/docs/chain-integrity.mjs` is the fourth of six `docs:check` steps and is
-described under [`last-verified` chain integrity](#last-verified-chain-integrity-1843)
-below. Unlike the other two it reads **git history**, so it needs a base
-commit: locally `origin/dev`, in CI `BASE_SHA`/`HEAD_SHA` with
-`fetch-depth: 0`. Without one it says NOTHING WAS CHECKED and, in CI, fails —
-a gate that cannot see the diff must never report a clean bill of health
-(the #1076 lesson).
+`scripts/docs/chain-integrity.mjs` was the fourth step until
+[#2681](https://github.com/d-hinders/Haven-AI/issues/2681) retired the
+`last-verified` chain (see [`last-verified` chain integrity](#last-verified-chain-integrity-1843)
+below for what it was). Of the `docs:check` steps, only `validate-frontmatter.mjs`
+still touches the chain: it **rejects** a `verified:` block or an inline annotation
+on the `last-verified:` scalar, naming the archive that holds the historical
+entries. The archive itself is guarded by `retire-verified-chains.mjs verify()`,
+run from the docs unit tests.
 
 ## Docs served to agents (#2532)
 
@@ -380,7 +378,7 @@ Run by `.github/workflows/docs.yml` on **every** pull request:
 | `packages/**` Markdown boundary ([#2088](https://github.com/d-hinders/Haven-AI/issues/2088)) | `scripts/docs/package-docs.mjs`, run from `validate-frontmatter.mjs` | **Blocking** |
 | Agent-skill structure + adapter alignment | `scripts/docs/validate-agent-skills.mjs` | **Blocking** |
 | Agent-facing README section, six copies ([#2533](https://github.com/d-hinders/Haven-AI/issues/2533)) | `scripts/docs/validate-readme-agent-section.mjs` | **Blocking** |
-| `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843), [#2477](https://github.com/d-hinders/Haven-AI/issues/2477), [#2504](https://github.com/d-hinders/Haven-AI/issues/2504)) | `scripts/docs/chain-integrity.mjs` | **Blocking** |
+| `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843), [#2477](https://github.com/d-hinders/Haven-AI/issues/2477), [#2504](https://github.com/d-hinders/Haven-AI/issues/2504)) | `scripts/docs/chain-integrity.mjs` — **retired** by [#2681](https://github.com/d-hinders/Haven-AI/issues/2681); `validate-frontmatter.mjs` rejects a reintroduced `verified:` block | Retired |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
 | Retired UI merge-gate wording ([#2657](https://github.com/d-hinders/Haven-AI/issues/2657)) | `scripts/docs/ui-gate-wording.mjs` | **Blocking** — and since [#2747](https://github.com/d-hinders/Haven-AI/issues/2747) its `--update` **refuses to raise** the baseline, like the OTHER five gates on `scripts/lib/ratchet.mjs` it now imports from rather than cloning. `covers-gaps.mjs` is the deliberate seventh: it keeps its own `hasShrunk` because its baseline stores gap FILES rather than counts, and it already refuses a rise (`--accept-new` is the explicit override, [#2679](https://github.com/d-hinders/Haven-AI/issues/2679)). Since [#2759](https://github.com/d-hinders/Haven-AI/issues/2759) the shared engine validates the baseline's SHAPE on read, so a malformed entry fails loudly instead of allowing everything for that key — and since [#2761](https://github.com/d-hinders/Haven-AI/issues/2761) all six gates run their `main` through the engine's `runGate`, so that failure reaches an operator as one line rather than wrapped in Node's uncaught-exception banner |
 | `covers:` gaps — a doc naming a file its `covers:` cannot reach ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679)) | `scripts/docs/covers-gaps.mjs` | **Blocking** (shrink-only baseline) |
@@ -394,10 +392,12 @@ report on every PR or auto-merge deadlocks waiting for a run that never happens
 setup). Add **Docs front-matter & agent skills** to the "Haven automerge rules"
 ruleset for the blocking column above to be true.
 
-The archive-integrity probe runs with the docs unit tests rather than as a
-required workflow job. It verifies the hash-pinned historical archive and that
-no current front matter reintroduces a retired `verified:` block; the required
-job remains focused on current documentation contracts.
+The archive-integrity probe (`retire-verified-chains.mjs verify()`, driven by
+its test) runs in the docs unit tests — which are the *Test the docs validators*
+step of the same required job, `if: always()` and without `continue-on-error` —
+so a hash mismatch in the historical archive or a reintroduced `verified:` block
+fails the required check like any other docs test. It is not a separate
+`docs:check` step.
 
 ### Empty-coverage disposition (#2681)
 
@@ -510,282 +510,61 @@ reviewer, which is the whole claim.
 
 #### `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843))
 
-Every other check here asks whether a doc was **touched**, or whether its header
-**parses**. None asks whether it still says what it said — so a deletion is the
-one edit that satisfies all of them at once. The coupling gate goes green
-because the doc changed (exactly what it wanted), front-matter validation
-because the header is still well-formed, and the staleness audit *improves*,
-because the edit bumped `last-verified`.
+**Retired by [#2681](https://github.com/d-hinders/Haven-AI/issues/2681)
+(PR #2775, 2026-09-09).** The heading stays so older links resolve; what follows
+is the record, not a live rule.
 
-That is not hypothetical. Resolving the #1832/#1841 collision on
-`ship-playbooks/frontend.md`, a session **picked a side instead of chaining**
-and deleted `#1816`'s chain entry, the §4 paragraph it pointed at, and a
-post-review correction — all already merged on `dev`. Valid front-matter, 145
-coherent lines, every gate green.
+**What it was.** Every other check here asks whether a doc was **touched** or
+whether its header **parses**; none asks whether it still says what it said. The
+chain was the answer: each doc's `last-verified` carried a list of what each
+re-verification pass had read and had *not* re-verified, and
+`scripts/docs/chain-integrity.mjs` ran three checks on every PR — no prior entry
+dropped (#1843), no entry duplicated (#2477), every prior entry byte-verbatim in
+the new list (#2504). #2637 moved the chain from one hand-packed comment line to
+a `verified:` list, one entry per line. That did not make concurrent entries
+merge — two branches inserting different lines at the same anchor still conflict
+in git's line merge, measured both orderings — but it turned the conflict into a
+two-line hunk resolved by keeping both, instead of one rewritten multi-KB line;
+and the byte ceiling (#2477, #2562) went away.
 
-**The shape ([#2637](https://github.com/d-hinders/Haven-AI/issues/2637)).** The
-chain is a `verified:` block list, **one entry per line, newest first**:
+**Why it was retired.** The chain recorded what a session *said* it re-read; it
+could be satisfied by writing a sentence, and it never asserted a note was true;
+the retrospective's evidence points the same way — across the three skill PRs
+(#2499, #2500, #2501) every wrong claim was caught by an independent read and
+none by a gate. It had grown to 74,442 words (504,844 bytes) across the 72
+governed docs — `npm run docs:measure` at `1671d2bf`, the 2026-09-08 tree #2681's
+re-measure names; the metric now reports 0 by construction, since the splitter
+returns an empty chain — larger on `CLAUDE.md` than the manual it annotated, and on
+`CLAUDE.md` and `AGENTS.md` that annotation loaded into every session and every
+reviewer pass. The question it stood in for — *is this claim still true* — is
+answered by the `covers:` gap check ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679))
+and by the test-pinned claims that [#2680](https://github.com/d-hinders/Haven-AI/issues/2680)
+moved out of prose, neither of which a sentence can satisfy.
 
-```yaml
-last-verified: "2026-09-08"
-verified:
-  - "#2637: reshaped the chain; three checks ported to line sets."
-  - "#2533: EDITED — three claims this diff made false. Scope: §3."
-```
+**What replaced it.**
 
-Add yours at the top. Entries are double-quoted YAML scalars because their text
-contains `"`, `#`, `:` and backslashes; `quoteEntry`/`unquoteEntry` in
-`validate-frontmatter.mjs` are the only writer and reader, so the two cannot
-drift apart (the census is pinned by
-`scripts/docs/chain-entry-codec-census-pin.test.mjs`, #2680). The retired form put the whole chain in a `#` comment on the
-`last-verified:` scalar, joined by `Prior:` markers — the validator now rejects
-that shape and names the one-shot migration (`scripts/docs/migrate-chain-to-list.mjs`).
+- Every governed doc keeps `last-verified: "YYYY-MM-DD"` and nothing else on
+  that key. `validate-frontmatter.mjs` rejects a `verified:` block and rejects an
+  inline `#` annotation on the scalar, naming the archive in the error.
+- Every chain was moved **verbatim** to
+  `docs/archive/last-verified-chains-2026-09.md`, one combined archive grouped
+  by doc. `scripts/docs/retire-verified-chains.mjs` did the move and asserts
+  byte equality; its test pins the section count and each section's inline
+  SHA-256 marker, so a deleted section or an edited block is a red docs test
+  rather than a green nothing.
+- `git log -p -- <doc>` still holds every entry with the diff it accompanied.
+  That, plus a grep over the archive, is the forensic path the chain used to
+  provide inline.
 
-**The rule is unchanged:** one entry per issue that re-verified the doc (#1496),
-and every entry on the base must still be there, byte-for-byte, on the head.
-
-**What the reshape did and did not buy — measured, because the issue that asked
-for it predicted otherwise.** #2637 expected git to merge concurrent entries as
-ordinary line insertions. It does **not**: two branches each inserting a
-different entry at the same anchor conflict in git's line-based merge, and that
-was measured both ways round — newest-first and oldest-last conflict alike. The
-conflict did not go away.
-
-What went away is the **damage**. The conflict is now the two inserted lines,
-with every other entry outside the hunk as untouched context, so the resolution
-is *keep both* and no unrelated entry is in reach. In the old shape the same
-conflict arrived as one line — 37,561 bytes on
-`delegation-rail-security-model.md` — that both sides had rewritten whole, and
-hand-merging that line is exactly how [#1843](https://github.com/d-hinders/Haven-AI/issues/1843)
-dropped entries and how [#2504](https://github.com/d-hinders/Haven-AI/issues/2504)
-rewrote them in place. Both failures required a human editing a chain they could
-not read; neither is reachable from a two-line hunk. `chain-integrity.test.mjs`
-proves both halves with a real `git merge` rather than asserting them.
-
-**Compacting a chain on purpose** says so in an entry, which passes the check
-and prints what was dropped:
-
-```yaml
-verified:
-  - "chain-reset(#1843): compacted, history in git log."
-```
-
-The marker lives in the file rather than in a PR description so the excuse lands
-in the diff of the file it excuses.
-
-**Refreshing a base: interleave, never take a side ([#2504](https://github.com/d-hinders/Haven-AI/issues/2504)).**
-When a branch merges `dev` in and both sides added an entry, `git` conflicts —
-that did not change in #2637, and the measurement is in the section above. What
-changed is the size of the thing you resolve: a two-line hunk with every other
-entry outside it as context, rather than one rewritten 37 KB line. Two
-properties make the result correct, and each is checked rather than trusted:
-
-1. **Newest first, both sides kept.** Your new entries, then the incoming
-   side's, then the shared tail exactly once. Taking one side drops history
-   (#1843); concatenating the two doubles it (#2477). In the list shape the
-   resolution is usually just *keep both lines*.
-2. **Every prior entry byte-verbatim.** Refs gained, none dropped, none
-   doubled — and none *edited*. An entry that keeps its ref while its prose
-   changes still passed both earlier checks, because one asks about refs and
-   the other about duplicates; neither asks whether the surviving entry still
-   says what it said.
-
-`node scripts/docs/chain-integrity.mjs --base=<ref>` answers both. The second is
-`checkChainEntries`'s `altered` list, and its tolerance was set by replaying it over
-merged history rather than by argument. The command, in full, because the window
-is not the script's default and the numbers do not hold without it:
-
-```bash
-node scripts/docs/chain-integrity-backtest.mjs --merges=1200 --since=2026-08-15
-# at origin/dev f9d920fa: 221 pull requests, 308 changed chain lines, 3 ALTERED
-```
-
-`--merges` is a walk depth, not a date filter, so it has to be deep enough to
-reach the `--since` cutoff: at the script's default of 250 this replay sees 0
-hits and at 400 it sees 1, purely because it has not walked far enough back.
-It saturates at 600 and above. A figure from this script without its `--merges`
-is not re-takeable, and an earlier draft of this section quoted one.
-
-All three hits at saturation are genuine losses of chain text — the check found
-two more than an earlier draft of this section credited it with:
-
-- `docs/product/agent-key-rotation.md` (PR #1964): entries `#1849` and `#1702`
-  truncated mid-entry during a merge resolution — each cut lands after a
-  terminating period, so the loss is a whole sentence, not a broken one.
-- `docs/quality/scan-ledger.md` (PR #1603): the prior entry **was** chained
-  behind `Prior:`, and compressed while chaining — "the outbound-tx-queue
-  finding (epic #1554, approved); both prior findings re-checked and excluded
-  per their dispositions" became "(epic #1554)". A non-verbatim chain, which is
-  precisely the shape `checkChain` and `chainAnomalies` both call healthy.
-- `docs/contributing/branch-and-release-flow.md` (PR #1502): the previous note
-  replaced outright, with no `Prior:` clause at all.
-
-Both of the last two are reported as `(entry)` rather than by a `#ref`, because
-their entries predate the `#NNNN:` heading style — which is what misled an
-earlier draft of this section into calling them pre-convention noise from
-before #1496. The git timestamps say otherwise: #1496 landed 2026-08-16 08:49
-UTC, PR #1502 merged seven hours later that same day, and PR #1603 three days
-after. Both are post-convention lapses, not history. The correction matters
-because it is the difference between a check with one confirmed find and a
-check with three.
-
-The mechanism claim that survives is narrower: the check is not retroactive. It
-only ever compares a pull request's own edit against that pull request's own
-merge base (`base = merge-base(p1, p2)` in the replay), so an entry already on
-`dev` is never re-examined by a later PR that does not touch it. That is why
-these three sit in history rather than failing CI today — a timing fact, not a
-blind spot. A new entry without a `#ref`, altered by some future PR, would be
-caught: `headOfEntry` returns null for it, so it is judged on its text alone.
-
-Two further hits were removed by fixing the check rather than the docs:
-
-- **A deleted full stop** (`docs/operations/mcp-runtime-compatibility.md`). A
-  gate that goes red over punctuation teaches people to route around it, so
-  whitespace and a single terminal period are normalised away. Any change to a
-  word is still a finding.
-- **A defect in the check itself** (`docs/architecture/00-overview.md`), found by
-  review rather than by the replay. That commit lost the structural `# ` that
-  opens the comment, leaving `"2026-08-25"  #1992: …`; the parser then ate the
-  first entry's own `#` as if it were the marker and reported an alteration
-  against text that was byte-identical. Fixed in `chainNoteBody` and pinned by a
-  regression test — a marker is followed by a space, so a `#` before a digit was
-  never one.
-
-A declared `chain-reset(#N)` is exempt, since a compaction rewrites entries on purpose.
-
-**Compacting is now optional, and there is no threshold that demands it
-([#2637](https://github.com/d-hinders/Haven-AI/issues/2637)).** The 64 KiB
-ceiling and the 40 KiB advisory band are gone with the single-line shape that
-made them necessary: an unbounded line was a cost every reader of the file paid,
-and a list has no such line. Nothing measures chain size any more.
-
-When you *choose* to compact — a chain long enough to be noise in the file is
-still worth trimming — do it in a pull request of its own, front matter only,
-the shape [#2563](https://github.com/d-hinders/Haven-AI/pull/2563) used:
-
-> keep the newest **~20 entries verbatim** under a declared
-> `chain-reset(#<issue>)` naming what was dropped and why; the older entries
-> leave the file and stay recoverable in `git log -p` on it.
-
-Twenty is a floor, not a target — keep more while they fit comfortably. Git
-history is what makes truncation defensible at all, so a compaction that does
-not say where the dropped entries went is not one. Do it in its own diff for the
-same reason #2563 was split out of #2557: losing 35 entries of someone else's
-provenance is a decision that deserves its own review, not a passenger in an
-unrelated change.
-
-The rule is about **unrelated** changes, and it has one narrow exception, stated
-here because the pull request that introduced this section is itself the case: a
-change that *lowers the threshold* trips it immediately on every doc already
-past the new line, and shipping the mechanism without those compactions leaves a
-standing warning nobody owns — which is the failure this whole section exists to
-prevent. Such a change may carry them, as **separate commits**, one per doc,
-front matter only. That preserves what the own-diff rule is actually protecting
-(a lossy edit gets its own reviewable diff) without the window where `dev` warns
-about something the same author is already fixing. Anything else — a compaction
-riding along with a feature, a fix, or another doc's edit — takes its own pull
-request.
-
-Two limits worth stating plainly. `chain-reset(#N)` **does not excuse the
-ceiling** — the check says so itself, and a reset does not make a doubled line
-smaller. And the measure on both sides is **UTF-8 bytes**: `chainAnomalies`
-compared `line.length` (UTF-16 code units) while reporting "N bytes" until
-#2562, so on a chain dense with em-dashes and arrows the same line could be
-under the enforced limit and over the reported one — 65,448 against 65,719 on
-`mcp-runtime-compatibility.md` at `f37184b5c0d6` (2026-09-04). Either measure is
-defensible; enforcing one while reporting the other is not, and it put wrong
-figures into two separate write-ups before it was fixed.
-
-To correct what an entry claimed, **add a new entry saying how it was wrong**.
-Overwriting it destroys the evidence of what was believed and when, which is the
-only thing a chain is for.
-
-**What it deliberately does not do.** It is not a general "did prose disappear"
-detector; it watches the one line where a lost entry is provable rather than
-guessed. It also does not follow **renames**: a doc moved and chain-edited in
-one pull request has no previous version at its new path, so that shape is a
-known blind spot rather than a covered case. Two heavier designs were weighed in #1843 and rejected: a shrink-only
-line-count ratchet on contract docs (more teeth, but it fires on every
-legitimate deletion, and an escape hatch used routinely stops being read), and
-surfacing deletions in the advisory coupling comment (nearly free, but the
-incident's advisory comment was already green — a comment nobody must answer
-would not have caught it).
-
-The check is also **containment, not the order-preserving subsequence** the
-issue proposed. Backtested over every feature PR merged into `dev` since the
-chaining convention took hold, the ordering half caught zero real defects and
-produced two false positives, both benign: a new note that CITES an older issue
-in its prose ("#1816: … reuses #1800's mechanism") moves that reference to the
-front without dropping anything. One of the two was the resolution that *fixed*
-the incident.
-
-A `dev → main` promotion pull request is exempt: its diff is weeks of history
-that each `dev` PR already carried through this check, and no promoter can act
-on a chain edited before the check existed. The exemption inherits this repo's
-usual caveat — a commit that reached `dev` by direct push or admin merge was
-never checked by any PR gate, this one included — so it is "already checked"
-in the same sense every other gate here means it, not a stronger one. A
-`hotfix/*` into `main` is real work and stays checked.
-
-The measurement behind the containment decision is re-runnable rather than
-quoted: `node scripts/docs/chain-integrity-backtest.mjs --since=<date>` replays
-the check over merged pull requests. It is a development tool; nothing in CI
-runs it.
-
-**Finding a break that is already on `dev`
-([#1876](https://github.com/d-hinders/Haven-AI/issues/1876)).** The check is
-diff-scoped, so a chain broken by an earlier merge is examined by nothing —
-and, because containment compares a contributor's new line against `dev`'s
-current line, neither of which carries the lost reference, it does not surface
-on the next edit either. It is silent permanently, not deferred. `node
-scripts/docs/chain-sweep.mjs` replays the same exported containment rule over
-every doc's own history and reports the drops whose references are still
-missing today. Also a development tool, also not in CI, and also not
-retroactive: it defaults to `--since=2026-08-15`, because before the chaining
-convention (#1496) replacing the note *was* the convention and every doc reads
-as broken. `--ref=<git ref>` picks the tree it sweeps, defaulting to
-`origin/dev`.
-
-**A declared reset is a separate class, not a silenced one
-([#1885](https://github.com/d-hinders/Haven-AI/issues/1885)).** The sweep's
-summary counts unrestored docs and declared-reset docs separately, and the
-two are different findings. `chain-reset(#N)` is written on a doc's *current* line, while the
-sweep replays *historical* pairs — so a marker added after the fact (both
-#1496 compactions at `cf177982`, 2026-08-16, predate the marker syntax
-introduced by #1843 at `178c67d0`, 2026-08-22) is invisible to a
-naive replay, and those docs were reported as unrestored breaks in every run
-forever. The fix is **not** to honour the marker on today's line: one declared
-compaction would then excuse every break in that doc's history, before and
-after it, and a false negative in the one tool built to find silent losses is
-worse than the false positive it tidies. Instead a declaration is bound to the
-single commit that **introduced** it — the commit that wrote the marker, or,
-for a retroactive declaration, the commit that compacted the chain down to the
-declaring issue's entry alone. Every other break in the same doc is still
-reported. "Introduced" is doing the work: a marker persists on the line for
-good, so a drop made a week later still carries it on both sides of its pair.
-
-The retroactive half is deliberately keyed on the compaction *shape* — `#N` as
-the line's only reference — and not on "the first commit to cite `#N`", which
-was the first attempt and had a hole review found: a note that merely mentions
-an issue in prose ("#1500: … plan tracked in #1496") is indistinguishable from
-an entry to `issueRefs`, so an unrelated commit that dropped a reference while
-name-checking #1496 got excused by #1496's declaration. A prose mention always
-sits alongside the entries it did not delete, which is what standing alone
-rules out. The rule is narrow on purpose and fails toward reporting: a partial
-compaction does not match, and is then listed as unrestored **and** as an
-unmatched declaration — a readable "your marker did not bind", never silence.
-A declaration matching no break is likewise reported, so an inert escape hatch
-cannot pass for a used one.
-
-**The sweep does not use `--follow`**, so a doc renamed inside the `--since`
-window hides the breaks it took under its old path — the same blind spot as the
-diff-scoped check above and as `chain-integrity-backtest.mjs`. Adding `--follow`
-alone would make it worse rather than better: the extra revisions predate the
-rename, the per-revision `git show <rev>:<path>` lookups use today's path, and
-every one of them would resolve to nothing — cost and a false air of
-completeness, no findings. A real fix has to carry the old path per commit.
-Currently the gap is empty rather than tolerated: `git log --diff-filter=R -M
---since=2026-08-15 origin/dev -- docs/` reports zero renames.
+**What was learned, kept here because it still applies to the checks that
+remain.** A check that reads text *about* a thing rather than the thing lets a
+sentence stand in for the work (#2323, and the chain's own `chain-reset` hatch
+one level down). A base refresh resolved by hand can keep a marker while
+rewriting what it marks (#2504). A diff-scoped check examines nothing about a
+defect an earlier merge left behind. Each of these shaped the gates that
+survive: the `covers:` gap check reads the body against the file system, the
+coupling gate reads the diff against the mapping, and neither accepts prose as
+evidence.
 
 
 #### `covers:` gaps ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679))
@@ -931,9 +710,7 @@ write its CASP perimeter analysis, so weakening it weakens that discipline;
 `validate-frontmatter.mjs` is listed because the gate imports its
 `globToRegExp`/`parseFrontMatter` and can therefore be disabled from outside
 itself, and the workflow because its `contract` job is what makes the script a
-**required** check. `chain-integrity.mjs` is deliberately **not** listed — the
-gate does not import it, and it guards `last-verified` history rather than the
-shard requirement.
+**required** check.
 
 **Run `npm run docs:coupling` locally — it is the strict, CI-equivalent form.**
 The bare `node scripts/docs/coupling-gate.mjs` is the *advisory* posture: it always

@@ -106,7 +106,7 @@ test('CLI: `--update` DOES write when the drift is gone', () => {
 
 test('CLI: a malformed baseline prints one line — and this gate has a SYNC main', () => {
   // #2761. The other five gates have an async `main`; this one is synchronous,
-  // which is why `runGate` uses `Promise.resolve().then(main)` rather than
+  // which is why `runGate` uses `Promise.resolve().then(() => main())` rather than
   // `main().catch(...)` — the latter lets a sync throw escape before any
   // handler exists. So this gate is not a fifth copy of the same case: it is
   // the one that would still print a node:internal banner under the obvious

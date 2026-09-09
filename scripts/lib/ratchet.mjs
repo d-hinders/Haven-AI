@@ -116,7 +116,7 @@ export function updateRefusals(counts, baseline, { firstRun = false } = {}) {
  * the evidence rather than on a flag: an error carrying stack FRAMES is a bug
  * and is printed whole; a frameless one is a refusal and prints as one line.
  *
- * `Promise.resolve().then(main)` rather than `main().catch(...)`, because
+ * `Promise.resolve().then(() => main())` rather than `main().catch(...)`, because
  * `design-lint`'s `main` is synchronous and a sync throw would escape the
  * latter before any handler existed.
  */
@@ -158,11 +158,18 @@ export function runGate(name, main) {
       // complete with an errno dump. It is a fact about the environment, not a
       // defect in this code, so it is classified as a refusal by its `code`.
       // `--update` WRITES, so the write path's codes belong here as much as the
-      // read path's: a read-only filesystem or a full disk is a permissions
-      // error in every sense #2761's acceptance criteria mean, and both printed
-      // as crashes with an errno dump until review measured them. `ELOOP` and
-      // `ENAMETOOLONG` are deliberately absent — neither is reachable from a
-      // `git ls-files` scan set.
+      // read path's: a read-only filesystem, a full disk or an exceeded quota
+      // is a permissions error in every sense #2761's acceptance criteria mean,
+      // and all of them printed as crashes with an errno dump until review
+      // measured them.
+      //
+      // `ELOOP` is here because a first version of this comment excluded it as
+      // "not reachable from a `git ls-files` scan set" — a reason that is true
+      // of exactly ONE of the six gates. The other five walk the tree
+      // themselves (`readdir`/`statSync`), and a self-referential symlink gives
+      // `ELOOP` from both `statSync` and `readFileSync`; measured. A stated
+      // reason that holds for one sixth of the callers is worse than no reason,
+      // because the next reader takes it as settled.
       const OPERATOR_ERRNO = new Set([
         'EACCES',
         'EPERM',
@@ -170,8 +177,12 @@ export function runGate(name, main) {
         'EISDIR',
         'ENOTDIR',
         'EMFILE',
+        'ENFILE',
         'EROFS',
         'ENOSPC',
+        'EDQUOT',
+        'ELOOP',
+        'ENAMETOOLONG',
       ])
       const isOperatorCondition = typeof err?.code === 'string' && OPERATOR_ERRNO.has(err.code)
       const hasFrames = typeof err?.stack === 'string' && /\n\s+at /.test(err.stack)

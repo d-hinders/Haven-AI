@@ -234,7 +234,7 @@ test('runGate: a frameless refusal prints one line; a bug keeps its frames', asy
 
 test('runGate: a SYNCHRONOUS throw is caught — design-lint has no async main', async () => {
   // `main().catch(...)` would let a sync throw escape before any handler
-  // existed, which is why this uses `Promise.resolve().then(main)`. design-lint
+  // existed, which is why this uses `Promise.resolve().then(() => main())`. design-lint
   // is the gate that makes this not hypothetical: its `main` is synchronous.
   //
   // The await before the restore is not incidental: the handler runs on a

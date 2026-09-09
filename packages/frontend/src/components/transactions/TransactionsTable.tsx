@@ -135,7 +135,11 @@ function LoadingTable({ columns, padY }: { columns: TransactionColumnId[]; padY:
       </td>
     ),
     amount: (key) => (
-      <td key={key} className={`px-2 ${padY} text-right md:px-4`}>
+      // Collapsed below `md` in step with the real cell and the header
+      // (#2734). A skeleton column the loaded rows do not have is a layout
+      // shift on every page load, and it is invisible to a screenshot taken
+      // after the data arrives.
+      <td key={key} className={`${tableColumnClass('md')} px-4 ${padY} text-right`}>
         <Skeleton className="h-4 w-20 ml-auto" />
       </td>
     ),
@@ -263,12 +267,20 @@ export default function TransactionsTable({
             />
           ) : null}
           {showCol('amount') ? (
+            // `revealAt="md"` follows the body cell (#2734). NOTE the cost,
+            // which is real and is recorded rather than absorbed: `date` is
+            // already `revealAt="md"`, so Amount was the LAST sortable header
+            // visible below `md`, and there is no sort control outside this
+            // header row. Sorting is therefore a desktop affordance now. That
+            // is a capability change, not a layout one, and it is tracked
+            // separately rather than decided here.
             <Table.SortableHeaderCell
               label="Amount"
               direction={directionOf('amount')}
               onSort={() => handleSort('amount')}
               tooltip={sortTooltip}
               align="right"
+              revealAt="md"
               sticky={isSticky}
               className="w-[110px]"
             />
@@ -394,6 +406,31 @@ export default function TransactionsTable({
                         {movement}
                       </div>
                     ) : null}
+                    {/* The amount, riding under the title while its own column
+                        is collapsed (#2734) — the same `tableHideFromClass`
+                        idiom the movement line above uses, and the shape the
+                        dashboard's "Recent transactions" preview already
+                        renders, so the two screens stop disagreeing.
+
+                        Full-width and right-aligned, per the issue's
+                        acceptance criterion. Noting the tension rather than
+                        resolving it silently: the same issue says to align
+                        with the dashboard's "Recent transactions" stacked
+                        shape, and that one renders the amount LEFT-aligned at
+                        a `pl-11` indent (`TransactionActivityRow`, below
+                        `sm`). The two sentences cannot both be satisfied. The
+                        checkable criterion wins here and the design reviewer
+                        can settle which shape both screens should share. */}
+                    {showCol('amount') ? (
+                      <div className={`mt-1 text-sm text-right ${tableHideFromClass('md')}`}>
+                        <Amount
+                          value={tx.valueFormatted}
+                          symbol={tx.asset}
+                          direction={tx.direction}
+                          failed={tx.isError}
+                        />
+                      </div>
+                    ) : null}
                   </td>
                 ) : null}
 
@@ -418,12 +455,20 @@ export default function TransactionsTable({
                 ) : null}
 
                 {showCol('amount') ? (
-                  // Same narrower gutter below md (#1772). Here it does not
-                  // widen the activity column — the width is fixed — it gives
-                  // the amount itself 94px of content box instead of 78, which
-                  // is the difference between "-25.00 USDC" on one line and
-                  // wrapped onto two.
-                  <td className={`w-[110px] px-2 ${padY} text-right md:px-4`}>
+                  // Below `md` this column is COLLAPSED and the amount rides
+                  // under the title instead (#2734) — see the activity cell
+                  // above. The column costs 110px plus its gutters out of a
+                  // ~343px row, and the activity column is the only flexible
+                  // one, so that width comes straight off the title and the
+                  // movement line: measured at 390px the title had ~117px and
+                  // wrapped to "Agent payment / by Research / agent".
+                  //
+                  // The gutter comment this replaces (#1772, `px-2` buying the
+                  // amount 94px of content box instead of 78) applied to the
+                  // narrow rendering that no longer exists; `md:px-4` is now
+                  // the only stage this cell is visible at, so `px-4` is
+                  // unconditional.
+                  <td className={`${tableColumnClass('md')} w-[110px] px-4 ${padY} text-right`}>
                     <Amount
                       value={tx.valueFormatted}
                       symbol={tx.asset}

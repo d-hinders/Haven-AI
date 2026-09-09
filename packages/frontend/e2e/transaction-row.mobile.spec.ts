@@ -212,3 +212,116 @@ for (const route of ['/transactions', '/design-system'] as const) {
  * What the route sweeps still cover is unchanged: they are the assertions that
  * go red on the #1774 defect, and they were never the SendModal test's.
  */
+
+/**
+ * The amount rides UNDER the title below `md` (#2734).
+ *
+ * WHAT WAS BROKEN. `/transactions` rendered the amount as its own 110px column
+ * at every width. The activity column is the only flexible one, so those 110px
+ * plus gutters came straight off the title and the movement line: at 390px the
+ * title had ~117px and wrapped to three lines ("Agent payment / by Research /
+ * agent"), and the same shape rendered inside the agent detail's Recent
+ * activity, which embeds this table.
+ *
+ * TWO ASSERTIONS, AND THE STRUCTURAL ONE IS THE LOAD-BEARING HALF. A line-count
+ * ceiling alone is satisfiable by anything that gives the title room —
+ * including shrinking the amount column rather than collapsing it, which is a
+ * different change with a different desktop cost. So this also asserts WHERE
+ * the amount is: in the same cell as the title. That is the property the fix
+ * actually has, and it is the one a later refactor would silently drop.
+ *
+ * WHY NOT A SCREENSHOT: the same reason as every other reading in this file —
+ * the visual gate renders `/design-system` at 1280 and 390 with a
+ * `maxDiffPixelRatio` budget a whole row can move inside (#1805).
+ */
+// `/transactions` only, and the omission is deliberate rather than an
+// oversight. #2734 names `/agents/agent-research` too, and the fix does reach
+// it — the agent detail renders THIS component with
+// `columns={['direction','activity','fromTo','date','amount','link']}`, so the
+// amount column it collapses is the same one. What is missing is a way to
+// DRIVE that route: `e2e/fixtures/haven-api.ts` serves no agent detail, and
+// `/agents/agent-research` exists only in the screenshot harness's fixtures.
+// Adding an agent to the shared e2e fixture is a change every other spec
+// inherits, and it is outside this issue's file list. Recorded as an
+// unasserted screen rather than covered by an assertion that cannot run; the
+// `/design-system` legs above exercise the component in a second context.
+for (const route of ['/transactions'] as const) {
+test(`${route}: the amount rides under the title below md, and the title stops wrapping to three lines (#2734)`, async ({
+  page,
+}) => {
+  const errors = collectBrowserErrors(page)
+  await seedAuthenticatedSession(page)
+  await mockHavenApi(page)
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto(route)
+  await dismissMobileSidebar(page)
+  // `tbody tr`, not `getByRole('table')`: the LOADING SKELETON is also a table
+  // with rows, and it has no title `<p>`, so waiting on the role measured the
+  // skeleton and produced zero readings. The zero-guard below caught it, which
+  // is the only reason this is a comment and not a false green.
+  await page.waitForSelector('tbody tr td p', { timeout: 60_000 })
+
+  const rows = await page.evaluate(() => {
+    const visible = (el: Element) => el.getClientRects().length > 0
+    return Array.from(document.querySelectorAll('tbody tr'))
+      .filter(visible)
+      .map((tr) => {
+        const p = Array.from(tr.querySelectorAll('p')).filter(visible)[0]
+        if (!p) return null
+        const range = document.createRange()
+        range.selectNodeContents(p)
+        // Distinct rounded tops = line boxes, the idiom
+        // `transaction-title-measure.spec.ts` established.
+        const lines = new Set(
+          Array.from(range.getClientRects()).map((r) => Math.round(r.top)),
+        ).size
+        const titleCell = p.closest('td')
+        // Anchor on the rendered currency text, not on a class or a component
+        // name: this file's own lesson is that a probe written against the
+        // shape it was made for finds nothing after the shape changes.
+        const amount = Array.from(tr.querySelectorAll('*')).filter(
+          (el) =>
+            visible(el) &&
+            el.children.length === 0 &&
+            /USDC|ETH/.test((el.textContent ?? '').trim()),
+        )[0]
+        return {
+          text: (p.textContent ?? '').trim(),
+          lines,
+          cellWidth: titleCell ? +titleCell.getBoundingClientRect().width.toFixed(1) : 0,
+          amountVisible: amount !== undefined,
+          amountInTitleCell: amount !== undefined && amount.closest('td') === titleCell,
+        }
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+  })
+
+  // Zero rows would pass every assertion below. Make the reading visible.
+  expect(rows.length).toBeGreaterThan(0)
+
+  // `expect.soft` so ONE run reports every property that broke. With hard
+  // assertions the structural one fires first and aborts the loop, which is
+  // how you end up unable to say whether the line ceiling is load-bearing —
+  // measured: on the pre-#2734 component the structural check reddened and the
+  // line count was never reached.
+  for (const row of rows) {
+    expect.soft(row.amountVisible, `no amount rendered for "${row.text}"`).toBe(true)
+    expect
+      .soft(row.lines, `"${row.text}" wraps to ${row.lines} lines at 390px`)
+      .toBeLessThanOrEqual(2)
+    expect
+      .soft(
+        row.amountInTitleCell,
+        `the amount for "${row.text}" is still in its own column below md`,
+      )
+      .toBe(true)
+  }
+
+  // Printed, not asserted on its own: the number is what tells the next reader
+  // whether the floor in MIN_ACTIVITY_CELL_PX above is still nowhere near the
+  // real value.
+  console.log(`${route} activity cell at 390px: ${rows.map((r) => r.cellWidth).join(', ')}px`)
+
+  expect(unexpectedBrowserErrors(errors)).toEqual([])
+})
+}

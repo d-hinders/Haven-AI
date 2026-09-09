@@ -68,7 +68,8 @@ satisfied-by:              # OPTIONAL (#1366): globs whose NEW files count as
                            # real shard convention (see
                            # docs/regulatory/casp-changelog/README.md).
 last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy.
-                           # REQUIRED. The LAST key: `verified:` was retired by
+                           # REQUIRED, and the last one there is: `verified:`
+                           # was retired by
                            # #2681 and `validate-frontmatter.mjs` now REFUSES
                            # it — a doc carrying one fails the required check.
                            # Historical chains live in
@@ -204,8 +205,10 @@ illustrated is what this survey is about:
   #2775). It was the strongest instance of this pattern and is recorded here
   rather than deleted, because the pattern it illustrated is what the section
   is about: `checkChain` verified CONTAINMENT — every issue reference in the
-  prior line surviving into the new one — which is a property no other check
-  here asks about. Nothing replaced it; the argument for retiring it is that a
+  prior line surviving into the new one — and `checkChainEntries` verified each
+  prior entry BYTE-VERBATIM, which caught an entry whose issue reference
+  survived while its prose was rewritten. Two properties, not one; no other
+  check here asks about either. Nothing replaced it; the argument for retiring it is that a
   date beside an unread entry was evidence of nothing.
 - **`EXEMPT_PACKAGE_DOCS`** (`package-docs.mjs`) — a `packages/**` Markdown file
   leaves the system by its author writing a reason string, and check (4b)
@@ -294,9 +297,9 @@ guard exists to catch, while this job has no `paths:` filter and always does.
 retired with the chain in #2775 — the chain-integrity paragraph below records
 what it did. It read **git history**, so it needed a base
 commit: locally `origin/dev`, in CI `BASE_SHA`/`HEAD_SHA` with
-`fetch-depth: 0`. Without one it says NOTHING WAS CHECKED and, in CI, fails —
-a gate that cannot see the diff must never report a clean bill of health
-(the #1076 lesson).
+`fetch-depth: 0`. Without one it SAID nothing was checked and, in CI, failed —
+a gate that cannot see the diff must never report a clean bill of health, which
+is the #1076 lesson and outlives the check that illustrated it.
 
 ## Docs served to agents (#2532)
 
@@ -531,9 +534,6 @@ in the pull request instead — #2681's argument is that a date beside an
 unread entry was evidence of nothing, and the PR is where a reviewer can
 actually check the scope against the diff.
 
-An archive-integrity probe runs with the docs unit tests: it verifies the
-hash-pinned archive and that no current front matter reintroduces a `verified:`
-block.
 
 #### `covers:` gaps ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679))
 

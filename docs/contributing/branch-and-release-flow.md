@@ -10,7 +10,7 @@ covers:
   - scripts/release-bump.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Branch & release flow
@@ -157,7 +157,10 @@ the epic when its last sub-issue lands on `dev`.
 ## Promotion to production (`dev → main`)
 
 1. Open a **`dev → main` PR** (a human step). Its diff is the promotion manifest
-   — exactly what's about to go live.
+   — exactly what's about to go live. **`dev` is held from here until the merge**,
+   because the PR's head is the branch and not a pinned SHA; see
+   [`../operations/promoting-dev-to-main.md` § *The promotion window*](../operations/promoting-dev-to-main.md#the-promotion-window--dev-is-held-while-the-pr-is-open)
+   for the consequences and what to do when something must land anyway.
 2. Merge it. On the push to `main`:
    - **`release.yml`** cuts a **`prod-<timestamp>` GitHub Release** with
      auto-generated notes listing the PRs in this promotion (anchored to the

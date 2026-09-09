@@ -76,17 +76,25 @@ for how the environments are wired, see
 `dev`.** The PR's head is the `dev` *branch*, not a pinned SHA, so anything that
 lands moves it, with three consequences:
 
-1. All **19** required contexts on `main` go pending and must re-run green
-   (count read from the live ruleset: `gh api
-   repos/d-hinders/Haven-AI/rules/branches/main`).
+1. The required contexts on `main` are re-evaluated at the new head. Each one
+   that applies re-runs and must go green; the rest report `skipped`, which
+   GitHub counts as satisfied — most of `ci.yml`'s jobs are gated on
+   `needs.changes.outputs.*`, so a promotion rarely re-runs all of them. The
+   authoritative list of required contexts is the ruleset inventory in
+   [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md);
+   a second copy drifts.
 2. `qa-freshness` re-evaluates **coverage**, not only recency. A new commit
    touching a money-path file the green QA run did not cover turns the gate red
    and needs another dispatched money-flow run.
 3. The promoted scope changes silently, which is the release-record trap in
    [#2724](https://github.com/d-hinders/Haven-AI/issues/2724).
 
-The window is longer than CI runtime suggests: a promotion sits waiting on a
-code owner for an unbounded time, and that whole wait is inside the hold.
+The sharpest consequence is not the re-runs but the review: `main` carries
+`dismiss_stale_reviews_on_push: true`, so a merge into `dev` **dismisses an
+approval already given** on the promotion PR. Code-owner review itself is
+conditional — `.github/CODEOWNERS` has one rule, on migration files — so a
+promotion carrying a migration can additionally sit waiting on a human for an
+unbounded time, and that whole wait is inside the hold.
 
 **If something must land anyway**, it is not forbidden — it is three pieces of
 work: re-measure the scope (#2724), re-dispatch *QA — money-flow (dev)*, and
@@ -110,11 +118,13 @@ so this is a rule to point at rather than a question to ask the release runner.
       `qa-dev` run, naming the offending commits. You no longer have to verify
       this by hand — if the gate is green, the run covered the money path. If it
       fails, re-run *QA — money-flow (dev)* rather than reaching for
-      `qa-override`. **Dispatch it; do not wait for the automatic post-deploy
-      run.** While `dev` is active those runs skip, and a skipped run's
-      run-level conclusion is `success` — a green tick in the Actions list that
-      satisfies nothing, because the gate reads the `money-flow` **job**. Both
-      facts and the one-line check are in
+      `qa-override`. **Dispatch it rather than waiting.** The automatic
+      post-deploy runs are bound to whatever commit was deployed, and during the
+      hold nothing merges — so no new deployment fires and no new automatic run
+      appears at the head you are promoting. Waiting is not a way to produce
+      one. When you inspect any run, **read the `money-flow` job's conclusion,
+      never the run's**: a run whose job skipped is still `success` at run level
+      and is a green tick that is not coverage. The one-line check is in
       [`agent-qa.md` § *Automation & gating*](./agent-qa.md#automation--gating).
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a

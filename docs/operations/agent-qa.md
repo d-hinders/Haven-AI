@@ -827,25 +827,24 @@ group moved from the workflow to the **money-flow job** so those skipped runs
 never hold it.
 
 **Read the `money-flow` JOB's conclusion, never the run's.** A run whose
-money-flow job skipped has run-level conclusion `success`, so in the Actions
-list it is a green tick — and it satisfies nothing, because the gate admits a
-run only when that job concluded `success`. This is the shape of a wrong answer
-that looks like the right one, and the skipped runs above are the common case
-rather than an edge: on 2026-09-09, runs `34340710137`, `34340672917` and
-`34339884272` were each `success` at run level with `money-flow: skipped`. Check
-it with
+money-flow job skipped still has run-level conclusion `success`, so in the
+Actions list it is a green tick — and it is not evidence, because the gate
+admits a run on the job's conclusion (rule 4 above). Two runs on the same commit
+on 2026-09-09 make the point: `34340710137` (`… (in_progress)`, skipped by rule
+1) is `success` with `money-flow: skipped`, while `34340824433`, 79 seconds
+later on that same commit `06ae6cc8`, is `success` with `money-flow: success`.
+Identical at run level; only one of them is coverage. Check it with
 
 ```bash
 gh api repos/d-hinders/Haven-AI/actions/runs/<id>/jobs \
   --jq '.jobs[] | "\(.name): \(.conclusion)"'
 ```
 
-A second consequence, and the reason a release author cannot simply wait: while
-`dev` is busy, each new deployment de-duplicates the previous one's second
-`success`, so the automatic post-deploy runs keep skipping and waiting for one
-to satisfy `qa-freshness` never converges. Dispatch the harness instead —
-[`promoting-dev-to-main.md`](./promoting-dev-to-main.md) has the release-side
-procedure.
+The skip reason is worth reading too, since the run title carries it: a
+`Preview` deployment on a feature branch produces the same green-looking run
+(`34339884272`), and that one is refused by the environment filter and by
+ancestry, not by de-duplication.
+
 
 #### Provenance — why a curl can no longer mute the alarm (#2271)
 

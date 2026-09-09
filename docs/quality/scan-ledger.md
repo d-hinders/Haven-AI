@@ -287,7 +287,15 @@ Drive with `ship-next epic=#2720`. Becomes `shipped` when the epic closes.
 **2026-09-08 (later the same day):** slices #2721 (PR #2739, eight guards under
 `scripts/`, plus the shared `scripts/test-support/guard-cli.mjs` harness) and
 #2723 (PR #2740, `scripts/docs/`) MERGED. #2722 (`scripts/ci/`) remains, and
-the epic stays open. Appended rather than edited, per the convention above.
+the epic stays open. One cost, found by the change catching its own pull request: this entry
+originally named two components in code spans as EXAMPLES of the token shape,
+and the gate read them as claims about those files. That is the same
+false-positive class block 2 above already records for paths — a measurement
+command read as an assertion — now widened to bare names. Remedy taken is the
+one #2678 prefers: delete the claim, since an illustration should not be a code
+span. Anyone writing about this gate should expect it.
+
+Appended rather than edited, per the convention above.
 
 **2026-09-09:** slice #2722 (`scripts/ci/`) ships in the pull request that adds
 this entry, taking the epic's own headline figure to **zero**. Re-running the
@@ -302,6 +310,21 @@ The zero was checked against a positive control before being written here: the
 same command at the parent commit returns **3**, naming those three guards with
 3, 1 and 1 refusals — the counts this slice's issue predicted. A zero from an
 instrument that has not been shown able to return non-zero is not a result.
+
+Appended rather than edited, per the convention above.
+
+**2026-09-09 (later):** #2780 taught `covers-gaps.mjs` to resolve backticked
+bare component names, which its path regex could not see because it needs a
+`packages/`-style prefix. The block-2 reading of **128 pairs across 39 docs** above is
+a record of 2026-09-08 and is left as written; the reading after this change is
+**154 across 40**, from +38 newly visible pairs and −8 closed (4 in
+`design-system.md` by #2779, 4 in `docs-quality-system.md`).
+
+The +38 was measured with a read-only script BEFORE the gate changed, precisely
+so the size was known rather than discovered as a wall of baseline entries, and
+the gate then reported the same 38 — two instruments agreeing. Accepted into the
+baseline with the explicit `--accept-new` override rather than by weakening the
+ratchet; the plain `--update` correctly refused the rise.
 
 Appended rather than edited, per the convention above.
 

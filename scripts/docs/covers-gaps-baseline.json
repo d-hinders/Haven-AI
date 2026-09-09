@@ -12,6 +12,7 @@
     "packages/connect/src/rekey.ts"
   ],
   "docs/architecture/03-payment-sequence.md": [
+    "packages/frontend/src/components/agent-panel/AllowanceBar.tsx",
     "packages/frontend/src/lib/allowance-math.ts"
   ],
   "docs/architecture/04-x402-payment-sequence.md": [
@@ -45,14 +46,20 @@
     "scripts/qa/discovery-reach.mjs"
   ],
   "docs/contributing/ai-agent-workflow.md": [
+    ".github/CODEOWNERS",
     "packages/backend/src/routes/__tests__/payments.test.ts",
     "packages/backend/src/routes/payments.ts",
     "packages/frontend/src/app/globals.css",
+    "packages/frontend/src/components/EditAgentModal.tsx",
+    "packages/frontend/src/components/NetworkGate.tsx",
+    "packages/frontend/src/components/OnchainActionGate.tsx",
+    "packages/frontend/src/components/WalletButton.tsx",
     "packages/frontend/src/components/haven/AgentBudgetCard.tsx",
     "packages/frontend/tailwind.config.js",
     "scripts/docs/coupling-gate.mjs"
   ],
   "docs/contributing/ai-review-patterns.md": [
+    "packages/frontend/src/components/WalletButton.tsx",
     "scripts/docs/coupling-gate.mjs"
   ],
   "docs/contributing/autonomous-pr-loop.md": [
@@ -62,14 +69,17 @@
     "scripts/ci/operator-verify-close-guard.mjs",
     "scripts/ci/qa-freshness.mjs"
   ],
+  "docs/contributing/branch-and-release-flow.md": [
+    ".github/CODEOWNERS"
+  ],
   "docs/contributing/docs-quality-system.md": [
     ".github/money-path-globs.json",
     "packages/backend/src/routes/payments.ts",
     "packages/core/src/api-types.ts",
-    "packages/frontend/playwright.config.ts",
-    "packages/sdk/src/agent-guidance.ts",
-    "scripts/ci/change-classifier.mjs",
-    "scripts/ci/money-path.test.mjs"
+    "packages/frontend/Dockerfile"
+  ],
+  "docs/contributing/loop-harness-index.md": [
+    "packages/frontend/src/components/agent-panel/AllowanceBar.tsx"
   ],
   "docs/contributing/pr-workflow-checklist.md": [
     "packages/backend/src/db/advisory-lock.ts",
@@ -91,6 +101,27 @@
     ".github/workflows/update-visual-baselines.yml",
     "packages/frontend/copy-lint-baseline.json",
     "packages/frontend/scripts/design-system-coupling.mjs",
+    "packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx",
+    "packages/frontend/src/app/(authenticated)/profile/ProfileClient.tsx",
+    "packages/frontend/src/components/AgentPanel.tsx",
+    "packages/frontend/src/components/BudgetGrantAction.tsx",
+    "packages/frontend/src/components/CatalogSubmitModal.tsx",
+    "packages/frontend/src/components/ConnectAgentModal.tsx",
+    "packages/frontend/src/components/DelegationBudgetCard.tsx",
+    "packages/frontend/src/components/DelegationSendModal.tsx",
+    "packages/frontend/src/components/EditAgentModal.tsx",
+    "packages/frontend/src/components/ErrorBoundary.tsx",
+    "packages/frontend/src/components/InfoModal.tsx",
+    "packages/frontend/src/components/ProtectedRoute.tsx",
+    "packages/frontend/src/components/ReceiveFundsModal.tsx",
+    "packages/frontend/src/components/agent-panel/AgentCard.tsx",
+    "packages/frontend/src/components/agent-panel/AllowanceBar.tsx",
+    "packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx",
+    "packages/frontend/src/components/connect-agent/CopyBlock.tsx",
+    "packages/frontend/src/components/sidebar/Sidebar.tsx",
+    "packages/frontend/src/components/ui/EmptyState.tsx",
+    "packages/frontend/src/components/ui/Modal.tsx",
+    "packages/frontend/src/components/ui/SidePanel.tsx",
     "packages/frontend/wire-type-baseline.json",
     "scripts/ci/baseline-audit.mjs",
     "scripts/ci/change-classifier.mjs",
@@ -120,6 +151,8 @@
     "packages/backend/src/rails/delegation-contracts.ts"
   ],
   "docs/operations/agent-discovery-listings.md": [
+    "packages/frontend/src/components/AccountSignersCard.tsx",
+    "packages/frontend/src/components/onboarding/RecoveryNudge.tsx",
     "packages/frontend/src/lib/__tests__/discovery-surfaces.test.ts"
   ],
   "docs/operations/agent-qa.md": [
@@ -143,6 +176,7 @@
   "docs/operations/dev-environment.md": [
     "packages/backend/src/rails/delegation-contracts.ts",
     "packages/demo-merchant-mcp/src/erc7710.test.ts",
+    "packages/frontend/src/components/TopBar.tsx",
     "packages/qa-agent/src/scenarios/x402-erc7710-settle.ts"
   ],
   "docs/operations/mainnet-canary.md": [
@@ -175,14 +209,16 @@
     "scripts/frontend-copy-lint.mjs",
     "scripts/frontend-copy-lint.test.mjs"
   ],
-  "docs/product/design-system.md": [
-    "packages/frontend/scripts/design-lint.mjs",
-    "packages/frontend/src/__tests__/token-contrast.test.ts",
-    "scripts/ci/visual-baseline-inventory.mjs",
-    "scripts/lib/lint-escapes.mjs"
+  "docs/product/design-review.md": [
+    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
+  ],
+  "docs/product/README.md": [
+    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
   ],
   "docs/product/screen-recipes.md": [
-    "packages/backend/src/index.ts"
+    "packages/backend/src/index.ts",
+    "packages/frontend/src/components/AccountSignersCard.tsx",
+    "packages/frontend/src/components/DelegationSendModal.tsx"
   ],
   "docs/quality/scan-ledger.md": [
     "packages/connect/src/runtime-manifest.ts",

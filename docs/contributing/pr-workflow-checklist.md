@@ -94,6 +94,15 @@ Good split examples:
 - Write the verdict of each pass into the PR's **Review Status** section as a named line naming the head it reviewed (`haven-reviewer: passed @ <sha> | skipped because ___`, and the same for `haven-design-reviewer` on frontend diffs). The rule above binds whether or not anything checks it; this line is what makes a skip *visible*, and `ship-next` will not arm auto-merge on an unfilled one ([#1968](https://github.com/d-hinders/Haven-AI/issues/1968)).
 - If this PR includes a follow-up commit that fixes a bug the original commits introduced, the fix commit must include the smallest regression test (typically a vitest case) that would have caught it. If no such test is practical, document why in the commit body. Every recent "Address reviewer findings" commit that compounded into durable quality landed 2–4 targeted vitest cases alongside the fix.
 
+## Proportionality-lane PR body
+
+When every boundary in [`ship-next` § *Proportionality lane*](../../.agents/skills/ship-next/SKILL.md#proportionality-lane-2798)
+passes, use the existing PR template with sections deleted rather than creating a
+second template. Keep **Review Status** (including the named verdict line), **Not
+filed** / **Filed**, and the bare `Closes` / `Refs` line; add a block containing the
+five pasted boundary outputs. Delete only the long-form sections the lane says do not
+apply. The PR template remains the source of truth for every other pull request.
+
 ## Before Merging
 
 - Re-check that the PR has no conflicts with `dev`.

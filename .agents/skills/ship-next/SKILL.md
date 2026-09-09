@@ -407,6 +407,40 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    know what was cleared and what was not, including every limit the reviewer put on
    their own clearance, in the reviewer's words (*Independent Review* step 2).
 
+### Proportionality lane (#2798)
+
+This is a bounded exception for a Markdown-only diff that passes every boundary
+below. It keeps every required check, docs gate, independent `haven-reviewer`
+pass, the **Not filed** / **Filed** dispositions, and the money-path classifier.
+It drops only the isolated review worktree, mutation-results table, and long-form
+PR body: Markdown is not executed, so the reviewer instead reviews the named
+`git diff origin/dev...<sha>` and the CI results at that SHA.
+
+Run and paste the output of all five boundary commands into the PR body. Any
+non-passing output means the normal workflow applies.
+
+| Boundary | Command | Passing output |
+|---|---|---|
+| B1 — Markdown only | `git diff --name-only origin/dev...HEAD` | Every listed path ends in `.md`. |
+| B2 — no `covers:` reach | `npm run docs:coupling` and `node scripts/docs/coupling-gate.mjs` | The strict run names no contract doc; the advisory list is empty or names only docs edited by the diff. |
+| B3 — no measured number added | `git diff origin/dev...HEAD \| grep '^+' \| grep -vE '^\+\+\+' \| grep -E '\b[0-9]{2,}\b' \| grep -vE '#[0-9]+\|[0-9]{4}-[0-9]{2}-[0-9]{2}'` | No output. |
+| B4 — no command added | `git diff origin/dev...HEAD \| grep '^+' \| grep -vE '^\+\+\+' \| grep -E '^\+\s*(\`\`\`\|npm run\|node \|npx \|gh \|git )'` | No output. |
+| B5 — not money-path | `node scripts/ci/money-path-classify.mjs` | Reports not money-path. |
+
+The short form is the existing PR template with sections deleted, not a second
+template file: keep **Review Status** (the verdict line), **Not filed** / **Filed**,
+and the bare `Closes` / `Refs` line; add the pasted boundary block. The PR template
+itself remains unchanged. Inside this lane, a prose finding is a `nit` unless it
+changes a reader-actionable rule, required check, or operator step. A re-review after
+a fix covers the delta since the last verdict (`git diff <last-verdict-sha>...HEAD`)
+and records both SHAs.
+
+The boundary decides mechanically; no author decides whether a change is “small” or
+“claim-free.” PR #2797 fails B1 (`package.json`) and B4 (new npm scripts); #2795
+fails B2 (`covers:` reach) and B3 (measured figures); #2777 passes B1 but fails B3
+(added figures). None qualify. A wording fix, link fix, or retired-claim deletion
+with no replacement figure can qualify when all five commands pass.
+
 ### Filing bar (#2767)
 
 **Filing an issue is not a way to finish.** By the owner's hand count in #2767

@@ -67,7 +67,10 @@ satisfied-by:              # OPTIONAL (#1366): globs whose NEW files count as
                            # doc's lines. Declare it only when the doc has a
                            # real shard convention (see
                            # docs/regulatory/casp-changelog/README.md).
-last-verified: "2026-06-28" # YYYY-MM-DD a human last confirmed accuracy
+                           # last-verified: YYYY-MM-DD a human last confirmed
+                           # accuracy. A bare date, nothing after it: the
+                           # validator refuses any `#` on this scalar (#2681).
+last-verified: "2026-06-28"
 ---
 ```
 

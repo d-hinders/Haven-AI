@@ -67,7 +67,8 @@ jobs:
     steps:
       # A shallow clone is enough: the #1843 chain-integrity check that read
       # the merge base was retired by #2681, and none of the five `docs:check`
-      # steps reads git history.
+      # scripts reads git history (two call `git ls-files`, which reads the
+      # index, not history).
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4

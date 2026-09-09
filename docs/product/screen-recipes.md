@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-07"
+last-verified: "2026-09-09"
 ---
 
 # Haven Screen Recipes
@@ -395,6 +395,11 @@ Money and risk clarity:
   110px was coming straight off the title, which is the only flexible column,
   and the title wrapped to three lines at 390px as a result.
 - Full history table sorting must use raw transaction values for amount sorting and `aria-sort` on sortable headers.
+- **Sorting is available at `md` and up only, and that is deliberate** (owner
+  decision 2026-09-09, #2790). Both sortable headers are `revealAt="md"` and
+  there is no sort control elsewhere, so a phone gets the default order —
+  newest first — and no way to change it. Do not read the absence as a defect,
+  and do not add a mobile sort control without taking it through #2736.
 - On mobile, preserve direction, activity/movement, amount, and the
   external-details link. Secondary columns, including date and initiator, may
   hide.

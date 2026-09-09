@@ -39,7 +39,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
@@ -59,7 +59,10 @@ export function runGuard(
     args = [],
     env = {},
     linkNodeModules = false,
+    binOnPath = false,
     gitInit = false,
+    gitCommit = false,
+    filesAfterCommit = {},
     mtimes = {},
     chmod = {},
     readBack = [],
@@ -110,6 +113,30 @@ export function runGuard(
         stdio: ['ignore', 'ignore', 'inherit'],
       })
     }
+    // A guard that asks git about HEAD -- ancestry, a two-dot diff, the blob a
+    // file had before it changed -- gets a fatal error in a repo with no
+    // commits, and several of them read that error as "no answer" and fail
+    // closed. That is the right direction but the wrong test: it exercises the
+    // unreadable-git path, never the one CI runs. So `gitCommit` gives the
+    // fixture a real HEAD. Identity is passed with `-c` rather than taken from
+    // the machine, because a contributor with no `user.email` set otherwise
+    // sees every such case fail for a reason that is not the guard's.
+    if (gitCommit) {
+      if (!gitInit) throw new Error('runGuard: gitCommit needs gitInit -- there is no repository to commit to')
+      execFileSync('git', ['-c', 'user.name=Guard Fixture', '-c', 'user.email=fixture@example.invalid', '-C', root, 'commit', '-q', '-m', 'fixture'], {
+        stdio: ['ignore', 'ignore', 'inherit'],
+      })
+      // Written after the commit on purpose: a guard comparing HEAD to the
+      // working tree needs the two to DIFFER, and a fixture where they cannot
+      // differ can only ever prove the clean case.
+      for (const [rel, body] of Object.entries(filesAfterCommit)) {
+        const dest = join(root, rel)
+        mkdirSync(dirname(dest), { recursive: true })
+        writeFileSync(dest, body)
+      }
+    } else if (Object.keys(filesAfterCommit).length) {
+      throw new Error('runGuard: filesAfterCommit without gitCommit would just be `files`, and would silently NOT be the post-commit state the caller asked for')
+    }
     // Permissions, where a guard's behaviour on an UNREADABLE file is the thing
     // under test (#2761). Applied after the writes and before the run; the
     // `finally` below removes the root, and `rmSync` is unaffected by a 000
@@ -127,10 +154,19 @@ export function runGuard(
     for (const [rel, seconds] of Object.entries(mtimes)) {
       utimesSync(join(root, rel), seconds, seconds)
     }
+    // A guard that shells out to a command it does not own (`gh`, say) can only
+    // be driven offline by putting a stand-in ahead of the real one on PATH.
+    // The fixture root is not known to the caller before this function runs, so
+    // the prepend happens here rather than through `env` -- a caller writing a
+    // relative PATH entry would be depending on cwd resolution, which is a
+    // silent no-op wherever it does not hold.
+    const pathEnv = binOnPath
+      ? { PATH: `${join(root, 'bin')}${delimiter}${process.env.PATH ?? ''}` }
+      : {}
     const res = spawnSync(process.execPath, [join(root, 'scripts', script), ...args], {
       encoding: 'utf-8',
       cwd: root,
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...pathEnv, ...env },
       // A hung guard should name itself rather than burn the job's ceiling.
       timeout: 120_000,
     })

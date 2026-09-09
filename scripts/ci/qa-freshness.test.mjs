@@ -12,6 +12,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
+import { runGuard } from '../test-support/guard-cli.mjs'
 import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs, greenRunQueryArgs, jobsQueryArgs, selectDiffBase, isVersionOnlyDiff, partitionVersionOnly, selectGreenRun, moneyFlowJobConclusion, EVIDENCE_EVENTS, MONEY_FLOW_JOB, GREEN_RUN_WINDOW } from './qa-freshness.mjs'
 
 const HOUR = 3_600_000
@@ -890,5 +891,116 @@ describe('partitionVersionOnly (#2164)', () => {
       (f) => (f.endsWith('.json') ? packageJsonBump : signerVersionBump),
     )
     assert.deepEqual(behavioural, [])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The CLI (#2722, slice 2 of epic #2720).
+//
+// Everything above this line imports the exported predicates and calls them
+// directly. `main()` is below the last export and none of it runs, so the three
+// refusals that decide whether a `dev → main` promotion may proceed were
+// unreachable by this file: neuter any of them and the suite above stays green.
+//
+// These cases drive the shipped script as a PROCESS, in a fixture repo the test
+// owns. `gh` is answered by a stand-in on PATH rather than by the network, so
+// the run list and the job list are inputs the test states rather than
+// conditions of the real repository — and the ACCEPT case is asserted alongside
+// the refusals, because a script that refuses everything passes a refusal test.
+describe('qa-freshness CLI (#2722)', () => {
+  const GLOBS = JSON.stringify({ globs: ['packages/backend/src/payments/**'] })
+
+  // `run list` and `api …/jobs` are the only two calls the guard makes. The
+  // stand-in answers both, and exits 64 on anything else so a guard that starts
+  // asking a third question fails loudly here instead of silently reaching the
+  // network from a test.
+  const GH_SHIM = `#!${process.execPath}
+const { execFileSync } = require('node:child_process')
+const args = process.argv.slice(2)
+if (process.env.GH_SHIM_FAIL === '1') {
+  process.stderr.write('gh: simulated API failure\\n')
+  process.exit(1)
+}
+if (args[0] === 'run' && args[1] === 'list') {
+  if (process.env.GH_SHIM_RUNS === 'at-head') {
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    process.stdout.write(JSON.stringify([{
+      databaseId: 1,
+      event: 'workflow_dispatch',
+      headBranch: 'dev',
+      headSha: sha,
+      createdAt: new Date().toISOString(),
+    }]))
+  } else {
+    process.stdout.write('[]')
+  }
+  process.exit(0)
+}
+if (args[0] === 'api') {
+  process.stdout.write(JSON.stringify({ jobs: [{ name: 'money-flow', conclusion: 'success', steps: [] }] }))
+  process.exit(0)
+}
+process.stderr.write('gh shim: unexpected args ' + JSON.stringify(args) + '\\n')
+process.exit(64)
+`
+
+  const run = (env) =>
+    runGuard('ci/qa-freshness.mjs', {
+      files: {
+        '.github/money-path-globs.json': GLOBS,
+        'bin/gh': GH_SHIM,
+        'packages/backend/src/payments/settle.ts': 'export const settle = () => {}\n',
+      },
+      chmod: { 'bin/gh': 0o755 },
+      binOnPath: true,
+      gitInit: true,
+      gitCommit: true,
+      env: { GITHUB_REPOSITORY: 'owner/repo', SOURCE_BRANCH: 'dev', ...env },
+    })
+
+  // --- the accept path, first, so the refusals below mean something ----------
+  test('ACCEPTS: a green run at the promotion head with money-flow passed', () => {
+    const { status, out } = run({ GH_SHIM_RUNS: 'at-head' })
+    assert.equal(status, 0, out)
+    assert.match(out, /✅/)
+    assert.doesNotMatch(out, /::error::/)
+  })
+
+  // --- refusal 1 of 3: the required inputs ----------------------------------
+  test('REFUSES (1/3): GITHUB_REPOSITORY missing', () => {
+    const { status, out } = run({ GITHUB_REPOSITORY: '', GH_SHIM_RUNS: 'at-head' })
+    assert.equal(status, 1, out)
+    assert.match(out, /GITHUB_REPOSITORY and SOURCE_BRANCH are required/)
+  })
+
+  test('REFUSES (1/3): SOURCE_BRANCH missing', () => {
+    const { status, out } = run({ SOURCE_BRANCH: '', GH_SHIM_RUNS: 'at-head' })
+    assert.equal(status, 1, out)
+    assert.match(out, /GITHUB_REPOSITORY and SOURCE_BRANCH are required/)
+  })
+
+  // --- refusal 2 of 3: the run query itself failed ---------------------------
+  // The distinction that matters: an unanswerable query must not read as "no
+  // runs found". Both refuse, but only this one says the API was the problem,
+  // and an operator who cannot tell them apart re-runs QA that already passed.
+  test('REFUSES (2/3): the workflow-run query fails', () => {
+    const { status, out } = run({ GH_SHIM_FAIL: '1' })
+    assert.equal(status, 1, out)
+    assert.match(out, /could not query workflow runs/)
+    // Load-bearing, and measured: with this refusal's `process.exit(1)` deleted
+    // the guard runs ON, reaches `evaluate` with no run, and refuses there
+    // instead — same exit code, and the message above is still in the output,
+    // so status-and-message alone left the mutation ALIVE. What proves the exit
+    // is that the fall-through refusal is absent.
+    assert.doesNotMatch(out, /No successful 'QA — money-flow \(dev\)' run found/)
+  })
+
+  // --- refusal 3 of 3: evaluate() said no ------------------------------------
+  test('REFUSES (3/3): no green run exists, so evaluate refuses', () => {
+    const { status, out } = run({ GH_SHIM_RUNS: 'none' })
+    assert.equal(status, 1, out)
+    assert.match(out, /::error::/)
+    assert.match(out, /No successful 'QA — money-flow \(dev\)' run found on dev/)
+    assert.doesNotMatch(out, /could not query workflow runs/)
   })
 })

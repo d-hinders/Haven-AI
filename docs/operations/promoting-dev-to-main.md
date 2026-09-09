@@ -8,7 +8,7 @@ covers:
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
   - scripts/release-scope.mjs
-last-verified: "2026-09-08"
+last-verified: "2026-09-09"
 ---
 
 # Promoting `dev → main` (production release)
@@ -70,6 +70,43 @@ for how the environments are wired, see
       rebuilding reflexively. Do not hand-count the diff
       ([#2724](https://github.com/d-hinders/Haven-AI/issues/2724)).
 
+## The promotion window — `dev` is held while the PR is open
+
+**From opening the promotion PR until it merges, do not merge anything into
+`dev`.** The PR's head is the `dev` *branch*, not a pinned SHA, so anything that
+lands moves it, with three consequences:
+
+1. The required contexts on `main` are re-evaluated at the new head. Each one
+   that applies re-runs and must go green; the rest report `skipped`, which
+   GitHub counts as satisfied — most of `ci.yml`'s jobs are gated on
+   `needs.changes.outputs.*`, so a promotion rarely re-runs all of them. The
+   authoritative list of required contexts is the ruleset inventory in
+   [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md);
+   a second copy drifts.
+2. `qa-freshness` re-evaluates **coverage**, not only recency. A new commit
+   touching a money-path file the green QA run did not cover turns the gate red
+   and needs another dispatched money-flow run.
+3. The promoted scope changes silently, which is the release-record trap in
+   [#2724](https://github.com/d-hinders/Haven-AI/issues/2724).
+
+The sharpest consequence is not the re-runs but the review: `main` carries
+`dismiss_stale_reviews_on_push: true`, so a merge into `dev` **dismisses an
+approval already given** on the promotion PR. Code-owner review itself is
+conditional — `.github/CODEOWNERS` has one rule, on migration files — so a
+promotion carrying a migration can additionally sit waiting on a human for an
+unbounded time, and that whole wait is inside the hold.
+
+**If something must land anyway**, it is not forbidden — it is three pieces of
+work: re-measure the scope (#2724), re-dispatch *QA — money-flow (dev)*, and
+expect a full re-run of the required contexts.
+
+**The hold lifts the moment the promotion merges.** The tarballs are built from
+`main` at that point, so later `dev` merges only deploy and publish
+`0.0.0-dev.*` snapshots and cannot reach the released version.
+
+More than one agent session and several people merge into `dev` independently,
+so this is a rule to point at rather than a question to ask the release runner.
+
 ## Open and review the PR (base `main`, head `dev`)
 
 - [ ] Skim the **cumulative diff since the last promotion**. Since #1024 removed
@@ -81,7 +118,14 @@ for how the environments are wired, see
       `qa-dev` run, naming the offending commits. You no longer have to verify
       this by hand — if the gate is green, the run covered the money path. If it
       fails, re-run *QA — money-flow (dev)* rather than reaching for
-      `qa-override`.
+      `qa-override`. **Dispatch it rather than waiting.** The automatic
+      post-deploy runs are bound to whatever commit was deployed, and during the
+      hold nothing merges — so no new deployment fires and no new automatic run
+      appears at the head you are promoting. Waiting is not a way to produce
+      one. When you inspect any run, **read the `money-flow` job's conclusion,
+      never the run's**: a run whose job skipped is still `success` at run level
+      and is a green tick that is not coverage. The one-line check is in
+      [`agent-qa.md` § *Automation & gating*](./agent-qa.md#automation--gating).
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a
       **prod DB snapshot** exists before they run on deploy.

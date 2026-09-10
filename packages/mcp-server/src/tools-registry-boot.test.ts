@@ -8,8 +8,54 @@
  * minus `haven_pay`) — which also keeps this file independent of the real
  * handler map, so the completeness twin above stays the instrument that goes
  * red on source mutations, not this wiring test.
+ *
+ * ## The imports are STATIC, and that is the fix for #2842
+ *
+ * They used to be `await import(...)` inside the `it`. Importing `server.js`
+ * costs ~1.2-3.4s depending on machine load, and paying that inside the test
+ * body ran it against vitest's 5000ms default `testTimeout` — so the test
+ * failed intermittently under a full suite (4 red of 11 runs on clean `dev`)
+ * and passed every time it ran alone. It surfaced as the registry guard "not
+ * throwing", which reads like the #2807 check regressing on a money-path
+ * package rather than like a timer.
+ *
+ * The cost is NOT the `vi.mock` factory below, which is what a first
+ * explanation of this claimed. Measured: importing `server.js` from a file
+ * with no `vi.mock` at all takes 2479ms, against 2500ms-ish mocked —
+ * indistinguishable. It is the plain transform and load of the SDK + server
+ * module graph, exactly as `connector-channel.test.ts` already records. That
+ * graph grows with every capability slice epic #2806 carves out, so the
+ * margin shrinks on its own.
+ *
+ * A static import moves the cost into vitest's COLLECT phase, which carries
+ * no per-test and no per-hook budget. That is why it is immune rather than
+ * merely roomier: hoisting into `beforeAll` — the first fix here — only
+ * traded the 5s test budget for the 10s hook budget.
+ *
+ * Measured, both variants in the same full-suite runs against 28 spinning
+ * background processes:
+ *
+ *   beforeAll      1 of 2 runs RED — `Hook timed out in 10000ms`, and the
+ *                  test reports as SKIPPED inside a failed suite, which is a
+ *                  harder trail than the `Test timed out in 5000ms` at the
+ *                  `it` that it replaced
+ *   static import  2 of 2 GREEN, 472/472
+ *
+ * Running the single FILE under the same load does not reproduce it — both
+ * variants pass — because one file transforms its graph with no competition
+ * from the other nineteen. The full suite is the experiment.
+ *
+ * `vi.mock` is hoisted above every import in the file, static ones included,
+ * so the mocked `./tools.js` is what `server.js` sees either way.
+ * `server.test.ts` already imports `server.js` this way.
+ *
+ * Siblings checked: `tools-registry.test.ts` never imports `server.js` and
+ * does not share this. `connector-channel.test.ts` DOES, and solves it with
+ * an explicit 30s timeout instead — correct there and deliberately not copied
+ * here, because it calls `vi.resetModules()` and re-imports per test by
+ * design, so it has nothing to hoist and nothing to make static.
  */
-import { describe, it, expect, beforeAll, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('./tools.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./tools.js')>()
@@ -21,40 +67,8 @@ vi.mock('./tools.js', async (importOriginal) => {
   return { ...actual, createToolHandlers: () => handlers }
 })
 
-/**
- * The imports are hoisted into `beforeAll` because they, not the assertion,
- * are what this test spends its time on (#2842).
- *
- * Measured: `import('./server.js')` takes **3423ms** and the SDK import 1ms,
- * of a 3442ms test — 99.4% of the budget in one import. It is not doing
- * anything slow on purpose; the `vi.mock` factory above has to `importOriginal`
- * and build the entire handler map before `server.js` can be evaluated, and
- * every capability slice #2806 adds makes that graph bigger.
- *
- * Paid inside the `it`, that cost ran against vitest's 5000ms default
- * `testTimeout`, so a 3.4s test had ~1.5s of headroom on an idle machine and
- * none on a busy one: it failed **3 of 5** full-suite runs on clean `dev` and
- * passed every time it ran alone. The failure surfaced as the registry guard
- * "not throwing", which reads like the completeness check regressing on a
- * money-path package rather than like a timer.
- *
- * A hook is the right home rather than a bigger number: the work happens once
- * either way, and moving it out of the test's timer both removes it from the
- * thing being measured and puts it under the hook budget, which is larger.
- * Verified rather than assumed — a deliberate 6s `beforeAll` passes here,
- * which a 5000ms budget would not.
- *
- * The sibling `tools-registry.test.ts` was checked and does NOT share this:
- * 10 tests in 17ms, because it exercises the detection logic directly and
- * never imports `server.js`.
- */
-let buildHostedMcpServer: (typeof import('./server.js'))['buildHostedMcpServer']
-let HavenClient: (typeof import('@haven_ai/sdk'))['HavenClient']
-
-beforeAll(async () => {
-  ;({ buildHostedMcpServer } = await import('./server.js'))
-  ;({ HavenClient } = await import('@haven_ai/sdk'))
-})
+import { buildHostedMcpServer } from './server.js'
+import { HavenClient } from '@haven_ai/sdk'
 
 describe('buildHostedMcpServer refuses to boot an incomplete registry (#2807)', () => {
   it('throws, naming the handler-less tool, before any registration', () => {

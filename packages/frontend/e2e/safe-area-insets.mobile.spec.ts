@@ -49,6 +49,14 @@ const INSET_BOTTOM = 34
  */
 const TAB_BAR_H = 56
 
+/**
+ * `--v2-modal-backdrop`'s computed value, written out for the same reason
+ * `TAB_BAR_H` is: reading the token here would make the assertion agree with
+ * the stylesheet by construction, and the assertion exists to catch the dim
+ * layer losing its colour.
+ */
+const BACKDROP_FILL = 'rgba(26, 31, 54, 0.66)'
+
 /** 390x844 is the iPhone the demo runs on (#2736), not Pixel 5's 393x727. */
 const VIEWPORT = { width: 390, height: 844 }
 
@@ -80,6 +88,41 @@ async function applyInsets(page: Page) {
   await page.addStyleTag({
     content: `:root{--v2-safe-top:${INSET_TOP}px;--v2-safe-bottom:${INSET_BOTTOM}px;--v2-safe-left:0px;--v2-safe-right:0px}`,
   })
+}
+
+/**
+ * Waits for the drawer to stop moving.
+ *
+ * `<aside>` carries `transition-transform`, and "the User menu is visible" is
+ * true well before the slide finishes — so a geometry read taken on that
+ * signal alone lands mid-animation. That is not a theoretical race: it was
+ * caught by a mutation that SURVIVED. Widening the drawer to `w-full`, which
+ * should have put it over the sample point, measured its right edge at 178px
+ * on a 390px viewport, because the drawer was still on its way in. Both the
+ * clearance check and `elementFromPoint` were reading a frame that no user
+ * ever sees, and both agreed with the unmutated answer by luck.
+ *
+ * The signal is the drawer's own open position (`left === 0`), not a fixed
+ * timeout and not frame-to-frame stability — see the note at the predicate for
+ * why the stability form silently resolves early.
+ */
+async function drawerSettled(page: Page) {
+  await page.waitForFunction(
+    () => {
+      const aside = document.querySelector('aside')
+      if (!aside) return false
+      const rect = aside.getBoundingClientRect()
+      // The OPEN position, which is an absolute fact about the drawer rather
+      // than a comparison against the previous frame. A frame-to-frame
+      // stability check is what a first attempt used, and it is wrong here:
+      // its first poll can land before the transition has started, when the
+      // closed position is trivially "stable", and it resolves immediately on
+      // a drawer that has not moved at all.
+      return Math.abs(rect.left) < 0.5 && rect.width > 0
+    },
+    undefined,
+    { timeout: 10_000 },
+  )
 }
 
 /**
@@ -571,11 +614,18 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         // Right of the drawer, which is itself opaque and would answer for the
         // scrim underneath it. 8px down is inside a 47px band by any rounding.
         const sampleX = window.innerWidth - 20
+        const aside = document.querySelector('aside')
         return {
           top: Math.round(rect.top),
           bottom: Math.round(rect.bottom),
           background: getComputedStyle(backdrop).backgroundColor,
           paintsTopBand: document.elementFromPoint(sampleX, 8) === backdrop,
+          // Measured, not assumed: `sampleX` is only clear of the drawer
+          // because the drawer is 240px wide. Widen it past 370 and this goes
+          // red first, naming the cause, instead of `paintsTopBand` going red
+          // and reading like the scrim stopped covering the band.
+          asideRight: aside ? Math.round(aside.getBoundingClientRect().right) : 0,
+          sampleX,
           viewportHeight: window.innerHeight,
         }
       })
@@ -584,6 +634,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await applyInsets(page)
     await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible()
+    await drawerSettled(page)
 
     // Control, before any geometry is judged: the drawer consumes the injected
     // inset, so the run really is one where a notch exists.
@@ -593,13 +644,30 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(drawerPaddingTop).toBe(`${INSET_TOP}px`)
 
     const scrim = await coverage()
+    expect(scrim.asideRight, 'the sample point must be clear of the open drawer').toBeLessThan(
+      scrim.sampleX,
+    )
     expect(scrim.top, 'the scrim starts at the top of the viewport, not below the notch').toBe(0)
-    expect(scrim.bottom).toBe(scrim.viewportHeight)
+    expect(scrim.bottom, 'the scrim reaches the home indicator too').toBe(scrim.viewportHeight)
     expect(scrim.paintsTopBand, 'the scrim is what paints the status-bar band').toBe(true)
+
+    // The colour, not just the stacking. `elementFromPoint` hit-tests geometry
+    // and z-order, NOT opacity — a fully transparent backdrop is still the
+    // topmost element at the sample point, so every assertion above survives
+    // `--v2-modal-backdrop` being deleted. That mutation is exactly "the band
+    // does not go grey", which is the condition #2819 is about, so it is the
+    // one this test cannot afford to pass under. Asserting the two backdrops
+    // merely AGREE would not catch it either: they agree by construction,
+    // both resolving the one declaration in globals.css.
+    expect(scrim.background, 'the scrim actually paints a dim colour').toBe(BACKDROP_FILL)
 
     await page.getByRole('button', { name: 'Close sidebar' }).click()
     await expect(page.locator('.v2-modal-backdrop')).toHaveCount(0)
 
+    // `openReceiveFundsModal` navigates, which destroys the document and the
+    // style tag injected above. This second call is REQUIRED, not redundant —
+    // without it every inset below resolves to 0. (The control that follows
+    // would catch its removal, which is the point of the control.)
     await openReceiveFundsModal(page)
     await applyInsets(page)
 
@@ -613,12 +681,8 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
 
     const modal = await coverage()
     expect(modal.top, "the overlay's padding must not push its backdrop out of the band").toBe(0)
-    expect(modal.bottom).toBe(modal.viewportHeight)
+    expect(modal.bottom, 'the backdrop reaches the home indicator too').toBe(modal.viewportHeight)
     expect(modal.paintsTopBand, 'Receive paints the same band with no drawer involved').toBe(true)
-
-    // The premise in one line: same strip, same colour, so the operator's
-    // Receive run is a real discriminator and not a differently-built surface
-    // that happens to be quiet.
-    expect(modal.background).toBe(scrim.background)
+    expect(modal.background, 'and paints it in the same dim colour').toBe(BACKDROP_FILL)
   })
 })

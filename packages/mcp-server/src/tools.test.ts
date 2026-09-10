@@ -10,116 +10,32 @@ import {
   type AgentNextStep,
 } from '@haven_ai/sdk'
 import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
+import {
+  AGENT_ALLOWANCES_RESPONSE,
+  AGENT_RESPONSE,
+  DELEGATE_KEY,
+  PAYMENT_REQUIRED,
+  X402_EXPECTED_AUTH,
+  X402_INTENT_RESPONSE,
+  clearCalls,
+  handlers,
+  headerSignerClient,
+  installSharedFixtureLifecycle,
+  mintPaymentHeaders,
+  mutateHeader,
+  ok,
+  recordedCalls,
+  stubFetch,
+  VALID_PAYMENT_HEADER_REF,
+  x402PreflightStatus,
+  type RouteDefinition,
+} from './test-support/hosted-mcp.js'
 
-const DELEGATE_KEY = '0x' + 'a'.repeat(64)
-const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
-const X402_EXPECTED_AUTH = {
-  version: 1 as const,
-  message: 'Haven x402 expected context v1\n{}',
-  signature: '0x' + '11'.repeat(65),
-  signer: '0x000000000000000000000000000000000000bEEF',
-}
+installSharedFixtureLifecycle()
 
-interface CapturedCall {
-  url: string
-  method: string
-  body: Record<string, unknown> | undefined
-  headers: Record<string, string>
-}
-
-let calls: CapturedCall[]
-
-interface RouteDefinition {
-  status?: number
-  body?: unknown
-  /** Extra response headers to include. */
-  responseHeaders?: Record<string, string>
-}
-
-/** Install a fetch stub that records every request and returns canned bodies. */
-function stubFetch(routes: Record<string, RouteDefinition>) {
-  vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-    const method = (init.method ?? 'GET').toUpperCase()
-    const path = new URL(url).pathname
-    const body = init.body ? JSON.parse(init.body as string) : undefined
-    calls.push({
-      url,
-      method,
-      body,
-      headers: (init.headers ?? {}) as Record<string, string>,
-    })
-    const route = routes[`${method} ${path}`]
-    // Paid MCP-tool tests model a strict streamable-HTTP merchant: before its
-    // configured 402 tool response, it establishes an MCP session and expects
-    // the lifecycle notification. This keeps existing route fixtures focused
-    // on the payment state they exercise while asserting the hosted flow uses
-    // the real transport sequence.
-    if (route && route.status !== 404 && method === 'POST' && body?.method === 'initialize') {
-      const responseHeaders = new Headers({ 'mcp-session-id': 'sess-tools-test' })
-      const bodySnapshot = { jsonrpc: '2.0', id: body.id, result: { protocolVersion: '2025-06-18' } }
-      return {
-        ok: true,
-        status: 200,
-        headers: responseHeaders,
-        json: async () => bodySnapshot,
-        text: async () => JSON.stringify(bodySnapshot),
-        clone: () => ({
-          ok: true,
-          status: 200,
-          headers: responseHeaders,
-          json: async () => bodySnapshot,
-          text: async () => JSON.stringify(bodySnapshot),
-        }),
-      }
-    }
-    if (route && route.status !== 404 && method === 'POST' && body?.method === 'notifications/initialized') {
-      const responseHeaders = new Headers()
-      return {
-        ok: true,
-        status: 202,
-        headers: responseHeaders,
-        json: async () => ({}),
-        text: async () => '',
-        clone: () => ({ ok: true, status: 202, headers: responseHeaders, json: async () => ({}), text: async () => '' }),
-      }
-    }
-    const status = route?.status ?? 200
-    const responseHeaders = new Headers(route?.responseHeaders ?? {})
-    const bodySnapshot = route?.body ?? (
-      method === 'GET' && /^\/machine-payments\/[^/]+\/status$/.test(path)
-        ? x402PreflightStatus()
-        : undefined
-    )
-    const response = {
-      ok: status >= 200 && status < 300,
-      status,
-      headers: responseHeaders,
-      json: async () => bodySnapshot ?? {},
-      text: async () => JSON.stringify(bodySnapshot ?? {}),
-      clone: () => ({
-        ok: status >= 200 && status < 300,
-        status,
-        headers: responseHeaders,
-        json: async () => bodySnapshot ?? {},
-        text: async () => JSON.stringify(bodySnapshot ?? {}),
-      }),
-    }
-    return response
-  })
-}
-
-function ok<T = unknown>(payload: ToolPayload): ToolSuccess<T> {
-  if (!payload.success) throw new Error(`expected success, got failure: ${payload.message}`)
-  return payload as ToolSuccess<T>
-}
-
-function handlers() {
-  const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
-  return createToolHandlers(haven)
-}
 
 beforeEach(() => {
-  calls = []
+  clearCalls()
 })
 
 afterEach(() => {
@@ -243,11 +159,11 @@ describe('haven_pay', () => {
 
     await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc' })
 
-    const payCall = calls.find((c) => c.url.endsWith('/payments'))
+    const payCall = recordedCalls().find((c) => c.url.endsWith('/payments'))
     expect(payCall?.body).toEqual({ token: 'USDC', amount: '1', to: '0xabc' })
     // Custody invariant: no field anywhere in the request carries key material.
-    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
-    expect(JSON.stringify(calls)).not.toContain('delegate_key')
+    expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(recordedCalls())).not.toContain('delegate_key')
   })
 })
 
@@ -270,105 +186,28 @@ describe('haven_submit', () => {
     expect(result.data.status).toBe('confirmed')
     expect(result.data.tx_hash).toBe('0xtx')
 
-    const signCall = calls.find((c) => c.url.includes('/sign'))
+    const signCall = recordedCalls().find((c) => c.url.includes('/sign'))
     // The relay payload is exactly the signature — nothing else crosses the wire.
     expect(signCall?.body).toEqual({ signature: sig })
-    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
   })
 
   it('rejects a malformed signature before any network call', async () => {
     stubFetch({})
     const payload = await handlers().haven_submit({ payment_id: 'pay_1', signature: 'not-hex' })
     expect(payload.success).toBe(false)
-    expect(calls).toHaveLength(0)
+    expect(recordedCalls()).toHaveLength(0)
   })
 })
 
 // ── x402 fixtures ─────────────────────────────────────────────────────────────
 
-const PAYMENT_REQUIRED = {
-  x402Version: 1,
-  resource: { url: 'https://merchant.test/paid', description: 'paid data' },
-  accepts: [
-    {
-      scheme: 'exact',
-      network: 'base',
-      amount: '1000000',
-      maxAmountRequired: '1500000',
-      // Base USDC — selectStandardPaymentOption only accepts this asset.
-      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-      payTo: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
-      maxTimeoutSeconds: 60,
-      extra: { name: 'USD Coin', version: '2' },
-    },
-  ],
-}
-
-const headerSigner = new HavenClient({
-  apiKey: 'sk_agent_test',
-  delegateKey: HEADER_SIGNING_KEY,
-  baseUrl: 'http://haven.test',
-})
-let VALID_PAYMENT_HEADER = ''
-let VALID_PAYMENT_HEADER_V2 = ''
-
 beforeAll(async () => {
   // Headers are minted by the SDK's real signing path so these fixtures
-  // cannot drift from what a client actually sends. #1618 moved that path
-  // off HavenClient onto its private `fundingLeg` module; still reaching
-  // through a real client is the point — a hand-rolled header here would
-  // stop testing the SDK and start testing this file.
-  type HeaderMinter = {
-    fundingLeg: {
-      createPaymentHeader(
-        paymentRequired: typeof PAYMENT_REQUIRED,
-        option: (typeof PAYMENT_REQUIRED.accepts)[number],
-      ): Promise<string>
-    }
-  }
-  const mint = (headerSigner as unknown as HeaderMinter).fundingLeg
-  VALID_PAYMENT_HEADER = await mint.createPaymentHeader(
-    PAYMENT_REQUIRED,
-    PAYMENT_REQUIRED.accepts[0],
-  )
-  VALID_PAYMENT_HEADER_V2 = await mint.createPaymentHeader(
-    { ...PAYMENT_REQUIRED, x402Version: 2 },
-    PAYMENT_REQUIRED.accepts[0],
-  )
+  // cannot drift from what a client actually sends (#1618 note — see the
+  // shared fixture's mintPaymentHeaders).
+  await mintPaymentHeaders()
 })
-
-function x402PreflightStatus(overrides: Record<string, unknown> = {}) {
-  return {
-    payment_id: 'pay_x402',
-    kind: 'payment_intent',
-    rail: 'x402',
-    status: 'pending_signature',
-    phase: 'awaiting_agent_signature',
-    next_action: 'sign_and_submit',
-    amount: '1.50',
-    token: 'USDC',
-    resource_url: PAYMENT_REQUIRED.resource.url,
-    merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
-    payer_address: headerSigner.delegateAddress,
-    tx_hash: null,
-    expires_at: '2099-01-01T00:00:00.000Z',
-    chain_id: 8453,
-    message: 'Ready to sign.',
-    amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
-    asset: PAYMENT_REQUIRED.accepts[0].asset,
-    network: PAYMENT_REQUIRED.accepts[0].network,
-    ...overrides,
-  }
-}
-
-function mutateHeader(
-  paymentHeader: string,
-  mutate: (header: Record<string, unknown>) => void,
-): string {
-  const header = JSON.parse(Buffer.from(paymentHeader, 'base64').toString('utf8')) as Record<string, unknown>
-  mutate(header)
-  return Buffer.from(JSON.stringify(header), 'utf8').toString('base64')
-}
 
 // ── haven_sweep_delegate (phase 1 mapping) ────────────────────────────────────
 
@@ -478,8 +317,8 @@ describe('haven_discover_tools', () => {
     })
 
     await handlers().haven_discover_tools({ category: 'VPN', search: 'NordShield' })
-    expect(calls[0]?.url).toBe('http://haven.test/catalog?category=VPN&search=NordShield')
-    expect(calls).toHaveLength(1)
+    expect(recordedCalls()[0]?.url).toBe('http://haven.test/catalog?category=VPN&search=NordShield')
+    expect(recordedCalls()).toHaveLength(1)
   })
 
   it('preserves blank search terms so hosted MCP matches the backend contract', async () => {
@@ -488,47 +327,10 @@ describe('haven_discover_tools', () => {
     })
 
     await handlers().haven_discover_tools({ search: '' })
-    expect(calls[0]?.url).toBe('http://haven.test/catalog?search=')
-    expect(calls).toHaveLength(1)
+    expect(recordedCalls()[0]?.url).toBe('http://haven.test/catalog?search=')
+    expect(recordedCalls()).toHaveLength(1)
   })
 })
-
-const X402_INTENT_RESPONSE = {
-  payment_id: 'pay_x402',
-  status: 'pending_signature',
-  expires_at: '2099-01-01T00:00:00.000Z',
-  merchant_to: '0xMerchant',
-  x402_expected_auth: X402_EXPECTED_AUTH,
-  sign_data: { hash: '0xfunding' },
-}
-
-const AGENT_RESPONSE = {
-  id: 'agt_1',
-  name: 'A',
-  status: 'active',
-  delegate_address: '0xDelegate',
-  chain_id: 8453,
-}
-
-const AGENT_ALLOWANCES_RESPONSE = {
-  agent_id: 'agt_1',
-  safe_address: '0xSafe',
-  delegate_address: '0xDelegate',
-  chain_id: 8453,
-  allowances: [{
-    id: 'allowance-1',
-    // Real Base USDC address (6 decimals) so remainingDisplay exercises the
-    // decimals lookup rather than the unknown-token atomic fallback.
-    token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-    token_symbol: 'USDC',
-    configured_amount: '10000',
-    reset_period_min: 60,
-    onchain: {
-      amount: '10000', spent: '2500', remaining: '7500', effective_spent: '2500',
-      reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
-    },
-  }],
-}
 
 // ── haven_get_agent (one-shot bootstrap) ──────────────────────────────────────
 
@@ -583,8 +385,8 @@ describe('haven_pay_x402_quote', () => {
     //
     // The property that protects money is unchanged and still pinned: no
     // authorize is created, so no funding intent exists and no funds moved.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
-    expect(calls.every((c) => c.method === 'GET')).toBe(true)
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().every((c) => c.method === 'GET')).toBe(true)
   })
 
   it('returns the unsigned funding hash + x402 data for the edge, signing nothing', async () => {
@@ -634,14 +436,14 @@ describe('haven_pay_x402_quote', () => {
     })
 
     // Custody: the funding request tops up the delegate EOA but carries no key.
-    const x402Call = calls.find((c) => c.url.endsWith('/x402'))
+    const x402Call = recordedCalls().find((c) => c.url.endsWith('/x402'))
     expect(x402Call?.body).toMatchObject({
       payTo: '0xDelegate',
       merchantPayTo: PAYMENT_REQUIRED.accepts[0].payTo,
       amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
     })
-    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
-    expect(JSON.stringify(calls)).not.toContain('delegate_key')
+    expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(recordedCalls())).not.toContain('delegate_key')
   })
 
   it('binds resource_url to what Haven signed, even when the option carries its own resource (#1189)', async () => {
@@ -789,9 +591,9 @@ describe('haven_quote_x402', () => {
 
     expect(result.data.payment_required).toBeDefined()
     // Haven was never contacted — only the merchant URL.
-    expect(calls.every((c) => c.url.includes('merchant.test'))).toBe(true)
+    expect(recordedCalls().every((c) => c.url.includes('merchant.test'))).toBe(true)
     // No x402 intent created.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 })
 
@@ -818,7 +620,7 @@ describe('haven_resume_x402_payment', () => {
     }
 
     stubFetch({
-      // getPaymentStatus calls /machine-payments/:id/status
+      // getPaymentStatus recordedCalls() /machine-payments/:id/status
       'GET /machine-payments/pay_approved/status': {
         status: 200,
         body: {
@@ -920,7 +722,7 @@ describe('haven_resume_x402_payment', () => {
 
 describe('haven_list_receipts', () => {
   it('calls the receipts endpoint and returns results', async () => {
-    // listReceipts calls /machine-payments/receipts
+    // listReceipts recordedCalls() /machine-payments/receipts
     stubFetch({
       'GET /machine-payments/receipts': {
         status: 200,
@@ -937,7 +739,7 @@ describe('haven_list_receipts', () => {
 
 describe('haven_get_resume_state', () => {
   it('calls the resume state endpoint', async () => {
-    // getResumeState calls /payments/:id/resume_state
+    // getResumeState recordedCalls() /payments/:id/resume_state
     stubFetch({
       'GET /payments/pay_1/resume_state': {
         status: 200,
@@ -981,10 +783,10 @@ describe('haven_send', () => {
     expect(result.data.asset).toBe('USDC')
     expect(result.data.amount).toBe('5.00')
 
-    const postCall = calls.find((c) => c.url.endsWith('/payments'))
+    const postCall = recordedCalls().find((c) => c.url.endsWith('/payments'))
     expect(postCall?.body).toEqual({ token: 'USDC', amount: '5.00', to: '0xRecipient' })
     // Custody invariant
-    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
   })
 
   it('forwards signature_scheme + typed_data VERBATIM for delegation-rail intents (#1254)', async () => {
@@ -1068,7 +870,7 @@ describe('haven_send', () => {
     stubFetch({})
     const result = await handlers().haven_send({ asset: 'DAI', recipient: '0xRecipient', amount: '1' })
     expect(result.success).toBe(false)
-    expect(calls).toHaveLength(0)
+    expect(recordedCalls()).toHaveLength(0)
   })
 })
 
@@ -1127,11 +929,11 @@ describe('haven_quote_mcp_tool', () => {
     // paid call must obtain a fresh quote and enforce its explicit cap.
     expect(result.data.payment_required).toBeUndefined()
     expect(result.data.payment_id).toBeUndefined()
-    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
     // The MCP lifecycle needs the existing public delegate address for
     // x402-wallet. It must not read allowances, create an intent, or write.
-    expect(calls.filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
-    expect(calls.find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+    expect(recordedCalls().filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
   })
 })
 
@@ -1154,7 +956,7 @@ describe('haven_pay_mcp_tool', () => {
       }),
     )
 
-    expect(calls.filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length).toBe(1)
+    expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length).toBe(1)
   })
 
   it('#1348 prefetch failure is invisible: createX402Intent falls back to its own fetch and the error shape is unchanged', async () => {
@@ -1174,7 +976,7 @@ describe('haven_pay_mcp_tool', () => {
     // Both the ignored prefetch and createX402Intent's own fetch failed —
     // the surfaced error is createX402Intent's, exactly as before #1348.
     expect(payload.success).toBe(false)
-    expect(calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/x402'))).toBeUndefined()
   })
 
   it('probes merchant, creates x402 intent, returns signing context with merchant context', async () => {
@@ -1186,7 +988,7 @@ describe('haven_pay_mcp_tool', () => {
       },
       // createX402Intent first fetches agent (for delegateAddress)
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      // createX402Intent calls POST /x402
+      // createX402Intent recordedCalls() POST /x402
       'POST /x402': {
         status: 201,
         body: X402_INTENT_RESPONSE,
@@ -1228,16 +1030,16 @@ describe('haven_pay_mcp_tool', () => {
     // token cost. It returns under include_signing_payload=true (next test).
     expect(result.data.payment_required).toBeUndefined()
     expect(result.data.x402).toBeDefined()
-    const initialize = calls.find((call) => call.body?.method === 'initialize')
-    const initialized = calls.find((call) => call.body?.method === 'notifications/initialized')
-    const quoteProbe = calls.find((call) => call.body?.method === 'tools/call')
+    const initialize = recordedCalls().find((call) => call.body?.method === 'initialize')
+    const initialized = recordedCalls().find((call) => call.body?.method === 'notifications/initialized')
+    const quoteProbe = recordedCalls().find((call) => call.body?.method === 'tools/call')
     expect(initialize).toBeDefined()
     expect(new Headers(initialized?.headers).get('mcp-session-id')).toBe('sess-tools-test')
     expect(new Headers(quoteProbe?.headers).get('Accept')).toBe('application/json, text/event-stream')
     expect(new Headers(quoteProbe?.headers).get('mcp-session-id')).toBe('sess-tools-test')
     expect(new Headers(quoteProbe?.headers).get('x402-wallet')).toBe(AGENT_RESPONSE.delegate_address)
     // createX402Intent was called (POST /x402 route was hit)
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   it('persists the merchant call context on the funding request (#1307 settle-leg rehydration)', async () => {
@@ -1259,7 +1061,7 @@ describe('haven_pay_mcp_tool', () => {
       }),
     )
 
-    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    const intentCall = recordedCalls().find((c) => c.url.endsWith('/x402'))
     expect(intentCall?.body?.mcpCallContext).toEqual({
       merchantUrl: 'http://merchant.test/mcp',
       toolName: 'create_text',
@@ -1291,7 +1093,7 @@ describe('haven_pay_mcp_tool', () => {
     // No funding intent was created — the guard fired before createX402Intent.
     // The MCP-aware quote resolves the public delegate address through /agent,
     // but it cannot sign, fund, or construct an x402 intent.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
   it('accepts a quote EXACTLY at max_amount — the cap is inclusive, no warning (#1275)', async () => {
@@ -1344,7 +1146,7 @@ describe('haven_pay_mcp_tool', () => {
     expect(result.data.payment_id).toBe(X402_INTENT_RESPONSE.payment_id)
     // Live merchant price is surfaced for user-facing confirmation.
     expect(result.data.amount_atomic).toBe('1500000')
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   it('returns Bazaar MCP transport context for non-/mcp merchants', async () => {
@@ -1645,7 +1447,7 @@ describe('haven_pay_mcp_tool', () => {
       tool_name: 'create_text',
     })
     expect(result.success).toBe(false)
-    expect(calls).toHaveLength(0)
+    expect(recordedCalls()).toHaveLength(0)
   })
 })
 
@@ -1700,9 +1502,9 @@ describe('haven_quote_catalog_purchase', () => {
       arguments: { prompt: 'Hello' },
       quote_is_informational: true,
     })
-    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
-    expect(calls.filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
-    expect(calls.find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
   })
 
   it('preserves the catalog preflight refusal when a row cannot produce a live MCP quote', async () => {
@@ -1715,7 +1517,7 @@ describe('haven_quote_catalog_purchase', () => {
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe('CATALOG_ENTRY_NOT_FOUND')
     expect(payload.suggested_tool).toBe('haven_discover_tools')
-    expect(calls).toHaveLength(1)
+    expect(recordedCalls()).toHaveLength(1)
   })
 })
 
@@ -1850,7 +1652,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.warnings.some((w) => w.code === 'CATALOG_PRICE_DIFFERS')).toBe(false)
 
     // The catalog entry's OWN tool_arguments were what got quoted and funded.
-    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    const intentCall = recordedCalls().find((c) => c.url.endsWith('/x402'))
     expect(intentCall?.body?.mcpCallContext).toMatchObject({
       merchantUrl: 'http://merchant.test/mcp',
       toolName: 'create_text',
@@ -1876,7 +1678,7 @@ describe('haven_prepare_catalog_purchase', () => {
       source: 'active_delegations',
     })
     // The intent was still created — sufficient budget does not refuse.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   it('refuses an unknown or wrong-chain catalog_id with 404 — chain-scoping is free from #1299 SQL', async () => {
@@ -1895,7 +1697,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.statusCode).toBe(404)
     expect(payload.suggested_tool).toBe('haven_discover_tools')
     // No merchant probe, no agent lookup, no intent — the refusal fires immediately.
-    expect(calls).toHaveLength(1)
+    expect(recordedCalls()).toHaveLength(1)
   })
 
   it('rejects with PRICE_EXCEEDS_MAX before any funding intent when the live price exceeds max_amount', async () => {
@@ -1918,7 +1720,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.message).toContain('1000000')
     // The MCP lifecycle reads the public delegate address before quoting, but
     // the cap guard still fires before any funding intent is constructed.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
   it('refuses without max_amount — no cap_warning softness on the guided path', async () => {
@@ -1928,7 +1730,7 @@ describe('haven_prepare_catalog_purchase', () => {
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe('INVALID_INPUT')
     // Schema validation runs before any network call.
-    expect(calls).toHaveLength(0)
+    expect(recordedCalls()).toHaveLength(0)
   })
 
   // #2259 re-based this test rather than deleting it. Its OLD framing —
@@ -1964,7 +1766,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.status).toBe('pending_approval')
     // The fail-closed half: a status the agent can act on, and nothing to sign.
     expect(result.data.payload_hash).toBeNull()
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   it('delegation rail: over-budget REFUSES at prepare — no approval queue exists on this rail', async () => {
@@ -1985,7 +1787,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.next_action).toBe(AgentPaymentNextAction.FundSafeOrRaiseAllowance)
     // Mutation-tested ordering: no funding intent was created — the refusal
     // fires before createX402Intent, unlike the legacy queue-and-proceed path.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
   it('refuses a degraded catalog entry, naming haven_pay_mcp_tool as the manual fallback', async () => {
@@ -2004,7 +1806,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
     expect(payload.message).toMatch(/degraded/)
     // No merchant probe was attempted against a row Haven cannot trust.
-    expect(calls).toHaveLength(1)
+    expect(recordedCalls()).toHaveLength(1)
   })
 
   it('refuses a catalog entry missing MCP tool metadata, naming haven_pay_mcp_tool as the manual fallback', async () => {
@@ -2057,7 +1859,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(result.data.allowance).toEqual({ rail: 'legacy', sufficient: null, source: 'allowance_module' })
     expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
     // A failed read never fails the preflight — the intent was still created.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   // #1319: the legacy-rail case above was already covered — this is the
@@ -2082,7 +1884,7 @@ describe('haven_prepare_catalog_purchase', () => {
     // A failed read degrades to null, never to a fabricated false — the
     // delegation-rail refusal guard (step 6) only fires on a genuine false,
     // so it never fires here and the intent is still created.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   // #1319: the #1318 review's second untested combination — a hard refusal
@@ -2105,13 +1907,13 @@ describe('haven_prepare_catalog_purchase', () => {
     // READ now starts in parallel with the merchant probe, so it may have
     // fired — a harmless read. The load-bearing invariant is intent-creation,
     // asserted here, plus the refusal itself.)
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
   // ── #1348: round-trip budget — the characterization the issue asked for ────
   // These counts ARE the regression gate: wall-clock is machine-dependent, but
   // the number of sequential Haven round trips is deterministic. Before #1348
-  // a successful preflight made FIVE Haven calls (catalog, agent, allowances,
+  // a successful preflight made FIVE Haven recordedCalls() (catalog, agent, allowances,
   // agent AGAIN inside createX402Intent, POST /x402); now it makes four, and
   // the agent/allowance reads overlap the merchant probe instead of following
   // it.
@@ -2124,7 +1926,7 @@ describe('haven_prepare_catalog_purchase', () => {
 
     ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
 
-    const byPath = (suffix: string) => calls.filter((c) => new URL(c.url).pathname.endsWith(suffix)).length
+    const byPath = (suffix: string) => recordedCalls().filter((c) => new URL(c.url).pathname.endsWith(suffix)).length
     expect(byPath('/catalog/cat_1')).toBe(1)
     // The mutation this guards: dropping the delegateAddress pass-through to
     // createX402Intent silently re-adds its internal agent fetch → 2.
@@ -2133,7 +1935,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(byPath('/x402')).toBe(1)
     // #1360: the funding-leg intent DECLARES its scheme, so a stale delegate
     // address fails the backend's shape cross-check loudly.
-    const intentPost = calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))!
+    const intentPost = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/x402'))!
     expect(intentPost.body).toMatchObject({ settlementScheme: 'eip3009' })
   })
 
@@ -2152,9 +1954,9 @@ describe('haven_prepare_catalog_purchase', () => {
     // (initialize/notify/tools-call) and the Haven GETs interleave; asserting
     // the GETs precede the LAST merchant POST proves the overlap without
     // depending on scheduler timing.
-    const lastMerchantPost = calls.map((c, i) => ({ c, i })).filter(({ c }) => c.method === 'POST' && new URL(c.url).pathname === '/mcp').at(-1)!.i
-    const agentIdx = calls.findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent'))
-    const allowancesIdx = calls.findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/allowances'))
+    const lastMerchantPost = recordedCalls().map((c, i) => ({ c, i })).filter(({ c }) => c.method === 'POST' && new URL(c.url).pathname === '/mcp').at(-1)!.i
+    const agentIdx = recordedCalls().findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent'))
+    const allowancesIdx = recordedCalls().findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/allowances'))
     expect(agentIdx).toBeGreaterThan(-1)
     expect(agentIdx).toBeLessThan(lastMerchantPost)
     expect(allowancesIdx).toBeLessThan(lastMerchantPost)
@@ -2180,7 +1982,7 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(payload.message).not.toContain('agent boom')
       expect(payload.message).not.toContain('allowance boom')
     }
-    expect(calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/x402'))).toBeUndefined()
   })
 
   // #1319: surfaces the #1145 provenance nuance — the delegation rail's
@@ -2216,7 +2018,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(warning).toBeDefined()
     expect(warning?.message).toMatch(/on-chain policy .* remains the actual .*gate/)
     // Never a refusal — the intent was still created.
-    expect(calls.find((c) => c.url.endsWith('/x402'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   it('delegation rail: does NOT warn ALLOWANCE_READ_OPTIMISTIC when the reported remaining came from a live chain read', async () => {
@@ -2265,7 +2067,7 @@ describe('haven_prepare_catalog_purchase', () => {
       }),
     )
 
-    const intentCall = calls.find((c) => c.url.endsWith('/x402'))
+    const intentCall = recordedCalls().find((c) => c.url.endsWith('/x402'))
     expect(intentCall?.body?.idempotencyKey).toBe('catalog-purchase-key-1')
   })
 
@@ -2305,7 +2107,7 @@ describe('haven_prepare_catalog_purchase', () => {
     }
 
     function xBody() {
-      const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+      const raw = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')!.body
       return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
     }
 
@@ -2426,22 +2228,22 @@ describe('haven_settle_mcp_tool', () => {
         // this test spent its life asserting a successful settle while the cap
         // it thought it had set was being silently stripped. Removed rather
         // than declared: the settle leg genuinely takes no cap.
-        payment_header: VALID_PAYMENT_HEADER,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
 
     // Funding signature was relayed (no key in the wire), then the merchant call ran.
-    const signCall = calls.find((c) => c.url.includes('/sign'))
+    const signCall = recordedCalls().find((c) => c.url.includes('/sign'))
     expect(signCall?.body).toEqual({ signature: SIG })
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0][0].paymentId).toBe('pay_x402')
-    expect(spy.mock.calls[0][0].paymentHeader).toBe(VALID_PAYMENT_HEADER)
+    expect(spy.mock.calls[0][0].paymentHeader).toBe(VALID_PAYMENT_HEADER_REF.v1)
     // payment_id is echoed so the agent can reconcile without retaining it.
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.funding_tx_hash).toBe('0xfund')
     expect(result.data.settled).toBe(true)
     expect(result.data.settlement_tx_hash).toBe('0xsettle')
-    expect(JSON.stringify(calls)).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
   })
 
   it('accepts the current v2 payment-header envelope before funding', async () => {
@@ -2453,11 +2255,11 @@ describe('haven_settle_mcp_tool', () => {
 
     const result = await createToolHandlers(haven).haven_settle_mcp_tool({
       payment_id: 'pay_x402', signature: SIG, merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text',
-      payment_header: VALID_PAYMENT_HEADER_V2,
+      payment_header: VALID_PAYMENT_HEADER_REF.v2,
     })
 
     expect(result.success).toBe(true)
-    expect(calls.some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
+    expect(recordedCalls().some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
   })
 
   it.each([
@@ -2473,7 +2275,7 @@ describe('haven_settle_mcp_tool', () => {
     ['nonce', (header: string) => mutateHeader(header, (value) => { ((value.payload as Record<string, any>).authorization).nonce = '0x01' })],
     ['resource', (header: string) => mutateHeader(header, (value) => { (value.accepted as Record<string, unknown>).resource = 'https://merchant.test/substituted' })],
   ])('rejects a %s mutation before funding or merchant delivery', async (_name, mutation) => {
-    const paymentHeader = typeof mutation === 'string' ? mutation : mutation(VALID_PAYMENT_HEADER_V2)
+    const paymentHeader = typeof mutation === 'string' ? mutation : mutation(VALID_PAYMENT_HEADER_REF.v2)
     stubFetch({
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
     })
@@ -2488,7 +2290,7 @@ describe('haven_settle_mcp_tool', () => {
     if (result.success) throw new Error('expected payment-header preflight failure')
     expect(result.code).toBe('INVALID_PAYMENT_HEADER')
     expect(result.message).toContain('No funding was relayed')
-    expect(calls.some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(recordedCalls().some((call) => call.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
     expect(merchant).not.toHaveBeenCalled()
     expect(JSON.stringify(result)).not.toContain(paymentHeader)
   })
@@ -2506,7 +2308,7 @@ describe('haven_settle_mcp_tool', () => {
         signature: SIG,
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
-        payment_header: VALID_PAYMENT_HEADER,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
 
@@ -2549,7 +2351,7 @@ describe('haven_settle_mcp_tool', () => {
         signature: SIG,
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
-        payment_header: VALID_PAYMENT_HEADER,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
 
@@ -2573,7 +2375,7 @@ describe('haven_settle_mcp_tool', () => {
       signature: SIG,
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2597,7 +2399,7 @@ describe('haven_settle_mcp_tool', () => {
       signature: SIG,
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -2650,7 +2452,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
       token: 'USDC',
       resource_url: PAYMENT_REQUIRED.resource.url,
       merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
-      payer_address: headerSigner.delegateAddress,
+      payer_address: headerSignerClient().delegateAddress,
       tx_hash: '0xfund',
       expires_at: '2099-01-01T00:00:00.000Z',
       chain_id: 8453,
@@ -2669,7 +2471,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'create_text',
       arguments: { prompt: 'Hello' },
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     }
   }
 
@@ -2770,7 +2572,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         allowance: { remaining_atomic: '3500000' },
       },
     })
-    expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(2)
+    expect(recordedCalls().filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(2)
   })
 
   it('does not infer settlement or metadata from a merchant result that merely claims payment', async () => {
@@ -2785,7 +2587,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
         phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
         resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
-        payerAddress: headerSigner.delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        payerAddress: headerSignerClient().delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
         chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
         asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
       })
@@ -2919,7 +2721,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
         phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
         resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
-        payerAddress: headerSigner.delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        payerAddress: headerSignerClient().delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
         chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
         asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
       })
@@ -3011,7 +2813,7 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
 
     expect('allowance' in result.data).toBe(false)
     // No allowance/agent reads were made for a non-settled status.
-    expect(calls.find((c) => c.url.endsWith('/machine-payments/allowances'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.endsWith('/machine-payments/allowances'))).toBeUndefined()
   })
 
   it('does NOT attach allowance for a non-x402 rail', async () => {
@@ -3044,7 +2846,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       payment_id: 'pay_x402',
       merchant_url: 'http://merchant.test/mcp',
       // tool_name omitted — an agent that supplied merchant_url expects it used
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
 
     if (payload.success) throw new Error('expected a failure payload')
@@ -3128,7 +2930,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       await createToolHandlers(haven).haven_settle_mcp_tool({
         payment_id: 'pay_x402',
         signature: SIG,
-        payment_header: VALID_PAYMENT_HEADER,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
 
@@ -3206,7 +3008,7 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
 
   /** The exact wire assertion that matters: did any funding relay leave? */
   const fundingRelayed = () =>
-    calls.some((call) => call.method === 'POST' && call.url.endsWith('/payments/pay_x402/sign'))
+    recordedCalls().some((call) => call.method === 'POST' && call.url.endsWith('/payments/pay_x402/sign'))
 
   it('does NOT relay funding when a quote-first intent has no stored merchant context', async () => {
     // The #2282 repro: an intent created by haven_pay_x402_quote, which
@@ -3229,7 +3031,7 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
     const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
       payment_id: 'pay_x402',
       signature: SIG,
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
 
     // THE assertion: no funding userop was relayed. An error code alone is not
@@ -3244,7 +3046,7 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
 
   it('leaves the intent retryable in place: the same tool succeeds on an explicit-context retry', async () => {
     // The point of refusing pre-funding rather than post-funding. The intent is
-    // still pending_signature, so the caller re-calls THIS tool with explicit
+    // still pending_signature, so the caller re-recordedCalls() THIS tool with explicit
     // context and it settles — no tool switch to haven_complete_mcp_tool, no
     // funded_but_unsettled state to recover from.
     stubFetch({
@@ -3260,7 +3062,7 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
     const handlers = createToolHandlers(haven)
 
     const refused = await handlers.haven_settle_mcp_tool({
-      payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER,
+      payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
     expect(refused.success).toBe(false)
     expect(fundingRelayed()).toBe(false)
@@ -3273,7 +3075,7 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
         tool_name: 'buy_vpn',
         arguments: { plan: 'legacy' },
         mcp_transport: { handshake_required: true, source: 'path' },
-        payment_header: VALID_PAYMENT_HEADER,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
 
@@ -3324,7 +3126,7 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
 
     const result = ok<{ settled: boolean }>(
       await createToolHandlers(haven).haven_settle_mcp_tool({
-        payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER,
+        payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
 
@@ -3364,7 +3166,7 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
         arguments: { plan: 'legacy' },
         // The shape @haven_ai/sdk's X402McpTransport uses.
         mcp_transport: { handshakeRequired: true, source: 'path' },
-        payment_header: VALID_PAYMENT_HEADER,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
       })
 
       if (payload.success) throw new Error('expected a refusal, not a permissive parse')
@@ -3375,7 +3177,7 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
       expect(payload.message).toContain('handshakeRequired')
       expect(payload.message).toMatch(/snake_case/)
       // And it is a refusal BEFORE anything moved.
-      expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+      expect(recordedCalls().some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
       expect(merchant).not.toHaveBeenCalled()
     },
   )
@@ -3390,7 +3192,7 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
       merchant_url: 'http://merchant.test/mcp',
       tool_name: 'buy_vpn',
       mcp_transport: { handshake_required: true, source: 'path', handshakeRequired: true },
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
 
     if (payload.success) throw new Error('expected the extra key to be refused, not stripped')
@@ -3420,14 +3222,14 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
     const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
       payment_id: 'pay_x402',
       signature: SIG,
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
 
     if (payload.success) throw new Error('expected the unparseable stored transport to be refused')
     expect(payload.code).toBe('INVALID_INPUT')
     expect(payload.message).toContain('mcp_transport')
     // Refused pre-funding, like every other context problem on this tool.
-    expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(recordedCalls().some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
     expect(merchant).not.toHaveBeenCalled()
   })
 
@@ -3453,13 +3255,13 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
     const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
       payment_id: 'pay_x402',
       signature: SIG,
-      payment_header: VALID_PAYMENT_HEADER,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
     })
 
     if (payload.success) throw new Error('expected the unknown transport source to be refused')
     expect(payload.code).toBe('INVALID_INPUT')
     expect(payload.message).toContain('mcp_transport')
-    expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
+    expect(recordedCalls().some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(false)
     expect(merchant).not.toHaveBeenCalled()
   })
 
@@ -3480,12 +3282,12 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
         tool_name: 'buy_vpn',
         arguments: { plan: 'legacy' },
         mcp_transport: { handshake_required: true, source: 'path' },
-        payment_header: VALID_PAYMENT_HEADER,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
 
     expect(result.data.settled).toBe(true)
-    expect(calls.some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
+    expect(recordedCalls().some((c) => c.url.endsWith('/payments/pay_x402/sign'))).toBe(true)
     expect(merchant.mock.calls[0][0].mcpTransport).toEqual({ handshakeRequired: true, source: 'path' })
   })
 })
@@ -3536,7 +3338,7 @@ describe('custody invariant', () => {
       payment_header: 'eyJwYXltZW50X29wYXF1ZSI6dHJ1ZX0=',
     })
 
-    const wire = JSON.stringify(calls)
+    const wire = JSON.stringify(recordedCalls())
     expect(wire).not.toContain(DELEGATE_KEY)
     expect(wire).not.toContain('delegate_key')
     expect(wire).not.toContain('private_key')
@@ -3747,8 +3549,8 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
       merchant_url: 'http://merchant.test/mcp',
       merchant_url_was_discovered: true,
     }))
-    expect(calls.find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
-    expect(calls.find((call) => new URL(call.url).pathname.includes('/allowances'))).toBeUndefined()
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.includes('/allowances'))).toBeUndefined()
   })
 
   it('resolves a base URL through /.well-known and returns the RESOLVED merchant_url', async () => {
@@ -3800,7 +3602,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     )
 
     expect(result.data.merchant_url).toBe('http://merchant.test/v1')
-    const lifecycle = calls.filter((call) => call.url === 'http://merchant.test/v1')
+    const lifecycle = recordedCalls().filter((call) => call.url === 'http://merchant.test/v1')
     expect(lifecycle.map((call) => call.body?.method)).toEqual([
       'initialize',
       'notifications/initialized',
@@ -3833,12 +3635,12 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
 
     expect(result.data.merchant_url).toBe('http://merchant.test/v1')
     expect(result.data.mcp_transport).toEqual({ handshake_required: true, source: 'path' })
-    expect(calls.filter((call) => call.url === 'http://merchant.test/v1').map((call) => call.body?.method)).toEqual([
+    expect(recordedCalls().filter((call) => call.url === 'http://merchant.test/v1').map((call) => call.body?.method)).toEqual([
       'initialize',
       'notifications/initialized',
       'tools/call',
     ])
-    expect(calls.some((call) => call.url.includes('.well-known'))).toBe(false)
+    expect(recordedCalls().some((call) => call.url.includes('.well-known'))).toBe(false)
   })
 
   it('does NOT run discovery when the exact endpoint answers 402', async () => {
@@ -3860,7 +3662,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
 
     expect(result.data.merchant_url).toBe('http://merchant.test/mcp')
     expect(result.data.merchant_url_discovered_from).toBeUndefined()
-    expect(calls.some((c) => String(c.url).includes('.well-known'))).toBe(false)
+    expect(recordedCalls().some((c) => String(c.url).includes('.well-known'))).toBe(false)
   })
 
   it('fails with actionable guidance when no discovery document exists', async () => {
@@ -3901,7 +3703,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
 
     expect(result.success).toBe(false)
     // The off-origin URL was refused at validation — no request ever went there.
-    expect(calls.some((c) => String(c.url).includes('evil.example'))).toBe(false)
+    expect(recordedCalls().some((c) => String(c.url).includes('evil.example'))).toBe(false)
   })
 
   it('a non-endpoint-miss error (merchant 500) does not trigger discovery', async () => {
@@ -3919,7 +3721,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     // 500 IS an endpoint miss by shape (non-402) — discovery may run, but the
     // point pinned here is that failure is reported against the ORIGINAL URL
     // and nothing beyond the two fixed same-origin paths was fetched.
-    const fetched = calls.map((c) => String(c.url))
+    const fetched = recordedCalls().map((c) => String(c.url))
     expect(
       fetched.every(
         (u) =>
@@ -3974,7 +3776,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     if (result.success) throw new Error('expected failure')
     expect(result.message).toMatch(/resolved the same URL/)
     // Exactly one POST probe — the retry was NOT spent on the echo.
-    expect(calls.filter((c) => c.method === 'POST').length).toBe(1)
+    expect(recordedCalls().filter((c) => c.method === 'POST').length).toBe(1)
   })
 })
 
@@ -4029,7 +3831,7 @@ describe('structured agent guidance (#1308)', () => {
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe('INVALID_INPUT')
     expect(payload.message).toContain('REQUIRED')
-    expect(calls).toHaveLength(0)
+    expect(recordedCalls()).toHaveLength(0)
   })
 
   it('passing max_amount clears BOTH the legacy field and the structured warning', async () => {
@@ -4121,7 +3923,7 @@ describe('human-unit spending caps (#1351)', () => {
     })
   }
 
-  const fundingCall = () => calls.find((c) => new URL(c.url).pathname.endsWith('/x402'))
+  const fundingCall = () => recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/x402'))
 
   describe('haven_pay_mcp_tool', () => {
     it('FAILS CLOSED: a cap of "1" USDC refuses a 1.50 USDC quote before any funding intent', async () => {
@@ -4191,7 +3993,7 @@ describe('human-unit spending caps (#1351)', () => {
       // Not just "before funding" — before ANY network call at all. Even a
       // consistent-looking pair is refused: agreeing here is a coincidence of
       // this fixture, and honouring one silently would teach the pattern.
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     })
 
     it('refuses a human cap finer than the asset can represent rather than truncating it', async () => {
@@ -4230,13 +4032,13 @@ describe('human-unit spending caps (#1351)', () => {
 
     it('rejects a non-decimal human cap at the schema, before any network call', async () => {
       for (const bad of ['1e6', '-1', '1.2.3', '1 USDC', '', '.5']) {
-        calls = []
+        clearCalls()
         stubFetch(payRoutes)
         const payload = await payMcpTool({ max_amount_human: bad })
         expect(payload.success, `expected "${bad}" to be rejected`).toBe(false)
         if (payload.success) throw new Error('expected failure')
         expect(payload.code).toBe('INVALID_INPUT')
-        expect(calls).toHaveLength(0)
+        expect(recordedCalls()).toHaveLength(0)
       }
     })
 
@@ -4249,7 +4051,7 @@ describe('human-unit spending caps (#1351)', () => {
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe('INVALID_INPUT')
       expect(payload.message).toContain('max_amount_human')
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     })
   })
 
@@ -4358,7 +4160,7 @@ describe('human-unit spending caps (#1351)', () => {
       }
 
       for (const capArgs of [{ max_amount: '2000000' }, { max_amount_human: '2' }]) {
-        calls = []
+        clearCalls()
         stubFetch({
           'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
           'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
@@ -4418,7 +4220,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.AmbiguousMaxAmount)
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     })
   })
 
@@ -4513,7 +4315,7 @@ describe('human-unit spending caps (#1351)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.AmbiguousMaxAmount)
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     })
 
     it('still refuses when NEITHER spelling is given — the guided path never runs uncapped', async () => {
@@ -4525,7 +4327,7 @@ describe('human-unit spending caps (#1351)', () => {
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe('INVALID_INPUT')
       expect(payload.message).toContain('max_amount_human')
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     })
 
     it('a generous human cap does NOT widen the on-chain budget: the delegation rail still refuses over-budget', async () => {
@@ -4633,7 +4435,7 @@ describe('hosted erc7710 (#1456)', () => {
     expect(res.data.settlement.funding_leg).toBe(false)
     expect(res.data.next_tool).toBe('mcp__haven-signer__haven_sign')
 
-    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const raw = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')!.body
     const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
     // payTo = the MERCHANT is what selects direct settlement server-side.
     expect(body.settlementScheme).toBe('erc7710')
@@ -4644,7 +4446,7 @@ describe('hosted erc7710 (#1456)', () => {
   it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
     const res = await pay(erc7710Header, { ...AGENT_RESPONSE, execution_rail: 'legacy' })
     expect(res.data.settlement_scheme).toBeUndefined()
-    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const raw = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')!.body
     const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
     expect(body.settlementScheme).toBe('eip3009')
   })
@@ -4652,7 +4454,7 @@ describe('hosted erc7710 (#1456)', () => {
   it('a 3009-only merchant stays on the bridge, even on a delegation account', async () => {
     const res = await pay(plainHeader, DELEGATION_AGENT)
     expect(res.data.settlement_scheme).toBeUndefined()
-    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const raw = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')!.body
     const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
     expect(body.settlementScheme).toBe('eip3009')
   })
@@ -4660,7 +4462,7 @@ describe('hosted erc7710 (#1456)', () => {
   it('keeps #1348 round-trip budget: still exactly ONE agent fetch', async () => {
     await pay(erc7710Header, DELEGATION_AGENT, true)
     expect(
-      calls.filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length,
+      recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent')).length,
     ).toBe(1)
   })
 
@@ -4698,8 +4500,8 @@ describe('hosted erc7710 (#1456)', () => {
     expect(res.data.funding_tx_hash).toBeNull()
     expect(spy.mock.calls[0][0].paymentHeader).toBe('HEADER_FROM_HAVEN')
     // The signature went to settle, NOT to the funding relay.
-    expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG7710 })
-    expect(calls.find((c) => c.url.includes('/payments/pay_7710/sign'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG7710 })
+    expect(recordedCalls().find((c) => c.url.includes('/payments/pay_7710/sign'))).toBeUndefined()
   })
 
   /**
@@ -4805,7 +4607,7 @@ describe('hosted erc7710 rail fallback (#1456 review)', () => {
   }
 
   function scheme() {
-    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const raw = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')!.body
     const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
     return body.settlementScheme
   }
@@ -4842,14 +4644,14 @@ describe('hosted erc7710 rail fallback (#1456 review)', () => {
       arguments: { prompt: 'Hello' },
       max_amount: '2000000',
     })
-    const authorize = calls.find((c) => new URL(c.url).pathname === '/x402')
+    const authorize = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')
     if (authorize) {
       const raw = authorize.body
       const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>)
       expect(body.settlementScheme).not.toBe('erc7710')
     }
     // Whatever else happened, no settlement child was requested.
-    expect(calls.find((c) => new URL(c.url).pathname.endsWith('/settle'))).toBeUndefined()
+    expect(recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/settle'))).toBeUndefined()
   })
 })
 
@@ -5027,7 +4829,7 @@ describe('haven_submit_catalog_entry (#1716)', () => {
       verify_token: 'ab'.repeat(24),
       status: 'submitted',
     })
-    const call = calls.find((c) => c.method === 'POST' && c.url.includes('/catalog/submit'))
+    const call = recordedCalls().find((c) => c.method === 'POST' && c.url.includes('/catalog/submit'))
     expect(call?.body).toEqual({ resource_url: 'https://merchant.example/mcp' })
   })
 })
@@ -5152,7 +4954,7 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
   }
 
   function authorizeBody() {
-    const raw = calls.find((c) => new URL(c.url).pathname === '/x402')!.body
+    const raw = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')!.body
     return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>
   }
 
@@ -5213,12 +5015,12 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
 
   it('keeps the #1348 round-trip budget on BOTH branches: exactly ONE agent fetch', async () => {
     await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true)
-    const onErc7710 = calls.filter((c) =>
+    const onErc7710 = recordedCalls().filter((c) =>
       new URL(c.url).pathname.endsWith('/machine-payments/agent'),
     ).length
-    calls = []
+    clearCalls()
     await quotePay(PAYMENT_REQUIRED, DELEGATION_AGENT)
-    const on3009 = calls.filter((c) =>
+    const on3009 = recordedCalls().filter((c) =>
       new URL(c.url).pathname.endsWith('/machine-payments/agent'),
     ).length
     expect([onErc7710, on3009]).toEqual([1, 1])
@@ -5285,7 +5087,7 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
       // The cap is PRE-network on this branch too: nothing was authorized.
-      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+      expect(recordedCalls().find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
     })
 
     it('POSITIVE CONTROL — an IN-cap erc7710 payment still succeeds', async () => {
@@ -5348,7 +5150,7 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+      expect(recordedCalls().find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
     })
 
     it('POSITIVE CONTROL — the 3009 branch keeps capping against the standard entry', async () => {
@@ -5391,7 +5193,7 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
       expect(payload.success).toBe(false)
       if (payload.success) throw new Error('expected failure')
       expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
-      expect(calls.find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
+      expect(recordedCalls().find((c) => new URL(c.url).pathname === '/x402')).toBeUndefined()
     })
 
     it('is still refused on a LEGACY rail, which genuinely cannot settle it', async () => {
@@ -5425,7 +5227,7 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     it('sends the SAME key on a repeated call, which is what makes the replay one purchase', async () => {
       const seen: unknown[] = []
       for (let i = 0; i < 2; i++) {
-        calls = []
+        clearCalls()
         await quotePay(ERC7710_PAYMENT_REQUIRED, DELEGATION_AGENT, true, {
           idempotency_key: 'x402:generic-7710:abc',
         })
@@ -5520,8 +5322,8 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     expect(res.data.reason).not.toContain('X-PAYMENT')
 
     // The signature went to settle, NOT to the funding relay.
-    expect(calls.find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
-    expect(calls.find((c) => c.url.includes('/sign'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.includes('/settle'))?.body).toEqual({ signature: SIG })
+    expect(recordedCalls().find((c) => c.url.includes('/sign'))).toBeUndefined()
   })
 
   it('POSITIVE CONTROL — omitting settlement_scheme still relays a FUNDING signature, unchanged', async () => {
@@ -5540,8 +5342,8 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
     // The pre-#2041 shape exactly: no scheme marker, no header.
     expect(res.data.settlement_scheme).toBeUndefined()
     expect(res.data.payment_header).toBeUndefined()
-    expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
-    expect(calls.find((c) => c.url.includes('/sign'))).toBeDefined()
+    expect(recordedCalls().find((c) => c.url.includes('/settle'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.includes('/sign'))).toBeDefined()
   })
 
   it('maps an EXPIRED settlement child to the structured window-expired refusal', async () => {
@@ -5605,7 +5407,7 @@ describe('haven_submit — erc7710 settle (#2041)', () => {
 
     expect(res.data.status).toBe('confirmed')
     expect(res.data.settlement_scheme).toBeUndefined()
-    expect(calls.find((c) => c.url.includes('/settle'))).toBeUndefined()
+    expect(recordedCalls().find((c) => c.url.includes('/settle'))).toBeUndefined()
   })
 })
 
@@ -5671,7 +5473,7 @@ describe('#2051 — cap binds the authorized option', () => {
 
   /** The authorize request body — assert on what was SENT, never on call counts. */
   function x402Body() {
-    const call = calls.find((c) => new URL(c.url).pathname === '/x402')
+    const call = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')
     if (!call) return undefined
     const raw = call.body
     return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
@@ -5824,7 +5626,7 @@ describe('#2051 — cap binds the authorized option', () => {
       const res = await pay(merchant('1000000', '900000000'), DELEGATION_AGENT, {})
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).toBe('INVALID_INPUT')
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     })
   })
 
@@ -5938,7 +5740,7 @@ describe('#2051 — cap binds the authorized option', () => {
       const res = await prepare(merchant('1000000', '900000000'), DELEGATION_AGENT, {})
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).toBe('INVALID_INPUT')
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     })
   })
 })
@@ -6002,7 +5804,7 @@ describe('#2054 — erc7710-only merchants', () => {
   }
 
   function x402Body() {
-    const call = calls.find((c) => new URL(c.url).pathname === '/x402')
+    const call = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')
     if (!call) return undefined
     const raw = call.body
     return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>

@@ -123,9 +123,8 @@ export function MobileTabBar({
                 colour-blind user — where the `--v2-ink`/`--v2-ink-3` pair
                 this replaces differ by ~3:1. The rail is the non-colour cue
                 that makes brand ink acceptable, and it is the cue the drawer
-                already uses. Both
-                text states still clear AA at 12px on their own
-                (6.29 and 5.32).
+                already uses. Both text states still clear AA at 12px on
+                their own (6.29 and 5.32).
 
                 It adds no height: `top-0` is inside the bar's `border-t` and
                 the span is absolutely positioned, so `--v2-tab-bar-h` and the

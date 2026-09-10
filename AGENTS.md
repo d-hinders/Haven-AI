@@ -149,7 +149,7 @@ More than one agent session works this repo (different users, different machines
 3. Check the tail of #1289 for claims or FYIs touching the same surfaces.
 4. A live claim (posted < 24h ago, no contrary signal since) means: pick something else, or coordinate in #1289 first. Never silently duplicate a claimed build.
 
-**Claim before you build:** comment `🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>` on the issue itself; ALSO post it to #1289 when the work touches shared surfaces (`packages/mcp-server/src/tools.ts`, demo-merchant-mcp, migrations, release trains, `db-mock-baseline.json`, contract docs).
+**Claim before you build:** comment `🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>` on the issue itself; ALSO post it to #1289 when the work touches shared surfaces (`packages/mcp-server/src/tools*` — the facade and everything under `tools/`, since #2807–#2809 split the hosted surface across several files — demo-merchant-mcp, migrations, release trains, `db-mock-baseline.json`, contract docs).
 
 **Release what you drop:** when the PR opens, or when you abandon the work, comment `🔓 RELEASE #<issue> — <landed as PR #N | abandoned: reason>`. An unreleased claim blocks the other session for a day.
 

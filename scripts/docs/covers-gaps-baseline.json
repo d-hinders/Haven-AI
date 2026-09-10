@@ -1,8 +1,7 @@
 {
   "AGENTS.md": [
     "packages/frontend/src/app/globals.css",
-    "packages/frontend/tailwind.config.js",
-    "packages/mcp-server/src/tools.ts"
+    "packages/frontend/tailwind.config.js"
   ],
   "CLAUDE.md": [
     "scripts/docs/package-docs.mjs"

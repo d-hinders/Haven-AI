@@ -9,10 +9,16 @@
  * the agent-facing descriptions (`toolDescriptions`), and the response payload
  * types (`ToolSuccess` / `ToolFailure` / `ToolPayload`).
  *
- * NOTHING here executes a tool. Handlers stay in `tools.ts`; the registration
- * seam lives in `tools/registry.ts`; argument parsing lives in
- * `tools/parsing.ts`. Later capability slices (#2809–#2812) extract handler
- * behaviour against this seam. `HostedToolError` moved to
+ * NOTHING here executes a tool. Handlers live in the capability modules under
+ * `tools/` and are composed by `tools.ts`, which stays the facade every
+ * embedder imports; the registration seam lives in `tools/registry.ts`;
+ * argument parsing lives in `tools/parsing.ts`. #2809 moved the first ten —
+ * the state, direct-payment and recovery handlers, to
+ * `tools/state-direct-recovery.ts` — and #2810–#2812 take the rest against
+ * this same seam. (This sentence said "handlers stay in `tools.ts`" until
+ * #2809 made it false; it is the load-bearing kind of module comment no gate
+ * names, so it is corrected in the slice that invalidated it rather than
+ * left for a later sweep.) `HostedToolError` moved to
  * `tools/support/errors.ts` in #2808 — deliberately NOT here: locating the
  * class in the contract seam would fork the class `normalizeError`
  * instanceof-checks. Shared support (errors, guidance, cap/price, transport/

@@ -16,7 +16,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
   - packages/backend/src/modules/agents/agent-connection-setup.ts
-last-verified: "2026-09-06"
+last-verified: "2026-09-10"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -114,7 +114,8 @@ on a second, equally explicit list — `PERMISSIVE_INPUT_TOOLS`, beside
 `STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools.ts`. Both lists carry
 the per-tool reason and neither is restated here, because a second copy
 drifts. Every hosted tool is on exactly one of them: a tool on neither fails
-to compile (a type-level exhaustiveness check in `tools.ts`) and fails
+to compile (a type-level exhaustiveness check in `tools/contracts.ts`, where
+both lists have lived since #2807) and fails
 `strict-tool-input.test.ts`, so a new tool cannot skip the decision. The
 principle that closed the list is the one #2312 opened it with — every hosted
 schema already advertised `additionalProperties: false`, so permissive

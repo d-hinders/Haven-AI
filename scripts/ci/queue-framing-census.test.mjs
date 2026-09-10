@@ -36,7 +36,8 @@
  * Comments are stripped first, then banned PROSE phrases are matched against
  * what is left. That is deliberate: `status === 'pending_approval'` and the
  * `pending_approval` wire literal are retained fail-closed code (see
- * `isPendingApproval` in `packages/mcp-server/src/tools.ts` for the argued
+ * `isPendingApproval` in `packages/mcp-server/src/tools/support/quote-response.ts`
+ * for the argued
  * retention), and a maintainer comment may legitimately name the retired rail
  * to explain the retirement. What must not survive is an agent-visible or
  * reader-visible SENTENCE promising the queue.
@@ -79,6 +80,16 @@ const GUARDED_FILES = [
   // #2101 — hosted MCP (the default topology) and the local MCP runtime
   'packages/mcp-server/src/server.ts',
   'packages/mcp-server/src/tools.ts',
+  // #2809 — the hosted tool surface stopped being one file. `tools.ts` was the
+  // whole of it when #2101 added the line above; since #2807/#2808/#2809 the
+  // agent-visible prose is spread across the contract seam (every
+  // `toolDescriptions` entry), the shared guidance builder, and the capability
+  // modules. The census kept passing over each move, silently, on an
+  // ever-smaller surface — a guard that shrinks with the thing it guards. Each
+  // was verified clean against the phrase list before being added here.
+  'packages/mcp-server/src/tools/contracts.ts',
+  'packages/mcp-server/src/tools/support/guidance.ts',
+  'packages/mcp-server/src/tools/state-direct-recovery.ts',
   'packages/mcp-server/README.md',
   'packages/mcp/src/server.ts',
   'packages/mcp/src/tools.ts',

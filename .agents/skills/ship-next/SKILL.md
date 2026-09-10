@@ -86,8 +86,11 @@ Before building, post a one-line `CLAIM` comment on the selected issue:
 Also post the same `CLAIM` to issue
 [#1289](https://github.com/d-hinders/Haven-AI/issues/1289) when the work touches
 shared surfaces another session could plausibly pick up, including
-`packages/mcp-server/src/tools.ts`, demo-merchant-mcp, migrations, release
-trains, `db-mock-baseline.json`, or contract docs.
+`packages/mcp-server/src/tools*` (the facade AND the capability/seam/support
+modules under `tools/` — since #2807–#2809 the hosted surface is no longer one
+file, and a session editing a capability module collides with exactly the same
+concurrent work), demo-merchant-mcp, migrations, release trains,
+`db-mock-baseline.json`, or contract docs.
 
 Release every place you claimed when the pull request opens or the work is
 abandoned:

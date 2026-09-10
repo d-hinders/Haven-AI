@@ -128,7 +128,8 @@ Source of truth:
   the settlement *compiler* (typed-data / header assembly primitives), not
   route orchestration.
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
-- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
+- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts) — the hosted facade: the catalog/quote/prepare, plain-HTTP x402 and paid-MCP completion handlers
+- [`packages/mcp-server/src/tools/state-direct-recovery.ts`](../../packages/mcp-server/src/tools/state-direct-recovery.ts) — the hosted state, direct-payment and recovery handlers since #2809, including `haven_submit`'s settlement-scheme branch and both expiry mappings
 - [`packages/backend/src/modules/mpp/reconciliation.ts`](../../packages/backend/src/modules/mpp/reconciliation.ts) — `POST /machine-payments/reconciliation-events`, and the #2292 acceptance-is-terminal precedence rule.
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
 

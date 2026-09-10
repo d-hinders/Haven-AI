@@ -25,7 +25,6 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
-  HavenApiError,
   HavenClient,
   HavenError,
   HavenPaymentStateError,
@@ -41,15 +40,12 @@ import {
   validateStandardX402PaymentHeader,
   X402PaymentHeaderValidationError,
   toolDescriptions as sharedDescriptions,
-  verifyPaymentReceipt,
   x402AuthorizationAmount,
   type AgentNextStep,
   type AgentPurchaseSummary,
   type AgentPaymentWarning,
   type AgentPaymentSummary,
-  type PaymentReceipt,
   type HavenCatalogEntry,
-  type SweepAuthorization,
   type X402McpTransport,
   type X402PaymentOption,
   type X402PaymentRequired,
@@ -62,9 +58,7 @@ import { z } from 'zod/v3'
 import {
   MCP_TRANSPORT_CASE_HINT,
   type HostedToolHandlers,
-  type HostedToolName,
   type ToolFailure,
-  type ToolPayload,
 } from './tools/contracts.js'
 import { parseStrict, setStrictRefusalThrower } from './tools/parsing.js'
 import { createStateDirectRecoveryHandlers } from './tools/state-direct-recovery.js'
@@ -94,7 +88,6 @@ import { buildAgentGuidance, buildPurchaseSummary } from './tools/support/guidan
 import {
   buildX402SigningContext,
   coerceJsonField,
-  delegationSignFields,
   deliverMerchantPayment,
   isMerchantEndpointMiss,
   parseMcpTransport,
@@ -102,7 +95,6 @@ import {
   quoteMcpToolCall,
   resolveMerchantCallContext,
   serializeMcpTransport,
-  submitErc7710WithExpiryMapping,
   submitSignatureWithExpiryMapping,
   withDiscoveryGuidance,
   type ResolvedMerchantCallContext,
@@ -170,9 +162,13 @@ export function createToolHandlers(haven: HavenClient): HostedToolHandlers {
     // haven_submit, haven_get_payment_status, haven_get_resume_state,
     // haven_list_receipts, haven_verify_receipt — are owned by the capability
     // module and composed in here. The `HostedToolHandlers` annotation on this
-    // function is what keeps the spread honest: a tool the capability stops
-    // contributing and this literal does not re-add is a compile error (TS2739
-    // names it), not a boot-time registry issue.
+    // function is what keeps the spread honest in ONE direction: a tool the
+    // capability stops contributing and this literal does not re-add is a
+    // compile error (TS2741 names the missing one), not a boot-time registry
+    // issue. The other direction is NOT compile-checked — a key written below
+    // that the spread already provides shadows it silently — so do not add a
+    // handler here for a tool a capability owns; the disjointness assertion in
+    // tools/support/shared-helper-ownership.test.ts is what catches it.
     ...createStateDirectRecoveryHandlers(haven),
 
     haven_discover_tools: async (input) =>

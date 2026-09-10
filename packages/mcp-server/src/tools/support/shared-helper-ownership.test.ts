@@ -79,7 +79,7 @@ import * as mcpContext from './mcp-context.js'
 import * as quoteResponse from './quote-response.js'
 import * as signerCompat from './signer-compat.js'
 import { parse, parseStrict } from '../parsing.js'
-import { createToolHandlers } from '../../tools.js'
+import { createToolHandlers, toolSchemas } from '../../tools.js'
 import {
   AGENT_ALLOWANCES_RESPONSE,
   AGENT_RESPONSE,
@@ -559,6 +559,38 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     expect(specifierFor('parseStrict'), 'parseStrict stays in the #2807 parsing seam').toBe(
       './parsing.js',
     )
+  })
+
+  it('is not shadowed: no capability tool is re-declared in the tools.ts literal', () => {
+    // The gap haven-reviewer measured on this PR. A key written into the
+    // facade's own object literal AFTER the spread silently shadows the
+    // capability's handler: TS1117 does not reach across a spread, and no key
+    // is excess because both sides are HostedToolName, so `tsc` exits 0 on a
+    // duplicate `haven_pay`. Their mutation was caught only by behavioural
+    // tests, and only because its body DIVERGED — a stale duplicate with an
+    // identical body would pass every other check in the tree.
+    //
+    // Source-read, because the shadow is invisible at runtime: by the time a
+    // map exists the duplicate has already collapsed last-wins, which is the
+    // same reason the #2807 registry twin takes entry LISTS rather than maps.
+    const facade = fs.readFileSync(new URL('../../tools.ts', import.meta.url), 'utf8')
+    const literalKeys = [...facade.matchAll(/^ {4}(haven_[a-z0-9_]+):/gm)].map((m) => m[1])
+    const owned = new Set<string>()
+    for (const stem of CAPABILITY_MODULES) {
+      const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
+      const tuple = src.slice(src.indexOf('_TOOLS = ['), src.indexOf('] as const'))
+      for (const [, name] of tuple.matchAll(/'(haven_[a-z0-9_]+)'/g)) owned.add(name)
+    }
+    expect(owned.size, 'the capability tuple parse found no tools — the probe is broken').toBeGreaterThan(0)
+    expect(literalKeys.length, 'the facade literal parse found no keys — the probe is broken').toBeGreaterThan(0)
+    const shadowed = literalKeys.filter((k) => owned.has(k))
+    expect(
+      shadowed,
+      `tools.ts re-declares handlers a capability module already owns; the literal wins silently: ${shadowed.join(', ')}`,
+    ).toEqual([])
+    // …and the two halves together still cover the whole surface, so this
+    // check cannot be satisfied by a facade that simply lost its literal.
+    expect(new Set([...literalKeys, ...owned]).size).toBe(Object.keys(toolSchemas).length)
   })
 
   it('contributes exactly the ten tools it claims, and only those', async () => {

@@ -49,10 +49,20 @@ import { isPendingApproval } from './support/quote-response.js'
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
- * comment. `satisfies` pins every entry to a real `HostedToolName`; the
- * registry's completeness twin (`assertHostedToolRegistry`) and
- * `createToolHandlers`' `Record<HostedToolName, …>` annotation between them
- * still refuse a surface where a tool ends up with no owner or two.
+ * comment. `satisfies` pins every entry to a real `HostedToolName`, and
+ * `createToolHandlers`' `HostedToolHandlers` annotation refuses a surface
+ * where a tool ends up with NO owner (TS2741 names the missing one).
+ *
+ * It does NOT refuse a tool owned TWICE, and the difference matters to the
+ * slices after this one. A key written into the residual literal in `tools.ts`
+ * after `...createStateDirectRecoveryHandlers(haven)` silently shadows the
+ * spread: TS1117 does not reach across a spread, and no key is excess because
+ * both are `HostedToolName`. Measured (haven-reviewer, #2809) — a duplicate
+ * `haven_pay` in the facade compiled clean, and only the behavioural tests
+ * caught it, because that mutation's body diverged. A stale duplicate with an
+ * IDENTICAL body would pass every check in the tree. So the disjointness of
+ * each capability's tuple against the facade's own literal is asserted
+ * directly, in `tools/support/shared-helper-ownership.test.ts`.
  */
 export const STATE_DIRECT_RECOVERY_TOOLS = [
   'haven_get_agent',

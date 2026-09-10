@@ -83,6 +83,21 @@
  * connect-agent flow, the agent detail page, onboarding, login/signup, the
  * marketing routes and every modal are uncovered by this gate.
  *
+ * **`/login` deliberately earns no committed baseline now that it is
+ * capturable ([#2825](https://github.com/d-hinders/Haven-AI/issues/2825)) —
+ * "No" is the recorded decision.** The screen is reachable on demand (declare
+ * nothing; the route's `signedOut: true` definition in
+ * `scripts/screenshot.mjs` makes `npm run screenshot -- /login` produce real
+ * evidence), so the thing a baseline would add is a *standing* gate, and the
+ * same trade #1944 declined for a 320px baseline applies: every added baseline
+ * is re-blessed forever, and this screen churns by design — the #2819/#2824
+ * chrome work is exactly the kind of design-only change that would have paid
+ * the tax with no defect on either side. What #2816 actually exposed was not
+ * "no baseline" but "mislabeled evidence": a capture named for `/login` whose
+ * pixels were the dashboard. That failure class is gated where it belongs — by
+ * the byte-identity guard in the capture harness — not by a pixel baseline
+ * this file would have to re-bless on every branding pass.
+ *
  * ── The frozen clock is load-bearing, not hygiene ────────────────────────────
  *
  * `lib/format.ts`'s `timeAgo` buckets against `Date.now()`, and the fixtures

@@ -10,6 +10,11 @@ import {
   SCENARIOS,
   ScenarioHttpError,
   ScenarioHttpDelay,
+  ROUTE_DEFINITIONS,
+  findRedirectCaptures,
+  findSignedOutDuplicates,
+  resolveRouteAuthPartitions,
+  signedOutRoutesFor,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 
@@ -950,5 +955,194 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     // so the assertions went with them rather than being repointed — a fixture
     // contract for a scenario that no longer exists is the definition of a
     // guard over the empty set.
+  })
+})
+
+/**
+ * The signed-out opt-out (#2825).
+ *
+ * These are the GUARD half of the change. The pre-fix failure — a capture
+ * named `login-mobile.png` whose pixels were the dashboard — cleared every
+ * structural check the harness makes (it rendered, the dimensions were
+ * plausible, the identity probe confirmed the server, the content floor was
+ * met), so the only thing that can see that defect is a comparison of the
+ * capture bytes. Everything here is pure over file records so the guard is
+ * testable without booting a browser; the live run wires the same functions
+ * over the run's real captures.
+ */
+describe('signed-out capture opt-out (#2825)', () => {
+  /** A capture record in the shape main() builds. */
+  const rec = (route: string, viewport: string, sha256: string) => ({
+    route,
+    viewport,
+    file: `${route.slice(1)}-${viewport}.png`,
+    sha256,
+  })
+
+  describe('signedOutRoutesFor (the ROUTE_DEFINITIONS registry)', () => {
+    it('resolves signed-out membership from the route definition, not the caller', () => {
+      // Being signed out is a property of the ROUTE: a caller captures
+      // /login by passing /login, and the definition decides how.
+      expect(signedOutRoutesFor(['/design-system', '/dashboard', '/login', '/signup'])).toEqual([
+        '/login',
+        '/signup',
+      ])
+    })
+
+    it('keeps every undeclared route authenticated — no "looks signed-out" heuristic', () => {
+      // The value of the authenticated default is that every other route
+      // captures populated rather than empty.
+      expect(signedOutRoutesFor(['/design-system', '/dashboard', '/', '/settings'])).toEqual([])
+    })
+
+    it('declares exactly the routes the issue names, with /onboarding for its redirect', () => {
+      expect(Object.keys(ROUTE_DEFINITIONS).sort()).toEqual(['/login', '/onboarding', '/signup'])
+      for (const def of Object.values(ROUTE_DEFINITIONS)) expect(def.signedOut).toBe(true)
+    })
+  })
+
+  describe('resolveRouteAuthPartitions', () => {
+    it('splits a mixed run so a context never wears both sessions', () => {
+      const partitions = resolveRouteAuthPartitions(
+        ['/design-system', '/dashboard', '/login'],
+        ['/login'],
+      )
+      expect(partitions.authenticated).toEqual(['/design-system', '/dashboard'])
+      expect(partitions.signed_out).toEqual(['/login'])
+    })
+
+    it('an explicit opt-out wins for ANY named route, /design-system included', () => {
+      // The authenticated default for /design-system is guaranteed by
+      // composition — the harness always adds the route and no run needs to
+      // opt it out — not by a silent force-back, which would make an explicit
+      // instruction a lie. Nothing the partitioner does protects it, because
+      // nothing needs protecting.
+      const partitions = resolveRouteAuthPartitions(
+        ['/design-system', '/login', '/signup'],
+        ['/login', '/signup', '/design-system'],
+      )
+      expect(partitions.authenticated).toEqual([])
+      expect(partitions.signed_out).toEqual(['/design-system', '/login', '/signup'])
+    })
+
+    it('puts everything in the authenticated partition with no opt-out', () => {
+      const partitions = resolveRouteAuthPartitions(['/design-system', '/dashboard'], [])
+      expect(partitions.authenticated).toEqual(['/design-system', '/dashboard'])
+      expect(partitions.signed_out).toEqual([])
+    })
+  })
+
+  describe('findRedirectCaptures (the GATING guard)', () => {
+    it('flags a capture byte-identical to its viewport /dashboard — authenticated or signed out', () => {
+      // Mode-blind ON PURPOSE: the original finding was an AUTHENTICATED
+      // /login whose bytes were the dashboard's, so a guard scoped to
+      // opted-in captures would leave the founding defect open one flag over.
+      const sha = 'a'.repeat(64)
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', sha)],
+        new Map([['mobile', sha]]),
+      )
+      expect(mismatches).toHaveLength(1)
+      expect(mismatches[0].route).toBe('/login')
+      expect(mismatches[0].viewport).toBe('mobile')
+      // The run's own error printer names the file; a record without it
+      // prints `undefined == dashboard-*.png` (caught by the mutation run).
+      expect(mismatches[0].file).toBe('login-mobile.png')
+      expect(mismatches[0].text).toContain('BYTE-IDENTICAL to /dashboard')
+      expect(mismatches[0].text).toContain('ROUTE_DEFINITIONS')
+    })
+
+    it('never flags /dashboard itself', () => {
+      const sha = 'a'.repeat(64)
+      const mismatches = findRedirectCaptures(
+        [rec('/dashboard', 'mobile', sha)],
+        new Map([['mobile', sha]]),
+      )
+      expect(mismatches).toEqual([])
+    })
+
+    it('stays silent when the capture differs from /dashboard — the guard the live run must satisfy', () => {
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', 'a'.repeat(64)), rec('/signup', 'desktop', 'b'.repeat(64))],
+        new Map([
+          ['mobile', 'c'.repeat(64)],
+          ['desktop', 'd'.repeat(64)],
+        ]),
+      )
+      expect(mismatches).toEqual([])
+    })
+
+    it('does not compare across viewports', () => {
+      // /login at 390 must not be judged against /dashboard at 1280.
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', 'a'.repeat(64))],
+        new Map([['desktop', 'a'.repeat(64)]]),
+      )
+      expect(mismatches).toEqual([])
+    })
+
+    it('stays silent when no /dashboard was captured in the run', () => {
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', 'a'.repeat(64))],
+        new Map(),
+      )
+      expect(mismatches).toEqual([])
+    })
+  })
+
+  describe('findSignedOutDuplicates (the ADVISORY guard)', () => {
+    it('names the route a duplicate matches, not a hardcoded twin', () => {
+      const sha = 'a'.repeat(64)
+      // /onboarding signed out legitimately redirects to /login: a duplicate
+      // of /login is expected and must say so.
+      const duplicates = findSignedOutDuplicates(
+        [rec('/onboarding', 'mobile', sha)],
+        [rec('/login', 'mobile', sha), rec('/dashboard', 'mobile', 'b'.repeat(64))],
+      )
+      expect(duplicates).toHaveLength(1)
+      expect(duplicates[0].matches).toBe('/login')
+    })
+
+    it('ignores /design-system in the comparison pool', () => {
+      // The design-system capture is a primitive catalogue; no product route
+      // legitimately shares its bytes, and counting it would only manufacture
+      // noise.
+      const duplicates = findSignedOutDuplicates(
+        [rec('/login', 'mobile', 'a'.repeat(64))],
+        [rec('/design-system', 'mobile', 'a'.repeat(64))],
+      )
+      expect(duplicates).toEqual([])
+    })
+
+    it('never matches a route against itself, or bytes across viewports', () => {
+      const sha = 'a'.repeat(64)
+      expect(
+        findSignedOutDuplicates([rec('/login', 'mobile', sha)], [rec('/login', 'mobile', sha)]),
+      ).toEqual([])
+      expect(
+        findSignedOutDuplicates([rec('/login', 'mobile', sha)], [rec('/login', 'desktop', sha)]),
+      ).toEqual([])
+    })
+
+    it('reports a mutual duplicate pair ONCE, anchored at the first capture', () => {
+      const sha = 'a'.repeat(64)
+      // /onboarding signed out redirects to /login, so both captures share
+      // bytes and each matches the other — one pair, one advisory record.
+      const duplicates = findSignedOutDuplicates(
+        [rec('/login', 'mobile', sha), rec('/onboarding', 'mobile', sha)],
+        [rec('/login', 'mobile', sha), rec('/onboarding', 'mobile', sha)],
+      )
+      expect(duplicates).toHaveLength(1)
+      expect(duplicates[0].route).toBe('/login')
+      expect(duplicates[0].matches).toBe('/onboarding')
+    })
+
+    it('stays silent when every signed-out capture is unique', () => {
+      const duplicates = findSignedOutDuplicates(
+        [rec('/login', 'mobile', 'a'.repeat(64)), rec('/signup', 'desktop', 'b'.repeat(64))],
+        [rec('/dashboard', 'mobile', 'c'.repeat(64)), rec('/dashboard', 'desktop', 'd'.repeat(64))],
+      )
+      expect(duplicates).toEqual([])
+    })
   })
 })

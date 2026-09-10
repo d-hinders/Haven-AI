@@ -739,7 +739,17 @@ test('the template as shipped closes nothing, and closes the issue once filled i
 
 const DOCS_WORKFLOW = fileURLToPath(new URL('../../.github/workflows/docs.yml', import.meta.url))
 
-/** The lines of a `key:` block, by indentation — enough YAML for this file. */
+/** Everything from `#` on. A trailing comment is not part of a value. */
+const uncommented = (line) => line.replace(/#.*$/, '')
+
+/**
+ * The lines of a `key:` block, by indentation — enough YAML for this file.
+ *
+ * `null` rather than `[]` for a key with no children, because `[]` is truthy:
+ * an `assert.ok(block)` would pass on an empty block and every `.find()` below
+ * it would return `undefined`, which is how a negative assertion goes
+ * unfalsifiable.
+ */
 function blockUnder(lines, key, indent) {
   const start = lines.findIndex((l) => l === `${' '.repeat(indent)}${key}:`)
   if (start === -1) return null
@@ -749,7 +759,18 @@ function blockUnder(lines, key, indent) {
     if (line.search(/\S/) <= indent) break
     body.push(line)
   }
-  return body
+  return body.length > 0 ? body : null
+}
+
+/**
+ * The block's own keys, at whatever indent it actually uses — not a hard-coded
+ * width. A sibling key written at a DIFFERENT indent is a YAML error that
+ * Actions rejects outright, so it is a loud failure rather than a silent one
+ * this needs to catch.
+ */
+function directChildren(block) {
+  const base = Math.min(...block.map((l) => l.search(/\S/)))
+  return block.filter((l) => l.search(/\S/) <= base)
 }
 
 test('#2839: docs.yml re-runs the close guard when the pull request is EDITED', () => {
@@ -759,37 +780,55 @@ test('#2839: docs.yml re-runs the close guard when the pull request is EDITED', 
   assert.ok(on, 'docs.yml still has a top-level `on:` block')
 
   const pr = blockUnder(on, 'pull_request', 2)
-  assert.ok(pr, '`on:` still has a `pull_request:` trigger')
+  assert.ok(pr, '`on:` still has a `pull_request:` trigger with settings under it')
 
-  const types = pr.find((l) => l.trimStart().startsWith('types:'))
+  const typesLine = pr.map(uncommented).find((l) => /^\s*types\s*:/.test(l))
   assert.ok(
-    types,
+    typesLine,
     'the `pull_request:` trigger declares `types:` — WITHOUT it GitHub defaults to ' +
       'opened/synchronize/reopened, and a body edited after this check went green is never re-read',
   )
-  assert.match(
-    types,
-    /\bedited\b/,
-    `\`edited\` must stay in the trigger types, got: ${types.trim()}`,
+
+  const declared = typesLine
+    .slice(typesLine.indexOf('[') + 1, typesLine.lastIndexOf(']'))
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+
+  // ALL FOUR, as a set. Asserting only that `edited` appears would accept
+  // `types: [edited]`, which stops the REQUIRED check running on `opened` and
+  // `synchronize` — a required check that never reports, blocking `dev`
+  // permanently (#933). The test protecting this trigger must not green-light
+  // the worst configuration available to it.
+  assert.deepEqual(
+    [...declared].sort(),
+    ['edited', 'opened', 'reopened', 'synchronize'],
+    `the trigger must keep the three defaults AND add \`edited\`, got: ${typesLine.trim()}`,
+  )
+
+  // Same hazard, one line higher: a `paths:` filter here would skip the
+  // required check on most pull requests, and GitHub waits forever for a run
+  // that will not happen. The header says this is deliberate; this pins it.
+  assert.equal(
+    pr.map(uncommented).find((l) => /^\s*paths(-ignore)?\s*:/.test(l)),
+    undefined,
+    'no `paths:` filter on `pull_request` — a skipped required check never reports (#933)',
   )
 })
 
-test('#2839: the REQUIRED job never opts out of an event, the advisory one may', () => {
+test('#2839: the REQUIRED job never opts out of an event, the advisory one skips only `edited`', () => {
   const lines = readFileSync(DOCS_WORKFLOW, 'utf8').split('\n')
   const jobs = blockUnder(lines, 'jobs', 0)
   assert.ok(jobs, 'docs.yml still has a `jobs:` block')
 
-  // #933: a required check that is skipped never reports, and GitHub waits
-  // forever for a run that will not happen. So `validate` — the required check,
-  // and the one hosting the guard — must carry no job-level `if:` at all.
+  // #933 again: `validate` is the required check and hosts the guard, so it
+  // must carry no job-level `if:` at all. Matched against the job's OWN keys
+  // rather than a fixed indent, and allowing `if :`, so the assertion is about
+  // structure rather than about spacing.
   const validate = blockUnder(jobs, 'validate', 2)
   assert.ok(validate, '`validate` is still the job that hosts the guard')
-  const validateStepIndent = 6
-  const validateJobIf = validate.find(
-    (l) => l.startsWith('    if:') && l.search(/\S/) < validateStepIndent,
-  )
   assert.equal(
-    validateJobIf,
+    directChildren(validate).find((l) => /^\s*if\s*:/.test(l)),
     undefined,
     'the required job must have no job-level `if:` — a skipped required check never reports (#933)',
   )
@@ -799,7 +838,20 @@ test('#2839: the REQUIRED job never opts out of an event, the advisory one may',
   // buys nothing.
   const advisory = blockUnder(jobs, 'advisory', 2)
   assert.ok(advisory, '`advisory` is still a separate job')
-  const advisoryIf = advisory.find((l) => l.startsWith('    if:'))
-  assert.ok(advisoryIf, 'the advisory job opts out of some event')
-  assert.match(advisoryIf, /edited/, `advisory should skip \`edited\`, got: ${advisoryIf?.trim()}`)
+  const advisoryIf = directChildren(advisory).find((l) => /^\s*if\s*:/.test(l))
+  assert.ok(advisoryIf, 'the advisory job opts out of `edited`')
+
+  // POLARITY, not just the word. `== 'edited'` also contains "edited", and it
+  // inverts the job: advisory would run ONLY on description tweaks and never
+  // on a push, silently retiring lychee, markdownlint and Vale for the repo.
+  assert.match(
+    uncommented(advisoryIf),
+    /!=\s*'edited'/,
+    `advisory must skip \`edited\` and run otherwise, got: ${advisoryIf.trim()}`,
+  )
+  assert.doesNotMatch(
+    uncommented(advisoryIf),
+    /==\s*'edited'/,
+    'the advisory condition is inverted — it would run ONLY on description edits',
+  )
 })

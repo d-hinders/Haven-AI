@@ -172,6 +172,18 @@ jobs:
     # cannot change any verdict below. Skipping keeps ~130 external URL checks
     # off every description tweak. Safe to skip precisely because this job is
     # advisory — see the `edited` note in the header.
+    #
+    # It can DELETE one, though, and that is worth knowing: this workflow's
+    # concurrency group is shared with `cancel-in-progress: true`, so editing a
+    # description while a `synchronize` run is in flight cancels it, and the
+    # replacement run skips this job. The lychee/markdownlint/Vale verdict for
+    # that commit is then gone until the next push, and Vale's
+    # `github-pr-check` annotations go stale rather than refreshing. Advisory
+    # output, so nothing is blocked — but "cannot change any verdict" is a
+    # claim about content, not about existence.
+    #
+    # Written as a deny-list of one on purpose: `types:` above could gain a
+    # member tomorrow, and this job should run for it without being edited.
     if: github.event.action != 'edited'
 
     steps:

@@ -5,8 +5,9 @@
  * BASELINES ARE LINUX-RENDERED, exactly as `design-system.visual.spec.ts`'s,
  * `focus-visible.visual.spec.ts`'s and `agent-panel-states.visual.spec.ts`'s
  * are, and for the same reason: CI is the judge and macOS font rendering
- * differs. Skipped locally unless VISUAL_REGRESSION=1. Regenerate via the
- * **Update visual baselines** workflow on the branch — see
+ * differs. The pixel comparison is skipped locally unless VISUAL_REGRESSION=1;
+ * VISUAL_STRUCTURE_ONLY=1 runs the structural assertions anywhere (#2827).
+ * Regenerate via the **Update visual baselines** workflow on the branch — see
  * docs/contributing/ship-playbooks/frontend.md §4.
  *
  * ── Why this file exists ─────────────────────────────────────────────────────

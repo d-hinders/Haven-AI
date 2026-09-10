@@ -35,7 +35,7 @@
  *
  * NOT a `.visual.spec.ts`: it takes no screenshot and needs no baseline, so it
  * runs on every platform in the ordinary e2e suite rather than only under
- * VISUAL_REGRESSION=1.
+ * VISUAL_REGRESSION=1 / VISUAL_STRUCTURE_ONLY=1.
  */
 import { expect, test } from '@playwright/test'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'

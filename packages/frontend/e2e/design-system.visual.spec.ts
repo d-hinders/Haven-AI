@@ -42,8 +42,9 @@
  * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
  * one directory per spec file — there is no platform segment in the path, which
  * is why they must never be regenerated locally): CI is
- * the judge; macOS font rendering differs, so this spec is skipped locally
- * unless VISUAL_REGRESSION=1. Intended visual changes: regenerate baselines in
+ * the judge; macOS font rendering differs, so this spec's PIXEL comparison is
+ * skipped locally unless VISUAL_REGRESSION=1 (VISUAL_STRUCTURE_ONLY=1 runs its
+ * structural assertions anywhere — #2827). Intended visual changes: regenerate baselines in
  * the same PR — see docs/contributing/ship-playbooks/frontend.md §4
  * ("Updating visual baselines") for the CI-artifact flow.
  */

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { defineConfig, devices, expect } from '@playwright/test'
 import {
+  VISUAL_COMPARE,
   VISUAL_SPECS_ENABLED,
   VISUAL_STRUCTURE_ONLY,
 } from './e2e/support/visual-mode'
@@ -100,22 +101,37 @@ const SUITE_IGNORE = [
   // The unmocked live smoke (e2e/live) runs only via playwright.live.config.ts
   // against a real deployment — keep it out of the fast, fully-mocked suite.
   '**/live/**',
-  // Visual-regression specs run only under the dedicated CI job (Linux
-  // baselines) — VISUAL_REGRESSION=1 opts in (#897), and VISUAL_STRUCTURE_ONLY=1
-  // admits them for their LOCATORS only (#2827). Both conditions live in
+  // Visual specs are out of the default suite because their PIXEL comparison
+  // needs Linux-rendered baselines — VISUAL_REGRESSION=1 opts into that (#897),
+  // and VISUAL_STRUCTURE_ONLY=1 admits them for their LOCATORS only (#2827). Both conditions live in
   // e2e/support/visual-mode.ts, which is also where the five specs read their
   // own `test.skip` from — one predicate, so a third mode cannot reach the
   // config and miss a spec.
   ...(VISUAL_SPECS_ENABLED ? [] : ['**/*.visual.spec.ts']),
 ]
 
+if (VISUAL_STRUCTURE_ONLY && VISUAL_COMPARE) {
+  // Refuse the combination rather than pick a winner (#2827).
+  //
+  // Both set would admit the specs AND install the no-op override: the pixel
+  // gate running green while comparing nothing. `visual-gate-coverage.test.ts`
+  // asserts `test:visual` does not carry the variable, but a script assertion
+  // cannot see an exported shell variable or a workflow-level `env:` — this
+  // can, because it runs wherever the config does.
+  throw new Error(
+    'VISUAL_REGRESSION=1 and VISUAL_STRUCTURE_ONLY=1 are mutually exclusive: the first ' +
+      'compares pixels, the second replaces that comparison with a no-op. Together they ' +
+      'would report a green pixel gate that compared nothing. Unset one.',
+  )
+}
+
 if (VISUAL_STRUCTURE_ONLY) {
   /**
    * Replace the pixel comparison with the wait it already performs (#2827).
    *
    * Everything a spec does BEFORE the capture still runs: navigation, fixture
-   * setup, and its own structural assertions — 27 `toHaveCount(1)` calls across
-   * the five specs, which is what actually catches a broken locator. Dropping
+   * setup, and its own structural assertions — every `toHaveCount(1)` in the
+   * five specs, which is what actually catches a broken locator. Dropping
    * the comparison leaves all of that intact, and leaves nothing that can fail
    * for a platform reason. That asymmetry is the whole licence for putting
    * these specs in the default local gate.

@@ -92,7 +92,8 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         (#1820). Nesting the `<header>` inside a wrapper makes that xpath match
         nothing, and the visual gate would fail on a locator rather than on a
         pixel — a failure this diff would have shipped, because `*.visual.spec.ts`
-        is excluded from the local gate unless `VISUAL_REGRESSION=1`. It also
+        was excluded from the local gate until #2827; `test:e2e:gate:built`
+        now runs these specs for their locators. It also
         reads better as semantics: the banner landmark is the whole chrome band,
         including the part behind the status bar.
       */}

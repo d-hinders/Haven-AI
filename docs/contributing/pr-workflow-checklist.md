@@ -162,7 +162,7 @@ Use the smallest reliable set that matches the change.
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, `npm run build -w packages/sdk`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — blocking in `sdk_checks`, `cli_checks` and `frontend_checks` alike) |
 | CLI | `npm run typecheck -w packages/cli`, `npm run test -w packages/cli`, `npm run build -w packages/cli`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — the CLI holds a full-text copy of the SDK's canonical agent runbook) |
 | Cross-package or release-risk | `npm run quality` |
-| Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:gate:built -w packages/frontend` — both gating projects, desktop **and** mobile (#1768), against a built server rather than `next dev`, which is minutes rather than tens of minutes (#2730; see the frontend playbook § *Verification*). `test:e2e:desktop:built` / `test:e2e:mobile:built` narrow it to one while iterating |
+| Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:gate:built -w packages/frontend` — both gating projects, desktop **and** mobile (#1768), plus the visual specs' structural assertions (#2827), against a built server rather than `next dev`, which is minutes rather than tens of minutes (#2730; see the frontend playbook § *Verification*). `test:e2e:desktop:built` / `test:e2e:mobile:built` narrow it to one while iterating |
 
 Notes:
 

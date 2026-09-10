@@ -15,7 +15,9 @@
  *     `//*[@id="main-content"]/preceding-sibling::header[1]` (#1820) and then
  *     asserts `toHaveCount(1)` on it — `focus-visible.visual.spec.ts` says why,
  *     at its line 296: that "closes 'matches nothing' and 'matches several'".
- *     There are 27 such assertions across the five specs.
+ *     Every `toHaveCount(1)` in the five specs is one of these — 24 of them at
+ *     the time of writing, but the instrument is the point, not the count:
+ *     `grep -c 'toHaveCount(1)' e2e/*.visual.spec.ts`.
  *
  *     So the structural coverage was never missing. It was unreachable: nesting
  *     `<header>` in a wrapper makes that xpath match nothing, #2819 did exactly
@@ -27,16 +29,34 @@
  * each spec: the same condition written five times is five chances for the
  * next mode to be added to four of them.
  *
- *   | mode                    | specs run | pixels compared |
- *   |-------------------------|-----------|-----------------|
- *   | default                 | no        | —               |
- *   | `VISUAL_REGRESSION=1`   | yes       | yes (CI, Linux) |
- *   | `VISUAL_STRUCTURE_ONLY=1` | yes     | **no**          |
+ *   | mode                      | specs run | pixels compared |
+ *   |---------------------------|-----------|-----------------|
+ *   | default                   | no        | —               |
+ *   | `VISUAL_REGRESSION=1`     | yes       | yes (CI, Linux) |
+ *   | `VISUAL_STRUCTURE_ONLY=1` | yes       | **no**          |
+ *   | both                      | REFUSED   | —               |
+ *
+ * Both together would run the pixel gate comparing nothing and report all
+ * green — the exact catastrophe this file warns about, reachable by an
+ * exported shell variable rather than by editing any script. So it is refused
+ * loudly in `playwright.config.ts` rather than resolved silently either way.
  *
  * Structure-only is safe in the default local gate because of one property:
- * **it cannot go red for a reason CI would call green.** It compares no pixels,
- * so what is left is the specs' own structural assertions and the setup that
- * reaches them — all of which fail identically on Linux.
+ * **it cannot go red because of a Linux-rendered baseline it cannot render.**
+ * It compares no pixels, so what is left is the specs' own structural
+ * assertions and the setup that reaches them.
+ *
+ * That is deliberately narrower than "it can never disagree with CI", which
+ * would be false. Two residual classes remain, and both are shared with every
+ * other spec in the gate rather than introduced here:
+ *
+ *   - **timeouts under contention.** On `next dev` this is not marginal: 12 of
+ *     24 tests failed on `page.goto` alone, purely from route-by-route
+ *     compilation. Both entry points build first because of it.
+ *   - **a handful of platform-sensitive geometry assertions.** `focus-visible`
+ *     asserts an overflow budget on a 390px action row, and its own docstring
+ *     records that macOS and Linux font metrics differ there. It passes today;
+ *     it is a class, not an observed defect.
  *
  * It is not a substitute for the pixel gate and must never be mistaken for one.
  * `test:visual` remains the only thing that compares anything, and

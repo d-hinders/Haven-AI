@@ -524,4 +524,101 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     const offenders = await chromeControlsInBands(page, INSET_TOP, INSET_BOTTOM)
     expect(offenders, 'an open overlay puts no control in a reserved band').toEqual([])
   })
+  /**
+   * #2819's diagnosis rests on a geometric premise, and this locks it.
+   *
+   * The status-bar band goes grey when the More drawer opens and stays grey
+   * after it closes, on a device, in the installed shell. PR #2824 shipped one
+   * mechanism (the header's `backdrop-filter`) and the device pass falsified
+   * it. The candidate that replaced it is the drawer scrim: `fixed inset-0`
+   * with `.v2-modal-backdrop`, which under `viewport-fit: cover` paints the
+   * strip a dark translucent slate.
+   *
+   * That candidate cannot be told apart from a drawer-specific one without a
+   * second surface using the SAME class with no drawer involved, so the
+   * operator was asked to open and close **Receive** on the dashboard: band
+   * goes grey there too and the defect belongs to `.v2-modal-backdrop` over the
+   * safe area rather than to navigation.
+   *
+   * The premise that test rests on is that the two backdrops really do cover
+   * the same strip — and it is not obvious, because they are built
+   * differently. The scrim is `fixed inset-0`. Receive's is `absolute inset-0`
+   * inside a `fixed inset-0` wrapper that carries `.v2-safe-overlay`, which
+   * reserves the notch as `padding-top`. Padding does not shrink an absolutely
+   * positioned child — `inset-0` resolves against the wrapper's PADDING box —
+   * so the backdrop still starts at y=0 while the panel inside it starts at 47.
+   * Swap that padding for `inset`, or add `top-[var(--v2-safe-top)]` to either
+   * backdrop, and Receive stops covering the strip while still looking correct
+   * on screen. The operator's "band stays white" would then read as
+   * "drawer-specific" when it only meant "this test no longer asks the
+   * question" — a false negative aimed at the next fix.
+   *
+   * `elementFromPoint` inside the band is the assertion that matters: a box
+   * that SPANS the strip is not the same claim as a box that PAINTS it, and
+   * only the second one produces a grey band.
+   */
+  test('the drawer scrim and a modal backdrop paint the same reserved band (#2819)', async ({
+    page,
+  }) => {
+    const coverage = async () =>
+      page.evaluate(() => {
+        const found = Array.from(document.querySelectorAll<HTMLElement>('.v2-modal-backdrop'))
+        if (found.length !== 1) {
+          throw new Error(`expected exactly one mounted backdrop, found ${found.length}`)
+        }
+        const backdrop = found[0]
+        const rect = backdrop.getBoundingClientRect()
+        // Right of the drawer, which is itself opaque and would answer for the
+        // scrim underneath it. 8px down is inside a 47px band by any rounding.
+        const sampleX = window.innerWidth - 20
+        return {
+          top: Math.round(rect.top),
+          bottom: Math.round(rect.bottom),
+          background: getComputedStyle(backdrop).backgroundColor,
+          paintsTopBand: document.elementFromPoint(sampleX, 8) === backdrop,
+          viewportHeight: window.innerHeight,
+        }
+      })
+
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await applyInsets(page)
+    await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible()
+
+    // Control, before any geometry is judged: the drawer consumes the injected
+    // inset, so the run really is one where a notch exists.
+    const drawerPaddingTop = await page.evaluate(
+      () => getComputedStyle(document.querySelector('aside') as HTMLElement).paddingTop,
+    )
+    expect(drawerPaddingTop).toBe(`${INSET_TOP}px`)
+
+    const scrim = await coverage()
+    expect(scrim.top, 'the scrim starts at the top of the viewport, not below the notch').toBe(0)
+    expect(scrim.bottom).toBe(scrim.viewportHeight)
+    expect(scrim.paintsTopBand, 'the scrim is what paints the status-bar band').toBe(true)
+
+    await page.getByRole('button', { name: 'Close sidebar' }).click()
+    await expect(page.locator('.v2-modal-backdrop')).toHaveCount(0)
+
+    await openReceiveFundsModal(page)
+    await applyInsets(page)
+
+    // The same control on the other surface: the overlay reserves the notch in
+    // padding, which is the thing that must NOT shrink the backdrop below it.
+    const overlayPaddingTop = await page.evaluate(() => {
+      const panel = document.querySelector('[role="dialog"]') as HTMLElement
+      return getComputedStyle(panel.closest('.v2-safe-overlay') as HTMLElement).paddingTop
+    })
+    expect(overlayPaddingTop).toBe(`${INSET_TOP}px`)
+
+    const modal = await coverage()
+    expect(modal.top, "the overlay's padding must not push its backdrop out of the band").toBe(0)
+    expect(modal.bottom).toBe(modal.viewportHeight)
+    expect(modal.paintsTopBand, 'Receive paints the same band with no drawer involved').toBe(true)
+
+    // The premise in one line: same strip, same colour, so the operator's
+    // Receive run is a real discriminator and not a differently-built surface
+    // that happens to be quiet.
+    expect(modal.background).toBe(scrim.background)
+  })
 })

@@ -352,6 +352,21 @@ utility of equal specificity silently loses. The gutter also INHERITS, so a
 starts to should set its own. An overlay that had a `p-4` gutter sets
 `--v2-safe-gutter: 1rem` to keep it; the ones that never had a gutter set none.
 
+**The padding insets the panel, not the backdrop.** An overlay's dim layer is
+`inset-0` inside the wrapper, and `inset-0` on an absolutely positioned child
+resolves against the wrapper's PADDING box — so the backdrop still starts at
+`y=0` and covers the reserved bands while the panel inside it starts below the
+notch. That asymmetry is intended: a dim layer that stopped at the inset would
+leave an undimmed strip under the status bar. It is also the reason the mobile
+nav scrim (`fixed inset-0`, no wrapper) and a modal's backdrop cover exactly
+the same strip despite being built differently, which
+[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) depends on to tell a
+`.v2-modal-backdrop` defect apart from a drawer-specific one. Moving either
+backdrop below the inset — `top-[var(--v2-safe-top)]`, or swapping the
+wrapper's padding for `inset` — breaks that comparison while still looking
+correct on screen, so `e2e/safe-area-insets.mobile.spec.ts` asserts both
+backdrops span the band AND are the element painting it.
+
 A panel that also sets its own `max-h` must subtract at least each side's inset,
 or it reserves height the wrapper's padding has already taken. How much depends
 on what the ceiling is measured from: a ceiling measured off `100vh` subtracts

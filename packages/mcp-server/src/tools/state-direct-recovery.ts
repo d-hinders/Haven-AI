@@ -322,5 +322,6 @@ export function createStateDirectRecoveryHandlers(
       runTool(async () => {
         const args = parseStrict('haven_verify_receipt', input)
         return verifyPaymentReceipt(args.receipt as PaymentReceipt)
-      }),  }
+      }),
+  }
 }

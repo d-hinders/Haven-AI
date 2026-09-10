@@ -164,12 +164,11 @@ describe('design-system coupling gate (#898)', () => {
  * usefully assert on. What it CAN assert on are the two pure pieces the union
  * is built from, and they are where the behaviour actually lives:
  *
- *  - `untrackedFileDiff` renders a brand-new file — the shape this gate exists
- *    to catch, and the one no `git diff` form emits, `git diff HEAD` included —
- *    as a diff the existing parser reads. If it stops producing something
- *    `addedExportsFromDiff` understands, the fix silently reverts to a false
- *    green, so the assertion is made by round-tripping the two together rather
- *    than by matching the diff text.
+ *  - `addedExportsInFile` scans a brand-new file directly — the shape this gate
+ *    exists to catch, and the one no `git diff` form emits, `git diff HEAD`
+ *    included. It is scanned rather than rendered into diff text and parsed
+ *    back, because that round trip is fail-open (see the forge-a-diff-header
+ *    case below).
  *  - `dedupe` handles the union's one new hazard: the same export reachable
  *    twice, committed and again in the working tree.
  *

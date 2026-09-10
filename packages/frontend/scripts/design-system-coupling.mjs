@@ -154,15 +154,6 @@ export function undocumentedPrimitives(addedExports, pageSource) {
 }
 
 /**
- * Parse a unified diff into added component exports. Tracks the current +++
- * target file across hunks; only added lines (`+`, not `+++`) in primitive
- * files are considered. Comment text is stripped before matching (so an
- * `export …` inside a comment or string never counts), the exempt opt-out must
- * be a real trailing `// design-system-exempt:` marker, and a multi-line
- * `export { … }` list is collected across its added member lines via brace
- * state — reset whenever the diff run breaks (a non-added line or a new file).
- */
-/**
  * Collect exports from a run of CONSECUTIVE lines belonging to one file.
  * Shared by the diff parser and the untracked-file scanner so both read a
  * multi-line `export { … }` list the same way. `inBrace` state is scoped to
@@ -197,6 +188,15 @@ function collectExports(file, lines) {
   return out
 }
 
+/**
+ * Parse a unified diff into added component exports. Tracks the current +++
+ * target file across hunks; only added lines (`+`, not `+++`) in primitive
+ * files are considered. Comment text is stripped before matching (so an
+ * `export …` inside a comment or string never counts), the exempt opt-out must
+ * be a real trailing `// design-system-exempt:` marker, and a multi-line
+ * `export { … }` list is collected across its added member lines via brace
+ * state — reset whenever the diff run breaks (a non-added line or a new file).
+ */
 export function addedExportsFromDiff(diff) {
   const added = []
   let file = null
@@ -351,7 +351,9 @@ function main() {
   const computed = getDiff()
   if (computed === null) {
     if (strict) {
-      console.error('--strict: refusing to pass on an uncomputable diff — fetch the base and retry.')
+      console.error(
+        '--strict: refusing to pass on a diff it could not read. See the cause above.',
+      )
       process.exit(1)
     }
     console.log('design-system coupling: skipped (diff unavailable; advisory mode).')

@@ -137,6 +137,44 @@
  * real client bug; either way you want to see it, not silently ship a blank
  * screenshot.
  *
+ * ── Capturing a route SIGNED OUT (#2825) ─────────────────────────────────────
+ * The auth seed above is the DEFAULT, not a law — but being signed out is a
+ * property of the ROUTE, not of the run, so it is declared on the route's
+ * definition (`ROUTE_DEFINITIONS` below; `signedOut: true`), the way
+ * `scenario.seed()` is already conditional. A caller captures `/login` by
+ * passing `/login`: the harness reads the route's own definition, captures it
+ * WITHOUT the token/active-safe seed, and renders the route's real screen
+ * instead of its redirect target. No flag to remember, and one run still
+ * captures `/dashboard` and `/login` together: routes are PARTITIONED per
+ * viewport by their definitions — an authenticated context and a signed-out
+ * one, never one context wearing both. A signed-out context answers `/auth/me`
+ * with 401 — the same response an expired token earns — and keeps the data
+ * fixture; only the auth state changes.
+ *
+ * The registry decides, so a route NOT in it always captures authenticated:
+ * there is no "looks like a signed-out route" heuristic. `/onboarding` is the
+ * instructive entry: it is NOT a signed-out surface (its real render state is
+ * authenticated-and-account-less, which the shared fixture cannot produce),
+ * but BOTH of its capturable default states redirect — authenticated to
+ * `/dashboard` (which the byte-identity gate below refuses as mislabeled
+ * evidence) and signed out to `/login`. It is declared `signedOut: true` so
+ * the route captures at all, and its capture is the truthful signed-out
+ * redirect, reported ADVISORY as byte-identical to `/login`'s capture. Rendering the
+ * enrollment flow itself needs an account-less fixture state and is separate
+ * work. `/` (marketing) needs none of this — it has no auth guard at all.
+ *
+ * The guard that makes all of this trustworthy: ANY capture byte-identical to
+ * its viewport's `/dashboard` capture FAILS the run — signed-out or not,
+ * because the original finding was an AUTHENTICATED `/login` whose bytes were
+ * the dashboard's. An author who deletes a route's `signedOut` declaration
+ * (or captures a signed-out-only route that was never declared) hits the
+ * guard instead of silently re-shooting the redirect. The pre-fix failure
+ * cleared every other check the harness makes (it renders, dimensions are
+ * plausible, identity is proven, the content floor is met), so the comparison
+ * is the only guard that can see it. `signed_out_routes`, `signed_out_files`
+ * (with per-capture sha256), `redirect_captures` and `signed_out_duplicates`
+ * are recorded in capture-manifest.json.
+ *
  * ── The browser ──────────────────────────────────────────────────────────────
  * Uses Playwright's pre-installed Chromium (no `playwright install`). Override
  * with PLAYWRIGHT_CHROMIUM_PATH if the cached browser isn't auto-resolved.
@@ -150,6 +188,8 @@ import { chromium } from '@playwright/test'
 // registry moves.
 import { resolveToken } from '@haven_ai/core'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { rm, stat, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -349,6 +389,140 @@ const ROUTES = ['/design-system', ...extra]
 // the route parser above already ignores it. `--keep=0` is the pre-#1888
 // destructive behaviour, kept reachable for a disk-pinched machine.
 const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
+
+// ── Route definitions (#2825) ────────────────────────────────────────────────
+// Capture properties that belong to the ROUTE, declared once here so a caller
+// never has to remember them. `signedOut: true` marks a route that only
+// exists for a signed-out visitor: the harness captures it WITHOUT the auth
+// seed, in its own context, while every undeclared route in the same run
+// keeps the authenticated fixture. Scenarios are deliberately out of scope —
+// they exist to seed signed-IN states and always run authenticated.
+export const ROUTE_DEFINITIONS = {
+  '/login': {
+    description: 'The first screen an installed, signed-out app shows (#2729/#2730).',
+    signedOut: true,
+  },
+  '/signup': {
+    description: 'Account creation — signed-out-only by the same guard shape as /login.',
+    signedOut: true,
+  },
+  '/onboarding': {
+    // NOT a signed-out surface — its real render state is authenticated and
+    // account-less, which the shared fixture cannot produce (the fixture user
+    // holds a safe, so OnboardingClient redirects to /dashboard and the
+    // byte-identity gate would refuse the capture as mislabeled evidence).
+    // Declared signedOut so the route captures AT ALL: the signed-out state
+    // redirects to /login, which is truthful evidence of what a signed-out
+    // visitor sees here, reported ADVISORY as a duplicate. Rendering the
+    // enrollment flow itself needs an account-less fixture state — separate
+    // work, not this declaration.
+    description: 'Account enrolment; captures its signed-out redirect to /login (#2825).',
+    signedOut: true,
+  },
+}
+
+/**
+ * Which of `routes` are DEFINED signed out (#2825).
+ *
+ * Pure and exported so the resolution is pinned by `screenshot-fixture.test.ts`.
+ * Membership is read ONLY from the route's definition — there is no
+ * "unrecognised routes are signed out" heuristic, because the value of the
+ * authenticated default is that every other route captures populated rather
+ * than empty.
+ */
+export function signedOutRoutesFor(routes, definitions = ROUTE_DEFINITIONS) {
+  return routes.filter((r) => definitions[r]?.signedOut === true)
+}
+
+/**
+ * Split the run's routes by auth mode (#2825).
+ *
+ * A run that mixes `/dashboard` and `/login` must NOT capture both from one
+ * browser context: the seed is per-context (it has to land before any app
+ * code runs), so a context that seeds for the dashboard would redirect the
+ * login capture, and one that did not would render the dashboard empty. The
+ * partition is the mechanism behind "one run captures both".
+ *
+ * Exported and pure for the fixture test.
+ */
+export function resolveRouteAuthPartitions(routes, signedOutRoutes) {
+  const signedOut = new Set(signedOutRoutes)
+  const partitions = { authenticated: [], signed_out: [] }
+  for (const route of routes) (signedOut.has(route) ? partitions.signed_out : partitions.authenticated).push(route)
+  return partitions
+}
+
+/**
+ * Signed-out captures that are byte-identical to ANOTHER capture of the SAME
+ * viewport (#2825) — the redirect-capture shape the issue was filed about.
+ *
+ * Compare within the viewport only: `/login` at 390 must be judged against
+ * what else rendered at 390, never against a different width of another route
+ * and never across viewports of its own route. `/design-system` is excluded
+ * from the pool on purpose — its capture is a primitive catalogue and shares
+ * no pixels with a product route by design. The match is NAMED (`matches` is
+ * the route whose bytes are identical), never assumed: `/onboarding` signed
+ * out legitimately redirects to `/login`, and that pair is reported ADVISORY
+ * because a redirect is what the route does — the GATING half is the
+ * /dashboard identity check below. A mutual pair is one record, anchored at
+ * the first capture in run order. Exported and pure for the fixture test.
+ */
+export function findSignedOutDuplicates(signedOutFiles, allFiles) {
+  const pool = allFiles.filter((f) => f.route !== '/design-system')
+  // A mutual pair (X matches Y and Y matches X) is ONE duplicate, not two —
+  // the same bytes in the same viewport are one fact. Canonical pair key
+  // `viewport|sorted-routes`, anchored at whichever capture comes first in
+  // run order; the advisory is direction-agnostic (it names the twin, not a
+  // cause), so the anchor choice carries no claim about which route moved.
+  const seenPairs = new Set()
+  return signedOutFiles
+    .map((f) => {
+      const twin = pool.find((other) => other.viewport === f.viewport && other.route !== f.route && other.sha256 === f.sha256)
+      if (!twin) return null
+      const pairKey = `${f.viewport}|${[f.route, twin.route].sort().join('=')}`
+      if (seenPairs.has(pairKey)) return null
+      seenPairs.add(pairKey)
+      return { route: f.route, viewport: f.viewport, file: f.file, sha256: f.sha256, matches: twin.route }
+    })
+    .filter(Boolean)
+}
+
+/**
+ * Captures whose pixels are byte-identical to their viewport's `/dashboard`
+ * capture (#2825). GATING, and deliberately over EVERY capture — signed-out or
+ * not. The original finding was an AUTHENTICATED `/login` whose bytes were the
+ * dashboard's: an author who captures a signed-out-only route whose definition
+ * is missing (or has lost) its `signedOut: true` entry must hit this guard,
+ * not silently re-shoot the redirect, so scoping it to opted-in captures would
+ * leave the exact defect that started this open one axis over.
+ *
+ * The defect cleared every check the harness makes: the PNG rendered, had
+ * plausible dimensions, came from the identity-verified server, and met the
+ * content floor — it was the dashboard under `login-*.png`. No structural
+ * guard can see that; only comparing the bytes can. A route REDIRECTING is
+ * legitimate (that is what `/onboarding` does signed out, and `/login` does
+ * authenticated); a PNG NAMED for the route while showing the dashboard is
+ * not evidence. The remedy is stated in the failure: declare the route in
+ * ROUTE_DEFINITIONS, or drop it from the run.
+ *
+ * Exported and pure for the fixture test.
+ */
+export function findRedirectCaptures(files, dashboardByViewport) {
+  return files
+    .filter((f) => f.route !== '/dashboard')
+    .filter((f) => dashboardByViewport.has(f.viewport) && dashboardByViewport.get(f.viewport) === f.sha256)
+    .map((f) => ({
+      route: f.route,
+      viewport: f.viewport,
+      file: f.file,
+      sha256: f.sha256,
+      text:
+        `capture of ${f.route} is BYTE-IDENTICAL to /dashboard (${f.viewport}) — the route redirected and ` +
+        'the harness photographed the redirect target under this route\'s name (#2825). If the route only ' +
+        'exists for a signed-out visitor, declare it in ROUTE_DEFINITIONS with signedOut: true and re-run; ' +
+        'otherwise do not capture it alongside /dashboard.',
+    }))
+}
 
 /**
  * Turn a failed capture into a RECORD of the PNG that was removed (#1936/#1939/
@@ -1541,18 +1715,25 @@ export const STALE_BUSY_DECLARATIONS = []
  * with a failure instead (#1725); `delayedHttp` keeps it pending long enough
  * to capture a loading branch.
  */
-async function newFixtureContext(browser, vp, scenario) {
+async function newFixtureContext(browser, vp, scenario, { signedOut = false } = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
     deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
   })
 
-  // Auth fixture: seed the token before any app code runs.
-  await context.addInitScript((keys) => {
-    window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
-    window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
-  }, SEED_STORAGE_KEYS)
+  // Auth fixture: seed the token before any app code runs — UNLESS this
+  // context is signed out (#2825). The seed keeps its ordering guarantee when
+  // it lands at all, so the opt-out SKIPS the seed rather than clearing it
+  // after the fact. With no token, AuthContext takes its real signed-out
+  // branch (`setLoading(false)` with `user` null, no `/auth/me` call) and the
+  // route guards see exactly what a signed-out visitor's browser sees.
+  if (!signedOut) {
+    await context.addInitScript((keys) => {
+      window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
+      window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
+    }, SEED_STORAGE_KEYS)
+  }
 
   // Device-local state a scenario needs (#1856). Some gates read localStorage
   // rather than the API — `useSafeOperationGate` resolves the signer from the
@@ -1667,6 +1848,20 @@ async function newFixtureContext(browser, vp, scenario) {
       return json(scenarioBody)
     }
 
+    // Signed-out contexts (#2825): the auth session the fixture normally
+    // resolves does not exist here. 401 is the same answer an expired token
+    // earns from the real backend — `lib/api.ts` throws on it and
+    // AuthContext's catch clears the token and renders signed out. A
+    // signed-out context should never need this (with no seed there is no
+    // token and no call), but a route that fetches `/auth/me` unconditionally
+    // gets the truthful answer rather than a session it did not earn.
+    if (signedOut && api === '/auth/me') {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Unauthorized' }),
+      })
+    }
     if (api === '/auth/me') return json(FIXTURE_USER)
     if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
     const populated = fixtureFor(api + search)
@@ -3749,6 +3944,11 @@ async function main() {
   // doing that after the dev server is spawned and the browser is launched
   // leaks both (the try/finally that cleans them up starts further down).
   const scenarios = resolveScenarios(SCENARIO_ARGS)
+  // Which routes this run captures WITHOUT the auth seed (#2825): read from
+  // the routes' OWN definitions, not the caller's memory. The capture loop
+  // partitions on this and the manifest block hashes those captures.
+  const routeAuthPartitions = resolveRouteAuthPartitions(ROUTES, signedOutRoutesFor(ROUTES))
+  const signedOutSet = new Set(routeAuthPartitions.signed_out)
 
   // The widths THIS run shoots (#2006). Same stance as the scenario check
   // above: a malformed `--viewport=` throws before a server or a browser is
@@ -3787,6 +3987,9 @@ async function main() {
         ? ' — the committed evidence set'
         : ` — OVERRIDE via ${viewportSource}, this run only; no baseline is affected`),
   )
+  if (signedOutSet.size > 0) {
+    console.log(`screenshot: signed-out captures for ${[...signedOutSet].join(', ')} (#2825) — signedOut on the route's definition in ROUTE_DEFINITIONS; no auth token seeded, every other route keeps the authenticated fixture`)
+  }
 
   // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
   // unconditionally — including the case that motivated #1888, a narrow
@@ -3927,6 +4130,13 @@ async function main() {
     throw err
   }
   const captured = []
+  // Every capture paired with the ROUTE it actually belongs to (#2825). The
+  // filename cannot be re-parsed for this: `slug('/design-system')` is
+  // `design-system`, which a first-hyphen split reads as route `/design`, and
+  // scenario captures (`<scenario>-<name>-<viewport>.png`) are not routes at
+  // all. The capture loop knows the truth; these records carry it to the
+  // signed-out guards and the manifest block.
+  const captureRecords = []
   const consoleErrors = []
   const gotoFailures = []
   const clipped = []
@@ -3954,20 +4164,37 @@ async function main() {
   const contentRaced = []
   try {
     for (const vp of captureViewports) {
-      const context = await newFixtureContext(browser, vp, null)
-      const page = await context.newPage()
-      // A red console on a fixture render is a fixture-shape gap or a real
-      // client bug — collect and summarise instead of shipping blank PNGs.
+      // ONE context per auth mode per viewport (#2825). The auth seed is
+      // per-context — it must land before any app code runs — so the context
+      // FOLLOWS the route's auth mode as the loop walks the caller's route
+      // order: a run mixing /dashboard and /login opens an
+      // authenticated context for the dashboard and a signed-out one for the
+      // login, never one context wearing both sessions. With no opt-out the
+      // flip never happens and this is the old single-context behaviour
+      // exactly: the authenticated default is unchanged, not relaxed.
+      let context = null
+      let contextIsSignedOut = null
+      let page = null
       let currentRoute = ROUTES[0]
-      page.on('console', (msg) => {
-        if (msg.type() === 'error') {
-          consoleErrors.push({ route: currentRoute, viewport: vp.name, text: msg.text().slice(0, 300) })
-        }
-      })
-      page.on('pageerror', (err) => {
-        consoleErrors.push({ route: currentRoute, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
-      })
+      const attachDiagnostics = (p) => {
+        p.on('console', (msg) => {
+          if (msg.type() === 'error') {
+            consoleErrors.push({ route: currentRoute, viewport: vp.name, text: msg.text().slice(0, 300) })
+          }
+        })
+        p.on('pageerror', (err) => {
+          consoleErrors.push({ route: currentRoute, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
+        })
+      }
       for (const routePath of ROUTES) {
+        const routeIsSignedOut = signedOutSet.has(routePath)
+        if (routeIsSignedOut !== contextIsSignedOut) {
+          if (context) await context.close()
+          context = await newFixtureContext(browser, vp, null, { signedOut: routeIsSignedOut })
+          contextIsSignedOut = routeIsSignedOut
+          page = await context.newPage()
+          attachDiagnostics(page)
+        }
         currentRoute = routePath
         // A swallowed navigation failure would screenshot the PREVIOUS route's
         // content under this route's filename — record it and mark the run.
@@ -3993,6 +4220,7 @@ async function main() {
             viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
           })
           captured.push(path.relative(ROOT, file))
+          captureRecords.push({ route: routePath, viewport: vp.name, file: path.relative(ROOT, file) })
           if (content) {
             contentSettles.push({
               route: routePath,
@@ -4137,6 +4365,45 @@ async function main() {
   // files is on the record rather than only on a console someone scrolled past.
   const viewportMismatches = findViewportMismatches(captured, captureViewports)
 
+  // Signed-out capture evidence (#2825): the auth opt-out is only trustworthy
+  // if its captures are PROVEN different, so captures are hashed and compared.
+  // The dashboard-identity half GATES over EVERY capture — the original
+  // finding was an authenticated /login whose bytes were the dashboard's, so
+  // forgetting the flag must fail the run rather than silently re-shoot the
+  // redirect. The duplicate half is ADVISORY, because a redirect IS what some
+  // routes legitimately do (/onboarding signed out redirects to /login). With
+  // no opt-out and no redirect the lists are empty.
+  const sha256 = (file) =>
+    createHash('sha256').update(readFileSync(file)).digest('hex')
+  // Route captures only, paired with their REAL route (#2825) — scenario
+  // captures and `-full` re-shoots stay out of these pools (they are not
+  // route evidence, and re-parsing their filenames would fabricate routes:
+  // `design-system-desktop.png` splits on the first hyphen into `/design`).
+  const allFiles = captureRecords.map((f) => ({ ...f, sha256: sha256(path.join(ROOT, f.file)) }))
+  const dashboardByViewport = new Map(
+    allFiles.filter((f) => f.route === '/dashboard').map((f) => [f.viewport, f.sha256]),
+  )
+  const signedOutFileRecords = allFiles.filter((f) => signedOutSet.has(f.route))
+  const redirectCaptures = findRedirectCaptures(allFiles, dashboardByViewport)
+  const signedOutDuplicates = findSignedOutDuplicates(signedOutFileRecords, allFiles)
+  if (redirectCaptures.length > 0) {
+    console.error(
+      `\n✗ ${redirectCaptures.length} capture(s) are BYTE-IDENTICAL to /dashboard — the route redirected ` +
+        'and the PNG shows the redirect target under the route\'s name (#2825):',
+    )
+    for (const m of redirectCaptures) {
+      console.error(`  ${m.file} == dashboard-${m.viewport}.png (${m.sha256.slice(0, 16)}…)`)
+      console.error(`    ${m.text}`)
+    }
+  }
+  if (signedOutDuplicates.length > 0) {
+    console.log(
+      `\n⚠ ${signedOutDuplicates.length} signed-out capture(s) are byte-identical to ANOTHER route's capture — ` +
+        'usually a redirect, which is what that route does signed out; advisory, not a failure:',
+    )
+    for (const d of signedOutDuplicates) console.log(`  ${d.file} == ${d.matches.replace(/^\//, '')}-${d.viewport}.png`)
+  }
+
   // Provenance an artifact can be traced by after the fact — which branch and
   // commit these PNGs actually show, and that the server was proven to be this
   // worktree's before they were taken.
@@ -4157,6 +4424,17 @@ async function main() {
         own_server: OWN_SERVER,
         identity_verified: identity.identity_verified === true,
         routes: ROUTES,
+        // The signed-out opt-out (#2825): which routes captured without the
+        // auth seed and which files they produced (with per-capture sha256 so
+        // a reviewer can compare without re-hashing), plus the two guards'
+        // verdicts. `redirect_captures` non-empty FAILS the run — over signed
+        // out AND authenticated captures alike, because the original finding
+        // was an authenticated /login whose bytes were the dashboard's;
+        // `signed_out_duplicates` is advisory (a redirect is legitimate).
+        signed_out_routes: [...signedOutSet],
+        signed_out_files: signedOutFileRecords,
+        redirect_captures: redirectCaptures,
+        signed_out_duplicates: signedOutDuplicates,
         // The widths these PNGs were ACTUALLY shot at, and where that came
         // from (#2006). Without this a 320px capture is indistinguishable from
         // a 390px one once the PNG is attached to a review thread.
@@ -4386,6 +4664,12 @@ async function main() {
     viewportMismatches.length > 0 && `${viewportMismatches.length} PNG(s) not named after any resolved viewport`,
     gotoFailures.length > 0 && `${gotoFailures.length} route(s) failed to navigate`,
     deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
+    // GATING (#2825): ANY capture byte-identical to /dashboard is the
+    // redirect-capture defect itself — evidence that confidently names the
+    // wrong screen, authenticated or signed out. Advisory is exactly how this
+    // defect hid for the whole life of the harness.
+    redirectCaptures.length > 0 &&
+      `${redirectCaptures.length} capture(s) byte-identical to /dashboard (redirect photographed under the route's name)`,
     // GATING, not advisory — review of #2204 caught this as a should-fix and it
     // was the right call. The whole claim made for `BUSY_TOLERANT_CAPTURES` is
     // that it SELF-EXPIRES; a stale declaration that only prints to stdout and

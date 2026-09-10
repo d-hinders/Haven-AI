@@ -11,6 +11,7 @@
     "design:lint": "node scripts/design-lint.mjs",
     "design:lint:update": "node scripts/design-lint.mjs --update",
     "design:coupling": "node scripts/design-system-coupling.mjs",
+    "design:coupling:strict": "node scripts/design-system-coupling.mjs --strict --out=/dev/null",
     "screenshot": "node scripts/screenshot.mjs",
     "test": "npm --prefix ../core run build && vitest run",
     "test:watch": "vitest",

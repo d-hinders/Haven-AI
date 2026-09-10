@@ -5,11 +5,20 @@ import {
   exportedComponentsInLine,
   addedExportsFromDiff,
   undocumentedPrimitives,
+  addedExportsInFile,
+  dedupe,
 } from '../../scripts/design-system-coupling.mjs'
 
 const exportsInLine = exportedComponentsInLine as (line: string) => string[]
 const fromDiff = addedExportsFromDiff as (
   diff: string,
+) => { file: string; symbol: string; exempt: boolean }[]
+const inFile = addedExportsInFile as (
+  file: string,
+  contents: string,
+) => { file: string; symbol: string; exempt: boolean }[]
+const dedup = dedupe as (
+  added: { file: string; symbol: string; exempt: boolean }[],
 ) => { file: string; symbol: string; exempt: boolean }[]
 const undocumented = undocumentedPrimitives as (
   added: { file: string; symbol: string; exempt: boolean }[],
@@ -136,5 +145,123 @@ describe('design-system coupling gate (#898)', () => {
       [],
     )
     expect(fromDiff(diff('src/components/haven/index.tsx', 'export const Gauge = () => null'))).toEqual([])
+  })
+})
+
+/**
+ * The local run reads the working tree (#2826).
+ *
+ * ## Why these two functions carry the fix
+ *
+ * The gate used to compute its local diff as `origin/dev...HEAD` alone —
+ * committed work only. A primitive that was written but not yet committed was
+ * therefore invisible, and the run printed "no undocumented primitives added"
+ * and exited 0. That is precisely when ship-next invokes it: during review,
+ * before the commit. CI, which sets BASE_SHA/HEAD_SHA, then failed the
+ * required **Design-system coupling (strict)** check on the same tree.
+ *
+ * The union that fixes it is three `git` calls, which a unit test cannot
+ * usefully assert on. What it CAN assert on are the two pure pieces the union
+ * is built from, and they are where the behaviour actually lives:
+ *
+ *  - `addedExportsInFile` scans a brand-new file directly — the shape this gate
+ *    exists to catch, and the one no `git diff` form emits, `git diff HEAD`
+ *    included. It is scanned rather than rendered into diff text and parsed
+ *    back, because that round trip is fail-open (see the forge-a-diff-header
+ *    case below).
+ *  - `dedupe` handles the union's one new hazard: the same export reachable
+ *    twice, committed and again in the working tree.
+ *
+ * End-to-end proof that the CLI goes red on an uncommitted primitive is a
+ * mutation run against the real entry point, recorded in the pull request —
+ * this is the part that belongs in the suite.
+ */
+describe('local runs read the working tree (#2826)', () => {
+  it('finds an export in an untracked primitive, which no git diff form emits', () => {
+    expect(
+      inFile('packages/frontend/src/components/ui/Gauge.tsx', 'export function Gauge() {}\n'),
+    ).toEqual([{ file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }])
+  })
+
+  it('honours a trailing exempt marker in an untracked file', () => {
+    expect(
+      inFile(
+        'packages/frontend/src/components/ui/Gauge.tsx',
+        'export function Gauge() {} // design-system-exempt: internal\n',
+      )[0].exempt,
+    ).toBe(true)
+  })
+
+  it('ignores an untracked file outside the primitive directories', () => {
+    expect(inFile('packages/frontend/src/lib/thing.ts', 'export function Thing() {}\n')).toEqual([])
+  })
+
+  /**
+   * File CONTENT cannot forge a diff file header.
+   *
+   * The first version of this fix rendered untracked files into diff text and
+   * fed them back through addedExportsFromDiff. Every content line gains a `+`
+   * there, so a source line beginning `++ ` arrives as `+++ ` — which that
+   * parser reads as a file header. It then re-points at that path and silently
+   * drops every export after it: a gate going green because of what a file
+   * happened to contain, which is the one posture it must not have. Scanning
+   * the file directly removes the round trip; this asserts the property rather
+   * than the mechanism, so it still means something if the internals change.
+   */
+  it('reads exports after a line that would forge a diff header', () => {
+    const contents = '// docs example:\n++ b/docs/README.md\nexport function Sneaky() {}\n'
+    expect(inFile('packages/frontend/src/components/ui/Sneaky.tsx', contents)).toEqual([
+      { file: 'src/components/ui/Sneaky.tsx', symbol: 'Sneaky', exempt: false },
+    ])
+  })
+
+  it('collapses an export the union sees twice', () => {
+    const twice = [
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+    ]
+    expect(dedup(twice)).toEqual([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+    ])
+  })
+
+  /**
+   * The newest occurrence wins in BOTH directions (#2826, review round 1).
+   *
+   * dedupe originally OR-ed the exempt flags, on the reasoning that the working
+   * tree is the newest state. The reasoning was right and the OR did not encode
+   * it: OR is order-blind, so it produced the newest answer only when the newest
+   * answer happened to be `true`.
+   *
+   * The second case is the fail-open that cost — commit the marker, then delete
+   * it in the working tree, the ordinary "a reviewer said that is not internal"
+   * move made before the commit. OR resolved it to exempt, so the local run
+   * exited 0 on a tree CI reddens, falsifying the guarantee this change is for.
+   */
+  it('an exemption added in the working tree wins over the committed state', () => {
+    const added = dedup([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }, // committed
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: true }, // working tree
+    ])
+    expect(undocumented(added, 'import { Button } from "..."')).toEqual([])
+  })
+
+  it('an exemption REMOVED in the working tree also wins — the fail-open direction', () => {
+    const added = dedup([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: true }, // committed
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }, // working tree
+    ])
+    expect(added).toEqual([{ file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }])
+    expect(undocumented(added, 'import { Button } from "..."')).toEqual([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge' },
+    ])
+  })
+
+  it('keeps distinct symbols in the same file apart', () => {
+    const added = dedup([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'GaugeLabel', exempt: false },
+    ])
+    expect(added.map((a) => a.symbol)).toEqual(['Gauge', 'GaugeLabel'])
   })
 })

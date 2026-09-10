@@ -52,7 +52,57 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     // over the first row of controls; the horizontal pair keep the `px-6`
     // gutter and only widen it on a landscape phone, where the notch eats one
     // side. `lg:` is untouched, so the desktop render is byte-identical.
-    <header className="relative z-[var(--v2-z-chrome)] h-14 max-lg:h-[calc(3.5rem+var(--v2-safe-top))] max-lg:pt-[var(--v2-safe-top)] flex items-center px-6 lg:px-8 max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md flex-shrink-0">
+    <header
+      data-app-chrome=""
+      className="relative z-[var(--v2-z-chrome)] flex-shrink-0"
+    >
+      {/*
+        The status-bar band is its own OPAQUE, unblurred element (#2819).
+
+        #2730 originally grew the header itself by `--v2-safe-top`, which put the
+        status-bar band inside an element carrying `backdrop-blur-md`. On the
+        installed iOS shell that band was observed keeping the nav scrim's grey
+        after the drawer closed, while the header's own hairline below it drew
+        correctly.
+
+        The mechanism is a hypothesis and the issue records it as one: NOT a
+        stale backdrop sample — the scrim is `--v2-z-nav-scrim` (130) against
+        this bar's `--v2-z-chrome` (100), so it paints in FRONT and was never in
+        this element's backdrop — but the composited output of the
+        `backdrop-filter` layer failing to invalidate when the overlay above it
+        unmounts, which iOS WebKit has a long history of. Nothing runnable here
+        can reproduce it: the symptom needs a standalone shell with non-zero
+        insets, and no engine in CI has either.
+
+        So this removes the CLASS rather than betting on the instance. No
+        `backdrop-filter` layer spans the status bar any more, so nothing there
+        can hold a stale composite whatever the precise mechanism. It is also
+        the better rendering on its own terms — the band behind a status bar
+        wants to be opaque, not a translucent blur of whatever is beneath.
+
+        `--v2-safe-top` is 0 everywhere without a notch, so this element
+        collapses to zero height and the desktop and CI renders are unchanged.
+
+        `<header>` stays the OUTERMOST element rather than the inner bar, and
+        that is load-bearing rather than taste: `design-system.visual.spec.ts`
+        locates the top bar structurally, as
+        `//*[@id="main-content"]/preceding-sibling::header[1]`, deliberately
+        (#1820). Nesting the `<header>` inside a wrapper makes that xpath match
+        nothing, and the visual gate would fail on a locator rather than on a
+        pixel — a failure this diff would have shipped, because `*.visual.spec.ts`
+        is excluded from the local gate unless `VISUAL_REGRESSION=1`. It also
+        reads better as semantics: the banner landmark is the whole chrome band,
+        including the part behind the status bar.
+      */}
+      <div
+        data-safe-area-band=""
+        aria-hidden="true"
+        className="max-lg:h-[var(--v2-safe-top)] bg-[var(--v2-bg)]"
+      />
+      <div
+        data-app-bar=""
+        className="h-14 flex items-center px-6 lg:px-8 max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md"
+      >
       {/*
         Left region: hamburger spacer + optional back-link.
 
@@ -109,6 +159,7 @@ export default function TopBar({ actionSlot }: TopBarProps) {
           budgets on-chain and produces no approvals to notify about. */}
       <div className="ml-auto flex items-center gap-3">
         <WalletButton />
+      </div>
       </div>
     </header>
   )

@@ -85,7 +85,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-09-09"
+last-verified: "2026-09-10"
 ---
 
 # Haven Design System
@@ -361,6 +361,14 @@ leaves the gutter. A panel with **no** ceiling at all is the case to watch: the
 available box shrinks by the insets, and with `items-center` and nothing to
 clamp it an over-tall panel overflows both ends with no scroll path.
 
+**Keep `backdrop-filter` off any element that spans a safe-area band** (#2819).
+The top bar originally grew the blurred `<header>` itself by `--v2-safe-top`,
+which put the status-bar band inside a `backdrop-filter` layer; on the installed
+iOS shell that band was seen keeping the nav scrim's grey after the drawer
+closed. `<header>` is now the whole chrome band with an opaque unblurred strip
+above a blurred 56px bar, so no composited blur layer spans the status bar. Blur
+what content scrolls under; leave the band behind the status bar opaque.
+
 `ui/SidePanel` is the deliberate exception: it is flush to three screen edges by
 design, so a gutter on its wrapper would un-flush it at every width. Its insets
 go on the panel, where `box-sizing: border-box` takes them out of the scroll
@@ -449,7 +457,7 @@ The authenticated app uses one stable product shell:
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: 56px blurred white header; below `lg` it grows by `--v2-safe-top` (§ *Safe areas*). Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
+- Top bar: a 56px blurred white bar, with an opaque unblurred status-bar band above it below `lg` — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
 - Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
 
 ### PageHeader

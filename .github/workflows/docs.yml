@@ -29,6 +29,27 @@ name: Docs quality
 # happen (the #933 lesson, recorded in docs-coupling.yml). Both validators are
 # whole-repo and dependency-free, so running them unconditionally is cheap.
 # The `push:` trigger keeps its filter — nothing is waiting on those runs.
+#
+# ## `edited`, because one step's input is the pull request itself (#2839)
+#
+# The close-keyword guard reads the pull-request BODY and TITLE. Everything
+# else here reads the repository, and every change to the repository arrives as
+# `synchronize` — but a body or title is edited without a push, and `edited` is
+# NOT in the default type list (`opened`, `synchronize`, `reopened`). So the
+# guard could pass, the body could then be rewritten, and the merge would act
+# on text no check had ever read. A green REQUIRED check describing text that
+# no longer exists is worse than no check: #2819, an `operator-verify` issue,
+# was closed exactly that way — the guard blocked the keyword in a commit
+# message, and the same keyword went into the body afterwards while describing
+# the fix.
+#
+# `advisory` opts OUT of `edited` instead of the trigger staying narrow,
+# because its inputs are entirely in the repository: re-running lychee over
+# ~130 external URLs because someone reworded a description is waste, and the
+# job's whole reason for existing is that those network steps are slow. It is
+# not a required check, so a skipped run reports as skipped and blocks nothing
+# — the #933 hazard applies to `validate`, which is why `validate` does not
+# opt out.
 
 on:
   push:
@@ -43,6 +64,9 @@ on:
       - 'scripts/docs/**'
       - '.github/workflows/docs.yml'
   pull_request:
+    # `edited` is not a default type. It is here for the close-keyword guard —
+    # see the note above.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: docs-${{ github.event.pull_request.number || github.ref }}
@@ -144,6 +168,23 @@ jobs:
     name: Docs links & style (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Nothing here reads the pull request itself, so a reworded description
+    # cannot change any verdict below. Skipping keeps ~130 external URL checks
+    # off every description tweak. Safe to skip precisely because this job is
+    # advisory — see the `edited` note in the header.
+    #
+    # It can DELETE one, though, and that is worth knowing: this workflow's
+    # concurrency group is shared with `cancel-in-progress: true`, so editing a
+    # description while a `synchronize` run is in flight cancels it, and the
+    # replacement run skips this job. The lychee/markdownlint/Vale verdict for
+    # that commit is then gone until the next push, and Vale's
+    # `github-pr-check` annotations go stale rather than refreshing. Advisory
+    # output, so nothing is blocked — but "cannot change any verdict" is a
+    # claim about content, not about existence.
+    #
+    # Written as a deny-list of one on purpose: `types:` above could gain a
+    # member tomorrow, and this job should run for it without being edited.
+    if: github.event.action != 'edited'
 
     steps:
       - uses: actions/checkout@v4

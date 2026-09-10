@@ -716,3 +716,142 @@ test('the template as shipped closes nothing, and closes the issue once filled i
     'filling the placeholder in place must produce a real closing reference',
   )
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// How the guard is WIRED (#2839).
+//
+// Every other check in `docs.yml` reads the repository, and every change to the
+// repository arrives as `synchronize`. This one reads the pull request itself —
+// its body and its title — which change without a push, on the `edited` event
+// that is NOT in GitHub's default type list.
+//
+// So the guard could pass, the body could be rewritten, and the merge would act
+// on text no check had ever read. That is not hypothetical: it closed #2819, an
+// `operator-verify` issue, after this very guard had blocked the same keyword in
+// a commit message and gone green once it was reworded. The body was edited
+// afterwards, to DESCRIBE the incident, and the description contained the thing
+// it described. The step's own comment records #2320 as the same shape one turn
+// earlier — a commit narrating the original incident closed #2268 a second time.
+//
+// A green REQUIRED check that describes text no longer present is worse than no
+// check, so the trigger is pinned here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DOCS_WORKFLOW = fileURLToPath(new URL('../../.github/workflows/docs.yml', import.meta.url))
+
+/** Everything from `#` on. A trailing comment is not part of a value. */
+const uncommented = (line) => line.replace(/#.*$/, '')
+
+/**
+ * The lines of a `key:` block, by indentation — enough YAML for this file.
+ *
+ * `null` rather than `[]` for a key with no children, because `[]` is truthy:
+ * an `assert.ok(block)` would pass on an empty block and every `.find()` below
+ * it would return `undefined`, which is how a negative assertion goes
+ * unfalsifiable.
+ */
+function blockUnder(lines, key, indent) {
+  const start = lines.findIndex((l) => l === `${' '.repeat(indent)}${key}:`)
+  if (start === -1) return null
+  const body = []
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue
+    if (line.search(/\S/) <= indent) break
+    body.push(line)
+  }
+  return body.length > 0 ? body : null
+}
+
+/**
+ * The block's own keys, at whatever indent it actually uses — not a hard-coded
+ * width. A sibling key written at a DIFFERENT indent is a YAML error that
+ * Actions rejects outright, so it is a loud failure rather than a silent one
+ * this needs to catch.
+ */
+function directChildren(block) {
+  const base = Math.min(...block.map((l) => l.search(/\S/)))
+  return block.filter((l) => l.search(/\S/) <= base)
+}
+
+test('#2839: docs.yml re-runs the close guard when the pull request is EDITED', () => {
+  const lines = readFileSync(DOCS_WORKFLOW, 'utf8').split('\n')
+
+  const on = blockUnder(lines, 'on', 0)
+  assert.ok(on, 'docs.yml still has a top-level `on:` block')
+
+  const pr = blockUnder(on, 'pull_request', 2)
+  assert.ok(pr, '`on:` still has a `pull_request:` trigger with settings under it')
+
+  const typesLine = pr.map(uncommented).find((l) => /^\s*types\s*:/.test(l))
+  assert.ok(
+    typesLine,
+    'the `pull_request:` trigger declares `types:` — WITHOUT it GitHub defaults to ' +
+      'opened/synchronize/reopened, and a body edited after this check went green is never re-read',
+  )
+
+  const declared = typesLine
+    .slice(typesLine.indexOf('[') + 1, typesLine.lastIndexOf(']'))
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+
+  // ALL FOUR, as a set. Asserting only that `edited` appears would accept
+  // `types: [edited]`, which stops the REQUIRED check running on `opened` and
+  // `synchronize` — a required check that never reports, blocking `dev`
+  // permanently (#933). The test protecting this trigger must not green-light
+  // the worst configuration available to it.
+  assert.deepEqual(
+    [...declared].sort(),
+    ['edited', 'opened', 'reopened', 'synchronize'],
+    `the trigger must keep the three defaults AND add \`edited\`, got: ${typesLine.trim()}`,
+  )
+
+  // Same hazard, one line higher: a `paths:` filter here would skip the
+  // required check on most pull requests, and GitHub waits forever for a run
+  // that will not happen. The header says this is deliberate; this pins it.
+  assert.equal(
+    pr.map(uncommented).find((l) => /^\s*paths(-ignore)?\s*:/.test(l)),
+    undefined,
+    'no `paths:` filter on `pull_request` — a skipped required check never reports (#933)',
+  )
+})
+
+test('#2839: the REQUIRED job never opts out of an event, the advisory one skips only `edited`', () => {
+  const lines = readFileSync(DOCS_WORKFLOW, 'utf8').split('\n')
+  const jobs = blockUnder(lines, 'jobs', 0)
+  assert.ok(jobs, 'docs.yml still has a `jobs:` block')
+
+  // #933 again: `validate` is the required check and hosts the guard, so it
+  // must carry no job-level `if:` at all. Matched against the job's OWN keys
+  // rather than a fixed indent, and allowing `if :`, so the assertion is about
+  // structure rather than about spacing.
+  const validate = blockUnder(jobs, 'validate', 2)
+  assert.ok(validate, '`validate` is still the job that hosts the guard')
+  assert.equal(
+    directChildren(validate).find((l) => /^\s*if\s*:/.test(l)),
+    undefined,
+    'the required job must have no job-level `if:` — a skipped required check never reports (#933)',
+  )
+
+  // The advisory job is free to skip, and should: nothing in it reads the pull
+  // request, so re-running ~130 external URL checks on a reworded description
+  // buys nothing.
+  const advisory = blockUnder(jobs, 'advisory', 2)
+  assert.ok(advisory, '`advisory` is still a separate job')
+  const advisoryIf = directChildren(advisory).find((l) => /^\s*if\s*:/.test(l))
+  assert.ok(advisoryIf, 'the advisory job opts out of `edited`')
+
+  // POLARITY, not just the word. `== 'edited'` also contains "edited", and it
+  // inverts the job: advisory would run ONLY on description tweaks and never
+  // on a push, silently retiring lychee, markdownlint and Vale for the repo.
+  assert.match(
+    uncommented(advisoryIf),
+    /!=\s*'edited'/,
+    `advisory must skip \`edited\` and run otherwise, got: ${advisoryIf.trim()}`,
+  )
+  assert.doesNotMatch(
+    uncommented(advisoryIf),
+    /==\s*'edited'/,
+    'the advisory condition is inverted — it would run ONLY on description edits',
+  )
+})

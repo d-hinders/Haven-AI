@@ -66,6 +66,13 @@ const TAB_BAR_H = 56
  */
 const DIM_FILL = /^rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0?\.[3-9]\d*\s*\)$/
 
+/**
+ * A fully opaque fill: `rgb(...)`, or `rgba(...)` at alpha 1. Shape rather than
+ * palette, for the same reason `DIM_FILL` is — `--v2-surface` is free to change
+ * without reddening a #2819 guard; ceasing to be opaque is not.
+ */
+const OPAQUE_FILL = /^(rgb\([^)]*\)|rgba\(\s*\d+,\s*\d+,\s*\d+,\s*1\s*\))$/
+
 /** 390x844 is the iPhone the demo runs on (#2736), not Pixel 5's 393x727. */
 const VIEWPORT = { width: 390, height: 844 }
 
@@ -548,86 +555,95 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(offenders, 'an open overlay puts no control in a reserved band').toEqual([])
   })
   /**
-   * #2819's diagnosis rests on a geometric premise, and this locks it.
+   * What covers the status-bar band, now that the scrim is gone (#2819, #2820).
    *
-   * The status-bar band goes grey when the More drawer opens and stays grey
-   * after it closes, on a device, in the installed shell. PR #2824 shipped one
-   * mechanism (the header's `backdrop-filter`) and the device pass falsified
-   * it. The candidate that replaced it is the drawer scrim: `fixed inset-0`
-   * with `.v2-modal-backdrop`, which under `viewport-fit: cover` paints the
-   * strip a dark translucent slate.
+   * #2819's device symptom is that the band goes grey when the mobile nav
+   * opens and STAYS grey after it closes. PR #2824 shipped one mechanism and
+   * the device pass falsified it. The candidate that replaced it was the
+   * drawer scrim — `.v2-modal-backdrop` on a `fixed inset-0` element, which
+   * under `viewport-fit: cover` paints the strip a dark translucent slate.
    *
-   * That candidate cannot be told apart from a drawer-specific one without a
-   * second surface using the SAME class with no drawer involved, so the
-   * operator was asked to open and close **Receive** on the dashboard: band
-   * goes grey there too and the defect belongs to `.v2-modal-backdrop` over the
-   * safe area rather than to navigation.
+   * #2820 then removed that scrim below `lg`: the drawer is `w-full` now, so
+   * there is nothing beside it left to dim. That does NOT close #2819, and the
+   * issue says so — the full-screen drawer covers the same strip with its own
+   * near-white `--v2-surface`. If the mechanism is "the strip does not repaint
+   * after something is drawn over it", the residue just becomes white on
+   * white: invisible rather than fixed, and back the next time a coloured
+   * overlay covers that strip.
    *
-   * The premise that test rests on is that the two backdrops really do cover
-   * the same strip — and it is not obvious, because they are built
-   * differently. The scrim is `fixed inset-0`. Receive's is `absolute inset-0`
-   * inside a `fixed inset-0` wrapper that carries `.v2-safe-overlay`, which
-   * reserves the notch as `padding-top`. Padding does not shrink an absolutely
-   * positioned child — `inset-0` resolves against the wrapper's PADDING box —
-   * so the backdrop still starts at y=0 while the panel inside it starts at 47.
-   * Swap that padding for `inset`, or add `top-[var(--v2-safe-top)]` to either
-   * backdrop, and Receive stops covering the strip while still looking correct
-   * on screen. The operator's "band stays white" would then read as
-   * "drawer-specific" when it only meant "this test no longer asks the
-   * question" — a false negative aimed at the next fix.
+   * So two surfaces still reach the band, and this pins what each one puts
+   * there:
    *
-   * `elementFromPoint` inside the band is the assertion that matters: a box
-   * that SPANS the strip is not the same claim as a box that PAINTS it, and
-   * only the second one produces a grey band.
+   * - the drawer, which after #2820 covers it OPAQUELY. A dim value here would
+   *   mean the scrim came back by another name.
+   * - a modal backdrop, which is now the only `.v2-modal-backdrop` over the
+   *   safe area on the demo path — and therefore the whole of the operator's
+   *   discriminating test. Opening and closing Receive uses that class with no
+   *   navigation involved: band goes grey there and the defect belongs to
+   *   `.v2-modal-backdrop` over the safe area rather than to the nav.
+   *
+   * That comparison rests on a premise worth locking, because it is not
+   * obvious and it is one refactor from silently untrue. Receive's backdrop is
+   * `absolute inset-0` inside a `fixed inset-0` wrapper carrying
+   * `.v2-safe-overlay`, which reserves the notch as `padding-top` — and
+   * padding does not shrink an absolutely positioned child, because `inset-0`
+   * resolves against the PADDING box. The backdrop therefore starts at y=0
+   * while the panel inside it starts at 47. Add `top-[var(--v2-safe-top)]` to
+   * it, or swap that padding for `inset`, and Receive stops covering the strip
+   * while still looking entirely correct on screen. "Band stays white" would
+   * then read as *not the backdrop* when it only meant *this test stopped
+   * asking the question*.
+   *
+   * `elementFromPoint` inside the band, not just the bounding box: a box that
+   * SPANS the strip is not the same claim as a box that covers it. What this
+   * still cannot see is #2819 itself — a stale composited layer is invisible
+   * to every DOM query. This locks the premise; the phone answers the issue.
    */
-  test('the drawer scrim and a modal backdrop paint the same reserved band (#2819)', async ({
+  test('the drawer and a modal backdrop each cover the status-bar band (#2819)', async ({
     page,
   }) => {
-    const coverage = async () =>
-      page.evaluate(() => {
-        const found = Array.from(document.querySelectorAll<HTMLElement>('.v2-modal-backdrop'))
+    const coverage = async (selector: string) =>
+      page.evaluate((sel) => {
+        const found = Array.from(document.querySelectorAll<HTMLElement>(sel))
         if (found.length !== 1) {
-          throw new Error(`expected exactly one mounted backdrop, found ${found.length}`)
+          throw new Error(`expected exactly one ${sel}, found ${found.length}`)
         }
-        const backdrop = found[0]
-        const rect = backdrop.getBoundingClientRect()
-        // Right of the drawer, which is itself opaque and would answer for the
-        // scrim underneath it. 8px down is inside a 47px band by any rounding.
+        const target = found[0]
+        const rect = target.getBoundingClientRect()
+        // Right of centre, and 8px down — inside a 47px band by any rounding.
         const sampleX = window.innerWidth - 20
-        // Composed, not the element's own: an ancestor at `opacity: 0` hides
-        // the backdrop just as completely, and neither is visible to
-        // `backgroundColor` or to `getBoundingClientRect`.
+        // Composed, not the element's own: an ancestor at `opacity: 0` hides it
+        // just as completely, and neither is visible to `backgroundColor` or to
+        // `getBoundingClientRect`.
         let composedOpacity = 1
-        for (let el: Element | null = backdrop; el; el = el.parentElement) {
+        for (let el: Element | null = target; el; el = el.parentElement) {
           composedOpacity *= Number(getComputedStyle(el).opacity)
         }
         return {
           top: Math.round(rect.top),
           bottom: Math.round(rect.bottom),
-          background: getComputedStyle(backdrop).backgroundColor,
+          background: getComputedStyle(target).backgroundColor,
           composedOpacity,
-          paintsTopBand: document.elementFromPoint(sampleX, 8) === backdrop,
+          coversTopBand: document.elementFromPoint(sampleX, 8) === target,
           // Which chrome element, if any, covers the sample POINT — not which
-          // one reaches past it horizontally. A first version compared right
-          // edges and was wrong on exactly that difference: Receive's panel is
-          // `mx-4 max-w-lg`, so at 390px its right edge is 374 and clears
-          // `sampleX`, while the panel itself sits centred and comes nowhere
-          // near y=8. The drawer occludes because it is full-height; the
-          // dialog does not. Only containment answers that.
+          // one reaches past it horizontally. Comparing right edges was the
+          // wrong question: Receive's panel is `mx-4 max-w-lg`, so at 390px its
+          // right edge is 374 and clears `sampleX`, while the panel sits centred
+          // and comes nowhere near y=8. Only containment answers that.
           //
-          // This exists so that when something DOES move over the sample
-          // point, the failure names it, instead of `paintsTopBand` going red
-          // and reading like the backdrop stopped covering the band.
-          occludedBy: ['aside', '[role="dialog"]'].filter((sel) => {
-            const el = document.querySelector(sel)
-            if (!el || el === backdrop) return false
+          // This exists so that when something DOES move over the sample point,
+          // the failure names it, instead of `coversTopBand` going red and
+          // reading like the surface stopped reaching the band.
+          occludedBy: ['aside', '[role="dialog"]', '.v2-modal-backdrop'].filter((s) => {
+            const el = document.querySelector(s)
+            if (!el || el === target || el.contains(target)) return false
             const r = el.getBoundingClientRect()
             return r.left <= sampleX && r.right >= sampleX && r.top <= 8 && r.bottom >= 8
           }),
           sampleX,
           viewportHeight: window.innerHeight,
         }
-      })
+      }, selector)
 
     await page.goto('/dashboard')
     await page.getByRole('button', { name: 'Open sidebar' }).click()
@@ -642,30 +658,22 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     )
     expect(drawerPaddingTop).toBe(`${INSET_TOP}px`)
 
-    const scrim = await coverage()
-    expect(scrim.occludedBy, 'the sample point must be clear of the open drawer').toEqual([])
-    expect(scrim.top, 'the scrim starts at the top of the viewport, not below the notch').toBe(0)
-    expect(scrim.bottom, 'the scrim reaches the home indicator too').toBe(scrim.viewportHeight)
-    expect(scrim.paintsTopBand, 'the scrim is what paints the status-bar band').toBe(true)
-
-    // The colour, not just the stacking. `elementFromPoint` hit-tests geometry
-    // and z-order, NOT opacity — a fully transparent backdrop is still the
-    // topmost element at the sample point, so every assertion above survives
-    // `--v2-modal-backdrop` being deleted. That mutation is exactly "the band
-    // does not go grey", which is the condition #2819 is about, so it is the
-    // one this test cannot afford to pass under. Asserting the two backdrops
-    // merely AGREE would not catch it either: they agree by construction,
-    // both resolving the one declaration in globals.css.
-    expect(scrim.background, 'the scrim actually paints a dim colour').toMatch(DIM_FILL)
-    expect(scrim.composedOpacity, 'and is not faded out of existence').toBe(1)
-
-    await page.getByRole('button', { name: 'Close sidebar' }).click()
-    await expect(page.locator('.v2-modal-backdrop')).toHaveCount(0)
+    const drawer = await coverage('aside')
+    expect(drawer.occludedBy, 'nothing should sit over the drawer at the sample point').toEqual([])
+    expect(drawer.top, 'the drawer starts at the top of the viewport, not below the notch').toBe(0)
+    expect(drawer.bottom, 'and reaches the home indicator').toBe(drawer.viewportHeight)
+    expect(drawer.coversTopBand, 'the drawer is what covers the status-bar band').toBe(true)
+    // #2820's substitution, asserted rather than assumed: what covers the band
+    // is now the drawer's own OPAQUE surface. A translucent value here would
+    // mean a dim layer had returned to the strip under another name, which is
+    // the state #2819 is trying to get out of.
+    expect(drawer.background, 'the drawer covers the band opaquely').toMatch(OPAQUE_FILL)
+    expect(drawer.composedOpacity, 'and is not faded out of existence').toBe(1)
 
     // `openReceiveFundsModal` navigates, which destroys the document and the
-    // style tag injected above. This second call is REQUIRED, not redundant —
-    // without it every inset below resolves to 0. (The control that follows
-    // would catch its removal, which is the point of the control.)
+    // style tag injected above. The second `applyInsets` is REQUIRED, not
+    // redundant — without it every inset below resolves to 0. (The control that
+    // follows would catch its removal, which is the point of the control.)
     await openReceiveFundsModal(page)
     await applyInsets(page)
 
@@ -677,16 +685,17 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     })
     expect(overlayPaddingTop).toBe(`${INSET_TOP}px`)
 
-    const modal = await coverage()
+    const modal = await coverage('.v2-modal-backdrop')
+    expect(modal.occludedBy, 'the sample point must be clear of the dialog panel').toEqual([])
     expect(modal.top, "the overlay's padding must not push its backdrop out of the band").toBe(0)
-    expect(modal.bottom, 'the backdrop reaches the home indicator too').toBe(modal.viewportHeight)
-    expect(modal.occludedBy, 'the sample point must be clear of the dialog panel too').toEqual([])
-    expect(modal.paintsTopBand, 'Receive paints the same band with no drawer involved').toBe(true)
-    expect(modal.background, 'and paints it in a dim colour too').toMatch(DIM_FILL)
+    expect(modal.bottom, 'and the backdrop reaches the home indicator').toBe(modal.viewportHeight)
+    expect(modal.coversTopBand, 'the backdrop covers the band with no navigation involved').toBe(
+      true,
+    )
+    // Dim, where the drawer is opaque. This is the surface the operator's
+    // discriminating test actually exercises, so what it puts on the strip is
+    // the whole of what that test asks about.
+    expect(modal.background, 'and it covers the band with a DIM layer').toMatch(DIM_FILL)
     expect(modal.composedOpacity, 'and is not faded out of existence').toBe(1)
-    // Both surfaces now measure against the same external shape, which still
-    // transitively establishes they agree — without the two of them agreeing
-    // being the whole of the claim, which is what made it a tautology.
-    expect(modal.background).toBe(scrim.background)
   })
 })

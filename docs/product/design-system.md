@@ -354,27 +354,37 @@ starts to should set its own. An overlay that had a `p-4` gutter sets
 
 **The padding insets the panel, not the backdrop.** Where an overlay puts its
 dim layer in a separate `inset-0` child — the common shape, deliberately not
-listed by name here because such a list rots on the next overlay and nothing
+listed by name here, because such a list rots on the next overlay and nothing
 lints it — `inset-0` on that absolutely positioned child resolves against the
-wrapper's PADDING box — so the backdrop still starts at
+wrapper's PADDING box, not its content box. So the backdrop still starts at
 `y=0` and covers the reserved bands while the panel inside it starts below the
 notch. That asymmetry is intended: a dim layer that stopped at the inset would
-leave an undimmed strip under the status bar. It is also the reason the mobile
-nav scrim (`fixed inset-0`, no wrapper) and a modal's backdrop cover exactly
-the same strip despite being built differently. (A few overlays take a third
+leave an undimmed strip under the status bar. (A few overlays take the other
 shape — `.v2-modal-backdrop` on the `fixed inset-0` wrapper itself, with no dim
 child at all. Same geometry, nothing to reconcile: with no padding between them
 the wrapper *is* the dim layer. Named by shape rather than by component on
 purpose — a list of file names here is a claim `covers:` has to reach, and the
-gate is right to ask for one fewer of those, not one more.) That is what
-[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) depends on to tell a
-`.v2-modal-backdrop` defect apart from a drawer-specific one. Moving either
-backdrop below the inset — `top-[var(--v2-safe-top)]`, or swapping the
-wrapper's padding for `inset` — breaks that comparison while still looking
-correct on screen, so `e2e/safe-area-insets.mobile.spec.ts` asserts both
-backdrops span the band, are the topmost element at a point inside it, and
-still carry the dim fill — `elementFromPoint` settles stacking, not opacity, so
-a transparent backdrop would satisfy the first two on its own.
+gate is right to ask for one fewer of those, not one more.)
+
+The drawer reaches the same strip by the third route: it is `inset-y-0` and,
+below `lg`, `w-full`, with the notch reserved in its own `max-lg:pt-*`. Since
+[#2820](https://github.com/d-hinders/Haven-AI/issues/2820) deleted the nav
+scrim, that drawer is what covers the band when the navigation is open, and it
+covers it **opaquely** with `--v2-surface` where a backdrop covers it dim. Both
+facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`, and the opaque one
+is load-bearing: a translucent value there would mean a dim layer had returned
+to the strip under another name, which is the state
+[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) is trying to get out
+of.
+
+That also leaves a modal backdrop as the only `.v2-modal-backdrop` reaching the
+safe area on the demo path, which is what #2819's remaining device test turns
+on. Moving it below the inset — `top-[var(--v2-safe-top)]`, or swapping the
+wrapper's padding for `inset` — would break that test while still looking
+entirely correct on screen, so the spec asserts each surface spans the band, is
+the topmost element at a point inside it, and still carries a fill:
+`elementFromPoint` settles stacking, not opacity, so a transparent or
+faded-out layer would satisfy the first two on its own.
 
 A panel that also sets its own `max-h` must subtract at least each side's inset,
 or it reserves height the wrapper's padding has already taken. How much depends

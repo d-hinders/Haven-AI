@@ -15,7 +15,7 @@
  *   2. `sdk/src/client.ts` `createX402Intent` maps the HTTP response into an
  *      intent — re-deriving `merchantTo`, `amountAtomic`, `asset`, `network`,
  *      `resourceUrl` and the typed-data digest from its OWN view of the world.
- *   3. `mcp-server/src/tools.ts` `buildX402SigningContext` flattens that intent
+ *   3. `mcp-server/src/tools/support/mcp-context.ts` `buildX402SigningContext` flattens that intent
  *      into the snake_case `x402.expected` object that crosses to the signer.
  *   4. `signer/src/tools.ts` `toExpectedX402` maps it back to camelCase, and
  *      `core.ts` `assertExpectedBinding` rebuilds the message and compares.

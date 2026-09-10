@@ -604,7 +604,10 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     // key that an unquoted-only pattern walks straight past, and the union
     // check below would NOT catch it (the name is in `owned`, so the union is
     // still 22). Nothing normalises the quoting away — the repository has no
-    // prettier config and no format or lint job.
+    // prettier or eslint config and no code-formatting or style-lint job. (Its
+    // twenty `lint:*` scripts are prose and contract ratchets — copy, wire
+    // types, db mocks, workspace pins, retired-rail prose — not formatters, so
+    // none of them would rewrite a quoted key.)
     const literalKeys = [...facade.matchAll(/^ {4}'?(haven_[a-z0-9_]+)'?:/gm)].map((m) => m[1])
     const owned = new Set<string>()
     for (const stem of CAPABILITY_MODULES) {

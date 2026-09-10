@@ -91,8 +91,7 @@ describe('MobileTabBar — active cell marks itself the way the drawer does (#28
     // edit, which is exactly why this one is separate (round-two review).
     // `classList.contains`, not `className.toContain`: the substring form also
     // passes on `lg:relative` or `sm:relative`, neither of which scopes the
-    // rail unconditionally. (The bracketed-token assertions around it have no
-    // such exact form available.)
+    // rail unconditionally.
     expect(active.classList.contains('relative')).toBe(true)
 
     const rail = railOf(active)

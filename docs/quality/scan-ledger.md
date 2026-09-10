@@ -381,3 +381,63 @@ API-contract finding (epic #1442), the 2026-08-18 outbound-lifecycle finding
   measurement, and this block deliberately retired size as a finding.
 - Incident clustering → NOT TAKEN as a systematic sweep this run.
 - Comment archaeology → NOT TAKEN this run.
+---
+
+## 2026-09-10 — packages/mcp-server (finding: the hosted-MCP monolith, epic #2806)
+
+**Finding: the hosted tool-contract surface has no seam — names, schemas,
+input-policy decisions, descriptions, parsing and all 22 handlers live in one
+monolithic money-path file, so every hosted tool change edits and reviews the
+same file.** Measured against `origin/dev` at `3f9ba290` (the SHA the epic
+review re-derived everything at); the slice's git history names the file
+this entry counts lines of.
+
+- sizing → `git show 3f9ba290:<mcp-tools-module> | wc -l` → **4277**
+  (`git show 7a07b321:<mcp-tools-module> | wc -l` → **1350** at the #980
+  closeout commit, the epic's baseline)
+- companion suite → `git show 3f9ba290:<mcp-tools-tests> | wc -l` → **6391**
+- churn, pinned window →
+  `git log origin/dev --oneline --since=2026-08-09T00:00:00Z --until=2026-09-09T23:59:59Z -- <mcp-tools-module> | wc -l` → **81**
+  of `git log origin/dev --oneline -- <mcp-tools-module> | wc -l` → **111** all-time
+- incident class the seam hardens → #2051, #2282, #2312, #2348 (repeated
+  money-path failures landing in this one file; the repo records them)
+
+**Approval: 2026-09-09 (epic #2806, slices #2807–#2812, linear build order).**
+Slice #2807 establishes the typed contract and registration seam without
+moving handler behaviour; #2808 extracts shared safety support; #2809–#2812
+extract the capability handlers and enforce one-owner-per-tool. Drive with
+`ship-next epic=#2806`. This entry records the approval the slices already
+carry; it lands with slice #2807's pull request so the ledger and the code
+move together. Reproduce the slice (the files are named in its PR):
+
+- contracts extracted, facade preserved → line counts of the facade and of
+  the three new contract/registry/parsing modules in the PR head (the facade
+  shrinks; its export surface unchanged, pinned by the new characterization
+  suite)
+- characterization-before-structure → the PR's commit order: the
+  characterization commit precedes the structural commit
+- registration runtime twin, five failure modes → run the two new registry
+  test files in the slice's PR (missing schema / description / input-policy /
+  handler and duplicated ownership each fail naming the tool; the server
+  builder refuses to boot an incomplete registry). Compile-time twins:
+  TS2741 on the `Record` annotations, TS2322 on the input-policy
+  double-decision sentinel, TS1117 on a duplicated literal key —
+  mutation-proven per mode in slice #2807's handoff evidence, byte-identical
+  restores sha-verified. One documented asymmetry: a duplicate key WITHIN one
+  shipped object literal collapses last-wins at construction, so its twin is
+  compile-time only plus the entries-injection unit test.
+- test-name parity across the move → grep `^it\('` counts before/after:
+  **329** both sides, zero changed names (the two new test files are additive)
+
+**Post-slice re-measurement (this PR's tree, slice #2807 applied):** the
+facade line count and the three new module line counts, as stated in the PR
+and its handoff — the facade holds handlers and error normalization only; the
+contract data, registration seam and parsing live in typed modules. The
+remaining shrink happens in #2809–#2812 and is measured by the same command.
+
+Becomes `shipped` when epic #2806 closes with its promotion checklist run.
+Appended rather than edited, per the convention above. Written WITHOUT
+concrete repo paths for the measured files: the covers-gate reads a path in
+prose as a claim about that file (the same false-positive class the
+2026-09-09 entry records for bare names), and a ledger has no business
+growing `covers:` over its own repro commands — the PR names the files.

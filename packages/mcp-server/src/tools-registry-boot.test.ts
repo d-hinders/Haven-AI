@@ -12,48 +12,65 @@
  * ## The imports are STATIC, and that is the fix for #2842
  *
  * They used to be `await import(...)` inside the `it`. Importing `server.js`
- * costs ~1.2-3.4s depending on machine load, and paying that inside the test
- * body ran it against vitest's 5000ms default `testTimeout` — so the test
- * failed intermittently under a full suite (4 red of 11 runs on clean `dev`)
- * and passed every time it ran alone. It surfaced as the registry guard "not
+ * costs ~1.0-1.1s on an idle machine and 5-10s inside a loaded full suite, and
+ * paying that inside the test body ran it against vitest's 5000ms default
+ * `testTimeout` — so the test failed intermittently under a full suite and
+ * passed every time it ran alone. It surfaced as the registry guard "not
  * throwing", which reads like the #2807 check regressing on a money-path
  * package rather than like a timer.
  *
  * The cost is NOT the `vi.mock` factory below, which is what a first
- * explanation of this claimed. Measured: importing `server.js` from a file
- * with no `vi.mock` at all takes 2479ms, against 2500ms-ish mocked —
- * indistinguishable. It is the plain transform and load of the SDK + server
- * module graph, exactly as `connector-channel.test.ts` already records. That
- * graph grows with every capability slice epic #2806 carves out, so the
- * margin shrinks on its own.
+ * explanation of this claimed. Measured on paired idle runs: importing
+ * `server.js` from a file with no `vi.mock` at all takes 1057/1048/1131ms
+ * against 1066/1066/1295ms mocked — the factory adds no material share. It is
+ * the plain transform and load of the SDK + server module graph, exactly as
+ * `connector-channel.test.ts` already records. That graph grows with every
+ * capability slice epic #2806 carves out, so the margin shrinks on its own.
  *
- * A static import moves the cost into vitest's COLLECT phase, which carries
- * no per-test and no per-hook budget. That is why it is immune rather than
- * merely roomier: hoisting into `beforeAll` — the first fix here — only
- * traded the 5s test budget for the 10s hook budget.
+ * A static import moves the cost into vitest's COLLECT phase, which carries no
+ * per-test and no per-hook budget — `testTimeout`/`hookTimeout` are attached to
+ * task objects at collection and enforced only while running. That is why it is
+ * immune rather than merely roomier: hoisting into `beforeAll` — the first fix
+ * tried here — only traded the 5s test budget for the 10s hook budget.
  *
- * Measured, both variants in the same full-suite runs against 28 spinning
- * background processes:
+ * Durations rather than a pass/fail count, because the count is a draw and the
+ * durations are not. Full suite, 28 spinning background processes, this file's
+ * reported time:
  *
- *   beforeAll      1 of 2 runs RED — `Hook timed out in 10000ms`, and the
- *                  test reports as SKIPPED inside a failed suite, which is a
- *                  harder trail than the `Test timed out in 5000ms` at the
- *                  `it` that it replaced
- *   static import  2 of 2 GREEN, 472/472
+ *   original     7521ms, 5195ms   — both OVER the 5000ms test budget
+ *   beforeAll    8722ms, 9796ms   — 87% and 98% of the 10000ms hook budget
+ *   static         22ms,   96ms   — no budget applies
  *
- * Running the single FILE under the same load does not reproduce it — both
- * variants pass — because one file transforms its graph with no competition
- * from the other nineteen. The full suite is the experiment.
+ * A second measurement on another machine got 7584/8991/8009ms for `beforeAll`
+ * against 16/149/207ms static, and saw no red in three runs where an earlier
+ * run here did. That disagreement is the point: at 98% of budget whether it
+ * goes red is a coin flip, so the durations are the claim and the count is not.
  *
- * `vi.mock` is hoisted above every import in the file, static ones included,
- * so the mocked `./tools.js` is what `server.js` sees either way.
- * `server.test.ts` already imports `server.js` this way.
+ * Running the single FILE under load does not separate `beforeAll` from static
+ * — both stay inside their (different) budgets. It does NOT follow that the
+ * defect needs a full suite: the original form reproduces on the single file
+ * too, at 5864ms against its 5000ms budget. The full suite is what separates
+ * the two candidate FIXES, not what creates the bug.
  *
- * Siblings checked: `tools-registry.test.ts` never imports `server.js` and
- * does not share this. `connector-channel.test.ts` DOES, and solves it with
- * an explicit 30s timeout instead — correct there and deliberately not copied
- * here, because it calls `vi.resetModules()` and re-imports per test by
- * design, so it has nothing to hoist and nothing to make static.
+ * `vi.mock` is hoisted above every import in the file, static ones included, so
+ * the mocked `./tools.js` is what `server.js` sees either way — verified by
+ * moving these imports above the `vi.mock` call, which is also green, so a
+ * formatter or an import-sorting tool cannot break this. `server.test.ts`
+ * already imports `server.js` this way.
+ *
+ * One signal shape did change, and it is worth knowing in a file that exists
+ * because a misleading signal cost time: if these imports ever fail to resolve,
+ * the FILE fails and the test leaves the count entirely (`471 passed`, no line
+ * naming it) rather than being reported as a failing test. CI is still red —
+ * the run exits 1 — but the trail is shorter than a named assertion. The
+ * `beforeAll` form reported that case as "skipped"; the static form does not
+ * report it at all.
+ *
+ * Siblings checked: `tools-registry.test.ts` never imports `server.js` and does
+ * not share this. `connector-channel.test.ts` DOES, and solves it with an
+ * explicit 30s timeout instead — correct there and deliberately not copied
+ * here, because it calls `vi.resetModules()` and re-imports per test by design,
+ * so it has nothing to hoist and nothing to make static.
  */
 import { describe, it, expect, vi } from 'vitest'
 

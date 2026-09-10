@@ -1,6 +1,8 @@
 'use client'
 
 import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
+import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
+import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
@@ -621,7 +623,7 @@ export default function DesignSystemPage() {
                 ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
                 ['--v2-z-sticky', '20', 'Sticky table headers'],
                 ['--v2-z-chrome', '100', 'TopBar — the app shell’s own bar'],
-                ['--v2-z-tab-bar', '105', 'Reserved for the bottom tab bar — the shell’s other bar'],
+                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s other bar'],
                 ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
                 ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
                 ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],
@@ -664,6 +666,46 @@ export default function DesignSystemPage() {
             component is the failure this table exists to prevent.
           </p>
         </Card>
+      </Section>
+
+      <Section
+        title="Bottom tab bar — primary navigation below lg"
+        description="Below `lg` the drawer stops being the primary navigation: four tabs (Dashboard, Agents, Transactions, Accounts) plus More, which opens the drawer for everything else. The drawer is not deleted, it becomes secondary. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the drawer's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
+      >
+        <Card hover={false} className="max-w-sm overflow-hidden">
+          {/*
+            The REAL component, in `presentational` mode — not a hand-rolled
+            copy of it. The showcase's mirror of `TransactionsTable` taught this
+            the expensive way: it kept teaching the pre-#2734 amount column for
+            a merge, and #2792 was the issue that noticed. `presentational`
+            swaps the fixed viewport placement for in-flow layout and drops the
+            landmark role, so this illustration cannot drift from the bar the
+            shell renders and cannot compete with it for the `Primary`
+            navigation name.
+
+            No `open` prop here, so the #2680 permanently-open census is
+            untouched — it counts bare `open` inside inert wrappers, and this is
+            neither.
+          */}
+          <MobileTabBar items={baseNavItems} presentational activeHref="/agents" />
+        </Card>
+        <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          Three surfaces reserve the bar&rsquo;s height from the{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-h</code>{' '}
+          token, and only one of them is the bar: <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code>{' '}
+          adds it to its bottom padding so the last row does not sit under the bar, and the toast
+          container lifts by it so the payoff notification is not hidden behind the navigation
+          everyone is looking at. The safe-area inset is added at each site rather than folded into
+          the token: the bar pads itself with it, the others clear the bar and the inset together.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          <strong>More is not a cell of this bar.</strong> It is a sibling of it, on the
+          nav-toggle tier rather than the tab-bar tier, because one control both opens the drawer
+          and closes it while painted over the drawer — and a child cannot climb out of its
+          parent&rsquo;s stacking context. It keeps the accessible name{' '}
+          <em>Open sidebar</em>, which is load-bearing: the screenshot harness waits on that name
+          from 25 call sites.
+        </p>
       </Section>
 
       <Section

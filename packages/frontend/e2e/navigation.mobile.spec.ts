@@ -398,3 +398,116 @@ test.describe('mobile viewport', () => {
   // and the hit-test came with it, under a real touch pointer rather than a
   // mouse in a narrow window.
 })
+
+/**
+ * The bottom tab bar drives navigation below `lg` (#2731).
+ *
+ * Geometry lives in `mobile-nav-tap-target.mobile.spec.ts`; this file asks the
+ * behavioural half — does tapping a tab go where it says, does the bar say
+ * WHICH tab you are on, and does that survive a detail route. The last one is
+ * the interesting case: `/agents/agent-research` is not `/agents`, and a naive
+ * equality check leaves the bar showing nothing selected on exactly the screen
+ * the demo spends its time on.
+ */
+test.describe('bottom tab bar (#2731)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+  })
+
+  test('tapping a tab navigates, and the bar says which tab you are on', async ({ page }) => {
+    await page.goto('/dashboard')
+    const bar = page.locator('[data-mobile-tab-bar]')
+    await bar.waitFor()
+
+    // The bar renders four tabs; More is a sibling, by stacking-context
+    // necessity (see `MobileTabBar`). Asserted so a fifth link appearing in
+    // here — the obvious "just add More to the grid" edit — is caught.
+    await expect(bar.getByRole('link')).toHaveCount(4)
+    // ORDER, not just membership. "Selected by route, never by index" is the
+    // headline claim in the component, the doc and the showcase caption, and
+    // nothing tested it: replacing the route lookup with `items.slice(0, 4)`
+    // left every one of these tests green, because the SET of four routes is
+    // the same either way and only the order differs. The bar's order is not
+    // the drawer's, which is the whole reason the claim exists.
+    expect(
+      await bar.getByRole('link').evaluateAll((els) => els.map((e) => e.getAttribute('href'))),
+      'the bar reads baseNavItems by route, not by position',
+    ).toEqual(['/dashboard', '/agents', '/transactions', '/accounts'])
+    await expect(bar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    await bar.getByRole('link', { name: 'Transactions' }).click()
+    await page.waitForURL('**/transactions')
+    await expect(bar.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    // Exactly one, not "at least one": two lit tabs is the failure a
+    // `startsWith` without a boundary produces.
+    await expect(bar.locator('a[aria-current="page"]')).toHaveCount(1)
+  })
+
+  test('a detail route lights its hub tab', async ({ page }) => {
+    await page.goto('/agents/agent-research')
+    const bar = page.locator('[data-mobile-tab-bar]')
+    await bar.waitFor()
+    await expect(bar.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page')
+    await expect(bar.locator('a[aria-current="page"]')).toHaveCount(1)
+  })
+
+  test('More opens the drawer, and keeps the name the harness waits on', async ({ page }) => {
+    await page.goto('/dashboard')
+    // `Open sidebar` is not decoration: `dismissMobileSidebar` in
+    // `scripts/screenshot.mjs` waits on this exact name from 25 call sites,
+    // and `e2e/fixtures/haven-api.ts` has a twin. #2731 moved the control and
+    // deliberately did not rename it.
+    const more = page.getByRole('button', { name: 'Open sidebar' })
+    await more.click()
+    await expect(
+      page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Catalog' }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Close sidebar' }).click()
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
+  })
+
+  // Both bands, because the offset is carried by THREE variants and only one
+  // of them is exercised at the project's own width. `sm:bottom-…` already
+  // existed on the toast container and overrides the base, so a bar offset
+  // applied only to the base is silently lost between 640px and 1023px — a bug
+  // this PR shipped and fixed, which nothing would have caught: the project
+  // viewport is 393, and 393 reads the BASE variant. 700 is the width that
+  // reads `sm`.
+  for (const width of [390, 700] as const) {
+    test(`the toast region clears the bar at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.goto('/dashboard')
+      const bar = page.locator('[data-mobile-tab-bar]')
+      await bar.waitFor()
+
+      // The CONTAINER, not a rendered toast. An earlier revision of this test
+      // dispatched a `haven:test-toast` event and said it was "driving a real
+      // toast"; nothing listens for that event, so it drove nothing and the
+      // comment was the only part that was false. The container is `fixed` and
+      // always present, and it is what carries the offset — so measure it, and
+      // say that is what is being measured.
+      const boxes = await page.evaluate(() => {
+        const b = document.querySelector('[data-mobile-tab-bar]')!.getBoundingClientRect()
+        // The TOASTER, not any `role="status"`. `/dashboard` renders its own
+        // status regions while loading, and `document.querySelector` takes the
+        // first in document order — measured at bottom 1212 on a 727px
+        // viewport, i.e. an in-page element well off screen, which made this
+        // flaky-red rather than wrong. The Toaster is the `fixed` polite
+        // region, which is how `safe-area-insets.mobile.spec.ts` already
+        // identifies it.
+        const t = Array.from(document.querySelectorAll('[role="status"][aria-live="polite"]'))
+          .filter((el) => getComputedStyle(el).position === 'fixed')[0]!
+          .getBoundingClientRect()
+        return { barTop: Math.round(b.top), toastBottom: Math.round(t.bottom) }
+      })
+      expect(boxes.toastBottom).toBeLessThanOrEqual(boxes.barTop)
+    })
+  }
+})

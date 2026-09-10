@@ -72,7 +72,14 @@ export default function AuthenticatedShell({
                   bottom one is the load-bearing one: this box runs to the
                   bottom of the screen, so its last row — the last table row,
                   the last card's action — sits under the home indicator
-                  without it. `calc` on the bottom because the 24px of `p-6` is
+                  without it.
+
+                  #2731 adds the tab bar's height to the same `calc`, for the
+                  same reason one layer up: the bar is `fixed` and consumes no
+                  layout, so without this the last row sits under the BAR
+                  instead of under the home indicator. Three terms, three
+                  different owners — content padding, chrome height, device
+                  inset — which is why they add rather than `max`. `calc` on the bottom because the 24px of `p-6` is
                   padding the CONTENT wants and the inset is clearance the
                   device demands, so they add; `max` on the sides because there
                   both are the same gutter measured two ways and the larger
@@ -81,7 +88,7 @@ export default function AuthenticatedShell({
               <main
                 id="main-content"
                 tabIndex={-1}
-                className="flex-1 bg-[var(--v2-bg)] p-6 lg:p-8 max-lg:pb-[calc(1.5rem+var(--v2-safe-bottom))] max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] overflow-y-auto focus:outline-none"
+                className="flex-1 bg-[var(--v2-bg)] p-6 lg:p-8 max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-safe-bottom))] max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] overflow-y-auto focus:outline-none"
               >
                 <ErrorBoundary>{children}</ErrorBoundary>
               </main>

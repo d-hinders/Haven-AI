@@ -45,7 +45,13 @@ describe('Sidebar', () => {
     const labels = ['Money', 'Agent tools', 'Admin'].map((l) => screen.getByText(l))
     expect(labels).toHaveLength(3)
     // Core loop order and routes unchanged (scoped to the nav — the logo also links to /dashboard):
-    const links = Array.from(document.querySelector('nav')!.querySelectorAll('a')).map((a) =>
+    // Scoped to the DRAWER's landmark by name (#2731). `querySelector('nav')`
+    // took the first `<nav>` in the DOM, and the mobile tab bar now renders
+    // before this one — the assertion silently started measuring four tab
+    // routes instead of the drawer's eight.
+    const links = Array.from(
+      document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a'),
+    ).map((a) =>
       a.getAttribute('href'),
     )
     const nav = links.filter((href) =>
@@ -87,7 +93,13 @@ describe('Sidebar', () => {
     })
     render(<Sidebar />)
     expect(screen.queryByRole('link', { name: /Approvals/ })).toBeNull()
-    const hrefs = Array.from(document.querySelector('nav')!.querySelectorAll('a')).map((a) =>
+    // Scoped like the assertion above (#2731). This one was the more dangerous
+    // of the two: it is a NEGATIVE assertion, so pointing it at the tab bar
+    // made it unable to FAIL rather than merely wrong — the four tab routes
+    // never contain '/approvals' whatever the drawer does.
+    const hrefs = Array.from(
+      document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a'),
+    ).map((a) =>
       a.getAttribute('href'),
     )
     expect(hrefs).not.toContain('/approvals')

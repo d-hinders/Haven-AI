@@ -40,6 +40,15 @@ import { mockHavenApi, seedAuthenticatedSession, openReceiveFundsModal } from '.
 const INSET_TOP = 47
 const INSET_BOTTOM = 34
 
+/**
+ * The bottom tab bar's height (#2731), which the two bottom reservations below
+ * now have to clear as well as the inset. Written as a NUMBER rather than read
+ * from the token deliberately: reading `--v2-tab-bar-h` here would make the
+ * assertion agree with the CSS by construction, and this file exists to catch
+ * the CSS being wrong.
+ */
+const TAB_BAR_H = 56
+
 /** 390x844 is the iPhone the demo runs on (#2736), not Pixel 5's 393x727. */
 const VIEWPORT = { width: 390, height: 844 }
 
@@ -220,8 +229,8 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
       expect(shell.headerPaddingTop, 'the top bar must consume --v2-safe-top').toBe(`${INSET_TOP}px`)
       expect(
         shell.mainPaddingBottom,
-        'the scroll region pads its own 24px PLUS the home indicator, not one or the other',
-      ).toBe(`${24 + INSET_BOTTOM}px`)
+        'the scroll region pads its own 24px PLUS the tab bar PLUS the home indicator — all three, not two of them',
+      ).toBe(`${24 + TAB_BAR_H + INSET_BOTTOM}px`)
 
       // The bar GROWS by the inset rather than squashing its contents into the
       // same 56px — the status bar then sits over the bar's own background.
@@ -401,9 +410,21 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     })
 
     // CONTROL: the region consumes the inset rather than its old flat 1rem.
-    expect(toast.bottom, 'the toast region must consume --v2-safe-bottom').toBe(
-      `${INSET_BOTTOM}px`,
+    // #2731 added the tab bar to this offset, and all three terms ADD. An
+    // earlier revision of this line read `max(16, inset) + bar`, which is what
+    // the CSS said at the time and was wrong in the same way: the bar already
+    // pads itself with the inset, so folding the inset into a `max()` with the
+    // gutter collapsed the gap between toast and bar to ZERO at inset 34 —
+    // both edges landed on 90px. Three owners, three terms.
+    expect(toast.bottom, 'the toast region must clear the tab bar AND --v2-safe-bottom').toBe(
+      `${TAB_BAR_H + INSET_BOTTOM + 16}px`,
     )
+    // ...and the gap is real, not zero-by-arithmetic. This is what the earlier
+    // form would have failed.
+    expect(
+      toast.regionBottom,
+      'the toast must clear the bar with a visible gutter, not touch it',
+    ).toBeLessThanOrEqual(toast.viewportHeight - INSET_BOTTOM - TAB_BAR_H)
     expect(toast.regionBottom).toBeLessThanOrEqual(toast.viewportHeight - INSET_BOTTOM)
     // The half that matters: a dismiss button inside the band is read by the OS
     // as a swipe-up, not a tap.

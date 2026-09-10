@@ -52,16 +52,22 @@
  * desktop baseline would catch is guarded by boolean measurement in
  * `agent-detail.mobile.spec.ts` (#1858's standing argument).
  *
- * **`/accounts` is rejected on fixture fidelity, and this is #2225.** That
- * issue is filed against `scripts/screenshot.mjs`, whose `fixtureFor` keys
- * `/portfolio/` and `/balances/` on the path PREFIX and ignores the address.
- * The gate fixture this spec runs on has the identical defect —
- * `haven-api.ts:348` and `:365` are both `path.startsWith(...)` with no address
- * discrimination. A baseline on `/accounts` would therefore be a blocking,
- * re-blessed-forever PNG of a screen that is address-blind by construction:
- * green while the route is objectively wrong, which is precisely the
- * over-readable green tick this issue is about, minted afresh one route over.
- * Fix #2225 (in BOTH fixtures) before baselining `/accounts`.
+ * **`/accounts` was rejected on fixture fidelity (#2225) — superseded 2026-09-10
+ * by #2817, which adds this route MOBILE-only.** The rejection was written
+ * while #2225 was open: both balance fixtures (`scripts/screenshot.mjs`'s
+ * `fixtureFor` and this spec's `haven-api.ts`) key `/portfolio/` and
+ * `/balances/` on the path PREFIX and ignore the address, so a harness serving
+ * two accounts photographs byte-identical balances for both. #2225 then closed
+ * 2026-09-01 as false-instrument WITHOUT a fixture change — verified against
+ * `docs/quality/issue-classification-2026-09.csv` (row 2225) and against both
+ * handlers on `dev`, which remain prefix-keyed. The instrument defect is real
+ * and the warning STANDS for any harness serving more than one account; it is
+ * unobservable in THIS gate because `mockHavenApi` seeds exactly ONE Safe
+ * (`testSafe`), so no two accounts here can render identical-looking balances.
+ * Re-derive this paragraph before a second fixture account is seeded or an
+ * address-keyed fixture fix lands in either file. #2817's capture also keeps
+ * clear of the `/agents` flake class: `/accounts` makes no on-chain call —
+ * its portfolio and balances come from the shared fixture.
  *
  * `/settings` and `/contacts` are deferred rather than rejected — nothing is
  * wrong with them, they are simply lower-traffic, and every added baseline is
@@ -147,6 +153,15 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  * #2733 inverts that choice for the two routes it adds: the mobile
  * composition is the thing that issue tunes and the thing nothing else
  * measured, so those two ship MOBILE-only (see the header note above).
+ *
+ * #2817 (2026-09-10) extends it once more: `/dashboard`, `/transactions` and
+ * `/accounts` also carry MOBILE now — the bottom tab bar (#2805) makes the
+ * 390px shell a first-class screen the demo lives on, and the three hub
+ * routes the bar routes to were compared against nothing at that width. The
+ * desktop baselines of the first two are untouched (same axis, same snapshot
+ * name, byte-identical PNG), so this adds coverage without regenerating
+ * anything that already existed. The either/or `mobileOnly` flag became a
+ * per-route `viewports` list for the same reason a flag cannot ADD a width.
  */
 const DESKTOP = VIEWPORTS.find((vp) => vp.name === 'desktop')
 /** The committed mobile evidence width — 390, per `evidence-viewports.mjs`. */
@@ -246,17 +261,38 @@ const ANCHOR_TIMEOUT_MS = 60_000
  * Per route rather than one global floor, because the floor has to sit under
  * the route's real content and `/transactions` legitimately renders 320
  * characters while `/settings` renders 1,407.
+ *
+ * Per AXIS as well, not just per route (#2817): a responsive layout carries
+ * less text at 390 than at 1280 — `/transactions` measures 246 characters at
+ * the mobile width against 320 at desktop, on this harness — so a floor set
+ * from the desktop measurement fails every mobile run of the same route.
+ * `minCharsMobile` overrides `minChars` on the mobile axis only, and is set
+ * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 200
+ * (measured 246), `/accounts` mobile gets 100 (measured 104 — matching the
+ * header's historic 104-character measurement of this route). A floor above
+ * the measured content is not strictness; it is a permanent red.
  */
 type ProductRoute = {
   path: string
   slug: string
   minChars: number
   /**
-   * Rendered only at the committed MOBILE width (390). The #2318 routes ship
-   * desktop-only and the #2733 routes ship mobile-only — see the header —
-   * so every route here renders at exactly one committed width.
+   * Mobile-axis override of `minChars` (#2817) — set from measurement, only
+   * where the 390px layout renders meaningfully less text than desktop.
    */
-  mobileOnly?: boolean
+  minCharsMobile?: number
+  /**
+   * The committed widths this route is compared at, named as in
+   * `evidence-viewports.mjs`. Defaults to `['desktop']`.
+   *
+   * Replaces the either/or `mobileOnly` flag (#2817): a boolean cannot ADD a
+   * mobile baseline to a route that already ships desktop — flipping it would
+   * silently DROP the desktop PNG. The loop below emits one test per listed
+   * axis and the snapshot stays `${slug}-${axis}.png`, so no existing PNG
+   * moves. `/dashboard` and `/transactions` carry both axes; `/accounts`
+   * ships mobile-only (see the header for both decisions).
+   */
+  viewports?: ReadonlyArray<'desktop' | 'mobile'>
   /** The route's own H1 — present only once the client component has data. */
   anchor: (page: Page) => Locator
   /**
@@ -265,6 +301,14 @@ type ProductRoute = {
    * static strings omit it.
    */
   frozenRelativeTime?: string
+  /**
+   * Set when the mobile layout hides every element that renders the fixture's
+   * relative timestamp (#2817, measured): the pin is then asserted on the
+   * desktop axis only. `page.clock.setFixedTime` stays global either way — a
+   * hidden timestamp cannot drift a pixel, and a freeze failure would have
+   * nothing visible to fail on at that width.
+   */
+  frozenRelativeTimeHiddenOnMobile?: boolean
   /**
    * Register `serveAgentDetailResponses` for this route — the detail-page
    * reads (`passport`, `delegate-balance`, per-agent activity/stats) that the
@@ -277,6 +321,7 @@ const ROUTES: ProductRoute[] = [
   {
     path: '/dashboard',
     slug: 'dashboard',
+    viewports: ['desktop', 'mobile'],
     minChars: 600,
     /** The route's own H1 — present only once the client component has data. */
     anchor: (page: Page) => page.getByRole('heading', { name: 'Dashboard', exact: true }),
@@ -301,7 +346,10 @@ const ROUTES: ProductRoute[] = [
   {
     path: '/transactions',
     slug: 'transactions',
+    viewports: ['desktop', 'mobile'],
     minChars: 250,
+    /** Measured at 390: the responsive layout renders 246 characters. */
+    minCharsMobile: 200,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Transaction history' }),
     /**
      * `dashboardTransaction.timestamp` is 1779000000 (2026-05-17T06:40Z), which
@@ -310,6 +358,13 @@ const ROUTES: ProductRoute[] = [
      * by name, rather than as a pixel diff on a date nobody can attribute.
      */
     frozenRelativeTime: '3mo ago',
+    /**
+     * #2817, measured: below the table's 718px container stage the date
+     * column is collapsed and NO riding element carries the timestamp (the
+     * mobile page renders no `ago` string at all — read off this spec's own
+     * failure snapshot), so the pin is asserted on the desktop axis only.
+     */
+    frozenRelativeTimeHiddenOnMobile: true,
   },
 
   /**
@@ -333,18 +388,43 @@ const ROUTES: ProductRoute[] = [
     path: '/agents',
     slug: 'agents-list',
     minChars: 200,
-    mobileOnly: true,
+    viewports: ['mobile'],
     anchor: (page: Page) => page.getByRole('heading', { name: 'Agents', exact: true }),
   },
   {
     path: '/agents/agent-research',
     slug: 'agent-detail-research',
     minChars: 700,
-    mobileOnly: true,
+    viewports: ['mobile'],
     anchor: (page: Page) => page.getByRole('heading', { name: 'Research agent', exact: true }),
     frozenRelativeTime: '4mo ago',
     /** Serves the four detail-page reads the shared fixture falls through on. */
     serveDetailResponses: true,
+  },
+
+  /**
+   * #2817: whole-page MOBILE baseline for the accounts hub — the fourth tab
+   * destination and, until now, a route the gate compared nothing on at any
+   * width. MOBILE-only by decision: the demo lives at 390 (#2736), and
+   * desktop adds a second re-bless tax without a defect pointing at that
+   * composition (the #2733 reasoning above). The #2225 objection is inert in
+   * this one-account harness and the route makes no chain call — see the
+   * header paragraph this row superseded.
+   *
+   * `frozenRelativeTime` is pinned for the same reason as `/transactions`:
+   * the card caption renders `Added {timeAgo(safe.created_at)}` off the
+   * fixture's fixed `2026-05-01` timestamp, which buckets to `4mo ago` at
+   * `FROZEN_NOW` — assert the literal the frozen clock must produce, not a
+   * pixel that drifts on a calendar boundary.
+   */
+  {
+    path: '/accounts',
+    slug: 'accounts',
+    viewports: ['mobile'],
+    /** Measured at 390 on this harness: 104 characters. */
+    minChars: 100,
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
+    frozenRelativeTime: 'Added 4mo ago',
   },
 ]
 
@@ -368,97 +448,104 @@ test.describe('product-route visual regression', () => {
   )
 
   for (const route of ROUTES) {
-    test(`${route.path} renders pixel-stable (${route.mobileOnly ? 'mobile' : 'desktop'})`, async ({ page }) => {
-      const vp = route.mobileOnly ? MOBILE : DESKTOP
-      const axis = route.mobileOnly ? 'mobile' : 'desktop'
-      if (!vp) {
-        throw new Error(
-          `visual gate: evidence-viewports.mjs carries no viewport named ` +
-            `"${route.mobileOnly ? 'mobile' : 'desktop'}", so ${route.path} ` +
-            `cannot be captured at a committed width`,
-        )
-      }
+    for (const axis of route.viewports ?? ['desktop']) {
+      test(`${route.path} renders pixel-stable (${axis})`, async ({ page }) => {
+        const vp = axis === 'mobile' ? MOBILE : DESKTOP
+        if (!vp) {
+          throw new Error(
+            `visual gate: evidence-viewports.mjs carries no viewport named ` +
+              `"${axis}", so ${route.path} cannot be captured at a committed width`,
+          )
+        }
 
-      // BEFORE `goto`: the page reads `Date.now()` during its first render.
-      await page.clock.setFixedTime(FROZEN_NOW)
-      await mockHavenApi(page)
-      if (route.serveDetailResponses) {
-        await serveAgentDetailResponses(page, 'agent-research')
-      }
-      await seedAuthenticatedSession(page)
+        // BEFORE `goto`: the page reads `Date.now()` during its first render.
+        await page.clock.setFixedTime(FROZEN_NOW)
+        await mockHavenApi(page)
+        if (route.serveDetailResponses) {
+          await serveAgentDetailResponses(page, 'agent-research')
+        }
+        await seedAuthenticatedSession(page)
 
-      await page.setViewportSize({ width: vp.width, height: vp.height })
-      await page.goto(route.path)
+        await page.setViewportSize({ width: vp.width, height: vp.height })
+        await page.goto(route.path)
 
-      const main = page.locator('#main-content')
-      await expect(main).toHaveCount(1)
-      // A generous timeout, for a measured reason. Playwright's 15 s default is
-      // fine against CI's prebuilt standalone server, and NOT fine against a
-      // local `next dev` that must compile the route first — reproduced while
-      // mutation-proving this file, where recolouring one label made the very
-      // next run fail with `element(s) not found` on this heading rather than
-      // on the pixel comparison it was testing. That is the #1943 failure class
-      // (a render problem masquerading as a selector problem), and a too-short
-      // wait here converts every real pixel finding into it.
-      await expect(route.anchor(page)).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
-      // The shell can be mounted while the route's data is still arriving, and
-      // a capture taken then is a baseline of a half-empty screen. Poll the
-      // rendered text past the route's own measured floor before believing it.
-      await expect
-        .poll(async () => (await main.innerText()).length, {
-          message:
-            `${route.path}: rendered less text than the route's measured floor — ` +
-            `the page never finished rendering (cold compile, failed hydration, ` +
-            `or an error boundary), NOT a fixture problem`,
+        const main = page.locator('#main-content')
+        await expect(main).toHaveCount(1)
+        // A generous timeout, for a measured reason. Playwright's 15 s default is
+        // fine against CI's prebuilt standalone server, and NOT fine against a
+        // local `next dev` that must compile the route first — reproduced while
+        // mutation-proving this file, where recolouring one label made the very
+        // next run fail with `element(s) not found` on this heading rather than
+        // on the pixel comparison it was testing. That is the #1943 failure class
+        // (a render problem masquerading as a selector problem), and a too-short
+        // wait here converts every real pixel finding into it.
+        await expect(route.anchor(page)).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
+        // The shell can be mounted while the route's data is still arriving, and
+        // a capture taken then is a baseline of a half-empty screen. Poll the
+        // rendered text past the route's own measured floor before believing it.
+        await expect
+          .poll(async () => (await main.innerText()).length, {
+            message:
+              `${route.path}: rendered less text than the route's measured floor — ` +
+              `the page never finished rendering (cold compile, failed hydration, ` +
+              `or an error boundary), NOT a fixture problem`,
+          })
+          .toBeGreaterThanOrEqual(
+            axis === 'mobile' && route.minCharsMobile !== undefined
+              ? route.minCharsMobile
+              : route.minChars,
+          )
+        await expectNoSkeletons(main, route.path)
+
+        if (
+          route.frozenRelativeTime &&
+          !(axis === 'mobile' && route.frozenRelativeTimeHiddenOnMobile)
+        ) {
+          await expect(
+            main.getByText(route.frozenRelativeTime, { exact: true }).first(),
+            `${route.path}: the frozen clock is not in effect — expected the ` +
+              `fixture's relative timestamp to render as "${route.frozenRelativeTime}" ` +
+              `at ${FROZEN_NOW.toISOString()}. Without it this baseline drifts on a ` +
+              `calendar boundary rather than on a code change (#2318).`,
+          ).toBeVisible()
+        }
+
+        // Determinism: fonts loaded, no animation mid-flight.
+        //
+        // `animations: 'disabled'` below settles CSS animations and transitions.
+        // It does NOT touch a JS `requestAnimationFrame` loop driving React
+        // state, and `/dashboard` has one: `useCountUp` animates the Total
+        // balance figure over 600 ms on mount. What actually settles that is
+        // `toHaveScreenshot`'s own stabilisation — it re-captures until two
+        // consecutive raw frames match — so this is a real dependency on an
+        // implicit mechanism rather than on anything asserted here. Named
+        // because every other determinism knob in this file is explicit, and an
+        // unstated one is the one that surprises someone (`haven-reviewer`, this
+        // PR). If a count-up ever outlives `expect`'s timeout, this is the line
+        // to reach for: drive it to its end state, do not widen the budget.
+        await page.evaluate(() => document.fonts.ready)
+        await page.waitForLoadState('networkidle')
+
+        // The app shell clips at h-screen/overflow-hidden, so a `fullPage`
+        // capture paints only the first viewport and leaves a very long white
+        // tail (#1738). Un-clip, then PROVE the capture is not blank before
+        // letting it stand as a baseline — a pixel gate whose baseline is empty
+        // compares white to white forever.
+        await unclipScrollShell(page)
+        const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
+        await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {
+          label: `${route.path} · ${axis}`,
+          viewportDevicePx: vp.height * devicePixelRatio,
         })
-        .toBeGreaterThanOrEqual(route.minChars)
-      await expectNoSkeletons(main, route.path)
 
-      if (route.frozenRelativeTime) {
-        await expect(
-          main.getByText(route.frozenRelativeTime, { exact: true }).first(),
-          `${route.path}: the frozen clock is not in effect — expected the ` +
-            `fixture's relative timestamp to render as "${route.frozenRelativeTime}" ` +
-            `at ${FROZEN_NOW.toISOString()}. Without it this baseline drifts on a ` +
-            `calendar boundary rather than on a code change (#2318).`,
-        ).toBeVisible()
-      }
-
-      // Determinism: fonts loaded, no animation mid-flight.
-      //
-      // `animations: 'disabled'` below settles CSS animations and transitions.
-      // It does NOT touch a JS `requestAnimationFrame` loop driving React
-      // state, and `/dashboard` has one: `useCountUp` animates the Total
-      // balance figure over 600 ms on mount. What actually settles that is
-      // `toHaveScreenshot`'s own stabilisation — it re-captures until two
-      // consecutive raw frames match — so this is a real dependency on an
-      // implicit mechanism rather than on anything asserted here. Named
-      // because every other determinism knob in this file is explicit, and an
-      // unstated one is the one that surprises someone (`haven-reviewer`, this
-      // PR). If a count-up ever outlives `expect`'s timeout, this is the line
-      // to reach for: drive it to its end state, do not widen the budget.
-      await page.evaluate(() => document.fonts.ready)
-      await page.waitForLoadState('networkidle')
-
-      // The app shell clips at h-screen/overflow-hidden, so a `fullPage`
-      // capture paints only the first viewport and leaves a very long white
-      // tail (#1738). Un-clip, then PROVE the capture is not blank before
-      // letting it stand as a baseline — a pixel gate whose baseline is empty
-      // compares white to white forever.
-      await unclipScrollShell(page)
-      const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
-      await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {
-        label: `${route.path} · ${axis}`,
-        viewportDevicePx: vp.height * devicePixelRatio,
+        await expect(page).toHaveScreenshot(`${route.slug}-${axis}.png`, {
+          fullPage: true,
+          animations: 'disabled',
+          caret: 'hide',
+          maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
+          threshold: PIXEL_THRESHOLD,
+        })
       })
-
-      await expect(page).toHaveScreenshot(`${route.slug}-${axis}.png`, {
-        fullPage: true,
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
-    })
+    }
   }
 })

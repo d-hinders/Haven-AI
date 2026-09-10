@@ -478,7 +478,20 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
 - Optional uppercase eyebrow.
 - One compact h1 using `.v2-text-h1`.
 - Optional subtitle using `.v2-text-body`.
-- Right-side actions that wrap on narrow viewports.
+- Right-side actions that wrap on narrow viewports — and **stack onto their own
+  row below `sm`**, which is right for a row of labelled buttons and wrong for a
+  single icon-only control.
+- `inlineActions` keeps the actions on the title's row at every width
+  ([#2821](https://github.com/d-hinders/Haven-AI/issues/2821)). Reach for it
+  when the slot holds one icon-only control: on agent detail it holds the kebab
+  alone — the `StatusBadge` beside it renders `null` while the agent is active —
+  and the stacked row was a lone bordered icon, left-aligned, belonging visually
+  to nothing.
+
+  It is a **prop, not a `Children.count`**. Counting tells you how many nodes
+  there are, not whether they are icon-only, and a caller wrapping its actions
+  in a fragment counts as one either way. The caller knows which shape it has;
+  the primitive owns what to do about it.
 
 Do not use marketing hero typography for normal authenticated pages.
 

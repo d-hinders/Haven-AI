@@ -497,6 +497,10 @@ export default function AgentDetailClient({ agentId }: Props) {
     <div className="max-w-5xl">
       <PageHeader
         title={currentAgent.name}
+        // The actions slot here is usually the kebab alone — the badge beside
+        // it renders `null` while the agent is active — so stacking it below
+        // `sm` left a lone bordered icon on its own row (#2821).
+        inlineActions
         actions={
           <div className="flex flex-wrap items-center gap-3">
             {currentAgent.status === 'active' ? null : (
@@ -532,7 +536,31 @@ export default function AgentDetailClient({ agentId }: Props) {
         }
       />
 
-      <Card hover={false} className="p-5 md:p-6">
+      {/* Second on a phone, first from `lg` (#2821).
+
+          The identity rows — wallet, network, created, last activity — took
+          essentially the whole first screen on a 390pt viewport, so the budget,
+          which is the reason to open an agent at all, was the last thing on it
+          and pinned against the tab bar. That is desktop information density on
+          a phone.
+
+          Reordered rather than hidden or collapsed, which were the other two
+          candidates on #2821: the metadata is still one scroll away and still
+          in the same DOM order for a screen reader below `lg`, where reading
+          order follows the DOM and `order` does not change it. At `lg` the
+          grid is four columns wide and costs nothing, so desktop keeps the
+          composition it had — verified by the desktop specs, which do not
+          move. */}
+      {/* The pair, and ONLY the pair, is the flex context (#2821).
+
+          A first attempt put `flex flex-col` on the page root and ordered these
+          two against it. That is wrong and the measurement said so immediately:
+          `order` is relative to every sibling, all of which default to 0, so
+          two positive orders pushed BOTH cards below the whole rest of the page
+          — the budget row went from y=655 to y=2241. Confining the flex context
+          to the two elements being swapped is what makes the reorder local. */}
+      <div className="flex flex-col">
+        <Card hover={false} className="order-2 p-5 md:p-6 lg:order-1">
         <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
           {currentAgent.description || 'This agent can make payments within the rules you set.'}
         </p>
@@ -559,17 +587,18 @@ export default function AgentDetailClient({ agentId }: Props) {
             </dd>
           </div>
         </dl>
-      </Card>
+        </Card>
+        <div id={DELEGATION_BUDGET_CARD_ID} className="order-1 scroll-mt-24 lg:order-2">
+          <DelegationBudgetCard
+            agentId={agentId}
+            chainId={chainId}
+            tokens={budgetTokenOptions}
+            onBudgetChange={refetch}
+          />
+        </div>
+      </div>
 
       <>
-          <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
-            <DelegationBudgetCard
-              agentId={agentId}
-              chainId={chainId}
-              tokens={budgetTokenOptions}
-              onBudgetChange={refetch}
-            />
-          </div>
           {/* #1089: backup & recovery moved to the account page — it's an
               account capability, not an agent one. This is a pointer, not a
               second copy of the controls. */}

@@ -60,10 +60,52 @@ const TOUCH_TARGET_FLOOR = 44
 
 /**
  * The committed mobile viewport (390x844) — `scripts/evidence-viewports.mjs`.
- * The fold assertion IS this height; it is not tunable per test.
+ * The fold assertion is derived from this height; it is not tunable per test.
  */
 const MOBILE_WIDTH = 390
 const MOBILE_HEIGHT = 844
+
+/**
+ * Where the visible screen actually ends (#2821).
+ *
+ * This used to be `MOBILE_HEIGHT`, and that was written when the bottom of the
+ * viewport was empty. Since #2731 the bottom of every authenticated route is
+ * the tab bar — `--v2-tab-bar-h` (56pt) plus the home-indicator inset it
+ * reserves, which is 34pt in the installed shell and 0 in a headless engine.
+ * A fold of 844 therefore measured up to 90pt of screen that is covered, in the
+ * direction that HIDES a defect: the budget row can sit under the bar and the
+ * assertion still passes.
+ *
+ * Read from the live bar rather than recomputed from the tokens. The bar's own
+ * top edge already is the answer, it carries the safe-area inset without this
+ * spec having to know the inset exists, and a second arithmetic copy of
+ * `AuthenticatedShell`'s `calc()` is exactly the duplicate that went stale the
+ * first time.
+ *
+ * It WAITS for the bar below `lg`, and that is the load-bearing part. The first
+ * version of this helper read the DOM immediately and fell back to
+ * `window.innerHeight` when it found nothing — and `Sidebar` is
+ * `dynamic({ ssr: false })`, so it had not mounted yet even though the page's
+ * own H1 was visible. Measured: the helper returned **844**, the exact stale
+ * value #2821 is about, and the corrected spec passed while proving nothing.
+ * A fallback that silently reproduces the bug is worse than no fallback.
+ */
+async function foldY(page: Page): Promise<number> {
+  const viewport = page.viewportSize()
+  // Above `lg` there is genuinely no bar and the viewport bottom IS the fold.
+  // Keyed on the width rather than on the element's absence, so "no bar yet"
+  // and "no bar here" can never be confused again.
+  if (viewport && viewport.width >= 1024) return viewport.height
+  await page.locator('[data-mobile-tab-bar]').waitFor({ state: 'attached', timeout: 30_000 })
+  return page.evaluate(() => {
+    const bar = document.querySelector('[data-mobile-tab-bar]')!
+    const top = Math.round(bar.getBoundingClientRect().top)
+    // Attached but unlaid-out reports 0, which would make every "above the
+    // fold" assertion trivially true. Refuse rather than return it.
+    if (top <= 0) throw new Error('tab bar attached but has no laid-out top edge')
+    return top
+  })
+}
 
 /**
  * Determinism: freeze the clock BEFORE navigation, exactly as
@@ -134,7 +176,7 @@ test.describe('agent detail at 390px (#2733)', () => {
     // "250.00"), so a substring probe on the full row text is both the amount
     // and the period claim: if that row starts above 844px, both read without
     // scrolling.
-    const fold = MOBILE_HEIGHT
+    const fold = await foldY(page)
     const budgetRowBox = await page
       .getByText('250 USDC per week')
       .first()
@@ -145,6 +187,13 @@ test.describe('agent detail at 390px (#2733)', () => {
       `active budget row starts at y=${budgetRowBox!.y} — the budget amount and ` +
         `period must sit above the ${fold}px fold without scrolling`,
     ).toBeLessThan(fold)
+    // Reported, not asserted: #2821 was found on a device where this row
+    // cleared the bar by a hair, and a margin nobody prints is one nobody
+    // notices shrinking. The number is in the run log before it is a failure.
+    console.log(
+      `#2821 fold margin: budget row bottom ${Math.round(budgetRowBox!.y + budgetRowBox!.height)}px, ` +
+        `fold ${fold}px, clearance ${Math.round(fold - budgetRowBox!.y - budgetRowBox!.height)}px`,
+    )
 
     // ── 2. "Set budget" is one line in its pill ────────────────────────────
     // The `sm` Button's height is the fixed `h-9` regardless of line count,
@@ -225,6 +274,32 @@ test.describe('agent detail at 390px (#2733)', () => {
     expect(kebabBox, 'the agent options kebab rendered').not.toBeNull()
     expect(kebabBox!.height).toBeGreaterThanOrEqual(TOUCH_TARGET_FLOOR)
     expect(kebabBox!.width).toBeGreaterThanOrEqual(TOUCH_TARGET_FLOOR)
+
+    // ── 4b. The kebab shares the title's row (#2821) ───────────────────────
+    // Below `sm` the header used to stack, and the actions slot on this page
+    // usually holds the kebab ALONE — the badge beside it renders `null` while
+    // the agent is active — so a lone bordered icon sat on its own line,
+    // left-aligned, belonging visually to nothing.
+    //
+    // Asserted as a vertical OVERLAP with the H1's box, not as "same y": the
+    // two have different heights and are aligned to the top of the row, so an
+    // equality would pin a coincidence. Overlap is the claim — they are on one
+    // row — and it fails the moment the header stacks again.
+    const titleBox = await page
+      .getByRole('heading', { name: 'Research agent', exact: true })
+      .boundingBox()
+    expect(titleBox, 'the agent title rendered').not.toBeNull()
+    const overlaps =
+      titleBox!.y < kebabBox!.y + kebabBox!.height && kebabBox!.y < titleBox!.y + titleBox!.height
+    expect(
+      overlaps,
+      `kebab at y=${Math.round(kebabBox!.y)}..${Math.round(kebabBox!.y + kebabBox!.height)} ` +
+        `must share a row with the title at y=${Math.round(titleBox!.y)}..` +
+        `${Math.round(titleBox!.y + titleBox!.height)}`,
+    ).toBe(true)
+    // ...and to the RIGHT of it, so "shares a row" cannot be satisfied by the
+    // two overlapping in the same column.
+    expect(kebabBox!.x).toBeGreaterThan(titleBox!.x)
 
     // ── 5. No horizontal overflow, both metrics (#1771) ────────────────────
     const overflow = await expectNoHorizontalOverflow(page)

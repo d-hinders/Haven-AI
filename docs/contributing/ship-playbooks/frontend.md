@@ -8,6 +8,7 @@ covers:
   - packages/frontend/e2e/support/visual-mode.ts
   - packages/frontend/src/__tests__/visual-gate-coverage.test.ts
   - packages/frontend/e2e/focus-visible.visual.spec.ts
+  - packages/frontend/package.json
 last-verified: "2026-09-10"
 ---
 

@@ -165,6 +165,11 @@ if (VISUAL_STRUCTURE_ONLY) {
       // obvious "honour .not" fix — makes the assertion pass SILENTLY, which
       // on the one matcher whose whole design note is "a green that compared
       // nothing is the catastrophe" is the worst of the three options.
+      // Proven by execution on this pull request — a probe spec calling
+      // `.not.toHaveScreenshot()` under this mode exited 1 with the message
+      // below — but NOT guarded by a test: nothing in the tree calls `.not`,
+      // and a spec that did could only run locally, never in the CI job where
+      // a deletion would actually merge.
       if (this.isNot) {
         throw new Error(
           'VISUAL_STRUCTURE_ONLY=1 cannot evaluate .not.toHaveScreenshot(): it compares no pixels.',

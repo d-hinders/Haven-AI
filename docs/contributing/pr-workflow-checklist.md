@@ -8,6 +8,7 @@ covers:
   - scripts/ci/change-classifier.mjs
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
+  - packages/frontend/package.json
 last-verified: "2026-09-10"
 ---
 

@@ -18,7 +18,8 @@
  * `visual-gate-coverage.test.ts` guards the npm scripts, but a script assertion
  * cannot see an exported shell variable or a workflow-level `env:`. These
  * refusals fire from `playwright.config.ts`, which runs wherever the run does;
- * their logic is here, in `e2e/support/visual-mode.ts`. Nothing protected them:
+ * their logic is in `e2e/support/visual-mode.ts`, which this file imports
+ * directly. Nothing protected them:
  * delete either branch and every check stayed green. Hence this file.
  *
  * A third refusal — `.not.toHaveScreenshot()` — stays at the matcher in

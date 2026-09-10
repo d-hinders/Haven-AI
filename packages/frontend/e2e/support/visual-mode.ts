@@ -13,8 +13,8 @@
  *     the half that breaks silently. These specs are already written that way:
  *     `design-system.visual.spec.ts` finds the top bar with
  *     `//*[@id="main-content"]/preceding-sibling::header[1]` (#1820) and then
- *     asserts `toHaveCount(1)` on it — `focus-visible.visual.spec.ts` says why,
- *     at its line 297: that "closes 'matches nothing' and 'matches several'".
+ *     asserts `toHaveCount(1)` on it — `focus-visible.visual.spec.ts` says why:
+ *     that assertion "closes 'matches nothing' and 'matches several'".
  *     Every `toHaveCount(1)` in the five specs is one of these — 24 call sites
  *     at the time of writing, but the instrument is the point, not the count:
  *     `grep -cE '\)\.toHaveCount\(1\)' e2e/*.visual.spec.ts` — five per-file
@@ -27,8 +27,8 @@
  *     — could not see these specs at all. This mode does not add assertions; it
  *     lets the ones already written run somewhere other than CI.
  *
- * So there are three modes, and the predicate is HERE rather than repeated in
- * each spec: the same condition written five times is five chances for the
+ * So there are three modes and one refused combination, and the predicate is
+ * HERE rather than repeated in each spec: the same condition written five times is five chances for the
  * next mode to be added to four of them.
  *
  *   | mode                      | specs run | pixels compared |

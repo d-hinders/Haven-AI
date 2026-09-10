@@ -5,7 +5,7 @@ covers:
   - packages/frontend/src/app/manifest.ts
   - packages/frontend/src/components/sidebar/*
   - packages/frontend/src/hooks/useVisiblePolling.ts
-last-verified: "2026-09-09"
+last-verified: "2026-09-10"
 ---
 
 # Mobile demo runbook
@@ -17,12 +17,14 @@ presentation — connecting the agent, granting the budget, the Fortnox and SIE
 acts — is [`../../operations/demo-agent-purchase-runbook.md`](../operations/demo-agent-purchase-runbook.md);
 this document is the phone half and the choreography between the two.
 
-Why `covers` names the sidebar directory rather than a `MobileTabBar.tsx`
-file: the bottom tab bar lands with #2731 (branch `feat/2731-mobile-tab-bar`,
-unmerged at last-verified), and the coupling gate must implicate this doc when
-the tab bar changes without waiting for this front-matter to learn its final
-path. Every file in that directory is the phone's primary navigation surface,
-which is exactly what checklist rows 2 and 6 attest.
+Why `covers` names the sidebar directory rather than a single file: when this
+doc was written the bottom tab bar was still unmerged on `feat/2731-mobile-tab-bar`,
+and the coupling gate had to implicate this doc when the bar changed without
+waiting for this front-matter to learn its final path. #2731 has since landed
+(PR #2805) at `packages/frontend/src/components/sidebar/MobileTabBar.tsx`, which
+that glob reaches — so the directory form stays, now for the ordinary reason:
+every file in it is the phone's primary navigation surface, which is exactly
+what checklist rows 2 and 6 attest.
 
 ## What you need
 
@@ -127,15 +129,41 @@ someone runs this on a real iPhone.
 
 | # | Check | iPhone model | iOS version | Date | Tester | Result |
 |---|---|---|---|---|---|---|
-| 1 | Both installs side by side from the share sheet, labels "Haven" and "Haven Dev", icons distinguishable | | | | | |
-| 2 | Standalone launch: no Safari chrome, status bar reads as part of the app | | | | | |
-| 3 | Sign-in by email + password, autofilled by the cloud password manager inside the installed shell | | | | | |
-| 4 | Login persists: force-quit and relaunch lands on the dashboard, no sign-in | | | | | |
-| 5 | Viewport fit: nothing renders under the notch or the home indicator, portrait and landscape | | | | | |
-| 6 | Tap targets as physical points: sidebar toggle and every MobileTabBar item land in their intended 44px areas | | | | | |
-| 7 | Demo end to end: agent told to buy at the harness, product picked and go-ahead on the phone, purchase lands with no refresh | | | | | |
-| 8 | Budget-change variant: passkey ceremony from the installed shell completes (per #2729 device checklist) | | | | | |
-| 9 | First end-to-end demo run for epic #2736 | | | | | pending-operator |
+| 1 | Both installs side by side from the share sheet, labels "Haven" and "Haven Dev", icons distinguishable | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **blocked** — prod serves no manifest until the `dev → main` promotion, so a prod install today yields a Safari stub. Dev half verified (label "Haven Dev", badged icon) on the #2729 pass. |
+| 2 | Standalone launch: no Safari chrome, status bar reads as part of the app | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass** |
+| 3 | Sign-in by email + password, autofilled by the cloud password manager inside the installed shell | iPhone 12 | iOS 26.6.1 | 2026-09-09 | @d-hinders | **pass** — carried from the #2729 device pass |
+| 4 | Login persists: force-quit and relaunch lands on the dashboard, no sign-in | iPhone 12 | iOS 26.6.1 | 2026-09-09 | @d-hinders | **pass** — carried from the #2729 device pass |
+| 5 | Viewport fit: nothing renders under the notch or the home indicator, portrait and landscape | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass**, both orientations. Portrait: chrome sits below the status bar, and at scroll end the last card rests ~20pt above the tab bar with its content gutter intact. Landscape: content inset ~47pt from both bezels, matching the device notch inset. Settles the open question from #2730 — iOS **does** report a non-zero `safe-area-inset-top` under `apple-mobile-web-app-status-bar-style: default`, so the top-inset rules are live, not inert. |
+| 6 | Tap targets as physical points: sidebar toggle and every MobileTabBar item land in their intended 44px areas | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass** — all five slots navigate, including taps near the bottom edge; no slot press was swallowed by the iOS home-indicator swipe. |
+| 7 | Demo end to end: agent told to buy at the harness, product picked and go-ahead on the phone, purchase lands with no refresh | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass**, both halves. Three x402 purchases of 0.001 USDC from `services.sandbox.ampersend.ai/api/joke` on Base Sepolia, driven through the real agent path (quote → local sign → relay → merchant retry). Foreground: row appeared unaided, "just now", no interaction. Backgrounded: app closed at the home screen during the purchase, and on reopen the row was **already present** — the visibility handler fires an immediate fetch on return rather than waiting out the 10s interval. No spinner or skeleton flashed over the balance, the stat cards or the list in either half, and the page held its scroll position — the refetch is silent, which is the qualifier that separates "appears without a refresh" from "appears acceptably". Evidence below. |
+| 8 | Budget-change variant: passkey ceremony from the installed shell completes (per #2729 device checklist) | iPhone 12 | iOS 26.6.1 | 2026-09-09 | @d-hinders | **pass** — carried from the #2729 device pass, on an account the phone had never seen |
+| 9 | First end-to-end demo run for epic #2736 | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **partial** — every phone-side behaviour the epic claims is verified (rows 2–8). Outstanding: row 1, which needs the promotion, and a full rehearsal with the laptop-side acts of the demo script. |
+
+### Row 7 evidence — the 2026-09-10 payoff run
+
+Three x402 purchases from `https://services.sandbox.ampersend.ai/api/joke`, 0.001 USDC each,
+agent `devtest` (`4256cb9a-0a10-4a41-beb3-9b10b73a65fb`) on Base Sepolia, delegation rail,
+EIP-3009 bridge (the merchant advertises no `extra.assetTransferMethod`, so the erc7710 path
+does not apply). Budget 4.00 USDC/day, unpinned recipient; ~3.997 remaining after the run.
+
+| # | Funding tx | What it tested | Result |
+|---|---|---|---|
+| 1 | `0x915b06a0876079744362f8ed617fb6b7872825bae894865d9de4d140bd05fb7a` | Foreground: dashboard open, phone untouched | Row appeared unaided, "just now" |
+| 2 | `0xd29761b6e1faef41e32594cb046600d8f66180f175213b008089db103e5d740a` | Intended as the backgrounded run | **Void** — the app was still foregrounded when it fired; recorded rather than dropped, so the trail matches what happened |
+| 3 | `0xec59861d7544367342625d766bce1613de9ae12473a66d2ad18e705357f095a3` | Backgrounded: app closed at the home screen, reopened after the purchase | Row already present on reopen — immediate fetch on return, not a delayed interval tick |
+
+Observed across both halves: no loading skeleton or spinner replaced good data during a silent
+tick, and scroll position was preserved. That is the behaviour `useVisiblePolling` and the
+per-hook `silent` paths are built for, and it is only checkable by watching a real screen.
+
+All three merchant legs returned HTTP 200 with `paid: true`, and all three were recorded via
+`haven_report_x402_outcome`, each reaching `phase: payment_confirmed` / `next_action: none`.
+No stranded delegate balance resulted, so no sweep was needed.
+
+What this run does **not** cover, since the operator drove the agent from a session rather than
+from the demo harness: the laptop-side choreography of the demo script itself (Acts 0–3 of
+`../../operations/demo-agent-purchase-runbook.md`). The phone-side claim — a purchase landing
+with no manual refresh — is what row 7 asserts, and that is verified.
 
 ## Troubleshooting
 

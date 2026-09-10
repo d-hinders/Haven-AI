@@ -1,4 +1,7 @@
 node_modules/
+# Slash-less too: `node_modules/` matches DIRECTORIES only, so a symlink
+# named node_modules is not covered — which is how one reached a commit (#2827).
+node_modules
 dist/
 *.tsbuildinfo
 .next/

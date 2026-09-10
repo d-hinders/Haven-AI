@@ -4,8 +4,9 @@
  *
  * BASELINES ARE LINUX-RENDERED, exactly as `design-system.visual.spec.ts`'s
  * are, and for the same reason: CI is the judge and macOS font rendering
- * differs. Skipped locally unless VISUAL_REGRESSION=1. Regenerate via the
- * **Update visual baselines** workflow on the branch — see
+ * differs. The pixel comparison is skipped locally unless VISUAL_REGRESSION=1;
+ * VISUAL_STRUCTURE_ONLY=1 runs the structural assertions anywhere (#2827).
+ * Regenerate via the **Update visual baselines** workflow on the branch — see
  * docs/contributing/ship-playbooks/frontend.md §4.
  *
  * ── Why a second visual spec rather than more pixels in the first ────────────
@@ -171,6 +172,7 @@
  * failure #1800 exists for.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { mockHavenApi, seedAuthenticatedSession, testAgent } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
@@ -698,8 +700,8 @@ async function gotoDesktop(page: Page, path: string) {
 
 test.describe('driven focus-state visual regression', () => {
   test.skip(
-    process.env.VISUAL_REGRESSION !== '1',
-    'Linux-rendered baselines — run via the CI job (or VISUAL_REGRESSION=1 in a Linux container)',
+    !VISUAL_SPECS_ENABLED,
+    VISUAL_SKIP_REASON,
   )
 
   test.beforeEach(async ({ page }) => {

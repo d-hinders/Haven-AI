@@ -6,8 +6,8 @@
  *
  * The *Design visual regression* check is one of the ticks a reviewer reads as
  * "the UI is unchanged". Its name said `/design-system`, and even that
- * understated it — it has always run every `*.visual.spec.ts`, which is four
- * files over two routes. Neither the name nor the green tick told anyone which
+ * understated it — it has always run every `*.visual.spec.ts`, which is five
+ * files today. Neither the name nor the green tick told anyone which
  * routes were actually compared, so the check licensed a claim far wider than
  * the thing it measured, and no reader could see the gap.
  *

@@ -39,7 +39,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-08"
+last-verified: "2026-09-10"
 ---
 
 # Haven - x402 Payment Execution Sequence

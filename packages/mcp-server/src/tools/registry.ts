@@ -17,8 +17,17 @@
  *   missing input-policy  -> `_everyHostedToolCarriesAnInputDecision` in
  *                            `contracts.ts` ({ undecided: 'name' } is not
  *                            assignable to true; names the tool, #2349)
- *   missing handler       -> `Record<HostedToolName, ...>` return annotation on
- *                            `createToolHandlers` (TS2739)
+ *   missing handler       -> the `HostedToolHandlers` return annotation on
+ *                            `createToolHandlers` (TS2741 for a single missing
+ *                            tool, TS2739 for two or more). NOTE the direction:
+ *                            this catches a tool with NO owner. A tool owned
+ *                            TWICE — a key in the facade's literal shadowing
+ *                            one a capability module already spreads in — is
+ *                            NOT a compile error, because TS1117 does not
+ *                            reach across a spread; the disjointness
+ *                            assertion in
+ *                            `tools/support/shared-helper-ownership.test.ts`
+ *                            is what catches that (#2809)
  *   duplicated ownership  -> TS1117, an object literal cannot have multiple
  *                            properties with the same name, for a duplicated
  *                            entry within one ownership map; and

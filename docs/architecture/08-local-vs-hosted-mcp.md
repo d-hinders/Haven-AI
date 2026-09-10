@@ -111,12 +111,13 @@ rather than from arguments (`haven_report_x402_outcome`, `haven_submit`,
 a caller holding `idempotencyKey` is told what to send instead. #2349 closed
 the list: **20 of the 22 hosted tools refuse**, and the two that do not are
 on a second, equally explicit list — `PERMISSIVE_INPUT_TOOLS`, beside
-`STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools.ts`. Both lists carry
-the per-tool reason and neither is restated here, because a second copy
-drifts. Every hosted tool is on exactly one of them: a tool on neither fails
-to compile (a type-level exhaustiveness check in `tools/contracts.ts`, where
-both lists have lived since #2807) and fails
-`strict-tool-input.test.ts`, so a new tool cannot skip the decision. The
+`STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools/contracts.ts` (both
+have lived there since #2807 split the contracts out of `tools.ts`, which
+re-exports them). Both lists carry the per-tool reason and neither is
+restated here, because a second copy drifts. Every hosted tool is on exactly
+one of them: a tool on neither fails to compile — a type-level exhaustiveness
+check in that same module — and fails `strict-tool-input.test.ts`, so a new
+tool cannot skip the decision. The
 principle that closed the list is the one #2312 opened it with — every hosted
 schema already advertised `additionalProperties: false`, so permissive
 behaviour was a contract mismatch, and the only reason to leave a tool
@@ -242,8 +243,9 @@ keeps working and keeps warning — which is a window only for as long as someon
 means to shut it.
 
 Treat the registered tool unions in `packages/mcp/src/tools.ts`,
-`packages/mcp-server/src/tools.ts`, and `packages/signer/src/tools.ts` as the
-source of truth.
+`packages/mcp-server/src/tools/contracts.ts` (re-exported by
+`packages/mcp-server/src/tools.ts`, the facade), and
+`packages/signer/src/tools.ts` as the source of truth.
 
 The four edge-signer tools are `haven_sign`, `haven_x402_sign_header`,
 `haven_sign_x402`, and `haven_sign_sweep_delegate`.

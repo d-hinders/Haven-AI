@@ -574,11 +574,21 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     // map exists the duplicate has already collapsed last-wins, which is the
     // same reason the #2807 registry twin takes entry LISTS rather than maps.
     const facade = fs.readFileSync(new URL('../../tools.ts', import.meta.url), 'utf8')
-    const literalKeys = [...facade.matchAll(/^ {4}(haven_[a-z0-9_]+):/gm)].map((m) => m[1])
+    // The optional quotes are load-bearing: `'haven_pay':` is a valid duplicate
+    // key that an unquoted-only pattern walks straight past, and the union
+    // check below would NOT catch it (the name is in `owned`, so the union is
+    // still 22). Nothing normalises the quoting away — the repository has no
+    // prettier config and no format or lint job.
+    const literalKeys = [...facade.matchAll(/^ {4}'?(haven_[a-z0-9_]+)'?:/gm)].map((m) => m[1])
     const owned = new Set<string>()
     for (const stem of CAPABILITY_MODULES) {
       const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
-      const tuple = src.slice(src.indexOf('_TOOLS = ['), src.indexOf('] as const'))
+      // Anchor the end to the START of the tuple, not to the file: a module
+      // declaring any other `] as const` array above its `_TOOLS` tuple would
+      // otherwise slice to '' and drop its tools out of `owned` silently.
+      const start = src.indexOf('_TOOLS = [')
+      expect(start, `${stem} declares no _TOOLS tuple — the probe is broken`).toBeGreaterThan(-1)
+      const tuple = src.slice(start, src.indexOf('] as const', start))
       for (const [, name] of tuple.matchAll(/'(haven_[a-z0-9_]+)'/g)) owned.add(name)
     }
     expect(owned.size, 'the capability tuple parse found no tools — the probe is broken').toBeGreaterThan(0)
@@ -590,7 +600,10 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     ).toEqual([])
     // …and the two halves together still cover the whole surface, so this
     // check cannot be satisfied by a facade that simply lost its literal.
-    expect(new Set([...literalKeys, ...owned]).size).toBe(Object.keys(toolSchemas).length)
+    expect(
+      new Set([...literalKeys, ...owned]).size,
+      'the facade literal plus the capability tuples must still cover the whole hosted surface — a short union means one side parsed less than it should',
+    ).toBe(Object.keys(toolSchemas).length)
   })
 
   it('contributes exactly the ten tools it claims, and only those', async () => {

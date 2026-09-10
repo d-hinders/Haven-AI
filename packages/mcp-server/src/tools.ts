@@ -26,62 +26,32 @@ import {
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
   HavenClient,
-  HavenError,
   HavenPaymentStateError,
-  MerchantTimeoutError,
-  X402UnexpectedStatusError,
-  signerUpdateFallback,
-  composeDescription,
-  discoverMerchantMcpUrl,
-  resolveTokenFromAddress,
-  sameUrl,
   selectErc7710PaymentOption,
   selectStandardPaymentOption,
-  validateStandardX402PaymentHeader,
-  X402PaymentHeaderValidationError,
-  toolDescriptions as sharedDescriptions,
-  x402AuthorizationAmount,
-  type AgentNextStep,
-  type AgentPurchaseSummary,
   type AgentPaymentWarning,
-  type AgentPaymentSummary,
-  type HavenCatalogEntry,
-  type X402McpTransport,
-  type X402PaymentOption,
   type X402PaymentRequired,
   selectX402SettlementScheme,
   normalizePaymentRequired,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
-import { z } from 'zod/v3'
 import {
-  MCP_TRANSPORT_CASE_HINT,
   type HostedToolHandlers,
-  type ToolFailure,
 } from './tools/contracts.js'
 import { parseStrict, setStrictRefusalThrower } from './tools/parsing.js'
 import { createStateDirectRecoveryHandlers } from './tools/state-direct-recovery.js'
 import {
-  atomicToDisplay,
-  assertWithinMaxAmount,
   CAP_WARNING_TEXT,
-  humanToAtomic,
   priceSelectedOption,
-  QUOTE_EXPIRES_SOON_MS,
   quoteWarnings,
   readMaxAmountCap,
   requireSettleableSelection,
-  resolveCapAtomic,
-  type MaxAmountCap,
 } from './tools/support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './tools/support/catalog-entry.js'
 import {
   HostedToolError,
-  isX402PaymentWindowExpired,
   normalizeError,
-  paymentWindowExpiredError,
-  paymentWindowExpiredErrorFor,
   runTool,
 } from './tools/support/errors.js'
 import { buildAgentGuidance, buildPurchaseSummary } from './tools/support/guidance.js'
@@ -89,15 +59,11 @@ import {
   buildX402SigningContext,
   coerceJsonField,
   deliverMerchantPayment,
-  isMerchantEndpointMiss,
-  parseMcpTransport,
   preflightMcpPaymentHeader,
   quoteMcpToolCall,
   resolveMerchantCallContext,
   serializeMcpTransport,
   submitSignatureWithExpiryMapping,
-  withDiscoveryGuidance,
-  type ResolvedMerchantCallContext,
 } from './tools/support/mcp-context.js'
 import {
   buildMcpToolQuoteResponse,
@@ -105,7 +71,6 @@ import {
   resolveResumeState,
   wrongTool,
 } from './tools/support/quote-response.js'
-import { SIGNER_CAPABILITY_KEY, signerCompatibilityNotice } from './tools/support/signer-compat.js'
 
 // #2807: the parsing seam throws through the SUPPORT module's HostedToolError
 // so `normalizeError` keeps a single instanceof branch. The wiring stays HERE

@@ -7,6 +7,7 @@ covers:
   - packages/mcp-server/src/auth.ts
   - packages/mcp-server/src/server.ts
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/tools/state-direct-recovery.ts
   - packages/mcp-server/src/hosted-signer-integration.test.ts
   - packages/connect/src/config-writers.ts
   - packages/connect/src/api.ts

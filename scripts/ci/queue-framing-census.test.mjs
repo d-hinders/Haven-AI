@@ -83,13 +83,33 @@ const GUARDED_FILES = [
   // #2809 — the hosted tool surface stopped being one file. `tools.ts` was the
   // whole of it when #2101 added the line above; since #2807/#2808/#2809 the
   // agent-visible prose is spread across the contract seam (every
-  // `toolDescriptions` entry), the shared guidance builder, and the capability
+  // `toolDescriptions` entry), the shared support modules, and the capability
   // modules. The census kept passing over each move, silently, on an
-  // ever-smaller surface — a guard that shrinks with the thing it guards. Each
-  // was verified clean against the phrase list before being added here.
+  // ever-smaller surface — a guard that shrinks with the thing it guards.
+  // Measured: a banned phrase planted in `tools/contracts.ts` passed this
+  // census GREEN before these lines existed.
+  //
+  // EVERY non-test source file under `src/tools/` is listed, not the three
+  // this slice happened to touch. A first pass added those three and
+  // haven-reviewer found `support/cap-price.ts` — which holds the cap and
+  // over-budget REFUSAL strings, the single place an agent is told why a
+  // payment was declined, and therefore the likeliest place a queue promise
+  // would ever be written — still outside. Enumerating the directory is what
+  // stops the next reviewer finding the ninth file. Each was verified clean
+  // against the phrase list before being added; a file that still tripped
+  // would have made this a red-CI change rather than a guard.
   'packages/mcp-server/src/tools/contracts.ts',
-  'packages/mcp-server/src/tools/support/guidance.ts',
+  'packages/mcp-server/src/tools/parsing.ts',
+  'packages/mcp-server/src/tools/registry.ts',
   'packages/mcp-server/src/tools/state-direct-recovery.ts',
+  'packages/mcp-server/src/tools/support/cap-price.ts',
+  'packages/mcp-server/src/tools/support/catalog-entry.ts',
+  'packages/mcp-server/src/tools/support/errors.ts',
+  'packages/mcp-server/src/tools/support/guidance.ts',
+  'packages/mcp-server/src/tools/support/index.ts',
+  'packages/mcp-server/src/tools/support/mcp-context.ts',
+  'packages/mcp-server/src/tools/support/quote-response.ts',
+  'packages/mcp-server/src/tools/support/signer-compat.ts',
   'packages/mcp-server/README.md',
   'packages/mcp/src/server.ts',
   'packages/mcp/src/tools.ts',

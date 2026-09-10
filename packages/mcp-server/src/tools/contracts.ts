@@ -10,8 +10,8 @@
  * types (`ToolSuccess` / `ToolFailure` / `ToolPayload`).
  *
  * NOTHING here executes a tool. Handlers live in the capability modules under
- * `tools/` and are composed by `tools.ts`, which stays the facade every
- * embedder imports; the registration seam lives in `tools/registry.ts`;
+ * `tools/` AND in `tools.ts` itself, which composes them and stays the facade
+ * every embedder imports — ten of the twenty-two have moved so far; the registration seam lives in `tools/registry.ts`;
  * argument parsing lives in `tools/parsing.ts`. #2809 moved the first ten —
  * the state, direct-payment and recovery handlers, to
  * `tools/state-direct-recovery.ts` — and #2810–#2812 take the rest against

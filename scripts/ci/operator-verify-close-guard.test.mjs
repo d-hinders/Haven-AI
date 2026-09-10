@@ -716,3 +716,90 @@ test('the template as shipped closes nothing, and closes the issue once filled i
     'filling the placeholder in place must produce a real closing reference',
   )
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// How the guard is WIRED (#2839).
+//
+// Every other check in `docs.yml` reads the repository, and every change to the
+// repository arrives as `synchronize`. This one reads the pull request itself —
+// its body and its title — which change without a push, on the `edited` event
+// that is NOT in GitHub's default type list.
+//
+// So the guard could pass, the body could be rewritten, and the merge would act
+// on text no check had ever read. That is not hypothetical: it closed #2819, an
+// `operator-verify` issue, after this very guard had blocked the same keyword in
+// a commit message and gone green once it was reworded. The body was edited
+// afterwards, to DESCRIBE the incident, and the description contained the thing
+// it described. The step's own comment records #2320 as the same shape one turn
+// earlier — a commit narrating the original incident closed #2268 a second time.
+//
+// A green REQUIRED check that describes text no longer present is worse than no
+// check, so the trigger is pinned here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DOCS_WORKFLOW = fileURLToPath(new URL('../../.github/workflows/docs.yml', import.meta.url))
+
+/** The lines of a `key:` block, by indentation — enough YAML for this file. */
+function blockUnder(lines, key, indent) {
+  const start = lines.findIndex((l) => l === `${' '.repeat(indent)}${key}:`)
+  if (start === -1) return null
+  const body = []
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue
+    if (line.search(/\S/) <= indent) break
+    body.push(line)
+  }
+  return body
+}
+
+test('#2839: docs.yml re-runs the close guard when the pull request is EDITED', () => {
+  const lines = readFileSync(DOCS_WORKFLOW, 'utf8').split('\n')
+
+  const on = blockUnder(lines, 'on', 0)
+  assert.ok(on, 'docs.yml still has a top-level `on:` block')
+
+  const pr = blockUnder(on, 'pull_request', 2)
+  assert.ok(pr, '`on:` still has a `pull_request:` trigger')
+
+  const types = pr.find((l) => l.trimStart().startsWith('types:'))
+  assert.ok(
+    types,
+    'the `pull_request:` trigger declares `types:` — WITHOUT it GitHub defaults to ' +
+      'opened/synchronize/reopened, and a body edited after this check went green is never re-read',
+  )
+  assert.match(
+    types,
+    /\bedited\b/,
+    `\`edited\` must stay in the trigger types, got: ${types.trim()}`,
+  )
+})
+
+test('#2839: the REQUIRED job never opts out of an event, the advisory one may', () => {
+  const lines = readFileSync(DOCS_WORKFLOW, 'utf8').split('\n')
+  const jobs = blockUnder(lines, 'jobs', 0)
+  assert.ok(jobs, 'docs.yml still has a `jobs:` block')
+
+  // #933: a required check that is skipped never reports, and GitHub waits
+  // forever for a run that will not happen. So `validate` — the required check,
+  // and the one hosting the guard — must carry no job-level `if:` at all.
+  const validate = blockUnder(jobs, 'validate', 2)
+  assert.ok(validate, '`validate` is still the job that hosts the guard')
+  const validateStepIndent = 6
+  const validateJobIf = validate.find(
+    (l) => l.startsWith('    if:') && l.search(/\S/) < validateStepIndent,
+  )
+  assert.equal(
+    validateJobIf,
+    undefined,
+    'the required job must have no job-level `if:` — a skipped required check never reports (#933)',
+  )
+
+  // The advisory job is free to skip, and should: nothing in it reads the pull
+  // request, so re-running ~130 external URL checks on a reworded description
+  // buys nothing.
+  const advisory = blockUnder(jobs, 'advisory', 2)
+  assert.ok(advisory, '`advisory` is still a separate job')
+  const advisoryIf = advisory.find((l) => l.startsWith('    if:'))
+  assert.ok(advisoryIf, 'the advisory job opts out of some event')
+  assert.match(advisoryIf, /edited/, `advisory should skip \`edited\`, got: ${advisoryIf?.trim()}`)
+})

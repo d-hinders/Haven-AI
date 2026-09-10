@@ -9,10 +9,19 @@
  * the agent-facing descriptions (`toolDescriptions`), and the response payload
  * types (`ToolSuccess` / `ToolFailure` / `ToolPayload`).
  *
- * NOTHING here executes a tool. Handlers stay in `tools.ts`; the registration
- * seam lives in `tools/registry.ts`; argument parsing lives in
- * `tools/parsing.ts`. Later capability slices (#2809–#2812) extract handler
- * behaviour against this seam. `HostedToolError` moved to
+ * NOTHING here executes a tool. Handlers live in the capability modules under
+ * `tools/` and in `tools.ts` itself, which composes them and stays the facade
+ * every embedder imports; the registration seam lives in `tools/registry.ts`;
+ * argument parsing lives in `tools/parsing.ts`. #2809 moved the first set out
+ * — the state, direct-payment and recovery handlers, to
+ * `tools/state-direct-recovery.ts` — and #2810–#2812 take the rest against
+ * this same seam. Two things deliberately absent from that sentence: it used
+ * to read "handlers stay in `tools.ts`", which #2809 made false — the
+ * load-bearing kind of module comment no gate names, so it is corrected in
+ * the slice that invalidated it rather than left for a later sweep — and it
+ * carries no count of how many have moved, because that would go stale on the
+ * next slice while each capability module's own tuple states what it owns in
+ * a form the tests can check. `HostedToolError` moved to
  * `tools/support/errors.ts` in #2808 — deliberately NOT here: locating the
  * class in the contract seam would fork the class `normalizeError`
  * instanceof-checks. Shared support (errors, guidance, cap/price, transport/
@@ -1021,3 +1030,28 @@ export interface ToolFailure {
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
+
+/**
+ * A registered hosted-MCP handler: one tool's `(input) => ToolPayload`.
+ *
+ * Named here rather than inline in `tools.ts` because the capability modules
+ * of epic #2806 each contribute a slice of the same map and must all describe
+ * it in the same words. The `unknown` input is deliberate: every handler
+ * parses its own arguments through `tools/parsing.ts` INSIDE its failure
+ * envelope, so a validation error leaves as a `ToolFailure` rather than as a
+ * raw throw (#2349).
+ */
+export type HostedToolHandler = (input: unknown) => Promise<ToolPayload>
+
+/**
+ * A handler map over some subset of the hosted tool surface.
+ *
+ * `HostedToolHandlers` (no argument) is the whole surface — what
+ * `createToolHandlers` returns. `HostedToolHandlers<'haven_pay' | …>` is one
+ * capability module's contribution, which is what makes a slice's ownership
+ * checkable at compile time instead of only at registry-assert time.
+ */
+export type HostedToolHandlers<N extends HostedToolName = HostedToolName> = Record<
+  N,
+  HostedToolHandler
+>

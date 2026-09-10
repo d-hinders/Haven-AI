@@ -122,7 +122,9 @@ export interface X402ExpectedPayment {
   /**
    * Resource URL of the x402 payment Haven prepared. On the hosted surface
    * that is `haven_pay_x402_quote` — `buildX402SigningContext` in
-   * `mcp-server/src/tools.ts` relays `intent.resourceUrl` here, and
+   * `mcp-server/src/tools/support/mcp-context.ts` (called from the
+   * `haven_pay_x402_quote` handler, which is still in `tools.ts`) relays
+   * `intent.resourceUrl` here, and
    * `haven_resume_x402_payment` re-emits the same context. Checked against
    * the merchant header's resource in `assertX402MatchesExpected`.
    */

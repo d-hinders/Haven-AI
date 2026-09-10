@@ -22,10 +22,12 @@ covers:
   - packages/sdk/src/merchant-discovery.ts
   - packages/mcp/src/tools.ts
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/tools/**
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
   - packages/mcp-server/src/tools.test.ts
+  - packages/mcp-server/src/tools/state-direct-recovery.test.ts
   - packages/mcp-server/src/strict-tool-input.test.ts
   - packages/backend/src/__tests__/x402-resume-producer-pin.test.ts
   - packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts
@@ -37,7 +39,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-08"
+last-verified: "2026-09-10"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -126,7 +128,8 @@ Source of truth:
   the settlement *compiler* (typed-data / header assembly primitives), not
   route orchestration.
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
-- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
+- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts) — the hosted facade: the catalog/quote/prepare, plain-HTTP x402 and paid-MCP completion handlers
+- [`packages/mcp-server/src/tools/state-direct-recovery.ts`](../../packages/mcp-server/src/tools/state-direct-recovery.ts) — the hosted state, direct-payment and recovery handlers since #2809, including `haven_submit`'s settlement-scheme branch and both expiry mappings
 - [`packages/backend/src/modules/mpp/reconciliation.ts`](../../packages/backend/src/modules/mpp/reconciliation.ts) — `POST /machine-payments/reconciliation-events`, and the #2292 acceptance-is-terminal precedence rule.
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
 

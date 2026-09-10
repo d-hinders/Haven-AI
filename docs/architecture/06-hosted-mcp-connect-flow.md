@@ -20,7 +20,7 @@ covers:
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-10"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -247,7 +247,9 @@ Hosted MCP provides identity and allowance reads, direct send/prepare/submit,
 x402 and MPP quote/resume/status operations, paid-MCP prepare/settle,
 receipt listing and verification, discovery, and gasless USDC sweep
 orchestration. The exact registered union is in
-`packages/mcp-server/src/tools.ts`.
+`packages/mcp-server/src/tools/contracts.ts` since #2807, re-exported by
+`packages/mcp-server/src/tools.ts`, which stays the facade every embedder
+imports.
 
 **An argument the tool does not declare is refused — on 20 of the 22 hosted
 tools (#2312, #2348, #2349, #2353).** It began with the money-path tools that read

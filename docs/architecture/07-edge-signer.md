@@ -7,6 +7,7 @@ covers:
   - packages/mcp-server/src/auth.ts
   - packages/mcp-server/src/server.ts
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/tools/state-direct-recovery.ts
   - packages/mcp-server/src/hosted-signer-integration.test.ts
   - packages/connect/src/config-writers.ts
   - packages/connect/src/api.ts
@@ -30,7 +31,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-10"
 ---
 
 # Haven — Edge Signer

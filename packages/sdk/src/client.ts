@@ -668,8 +668,10 @@ export class HavenClient {
    * allowance/budget summary a settle response carries.
    *
    * #1310/#1311 parity: this is the ONE home for logic that was duplicated
-   * verbatim in `packages/mcp-server/src/tools.ts` and `packages/mcp/src/tools.ts`
-   * (both hosted and local `haven_get_payment_status` handlers) — extracted
+   * verbatim in the hosted and local `haven_get_payment_status` handlers —
+   * `packages/mcp-server/src/tools/state-direct-recovery.ts` since #2809 (it
+   * was `packages/mcp-server/src/tools.ts` when this was written) and
+   * `packages/mcp/src/tools.ts` — extracted
    * here because both packages already depend on `@haven_ai/sdk` and call
    * methods on a `HavenClient` instance, so this needed no new dependency
    * edge. `funded_but_unsettled` is deliberately excluded: that phase means

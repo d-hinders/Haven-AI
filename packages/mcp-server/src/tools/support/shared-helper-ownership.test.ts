@@ -33,6 +33,17 @@
  *    seam (parseStrict) — re-grepped tools.ts, recorded here per the issue's
  *    re-derivation rule.
  *
+ *    RE-DERIVED AGAIN for #2809, now that s2809 is a real module rather than a
+ *    projected partition: the slice's ten handler bodies live in
+ *    `tools/state-direct-recovery.ts` and their imports are the measurement.
+ *    Nothing in the map moved. The six helpers those bodies call —
+ *    `runTool`, `buildAgentGuidance`, `isPendingApproval`,
+ *    `delegationSignFields`, `submitSignatureWithExpiryMapping`,
+ *    `submitErc7710WithExpiryMapping` — are all imported from support, and
+ *    `parseStrict` from the #2807 parsing seam; none is copied into the
+ *    capability. The `capabilityImports` check below reads that module's real
+ *    import specifiers rather than trusting this paragraph.
+ *
  * 2. ENFORCEMENT. The mapping is executable, with ground truth derived from
  *    the imported support-module namespaces at runtime rather than any hand-
  *    maintained list: every runtime export of every support module must be
@@ -68,7 +79,7 @@ import * as mcpContext from './mcp-context.js'
 import * as quoteResponse from './quote-response.js'
 import * as signerCompat from './signer-compat.js'
 import { parse, parseStrict } from '../parsing.js'
-import { createToolHandlers } from '../../tools.js'
+import { createToolHandlers, toolSchemas } from '../../tools.js'
 import {
   AGENT_ALLOWANCES_RESPONSE,
   AGENT_RESPONSE,
@@ -198,9 +209,11 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'Only the #2812 handlers call it; retained in support until #2812 moves it into its capability module.',
   // s2809 (#2809 state/direct/recovery capability, to come):
   submitErc7710WithExpiryMapping:
-    'Only the #2809 handlers call it, but it is DELIBERATE: it shares the expiry-mapping pattern with ' +
-    'submitSignatureWithExpiryMapping (s2809+s2812) and stays beside it in support until #2812 settles ' +
-    'where the shared pattern lives.',
+    'Only the #2809 handlers call it — from tools/state-direct-recovery.ts since #2809 landed — but it ' +
+    'is DELIBERATE: it shares the expiry-mapping pattern with submitSignatureWithExpiryMapping ' +
+    '(s2809+s2812) and stays beside it in support until #2812 settles where the shared pattern lives. ' +
+    'Moving it into the capability would fork the pattern across a module boundary on the signing path, ' +
+    'which is the failure this epic exists to make impossible.',
   // s2811 (#2811 plain-HTTP x402 capability, to come):
   coerceJsonField:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
@@ -209,6 +222,49 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
   resolveResumeState:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
 }
+
+/**
+ * The capability modules of the #2806 chain, DERIVED from the directory —
+ * every non-test `tools/*.ts` that is not one of #2807's three named seams.
+ *
+ * Hand-written, this was `['state-direct-recovery']`, and the three suites it
+ * drives — the sibling-import ban, the allowed-import allow-list and the
+ * handler-only rule — would have silently skipped #2810's module until someone
+ * remembered to append it (haven-reviewer, #2809 round 3). Those are exactly
+ * the rules that stop a capability reaching into a sibling or forking
+ * `submitSignatureWithExpiryMapping`, so applying them to modules that do not
+ * exist yet is the whole point.
+ *
+ * The seam list is an EXCLUSION rather than the capability list being an
+ * inclusion, so the default for a new file is "checked". A new seam has to be
+ * argued for here; a new capability needs nothing.
+ */
+const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry']
+
+const CAPABILITY_MODULES: readonly string[] = fs
+  .readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.ts') && !e.name.endsWith('.test.ts'))
+  .map((e) => e.name.replace(/\.ts$/, ''))
+  .filter((stem) => !TOOL_SEAM_MODULES.includes(stem))
+  .sort()
+
+/**
+ * The modules a capability is ALLOWED to import, as import-specifier prefixes.
+ *
+ * The #2806 dependency rule is one-directional: a capability may reach the
+ * #2807 contract/parsing/registry seams, the #2808 shared support, and the
+ * SDK — and never a sibling capability. Sibling reach is what would let two
+ * slices share a helper without either owning it, re-creating the monolith
+ * one import at a time.
+ */
+const CAPABILITY_ALLOWED_IMPORTS = [
+  '@haven_ai/sdk',
+  'zod',
+  './contracts.js',
+  './parsing.js',
+  './registry.js',
+  './support/',
+]
 
 /** Support module → its runtime export names, enumerated (not derived). */
 const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
@@ -343,17 +399,27 @@ describe('shared-helper ownership map (#2808)', () => {
     expect(typeof parseStrict).toBe('function')
   })
 
-  it('keeps tools.ts a handler+facade module: no helper definitions regrow there', () => {
-    // The facade keeps createToolHandlers + re-exports; the #2807 seam and
-    // #2808 support carry everything else. Read the SOURCE, not the runtime:
-    // a helper definition regrowing in tools.ts must move to its capability
-    // slice or support — this suite refuses to ratify it.
-    const fsMod = fs
-    const src = fsMod.readFileSync(new URL('../../tools.ts', import.meta.url), 'utf8')
+  const HANDLER_ONLY_MODULES: ReadonlyArray<readonly [label: string, relative: string]> = [
+    ['tools.ts', '../../tools.ts'],
+    ...CAPABILITY_MODULES.map((m) => [`tools/${m}.ts`, `../${m}.ts`] as const),
+  ]
+
+  it.each(HANDLER_ONLY_MODULES)('keeps %s handler-only: no support helper is re-defined there', (_label, rel) => {
+    // The facade keeps createToolHandlers + re-exports; a capability module
+    // keeps its own handlers; the #2807 seam and #2808 support carry
+    // everything else. Read the SOURCE, not the runtime: a helper definition
+    // regrowing HERE must move to support — this suite refuses to ratify it.
+    //
+    // #2809 widened this from the facade alone to every capability module.
+    // Copying a shared helper into a capability is the exact drift the epic
+    // exists to prevent (the issue names submitSignatureWithExpiryMapping,
+    // on the signing path, as the crossing that must not fork), and checking
+    // only tools.ts would have blessed a fork the moment the handlers left it.
+    const src = fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
     for (const name of Object.keys(HELPER_OWNERSHIP)) {
       expect(
         src.match(new RegExp(`(export )?(async )?function ${name}\\b|(export )?class ${name}\\b|(export )?const ${name}\\b`)),
-        `"${name}" must live in support, not be re-defined in tools.ts`,
+        `"${name}" must live in support, not be re-defined in ${_label}`,
       ).toBeNull()
     }
   })
@@ -411,6 +477,198 @@ describe('shared-helper ownership map (#2808)', () => {
       stale,
       `SINGLE_SLICE_RETAINED entries that are not single-slice HELPER_OWNERSHIP entries (re-judge the declaration): ${stale.join(', ')}`,
     ).toEqual([])
+  })
+})
+
+describe('capability-module dependency rule (#2806, first enforced #2809)', () => {
+  it('derives a non-empty capability set that contains this slice', () => {
+    // The derivation's own positive control (#2444): an empty or mis-rooted
+    // readdir would make every it.each below vacuous, and a suite with no
+    // cases reports exactly like a suite that passed.
+    expect(CAPABILITY_MODULES.length).toBeGreaterThan(0)
+    expect(CAPABILITY_MODULES).toContain('state-direct-recovery')
+    for (const seam of TOOL_SEAM_MODULES) {
+      expect(CAPABILITY_MODULES, `${seam} is a #2807 seam, not a capability`).not.toContain(seam)
+    }
+  })
+
+  /** Every `from '…'` specifier in a module's source, in file order. */
+  function importSpecifiers(stem: string): string[] {
+    const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
+    return [...src.matchAll(/\bfrom\s+'([^']+)'/g)].map((m) => m[1])
+  }
+
+  /**
+   * The rule as a PURE function, so it can be driven with inputs the
+   * repository does not contain yet.
+   *
+   * With one capability module in the tree, `siblingReach` over the real file
+   * is structurally incapable of returning a hit — there is no sibling to
+   * reach. A guard whose "no" is unreachable is not a guard, so the rule is
+   * separated from the file it is applied to: the synthetic case below proves
+   * the instrument can say yes, and the file case is then a meaningful no.
+   * #2810 is where the real file first CAN violate it.
+   */
+  function siblingReach(specifiers: string[], stem: string, capabilities: readonly string[]): string[] {
+    const siblings = capabilities.filter((m) => m !== stem)
+    return specifiers.filter((spec) =>
+      siblings.some((m) => spec === `./${m}.js` || spec.endsWith(`/${m}.js`)),
+    )
+  }
+
+  it('POSITIVE CONTROL: siblingReach names a capability reaching into a sibling', () => {
+    // The #2810 shape, written out before #2810 exists.
+    expect(
+      siblingReach(
+        ['@haven_ai/sdk', './support/errors.js', './state-direct-recovery.js'],
+        'catalog-quote-prepare',
+        ['state-direct-recovery', 'catalog-quote-prepare'],
+      ),
+    ).toEqual(['./state-direct-recovery.js'])
+    // …and stays silent on a module importing only seams and support.
+    expect(
+      siblingReach(
+        ['@haven_ai/sdk', './contracts.js', './support/errors.js'],
+        'catalog-quote-prepare',
+        ['state-direct-recovery', 'catalog-quote-prepare'],
+      ),
+    ).toEqual([])
+  })
+
+  it.each(CAPABILITY_MODULES)('%s imports no sibling capability module', (stem) => {
+    // Read the SPECIFIERS, not the runtime graph: a capability that reaches a
+    // sibling still resolves and still passes every behavioural test — the
+    // damage is structural, so the check has to be structural too.
+    const reached = siblingReach(importSpecifiers(stem), stem, CAPABILITY_MODULES)
+    expect(reached, `${stem} must not import a sibling capability: ${reached.join(', ')}`).toEqual([])
+  })
+
+  it.each(CAPABILITY_MODULES)('%s imports only the seams and support it is allowed to', (stem) => {
+    // The allow-list is the positive form of the rule above. It also catches
+    // the case the sibling check cannot see: a capability reaching BACKWARDS
+    // into `tools.ts`, the facade that composes it, which would make the
+    // module graph cyclic and the extraction cosmetic.
+    const disallowed = importSpecifiers(stem).filter(
+      (spec) => !CAPABILITY_ALLOWED_IMPORTS.some((allowed) => spec.startsWith(allowed)),
+    )
+    expect(
+      disallowed,
+      `${stem} imports outside the capability contract (contracts/parsing/registry seams, support, SDK): ${disallowed.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('takes the five named cross-slice helpers from shared ownership, never a copy', () => {
+    // The issue names five by hand — submitSignatureWithExpiryMapping (the one
+    // #2809↔#2812 crossing, on the signing path), buildAgentGuidance,
+    // isPendingApproval, runTool and parseStrict. Four are support exports;
+    // parseStrict is #2807's parsing seam and must NOT come from support.
+    const src = fs.readFileSync(new URL('../state-direct-recovery.ts', import.meta.url), 'utf8')
+    const specifierFor = (name: string): string | undefined =>
+      [...src.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g)]
+        .filter(([, names]) => names.split(',').some((n) => n.trim().replace(/^type\s+/, '') === name))
+        .map(([, , spec]) => spec)[0]
+
+    for (const name of [
+      'submitSignatureWithExpiryMapping',
+      'buildAgentGuidance',
+      'isPendingApproval',
+      'runTool',
+    ]) {
+      const spec = specifierFor(name)
+      expect(spec, `"${name}" must be imported by the capability, not re-implemented in it`).toBeDefined()
+      expect(spec, `"${name}" must come from shared support`).toMatch(/^\.\/support\//)
+      // …and support must actually be its declared owner, so the import is
+      // checked against the derived map rather than against a path shape.
+      expect(HELPER_OWNERSHIP[name]?.module, `"${name}" is not a mapped support helper`).toBeDefined()
+      expect(spec).toBe(`./support/${HELPER_OWNERSHIP[name].module}.js`)
+    }
+    expect(specifierFor('parseStrict'), 'parseStrict stays in the #2807 parsing seam').toBe(
+      './parsing.js',
+    )
+  })
+
+  it('is not shadowed: no capability tool is re-declared in the tools.ts literal', () => {
+    // The gap haven-reviewer measured on this PR. A key written into the
+    // facade's own object literal AFTER the spread silently shadows the
+    // capability's handler: TS1117 does not reach across a spread, and no key
+    // is excess because both sides are HostedToolName, so `tsc` exits 0 on a
+    // duplicate `haven_pay`. Their mutation was caught only by behavioural
+    // tests, and only because its body DIVERGED — a stale duplicate with an
+    // identical body would pass every other check in the tree.
+    //
+    // Source-read, because the shadow is invisible at runtime: by the time a
+    // map exists the duplicate has already collapsed last-wins, which is the
+    // same reason the #2807 registry twin takes entry LISTS rather than maps.
+    const facade = fs.readFileSync(new URL('../../tools.ts', import.meta.url), 'utf8')
+    // The optional quotes are load-bearing: `'haven_pay':` is a valid duplicate
+    // key that an unquoted-only pattern walks straight past, and the union
+    // check below would NOT catch it (the name is in `owned`, so the union is
+    // still 22). Nothing normalises the quoting away — the repository has no
+    // prettier or eslint config and no code-formatting or style-lint job. (Its
+    // twenty `lint:*` scripts are prose and contract ratchets — copy, wire
+    // types, db mocks, workspace pins, retired-rail prose — not formatters, so
+    // none of them would rewrite a quoted key.)
+    const literalKeys = [...facade.matchAll(/^ {4}'?(haven_[a-z0-9_]+)'?:/gm)].map((m) => m[1])
+    const owned = new Set<string>()
+    for (const stem of CAPABILITY_MODULES) {
+      const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
+      // Anchor the end to the START of the tuple, not to the file: a module
+      // declaring any other `] as const` array above its `_TOOLS` tuple would
+      // otherwise slice to '' and drop its tools out of `owned` silently.
+      const start = src.indexOf('_TOOLS = [')
+      expect(
+        start,
+        `tools/${stem}.ts declares no _TOOLS tuple. Either it is a capability module missing one, ` +
+          `or it is a new SEAM — in which case add its stem to TOOL_SEAM_MODULES with a reason, ` +
+          `rather than leaving it to fail here.`,
+      ).toBeGreaterThan(-1)
+      const tuple = src.slice(start, src.indexOf('] as const', start))
+      for (const [, name] of tuple.matchAll(/'(haven_[a-z0-9_]+)'/g)) owned.add(name)
+    }
+    expect(owned.size, 'the capability tuple parse found no tools — the probe is broken').toBeGreaterThan(0)
+    expect(literalKeys.length, 'the facade literal parse found no keys — the probe is broken').toBeGreaterThan(0)
+    const shadowed = literalKeys.filter((k) => owned.has(k))
+    expect(
+      shadowed,
+      `tools.ts re-declares handlers a capability module already owns; the literal wins silently: ${shadowed.join(', ')}`,
+    ).toEqual([])
+    // …and the two halves together still cover the whole surface, so this
+    // check cannot be satisfied by a facade that simply lost its literal.
+    expect(
+      new Set([...literalKeys, ...owned]).size,
+      'the facade literal plus the capability tuples must still cover the whole hosted surface — a short union means one side parsed less than it should',
+    ).toBe(Object.keys(toolSchemas).length)
+  })
+
+  it('contributes exactly the ten tools it claims, and only those', async () => {
+    const { STATE_DIRECT_RECOVERY_TOOLS, createStateDirectRecoveryHandlers } = await import(
+      '../state-direct-recovery.js'
+    )
+    const contributed = Object.keys(
+      createStateDirectRecoveryHandlers(keylessClient()),
+    ).sort()
+    expect(contributed).toEqual([...STATE_DIRECT_RECOVERY_TOOLS].sort())
+    expect(contributed).toEqual(
+      [
+        'haven_get_agent',
+        'haven_get_allowances',
+        'haven_get_payment_status',
+        'haven_get_resume_state',
+        'haven_list_receipts',
+        'haven_pay',
+        'haven_send',
+        'haven_submit',
+        'haven_sweep_delegate',
+        'haven_verify_receipt',
+      ],
+    )
+    // And the facade still answers for the whole surface: the composed map is
+    // a superset, so a capability silently dropping a tool cannot pass here
+    // while `createToolHandlers` quietly loses it.
+    const composed = createToolHandlers(keylessClient())
+    for (const name of contributed) {
+      expect(typeof (composed as Record<string, unknown>)[name]).toBe('function')
+    }
   })
 })
 

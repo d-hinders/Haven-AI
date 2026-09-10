@@ -125,7 +125,8 @@ describe('generic skill content', () => {
   })
 
   it('names the declared `to` field for haven_pay, not `recipient` (#2393)', () => {
-    // The hosted haven_pay schema (packages/mcp-server/src/tools.ts) declares
+    // The hosted haven_pay schema (packages/mcp-server/src/tools/contracts.ts,
+    // re-exported by tools.ts) declares
     // `token`, `amount`, `to` and `idempotency_key`. `recipient` is
     // haven_send's spelling. This skill told agents to send `recipient` to
     // haven_pay, which the server refuses (`to` is required) — shipped

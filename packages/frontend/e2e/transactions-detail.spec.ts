@@ -29,7 +29,17 @@ test.describe('transaction history — x402 display + detail panel', () => {
     await expect(page.getByRole('heading', { name: 'Transaction history' })).toBeVisible()
     // #2357: the row title is user-facing copy now — the protocol name moved
     // to the detail drawer's section heading, asserted below.
-    await expect(page.getByText('Agent payment').first()).toBeVisible()
+    // #2834: scoped to the table. `getByText('Agent payment')` is a
+    // case-insensitive substring match, and the document <title> ("Haven,
+    // agent payments within your rules") contains it. Next's dev server
+    // renders that <title> into <body>, where Playwright's text engine
+    // reaches it and — first in DOM order — shadows the row, so the unscoped
+    // locator resolved to the hidden <title> and could never pass. The
+    // production build puts the <title> in <head> (out of the text engine's
+    // reach), which is why the same spec passed in CI. Scoping to the table
+    // binds the assertion to the row and makes it immune to the page title
+    // in either environment.
+    await expect(page.getByRole('table').getByText('Agent payment')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeEnabled()
 
     // Clicking the row opens the per-type detail panel.

@@ -83,6 +83,13 @@ describe('MobileTabBar — active cell marks itself the way the drawer does (#28
 
     const active = screen.getByRole('link', { name: 'Agents' })
     expect(active.className).toContain('text-[var(--v2-brand)]')
+    // `relative` is what SCOPES the rail to this cell. Drop it — a plausible
+    // tidy-up in a 240-char class stack — and the absolutely-positioned rail
+    // resolves against the nearest positioned ancestor, which for the live bar
+    // is the `fixed` <nav>: one 2px line across the WHOLE bar instead of over
+    // the active cell. Every other assertion here stays green through that
+    // edit, which is exactly why this one is separate (round-two review).
+    expect(active.className).toContain('relative')
 
     const rail = railOf(active)
     expect(rail).not.toBeNull()

@@ -68,6 +68,10 @@ describe('isUpdatingSnapshots covers every spelling Playwright accepts (#2827)',
     ['a spec filter', ['design-system.visual.spec.ts']],
     // -g takes a REQUIRED value, so this is grep "u" — an ordinary run.
     ['-gu, which is grep "u" and not an update', ['-gu']],
+    // Pins the RATIONALE for `/^-x*u/` over `/^-[xh]*u/`: `-h` never clusters
+    // (`playwright test -hu` is rejected as an unknown option), so no runtime
+    // behaviour distinguishes the two classes — only this case records why.
+    ['-hu, which Playwright rejects outright', ['-hu']],
     ['-ju, which is workers "u"', ['-ju']],
   ])('does not fire on %s', (_label, args) => {
     expect(updating([...ARGV, ...(args as string[])])).toBe(false)

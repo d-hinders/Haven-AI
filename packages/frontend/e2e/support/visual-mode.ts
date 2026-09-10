@@ -102,16 +102,21 @@ export const VISUAL_SPECS_ENABLED = VISUAL_COMPARE || VISUAL_STRUCTURE_ONLY
  * baseline regeneration and are out of scope by choice, not oversight: the
  * `updateSnapshots` field in `playwright.config.ts` itself, and the
  * test-server `params.updateSnapshots` that UI mode and the VS Code extension
- * use. Neither can corrupt a baseline under structure-only — the matcher is
- * replaced wholesale, so nothing is written either way — and reaching them
- * means editing the config three lines from this refusal, or running `--ui`
- * with the variable already exported. The boundary is stated rather than
+ * use. Neither can CORRUPT a baseline under structure-only — the matcher is
+ * replaced wholesale, so nothing is written either way. But corruption is not
+ * the hazard this guards: the hazard is a run reporting success having
+ * regenerated nothing, and both routes can still produce exactly that. What
+ * keeps them out of scope is reachability — getting there means editing the
+ * config three lines from this refusal, or running `--ui` with the variable
+ * already exported. The boundary is stated rather than
  * implied because this predicate has been corrected three times, and the next
  * correction should start by asking whether the CLASS is right.
  *
  * The enumeration is version-bound: a future Playwright that adds a value-less
- * short option would widen the cluster silently. The version is pinned in
- * `package.json`; re-check this on a bump.
+ * short option would widen the cluster silently. `package.json` carries a
+ * CARET range (`^1.60.0`), so that version can arrive without a diff anyone
+ * re-reads — re-check this against the lockfile, not against a bump you expect
+ * to see.
  */
 const CLUSTERED_UPDATE_SHORT = /^-x*u/
 

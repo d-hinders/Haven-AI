@@ -336,6 +336,17 @@ export default function Sidebar() {
         1px everywhere else — a visible step. Without it the bar's own border
         runs unbroken underneath.
 
+        The surface FOLLOWS the drawer (#2820). Closed, the button paints
+        `--v2-bg` — byte-identical to the bar slot it was before #2820, and
+        `MobileTabBar` paints the same token, so the fifth slot does not change
+        colour against its four neighbours. Open, it is transparent: the
+        control floats on the `--v2-z-nav-toggle` tier over the now full-width
+        drawer, and with the scrim gone there is no page behind it — an opaque
+        box there is exactly the detached white rectangle the issue names,
+        belonging to neither the drawer nor the bar. A background that exists
+        only while the drawer is closed lets the single control belong to
+        whichever surface is showing.
+
         The accessible name is unchanged, and that is load-bearing rather than
         incidental: `dismissMobileSidebar` in `scripts/screenshot.mjs` waits on
         `getByRole('button', { name: 'Open sidebar' })` from 25 call sites, with
@@ -345,7 +356,9 @@ export default function Sidebar() {
       <button
         onClick={() => setCollapsed(!collapsed)}
         aria-label={collapsed ? 'Open sidebar' : 'Close sidebar'}
-        className="lg:hidden fixed bottom-[var(--v2-safe-bottom)] right-[var(--v2-safe-right)] z-[var(--v2-z-nav-toggle)] w-1/5 h-[var(--v2-tab-bar-h)] flex flex-col items-center justify-center gap-1 bg-[var(--v2-bg)] text-xs font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
+        className={`lg:hidden fixed bottom-[var(--v2-safe-bottom)] right-[var(--v2-safe-right)] z-[var(--v2-z-nav-toggle)] w-1/5 h-[var(--v2-tab-bar-h)] flex flex-col items-center justify-center gap-1 text-xs font-medium text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
+          collapsed ? 'bg-[var(--v2-bg)]' : 'bg-transparent'
+        }`}
       >
         {/* The visible state follows the drawer (#2731 review). It used to
             read "More" with a hamburger in BOTH states while the accessible
@@ -384,14 +397,25 @@ export default function Sidebar() {
         paint. So this reuses the existing dim token instead, blur included in
         what it deliberately omits.
       */}
-      <MobileTabBar items={baseNavItems} />
+      {/*
+        No scrim below `lg` (#2820).
 
-      {!collapsed && (
-        <div
-          className="lg:hidden fixed inset-0 v2-modal-backdrop z-[var(--v2-z-nav-scrim)]"
-          onClick={() => setCollapsed(true)}
-        />
-      )}
+        The drawer used to slide over a `v2-modal-backdrop` sheet — the right
+        answer while it was a 240px column, and a defect once #2731 made it
+        "More": at 390px the sheet left ~150px of dimmed page down the right
+        edge, so the app's own navigation read as a slide-over, and the toggle
+        read as a detached bright rectangle belonging to neither surface. The
+        drawer is `w-full` below `lg` now, so there is nothing left to dim: the
+        drawer IS the screen, and the only thing beneath it at full width is the
+        tab bar it opened from.
+
+        --v2-z-nav-scrim stays in the scale untouched. Its only consumer was
+        this element, and the tier it occupies is still real ordering —
+        `z-index-scale.test.ts` asserts the ascent through it, and retiring a
+        tier because its consumer left would renumber the scale for nothing.
+      */}
+
+      <MobileTabBar items={baseNavItems} />
 
       {/*
         Safe-area insets on the drawer (#2730), below `lg` only — at `lg` this
@@ -408,9 +432,47 @@ export default function Sidebar() {
         region's height, so both ends clear their obstruction and the scroll
         region absorbs the difference. `pl` covers the landscape notch, where
         the drawer is on the eaten side.
+
+        The drawer is `w-full` below `lg` (#2820). Under #2731 the tab bar is
+        primary navigation and this surface is "More" — and at 390pt a 240px
+        column sliding over a scrim is a desktop artifact: ~150px of dimmed
+        page down the right edge, a dead middle band, and the toggle reading as
+        a detached bright rectangle. Full width is also the iOS idiom for a
+        tab bar's More: a full-height sheet, not a slide-over. `w-full` below
+        the breakpoint and `lg:w-[240px]` at it keeps the desktop column
+        byte-identical; there is no desktop behaviour in the diff at all.
+
+        Two #2820 consequences live in the classes below:
+
+        1. `max-lg:border-r-0`. The 1px `border-r` was the column's edge
+           against the page. Full width, it is a stray vertical line inside the
+           screen's right edge, and `--v2-border` on `--v2-surface` is visible
+           against both. The border returns at `lg` with the column.
+
+        2. The footer's `max-lg:pr-[calc(20%+var(--v2-safe-right))]`. The
+           Close toggle is `fixed w-1/5` on a higher tier and floats over the
+           drawer's bottom-right corner below `lg` — without a yield it covers
+           the user card's kebab, an interactive control under an invisible
+           hit area, the #1749 defect class one surface over. 20% is exactly
+           the toggle's fifth-of-a-screen column; at `lg` the toggle is
+           `lg:hidden`, so the padding must not exist there. The `Settings`
+           row above carries the same reserve so the two footer rows keep
+           their shared right edge.
+
+        The nav's `max-lg:flex max-lg:flex-col` + the groups' `max-lg:my-auto`
+        kill the dead middle band (#2820 item 2): the desktop column is taller
+        than its content, so the footer sat at the bottom and everything above
+        it left a gap roughly as tall as the nav itself. Auto margins
+        distribute the free space evenly BETWEEN the groups (top and bottom
+        margins cancel pairwise), dropping the first group back to the logo
+        and pinning the last against the footer — on a phone, where the nav
+        has less room than it wants, they resolve to 0 and the list is simply
+        top-aligned, so `overflow-y-auto` keeps doing its job and short or
+        landscape viewports cannot clip the top the way a `justify-evenly`
+        distribution would.
       */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-[var(--v2-z-nav-drawer)] w-[240px] h-screen lg:h-full max-lg:pt-[var(--v2-safe-top)] max-lg:pb-[var(--v2-safe-bottom)] max-lg:pl-[var(--v2-safe-left)] bg-[var(--v2-surface)] border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-[var(--v2-z-nav-drawer)] w-full lg:w-[240px] h-screen lg:h-full max-lg:border-r-0 max-lg:pt-[var(--v2-safe-top)] max-lg:pb-[var(--v2-safe-bottom)] max-lg:pl-[var(--v2-safe-left)] bg-[var(--v2-surface)] lg:border-r border-[var(--v2-border)] flex flex-col flex-shrink-0 transition-transform duration-200 ${
           collapsed ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'
         }`}
       >
@@ -431,9 +493,17 @@ export default function Sidebar() {
             every `getByRole('navigation')` in the suite — `Sidebar.test.tsx`
             was reading `document.querySelector('nav')` and silently started
             measuring the tab bar instead of this drawer. */}
-        <nav aria-label="All sections" className="flex-1 px-3 py-4 overflow-y-auto">
+        {/* `max-lg:flex max-lg:flex-col` (#2820): below `lg` the free vertical
+            space of the drawer's dead middle band is distributed evenly
+            BETWEEN the groups by each group's `max-lg:my-auto` (see the
+            aside's comment above). At `lg` the column is a fixed 240px rail
+            and the block layout is byte-identical to pre-#2820. */}
+        <nav
+          aria-label="All sections"
+          className="flex-1 px-3 py-4 overflow-y-auto max-lg:flex max-lg:flex-col"
+        >
           {navGroups.map((group, groupIndex) => (
-            <div key={group.label} className={groupIndex > 0 ? 'mt-5' : ''}>
+            <div key={group.label} className={groupIndex > 0 ? 'mt-5 max-lg:my-auto' : 'max-lg:my-auto'}>
               <p className="v2-text-meta px-3 pb-1 uppercase tracking-wider text-[var(--v2-ink-3)]">
                 {group.label}
               </p>
@@ -455,9 +525,16 @@ export default function Sidebar() {
         </nav>
 
         {/* Bottom section */}
-        <div className="flex-shrink-0 border-t border-[var(--v2-border)]">
+        {/* `max-lg:pr-[calc(20%+var(--v2-safe-right))]` (#2820): the Close
+            toggle is `fixed w-1/5` on the `--v2-z-nav-toggle` tier and floats
+            over the full-width drawer's bottom-right corner below `lg`. This
+            yield keeps the kebab — an interactive control — clear of its hit
+            area. The `Settings` row below carries the same reserve, so the
+            footer's two rows keep a shared right edge. `lg` needs none: the
+            toggle is `lg:hidden` there. */}
+        <div className="flex-shrink-0 border-t border-[var(--v2-border)] max-lg:pr-[calc(20%+var(--v2-safe-right))]">
           {/* Settings */}
-          <div className="px-3 py-2">
+          <div className="px-3 py-2 max-lg:pr-0">
             <NavLink
               item={{ label: 'Settings', href: '/settings', icon: icons.settings }}
               active={pathname === '/settings'}

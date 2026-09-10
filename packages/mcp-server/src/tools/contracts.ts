@@ -1021,3 +1021,28 @@ export interface ToolFailure {
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
+
+/**
+ * A registered hosted-MCP handler: one tool's `(input) => ToolPayload`.
+ *
+ * Named here rather than inline in `tools.ts` because the capability modules
+ * of epic #2806 each contribute a slice of the same map and must all describe
+ * it in the same words. The `unknown` input is deliberate: every handler
+ * parses its own arguments through `tools/parsing.ts` INSIDE its failure
+ * envelope, so a validation error leaves as a `ToolFailure` rather than as a
+ * raw throw (#2349).
+ */
+export type HostedToolHandler = (input: unknown) => Promise<ToolPayload>
+
+/**
+ * A handler map over some subset of the hosted tool surface.
+ *
+ * `HostedToolHandlers` (no argument) is the whole surface — what
+ * `createToolHandlers` returns. `HostedToolHandlers<'haven_pay' | …>` is one
+ * capability module's contribution, which is what makes a slice's ownership
+ * checkable at compile time instead of only at registry-assert time.
+ */
+export type HostedToolHandlers<N extends HostedToolName = HostedToolName> = Record<
+  N,
+  HostedToolHandler
+>

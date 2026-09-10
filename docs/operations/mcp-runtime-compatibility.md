@@ -38,6 +38,19 @@ last-verified: "2026-09-10"
 > response shapes, and payment behavior — is unchanged, and
 > `parse`/`parseStrict` remain in the #2807 parsing seam.
 >
+> **Recent re-verification (#2809):** the hosted server's state,
+> direct-payment and recovery handlers — `haven_get_agent`,
+> `haven_get_allowances`, `haven_get_payment_status`,
+> `haven_get_resume_state`, `haven_send`, `haven_pay`, `haven_submit`,
+> `haven_sweep_delegate`, `haven_list_receipts` and `haven_verify_receipt` —
+> moved from `tools.ts` into `src/tools/state-direct-recovery.ts` and are
+> composed back into `createToolHandlers` from there. The runtime contract is
+> again unchanged: the same tool names are registered, the strict/permissive
+> split is untouched (`haven_get_agent` and `haven_get_allowances` remain the
+> two permissive tools, and both moved), schemas and descriptions still come
+> from the #2807 contracts module, and the version-skew and consent-hash
+> contracts do not move because the registered tool-NAME set does not.
+>
 > **Two sections sit outside that scope**, each for its own reason:
 >
 > - [Where the Node floor is enforced](#where-the-node-floor-is-enforced) applies

@@ -55,3 +55,77 @@ describe('MobileTabBar — the presentational copy is inert (#2819)', () => {
     expect(nav.hasAttribute('inert')).toBe(false)
   })
 })
+
+/**
+ * The one active idiom, asserted on the RENDERED markup (#2818).
+ *
+ * Before this, the bar's active state had no unit coverage at all — the only
+ * automated evidence was the visual baselines, which is evidence a reviewer
+ * reads rather than evidence a gate reports, and which was stale on this very
+ * change until the Linux regeneration ran. These three cases are what would
+ * have gone red if the rail were dropped, applied to every cell, or left
+ * visible to the accessibility tree.
+ *
+ * Asserted on the element, not on a class string in the source: the defect
+ * class here is "the active cell renders like the inactive one", and a source
+ * grep for `--v2-brand` finds the token in a comment just as happily.
+ */
+describe('MobileTabBar — active cell marks itself the way the drawer does (#2818)', () => {
+  const renderBar = () =>
+    render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
+
+  /** The rail: a 2px brand span, absolutely placed on the cell's top edge. */
+  const railOf = (link: HTMLElement) =>
+    link.querySelector('span[aria-hidden="true"].absolute')
+
+  it('gives the active cell brand ink and a rail the a11y tree cannot see', () => {
+    renderBar()
+
+    const active = screen.getByRole('link', { name: 'Agents' })
+    expect(active.className).toContain('text-[var(--v2-brand)]')
+    // `relative` is what SCOPES the rail to this cell. Drop it — a plausible
+    // tidy-up in a 240-char class stack — and the absolutely-positioned rail
+    // resolves against the nearest positioned ancestor, which for the live bar
+    // is the `fixed` <nav>: one 2px line across the WHOLE bar instead of over
+    // the active cell. Every other assertion here stays green through that
+    // edit, which is exactly why this one is separate (round-two review).
+    // `classList.contains`, not `className.toContain`: the substring form also
+    // passes on `lg:relative` or `sm:relative`, neither of which scopes the
+    // rail unconditionally.
+    expect(active.classList.contains('relative')).toBe(true)
+
+    const rail = railOf(active)
+    expect(rail).not.toBeNull()
+    // `aria-hidden` because the rail restates `aria-current`, which is already
+    // on the link — announcing it twice is the accessibility defect, not the
+    // decoration.
+    expect(rail?.getAttribute('aria-hidden')).toBe('true')
+    expect(rail?.className).toContain('top-0')
+    expect(rail?.className).toContain('h-0.5')
+    expect(rail?.className).toContain('bg-[var(--v2-brand)]')
+  })
+
+  it('leaves every inactive cell in ink-3, with no rail', () => {
+    // The control. Without it, a rail rendered unconditionally would satisfy
+    // the case above while erasing the distinction the rail exists to draw.
+    renderBar()
+
+    for (const name of ['Dashboard', 'Transactions', 'Accounts']) {
+      const inactive = screen.getByRole('link', { name })
+      expect(inactive.className).toContain('text-[var(--v2-ink-3)]')
+      expect(inactive.className).not.toContain('text-[var(--v2-brand)]')
+      expect(railOf(inactive)).toBeNull()
+    }
+  })
+
+  it('keeps aria-current on exactly one tab — the rail did not replace it', () => {
+    // The rail is a second, VISUAL cue. It must not have become the only one:
+    // `aria-current` is what a screen reader has, and it is unaffected by
+    // anything above.
+    const { container } = renderBar()
+
+    const current = container.querySelectorAll('a[aria-current="page"]')
+    expect(current).toHaveLength(1)
+    expect(current[0]).toHaveAttribute('href', '/agents')
+  })
+})

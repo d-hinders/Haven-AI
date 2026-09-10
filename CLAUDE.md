@@ -296,9 +296,12 @@ copy lint. Two are judgement, so no check reports them skipped: the
 families in [`design-system.md`](docs/product/design-system.md)), named here so
 none is a surprise, not restated. Three consequences: read a green
 visual-regression tick narrowly — the job prints the baselines it compared, a
-screen absent from that list has none; that gate is **required** on `dev` and
-`main` today, and epic #2632's owner step O2 (a GitHub-settings action, not
-applied yet) makes it `main`-only, advisory on `dev`; and a `blocking` or
+screen absent from that list has none; that gate is **required on `main` only**
+— epic #2632's owner step O2 HAS been applied, so it is advisory on `dev`, and
+a frontend PR into `dev` can merge with it red (which is how #2821's PR left
+`agent-detail-research-mobile.png` stale on `dev`, for an unrelated PR to
+absorb). Read the live list, never this sentence:
+`gh api repos/d-hinders/Haven-AI/rules/branches/dev`; and a `blocking` or
 `should-fix` finding from either **review** pass — `haven-reviewer` (code) or
 `haven-design-reviewer` (rendered) — pauses auto-merge, a `nit` does not.
 

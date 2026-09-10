@@ -31,7 +31,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-10"
 ---
 
 # Haven — Edge Signer

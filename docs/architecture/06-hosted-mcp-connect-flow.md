@@ -20,7 +20,7 @@ covers:
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-10"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract

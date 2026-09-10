@@ -224,14 +224,29 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
 }
 
 /**
- * The capability modules of the #2806 chain that exist TODAY, by file stem
- * under `tools/`.
+ * The capability modules of the #2806 chain, DERIVED from the directory —
+ * every non-test `tools/*.ts` that is not one of #2807's three named seams.
  *
- * #2809 is the first. #2810–#2812 append theirs, and every check keyed on this
- * list then covers them without being rewritten — which is the point of it
- * being a list rather than a path repeated in each assertion.
+ * Hand-written, this was `['state-direct-recovery']`, and the three suites it
+ * drives — the sibling-import ban, the allowed-import allow-list and the
+ * handler-only rule — would have silently skipped #2810's module until someone
+ * remembered to append it (haven-reviewer, #2809 round 3). Those are exactly
+ * the rules that stop a capability reaching into a sibling or forking
+ * `submitSignatureWithExpiryMapping`, so applying them to modules that do not
+ * exist yet is the whole point.
+ *
+ * The seam list is an EXCLUSION rather than the capability list being an
+ * inclusion, so the default for a new file is "checked". A new seam has to be
+ * argued for here; a new capability needs nothing.
  */
-const CAPABILITY_MODULES = ['state-direct-recovery'] as const
+const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry']
+
+const CAPABILITY_MODULES: readonly string[] = fs
+  .readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.ts') && !e.name.endsWith('.test.ts'))
+  .map((e) => e.name.replace(/\.ts$/, ''))
+  .filter((stem) => !TOOL_SEAM_MODULES.includes(stem))
+  .sort()
 
 /**
  * The modules a capability is ALLOWED to import, as import-specifier prefixes.
@@ -466,6 +481,17 @@ describe('shared-helper ownership map (#2808)', () => {
 })
 
 describe('capability-module dependency rule (#2806, first enforced #2809)', () => {
+  it('derives a non-empty capability set that contains this slice', () => {
+    // The derivation's own positive control (#2444): an empty or mis-rooted
+    // readdir would make every it.each below vacuous, and a suite with no
+    // cases reports exactly like a suite that passed.
+    expect(CAPABILITY_MODULES.length).toBeGreaterThan(0)
+    expect(CAPABILITY_MODULES).toContain('state-direct-recovery')
+    for (const seam of TOOL_SEAM_MODULES) {
+      expect(CAPABILITY_MODULES, `${seam} is a #2807 seam, not a capability`).not.toContain(seam)
+    }
+  })
+
   /** Every `from '…'` specifier in a module's source, in file order. */
   function importSpecifiers(stem: string): string[] {
     const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
@@ -587,7 +613,12 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
       // declaring any other `] as const` array above its `_TOOLS` tuple would
       // otherwise slice to '' and drop its tools out of `owned` silently.
       const start = src.indexOf('_TOOLS = [')
-      expect(start, `${stem} declares no _TOOLS tuple — the probe is broken`).toBeGreaterThan(-1)
+      expect(
+        start,
+        `tools/${stem}.ts declares no _TOOLS tuple. Either it is a capability module missing one, ` +
+          `or it is a new SEAM — in which case add its stem to TOOL_SEAM_MODULES with a reason, ` +
+          `rather than leaving it to fail here.`,
+      ).toBeGreaterThan(-1)
       const tuple = src.slice(start, src.indexOf('] as const', start))
       for (const [, name] of tuple.matchAll(/'(haven_[a-z0-9_]+)'/g)) owned.add(name)
     }

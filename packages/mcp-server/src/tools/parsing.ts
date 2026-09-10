@@ -6,11 +6,12 @@
  * schema (#2292/#2312 — its docstring below records the measured wire
  * behaviour that fixed its layer).
  *
- * `HostedToolError` stays in `tools.ts` (#2808 owns its move to shared safety
- * support). To keep the refusal a single class — duplicating it here would
- * fork `normalizeError`'s instanceof branch — the throw site is injected:
- * `tools.ts` calls `setStrictRefusalThrower` at module load and `parseStrict`
- * throws through it. The default below keeps the structured fields on a plain
+ * `HostedToolError` lives in `tools/support/errors.ts` (#2808's shared safety
+ * support). This module still never imports it — the throw site is injected,
+ * which keeps the refusal a single class (duplicating the class here would
+ * fork `normalizeError`'s instanceof branch): the `tools.ts` facade calls
+ * `setStrictRefusalThrower` at module load and `parseStrict` throws through
+ * it. The default below keeps the structured fields on a plain
  * Error and exists only for direct `parsing.ts` imports that never wire the
  * real thrower (the server always wires it).
  */

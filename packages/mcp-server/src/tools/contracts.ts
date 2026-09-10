@@ -12,9 +12,11 @@
  * NOTHING here executes a tool. Handlers stay in `tools.ts`; the registration
  * seam lives in `tools/registry.ts`; argument parsing lives in
  * `tools/parsing.ts`. Later capability slices (#2809–#2812) extract handler
- * behaviour against this seam. `HostedToolError` deliberately remains in
- * `tools.ts` until #2808 moves it to shared safety support — moving it here
- * would fork the class `normalizeError` instanceof-checks.
+ * behaviour against this seam. `HostedToolError` moved to
+ * `tools/support/errors.ts` in #2808 — deliberately NOT here: locating the
+ * class in the contract seam would fork the class `normalizeError`
+ * instanceof-checks. Shared support (errors, guidance, cap/price, transport/
+ * context, quote responses) also landed under `tools/support/` in #2808.
  */
 import { z } from 'zod/v3'
 import { composeDescription, toolDescriptions as sharedDescriptions } from '@haven_ai/sdk'

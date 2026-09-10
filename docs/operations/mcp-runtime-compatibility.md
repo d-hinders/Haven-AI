@@ -28,6 +28,16 @@ last-verified: "2026-09-10"
 > documented as stranded-balance recovery only. This does not change the local
 > runtime's capabilities, consent hash, or version-skew contract.
 >
+> **Recent re-verification (#2808):** the hosted server's cross-tool safety
+> support (error normalization and `HostedToolError`, `runTool`, agent
+> guidance and purchase summaries, cap/price selection, MCP transport
+> serialization and merchant-context validation, the expiry-aware signing
+> context, quote responses and payment-status predicates) moved from
+> `tools.ts` into `src/tools/support/*`, still behind the same facade. The
+> runtime contract — tool names, schemas, input policies, refusal text,
+> response shapes, and payment behavior — is unchanged, and
+> `parse`/`parseStrict` remain in the #2807 parsing seam.
+>
 > **Two sections sit outside that scope**, each for its own reason:
 >
 > - [Where the Node floor is enforced](#where-the-node-floor-is-enforced) applies
@@ -1160,7 +1170,9 @@ was already sufficient for the acceptance bar "hosted MCP quote/preflight
 responses surface compatibility requirements in a stable field"; `fallback`
 is the one field #1309 added, because it was the one piece of `check` an
 agent could not previously read without parsing a sentence. See
-`signerCompatibilityNotice` in `packages/mcp-server/src/tools.ts`.
+`signerCompatibilityNotice` — since #2808 in the hosted server's signer-compat
+support module (`src/tools/support/signer-compat.ts`, re-exported through
+`tools.ts`).
 
 The advertised set is **derived** from `SUPPORTED_X402_EXPECTED_VERSIONS` /
 `SUPPORTED_SWEEP_BINDING_VERSIONS`, never a second literal — including the

@@ -85,7 +85,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-09-09"
+last-verified: "2026-09-10"
 ---
 
 # Haven Design System
@@ -367,6 +367,25 @@ go on the panel, where `box-sizing: border-box` takes them out of the scroll
 body between the header and footer rows — not on the rows themselves, because
 `footer` is optional and the only shipped caller passes none.
 
+**Keep `backdrop-filter` off anything that spans a safe-area band** (#2819). The
+top bar originally grew the blurred `<header>` itself by `--v2-safe-top`, putting
+the status-bar band inside a `backdrop-filter` layer; on the installed iOS shell
+that band was seen keeping the nav scrim's grey after the drawer closed. **The
+mechanism is unconfirmed** — the symptom needs a standalone shell with non-zero
+insets and no engine in CI has one — so the rule removes the class of failure
+rather than resting on a diagnosis. Use `ui/SafeAreaBand`: a strip as a sibling
+*above* the bar, never padding inside it.
+
+The **filter** half is absolute; the **opacity** half is a default. Blur is for
+content scrolling under a bar, and nothing scrolls under the status bar, so the
+band gains nothing from a filter — and an opaque band gives the OS-drawn status
+glyphs a fixed backdrop instead of one that drifts with the page, which is why
+`SafeAreaBand` defaults to `bg-bg`. Where the bar's own background is
+translucent by design the band should match it rather than invent a second
+colour: the marketing `SiteHeader` passes `bg-transparent` so its dark-section
+tint shows through. That is a real exception to *opaque*, and not one to
+*unfiltered*.
+
 ### Layering (z-index) ([#1749](https://github.com/d-hinders/Haven-AI/issues/1749))
 
 Every stacking layer has a named token. **Reach for a token, never a fresh number.**
@@ -449,7 +468,7 @@ The authenticated app uses one stable product shell:
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: 56px blurred white header; below `lg` it grows by `--v2-safe-top` (§ *Safe areas*). Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
+- Top bar: a 56px blurred white bar with an unblurred status-bar band above it — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). The band is not breakpoint-gated: the inset is 0 on anything without a notch, so it collapses on its own rather than needing `max-lg:`. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
 - Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
 
 ### PageHeader

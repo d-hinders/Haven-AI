@@ -77,7 +77,13 @@ export function MobileTabBar({
       // is navigated off the showcase by an illustration. `inert` removes both
       // the focusability and the tree entry, which is what "this is a picture"
       // actually means.
-      {...(presentational ? { inert: '' as unknown as boolean } : {})}
+      // `inert: true`, not `inert: ''` — the empty string is the React 18
+      // workaround, and under React 19 (`^19.0.0` here) it makes React drop the
+      // attribute entirely with a console warning, leaving the four `<Link>`s
+      // focusable and in the a11y tree — the fifth slot is a non-interactive
+      // `<span>`. The guard the comment above describes was inoperative until
+      // #2819's capture surfaced the warning.
+      {...(presentational ? { inert: true } : {})}
       data-mobile-tab-bar=""
       className={`grid grid-cols-5 border-t border-[var(--v2-border)] bg-[var(--v2-bg)] ${
         presentational

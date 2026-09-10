@@ -175,13 +175,28 @@ async function controlsUnderIndicatorAtScrollEnd(page: Page, bottom: number) {
 
 async function shellGeometry(page: Page) {
   return page.evaluate(() => {
-    const header = document.querySelector('header') as HTMLElement | null
+    // `<header>` is the whole chrome band since #2819; the blurred 56px bar is
+    // its `[data-app-bar]` child and the status-bar strip its `[data-safe-area-band]`.
+    // `[data-app-chrome]`, not `querySelector('header')`: `ui/PageHeader` also
+    // renders a `<header>`, so the bare tag is the ambiguity #1820 argued against.
+    const chrome = document.querySelector('[data-app-chrome]') as HTMLElement | null
+    const bar = document.querySelector('[data-app-bar]') as HTMLElement | null
+    const band = document.querySelector('[data-safe-area-band]') as HTMLElement | null
     const main = document.getElementById('main-content')
     const toggle = document.querySelector('[aria-label="Open sidebar"]') as HTMLElement | null
     return {
-      headerPaddingTop: header ? getComputedStyle(header).paddingTop : null,
-      headerHeight: header ? Math.round(header.getBoundingClientRect().height) : null,
-      headerLeft: header ? Math.round(header.getBoundingClientRect().left) : null,
+      // #2819 split the status-bar band OUT of the blurred header, so the
+      // inset is now the band's height rather than the header's padding. The
+      // user-facing property is unchanged and asserted the same way: the chrome
+      // as a whole reserves 56px + the inset, and no control sits in the band.
+      bandHeight: band ? Math.round(band.getBoundingClientRect().height) : null,
+      bandBackdropFilter: band ? getComputedStyle(band).backdropFilter : null,
+      bandBackground: band ? getComputedStyle(band).backgroundColor : null,
+      chromeHeight: chrome ? Math.round(chrome.getBoundingClientRect().height) : null,
+      chromeBackdropFilter: chrome ? getComputedStyle(chrome).backdropFilter : null,
+      headerHeight: bar ? Math.round(bar.getBoundingClientRect().height) : null,
+      headerBackdropFilter: bar ? getComputedStyle(bar).backdropFilter : null,
+      headerLeft: chrome ? Math.round(chrome.getBoundingClientRect().left) : null,
       mainPaddingBottom: main ? getComputedStyle(main).paddingBottom : null,
       mainOverscroll: main ? getComputedStyle(main).overscrollBehaviorY : null,
       // By attribute, not `parentElement.parentElement`: a wrapper inserted
@@ -226,15 +241,43 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
       // CONTROL, first: the override reached the stylesheet. Every assertion
       // below is trivially true if the insets resolved to 0, so this is what
       // makes the rest evidence rather than decoration.
-      expect(shell.headerPaddingTop, 'the top bar must consume --v2-safe-top').toBe(`${INSET_TOP}px`)
+      expect(shell.bandHeight, 'the safe-area band must consume --v2-safe-top').toBe(INSET_TOP)
       expect(
         shell.mainPaddingBottom,
         'the scroll region pads its own 24px PLUS the tab bar PLUS the home indicator — all three, not two of them',
       ).toBe(`${24 + TAB_BAR_H + INSET_BOTTOM}px`)
 
-      // The bar GROWS by the inset rather than squashing its contents into the
-      // same 56px — the status bar then sits over the bar's own background.
-      expect(shell.headerHeight, 'the top bar grows by the top inset').toBe(56 + INSET_TOP)
+      // The chrome as a whole still grows by the inset rather than squashing the
+      // bar's contents into the same 56px — the status bar sits over the app's
+      // own background, not over its controls.
+      expect(shell.chromeHeight, 'the chrome grows by the top inset').toBe(56 + INSET_TOP)
+      expect(shell.headerHeight, 'the bar itself stays 56px').toBe(56)
+
+      // THE FIX (#2819). The band is opaque and carries no backdrop-filter, so
+      // no composited blur layer spans the status bar and nothing there can
+      // retain a stale frame of an overlay that has unmounted. The bar keeps
+      // its blur — content scrolls under it, which is what the blur is for.
+      expect(
+        shell.bandBackdropFilter,
+        'the status-bar band must not be a backdrop-filter layer',
+      ).toBe('none')
+      // Opacity is the property under test, so assert THAT rather than a palette
+      // value — a change to `--v2-bg` should not redden a #2819 guard. `rgb(...)`
+      // with no alpha channel is what "opaque" computes to.
+      expect(
+        shell.bandBackground,
+        'the status-bar band must be opaque, not a translucent blur of what is beneath',
+      ).toMatch(/^rgb\([^)]+\)$/)
+      // `toContain('blur(')` with a non-zero radius, not `not.toBe('none')`,
+      // which `blur(0px)` would satisfy while blurring nothing.
+      expect(shell.headerBackdropFilter, 'the bar itself keeps its blur').toMatch(
+        /blur\((?!0px\))[^)]+\)/,
+      )
+      // And the blur is on the BAR, not on the element spanning the status bar.
+      expect(
+        shell.chromeBackdropFilter,
+        'the chrome band as a whole must not be a backdrop-filter layer',
+      ).toBe('none')
       // Viewport-anchored (#1779): a relative check cannot see the whole shell
       // move sideways, which is what a bad landscape inset rule would do.
       expect(shell.headerLeft).toBe(0)

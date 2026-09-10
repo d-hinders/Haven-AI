@@ -89,13 +89,31 @@ export const VISUAL_SPECS_ENABLED = VISUAL_COMPARE || VISUAL_STRUCTURE_ONLY
  *      value-less short options and `-x` (stop after first failure) is one, so
  *      `-xu` parses as `-x --update-snapshots`.
  *
- * Hence the character class rather than a prefix test, and hence its bounds:
- * `-x` and `-h` take no value and may precede `-u`, while `-c`, `-g` and `-j`
- * take a REQUIRED one — so `-gu` is `grep "u"`, an ordinary run that must not
- * be refused. A guard that matches one spelling of the thing it forbids reports
- * green on the others (#2827).
+ * Hence the character class rather than a prefix test, and hence its bounds,
+ * measured against Playwright 1.60's option table rather than guessed:
+ * `-x` is the only value-less short that clusters (`-hu` is rejected as an
+ * unknown option), while `-c`, `-g` and `-j` take a REQUIRED value — so `-gu`
+ * is `grep "u"`, an ordinary run that must not be refused. A guard that matches
+ * one spelling of the thing it forbids reports green on the others (#2827).
+ *
+ * ## What this deliberately does NOT cover
+ *
+ * It reads argv, so it sees CLI invocations only. Two other routes reach
+ * baseline regeneration and are out of scope by choice, not oversight: the
+ * `updateSnapshots` field in `playwright.config.ts` itself, and the
+ * test-server `params.updateSnapshots` that UI mode and the VS Code extension
+ * use. Neither can corrupt a baseline under structure-only — the matcher is
+ * replaced wholesale, so nothing is written either way — and reaching them
+ * means editing the config three lines from this refusal, or running `--ui`
+ * with the variable already exported. The boundary is stated rather than
+ * implied because this predicate has been corrected three times, and the next
+ * correction should start by asking whether the CLASS is right.
+ *
+ * The enumeration is version-bound: a future Playwright that adds a value-less
+ * short option would widen the cluster silently. The version is pinned in
+ * `package.json`; re-check this on a bump.
  */
-const CLUSTERED_UPDATE_SHORT = /^-[xh]*u/
+const CLUSTERED_UPDATE_SHORT = /^-x*u/
 
 export function isUpdatingSnapshots(argv: readonly string[]): boolean {
   return argv.some((a) => a.startsWith('--update-snapshots') || CLUSTERED_UPDATE_SHORT.test(a))

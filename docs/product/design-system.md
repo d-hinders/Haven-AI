@@ -114,7 +114,7 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 | `--v2-surface-2` | `#eef2f7` | Disabled states, deeper card stacking |
 | `--v2-surface-code` | `#0b1120` | Dark code blocks on light pages (Stripe pattern) |
 | `--v2-surface-hover` | `#f0f4f9` | Sidebar/user-menu row hover and subtle interactive shells |
-| `--v2-modal-backdrop` | `rgba(26, 31, 54, 0.66)` | Overlay dim for Modal, SidePanel and the mobile nav scrim — solid, deliberately **no** blur (see § Layering) |
+| `--v2-modal-backdrop` | `rgba(26, 31, 54, 0.66)` | Overlay dim for Modal and SidePanel — solid, deliberately **no** blur (see § Layering) |
 
 ### Ink (text)
 
@@ -396,7 +396,7 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 --v2-z-chrome:        100;   /* TopBar */
 --v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
---v2-z-nav-scrim:     130;   /* mobile drawer scrim */
+--v2-z-nav-scrim:     130;   /* mobile navigation tier (consumer retired by #2820, ordering kept) */
 --v2-z-nav-drawer:    140;   /* mobile drawer */
 --v2-z-nav-toggle:    150;   /* the Open / Close sidebar toggle */
 --v2-z-modal:         200;   /* Modal, SidePanel */
@@ -405,13 +405,17 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 --v2-z-toast:        9999;   /* Toast, skip-to-content link */
 ```
 
-The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it slides over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar, and its scrim exists to dim everything behind it — the bar included. Let the bar win and the drawer is decapitated, the scrim dims all but the top strip, and the toggle (which sits *inside* that strip by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar. Let the bar win and the drawer is decapitated, and the toggle (which sits *inside* that band by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+
+`--v2-z-nav-scrim` has no consumer since #2820 — the drawer is full width below `lg`, so the slide-over scrim it used to carry was deleted — and the tier stays anyway. The scale's job is ordering, not inventory: removing the tier would renumber the ascent the tests pin and retire a landing place the day a second navigation overlay returns. Nothing new may take the tier back without a consumer that needs it.
 
 Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the top bar can hang down across the bar's band on a phone, and under the nav tiers because the drawer the bar opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
 
 That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.mobile.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
-**One dim treatment for every overlay: `v2-modal-backdrop`** ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818)). `Modal`, `SidePanel` and the mobile nav scrim all use it. It is a solid `--v2-modal-backdrop` fill and it deliberately carries **no `backdrop-filter`** — the reason is written at its definition in `globals.css`: a full-viewport blur makes the compositor hold a GPU snapshot of the whole page and re-blur it on every paint, which on tall pages ballooned VRAM and made the overlay feel sluggish.
+**One dim treatment for every overlay: `v2-modal-backdrop`** ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818)). `Modal` and `SidePanel` use it. It is a solid `--v2-modal-backdrop` fill and it deliberately carries **no `backdrop-filter`** — the reason is written at its definition in `globals.css`: a full-viewport blur makes the compositor hold a GPU snapshot of the whole page and re-blur it on every paint, which on tall pages ballooned VRAM and made the overlay feel sluggish.
+
+The mobile nav scrim used this token too, until #2820 deleted the scrim outright: with the drawer full width below `lg` there is nothing left to dim, and an element that exists only to be deleted is not a consumer to keep. The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
 
 The nav scrim was the exception until #1818, and instructively so: it read `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, but the opacity modifier on a bare `var()` compiled to nothing (see § "Opacity on a token colour"), so the scrim painted no background — and a `backdrop-filter` with nothing behind it to composite costs nothing. **The blur was free only by accident.** Fixing the fill would have made it real, on a `fixed inset-0` element, which is precisely the shape the rule above exists to prevent. So the fix reused the shared token rather than reviving a second convention.
 
@@ -459,11 +463,12 @@ Marketing pages may still use larger hero type:
 
 The authenticated app uses one stable product shell:
 
-- Sidebar: 240px desktop rail, mobile overlay, white surface, subtle active tint, and a 2px brand accent bar on the active route.
+- Sidebar: 240px desktop rail, full-screen mobile sheet below `lg` (#2820), white surface, subtle active tint, and a 2px brand accent bar on the active route.
 - **Below `lg` the drawer is SECONDARY navigation** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731)). Primary is a five-slot bottom tab bar — Dashboard, Agents, Transactions, Accounts, and More, which opens the drawer for everything else. Three properties are worth knowing before touching it:
   - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the drawer's, so a positional read reorders the bar the next time an entry is inserted.
   - **Active state prefix-matches on a `/` boundary**, so `/agents/agent-research` lights Agents — the screen the demo spends its time on — while `/accounts` cannot light for a hypothetical `/accounts-archive`.
-  - **"More" is a sibling of the bar, not a cell in it.** The bar sits on the `--v2-z-tab-bar` tier so the drawer and its scrim cover it; the control sits on the higher `--v2-z-nav-toggle` tier so one button both opens the drawer and closes it while painted over it. A child cannot climb out of its parent's stacking context, so the bar lays out five columns, fills four, and the button takes the fifth by geometry. It keeps the accessible name *Open sidebar*, which the screenshot harness waits on from 25 call sites.
+  - **"More" is a sibling of the bar, not a cell in it.** The bar sits on the `--v2-z-tab-bar` tier so the drawer covers it; the control sits on the higher `--v2-z-nav-toggle` tier so one button both opens the drawer and closes it while painted over it. A child cannot climb out of its parent's stacking context, so the bar lays out five columns, fills four, and the button takes the fifth by geometry. It keeps the accessible name *Open sidebar*, which the screenshot harness waits on from 25 call sites.
+- **The drawer is FULL WIDTH below `lg`** ([#2820](https://github.com/d-hinders/Haven-AI/issues/2820)). A tab bar's More is a full-height sheet in the iOS idiom, not a 240px slide-over — so below the breakpoint the drawer takes `w-full`, carries **no scrim** (there is nothing left to dim), drops its `border-r` (a full-width column has no edge against the page), and distributes the space its old dead middle band wasted between the nav groups (`max-lg` auto margins between groups, which resolve to zero when the nav runs out of room, so short and landscape viewports scroll instead of clipping). Its surface shows through the Close control while open — the toggle paints `--v2-bg` only while the drawer is closed — and the drawer's footer reserves the toggle's fifth-of-a-screen column on the right (`max-lg:pr-[calc(20%+var(--v2-safe-right))]`), so the fixed control never sits over the user card's kebab. At `lg` and above none of this exists: the rail is the same 240px static column it has always been.
 - **`--v2-tab-bar-h` is reserved by three surfaces and only one of them is the bar**: `<main>` adds it to its bottom padding so the last row does not sit under the bar, and the toast container lifts by it so a notification is not hidden behind the navigation. The safe-area inset is added at each site rather than folded into the token — the bar pads itself with it, the others clear the bar *and* the inset. Note the toast offset carries on the `sm:` variant as well: `sm:bottom-…` overrides the base, so an offset applied only to the base is silently lost between 640px and 1023px, the band where the bar still renders.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.

@@ -572,6 +572,12 @@ export default function AgentDetailClient({ agentId }: Props) {
           to the two elements being swapped is what makes the reorder local. */}
       <div className="flex flex-col">
         <Card hover={false} className="order-2 p-5 md:p-6 lg:order-1">
+        {/* A heading, because the reorder took this card's identity away
+            (#2821 design review). It leads with the muted description, which
+            read as the page's subtitle while this was card #1 directly under
+            the H1. As card #2 the same grey paragraph belongs to nothing. One
+            line restores it. */}
+        <h2 className="v2-text-h3 mb-2 text-[var(--v2-ink)]">About this agent</h2>
         <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
           {currentAgent.description || 'This agent can make payments within the rules you set.'}
         </p>

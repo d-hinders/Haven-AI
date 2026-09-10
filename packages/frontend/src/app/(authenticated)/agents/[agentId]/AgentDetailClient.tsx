@@ -493,17 +493,36 @@ export default function AgentDetailClient({ agentId }: Props) {
     }
   }
 
+  // One predicate, read twice: the badge's presence IS the reason the actions
+  // slot can be inlined, so the two must never drift apart (#2821 review).
+  const showsStatusBadge = currentAgent.status !== 'active'
+
   return (
     <div className="max-w-5xl">
       <PageHeader
         title={currentAgent.name}
+        // Inline ONLY when the slot really is one icon-only control (#2821).
+        //
+        // The first version passed this unconditionally, on the reasoning that
+        // "the badge renders null while the agent is active" — true for an
+        // active agent and false for exactly the state a user opens this page
+        // to check. Rendered for a paused agent at 390px the badge took
+        // x≈250–310 and the kebab x≈322–367, leaving the title ~200px of a
+        // 342px content width, and a name as short as "Data-feed agent"
+        // wrapped to two lines — pushing the budget card down on the screen
+        // this issue exists to buy room on.
+        //
+        // Two controls want the stacking the default gives them. One does not.
+        // The condition is the prop's own justification, written as code
+        // instead of as a comment that was only sometimes true.
+        inlineActions={!showsStatusBadge}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            {currentAgent.status === 'active' ? null : (
+            {showsStatusBadge ? (
               <StatusBadge tone={agentStatus.tone}>
                 {agentStatus.label}
               </StatusBadge>
-            )}
+            ) : null}
             {!isRevoked ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -532,7 +551,43 @@ export default function AgentDetailClient({ agentId }: Props) {
         }
       />
 
-      <Card hover={false} className="p-5 md:p-6">
+      {/* Second on a phone, first from `lg` (#2821).
+
+          The identity rows — wallet, network, created, last activity — took
+          essentially the whole first screen on a 390pt viewport, so the budget,
+          which is the reason to open an agent at all, was the last thing on it
+          and pinned against the tab bar. That is desktop information density on
+          a phone.
+
+          Reordered rather than hidden or collapsed, which were the other two
+          candidates on #2821. At `lg` the grid is four columns wide and costs
+          nothing, so desktop keeps the composition it had.
+
+          The trade, stated as a trade rather than as a safeguard: `order`
+          changes paint order, not DOM order, so below `lg` a screen-reader
+          user still hears the metadata first and the budget second — they do
+          not get the reordering sighted users get (WCAG 1.3.2 territory). An
+          earlier version of this comment presented that as a mitigation, which
+          it is not. It is small here because both cards are self-labelled by
+          headings and nothing focusable sits between them, and reordering the
+          DOM instead would move the desktop composition too. Recorded so the
+          next person weighs it rather than rediscovers it. */}
+      {/* The pair, and ONLY the pair, is the flex context (#2821).
+
+          A first attempt put `flex flex-col` on the page root and ordered these
+          two against it. That is wrong and the measurement said so immediately:
+          `order` is relative to every sibling, all of which default to 0, so
+          two positive orders pushed BOTH cards below the whole rest of the page
+          — the budget row went from y=655 to y=2241. Confining the flex context
+          to the two elements being swapped is what makes the reorder local. */}
+      <div className="flex flex-col gap-6 lg:gap-0">
+        <Card hover={false} className="order-2 p-5 md:p-6 lg:order-1">
+        {/* A heading, because the reorder took this card's identity away
+            (#2821 design review). It leads with the muted description, which
+            read as the page's subtitle while this was card #1 directly under
+            the H1. As card #2 the same grey paragraph belongs to nothing. One
+            line restores it. */}
+        <h2 className="v2-text-h3 mb-2 text-[var(--v2-ink)]">About this agent</h2>
         <p className="max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
           {currentAgent.description || 'This agent can make payments within the rules you set.'}
         </p>
@@ -559,17 +614,30 @@ export default function AgentDetailClient({ agentId }: Props) {
             </dd>
           </div>
         </dl>
-      </Card>
+        </Card>
+        {/* `-mt-6` below `lg` cancels `DelegationBudgetCard`'s own leading
+            margin (#2821 review). The 24px rhythm on this page lives on the
+            CARDS, not on a container, so swapping the order moved the pair's
+            only margin from BETWEEN them to ABOVE the stack: measured at
+            390px the two card borders touched (gap 0) while the budget card
+            started 24px lower than the metadata card used to — spending the
+            above-the-fold room this issue exists to buy. The wrapper owns the
+            gap below `lg` and hands it back at `lg`, where the child margin is
+            the original rhythm and nothing moves. */}
+        <div
+          id={DELEGATION_BUDGET_CARD_ID}
+          className="order-1 scroll-mt-24 max-lg:-mt-6 lg:order-2"
+        >
+          <DelegationBudgetCard
+            agentId={agentId}
+            chainId={chainId}
+            tokens={budgetTokenOptions}
+            onBudgetChange={refetch}
+          />
+        </div>
+      </div>
 
       <>
-          <div id={DELEGATION_BUDGET_CARD_ID} className="scroll-mt-24">
-            <DelegationBudgetCard
-              agentId={agentId}
-              chainId={chainId}
-              tokens={budgetTokenOptions}
-              onBudgetChange={refetch}
-            />
-          </div>
           {/* #1089: backup & recovery moved to the account page — it's an
               account capability, not an agent one. This is a pointer, not a
               second copy of the controls. */}

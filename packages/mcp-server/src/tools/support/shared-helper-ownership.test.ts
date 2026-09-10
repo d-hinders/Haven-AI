@@ -640,6 +640,32 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     ).toBe(Object.keys(toolSchemas).length)
   })
 
+  it('#2810: contributes exactly the six tools it claims, and only those', async () => {
+    const { CATALOG_PURCHASE_TOOLS, createCatalogPurchaseHandlers } = await import(
+      '../catalog-purchase.js'
+    )
+    const contributed = Object.keys(createCatalogPurchaseHandlers(keylessClient())).sort()
+    expect(contributed).toEqual([...CATALOG_PURCHASE_TOOLS].sort())
+    // Spelled out as well as derived: the tuple comparison alone would still
+    // pass if a tool were dropped from BOTH the tuple and the handler map at
+    // once, which is exactly what a careless extraction does.
+    expect(contributed).toEqual([
+      'haven_discover_tools',
+      'haven_pay_mcp_tool',
+      'haven_prepare_catalog_purchase',
+      'haven_quote_catalog_purchase',
+      'haven_quote_mcp_tool',
+      'haven_submit_catalog_entry',
+    ])
+    // And the facade still answers for the whole surface: the composed map is
+    // a superset, so a capability silently dropping a tool cannot pass here
+    // while `createToolHandlers` quietly loses it.
+    const composed = createToolHandlers(keylessClient())
+    for (const name of contributed) {
+      expect(typeof (composed as Record<string, unknown>)[name]).toBe('function')
+    }
+  })
+
   it('contributes exactly the ten tools it claims, and only those', async () => {
     const { STATE_DIRECT_RECOVERY_TOOLS, createStateDirectRecoveryHandlers } = await import(
       '../state-direct-recovery.js'

@@ -299,11 +299,22 @@ const OTHER_STATE_NAMES = ['Connect wallet', 'Wrong network', 'Passkey'] as cons
  * and the very next read found nothing, which reads like a detached-element
  * flake and is actually a locator that silently moved.
  *
- * `role="banner"` is the fix and not merely a workaround: a `<header>` scoped
+ * `role="banner"` was the fix and not merely a workaround: a `<header>` scoped
  * inside sectioning content is NOT a banner, so exactly one node in this page
  * carries the role — the app bar. Measured at count 1 while both headers were
  * mounted. It is also semantic contract rather than a class string, which is
  * the handle `focus-visible.visual.spec.ts` and #1811/#1820 argue for.
+ *
+ * **#2819 moved this handle one level in, to `[data-app-bar]`, and the reason
+ * is the same defect one layer down.** `<header>` is now the whole chrome band
+ * — an opaque `[data-safe-area-band]` strip plus the blurred 56px
+ * `[data-app-bar]` — so `banner > div` stopped meaning "the bar's regions" and
+ * started meaning "[band, bar]", making `.last()` the whole bar rather than the
+ * wallet region. It still resolved to the right button, by DOM-order accident
+ * rather than by contract, which is precisely the silent move this block was
+ * written about. `[data-app-bar] > div` restores the original meaning: the
+ * attribute is a contract the component owns, like the role, not a class
+ * string.
  *
  * **A trap for whoever reuses this after a CLICK** (independent review): the
  * `.last()` holds only while the popover is closed. `WalletPopover` renders

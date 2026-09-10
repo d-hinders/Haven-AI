@@ -42,8 +42,6 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     //
     // bg-bg/85, not bg-[var(--v2-bg)]/85 (#1818). The arbitrary-value form put an
     // opacity modifier on a bare var(), which Tailwind v3.4 drops silently — this
-    // (`SafeAreaBand` is on `bg-bg` for the same reason — one pipeline across
-    // both halves of the chrome, so a future `/N` on either compiles.)
     // bar had NO background rule at all, and `backdrop-blur-md` had nothing to
     // composite. It looked fine only because --v2-bg is white and the page behind
     // it is the same white. `bg-bg` reads the channel token --v2-bg-rgb through
@@ -101,54 +99,54 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         data-app-bar=""
         className="h-14 flex items-center px-6 lg:px-8 max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md"
       >
-      {/*
-        Left region: hamburger spacer + optional back-link.
-
-        `mr-3` is a floor, not decoration (#1767, design review). This region is
-        the compressible one and the right region carries `ml-auto`, so on a
-        phone the two meet exactly when the row runs out of space: measured at
-        390px, the account chip's right edge landed on the notification bell's
-        left edge at 210.61 — touching, with no overlap and no gap either. That
-        was a coincidence of the current strings, not a spacing decision, and it
-        sat one line away from this file rejecting a 6px gap elsewhere as too
-        tight. `mr-3` gives it the same 12px the row uses between its own items;
-        where there is free space `ml-auto` absorbs it and nothing moves.
-      */}
-      <div className="flex items-center gap-3 min-w-0 mr-3">
         {/*
-          The mobile hamburger's spacer is GONE (#2731), and its absence is the
-          point: the toggle moved out of this bar's band entirely and became
-          the tab bar's "More" slot at the bottom of the screen, so there is no
-          longer a fixed control overlapping this row to reserve room for.
+          Left region: hamburger spacer + optional back-link.
 
-          What that gives back is 32px on a phone, and it goes where it was
-          taken from — `NetworkSwitcher`, the widest item here and the only one
-          that could truncate to pay for the spacer (#1767). If a fixed control
-          is ever reintroduced over this row, the reservation has to come back
-          with it; a bare `w-8` is not enough, it needs `shrink-0`, because this
-          row is over-subscribed at 390px and an unshrunk spacer collapses to
-          zero and lets the control paint over the chip.
+          `mr-3` is a floor, not decoration (#1767, design review). This region is
+          the compressible one and the right region carries `ml-auto`, so on a
+          phone the two meet exactly when the row runs out of space: measured at
+          390px, the account chip's right edge landed on the notification bell's
+          left edge at 210.61 — touching, with no overlap and no gap either. That
+          was a coincidence of the current strings, not a spacing decision, and it
+          sat one line away from this file rejecting a 6px gap elsewhere as too
+          tight. `mr-3` gives it the same 12px the row uses between its own items;
+          where there is free space `ml-auto` absorbs it and nothing moves.
         */}
-        <EnvBadge />
-        <NetworkSwitcher />
-        {back && (
-          <Link
-            href={back.href}
-            className="group inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
-          >
-            <Icon
-              icon={ChevronLeft}
-              className="w-3.5 h-3.5 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors"
-            />
-            <span>{back.label}</span>
-          </Link>
-        )}
-      </div>
+        <div className="flex items-center gap-3 min-w-0 mr-3">
+          {/*
+            The mobile hamburger's spacer is GONE (#2731), and its absence is the
+            point: the toggle moved out of this bar's band entirely and became
+            the tab bar's "More" slot at the bottom of the screen, so there is no
+            longer a fixed control overlapping this row to reserve room for.
 
-      {/* Center / action slot */}
-      {actionSlot ? (
-        <div className="hidden md:flex items-center ml-4">
-          {actionSlot}
+            What that gives back is 32px on a phone, and it goes where it was
+            taken from — `NetworkSwitcher`, the widest item here and the only one
+            that could truncate to pay for the spacer (#1767). If a fixed control
+            is ever reintroduced over this row, the reservation has to come back
+            with it; a bare `w-8` is not enough, it needs `shrink-0`, because this
+            row is over-subscribed at 390px and an unshrunk spacer collapses to
+            zero and lets the control paint over the chip.
+          */}
+          <EnvBadge />
+          <NetworkSwitcher />
+          {back && (
+            <Link
+              href={back.href}
+              className="group inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+            >
+              <Icon
+                icon={ChevronLeft}
+                className="w-3.5 h-3.5 text-[var(--v2-ink-3)] group-hover:text-[var(--v2-ink-2)] transition-colors"
+              />
+              <span>{back.label}</span>
+            </Link>
+          )}
+        </div>
+
+        {/* Center / action slot */}
+        {actionSlot ? (
+          <div className="hidden md:flex items-center ml-4">
+            {actionSlot}
         </div>
       ) : null}
 

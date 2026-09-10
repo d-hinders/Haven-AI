@@ -57,44 +57,44 @@ export function SiteHeader() {
       */}
       <SafeAreaBand className="bg-transparent" />
       <div className="backdrop-blur">
-      <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-        <Link
-          href="/"
-          className={`flex items-center gap-2 text-[15px] font-semibold tracking-tight transition-colors ${
-            onDarkSection ? 'text-white' : 'text-[var(--v2-ink)]'
-          }`}
-        >
-          <HavenMark tone={onDarkSection ? 'inverse' : 'brand'} />
-          Haven
-        </Link>
-
-        <nav
-          className={`hidden md:flex items-center gap-7 text-[14px] font-medium transition-colors ${
-            onDarkSection ? 'text-white' : 'text-[var(--v2-ink)]'
-          }`}
-        >
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={onDarkSection ? 'hover:text-white transition-colors' : 'hover:text-[var(--v2-ink)] transition-colors'}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-
-        <div className="flex items-center gap-3">
+        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link
-            href="/login"
-            className={`hidden sm:inline-block text-[14px] font-medium transition-colors ${
-              onDarkSection ? 'text-white hover:text-white/85' : 'text-[var(--v2-ink)] hover:text-[var(--v2-brand)]'
+            href="/"
+            className={`flex items-center gap-2 text-[15px] font-semibold tracking-tight transition-colors ${
+              onDarkSection ? 'text-white' : 'text-[var(--v2-ink)]'
             }`}
           >
-            Sign in
+            <HavenMark tone={onDarkSection ? 'inverse' : 'brand'} />
+            Haven
           </Link>
-          <Button href="/signup" size="sm">Create your account</Button>
-        </div>
+
+          <nav
+            className={`hidden md:flex items-center gap-7 text-[14px] font-medium transition-colors ${
+              onDarkSection ? 'text-white' : 'text-[var(--v2-ink)]'
+            }`}
+          >
+            {NAV.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={onDarkSection ? 'hover:text-white transition-colors' : 'hover:text-[var(--v2-ink)] transition-colors'}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className={`hidden sm:inline-block text-[14px] font-medium transition-colors ${
+                onDarkSection ? 'text-white hover:text-white/85' : 'text-[var(--v2-ink)] hover:text-[var(--v2-brand)]'
+              }`}
+            >
+              Sign in
+            </Link>
+            <Button href="/signup" size="sm">Create your account</Button>
+          </div>
       </div>
       </div>
     </header>

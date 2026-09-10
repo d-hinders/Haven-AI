@@ -141,15 +141,15 @@ export default function SignupPage() {
       <div className="relative z-10">
         <SafeAreaBand />
         <div className="border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
-          >
-            <HavenMark />
-            Haven
-          </Link>
-          </div>
+          <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
+            >
+              <HavenMark />
+              Haven
+            </Link>
+            </div>
         </div>
       </div>
 

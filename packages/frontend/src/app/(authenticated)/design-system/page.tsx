@@ -647,6 +647,22 @@ export default function DesignSystemPage() {
         </Card>
         <Card hover={false} className="p-5">
           <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+            Safe areas — <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">SafeAreaBand</code>
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            The strip behind the iOS status bar is its own element, never padding inside the bar.{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">ui/SafeAreaBand</code> renders
+            it: opaque, unblurred, sized by{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>, and a
+            sibling above the blurred bar. It has no rendered sample here because it is a zero-height
+            box at every viewport this page can show — the inset is 0 without a notch. Keep{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">backdrop-filter</code> off
+            anything that spans a safe-area band: blur is for content scrolling under a bar, and
+            nothing scrolls under the status bar.
+          </p>
+        </Card>
+        <Card hover={false} className="p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
             The rule the numbers encode
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">

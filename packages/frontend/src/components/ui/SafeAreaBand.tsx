@@ -7,7 +7,8 @@
  * #2730 gave every top bar its safe-area clearance as padding on the bar, which
  * is the obvious shape and was wrong in one specific way: those bars carry
  * `backdrop-blur`, so the padding put the status-bar band *inside* a
- * `backdrop-filter` layer. On the installed iOS shell that band was observed
+ * `backdrop-filter` layer. #2819 replaced that shape at all five sites — this
+ * component is the replacement, and no bar should reintroduce the padding. On the installed iOS shell that band was observed
  * keeping the nav scrim's grey after the drawer closed, while the bar's own
  * hairline below it drew correctly (#2819).
  *
@@ -47,11 +48,6 @@
  * marketing header's dark-section state needs. It must not be used to add a
  * filter — that would reintroduce the defect.
  */
-// design-system-exempt: renders nothing visible — a zero-height box at every
-// viewport any gate or showcase can produce, since `--v2-safe-top` is 0 without
-// a notch. A `/design-system` entry could only show an empty strip. The pattern
-// and its contract are documented in `docs/product/design-system.md`
-// § *Safe areas*, which is where a reader looking for it will be.
 export function SafeAreaBand({ className = '' }: { className?: string }) {
   return (
     <div

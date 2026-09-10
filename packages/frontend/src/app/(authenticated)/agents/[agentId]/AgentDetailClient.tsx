@@ -493,6 +493,10 @@ export default function AgentDetailClient({ agentId }: Props) {
     }
   }
 
+  // One predicate, read twice: the badge's presence IS the reason the actions
+  // slot can be inlined, so the two must never drift apart (#2821 review).
+  const showsStatusBadge = currentAgent.status !== 'active'
+
   return (
     <div className="max-w-5xl">
       <PageHeader
@@ -511,14 +515,14 @@ export default function AgentDetailClient({ agentId }: Props) {
         // Two controls want the stacking the default gives them. One does not.
         // The condition is the prop's own justification, written as code
         // instead of as a comment that was only sometimes true.
-        inlineActions={currentAgent.status === 'active'}
+        inlineActions={!showsStatusBadge}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            {currentAgent.status === 'active' ? null : (
+            {showsStatusBadge ? (
               <StatusBadge tone={agentStatus.tone}>
                 {agentStatus.label}
               </StatusBadge>
-            )}
+            ) : null}
             {!isRevoked ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -556,12 +560,18 @@ export default function AgentDetailClient({ agentId }: Props) {
           a phone.
 
           Reordered rather than hidden or collapsed, which were the other two
-          candidates on #2821: the metadata is still one scroll away and still
-          in the same DOM order for a screen reader below `lg`, where reading
-          order follows the DOM and `order` does not change it. At `lg` the
-          grid is four columns wide and costs nothing, so desktop keeps the
-          composition it had — verified by the desktop specs, which do not
-          move. */}
+          candidates on #2821. At `lg` the grid is four columns wide and costs
+          nothing, so desktop keeps the composition it had.
+
+          The trade, stated as a trade rather than as a safeguard: `order`
+          changes paint order, not DOM order, so below `lg` a screen-reader
+          user still hears the metadata first and the budget second — they do
+          not get the reordering sighted users get (WCAG 1.3.2 territory). An
+          earlier version of this comment presented that as a mitigation, which
+          it is not. It is small here because both cards are self-labelled by
+          headings and nothing focusable sits between them, and reordering the
+          DOM instead would move the desktop composition too. Recorded so the
+          next person weighs it rather than rediscovers it. */}
       {/* The pair, and ONLY the pair, is the flex context (#2821).
 
           A first attempt put `flex flex-col` on the page root and ordered these
@@ -570,7 +580,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           two positive orders pushed BOTH cards below the whole rest of the page
           — the budget row went from y=655 to y=2241. Confining the flex context
           to the two elements being swapped is what makes the reorder local. */}
-      <div className="flex flex-col">
+      <div className="flex flex-col gap-6 lg:gap-0">
         <Card hover={false} className="order-2 p-5 md:p-6 lg:order-1">
         {/* A heading, because the reorder took this card's identity away
             (#2821 design review). It leads with the muted description, which
@@ -605,7 +615,19 @@ export default function AgentDetailClient({ agentId }: Props) {
           </div>
         </dl>
         </Card>
-        <div id={DELEGATION_BUDGET_CARD_ID} className="order-1 scroll-mt-24 lg:order-2">
+        {/* `-mt-6` below `lg` cancels `DelegationBudgetCard`'s own leading
+            margin (#2821 review). The 24px rhythm on this page lives on the
+            CARDS, not on a container, so swapping the order moved the pair's
+            only margin from BETWEEN them to ABOVE the stack: measured at
+            390px the two card borders touched (gap 0) while the budget card
+            started 24px lower than the metadata card used to — spending the
+            above-the-fold room this issue exists to buy. The wrapper owns the
+            gap below `lg` and hands it back at `lg`, where the child margin is
+            the original rhythm and nothing moves. */}
+        <div
+          id={DELEGATION_BUDGET_CARD_ID}
+          className="order-1 scroll-mt-24 max-lg:-mt-6 lg:order-2"
+        >
           <DelegationBudgetCard
             agentId={agentId}
             chainId={chainId}

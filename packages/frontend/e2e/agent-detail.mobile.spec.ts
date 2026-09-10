@@ -96,13 +96,27 @@ async function foldY(page: Page): Promise<number> {
   // Keyed on the width rather than on the element's absence, so "no bar yet"
   // and "no bar here" can never be confused again.
   if (viewport && viewport.width >= 1024) return viewport.height
-  await page.locator('[data-mobile-tab-bar]').waitFor({ state: 'attached', timeout: 30_000 })
+  // Scoped to the FIXED bar: `[data-mobile-tab-bar]` also matches the
+  // `presentational` illustration on `/design-system`, and a helper whose whole
+  // point is not lying should not depend on which route it is called from.
+  await page.locator('nav.fixed[data-mobile-tab-bar]').waitFor({ state: 'attached', timeout: 30_000 })
   return page.evaluate(() => {
-    const bar = document.querySelector('[data-mobile-tab-bar]')!
-    const top = Math.round(bar.getBoundingClientRect().top)
-    // Attached but unlaid-out reports 0, which would make every "above the
-    // fold" assertion trivially true. Refuse rather than return it.
+    const bars = document.querySelectorAll('nav.fixed[data-mobile-tab-bar]')
+    if (bars.length !== 1) throw new Error(`expected exactly one fixed tab bar, found ${bars.length}`)
+    const rect = bars[0].getBoundingClientRect()
+    const top = Math.round(rect.top)
+    // Three refusals, not one, and the second is the reason this block was
+    // rewritten. `top <= 0` catches an unlaid-out bar — but a bar whose HEIGHT
+    // collapses to 0 reports `top = innerHeight - 1`, which is comfortably
+    // positive, so the original guard let it through: mutating the tab cells to
+    // `h-0` returned **843** and the spec passed while measuring the covered
+    // band again. That is the exact failure this helper exists to prevent,
+    // surviving inside the fix for it.
     if (top <= 0) throw new Error('tab bar attached but has no laid-out top edge')
+    if (rect.height < 1) throw new Error(`tab bar has no height (${rect.height}) — fold would be meaningless`)
+    if (top >= window.innerHeight - 40) {
+      throw new Error(`tab bar top ${top} is within 40px of the viewport bottom (${window.innerHeight}) — it is not laid out as a bar`)
+    }
     return top
   })
 }
@@ -300,6 +314,52 @@ test.describe('agent detail at 390px (#2733)', () => {
     // ...and to the RIGHT of it, so "shares a row" cannot be satisfied by the
     // two overlapping in the same column.
     expect(kebabBox!.x).toBeGreaterThan(titleBox!.x)
+
+    // ── 4c. The budget leads the first screen, and desktop does not ────────
+    // The reorder is #2821's headline change and had NO coverage: removing
+    // both `order-*` classes left every assertion green, because the fold
+    // check clears by 150px even unreordered. This is the assertion that
+    // notices, and it is asserted in BOTH directions — the `lg:order-*` half
+    // is a claim about desktop that was equally unguarded.
+    const cardTops = async () =>
+      page.evaluate(() => {
+        const budget = document.getElementById('delegation-budget-card')
+        const about = Array.from(document.querySelectorAll('h2')).find(
+          (h) => (h.textContent ?? '').trim() === 'About this agent',
+        )
+        if (!budget || !about) return null
+        return {
+          budget: Math.round(budget.getBoundingClientRect().top + window.scrollY),
+          about: Math.round(about.getBoundingClientRect().top + window.scrollY),
+        }
+      })
+
+    const mobileOrder = await cardTops()
+    expect(mobileOrder, 'both cards rendered').not.toBeNull()
+    expect(
+      mobileOrder!.budget,
+      `at ${MOBILE_WIDTH}px the budget must lead: budget y=${mobileOrder!.budget}, ` +
+        `about y=${mobileOrder!.about}`,
+    ).toBeLessThan(mobileOrder!.about)
+
+    // ...and the desktop composition is restored at `lg`, where the metadata
+    // grid is four columns and costs nothing.
+    await page.setViewportSize({ width: 1280, height: 900 })
+    // Waits for the bar to stop RENDERING, not to leave the DOM: `lg:hidden` is
+    // `display: none`, so `querySelector` still finds it and a presence check
+    // waits forever (measured — this timed out at 60s the first time).
+    await page.waitForFunction(() => {
+      const bar = document.querySelector('nav[data-mobile-tab-bar]')
+      return !bar || getComputedStyle(bar).display === 'none'
+    })
+    const desktopOrder = await cardTops()
+    expect(desktopOrder, 'both cards rendered at 1280').not.toBeNull()
+    expect(
+      desktopOrder!.about,
+      `at 1280px the metadata must lead again: about y=${desktopOrder!.about}, ` +
+        `budget y=${desktopOrder!.budget}`,
+    ).toBeLessThan(desktopOrder!.budget)
+    await page.setViewportSize({ width: MOBILE_WIDTH, height: MOBILE_HEIGHT })
 
     // ── 5. No horizontal overflow, both metrics (#1771) ────────────────────
     const overflow = await expectNoHorizontalOverflow(page)

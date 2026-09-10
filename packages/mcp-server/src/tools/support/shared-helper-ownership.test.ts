@@ -178,9 +178,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  *
  * The rule says a helper called from exactly one capability slice belongs to
  * that capability, not here. Each export below is measured at exactly one
- * slice, yet is retained in shared support — until the #2809–#2812 carve-out
- * chain lands and moves it into its owning capability module (the capability
- * modules do not exist yet; these are the exports the carve-outs will move).
+ * slice, yet is retained in shared support — either until the #2809–#2812
+ * carve-out chain lands and moves it into its owning capability module, or,
+ * once that slice HAS landed, because the slice looked and argued that moving
+ * it would be worse. Two of the four capability modules now exist
+ * (state-direct-recovery, catalog-purchase), so "the carve-out will move it"
+ * is no longer an answer for s2809 or s2810 entries: those carry a decision.
  * The retained set is executable: the enforcement test requires every
  * single-slice entry in HELPER_OWNERSHIP to appear here with a non-empty
  * reason, and rejects any name here that is not a 1-slice map entry, so a
@@ -189,15 +192,33 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  * support helper and are expected to remain shared even after the carve-out.
  */
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
-  // s2810 (#2810 catalog/quote/prepare capability, to come):
+  // s2810 (#2810 catalog/quote/prepare capability — LANDED; each of the four
+  // was re-argued rather than moved, the way #2809 re-argued its own):
   isMerchantEndpointMiss:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE, and the earlier reason here was WRONG: no #2810 handler calls it. ' +
+    'tools/catalog-purchase.ts references it zero times — it is called from inside ' +
+    'mcp-context.ts\'s own discovery wrapper (the `if (!isMerchantEndpointMiss(probeErr))` ' +
+    'guard), so the 1-slice attribution is transitive, not a call site. Moving a helper a ' +
+    'capability cannot see into that capability would be renaming, not owning.',
   withDiscoveryGuidance:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE, same as isMerchantEndpointMiss: zero references from ' +
+    'tools/catalog-purchase.ts, called only from mcp-context.ts\'s discovery wrapper. It is ' +
+    'also the mcp-server half of the #1271/#1301 bounded same-origin discovery pattern whose ' +
+    'other half is shared verbatim with the local runtime through @haven_ai/sdk; forking the ' +
+    'mcp-server half into one capability is what the CASP record for #1301 argues against.',
   quoteMcpToolCall:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE. This one IS called by #2810 (tools/catalog-purchase.ts), so the earlier ' +
+    'reason was accurate — but moving it alone forks the pattern, because it is the wrapper ' +
+    'that calls the two helpers above, and moving all three would relocate a security-relevant ' +
+    'perimeter helper (bounded, same-origin, redirect: error, 5s, 64KB) into a capability ' +
+    'module while packages/mcp keeps its own copy of the same pattern. Same shape of argument ' +
+    'as #2809 made for submitErc7710WithExpiryMapping on the signing path.',
   getUsableCatalogMcpEntry:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE. Called by #2810, but catalog-entry.ts\'s own header records why it is shared: ' +
+    'the #2811 resume tests PIN the error shape of these quote/preflight refusals. Moving it ' +
+    'into tools/catalog-purchase.ts would put a contract #2811 depends on inside another ' +
+    'capability, and the dependency rule in this file forbids #2811 importing it there — so ' +
+    'the move would trade a support export for a rule violation.',
   // s2812 (#2812 paid-MCP completion capability, to come):
   resolveMerchantCallContext:
     'Only the #2812 handlers call it; retained in support until #2812 moves it into its capability module.',
@@ -638,6 +659,32 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
       new Set([...literalKeys, ...owned]).size,
       'the facade literal plus the capability tuples must still cover the whole hosted surface — a short union means one side parsed less than it should',
     ).toBe(Object.keys(toolSchemas).length)
+  })
+
+  it('#2810: contributes exactly the six tools it claims, and only those', async () => {
+    const { CATALOG_PURCHASE_TOOLS, createCatalogPurchaseHandlers } = await import(
+      '../catalog-purchase.js'
+    )
+    const contributed = Object.keys(createCatalogPurchaseHandlers(keylessClient())).sort()
+    expect(contributed).toEqual([...CATALOG_PURCHASE_TOOLS].sort())
+    // Spelled out as well as derived: the tuple comparison alone would still
+    // pass if a tool were dropped from BOTH the tuple and the handler map at
+    // once, which is exactly what a careless extraction does.
+    expect(contributed).toEqual([
+      'haven_discover_tools',
+      'haven_pay_mcp_tool',
+      'haven_prepare_catalog_purchase',
+      'haven_quote_catalog_purchase',
+      'haven_quote_mcp_tool',
+      'haven_submit_catalog_entry',
+    ])
+    // And the facade still answers for the whole surface: the composed map is
+    // a superset, so a capability silently dropping a tool cannot pass here
+    // while `createToolHandlers` quietly loses it.
+    const composed = createToolHandlers(keylessClient())
+    for (const name of contributed) {
+      expect(typeof (composed as Record<string, unknown>)[name]).toBe('function')
+    }
   })
 
   it('contributes exactly the ten tools it claims, and only those', async () => {

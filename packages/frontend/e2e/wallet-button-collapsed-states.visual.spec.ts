@@ -189,6 +189,7 @@
  * hydrates a hybrid signer set, so neither hook had anything to mis-read.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { mockHavenApi, seedAuthenticatedSession, serveOwnerOnlyHybridSigners } from './fixtures/haven-api'
 import {
   SUPPORTED_CHAIN_ID_HEX,
@@ -579,8 +580,8 @@ async function gotoCollapsed(page: Page, path: string) {
 
 test.describe('WalletButton collapsed states', () => {
   test.skip(
-    process.env.VISUAL_REGRESSION !== '1',
-    'Linux-rendered baselines — run via the CI job (or VISUAL_REGRESSION=1 in a Linux container)',
+    !VISUAL_SPECS_ENABLED,
+    VISUAL_SKIP_REASON,
   )
 
   test.beforeEach(async ({ page }) => {

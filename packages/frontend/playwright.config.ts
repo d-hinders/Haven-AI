@@ -1,6 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
-import { defineConfig, devices } from '@playwright/test'
+import { defineConfig, devices, expect } from '@playwright/test'
+import {
+  VISUAL_SPECS_ENABLED,
+  VISUAL_STRUCTURE_ONLY,
+} from './e2e/support/visual-mode'
 
 /**
  * The port this run's app server owns — per worktree, and PROVEN free (#1816).
@@ -97,9 +101,52 @@ const SUITE_IGNORE = [
   // against a real deployment — keep it out of the fast, fully-mocked suite.
   '**/live/**',
   // Visual-regression specs run only under the dedicated CI job (Linux
-  // baselines) — VISUAL_REGRESSION=1 opts in. See #897.
-  ...(process.env.VISUAL_REGRESSION === '1' ? [] : ['**/*.visual.spec.ts']),
+  // baselines) — VISUAL_REGRESSION=1 opts in (#897), and VISUAL_STRUCTURE_ONLY=1
+  // admits them for their LOCATORS only (#2827). Both conditions live in
+  // e2e/support/visual-mode.ts, which is also where the five specs read their
+  // own `test.skip` from — one predicate, so a third mode cannot reach the
+  // config and miss a spec.
+  ...(VISUAL_SPECS_ENABLED ? [] : ['**/*.visual.spec.ts']),
 ]
+
+if (VISUAL_STRUCTURE_ONLY) {
+  /**
+   * Replace the pixel comparison with the wait it already performs (#2827).
+   *
+   * Everything a spec does BEFORE the capture still runs: navigation, fixture
+   * setup, and its own structural assertions — 27 `toHaveCount(1)` calls across
+   * the five specs, which is what actually catches a broken locator. Dropping
+   * the comparison leaves all of that intact, and leaves nothing that can fail
+   * for a platform reason. That asymmetry is the whole licence for putting
+   * these specs in the default local gate.
+   *
+   * Keeping the auto-wait here rather than passing unconditionally is the
+   * second net: a spec that screenshots a locator it never asserted on still
+   * has to resolve it.
+   *
+   * Overriding the built-in matcher rather than editing the five specs means
+   * there is no second copy of any locator to drift, and the specs stay
+   * readable as what they are: pixel gates.
+   *
+   * `expect.extend` at config module scope reaches the workers because each
+   * worker re-loads this config — the same mechanism the port/token stamp
+   * above relies on.
+   */
+  expect.extend({
+    async toHaveScreenshot(subject: unknown) {
+      // A Page subject has no locator to resolve; the assertion is purely
+      // about pixels, so structure-only has nothing left to check on it.
+      const locator = subject as { waitFor?: (opts: unknown) => Promise<void> }
+      if (typeof locator?.waitFor === 'function') {
+        await locator.waitFor({ state: 'visible' })
+      }
+      return {
+        pass: true,
+        message: () => 'VISUAL_STRUCTURE_ONLY=1: locator resolved; pixels NOT compared',
+      }
+    },
+  })
+}
 
 export default defineConfig({
   testDir: './e2e',

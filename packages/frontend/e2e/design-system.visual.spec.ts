@@ -39,13 +39,16 @@
  * spec, and they are unaffected by the removal — they were never the flaky
  * half.
  *
- * BASELINES ARE LINUX-RENDERED (committed under __screenshots__/linux/): CI is
+ * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
+ * one directory per spec file — there is no platform segment in the path, which
+ * is why they must never be regenerated locally): CI is
  * the judge; macOS font rendering differs, so this spec is skipped locally
  * unless VISUAL_REGRESSION=1. Intended visual changes: regenerate baselines in
  * the same PR — see docs/contributing/ship-playbooks/frontend.md §4
  * ("Updating visual baselines") for the CI-artifact flow.
  */
 import { expect, test } from '@playwright/test'
+import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, so the
@@ -320,8 +323,8 @@ const PIXEL_THRESHOLD = 0.02
 
 test.describe('design-system visual regression', () => {
   test.skip(
-    process.env.VISUAL_REGRESSION !== '1',
-    'Linux-rendered baselines — run via the CI job (or VISUAL_REGRESSION=1 in a Linux container)',
+    !VISUAL_SPECS_ENABLED,
+    VISUAL_SKIP_REASON,
   )
 
   test.beforeEach(async ({ page }) => {

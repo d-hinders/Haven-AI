@@ -98,3 +98,69 @@ describe('the visual gate runs every visual spec (#1863)', () => {
     ).toEqual([])
   })
 })
+
+/**
+ * The structure-only mode is wired where it claims to be, and NOWHERE ELSE
+ * (#2827).
+ *
+ * `VISUAL_STRUCTURE_ONLY=1` runs the visual specs for their locators and
+ * compares no pixels. That is exactly what makes it safe in the default local
+ * gate, and exactly what would make it catastrophic in the pixel gate: set it
+ * on `test:visual` and the blocking *Design visual regression* job keeps
+ * passing while comparing nothing at all. Green, fast, and blind — this file's
+ * own #1863 lesson ("a capture that nothing runs is indistinguishable from a
+ * capture that always passes") with the failure moved one layer in.
+ *
+ * So the assertions run in both directions: the mode must be present on the
+ * local gate, and absent from the pixel gate.
+ *
+ * What is NOT asserted here, because no unit test can: that the mode actually
+ * reddens on a broken locator and stays green on a pixel difference. That is
+ * behaviour of a Playwright run, and it is proven by the mutation cell in the
+ * pull request — nesting `<header>` in a wrapper, the real #2819 break, and
+ * showing the gate go red.
+ */
+describe('the structure-only visual mode is wired where it claims (#2827)', () => {
+  const pkg = JSON.parse(
+    readFileSync(path.join(frontendRoot, 'package.json'), 'utf8'),
+  ) as { scripts: Record<string, string> }
+
+  it('the default local gate opts into it, so a broken locator is catchable pre-push', () => {
+    const gate = pkg.scripts['test:e2e:gate:built']
+    expect(gate, 'package.json lost its `test:e2e:gate:built` script').toBeTruthy()
+    expect(
+      gate,
+      'the local gate no longer runs the visual specs, so a broken visual LOCATOR ' +
+        'is once again only findable in CI — the #2827 defect',
+    ).toContain('VISUAL_STRUCTURE_ONLY=1')
+  })
+
+  it('NEVER sets it on test:visual, which would leave the pixel gate green and blind', () => {
+    expect(pkg.scripts['test:visual']).not.toContain('VISUAL_STRUCTURE_ONLY')
+  })
+
+  it('has a structure-only script that selects every visual spec, on the built server', () => {
+    const script = pkg.scripts['test:visual:structure']
+    expect(script, 'package.json lost its `test:visual:structure` script').toBeTruthy()
+    expect(script).toContain('VISUAL_STRUCTURE_ONLY=1')
+    // Same deviceScaleFactor reasoning as `test:visual` above.
+    expect(script).toContain('--project=chromium-desktop')
+    // `next dev` compiles each route on first request; running these specs
+    // against it times out on `page.goto` under parallel workers (measured:
+    // 12 of 24 failed that way, none for a locator or a pixel reason). The
+    // built server is not an optimisation here, it is what makes the mode
+    // usable at all.
+    expect(script).toContain('npm run build')
+    expect(script).toContain('CI=1')
+
+    const specs = visualSpecPaths()
+    expect(specs.length, 'found no visual specs at all — the walk is broken').toBeGreaterThanOrEqual(2)
+    const filters = playwrightFilters(script)
+    expect(filters.length, '`test:visual:structure` passes no file filter at all').toBeGreaterThan(0)
+    expect(
+      specs.filter((spec) => !filters.some((re) => re.test(spec))),
+      `these visual specs are NOT run by \`test:visual:structure\` (${script}), so their ` +
+        `locators stay unverifiable outside CI`,
+    ).toEqual([])
+  })
+})

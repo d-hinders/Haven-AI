@@ -497,10 +497,21 @@ export default function AgentDetailClient({ agentId }: Props) {
     <div className="max-w-5xl">
       <PageHeader
         title={currentAgent.name}
-        // The actions slot here is usually the kebab alone — the badge beside
-        // it renders `null` while the agent is active — so stacking it below
-        // `sm` left a lone bordered icon on its own row (#2821).
-        inlineActions
+        // Inline ONLY when the slot really is one icon-only control (#2821).
+        //
+        // The first version passed this unconditionally, on the reasoning that
+        // "the badge renders null while the agent is active" — true for an
+        // active agent and false for exactly the state a user opens this page
+        // to check. Rendered for a paused agent at 390px the badge took
+        // x≈250–310 and the kebab x≈322–367, leaving the title ~200px of a
+        // 342px content width, and a name as short as "Data-feed agent"
+        // wrapped to two lines — pushing the budget card down on the screen
+        // this issue exists to buy room on.
+        //
+        // Two controls want the stacking the default gives them. One does not.
+        // The condition is the prop's own justification, written as code
+        // instead of as a comment that was only sometimes true.
+        inlineActions={currentAgent.status === 'active'}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             {currentAgent.status === 'active' ? null : (

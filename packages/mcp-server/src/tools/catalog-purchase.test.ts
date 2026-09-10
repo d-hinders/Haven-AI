@@ -4,12 +4,17 @@
  * Moved VERBATIM out of `tools.test.ts`, which had grown to cover the whole
  * hosted surface from one file. Every block here invokes ONLY the six tools
  * this capability owns; blocks that also drive a sibling capability's handler
- * (`haven_pay_x402_quote`, `haven_settle_mcp_tool`, `haven_complete_mcp_tool`)
+ * (`haven_pay_x402_quote`, `haven_settle_mcp_tool`, `haven_complete_mcp_tool`,
+ * and in the custody-invariant block `haven_pay`, `haven_send`, `haven_submit`)
  * deliberately stayed behind rather than being split, because splitting a test
  * that spans two capabilities is a behaviour change dressed as a move.
  *
- * The classification is by INVOCATION, not by title: a block was moved only if
- * the set of `.haven_*(` calls in it is a subset of this capability's tuple. A
+ * The classification is by the INVOCATION SET OF A TOP-LEVEL `describe`, not by
+ * title: a block moved only if the set of `.haven_*(` calls anywhere in it is a
+ * subset of this capability's tuple. At `it` granularity several tests left
+ * behind are pure single-capability tests — the rule is deliberately coarser
+ * than that, because a describe's `beforeEach` and fixtures are shared by its
+ * children and splitting them is a behaviour change dressed as a move. A
  * prose mention or a `nextTool` literal naming another tool does not make a
  * test that tool's — reading titles would have moved the wrong blocks in both
  * directions.
@@ -20,31 +25,19 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
-  AgentPaymentPhase,
-  HavenApiError,
-  HavenClient,
-  MerchantTimeoutError,
-  SIGNER_UPDATE_FALLBACK,
   type AgentNextStep,
 } from '@haven_ai/sdk'
-import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from '../tools.js'
 import {
   AGENT_RESPONSE,
-  DELEGATE_KEY,
   PAYMENT_REQUIRED,
-  X402_EXPECTED_AUTH,
   X402_INTENT_RESPONSE,
   clearCalls,
   handlers,
-  headerSignerClient,
   installSharedFixtureLifecycle,
   mintPaymentHeaders,
-  mutateHeader,
   ok,
   recordedCalls,
   stubFetch,
-  VALID_PAYMENT_HEADER_REF,
-  x402PreflightStatus,
   type RouteDefinition,
 } from '../test-support/hosted-mcp.js'
 

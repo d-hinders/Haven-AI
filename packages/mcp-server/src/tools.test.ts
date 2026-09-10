@@ -2990,14 +2990,25 @@ describe('runtime-neutral tool naming (#1588)', () => {
 
 describe('next_tool emission literals (#1588 review)', () => {
   /**
-   * The WHOLE hosted surface, not just the facade (#2810).
+   * Every non-test source file under `src/tools/`, RECURSIVELY, plus the
+   * facade (#2810).
    *
    * Both scanners below used to read `tools.ts` alone. That was the whole
    * surface when they were written; it is now the facade plus one module per
-   * capability, and epic #2806 moves more out with every slice. A scanner that
-   * keeps reading only `tools.ts` does not fail when handlers leave it — it
-   * quietly measures less, which for the `suggestedTool` check below (a
-   * NEGATIVE assertion) means it stops being able to fail at all.
+   * capability plus the shared `tools/support/`, and epic #2806 moves more out
+   * with every slice. A scanner that keeps reading only `tools.ts` does not
+   * fail when handlers leave it — it quietly measures less, which for the
+   * `suggestedTool` check below (a NEGATIVE assertion) means it stops being
+   * able to fail at all.
+   *
+   * The recursion is the correction that matters, and it was found by a
+   * mutation that SURVIVED. A non-recursive read covers 2 of the 9
+   * `suggestedTool` emission sites; the other 7 are in `tools/support/`
+   * (`errors.ts`, `cap-price.ts`, `catalog-entry.ts`, `mcp-context.ts`) and
+   * every one of them is agent-visible — `support/errors.ts` maps
+   * `suggestedTool` straight onto the `suggested_tool` response field. A
+   * prefixed literal planted at `support/mcp-context.ts` passed the whole
+   * suite before this change.
    *
    * Directory-derived rather than a list, so the next slice is covered without
    * editing this file — the same reason `CAPABILITY_MODULES` is derived in
@@ -3006,13 +3017,19 @@ describe('next_tool emission literals (#1588 review)', () => {
   async function hostedSurfaceSource(): Promise<string> {
     const { readFileSync, readdirSync } = await import('node:fs')
     const { fileURLToPath } = await import('node:url')
-    const facadeUrl = new URL('./tools.ts', import.meta.url)
-    const modulesDir = new URL('./tools/', import.meta.url)
-    const parts = [readFileSync(fileURLToPath(facadeUrl), 'utf8')]
-    for (const entry of readdirSync(fileURLToPath(modulesDir), { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue
-      parts.push(readFileSync(fileURLToPath(new URL(entry.name, modulesDir)), 'utf8'))
+    const parts = [readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')]
+    const walk = (dir: URL) => {
+      for (const entry of readdirSync(fileURLToPath(dir), { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          walk(new URL(`${entry.name}/`, dir))
+          continue
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.ts')) continue
+        if (entry.name.endsWith('.test.ts')) continue
+        parts.push(readFileSync(fileURLToPath(new URL(entry.name, dir)), 'utf8'))
+      }
     }
+    walk(new URL('./tools/', import.meta.url))
     return parts.join('\n')
   }
 
@@ -3031,9 +3048,16 @@ describe('next_tool emission literals (#1588 review)', () => {
 
   it('suggested_tool hints use BARE tool names — the sibling convention, never the prefixed form', async () => {
     const source = await hostedSurfaceSource()
-    const prefixed = [...source.matchAll(/suggestedTool: '([^']+)'/g)]
-      .map((m) => m[1])
-      .filter((v) => v.startsWith('mcp__'))
+    const all = [...source.matchAll(/suggestedTool: '([^']+)'/g)].map((m) => m[1])
+    // A FLOOR, because everything below it is a negative assertion and an
+    // empty input satisfies those for free. Its sibling above has one; this
+    // one did not, so a later slice relocating these literals somewhere the
+    // walk does not reach would have turned the check green rather than red.
+    expect(
+      all.length,
+      'the suggestedTool scan found (almost) nothing — the probe is broken, not the code clean',
+    ).toBeGreaterThanOrEqual(9)
+    const prefixed = all.filter((v) => v.startsWith('mcp__'))
     expect(prefixed).toEqual([])
   })
 })

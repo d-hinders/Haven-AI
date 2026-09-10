@@ -22,11 +22,21 @@
  *
  * DEPENDENCY RULE (epic #2806): this module imports the #2807 contract and
  * parsing seams and the #2808 shared support, and NEVER another capability
- * module. Every helper it calls that a sibling slice also calls — `runTool`,
- * `parseStrict`, `buildAgentGuidance`, `isPendingApproval`,
- * `quoteMcpToolCall`, `serializeMcpTransport`, `buildX402SigningContext` — is
- * imported from that shared ownership, never copied here; the derived mapping
- * and its enforcement live in `tools/support/shared-helper-ownership.test.ts`.
+ * module. Helpers it shares with a sibling slice — `runTool`, `parseStrict`,
+ * `buildAgentGuidance`, `isPendingApproval`, `buildX402SigningContext`,
+ * `serializeMcpTransport` — are imported from that shared ownership, never
+ * copied here.
+ *
+ * Two helpers it calls are NOT shared, and stay in support anyway:
+ * `quoteMcpToolCall` and `getUsableCatalogMcpEntry` have this capability as
+ * their only consumer, which by the epic's own rule would make them ours. The
+ * argument for leaving them is recorded per-export in
+ * `tools/support/shared-helper-ownership.test.ts`, not hand-waved here — in
+ * short, `quoteMcpToolCall` is the wrapper around the #1271/#1301 bounded
+ * same-origin discovery perimeter and moving it forks a pattern
+ * `packages/mcp` also implements, and `getUsableCatalogMcpEntry`'s refusal
+ * shape is pinned by #2811's resume tests, which could not import it from
+ * here without breaking the dependency rule above.
  */
 import {
   AgentPaymentNextAction,

@@ -178,9 +178,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  *
  * The rule says a helper called from exactly one capability slice belongs to
  * that capability, not here. Each export below is measured at exactly one
- * slice, yet is retained in shared support — until the #2809–#2812 carve-out
- * chain lands and moves it into its owning capability module (the capability
- * modules do not exist yet; these are the exports the carve-outs will move).
+ * slice, yet is retained in shared support — either until the #2809–#2812
+ * carve-out chain lands and moves it into its owning capability module, or,
+ * once that slice HAS landed, because the slice looked and argued that moving
+ * it would be worse. Two of the four capability modules now exist
+ * (state-direct-recovery, catalog-purchase), so "the carve-out will move it"
+ * is no longer an answer for s2809 or s2810 entries: those carry a decision.
  * The retained set is executable: the enforcement test requires every
  * single-slice entry in HELPER_OWNERSHIP to appear here with a non-empty
  * reason, and rejects any name here that is not a 1-slice map entry, so a
@@ -189,15 +192,33 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  * support helper and are expected to remain shared even after the carve-out.
  */
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
-  // s2810 (#2810 catalog/quote/prepare capability, to come):
+  // s2810 (#2810 catalog/quote/prepare capability — LANDED; each of the four
+  // was re-argued rather than moved, the way #2809 re-argued its own):
   isMerchantEndpointMiss:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE, and the earlier reason here was WRONG: no #2810 handler calls it. ' +
+    'tools/catalog-purchase.ts references it zero times — it is called from inside ' +
+    'mcp-context.ts\'s own discovery wrapper (the `if (!isMerchantEndpointMiss(probeErr))` ' +
+    'guard), so the 1-slice attribution is transitive, not a call site. Moving a helper a ' +
+    'capability cannot see into that capability would be renaming, not owning.',
   withDiscoveryGuidance:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE, same as isMerchantEndpointMiss: zero references from ' +
+    'tools/catalog-purchase.ts, called only from mcp-context.ts\'s discovery wrapper. It is ' +
+    'also the mcp-server half of the #1271/#1301 bounded same-origin discovery pattern whose ' +
+    'other half is shared verbatim with the local runtime through @haven_ai/sdk; forking the ' +
+    'mcp-server half into one capability is what the CASP record for #1301 argues against.',
   quoteMcpToolCall:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE. This one IS called by #2810 (tools/catalog-purchase.ts), so the earlier ' +
+    'reason was accurate — but moving it alone forks the pattern, because it is the wrapper ' +
+    'that calls the two helpers above, and moving all three would relocate a security-relevant ' +
+    'perimeter helper (bounded, same-origin, redirect: error, 5s, 64KB) into a capability ' +
+    'module while packages/mcp keeps its own copy of the same pattern. Same shape of argument ' +
+    'as #2809 made for submitErc7710WithExpiryMapping on the signing path.',
   getUsableCatalogMcpEntry:
-    'Only the #2810 handlers call it; retained in support until #2810 moves it into its capability module.',
+    'DELIBERATE. Called by #2810, but catalog-entry.ts\'s own header records why it is shared: ' +
+    'the #2811 resume tests PIN the error shape of these quote/preflight refusals. Moving it ' +
+    'into tools/catalog-purchase.ts would put a contract #2811 depends on inside another ' +
+    'capability, and the dependency rule in this file forbids #2811 importing it there — so ' +
+    'the move would trade a support export for a rule violation.',
   // s2812 (#2812 paid-MCP completion capability, to come):
   resolveMerchantCallContext:
     'Only the #2812 handlers call it; retained in support until #2812 moves it into its capability module.',

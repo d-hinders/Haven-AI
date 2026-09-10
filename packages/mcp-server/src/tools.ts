@@ -15,11 +15,13 @@
  * exactly as before, and later capability slices (#2809–#2812) move the
  * handlers OUT while this facade stays stable.
  *
- * #2809 is the first such slice: the state / direct-payment / recovery
- * handlers now live in `tools/state-direct-recovery.ts` and are composed into
- * `createToolHandlers` as a typed contribution. What is left here is the
- * catalog/quote/prepare, plain-HTTP x402 and paid-MCP completion handlers
- * that #2810–#2812 take next, plus the re-export surface.
+ * #2809 was the first such slice: the state / direct-payment / recovery
+ * handlers live in `tools/state-direct-recovery.ts`. #2810 is the second: the
+ * catalog / quote / prepare handlers live in `tools/catalog-purchase.ts`.
+ * Both are composed into `createToolHandlers` as typed contributions.
+ *
+ * What is left here is the plain-HTTP x402 and paid-MCP completion handlers
+ * that #2811 and #2812 take next, plus the re-export surface.
  */
 import {
   AgentPaymentFailureCode,

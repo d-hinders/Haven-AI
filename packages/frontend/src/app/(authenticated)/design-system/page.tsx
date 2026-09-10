@@ -647,22 +647,6 @@ export default function DesignSystemPage() {
         </Card>
         <Card hover={false} className="p-5">
           <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
-            Safe areas — <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">SafeAreaBand</code>
-          </h3>
-          <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            The strip behind the iOS status bar is its own element, never padding inside the bar.{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">ui/SafeAreaBand</code> renders
-            it: opaque, unblurred, sized by{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>, and a
-            sibling above the blurred bar. It has no rendered sample here because it is a zero-height
-            box at every viewport this page can show — the inset is 0 without a notch. Keep{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">backdrop-filter</code> off
-            anything that spans a safe-area band: blur is for content scrolling under a bar, and
-            nothing scrolls under the status bar.
-          </p>
-        </Card>
-        <Card hover={false} className="p-5">
-          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
             The rule the numbers encode
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
@@ -680,6 +664,31 @@ export default function DesignSystemPage() {
             the tiers fits, add one to the scale here first — a raw{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">z-[…]</code> in a shell
             component is the failure this table exists to prevent.
+          </p>
+        </Card>
+      </Section>
+
+      <Section
+        title="Safe areas — the notch and the home indicator"
+        description="The four --v2-safe-* tokens carry the iOS insets. What matters on this page is the one structural rule they imply: nothing that spans a safe-area band may carry a backdrop-filter."
+      >
+        <Card hover={false} className="p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+            Safe areas — <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">SafeAreaBand</code>
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            The strip behind the iOS status bar is its own element, never padding inside the bar.{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">ui/SafeAreaBand</code> renders
+            it: unblurred, and opaque by default, sized by{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>, and a
+            sibling above the blurred bar. It has no rendered sample here because it is a zero-height
+            box at every viewport this page can show — the inset is 0 without a notch. Keep{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">backdrop-filter</code> off
+            anything that spans a safe-area band: blur is for content scrolling under a bar, and
+            nothing scrolls under the status bar. Opaque is the default, not the rule: a bar
+            whose own background is translucent by design passes{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code> so its
+            colour shows through — an exception to <em>opaque</em>, never to <em>unfiltered</em>.
           </p>
         </Card>
       </Section>

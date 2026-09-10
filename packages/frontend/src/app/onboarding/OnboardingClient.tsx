@@ -197,7 +197,7 @@ export default function OnboardingClient() {
                 Log out
               </button>
             </div>
-            </div>
+          </div>
         </div>
       </div>
 

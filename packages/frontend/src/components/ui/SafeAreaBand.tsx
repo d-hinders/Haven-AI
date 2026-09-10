@@ -7,10 +7,12 @@
  * #2730 gave every top bar its safe-area clearance as padding on the bar, which
  * is the obvious shape and was wrong in one specific way: those bars carry
  * `backdrop-blur`, so the padding put the status-bar band *inside* a
- * `backdrop-filter` layer. #2819 replaced that shape at all five sites — this
- * component is the replacement, and no bar should reintroduce the padding. On the installed iOS shell that band was observed
+ * `backdrop-filter` layer. On the installed iOS shell that band was observed
  * keeping the nav scrim's grey after the drawer closed, while the bar's own
  * hairline below it drew correctly (#2819).
+ *
+ * #2819 replaced that shape at all five sites that had it, and this component is
+ * the replacement — no bar should reintroduce the padding.
  *
  * The mechanism is a hypothesis — the symptom needs a standalone shell with
  * non-zero insets and no engine in CI has one — but the class is avoidable

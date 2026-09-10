@@ -149,7 +149,7 @@ export default function SignupPage() {
               <HavenMark />
               Haven
             </Link>
-            </div>
+          </div>
         </div>
       </div>
 

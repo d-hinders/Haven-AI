@@ -95,7 +95,7 @@ export function SiteHeader() {
             </Link>
             <Button href="/signup" size="sm">Create your account</Button>
           </div>
-      </div>
+        </div>
       </div>
     </header>
   )

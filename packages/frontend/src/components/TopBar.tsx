@@ -35,10 +35,11 @@ export default function TopBar({ actionSlot }: TopBarProps) {
 
   return (
     // z-[var(--v2-z-chrome)]: the app chrome tier. Deliberately BELOW the
-    // mobile navigation tiers — the sidebar's toggle is positioned inside this
-    // bar's own band (see the `w-8 lg:hidden` spacer below, which reserves the
-    // room for it), so a bar that outranks the toggle covers the control it is
-    // making space for. That was #1749.
+    // mobile navigation tiers, so a bar that outranks the drawer covers the
+    // control it makes space for. That was #1749. (The `w-8 lg:hidden` spacer
+    // that reservation used to refer to is GONE — #2731 moved the toggle out of
+    // this bar entirely and into the tab bar's More slot; see the note further
+    // down.)
     //
     // bg-bg/85, not bg-[var(--v2-bg)]/85 (#1818). The arbitrary-value form put an
     // opacity modifier on a bare var(), which Tailwind v3.4 drops silently — this
@@ -46,6 +47,7 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     // composite. It looked fine only because --v2-bg is white and the page behind
     // it is the same white. `bg-bg` reads the channel token --v2-bg-rgb through
     // <alpha-value>, so the modifier compiles. See tailwind.config.js's colours.
+    //
     // Safe-area insets (#2730, restructured by #2819). The horizontal pair keep
     // the `px-6` gutter and only widen it on a landscape phone, where the notch
     // eats one side; both collapse to the previous value at zero insets, and
@@ -147,15 +149,16 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         {actionSlot ? (
           <div className="hidden md:flex items-center ml-4">
             {actionSlot}
-        </div>
-      ) : null}
+          </div>
+        ) : null}
 
-      {/* Right region: wallet. The approval-notification bell was deleted with
-          the legacy Safe rail (#1989, epic #1440) — the delegation rail enforces
-          budgets on-chain and produces no approvals to notify about. */}
-      <div className="ml-auto flex items-center gap-3">
-        <WalletButton />
-      </div>
+        {/* Right region: wallet. The approval-notification bell was deleted
+            with the legacy Safe rail (#1989, epic #1440) — the delegation rail
+            enforces budgets on-chain and produces no approvals to notify
+            about. */}
+        <div className="ml-auto flex items-center gap-3">
+          <WalletButton />
+        </div>
       </div>
     </header>
   )

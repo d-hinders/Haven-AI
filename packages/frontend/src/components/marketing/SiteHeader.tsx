@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { useEffect, useState } from 'react'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '../ui/Button'
@@ -43,12 +44,19 @@ export function SiteHeader() {
     <header
       data-v2-header
       style={onDarkSection ? { backgroundColor: 'rgba(30, 27, 75, 0.88)' } : undefined}
-      className={`sticky top-0 z-30 pt-[var(--v2-safe-top)] backdrop-blur transition-colors duration-200 ${
+      className={`sticky top-0 z-30 transition-colors duration-200 ${
         onDarkSection
           ? 'border-b border-transparent shadow-none'
           : 'bg-white/95 border-b border-[var(--v2-border)]'
       }`}
     >
+      {/*
+        The status-bar band, outside the blur (#2819) — `bg-transparent` so this
+        header's own background (solid-ish white, or the dark-section colour set
+        via `style`) shows through it rather than a second, wrong colour.
+      */}
+      <SafeAreaBand className="bg-transparent" />
+      <div className="backdrop-blur">
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
         <Link
           href="/"
@@ -87,6 +95,7 @@ export function SiteHeader() {
           </Link>
           <Button href="/signup" size="sm">Create your account</Button>
         </div>
+      </div>
       </div>
     </header>
   )

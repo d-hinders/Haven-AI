@@ -7,6 +7,7 @@ import EnvBadge from './EnvBadge'
 import NetworkSwitcher from './NetworkSwitcher'
 import { ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 
 interface TopBarProps {
   actionSlot?: React.ReactNode
@@ -41,17 +42,18 @@ export default function TopBar({ actionSlot }: TopBarProps) {
     //
     // bg-bg/85, not bg-[var(--v2-bg)]/85 (#1818). The arbitrary-value form put an
     // opacity modifier on a bare var(), which Tailwind v3.4 drops silently — this
+    // (`SafeAreaBand` is on `bg-bg` for the same reason — one pipeline across
+    // both halves of the chrome, so a future `/N` on either compiles.)
     // bar had NO background rule at all, and `backdrop-blur-md` had nothing to
     // composite. It looked fine only because --v2-bg is white and the page behind
     // it is the same white. `bg-bg` reads the channel token --v2-bg-rgb through
     // <alpha-value>, so the modifier compiles. See tailwind.config.js's colours.
-    // Safe-area insets (#2730). Below `lg` only, and all three arithmetic
-    // forms collapse to the previous value when the insets are 0 — the bar
-    // GROWS by the top inset rather than padding its content into the same
-    // 56px, so the status bar sits over the bar's own background instead of
-    // over the first row of controls; the horizontal pair keep the `px-6`
-    // gutter and only widen it on a landscape phone, where the notch eats one
-    // side. `lg:` is untouched, so the desktop render is byte-identical.
+    // Safe-area insets (#2730, restructured by #2819). The horizontal pair keep
+    // the `px-6` gutter and only widen it on a landscape phone, where the notch
+    // eats one side; both collapse to the previous value at zero insets, and
+    // `lg:` is untouched, so the desktop render is byte-identical. The TOP inset
+    // is no longer padding on this bar — it is the `SafeAreaBand` above it, for
+    // the reason that component's docstring gives.
     <header
       data-app-chrome=""
       className="relative z-[var(--v2-z-chrome)] flex-shrink-0"
@@ -94,11 +96,7 @@ export default function TopBar({ actionSlot }: TopBarProps) {
         reads better as semantics: the banner landmark is the whole chrome band,
         including the part behind the status bar.
       */}
-      <div
-        data-safe-area-band=""
-        aria-hidden="true"
-        className="max-lg:h-[var(--v2-safe-top)] bg-[var(--v2-bg)]"
-      />
+      <SafeAreaBand />
       <div
         data-app-bar=""
         className="h-14 flex items-center px-6 lg:px-8 max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] border-b border-[var(--v2-border)] bg-bg/85 backdrop-blur-md"

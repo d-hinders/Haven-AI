@@ -18,6 +18,7 @@
  */
 
 import { Check } from 'lucide-react'
+import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
@@ -168,7 +169,9 @@ export default function OnboardingClient() {
         }}
       />
 
-      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md pt-[var(--v2-safe-top)]">
+      <div className="relative z-10">
+        <SafeAreaBand />
+        <div className="border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link
             href="/"
@@ -193,6 +196,7 @@ export default function OnboardingClient() {
             >
               Log out
             </button>
+          </div>
           </div>
         </div>
       </div>

@@ -177,7 +177,9 @@ async function shellGeometry(page: Page) {
   return page.evaluate(() => {
     // `<header>` is the whole chrome band since #2819; the blurred 56px bar is
     // its `[data-app-bar]` child and the status-bar strip its `[data-safe-area-band]`.
-    const chrome = document.querySelector('header') as HTMLElement | null
+    // `[data-app-chrome]`, not `querySelector('header')`: `ui/PageHeader` also
+    // renders a `<header>`, so the bare tag is the ambiguity #1820 argued against.
+    const chrome = document.querySelector('[data-app-chrome]') as HTMLElement | null
     const bar = document.querySelector('[data-app-bar]') as HTMLElement | null
     const band = document.querySelector('[data-safe-area-band]') as HTMLElement | null
     const main = document.getElementById('main-content')
@@ -259,11 +261,18 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         shell.bandBackdropFilter,
         'the status-bar band must not be a backdrop-filter layer',
       ).toBe('none')
+      // Opacity is the property under test, so assert THAT rather than a palette
+      // value — a change to `--v2-bg` should not redden a #2819 guard. `rgb(...)`
+      // with no alpha channel is what "opaque" computes to.
       expect(
         shell.bandBackground,
         'the status-bar band must be opaque, not a translucent blur of what is beneath',
-      ).toBe('rgb(255, 255, 255)')
-      expect(shell.headerBackdropFilter, 'the bar itself keeps its blur').not.toBe('none')
+      ).toMatch(/^rgb\([^)]+\)$/)
+      // `toContain('blur(')` with a non-zero radius, not `not.toBe('none')`,
+      // which `blur(0px)` would satisfy while blurring nothing.
+      expect(shell.headerBackdropFilter, 'the bar itself keeps its blur').toMatch(
+        /blur\((?!0px\))[^)]+\)/,
+      )
       // And the blur is on the BAR, not on the element spanning the status bar.
       expect(
         shell.chromeBackdropFilter,

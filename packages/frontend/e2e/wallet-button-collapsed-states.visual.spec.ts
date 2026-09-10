@@ -314,7 +314,7 @@ const OTHER_STATE_NAMES = ['Connect wallet', 'Wrong network', 'Passkey'] as cons
  * popover open needs a different handle, not this one with a longer wait.
  */
 function walletControl(page: Page): Locator {
-  return page.getByRole('banner').locator('> div').last().locator('button').last()
+  return page.locator('[data-app-bar]').locator('> div').last().locator('button').last()
 }
 
 /**

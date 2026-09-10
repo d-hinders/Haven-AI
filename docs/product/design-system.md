@@ -365,9 +365,13 @@ clamp it an over-tall panel overflows both ends with no scroll path.
 The top bar originally grew the blurred `<header>` itself by `--v2-safe-top`,
 which put the status-bar band inside a `backdrop-filter` layer; on the installed
 iOS shell that band was seen keeping the nav scrim's grey after the drawer
-closed. `<header>` is now the whole chrome band with an opaque unblurred strip
-above a blurred 56px bar, so no composited blur layer spans the status bar. Blur
-what content scrolls under; leave the band behind the status bar opaque.
+closed. **The mechanism is unconfirmed** — the symptom needs a standalone shell
+with non-zero insets and no engine in CI has one — so the rule removes the class
+of failure rather than resting on a diagnosis. Use `ui/SafeAreaBand`: an opaque,
+unblurred strip as a sibling above the bar, never padding inside it. Blur what
+content scrolls under; nothing scrolls under the status bar, so the band behind
+it gains nothing from a filter and wants to be opaque, which also gives the
+OS-drawn status glyphs a fixed backdrop instead of one that drifts with the page.
 
 `ui/SidePanel` is the deliberate exception: it is flush to three screen edges by
 design, so a gutter on its wrapper would un-flush it at every width. Its insets

@@ -28,6 +28,7 @@ covers:
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
   - packages/mcp-server/src/tools.test.ts
   - packages/mcp-server/src/tools/state-direct-recovery.test.ts
+  - packages/mcp-server/src/tools/catalog-purchase.test.ts
   - packages/mcp-server/src/strict-tool-input.test.ts
   - packages/backend/src/__tests__/x402-resume-producer-pin.test.ts
   - packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts

@@ -104,6 +104,7 @@ const GUARDED_FILES = [
   // the bottom of this file are what make the membership a RULE instead of an
   // act of memory: a new file under `src/tools/` fails this suite until it is
   // listed here (haven-reviewer, #2809 round 3).
+  'packages/mcp-server/src/tools/catalog-purchase.ts',
   'packages/mcp-server/src/tools/contracts.ts',
   'packages/mcp-server/src/tools/parsing.ts',
   'packages/mcp-server/src/tools/registry.ts',

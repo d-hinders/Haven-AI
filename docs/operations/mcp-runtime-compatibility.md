@@ -65,6 +65,19 @@ last-verified: "2026-09-10"
 >   components and the local runtime signs in-process with the SDK it shipped
 >   with. They live here because this is the runtime-compatibility doc, not
 >   because they describe the local path.
+>
+> **Recent re-verification (#2810):** the same for the hosted server's catalog,
+> quote and prepare handlers — `haven_discover_tools`,
+> `haven_submit_catalog_entry`, `haven_quote_mcp_tool`, `haven_pay_mcp_tool`,
+> `haven_quote_catalog_purchase` and `haven_prepare_catalog_purchase` — which
+> moved from `tools.ts` into `src/tools/catalog-purchase.ts` and are composed
+> back into `createToolHandlers` from there. The runtime contract is again
+> unchanged: the same tool names are registered, the strict/permissive split is
+> untouched (none of these six is permissive, and none changed), and schemas
+> and descriptions still come from the #2807 contracts module. `haven_pay_mcp_tool`'s
+> local twin is unaffected — the #1301 bounded discovery helper it shares still
+> lives in `@haven_ai/sdk`, so the skew-flatness this document asserts is a
+> property of the SDK helper, not of which mcp-server file calls it.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

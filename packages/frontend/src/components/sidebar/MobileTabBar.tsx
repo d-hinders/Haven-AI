@@ -98,10 +98,43 @@ export function MobileTabBar({
             key={item.href}
             href={item.href}
             aria-current={active ? 'page' : undefined}
-            className={`flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
-              active ? 'text-[var(--v2-ink)]' : 'text-[var(--v2-ink-3)]'
+            className={`relative flex h-[var(--v2-tab-bar-h)] flex-col items-center justify-center gap-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 ${
+              active ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)]'
             }`}
           >
+            {/* One "you are here" idiom across both halves of the same
+                navigation (#2818). The drawer this bar opens is two feet away
+                on one 390px screen and used to mark active in a different
+                visual language — brand ink on a `--v2-brand-soft` fill with a
+                2px brand rail down the left edge — while the bar marked it in
+                ink value alone. On `/agents` with the drawer open both were
+                visible at once.
+
+                The bar is the side that moved, and it takes the drawer's idiom
+                translated from a row to a cell: the rail runs across the TOP
+                edge instead of the left, and the fill is dropped because a
+                tinted 56px cell reads as a pressed button rather than as a
+                selection.
+
+                The rail is NOT decoration. Brand ink alone would be a WCAG
+                1.4.1 regression: `--v2-brand` against `--v2-ink-3` is 1.18:1,
+                a hue difference with no luminance difference, so the active
+                tab would be indistinguishable in greyscale and to a
+                colour-blind user — where today's `--v2-ink`/`--v2-ink-3` pair
+                differs by ~3x. The rail is the non-colour cue that makes brand
+                ink acceptable, and it is the cue the drawer already uses. Both
+                text states still clear AA at 12px on their own
+                (6.29 and 5.32).
+
+                It adds no height: `top-0` is inside the bar's `border-t` and
+                the span is absolutely positioned, so `--v2-tab-bar-h` and the
+                44px tap target the e2e spec asserts are untouched. */}
+            {active && (
+              <span
+                aria-hidden="true"
+                className="absolute inset-x-0 top-0 h-0.5 bg-[var(--v2-brand)]"
+              />
+            )}
             <span className="h-5 w-5" aria-hidden="true">
               {item.icon}
             </span>

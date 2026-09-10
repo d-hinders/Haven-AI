@@ -110,6 +110,19 @@ const SUITE_IGNORE = [
   ...(VISUAL_SPECS_ENABLED ? [] : ['**/*.visual.spec.ts']),
 ]
 
+if (VISUAL_STRUCTURE_ONLY && process.argv.some((a) => a.startsWith('--update-snapshots'))) {
+  // Structure-only compares nothing, so it also WRITES nothing: measured, a
+  // `--update-snapshots=all` run under this mode produced zero PNGs and exited
+  // 0. On the *Update visual baselines* workflow — whose entire job is to
+  // regenerate them — that is a silent no-op reported as success, which is
+  // worse than a corrupt baseline because nothing looks wrong (#2827).
+  throw new Error(
+    'VISUAL_STRUCTURE_ONLY=1 cannot regenerate baselines: it replaces the comparison ' +
+      'with a no-op, so --update-snapshots would write nothing and exit 0. Use ' +
+      'VISUAL_REGRESSION=1 (Linux only — see the frontend playbook §4).',
+  )
+}
+
 if (VISUAL_STRUCTURE_ONLY && VISUAL_COMPARE) {
   // Refuse the combination rather than pick a winner (#2827).
   //
@@ -131,14 +144,26 @@ if (VISUAL_STRUCTURE_ONLY) {
    *
    * Everything a spec does BEFORE the capture still runs: navigation, fixture
    * setup, and its own structural assertions — every `toHaveCount(1)` in the
-   * five specs, which is what actually catches a broken locator. Dropping
-   * the comparison leaves all of that intact, and leaves nothing that can fail
-   * for a platform reason. That asymmetry is the whole licence for putting
-   * these specs in the default local gate.
+   * five specs, which is what actually catches a broken locator. Dropping the
+   * comparison leaves all of that intact and removes the one thing that needs
+   * a Linux-rendered artefact.
+   *
+   * NOT "nothing platform-dependent is left" — that is false, and the exact
+   * over-claim a reader will stop believing the first time this flakes. Two
+   * text-METRIC assertions survive in `focus-visible.visual.spec.ts`:
+   * `expectRowControlsUnwrapped` (line 688, `lines === 1`), whose own failure
+   * message says "this can be GREEN on macOS and RED here — that asymmetry is
+   * #1909"; and the 390px overflow budget near line 1004. Both fail
+   * green-local/red-CI, because Linux metrics are the wider ones (#1873,
+   * #1909) — the safe direction. A NEW assertion of that kind has to be
+   * checked in that direction before it is added to a visual spec.
    *
    * Keeping the auto-wait here rather than passing unconditionally is the
    * second net: a spec that screenshots a locator it never asserted on still
-   * has to resolve it.
+   * has to resolve it. It inherits the caller's `timeout` so a broken locator
+   * reports against the expect timeout rather than running to the test
+   * timeout — the latter reads as the contention signature the frontend
+   * playbook teaches you to re-run rather than investigate.
    *
    * Overriding the built-in matcher rather than editing the five specs means
    * there is no second copy of any locator to drift, and the specs stay
@@ -149,15 +174,31 @@ if (VISUAL_STRUCTURE_ONLY) {
    * above relies on.
    */
   expect.extend({
-    async toHaveScreenshot(subject: unknown) {
+    async toHaveScreenshot(
+      this: { isNot?: boolean; timeout?: number },
+      subject: unknown,
+      ...args: unknown[]
+    ) {
+      // `toHaveScreenshot(name?, options?)` — the options object is whichever
+      // argument is one, so the caller's timeout is honoured either way.
+      const options = args.find(
+        (a): a is { timeout?: number } => typeof a === 'object' && a !== null,
+      )
+      const timeout = options?.timeout ?? this.timeout
+
       // A Page subject has no locator to resolve; the assertion is purely
       // about pixels, so structure-only has nothing left to check on it.
       const locator = subject as { waitFor?: (opts: unknown) => Promise<void> }
       if (typeof locator?.waitFor === 'function') {
-        await locator.waitFor({ state: 'visible' })
+        await locator.waitFor({ state: 'visible', timeout })
       }
       return {
-        pass: true,
+        // Honour `.not` rather than hardcoding true: Playwright's finalizer
+        // asserts `pass === !!isNot`, so a hardcoded pass makes
+        // `.not.toHaveScreenshot()` throw an internal error instead of doing
+        // what it says. Latent today — no spec uses it — and one word to keep
+        // the override behaving like the matcher it replaces.
+        pass: !this.isNot,
         message: () => 'VISUAL_STRUCTURE_ONLY=1: locator resolved; pixels NOT compared',
       }
     },

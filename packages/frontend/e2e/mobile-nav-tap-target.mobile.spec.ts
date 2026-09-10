@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fixtures/haven-api'
 
 /**
  * Mobile navigation toggle — tap target (#1766).
@@ -788,11 +788,7 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
       // Wait for the 200ms slide to FINISH. Hit-testing a transforming element
       // lands on a part-way drawer and reports a defect that does not exist —
       // the false failure that hit three of four widths on #1749's first run.
-      await page.waitForFunction(
-        () => Math.round(document.querySelector('aside')!.getBoundingClientRect().left) === 0,
-        undefined,
-        { timeout: 10_000 },
-      )
+      await waitForDrawerOpen(page)
 
       const reach = await page.evaluate(() => {
         const aside = document.querySelector('aside')!

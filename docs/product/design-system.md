@@ -353,17 +353,20 @@ starts to should set its own. An overlay that had a `p-4` gutter sets
 `--v2-safe-gutter: 1rem` to keep it; the ones that never had a gutter set none.
 
 **The padding insets the panel, not the backdrop.** Where an overlay puts its
-dim layer in a separate `inset-0` child — `ui/Modal`, `ui/SidePanel`,
-`ReceiveFundsModal`, `AddFundsModal`, `DashboardActionPickerModal` — `inset-0`
-on that absolutely positioned child resolves against the wrapper's PADDING box — so the backdrop still starts at
+dim layer in a separate `inset-0` child — the common shape, deliberately not
+listed by name here because such a list rots on the next overlay and nothing
+lints it — `inset-0` on that absolutely positioned child resolves against the
+wrapper's PADDING box — so the backdrop still starts at
 `y=0` and covers the reserved bands while the panel inside it starts below the
 notch. That asymmetry is intended: a dim layer that stopped at the inset would
 leave an undimmed strip under the status bar. It is also the reason the mobile
 nav scrim (`fixed inset-0`, no wrapper) and a modal's backdrop cover exactly
-the same strip despite being built differently. (`EditAgentModal` and
-`PaymentCredentialsModal` take the other shape — `.v2-modal-backdrop` on the
-`fixed inset-0` wrapper itself, with no dim child. Same geometry, nothing to
-reconcile; they are simply not what this paragraph is about.) That is what
+the same strip despite being built differently. (A few overlays take a third
+shape — `.v2-modal-backdrop` on the `fixed inset-0` wrapper itself, with no dim
+child at all. Same geometry, nothing to reconcile: with no padding between them
+the wrapper *is* the dim layer. Named by shape rather than by component on
+purpose — a list of file names here is a claim `covers:` has to reach, and the
+gate is right to ask for one fewer of those, not one more.) That is what
 [#2819](https://github.com/d-hinders/Haven-AI/issues/2819) depends on to tell a
 `.v2-modal-backdrop` defect apart from a drawer-specific one. Moving either
 backdrop below the inset — `top-[var(--v2-safe-top)]`, or swapping the

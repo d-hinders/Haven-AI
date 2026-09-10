@@ -28,7 +28,12 @@
  * reason that has nothing to do with a notch.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession, openReceiveFundsModal } from './fixtures/haven-api'
+import {
+  mockHavenApi,
+  seedAuthenticatedSession,
+  openReceiveFundsModal,
+  waitForDrawerOpen,
+} from './fixtures/haven-api'
 
 /**
  * An iPhone's portrait insets, near enough: 47pt of status bar under a Dynamic
@@ -50,12 +55,16 @@ const INSET_BOTTOM = 34
 const TAB_BAR_H = 56
 
 /**
- * `--v2-modal-backdrop`'s computed value, written out for the same reason
- * `TAB_BAR_H` is: reading the token here would make the assertion agree with
- * the stylesheet by construction, and the assertion exists to catch the dim
- * layer losing its colour.
+ * A dim layer that actually dims: any colour, at an alpha that reads as a
+ * scrim. Deliberately NOT `TAB_BAR_H`'s treatment — that constant is an
+ * independent literal because it feeds a three-term sum where a dropped term
+ * has to be caught. This is a bare identity against one declaration, and
+ * pinning `rgba(26, 31, 54, 0.66)` would redden a #2819 guard when a designer
+ * retunes the dim or the palette migrates to `oklch()`/`color-mix()`, neither
+ * of which is the defect. The property under test is non-zero alpha, so assert
+ * that — the same argument this file already makes about `--v2-bg` further up.
  */
-const BACKDROP_FILL = 'rgba(26, 31, 54, 0.66)'
+const DIM_FILL = /^rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0?\.[3-9]\d*\s*\)$/
 
 /** 390x844 is the iPhone the demo runs on (#2736), not Pixel 5's 393x727. */
 const VIEWPORT = { width: 390, height: 844 }
@@ -88,41 +97,6 @@ async function applyInsets(page: Page) {
   await page.addStyleTag({
     content: `:root{--v2-safe-top:${INSET_TOP}px;--v2-safe-bottom:${INSET_BOTTOM}px;--v2-safe-left:0px;--v2-safe-right:0px}`,
   })
-}
-
-/**
- * Waits for the drawer to stop moving.
- *
- * `<aside>` carries `transition-transform`, and "the User menu is visible" is
- * true well before the slide finishes — so a geometry read taken on that
- * signal alone lands mid-animation. That is not a theoretical race: it was
- * caught by a mutation that SURVIVED. Widening the drawer to `w-full`, which
- * should have put it over the sample point, measured its right edge at 178px
- * on a 390px viewport, because the drawer was still on its way in. Both the
- * clearance check and `elementFromPoint` were reading a frame that no user
- * ever sees, and both agreed with the unmutated answer by luck.
- *
- * The signal is the drawer's own open position (`left === 0`), not a fixed
- * timeout and not frame-to-frame stability — see the note at the predicate for
- * why the stability form silently resolves early.
- */
-async function drawerSettled(page: Page) {
-  await page.waitForFunction(
-    () => {
-      const aside = document.querySelector('aside')
-      if (!aside) return false
-      const rect = aside.getBoundingClientRect()
-      // The OPEN position, which is an absolute fact about the drawer rather
-      // than a comparison against the previous frame. A frame-to-frame
-      // stability check is what a first attempt used, and it is wrong here:
-      // its first poll can land before the transition has started, when the
-      // closed position is trivially "stable", and it resolves immediately on
-      // a drawer that has not moved at all.
-      return Math.abs(rect.left) < 0.5 && rect.width > 0
-    },
-    undefined,
-    { timeout: 10_000 },
-  )
 }
 
 /**
@@ -390,6 +364,12 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await applyInsets(page)
     await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible()
+    // Without this the drawer can still be at `translateX(-100%)`, where its
+    // `rect.right` is exactly 0 — and `chromeControlsInBands` skips anything
+    // with `rect.right <= 0`. Every drawer control would be skipped and the
+    // `offenders` assertion below would pass having examined none of them, on
+    // the one test in this file whose whole subject is the open drawer.
+    await waitForDrawerOpen(page)
 
     const drawer = await page.evaluate(() => {
       const aside = document.querySelector('aside') as HTMLElement
@@ -614,17 +594,36 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         // Right of the drawer, which is itself opaque and would answer for the
         // scrim underneath it. 8px down is inside a 47px band by any rounding.
         const sampleX = window.innerWidth - 20
-        const aside = document.querySelector('aside')
+        // Composed, not the element's own: an ancestor at `opacity: 0` hides
+        // the backdrop just as completely, and neither is visible to
+        // `backgroundColor` or to `getBoundingClientRect`.
+        let composedOpacity = 1
+        for (let el: Element | null = backdrop; el; el = el.parentElement) {
+          composedOpacity *= Number(getComputedStyle(el).opacity)
+        }
         return {
           top: Math.round(rect.top),
           bottom: Math.round(rect.bottom),
           background: getComputedStyle(backdrop).backgroundColor,
+          composedOpacity,
           paintsTopBand: document.elementFromPoint(sampleX, 8) === backdrop,
-          // Measured, not assumed: `sampleX` is only clear of the drawer
-          // because the drawer is 240px wide. Widen it past 370 and this goes
-          // red first, naming the cause, instead of `paintsTopBand` going red
-          // and reading like the scrim stopped covering the band.
-          asideRight: aside ? Math.round(aside.getBoundingClientRect().right) : 0,
+          // Which chrome element, if any, covers the sample POINT — not which
+          // one reaches past it horizontally. A first version compared right
+          // edges and was wrong on exactly that difference: Receive's panel is
+          // `mx-4 max-w-lg`, so at 390px its right edge is 374 and clears
+          // `sampleX`, while the panel itself sits centred and comes nowhere
+          // near y=8. The drawer occludes because it is full-height; the
+          // dialog does not. Only containment answers that.
+          //
+          // This exists so that when something DOES move over the sample
+          // point, the failure names it, instead of `paintsTopBand` going red
+          // and reading like the backdrop stopped covering the band.
+          occludedBy: ['aside', '[role="dialog"]'].filter((sel) => {
+            const el = document.querySelector(sel)
+            if (!el || el === backdrop) return false
+            const r = el.getBoundingClientRect()
+            return r.left <= sampleX && r.right >= sampleX && r.top <= 8 && r.bottom >= 8
+          }),
           sampleX,
           viewportHeight: window.innerHeight,
         }
@@ -634,7 +633,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     await page.getByRole('button', { name: 'Open sidebar' }).click()
     await applyInsets(page)
     await expect(page.getByRole('button', { name: 'User menu' })).toBeVisible()
-    await drawerSettled(page)
+    await waitForDrawerOpen(page)
 
     // Control, before any geometry is judged: the drawer consumes the injected
     // inset, so the run really is one where a notch exists.
@@ -644,9 +643,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(drawerPaddingTop).toBe(`${INSET_TOP}px`)
 
     const scrim = await coverage()
-    expect(scrim.asideRight, 'the sample point must be clear of the open drawer').toBeLessThan(
-      scrim.sampleX,
-    )
+    expect(scrim.occludedBy, 'the sample point must be clear of the open drawer').toEqual([])
     expect(scrim.top, 'the scrim starts at the top of the viewport, not below the notch').toBe(0)
     expect(scrim.bottom, 'the scrim reaches the home indicator too').toBe(scrim.viewportHeight)
     expect(scrim.paintsTopBand, 'the scrim is what paints the status-bar band').toBe(true)
@@ -659,7 +656,8 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     // one this test cannot afford to pass under. Asserting the two backdrops
     // merely AGREE would not catch it either: they agree by construction,
     // both resolving the one declaration in globals.css.
-    expect(scrim.background, 'the scrim actually paints a dim colour').toBe(BACKDROP_FILL)
+    expect(scrim.background, 'the scrim actually paints a dim colour').toMatch(DIM_FILL)
+    expect(scrim.composedOpacity, 'and is not faded out of existence').toBe(1)
 
     await page.getByRole('button', { name: 'Close sidebar' }).click()
     await expect(page.locator('.v2-modal-backdrop')).toHaveCount(0)
@@ -682,7 +680,13 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     const modal = await coverage()
     expect(modal.top, "the overlay's padding must not push its backdrop out of the band").toBe(0)
     expect(modal.bottom, 'the backdrop reaches the home indicator too').toBe(modal.viewportHeight)
+    expect(modal.occludedBy, 'the sample point must be clear of the dialog panel too').toEqual([])
     expect(modal.paintsTopBand, 'Receive paints the same band with no drawer involved').toBe(true)
-    expect(modal.background, 'and paints it in the same dim colour').toBe(BACKDROP_FILL)
+    expect(modal.background, 'and paints it in a dim colour too').toMatch(DIM_FILL)
+    expect(modal.composedOpacity, 'and is not faded out of existence').toBe(1)
+    // Both surfaces now measure against the same external shape, which still
+    // transitively establishes they agree — without the two of them agreeing
+    // being the whole of the claim, which is what made it a tautology.
+    expect(modal.background).toBe(scrim.background)
   })
 })

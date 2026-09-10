@@ -858,6 +858,45 @@ export async function dismissMobileSidebar(page: Page) {
  * `dismissMobileSidebar` no-ops at or above `lg`, so this is correct at both
  * viewports without a branch.
  */
+/**
+ * Waits for the mobile drawer to finish sliding OPEN.
+ *
+ * The name says `Open` because that is the only thing it waits for: the
+ * predicate is the open position, so calling it after a dismiss would hang for
+ * the full timeout rather than confirming the drawer left.
+ *
+ * A visible control is not this signal. `<aside>` animates on
+ * `transition-transform duration-200`, and a transforming element still has a
+ * non-empty box, so Playwright calls it visible from the first frame. Geometry
+ * read on that signal lands on a part-way drawer. Two specs found this
+ * independently — #1749's false layering failure "hit three of four widths on
+ * this spec's first run", and a #2819 mutation that should have moved the
+ * drawer over a sample point measured its right edge at 178px on a 390px
+ * viewport instead.
+ *
+ * `getBoundingClientRect()` reports the border box AFTER transforms, so
+ * `left` interpolates from `-width` to 0 rather than jumping — which is why
+ * `left === 0` is the arrival, and why a frame-to-frame stability check is the
+ * wrong shape: its first poll can land before the transition starts, when the
+ * closed position is trivially stable.
+ *
+ * At or above `lg` the drawer is `lg:static` at the shell's left edge, so this
+ * resolves on the first poll whatever the drawer is doing. Below `lg` is where
+ * it means something.
+ */
+export async function waitForDrawerOpen(page: Page) {
+  await page.waitForFunction(
+    () => {
+      const aside = document.querySelector('aside')
+      if (!aside) return false
+      const rect = aside.getBoundingClientRect()
+      return Math.round(rect.left) === 0 && rect.width > 0
+    },
+    undefined,
+    { timeout: 10_000 },
+  )
+}
+
 export async function openReceiveFundsModal(page: Page) {
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)

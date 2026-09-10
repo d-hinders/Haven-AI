@@ -100,7 +100,6 @@
   "docs/contributing/ship-playbooks/frontend.md": [
     ".github/workflows/update-visual-baselines.yml",
     "packages/frontend/copy-lint-baseline.json",
-    "packages/frontend/scripts/design-system-coupling.mjs",
     "packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx",
     "packages/frontend/src/app/(authenticated)/profile/ProfileClient.tsx",
     "packages/frontend/src/components/AgentPanel.tsx",

@@ -5,7 +5,7 @@ import {
   exportedComponentsInLine,
   addedExportsFromDiff,
   undocumentedPrimitives,
-  untrackedFileDiff,
+  addedExportsInFile,
   dedupe,
 } from '../../scripts/design-system-coupling.mjs'
 
@@ -13,7 +13,10 @@ const exportsInLine = exportedComponentsInLine as (line: string) => string[]
 const fromDiff = addedExportsFromDiff as (
   diff: string,
 ) => { file: string; symbol: string; exempt: boolean }[]
-const untrackedDiff = untrackedFileDiff as (file: string, contents: string) => string
+const inFile = addedExportsInFile as (
+  file: string,
+  contents: string,
+) => { file: string; symbol: string; exempt: boolean }[]
 const dedup = dedupe as (
   added: { file: string; symbol: string; exempt: boolean }[],
 ) => { file: string; symbol: string; exempt: boolean }[]
@@ -175,45 +178,42 @@ describe('design-system coupling gate (#898)', () => {
  * this is the part that belongs in the suite.
  */
 describe('local runs read the working tree (#2826)', () => {
-  it('renders an untracked primitive as a diff the parser flags', () => {
-    const file = 'packages/frontend/src/components/ui/Gauge.tsx'
-    const rendered = untrackedDiff(file, 'export function Gauge() {\n  return null\n}\n')
+  it('finds an export in an untracked primitive, which no git diff form emits', () => {
+    expect(
+      inFile('packages/frontend/src/components/ui/Gauge.tsx', 'export function Gauge() {}\n'),
+    ).toEqual([{ file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }])
+  })
 
-    // Round-trip, not a text match: what matters is that the parser reaches
-    // the export, and it is the parser that decides what a diff means.
-    expect(fromDiff(rendered)).toEqual([
-      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+  it('honours a trailing exempt marker in an untracked file', () => {
+    expect(
+      inFile(
+        'packages/frontend/src/components/ui/Gauge.tsx',
+        'export function Gauge() {} // design-system-exempt: internal\n',
+      )[0].exempt,
+    ).toBe(true)
+  })
+
+  it('ignores an untracked file outside the primitive directories', () => {
+    expect(inFile('packages/frontend/src/lib/thing.ts', 'export function Thing() {}\n')).toEqual([])
+  })
+
+  /**
+   * File CONTENT cannot forge a diff file header.
+   *
+   * The first version of this fix rendered untracked files into diff text and
+   * fed them back through addedExportsFromDiff. Every content line gains a `+`
+   * there, so a source line beginning `++ ` arrives as `+++ ` — which that
+   * parser reads as a file header. It then re-points at that path and silently
+   * drops every export after it: a gate going green because of what a file
+   * happened to contain, which is the one posture it must not have. Scanning
+   * the file directly removes the round trip; this asserts the property rather
+   * than the mechanism, so it still means something if the internals change.
+   */
+  it('reads exports after a line that would forge a diff header', () => {
+    const contents = '// docs example:\n++ b/docs/README.md\nexport function Sneaky() {}\n'
+    expect(inFile('packages/frontend/src/components/ui/Sneaky.tsx', contents)).toEqual([
+      { file: 'src/components/ui/Sneaky.tsx', symbol: 'Sneaky', exempt: false },
     ])
-  })
-
-  it('carries a trailing exempt marker through the synthesized diff', () => {
-    const rendered = untrackedDiff(
-      'packages/frontend/src/components/ui/Gauge.tsx',
-      'export function Gauge() { // design-system-exempt: internal\n  return null\n}\n',
-    )
-    expect(fromDiff(rendered)[0].exempt).toBe(true)
-  })
-
-  it('counts real lines only, so a trailing newline is not an extra one', () => {
-    // The hunk header and the added-line count must agree, and a file's
-    // trailing newline is a terminator rather than a third line. A diff whose
-    // header overcounts is one `git apply` would reject, and the phantom `+`
-    // line it implies is a line the parser would read as code.
-    const rendered = untrackedDiff(
-      'packages/frontend/src/components/ui/Gauge.tsx',
-      'export function Gauge() {}\nexport const GaugeLabel = () => null\n',
-    )
-    const addedLines = rendered.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'))
-
-    expect(rendered).toContain('@@ -0,0 +1,2 @@')
-    expect(addedLines).toHaveLength(2)
-    expect(fromDiff(rendered).map((a) => a.symbol)).toEqual(['Gauge', 'GaugeLabel'])
-  })
-
-  it('renders an empty file without inventing an added line', () => {
-    const rendered = untrackedDiff('packages/frontend/src/components/ui/Empty.tsx', '')
-    expect(rendered.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'))).toEqual([])
-    expect(fromDiff(rendered)).toEqual([])
   })
 
   it('collapses an export the union sees twice', () => {
@@ -226,14 +226,36 @@ describe('local runs read the working tree (#2826)', () => {
     ])
   })
 
-  it('an exemption anywhere wins, because the working tree is the newest state', () => {
-    // Committed without the marker, then marked in the working tree: the fix
-    // IS present and must not still read as a finding.
+  /**
+   * The newest occurrence wins in BOTH directions (#2826, review round 1).
+   *
+   * dedupe originally OR-ed the exempt flags, on the reasoning that the working
+   * tree is the newest state. The reasoning was right and the OR did not encode
+   * it: OR is order-blind, so it produced the newest answer only when the newest
+   * answer happened to be `true`.
+   *
+   * The second case is the fail-open that cost — commit the marker, then delete
+   * it in the working tree, the ordinary "a reviewer said that is not internal"
+   * move made before the commit. OR resolved it to exempt, so the local run
+   * exited 0 on a tree CI reddens, falsifying the guarantee this change is for.
+   */
+  it('an exemption added in the working tree wins over the committed state', () => {
     const added = dedup([
-      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
-      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: true },
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }, // committed
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: true }, // working tree
     ])
     expect(undocumented(added, 'import { Button } from "..."')).toEqual([])
+  })
+
+  it('an exemption REMOVED in the working tree also wins — the fail-open direction', () => {
+    const added = dedup([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: true }, // committed
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }, // working tree
+    ])
+    expect(added).toEqual([{ file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }])
+    expect(undocumented(added, 'import { Button } from "..."')).toEqual([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge' },
+    ])
   })
 
   it('keeps distinct symbols in the same file apart', () => {

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fixtures/haven-api'
 
 /**
  * Mobile navigation layering (#1749).
@@ -158,11 +158,7 @@ async function expectNavigationReachable(page: Page) {
   //    can land on a part-way drawer, return the scrim, and report a layering
   //    defect that does not exist. That false failure hit three of four widths
   //    on this spec's first run.
-  await page.waitForFunction(
-    () => Math.round(document.querySelector('aside')!.getBoundingClientRect().left) === 0,
-    undefined,
-    { timeout: 10_000 },
-  )
+  await waitForDrawerOpen(page)
 
   const layering = await page.evaluate(() => {
     const aside = document.querySelector('aside')!

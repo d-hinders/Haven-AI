@@ -5,11 +5,17 @@ import {
   exportedComponentsInLine,
   addedExportsFromDiff,
   undocumentedPrimitives,
+  untrackedFileDiff,
+  dedupe,
 } from '../../scripts/design-system-coupling.mjs'
 
 const exportsInLine = exportedComponentsInLine as (line: string) => string[]
 const fromDiff = addedExportsFromDiff as (
   diff: string,
+) => { file: string; symbol: string; exempt: boolean }[]
+const untrackedDiff = untrackedFileDiff as (file: string, contents: string) => string
+const dedup = dedupe as (
+  added: { file: string; symbol: string; exempt: boolean }[],
 ) => { file: string; symbol: string; exempt: boolean }[]
 const undocumented = undocumentedPrimitives as (
   added: { file: string; symbol: string; exempt: boolean }[],
@@ -136,5 +142,105 @@ describe('design-system coupling gate (#898)', () => {
       [],
     )
     expect(fromDiff(diff('src/components/haven/index.tsx', 'export const Gauge = () => null'))).toEqual([])
+  })
+})
+
+/**
+ * The local run reads the working tree (#2826).
+ *
+ * ## Why these two functions carry the fix
+ *
+ * The gate used to compute its local diff as `origin/dev...HEAD` alone —
+ * committed work only. A primitive that was written but not yet committed was
+ * therefore invisible, and the run printed "no undocumented primitives added"
+ * and exited 0. That is precisely when ship-next invokes it: during review,
+ * before the commit. CI, which sets BASE_SHA/HEAD_SHA, then failed the
+ * required **Design-system coupling (strict)** check on the same tree.
+ *
+ * The union that fixes it is three `git` calls, which a unit test cannot
+ * usefully assert on. What it CAN assert on are the two pure pieces the union
+ * is built from, and they are where the behaviour actually lives:
+ *
+ *  - `untrackedFileDiff` renders a brand-new file — the shape this gate exists
+ *    to catch, and the one no `git diff` form emits, `git diff HEAD` included —
+ *    as a diff the existing parser reads. If it stops producing something
+ *    `addedExportsFromDiff` understands, the fix silently reverts to a false
+ *    green, so the assertion is made by round-tripping the two together rather
+ *    than by matching the diff text.
+ *  - `dedupe` handles the union's one new hazard: the same export reachable
+ *    twice, committed and again in the working tree.
+ *
+ * End-to-end proof that the CLI goes red on an uncommitted primitive is a
+ * mutation run against the real entry point, recorded in the pull request —
+ * this is the part that belongs in the suite.
+ */
+describe('local runs read the working tree (#2826)', () => {
+  it('renders an untracked primitive as a diff the parser flags', () => {
+    const file = 'packages/frontend/src/components/ui/Gauge.tsx'
+    const rendered = untrackedDiff(file, 'export function Gauge() {\n  return null\n}\n')
+
+    // Round-trip, not a text match: what matters is that the parser reaches
+    // the export, and it is the parser that decides what a diff means.
+    expect(fromDiff(rendered)).toEqual([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+    ])
+  })
+
+  it('carries a trailing exempt marker through the synthesized diff', () => {
+    const rendered = untrackedDiff(
+      'packages/frontend/src/components/ui/Gauge.tsx',
+      'export function Gauge() { // design-system-exempt: internal\n  return null\n}\n',
+    )
+    expect(fromDiff(rendered)[0].exempt).toBe(true)
+  })
+
+  it('counts real lines only, so a trailing newline is not an extra one', () => {
+    // The hunk header and the added-line count must agree, and a file's
+    // trailing newline is a terminator rather than a third line. A diff whose
+    // header overcounts is one `git apply` would reject, and the phantom `+`
+    // line it implies is a line the parser would read as code.
+    const rendered = untrackedDiff(
+      'packages/frontend/src/components/ui/Gauge.tsx',
+      'export function Gauge() {}\nexport const GaugeLabel = () => null\n',
+    )
+    const addedLines = rendered.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+
+    expect(rendered).toContain('@@ -0,0 +1,2 @@')
+    expect(addedLines).toHaveLength(2)
+    expect(fromDiff(rendered).map((a) => a.symbol)).toEqual(['Gauge', 'GaugeLabel'])
+  })
+
+  it('renders an empty file without inventing an added line', () => {
+    const rendered = untrackedDiff('packages/frontend/src/components/ui/Empty.tsx', '')
+    expect(rendered.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'))).toEqual([])
+    expect(fromDiff(rendered)).toEqual([])
+  })
+
+  it('collapses an export the union sees twice', () => {
+    const twice = [
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+    ]
+    expect(dedup(twice)).toEqual([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+    ])
+  })
+
+  it('an exemption anywhere wins, because the working tree is the newest state', () => {
+    // Committed without the marker, then marked in the working tree: the fix
+    // IS present and must not still read as a finding.
+    const added = dedup([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: true },
+    ])
+    expect(undocumented(added, 'import { Button } from "..."')).toEqual([])
+  })
+
+  it('keeps distinct symbols in the same file apart', () => {
+    const added = dedup([
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false },
+      { file: 'src/components/ui/Gauge.tsx', symbol: 'GaugeLabel', exempt: false },
+    ])
+    expect(added.map((a) => a.symbol)).toEqual(['Gauge', 'GaugeLabel'])
   })
 })

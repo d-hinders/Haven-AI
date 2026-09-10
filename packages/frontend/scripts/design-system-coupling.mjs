@@ -24,10 +24,19 @@
 // workflow stricter than opening a PR by hand.
 //
 // Usage:
-//   node scripts/design-system-coupling.mjs                 # diff origin/dev...HEAD
+//   npm run design:coupling:strict -w packages/frontend     # what CI decides
+//   node scripts/design-system-coupling.mjs                 # advisory, same scope
 //   node scripts/design-system-coupling.mjs --changed-diff=<file>   # a diff on disk
-//   node scripts/design-system-coupling.mjs --strict        # exit 1 on findings
 //   BASE_SHA=… HEAD_SHA=… node scripts/design-system-coupling.mjs   # CI
+//
+// #2826: the local run reads the WORKING TREE, not just committed work. It
+// used to diff `origin/dev...HEAD` alone, so a primitive that had been written
+// but not yet committed produced "no undocumented primitives added" — and
+// ship-next runs this during review, BEFORE the commit. Every run now prints
+// the range it compared, because a gate whose scope depends on unset
+// environment variables must not be silent about which question it answered.
+// This is the same false green the docs coupling gate fixed under #1076;
+// scripts/docs/coupling-gate.mjs has carried the union since.
 import { readFileSync, writeFileSync, appendFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -202,29 +211,121 @@ export function addedExportsFromDiff(diff) {
   return added
 }
 
+const LOCAL_BASE = 'origin/dev'
+
+function git(args) {
+  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+}
+
+function gitDiff(revs) {
+  return git(['diff', '--unified=0', ...revs, '--', ...PRIMITIVE_DIRS])
+}
+
 /**
- * Compute the diff. Always THREE-DOT (merge-base) — a two-dot diff against a
- * moving base branch shows base-side drift as phantom `+` lines, so a stale PR
- * would be blamed for exports it never touched. Returns null when git fails:
- * the caller decides — fatal under --strict (a hard gate must not silently
- * pass on an unreadable diff), warn-and-exit-0 in advisory mode.
+ * Render an untracked file as a unified diff of pure additions, so the one
+ * parser reads tracked and untracked work identically.
+ *
+ * An untracked file is the shape this gate exists to catch — a brand-new
+ * primitive — and it is invisible to every `git diff` form, including
+ * `git diff HEAD`. Synthesized rather than shelled out to `git diff --no-index`
+ * so it stays a pure function the suite can assert on directly.
+ *
+ * The path is emitted repo-root-relative on the `+++ b/` line, matching what
+ * `git diff` prints from this package's cwd; addedExportsFromDiff strips the
+ * package prefix itself.
+ */
+export function untrackedFileDiff(file, contents) {
+  const lines = contents.split('\n')
+  // A trailing newline yields a final empty element that is not a line.
+  if (lines.length && lines[lines.length - 1] === '') lines.pop()
+  return (
+    `diff --git a/${file} b/${file}\n` +
+    'new file mode 100644\n' +
+    '--- /dev/null\n' +
+    `+++ b/${file}\n` +
+    `@@ -0,0 +1,${lines.length} @@\n` +
+    lines.map((l) => `+${l}`).join('\n') +
+    (lines.length ? '\n' : '')
+  )
+}
+
+/**
+ * Compute the diff, and say which range it is. Always THREE-DOT (merge-base) —
+ * a two-dot diff against a moving base branch shows base-side drift as phantom
+ * `+` lines, so a stale PR would be blamed for exports it never touched.
+ * Returns null when git fails: the caller decides — fatal under --strict (a
+ * hard gate must not silently pass on an unreadable diff), warn-and-exit-0 in
+ * advisory mode.
+ *
+ * Two scopes, and the difference is #2826's defect:
+ *   - CI sets BASE_SHA/HEAD_SHA and gets exactly the pull request's range.
+ *   - A local run has no such range, and a committed-only `origin/dev...HEAD`
+ *     answers a DIFFERENT question than CI will — it reports a clean bill on
+ *     work that is written but not committed, which is when ship-next runs it.
+ *     So the local scope is the union a reviewer would look at: committed
+ *     branch work, staged and unstaged tracked changes, and untracked files.
+ * The union can only ever be WIDER than CI's range, never narrower, so it
+ * cannot produce a green that CI turns red — the direction that matters.
  */
 function getDiff() {
   const fromFile = arg('changed-diff')
-  if (fromFile) return readFileSync(fromFile, 'utf8')
+  if (fromFile) return { diff: readFileSync(fromFile, 'utf8'), range: fromFile }
+
   const base = process.env.BASE_SHA
-  const head = process.env.HEAD_SHA || 'HEAD'
-  const range = base ? `${base}...${head}` : 'origin/dev...HEAD'
+  if (base) {
+    const range = `${base}...${process.env.HEAD_SHA || 'HEAD'}`
+    try {
+      return { diff: gitDiff([range]), range }
+    } catch (err) {
+      console.error(`design-system coupling: could not compute the diff (${range}):`, err.message)
+      return null
+    }
+  }
+
+  const range = `${LOCAL_BASE}...HEAD + working tree`
   try {
-    return execFileSync('git', ['diff', '--unified=0', range, '--', ...PRIMITIVE_DIRS], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-    })
+    const untracked = git([
+      'ls-files',
+      '--others',
+      '--exclude-standard',
+      '--full-name',
+      '--',
+      ...PRIMITIVE_DIRS,
+    ])
+      .split('\n')
+      .filter(Boolean)
+    const repoRoot = git(['rev-parse', '--show-toplevel']).trim()
+    return {
+      diff:
+        gitDiff([`${LOCAL_BASE}...HEAD`]) +
+        gitDiff(['HEAD']) + // staged + unstaged tracked
+        untracked
+          .map((f) => untrackedFileDiff(f, readFileSync(path.join(repoRoot, f), 'utf8')))
+          .join(''),
+      range,
+    }
   } catch (err) {
     console.error(`design-system coupling: could not compute the diff (${range}):`, err.message)
     return null
   }
+}
+
+/**
+ * One entry per file+symbol. The union scope can see the same export twice —
+ * committed on the branch AND modified in the working tree. An occurrence
+ * marked `// design-system-exempt:` anywhere wins, because the working tree is
+ * the newest state and is what will be pushed: exempting a primitive without
+ * committing yet must not still read as a finding.
+ */
+export function dedupe(added) {
+  const byKey = new Map()
+  for (const entry of added) {
+    const key = `${entry.file}::${entry.symbol}`
+    const seen = byKey.get(key)
+    if (seen) seen.exempt = seen.exempt || entry.exempt
+    else byKey.set(key, { ...entry })
+  }
+  return [...byKey.values()]
 }
 
 function main() {
@@ -232,8 +333,8 @@ function main() {
   const outPath = arg('out') || 'design-system-coupling-comment.md'
   const pageSource = readFileSync(path.join(ROOT, PAGE), 'utf8')
 
-  const diff = getDiff()
-  if (diff === null) {
+  const computed = getDiff()
+  if (computed === null) {
     if (strict) {
       console.error('--strict: refusing to pass on an uncomputable diff — fetch the base and retry.')
       process.exit(1)
@@ -245,7 +346,12 @@ function main() {
     return
   }
 
-  const added = addedExportsFromDiff(diff)
+  // Say what was compared. A gate that silently changes scope on whether two
+  // environment variables happen to be set is exactly what made #2826's false
+  // green invisible: the run looked identical either way (#2826).
+  console.log(`design-system coupling: comparing ${computed.range}`)
+
+  const added = dedupe(addedExportsFromDiff(computed.diff))
   const findings = undocumentedPrimitives(added, pageSource)
   const hasFindings = findings.length > 0
 

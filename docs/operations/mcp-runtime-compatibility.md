@@ -7,13 +7,14 @@ covers:
   - packages/connect/**
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/tools/**
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-10"
 ---
 
 # MCP Runtime Compatibility
@@ -921,8 +922,9 @@ Read it as an argument-name mismatch, not an out-of-date package. Two things
 worth knowing before you reach for an upgrade:
 
 - **The affected tools are a declared list — and since #2353's switch that
-  list is 20 of the 22.** It is `STRICT_INPUT_TOOLS` in
-  `packages/mcp-server/src/tools.ts`. It began (#2312) with the money-path
+  list is 20 of the 22.** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
+  in the hosted server's contracts module (`src/tools/contracts.ts`, behind
+  the `tools.ts` facade). It began (#2312) with the money-path
   tools that read from the payment record rather than from arguments, #2348
   added the four the local MCP reaches under the same name with a different
   argument spelling, #2349 closed it with the remaining twelve, and #2353's

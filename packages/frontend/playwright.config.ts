@@ -5,6 +5,7 @@ import {
   VISUAL_COMPARE,
   VISUAL_SPECS_ENABLED,
   VISUAL_STRUCTURE_ONLY,
+  visualModeRefusal,
 } from './e2e/support/visual-mode'
 
 /**
@@ -110,41 +111,12 @@ const SUITE_IGNORE = [
   ...(VISUAL_SPECS_ENABLED ? [] : ['**/*.visual.spec.ts']),
 ]
 
-// `-u`, `-uall`, `--update-snapshots`, `--update-snapshots=all` — Playwright's
-// own help says `-u, --update-snapshots [mode]`, so the short form has to be
-// matched too. Missing it was the first version of this guard: `-u` bypassed
-// the refusal entirely and listed all 24 tests (#2827).
-const UPDATING_SNAPSHOTS = process.argv.some(
-  (a) => a.startsWith('--update-snapshots') || (a.startsWith('-u') && !a.startsWith('--')),
-)
-
-if (VISUAL_STRUCTURE_ONLY && UPDATING_SNAPSHOTS) {
-  // Structure-only compares nothing, so it also WRITES nothing: measured, a
-  // `--update-snapshots=all` run under this mode produced zero PNGs and exited
-  // 0. On the *Update visual baselines* workflow — whose entire job is to
-  // regenerate them — that is a silent no-op reported as success, which is
-  // worse than a corrupt baseline because nothing looks wrong (#2827).
-  throw new Error(
-    'VISUAL_STRUCTURE_ONLY=1 cannot regenerate baselines: it replaces the comparison ' +
-      'with a no-op, so --update-snapshots would write nothing and exit 0. Use ' +
-      'VISUAL_REGRESSION=1 (Linux only — see the frontend playbook §4).',
-  )
-}
-
-if (VISUAL_STRUCTURE_ONLY && VISUAL_COMPARE) {
-  // Refuse the combination rather than pick a winner (#2827).
-  //
-  // Both set would admit the specs AND install the no-op override: the pixel
-  // gate running green while comparing nothing. `visual-gate-coverage.test.ts`
-  // asserts `test:visual` does not carry the variable, but a script assertion
-  // cannot see an exported shell variable or a workflow-level `env:` — this
-  // can, because it runs wherever the config does.
-  throw new Error(
-    'VISUAL_REGRESSION=1 and VISUAL_STRUCTURE_ONLY=1 are mutually exclusive: the first ' +
-      'compares pixels, the second replaces that comparison with a no-op. Together they ' +
-      'would report a green pixel gate that compared nothing. Unset one.',
-  )
-}
+const VISUAL_MODE_REFUSAL = visualModeRefusal({
+  compare: VISUAL_COMPARE,
+  structureOnly: VISUAL_STRUCTURE_ONLY,
+  argv: process.argv,
+})
+if (VISUAL_MODE_REFUSAL) throw new Error(VISUAL_MODE_REFUSAL)
 
 if (VISUAL_STRUCTURE_ONLY) {
   /**
@@ -159,9 +131,9 @@ if (VISUAL_STRUCTURE_ONLY) {
    * NOT "nothing platform-dependent is left" — that is false, and the exact
    * over-claim a reader will stop believing the first time this flakes. Two
    * text-METRIC assertions survive in `focus-visible.visual.spec.ts`:
-   * `expectRowControlsUnwrapped` (line 688, `lines === 1`), whose own failure
+   * `expectRowControlsUnwrapped` (`lines === 1`), whose own failure
    * message says "this can be GREEN on macOS and RED here — that asymmetry is
-   * #1909"; and the 390px overflow budget near line 1004. Both fail
+   * #1909"; and the 390px overflow budget in the archived-row test. Both fail
    * green-local/red-CI, because Linux metrics are the wider ones (#1873,
    * #1909) — the safe direction. A NEW assertion of that kind has to be
    * checked in that direction before it is added to a visual spec.
@@ -187,10 +159,24 @@ if (VISUAL_STRUCTURE_ONLY) {
       subject: unknown,
       ...args: unknown[]
     ) {
-      // `toHaveScreenshot(name?, options?)` — the options object is whichever
-      // argument is one, so the caller's timeout is honoured either way.
+      // `.not.toHaveScreenshot()` has NO truthful answer here: this mode
+      // compares no pixels, so it cannot know whether a screenshot differs.
+      // Refuse rather than resolve it. Returning `pass: !this.isNot` — the
+      // obvious "honour .not" fix — makes the assertion pass SILENTLY, which
+      // on the one matcher whose whole design note is "a green that compared
+      // nothing is the catastrophe" is the worst of the three options.
+      if (this.isNot) {
+        throw new Error(
+          'VISUAL_STRUCTURE_ONLY=1 cannot evaluate .not.toHaveScreenshot(): it compares no pixels.',
+        )
+      }
+
+      // `toHaveScreenshot(name?, options?)`, where `name` may be a string OR an
+      // array of path segments — so an array must not be mistaken for the
+      // options object, or the caller's timeout is silently dropped.
       const options = args.find(
-        (a): a is { timeout?: number } => typeof a === 'object' && a !== null,
+        (a): a is { timeout?: number } =>
+          typeof a === 'object' && a !== null && !Array.isArray(a),
       )
       const timeout = options?.timeout ?? this.timeout
 
@@ -201,12 +187,7 @@ if (VISUAL_STRUCTURE_ONLY) {
         await locator.waitFor({ state: 'visible', timeout })
       }
       return {
-        // Honour `.not` rather than hardcoding true: Playwright's finalizer
-        // asserts `pass === !!isNot`, so a hardcoded pass makes
-        // `.not.toHaveScreenshot()` throw an internal error instead of doing
-        // what it says. Latent today — no spec uses it — and one word to keep
-        // the override behaving like the matcher it replaces.
-        pass: !this.isNot,
+        pass: true,
         message: () => 'VISUAL_STRUCTURE_ONLY=1: locator resolved; pixels NOT compared',
       }
     },

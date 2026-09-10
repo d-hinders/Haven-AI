@@ -14,10 +14,14 @@
  *     `design-system.visual.spec.ts` finds the top bar with
  *     `//*[@id="main-content"]/preceding-sibling::header[1]` (#1820) and then
  *     asserts `toHaveCount(1)` on it — `focus-visible.visual.spec.ts` says why,
- *     at its line 296: that "closes 'matches nothing' and 'matches several'".
- *     Every `toHaveCount(1)` in the five specs is one of these — 24 of them at
- *     the time of writing, but the instrument is the point, not the count:
- *     `grep -c 'toHaveCount(1)' e2e/*.visual.spec.ts`.
+ *     at its line 297: that "closes 'matches nothing' and 'matches several'".
+ *     Every `toHaveCount(1)` in the five specs is one of these — 24 call sites
+ *     at the time of writing, but the instrument is the point, not the count:
+ *     `grep -cE '\)\.toHaveCount\(1\)' e2e/*.visual.spec.ts` — five per-file
+ *     counts summing to 24.
+ *     Anchoring on `).` is load-bearing: a bare `grep -c 'toHaveCount(1)'`
+ *     also counts the two docstrings that MENTION the matcher, which is how
+ *     the first version of this comment said 27.
  *
  *     So the structural coverage was never missing. It was unreachable: nesting
  *     `<header>` in a wrapper makes that xpath match nothing, #2819 did exactly
@@ -74,6 +78,63 @@ export const VISUAL_SPECS_ENABLED = VISUAL_COMPARE || VISUAL_STRUCTURE_ONLY
  * The `test.skip` reason, so the five specs cannot drift into describing
  * different conditions for the same predicate.
  */
+/**
+ * Is this run trying to regenerate baselines?
+ *
+ * Playwright declares the option as `-u, --update-snapshots [mode]`, so the
+ * SHORT form has to be matched too. The first version of the refusal below
+ * tested only `--update-snapshots`, and `-u` walked straight past it: measured,
+ * `VISUAL_STRUCTURE_ONLY=1 playwright test -u --list` exited 0 and listed every
+ * test. A guard that matches one spelling of the thing it forbids reports green
+ * on the other (#2827).
+ */
+export function isUpdatingSnapshots(argv: readonly string[]): boolean {
+  return argv.some(
+    (a) => a.startsWith('--update-snapshots') || (a.startsWith('-u') && !a.startsWith('--')),
+  )
+}
+
+/**
+ * The message for a mode combination that must not run, or null when the
+ * combination is fine.
+ *
+ * A pure function rather than an `if` in the config so the suite can hold it to
+ * every spelling: these two refusals are the only thing standing between a
+ * green run and a comparison that never happened, and nothing else in the
+ * repository can see them (`visual-gate-coverage.test.ts` reads `package.json`
+ * script text, which an exported shell variable walks straight past).
+ */
+export function visualModeRefusal(opts: {
+  compare: boolean
+  structureOnly: boolean
+  argv: readonly string[]
+}): string | null {
+  if (!opts.structureOnly) return null
+
+  if (opts.compare) {
+    return (
+      'VISUAL_REGRESSION=1 and VISUAL_STRUCTURE_ONLY=1 are mutually exclusive: the first ' +
+      'compares pixels, the second replaces that comparison with a no-op. Together they ' +
+      'would report a green pixel gate that compared nothing. Unset one.'
+    )
+  }
+
+  if (isUpdatingSnapshots(opts.argv)) {
+    // Structure-only compares nothing, so it also WRITES nothing: measured, an
+    // `--update-snapshots=all` run under this mode produced zero PNGs and
+    // exited 0. On the *Update visual baselines* workflow — whose entire job is
+    // to regenerate them — that is a silent no-op reported as success, which is
+    // worse than a corrupt baseline because nothing looks wrong.
+    return (
+      'VISUAL_STRUCTURE_ONLY=1 cannot regenerate baselines: it replaces the comparison ' +
+      'with a no-op, so --update-snapshots would write nothing and exit 0. Use ' +
+      'VISUAL_REGRESSION=1 (Linux only — see the frontend playbook §4).'
+    )
+  }
+
+  return null
+}
+
 export const VISUAL_SKIP_REASON =
   'Linux-rendered baselines — run via the CI job (or VISUAL_REGRESSION=1 in a Linux container). ' +
   'VISUAL_STRUCTURE_ONLY=1 runs the locators without comparing pixels (#2827).'

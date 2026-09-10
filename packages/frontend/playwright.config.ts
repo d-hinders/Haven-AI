@@ -110,7 +110,15 @@ const SUITE_IGNORE = [
   ...(VISUAL_SPECS_ENABLED ? [] : ['**/*.visual.spec.ts']),
 ]
 
-if (VISUAL_STRUCTURE_ONLY && process.argv.some((a) => a.startsWith('--update-snapshots'))) {
+// `-u`, `-uall`, `--update-snapshots`, `--update-snapshots=all` — Playwright's
+// own help says `-u, --update-snapshots [mode]`, so the short form has to be
+// matched too. Missing it was the first version of this guard: `-u` bypassed
+// the refusal entirely and listed all 24 tests (#2827).
+const UPDATING_SNAPSHOTS = process.argv.some(
+  (a) => a.startsWith('--update-snapshots') || (a.startsWith('-u') && !a.startsWith('--')),
+)
+
+if (VISUAL_STRUCTURE_ONLY && UPDATING_SNAPSHOTS) {
   // Structure-only compares nothing, so it also WRITES nothing: measured, a
   // `--update-snapshots=all` run under this mode produced zero PNGs and exited
   // 0. On the *Update visual baselines* workflow — whose entire job is to

@@ -18,10 +18,8 @@
  *     Every `toHaveCount(1)` in the five specs is one of these — 24 call sites
  *     at the time of writing, but the instrument is the point, not the count:
  *     `grep -cE '\)\.toHaveCount\(1\)' e2e/*.visual.spec.ts` — five per-file
- *     counts summing to 24.
- *     Anchoring on `).` is load-bearing: a bare `grep -c 'toHaveCount(1)'`
- *     also counts the two docstrings that MENTION the matcher, which is how
- *     the first version of this comment said 27.
+ *     counts summing to 24. Anchor on `).`, or the count picks up the
+ *     docstrings that merely name the matcher.
  *
  *     So the structural coverage was never missing. It was unreachable: nesting
  *     `<header>` in a wrapper makes that xpath match nothing, #2819 did exactly
@@ -45,6 +43,10 @@
  * exported shell variable rather than by editing any script. So it is refused
  * loudly in `playwright.config.ts` rather than resolved silently either way.
  *
+ * Two further refusals share that reasoning: `--update-snapshots` under
+ * structure-only (below), and `.not.toHaveScreenshot()`, which has no truthful
+ * answer when nothing is compared and is refused at the matcher.
+ *
  * Structure-only is safe in the default local gate because of one property:
  * **it cannot go red because of a Linux-rendered baseline it cannot render.**
  * It compares no pixels, so what is left is the specs' own structural
@@ -57,10 +59,11 @@
  *   - **timeouts under contention.** On `next dev` this is not marginal: 12 of
  *     24 tests failed on `page.goto` alone, purely from route-by-route
  *     compilation. Both entry points build first because of it.
- *   - **a handful of platform-sensitive geometry assertions.** `focus-visible`
- *     asserts an overflow budget on a 390px action row, and its own docstring
- *     records that macOS and Linux font metrics differ there. It passes today;
- *     it is a class, not an observed defect.
+ *   - **two text-metric assertions**, both in `focus-visible.visual.spec.ts`:
+ *     `expectRowControlsUnwrapped` (`lines === 1`) and the 390px archived-row
+ *     overflow budget. That file records the asymmetry itself — Linux metrics
+ *     are the wider ones — so both fail green-local/red-CI, the safe
+ *     direction. They pass today; it is a class, not an observed defect.
  *
  * It is not a substitute for the pixel gate and must never be mistaken for one.
  * `test:visual` remains the only thing that compares anything, and
@@ -75,23 +78,27 @@ export const VISUAL_STRUCTURE_ONLY = process.env.VISUAL_STRUCTURE_ONLY === '1'
 export const VISUAL_SPECS_ENABLED = VISUAL_COMPARE || VISUAL_STRUCTURE_ONLY
 
 /**
- * The `test.skip` reason, so the five specs cannot drift into describing
- * different conditions for the same predicate.
- */
-/**
  * Is this run trying to regenerate baselines?
  *
  * Playwright declares the option as `-u, --update-snapshots [mode]`, so the
- * SHORT form has to be matched too. The first version of the refusal below
- * tested only `--update-snapshots`, and `-u` walked straight past it: measured,
- * `VISUAL_STRUCTURE_ONLY=1 playwright test -u --list` exited 0 and listed every
- * test. A guard that matches one spelling of the thing it forbids reports green
- * on the other (#2827).
+ * short form has to be matched too. This took two corrections, both found the
+ * same way — by running the real CLI rather than reading the predicate:
+ *
+ *   1. matching only `--update-snapshots` let `-u` through entirely;
+ *   2. matching `-u*` still let `-xu` through, because commander CLUSTERS
+ *      value-less short options and `-x` (stop after first failure) is one, so
+ *      `-xu` parses as `-x --update-snapshots`.
+ *
+ * Hence the character class rather than a prefix test, and hence its bounds:
+ * `-x` and `-h` take no value and may precede `-u`, while `-c`, `-g` and `-j`
+ * take a REQUIRED one — so `-gu` is `grep "u"`, an ordinary run that must not
+ * be refused. A guard that matches one spelling of the thing it forbids reports
+ * green on the others (#2827).
  */
+const CLUSTERED_UPDATE_SHORT = /^-[xh]*u/
+
 export function isUpdatingSnapshots(argv: readonly string[]): boolean {
-  return argv.some(
-    (a) => a.startsWith('--update-snapshots') || (a.startsWith('-u') && !a.startsWith('--')),
-  )
+  return argv.some((a) => a.startsWith('--update-snapshots') || CLUSTERED_UPDATE_SHORT.test(a))
 }
 
 /**
@@ -99,9 +106,11 @@ export function isUpdatingSnapshots(argv: readonly string[]): boolean {
  * combination is fine.
  *
  * A pure function rather than an `if` in the config so the suite can hold it to
- * every spelling: these two refusals are the only thing standing between a
- * green run and a comparison that never happened, and nothing else in the
- * repository can see them (`visual-gate-coverage.test.ts` reads `package.json`
+ * every spelling. These are two of the three things standing between a green run
+ * and a comparison that never happened — the third is the
+ * `.not.toHaveScreenshot()` refusal, which lives at the matcher in
+ * `playwright.config.ts` because it is about one assertion rather than the run.
+ * Nothing else in the repository can see any of them (`visual-gate-coverage.test.ts` reads `package.json`
  * script text, which an exported shell variable walks straight past).
  */
 export function visualModeRefusal(opts: {
@@ -135,6 +144,10 @@ export function visualModeRefusal(opts: {
   return null
 }
 
+/**
+ * The `test.skip` reason, so the five specs cannot drift into describing
+ * different conditions for the same predicate.
+ */
 export const VISUAL_SKIP_REASON =
   'Linux-rendered baselines — run via the CI job (or VISUAL_REGRESSION=1 in a Linux container). ' +
   'VISUAL_STRUCTURE_ONLY=1 runs the locators without comparing pixels (#2827).'

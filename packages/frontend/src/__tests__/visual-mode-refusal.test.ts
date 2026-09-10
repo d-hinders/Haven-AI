@@ -16,10 +16,14 @@
  *     existed: zero PNGs written, exit 0.
  *
  * `visual-gate-coverage.test.ts` guards the npm scripts, but a script assertion
- * cannot see an exported shell variable or a workflow-level `env:`. The
- * refusals live in `playwright.config.ts`, which runs wherever the run does —
- * and nothing protected THEM: delete either branch and every check stayed
- * green. Hence this file.
+ * cannot see an exported shell variable or a workflow-level `env:`. These
+ * refusals fire from `playwright.config.ts`, which runs wherever the run does;
+ * their logic is here, in `e2e/support/visual-mode.ts`. Nothing protected them:
+ * delete either branch and every check stayed green. Hence this file.
+ *
+ * A third refusal — `.not.toHaveScreenshot()` — stays at the matcher in
+ * `playwright.config.ts`, because it is about one assertion rather than the
+ * run, and is not reachable from here.
  *
  * ## Why the flag spellings get their own cases
  *
@@ -30,16 +34,13 @@
  * one that was, or could have been, missed.
  */
 import { describe, expect, it } from 'vitest'
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — the module is TS but lives outside src/; typed via the casts.
 import { isUpdatingSnapshots, visualModeRefusal } from '../../e2e/support/visual-mode'
 
-const updating = isUpdatingSnapshots as (argv: readonly string[]) => boolean
-const refusal = visualModeRefusal as (opts: {
-  compare: boolean
-  structureOnly: boolean
-  argv: readonly string[]
-}) => string | null
+// Imported directly, with no `as` casts: the frontend tsconfig covers `e2e/`
+// too, so a signature change in visual-mode.ts reddens HERE rather than
+// compiling against a re-declared shape.
+const updating = isUpdatingSnapshots
+const refusal = visualModeRefusal
 
 const ARGV = ['node', 'playwright', 'test']
 
@@ -51,6 +52,10 @@ describe('isUpdatingSnapshots covers every spelling Playwright accepts (#2827)',
     ['--update-snapshots', ['--update-snapshots']],
     ['--update-snapshots=all', ['--update-snapshots=all']],
     ['--update-snapshots changed', ['--update-snapshots', 'changed']],
+    // commander clusters value-less shorts: -x is "stop after first failure",
+    // so -xu parses as `-x --update-snapshots`. Measured bypassing the guard.
+    ['-xu (clustered behind -x)', ['-xu']],
+    ['-xuall', ['-xuall']],
   ])('detects %s', (_label, args) => {
     expect(updating([...ARGV, ...(args as string[])])).toBe(true)
   })
@@ -58,8 +63,11 @@ describe('isUpdatingSnapshots covers every spelling Playwright accepts (#2827)',
   it.each([
     ['no flags', []],
     ['--ui, which merely starts with a dash-u-ish prefix', ['--ui']],
-    ['--update-something-else', ['--updates']],
+    ['--updates', ['--updates']],
     ['a spec filter', ['design-system.visual.spec.ts']],
+    // -g takes a REQUIRED value, so this is grep "u" — an ordinary run.
+    ['-gu, which is grep "u" and not an update', ['-gu']],
+    ['-ju, which is workers "u"', ['-ju']],
   ])('does not fire on %s', (_label, args) => {
     expect(updating([...ARGV, ...(args as string[])])).toBe(false)
   })

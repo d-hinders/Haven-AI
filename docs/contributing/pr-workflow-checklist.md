@@ -8,7 +8,7 @@ covers:
   - scripts/ci/change-classifier.mjs
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
-last-verified: "2026-09-09"
+last-verified: "2026-09-10"
 ---
 
 # PR Workflow Checklist

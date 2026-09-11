@@ -195,7 +195,7 @@
     "packages/backend/src/modules/passport/reanchor.ts"
   ],
   "docs/product/copy-guidelines.md": [
-    "packages/backend/src/modules/reporting/receipt-underlag.ts",
+    "packages/backend/src/modules/accounting/receipt-underlag.ts",
     "packages/connect/src/runtime.ts",
     "packages/frontend/copy-lint-baseline.json",
     "packages/mcp-server/src/strict-tool-input.test.ts",

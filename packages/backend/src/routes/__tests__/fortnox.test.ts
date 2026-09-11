@@ -35,11 +35,16 @@ const fortnoxConnectionMocks = vi.hoisted(() => ({
   saveFortnoxConnection: vi.fn(),
   deleteFortnoxConnection: vi.fn(),
 }))
+// The asserting voucher pair, hoisted separately because it is mocked on a
+// different specifier (`legacy/index.js`) since #2859.
+const voucherMocks = vi.hoisted(() => ({
+  pushVoucher: vi.fn(),
+  toFortnoxVoucher: vi.fn(),
+}))
+
 const fortnoxMocks = vi.hoisted(() => ({
   buildFortnoxAuthorizeUrl: vi.fn(() => 'https://apps.fortnox.se/oauth-v1/auth?client_id=cid'),
   exchangeCodeForTokens: vi.fn(),
-  pushVoucher: vi.fn(),
-  toFortnoxVoucher: vi.fn(),
   // Match the real class signature (message, status) so the mock stays
   // contract-faithful if a future test reaches the push error path.
   FortnoxError: class FortnoxError extends Error {
@@ -48,16 +53,24 @@ const fortnoxMocks = vi.hoisted(() => ({
     }
   },
 }))
-// fortnox-connection.ts and fortnox.ts both fold into one public entry point
-// post-#998 (modules/reporting/index.ts) — a single mock factory, not two
-// vi.mock calls to the same specifier (the second silently wins otherwise).
-vi.mock('../../modules/reporting/index.js', () => ({
+// ONE factory per specifier — never two `vi.mock` calls to the same one, where
+// the second silently wins. #2859 briefly reintroduced exactly that here: a
+// blanket `modules/reporting/` → `modules/accounting/` path rewrite collapsed
+// two distinct specifiers into one, the connection/OAuth factory lost, and
+// every route test in this file 500'd.
+//
+// The module's own public entry point carries the feed-side helpers plus the
+// shared `buildAccountingEntries`; the ASSERTING voucher pair moved to
+// `legacy/index.ts` with the rest of the darkened #462 code.
+vi.mock('../../modules/accounting/index.js', () => ({
   ...fortnoxConnectionMocks,
   ...fortnoxMocks,
+  buildAccountingEntries: vi.fn(async () => []),
 }))
 
-vi.mock('../../modules/accounting/index.js', () => ({
-  buildAccountingEntries: vi.fn(async () => []),
+vi.mock('../../modules/accounting/legacy/index.js', () => ({
+  pushVoucher: voucherMocks.pushVoucher,
+  toFortnoxVoucher: voucherMocks.toFortnoxVoucher,
 }))
 
 import fortnoxRoutes from '../fortnox.js'
@@ -292,10 +305,10 @@ describe('fortnox routes — route invariants', () => {
       )
       // One entry has no book-time SEK amount → unbookable, counted as skipped
       // rather than failed; the other pushes and then the provider rejects it.
-      fortnoxMocks.toFortnoxVoucher
+      voucherMocks.toFortnoxVoucher
         .mockReturnValueOnce({ voucher: true })
         .mockReturnValueOnce(null)
-      fortnoxMocks.pushVoucher.mockRejectedValueOnce(new Error('Fortnox says no'))
+      voucherMocks.pushVoucher.mockRejectedValueOnce(new Error('Fortnox says no'))
 
       const res = await app.inject({
         method: 'POST',

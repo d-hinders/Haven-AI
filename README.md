@@ -80,7 +80,7 @@ This is a TypeScript monorepo:
 
 | Package | Description |
 |---|---|
-| `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox reporting feed, and OpenAPI (the legacy approval queue is gone entirely — its route was deregistered and its table dropped by #2055) |
+| `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox accounting feed, and OpenAPI (the legacy approval queue is gone entirely — its route was deregistered and its table dropped by #2055) |
 | `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, and activity |
 | `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
 | `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |

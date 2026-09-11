@@ -63,7 +63,7 @@ export const baseNavItems: NavItem[] = [
   { label: 'Agents', href: '/agents', icon: icons.agents },
   { label: 'Catalog', href: '/catalog', icon: icons.catalog },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
-  { label: 'Reporting', href: '/reporting', icon: icons.accounting },
+  { label: 'Accounting', href: '/accounting', icon: icons.accounting },
   { label: 'Custody', href: '/custody', icon: icons.custody },
 ]
 
@@ -154,7 +154,7 @@ export default function Sidebar() {
     {
       label: 'Admin',
       items: [
-        baseNavItems[6], // Reporting
+        baseNavItems[6], // Accounting
         baseNavItems[7], // Custody
       ],
     },

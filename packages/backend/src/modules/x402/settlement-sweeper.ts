@@ -118,7 +118,7 @@
  *
  * All three are logged as they age past the horizon, and all three are recorded
  * in `docs/architecture/04-x402-payment-sequence.md` and
- * `docs/operations/fortnox-reporting-feed.md`.
+ * `docs/operations/accounting-feed.md`.
  *
  * **None of the three is unrecoverable, and the log must not imply it is.**
  * What the sweep cannot do is attribute them WITHOUT BEING TOLD. An agent (or

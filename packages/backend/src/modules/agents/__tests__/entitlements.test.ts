@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockConfig, mockQuery } = vi.hoisted(() => ({
-  mockConfig: { hosted: false, reportingFeedEnabled: false },
+  mockConfig: { hosted: false, accountingEnabled: false },
   mockQuery: vi.fn(),
 }))
 
@@ -12,7 +12,7 @@ import {
   hasEntitlement,
   grantEntitlement,
   revokeEntitlement,
-  reportingFeedAvailable,
+  accountingFeedAvailable,
   REPORTING_FEED,
 } from '../entitlements.js'
 
@@ -22,7 +22,7 @@ describe('entitlements', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     mockConfig.hosted = false
-    mockConfig.reportingFeedEnabled = false
+    mockConfig.accountingEnabled = false
   })
   afterEach(() => vi.clearAllMocks())
 
@@ -33,33 +33,33 @@ describe('entitlements', () => {
     expect(await hasEntitlement(USER, REPORTING_FEED)).toBe(false)
   })
 
-  describe('reportingFeedAvailable — requires hosted AND flag AND entitlement', () => {
+  describe('accountingFeedAvailable — requires hosted AND flag AND entitlement', () => {
     it('false when not hosted (no DB lookup)', async () => {
       mockConfig.hosted = false
-      mockConfig.reportingFeedEnabled = true
-      expect(await reportingFeedAvailable(USER)).toBe(false)
+      mockConfig.accountingEnabled = true
+      expect(await accountingFeedAvailable(USER)).toBe(false)
       expect(mockQuery).not.toHaveBeenCalled()
     })
 
     it('false when the global flag is off', async () => {
       mockConfig.hosted = true
-      mockConfig.reportingFeedEnabled = false
-      expect(await reportingFeedAvailable(USER)).toBe(false)
+      mockConfig.accountingEnabled = false
+      expect(await accountingFeedAvailable(USER)).toBe(false)
       expect(mockQuery).not.toHaveBeenCalled()
     })
 
     it('false when hosted + flag but no entitlement', async () => {
       mockConfig.hosted = true
-      mockConfig.reportingFeedEnabled = true
+      mockConfig.accountingEnabled = true
       mockQuery.mockResolvedValueOnce({ rows: [] })
-      expect(await reportingFeedAvailable(USER)).toBe(false)
+      expect(await accountingFeedAvailable(USER)).toBe(false)
     })
 
     it('true only when hosted + flag + entitlement', async () => {
       mockConfig.hosted = true
-      mockConfig.reportingFeedEnabled = true
+      mockConfig.accountingEnabled = true
       mockQuery.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
-      expect(await reportingFeedAvailable(USER)).toBe(true)
+      expect(await accountingFeedAvailable(USER)).toBe(true)
     })
   })
 

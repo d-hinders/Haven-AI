@@ -2,9 +2,9 @@
 owner: "@d-hinders"
 status: research
 covers:
-  - packages/backend/src/modules/accounting/accounting-entry.ts
-  - packages/backend/src/modules/reporting/fortnox-connection.ts
-  - packages/backend/src/modules/reporting/reporting-transaction.ts
+  - packages/backend/src/modules/accounting/entry.ts
+  - packages/backend/src/modules/accounting/fortnox-connection.ts
+  - packages/backend/src/modules/accounting/feed-transaction.ts
 last-verified: "2026-07-16"
 ---
 
@@ -164,7 +164,7 @@ MCP), because that's where Haven controls execution and can monetize. Gate =
 
 ```
 config.hosted (HAVEN_HOSTED=true on the managed deploy)
-  && config.reportingFeedEnabled (HAVEN_REPORTING_FEED_ENABLED — global kill-switch)
+  && config.accountingEnabled (HAVEN_REPORTING_FEED_ENABLED — global kill-switch)
   && hasEntitlement(userId, 'reporting_feed')
 ```
 

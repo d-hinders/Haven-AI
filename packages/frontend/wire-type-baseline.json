@@ -22,8 +22,8 @@
     "RevokeAllPrepare": 1,
     "RevokePrepare": 1
   },
-  "packages/frontend/src/hooks/useReporting.ts": {
-    "ReportingSync": 1,
-    "ReportingVerification": 1
+  "packages/frontend/src/hooks/useAccountingFeed.ts": {
+    "AccountingSync": 1,
+    "AccountingVerification": 1
   }
 }

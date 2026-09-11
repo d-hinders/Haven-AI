@@ -35,7 +35,7 @@ const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   reportingMocks: {
     lateAttachMerchantReceipt: vi.fn().mockResolvedValue(undefined),
     // modules/mpp/evidence.ts's fire-and-forget feed hook — also part of the
-    // modules/reporting/ barrel post-#998, so it needs a mock here too (an
+    // modules/accounting/ barrel post-#998, so it needs a mock here too (an
     // unmocked call threw and 500'd the settle/evidence routes).
     feedSettledPaymentBestEffort: vi.fn(),
   },
@@ -59,7 +59,7 @@ vi.mock('../../modules/fee/index.js', () => ({
 
 // #956 late-attach: fire-and-forget, mocked so its own DB reads never
 // interleave with these tests.
-vi.mock('../../modules/reporting/index.js', () => reportingMocks)
+vi.mock('../../modules/accounting/index.js', () => reportingMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',

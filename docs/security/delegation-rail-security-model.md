@@ -125,6 +125,16 @@ delegation, or allowance (a test pins the target and the zero value). It does
 not add a value-bearing server signer, so invariant 3 stands. See
 [11-agent-passport-schema](../architecture/11-agent-passport-schema.md).
 
+**Read-only reporting columns (#2871) — no invariant moves:** the covered
+repository `infra/repositories/transaction-history.ts` now also projects
+`machine_payment_evidence.fx_rate_sek` and `.fx_source` alongside the
+`amount_sek` it already read, so the transaction CSV export can state the
+book-time rate it used instead of an unexplained SEK figure. Both columns ride
+the existing `LEFT JOIN`, inside the same `pi.user_id = $N` +
+`us.id = ANY($N)` tenant scoping, and nothing writes: no signer, no authority
+and no spend path is implicated, and invariants 1–13 above are untouched. The
+export itself moves no money — it is a read of settled history.
+
 **Relayer gas budgets (#717) — an availability control on the same signer:**
 every relayer-paid operation (deploys, execs, allowance transfers, sweeps)
 runs a per-identity window budget before the relayer signs (over-cap → 429,

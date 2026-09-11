@@ -15,24 +15,43 @@
  * destination must never re-feed history into the new ledger. `activate`
  * stamps `feed_from` in the same transaction as the flag, and the
  * orchestrator feeds nothing settled before it. A user who WANTS history
- * chooses a backfill (#2867), which passes an explicit `feedFrom`.
+ * chooses a backfill (#2867, `backfillConnection` below) — the ONE path that
+ * moves `feed_from` earlier.
+ *
+ * ## Per-connection settings (#2867)
+ *
+ * Two user knobs live in the row's `settings` JSONB, next to #2864's
+ * `companySwitches` log and the `backfill` record: `suggested_account` (a
+ * hint for the accountant, surfaced only through the connector's
+ * non-asserting hint field) and `auto_feed` (false = the settlement hook and
+ * the retry sweep leave the user alone; Sync now and the backfill still
+ * push). `updateConnectionSettings` validates the patch key by key and
+ * merges it on the SQL side. Supplier strategy is NOT a setting — one
+ * supplier per merchant, fixed (owner decision).
  */
 
 import {
+  SETTINGS_KEY_AUTO_FEED,
+  SETTINGS_KEY_SUGGESTED_ACCOUNT,
   companyIdAt,
+  connectionSettings,
   disconnect as disconnectRow,
   getActiveConnection,
   getConnection,
   listConnections,
+  mergeSettings,
+  recordBackfill,
   setActiveDestination,
   setStatus,
   type AccountingConnectionRow,
+  type ConnectionSettings,
   type ConnectionStatus,
 } from '../../infra/repositories/accounting-connections.js'
 import { decryptSecrets } from '../../infra/secrets.js'
 import { connectWithApiKey } from './api-key-flow.js'
 import { companySwitchLog } from './company-info.js'
 import { getConnector, type AccountingVerification, type ProviderSecrets } from './connector.js'
+import { syncUser } from './feed-orchestrator.js'
 import { getSyncState, reopenMissingPushed } from './feed-sync.js'
 import { fortnoxConfigured, fortnoxCredentials } from './fortnox-connection.js'
 import { fortnoxOAuth2Config } from './fortnox.js'
@@ -66,6 +85,8 @@ export interface ConnectionSummary {
   lastError: string | null
   connectedAt: string
   updatedAt: string
+  /** #2867: the user's settings, with defaults applied. */
+  settings: ConnectionSettings
 }
 
 const iso = (d: Date | string | null): string | null => (d == null ? null : new Date(d).toISOString())
@@ -89,6 +110,7 @@ export function toConnectionSummary(row: AccountingConnectionRow): ConnectionSum
     lastError: row.last_error,
     connectedAt: iso(row.created_at) as string,
     updatedAt: iso(row.updated_at) as string,
+    settings: connectionSettings(row),
   }
 }
 
@@ -263,6 +285,161 @@ export async function degradeConnection(
   reason: string | null,
 ): Promise<void> {
   await setStatus(userId, providerId, status, reason)
+}
+
+// ── Backfill (#2867) ─────────────────────────────────────────────────────────
+
+/**
+ * The earliest `since` a backfill accepts. Haven has no settled payments
+ * before it; a date earlier than this is a typo, not a choice.
+ */
+export const BACKFILL_FLOOR = new Date('2020-01-01T00:00:00.000Z')
+
+export class BackfillRefusedError extends Error {
+  readonly code: 'NOT_FOUND' | 'NOT_ACTIVE' | 'SINCE_INVALID' | 'SINCE_NOT_EARLIER'
+  constructor(code: BackfillRefusedError['code'], message: string) {
+    super(message)
+    this.name = 'BackfillRefusedError'
+    this.code = code
+  }
+}
+
+/**
+ * `since` as the user sent it → a Date, or a refusal: it must parse as an
+ * ISO date, be in the past, and not precede `BACKFILL_FLOOR`.
+ */
+export function parseBackfillSince(since: unknown, now: Date = new Date()): Date {
+  const invalid = (message: string) => new BackfillRefusedError('SINCE_INVALID', message)
+  if (typeof since !== 'string' || since.trim() === '') throw invalid('`since` must be an ISO date (for example 2026-01-01).')
+  const d = new Date(since)
+  if (Number.isNaN(d.getTime())) throw invalid('`since` must be an ISO date (for example 2026-01-01).')
+  if (d.getTime() < BACKFILL_FLOOR.getTime()) throw invalid(`\`since\` cannot be before ${BACKFILL_FLOOR.toISOString().slice(0, 10)}.`)
+  if (d.getTime() > now.getTime()) throw invalid('`since` must be in the past.')
+  return d
+}
+
+/**
+ * The user's explicit choice to include history: move the active
+ * destination's `feed_from` EARLIER to `since`, record the choice under
+ * `settings.backfill`, and run one bounded sync (200 payments, resumable via
+ * the claim ledger — a larger history takes further Sync now presses).
+ *
+ * Only earlier: a `since` at or after the current floor is refused
+ * (`SINCE_NOT_EARLIER`) with the floor untouched — moving it forward is the
+ * activate path's job. A row with NO floor (a pre-#2862 row that already
+ * feeds everything) is refused the same way. The guard is the WHERE clause of
+ * `RECORD_BACKFILL_SQL`, so two concurrent backfills cannot leap-frog. Only
+ * the ACTIVE destination can be backfilled: the sync feeds the active one,
+ * and activating a connection later re-stamps its floor to now anyway.
+ */
+export async function backfillConnection(
+  userId: string,
+  providerId: string,
+  sinceInput: unknown,
+): Promise<{ feedFrom: string; fed: number }> {
+  const now = new Date()
+  const since = parseBackfillSince(sinceInput, now)
+  const name = getProvider(providerId)?.displayName ?? providerId
+  const row = await getConnection(userId, providerId)
+  if (!row) throw new BackfillRefusedError('NOT_FOUND', `No ${name} connection to backfill.`)
+  if (!row.is_active_destination || row.status !== 'connected') {
+    throw new BackfillRefusedError('NOT_ACTIVE', `The ${name} connection is not the active feed destination — activate it first.`)
+  }
+  const moved = await recordBackfill(userId, providerId, { since, requestedAt: now })
+  if (!moved) {
+    // The statement refused: the floor is null, or not later than `since`.
+    const floor = row.feed_from ? new Date(row.feed_from).toISOString() : null
+    throw new BackfillRefusedError(
+      'SINCE_NOT_EARLIER',
+      floor
+        ? `\`since\` must be earlier than the current feed-from (${floor}) — a backfill only ever includes more history.`
+        : 'This connection already feeds all history; there is nothing earlier to include.',
+    )
+  }
+  const { fed } = await syncUser(userId)
+  return { feedFrom: new Date(moved.feed_from!).toISOString(), fed }
+}
+
+// ── Settings (#2867) ─────────────────────────────────────────────────────────
+
+export class ConnectionSettingsError extends Error {
+  readonly code: 'NOT_FOUND' | 'INVALID_SETTING'
+  /** The offending key, named so the client can point at the field. */
+  readonly key: string | null
+  constructor(code: ConnectionSettingsError['code'], message: string, key: string | null = null) {
+    super(message)
+    this.name = 'ConnectionSettingsError'
+    this.code = code
+    this.key = key
+  }
+}
+
+/** Fortnox: a four-digit BAS account, classes 1–8. */
+const BAS_ACCOUNT_RE = /^[1-8]\d{3}$/
+const GENERIC_ACCOUNT_MAX = 32
+
+/**
+ * Validate a settings patch: exactly the two keys, each optional. An unknown
+ * key is refused by name (a typo must not silently do nothing); a
+ * `suggested_account` for Fortnox must be a BAS account; for any other
+ * provider a non-empty string of at most 32 characters. Null clears it.
+ * Returns the stored-key patch for the merge.
+ */
+export function validateSettingsPatch(providerId: string, body: unknown): Record<string, unknown> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new ConnectionSettingsError('INVALID_SETTING', 'Settings must be a JSON object.')
+  }
+  const patch: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+    if (key === SETTINGS_KEY_SUGGESTED_ACCOUNT) {
+      if (value === null) {
+        patch[key] = null
+        continue
+      }
+      if (typeof value !== 'string') {
+        throw new ConnectionSettingsError('INVALID_SETTING', '`suggested_account` must be a string or null.', key)
+      }
+      const account = value.trim()
+      // MUTATION TARGET (accounting-connections.test.ts "a non-BAS account is
+      // refused"): the Fortnox rule is the four-digit BAS shape, nothing looser.
+      if (providerId === 'fortnox') {
+        if (!BAS_ACCOUNT_RE.test(account)) {
+          throw new ConnectionSettingsError('INVALID_SETTING', '`suggested_account` must be a four-digit BAS account (1000–8999) for Fortnox.', key)
+        }
+      } else if (account.length === 0 || account.length > GENERIC_ACCOUNT_MAX) {
+        throw new ConnectionSettingsError('INVALID_SETTING', `\`suggested_account\` must be 1–${GENERIC_ACCOUNT_MAX} characters.`, key)
+      }
+      patch[key] = account
+    } else if (key === SETTINGS_KEY_AUTO_FEED) {
+      if (typeof value !== 'boolean') {
+        throw new ConnectionSettingsError('INVALID_SETTING', '`auto_feed` must be true or false.', key)
+      }
+      patch[key] = value
+    } else {
+      throw new ConnectionSettingsError('INVALID_SETTING', `Unknown setting \`${key}\`; the settings are \`suggested_account\` and \`auto_feed\`.`, key)
+    }
+  }
+  return patch
+}
+
+/**
+ * `PATCH /accounting/connections/:provider/settings`: validate, then merge on
+ * the SQL side (`MERGE_CONNECTION_SETTINGS_SQL`) so `companySwitches` and
+ * `backfill` survive untouched. An empty patch is a no-op that still answers
+ * with the row. Any row can carry settings — a disconnected one keeps them
+ * for its reconnect.
+ */
+export async function updateConnectionSettings(
+  userId: string,
+  providerId: string,
+  body: unknown,
+): Promise<ConnectionSummary> {
+  const patch = validateSettingsPatch(providerId, body)
+  const row = Object.keys(patch).length === 0
+    ? await getConnection(userId, providerId)
+    : await mergeSettings(userId, providerId, patch)
+  if (!row) throw new ConnectionSettingsError('NOT_FOUND', `No ${getProvider(providerId)?.displayName ?? providerId} connection.`)
+  return toConnectionSummary(row)
 }
 
 // ── Verify (dispatches to the ACTIVE connection's connector) ─────────────────

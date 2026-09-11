@@ -34,7 +34,12 @@ const connectionMocks = vi.hoisted(() => ({
   listConnections: vi.fn(async () => []),
   setStatus: vi.fn(async () => {}),
 }))
-vi.mock('../../../infra/repositories/accounting-connections.js', () => connectionMocks)
+// #2867: the pure helpers (`connectionSettings`) stay real; only the data
+// access is stubbed. A row without `settings` reads as the defaults.
+vi.mock('../../../infra/repositories/accounting-connections.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../infra/repositories/accounting-connections.js')>()),
+  ...connectionMocks,
+}))
 
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import { registerConnector, clearConnectors, InMemoryConnector, type AccountingConnector } from '../connector.js'

@@ -207,6 +207,42 @@ export const RECORD_COMPANY_SWITCH_SQL = `UPDATE accounting_connections
      RETURNING ${COLUMNS}`
 
 /**
+ * #2867: the per-connection user settings, written as a JSONB MERGE on the
+ * SQL side (`settings || $3`) — never read-modify-write — so the other keys
+ * the column carries (`companySwitches` from #2864, `backfill` below) are
+ * preserved by construction and two writers cannot lose each other's key.
+ * `$3` is the patch as JSON text; a key set to JSON null reads back as
+ * "unset" (`connectionSettings`).
+ */
+export const MERGE_CONNECTION_SETTINGS_SQL = `UPDATE accounting_connections
+     SET settings = settings || $3::jsonb, updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2
+     RETURNING ${COLUMNS}`
+
+/**
+ * #2867: the backfill choice. The ONE statement that ever moves `feed_from`
+ * EARLIER — activate (#2862) and a company switch (#2864) only ever move it
+ * forward. The guard is in the WHERE, not in the caller: a `since` at or
+ * after the current floor updates zero rows (the caller then reads the row
+ * to tell "no row" from "not earlier"), and a NULL floor — a pre-#2862 row
+ * that already feeds everything — has nothing earlier to move to and is
+ * refused the same way. The choice is recorded under `settings.backfill`
+ * (`{ since, requestedAt }`) through the same append-safe merge as the
+ * settings write. `$3` is the new floor, `$4` the backfill entry as JSON text.
+ *
+ * MUTATION TARGET (backfill-and-settings.db.test.ts "a LATER since is
+ * refused"): dropping `feed_from > $3` lets a backfill move the floor
+ * forward, which is the activate path's job and would hide history the
+ * user never asked to hide.
+ */
+export const RECORD_BACKFILL_SQL = `UPDATE accounting_connections
+     SET feed_from = $3,
+         settings = settings || jsonb_build_object('backfill', $4::jsonb),
+         updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2 AND feed_from IS NOT NULL AND feed_from > $3::timestamptz
+     RETURNING ${COLUMNS}`
+
+/**
  * #2863: the per-connection refresh lock. A provider refresh token is
  * single-use (Fortnox rotates it on every refresh), so two workers refreshing
  * the same row at once — the settlement hook and a "Sync now" click — burn
@@ -417,6 +453,73 @@ export async function recordCompanySwitch(
     JSON.stringify(entry),
     input.reason,
   ])
+  return r.rows[0] ?? null
+}
+
+/** The user-facing settings on a row (#2867) — the `settings` keys the PATCH route owns, read with their defaults. */
+export interface ConnectionSettings {
+  /** A hint for the accountant, surfaced only as the connector's non-asserting hint field. Null = none. */
+  suggestedAccount: string | null
+  /** False = the settlement hook and the retry sweep leave this user alone; manual sync and backfill still push. Default true. */
+  autoFeed: boolean
+}
+
+/** The stored key names — the wire contract of `PATCH /accounting/connections/:provider/settings`. */
+export const SETTINGS_KEY_SUGGESTED_ACCOUNT = 'suggested_account'
+export const SETTINGS_KEY_AUTO_FEED = 'auto_feed'
+
+export function connectionSettings(row: Pick<AccountingConnectionRow, 'settings'>): ConnectionSettings {
+  const raw = (row.settings ?? {}) as Record<string, unknown>
+  const account = raw[SETTINGS_KEY_SUGGESTED_ACCOUNT]
+  const auto = raw[SETTINGS_KEY_AUTO_FEED]
+  return {
+    suggestedAccount: typeof account === 'string' && account.length > 0 ? account : null,
+    autoFeed: auto !== false,
+  }
+}
+
+/** The recorded backfill choice on a row (#2867), or null when the user never chose one. */
+export interface BackfillEntry {
+  since: string
+  requestedAt: string
+}
+
+export function backfillChoice(row: Pick<AccountingConnectionRow, 'settings'>): BackfillEntry | null {
+  const raw = (row.settings as { backfill?: unknown } | null)?.backfill
+  if (typeof raw !== 'object' || raw === null) return null
+  const e = raw as Partial<BackfillEntry>
+  return typeof e.since === 'string' && typeof e.requestedAt === 'string' ? { since: e.since, requestedAt: e.requestedAt } : null
+}
+
+/**
+ * See `MERGE_CONNECTION_SETTINGS_SQL`. `patch` holds only the keys to change,
+ * already validated by the caller (`connections.ts`); a null value stores a
+ * JSON null, which reads back as unset. Returns the row after the merge, or
+ * null when there is no row.
+ */
+export async function mergeSettings(
+  userId: string,
+  provider: string,
+  patch: Record<string, unknown>,
+  db: Executor = pool,
+): Promise<AccountingConnectionRow | null> {
+  const r = await db.query<AccountingConnectionRow>(MERGE_CONNECTION_SETTINGS_SQL, [userId, provider, JSON.stringify(patch)])
+  return r.rows[0] ?? null
+}
+
+/**
+ * See `RECORD_BACKFILL_SQL`. Returns the row with its new floor, or null when
+ * nothing qualified — no row, no floor, or `since` not earlier than the floor;
+ * the caller tells those apart with a read.
+ */
+export async function recordBackfill(
+  userId: string,
+  provider: string,
+  input: { since: Date; requestedAt: Date },
+  db: Executor = pool,
+): Promise<AccountingConnectionRow | null> {
+  const entry: BackfillEntry = { since: input.since.toISOString(), requestedAt: input.requestedAt.toISOString() }
+  const r = await db.query<AccountingConnectionRow>(RECORD_BACKFILL_SQL, [userId, provider, input.since, JSON.stringify(entry)])
   return r.rows[0] ?? null
 }
 

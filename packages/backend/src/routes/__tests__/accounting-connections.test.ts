@@ -58,10 +58,41 @@ const { rows, repo } = vi.hoisted(() => {
     stampFeedFromIfUnset: vi.fn(async () => null),
     updateSecrets: vi.fn(async () => {}),
     upsertConnection: vi.fn(async () => { throw new Error('not used here') }),
+    // #2867: the same MERGE semantic as `MERGE_CONNECTION_SETTINGS_SQL`
+    // (`settings || patch`) — other keys survive. The SQL itself is proven
+    // on the real database in backfill-and-settings.db.test.ts.
+    mergeSettings: vi.fn(async (u: string, p: string, patch: Record<string, unknown>) => {
+      const r = rows.get(key(u, p))
+      if (!r) return null
+      r.settings = { ...(r.settings as Record<string, unknown>), ...patch }
+      return r
+    }),
+    // #2867: `RECORD_BACKFILL_SQL`'s guard — only an existing, non-null
+    // floor that is LATER than `since` moves; anything else updates nothing.
+    recordBackfill: vi.fn(async (u: string, p: string, input: { since: Date; requestedAt: Date }) => {
+      const r = rows.get(key(u, p))
+      if (!r || !r.feed_from || (r.feed_from as Date).getTime() <= input.since.getTime()) return null
+      r.feed_from = input.since
+      r.settings = { ...(r.settings as Record<string, unknown>), backfill: { since: input.since.toISOString(), requestedAt: input.requestedAt.toISOString() } }
+      return r
+    }),
   }
   return { rows, repo }
 })
-vi.mock('../../infra/repositories/accounting-connections.js', () => repo)
+// The pure helpers (`connectionSettings`, the settings key names, …) stay
+// real; only the data access is replaced.
+vi.mock('../../infra/repositories/accounting-connections.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/repositories/accounting-connections.js')>()),
+  ...repo,
+}))
+
+// #2867: the backfill's one bounded sync — the orchestrator is proven on the
+// real database; here only "it was triggered, once, after the move" matters.
+const orchestratorMocks = vi.hoisted(() => ({ syncUser: vi.fn(async () => ({ fed: 0 })) }))
+vi.mock('../../modules/accounting/feed-orchestrator.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../modules/accounting/feed-orchestrator.js')>()),
+  syncUser: orchestratorMocks.syncUser,
+}))
 
 // The state store: same first-call semantic as `rate_limit_counters`.
 const { stateStore } = vi.hoisted(() => {
@@ -179,9 +210,10 @@ describe('accounting connection routes (#2862)', () => {
       return r
     })
     flowMocks.connectWithApiKey.mockReset()
+    orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
   })
 
-  const authed = (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown) =>
+  const authed = (method: 'GET' | 'POST' | 'DELETE' | 'PATCH', url: string, payload?: unknown) =>
     app.inject({ method, url, headers: { authorization: `Bearer ${token}` }, ...(payload ? { payload } : {}) })
 
   describe('GET /accounting/providers', () => {
@@ -229,11 +261,14 @@ describe('accounting connection routes (#2862)', () => {
         externalCompanyId: '1234567',
         externalCompanyName: 'Ada AB',
         baseCurrency: 'SEK',
+        // #2867: settings with defaults applied — an empty JSONB reads as these.
+        settings: { suggestedAccount: null, autoFeed: true },
       })
       expect(connections[0]).not.toHaveProperty('secrets_ciphertext')
       // #2865: a grant that carries only `bookkeeping` is short of the other
       // six — named in the descriptor's order, even on a `connected` row.
       expect(connections[0].missingScopes).toEqual(['supplierinvoice', 'supplier', 'archive', 'inbox', 'connectfile', 'companyinformation'])
+      expect(connections[0]).not.toHaveProperty('companySwitches')
       expect(leaks(res.body)).toBe(false)
       expect(leaks(JSON.stringify(res.headers))).toBe(false)
       expectMatchesSpec('GET', '/accounting/connections', res.json())
@@ -533,6 +568,169 @@ describe('accounting connection routes (#2862)', () => {
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'NOT_CONNECTED' })
       expect(repo.setActiveDestination).not.toHaveBeenCalled()
+    })
+  })
+  describe('POST /accounting/connections/:provider/backfill (#2867)', () => {
+    const FLOOR = new Date('2026-06-01T00:00:00.000Z')
+    const active = () => rows.set(`${USER}::fortnox`, row('fortnox', { is_active_destination: true, feed_from: FLOOR, settings: { companySwitches: [{ at: '2026-05-01T00:00:00.000Z', fromCompanyId: '1', fromCompanyName: 'Old AB', toCompanyId: '1234567', toCompanyName: 'Ada AB' }] } }))
+
+    it('moves feed_from EARLIER to `since`, records the choice, runs ONE sync and answers { feedFrom, fed }', async () => {
+      active()
+      orchestratorMocks.syncUser.mockResolvedValue({ fed: 3 })
+      const before = Date.now()
+      const res = await authed('POST', '/accounting/connections/fortnox/backfill', { since: '2026-01-01' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3 })
+      expectMatchesSpec('POST', '/accounting/connections/{provider}/backfill', res.json())
+      // The move happened BEFORE the sync, on this user only.
+      expect(repo.recordBackfill).toHaveBeenCalledOnce()
+      expect(orchestratorMocks.syncUser).toHaveBeenCalledOnce()
+      expect(orchestratorMocks.syncUser).toHaveBeenCalledWith(USER)
+      expect(repo.recordBackfill.mock.invocationCallOrder[0]).toBeLessThan(orchestratorMocks.syncUser.mock.invocationCallOrder[0])
+      const stored = rows.get(`${USER}::fortnox`)!
+      expect((stored.feed_from as Date).toISOString()).toBe('2026-01-01T00:00:00.000Z')
+      const settings = stored.settings as { backfill: { since: string; requestedAt: string }; companySwitches: unknown[] }
+      expect(settings.backfill.since).toBe('2026-01-01T00:00:00.000Z')
+      expect(new Date(settings.backfill.requestedAt).getTime()).toBeGreaterThanOrEqual(before)
+      // The merge preserved the #2864 log.
+      expect(settings.companySwitches).toHaveLength(1)
+      expect(leaks(res.body)).toBe(false)
+    })
+
+    it('REFUSES a `since` at or after the current feed_from — the floor and the sync are untouched (400 SINCE_NOT_EARLIER)', async () => {
+      active()
+      for (const since of ['2026-06-01T00:00:00.000Z', '2026-07-15']) {
+        const res = await authed('POST', '/accounting/connections/fortnox/backfill', { since })
+        expect(res.statusCode).toBe(400)
+        expect(res.json()).toMatchObject({ error_code: 'SINCE_NOT_EARLIER' })
+        expect(res.json().error).toContain('2026-06-01T00:00:00.000Z')
+        expectMatchesSpec('POST', '/accounting/connections/{provider}/backfill', res.json(), '400')
+      }
+      expect((rows.get(`${USER}::fortnox`)!.feed_from as Date).toISOString()).toBe(FLOOR.toISOString())
+      expect(rows.get(`${USER}::fortnox`)!.settings).not.toHaveProperty('backfill')
+      expect(orchestratorMocks.syncUser).not.toHaveBeenCalled()
+    })
+
+    it('refuses a connection with NO floor the same way — nothing earlier to include', async () => {
+      rows.set(`${USER}::fortnox`, row('fortnox', { is_active_destination: true, feed_from: null }))
+      const res = await authed('POST', '/accounting/connections/fortnox/backfill', { since: '2026-01-01' })
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toMatchObject({ error_code: 'SINCE_NOT_EARLIER' })
+      expect(orchestratorMocks.syncUser).not.toHaveBeenCalled()
+    })
+
+    it('400s SINCE_INVALID for a missing, unparseable, future or pre-2020 `since` — before any read', async () => {
+      active()
+      for (const payload of [{}, { since: 'yesterday' }, { since: 42 }, { since: '2999-01-01' }, { since: '2019-12-31' }]) {
+        const res = await authed('POST', '/accounting/connections/fortnox/backfill', payload)
+        expect(res.statusCode, JSON.stringify(payload)).toBe(400)
+        expect(res.json()).toMatchObject({ error_code: 'SINCE_INVALID' })
+        expectMatchesSpec('POST', '/accounting/connections/{provider}/backfill', res.json(), '400')
+      }
+      expect(repo.recordBackfill).not.toHaveBeenCalled()
+      expect(orchestratorMocks.syncUser).not.toHaveBeenCalled()
+      expect((rows.get(`${USER}::fortnox`)!.feed_from as Date).toISOString()).toBe(FLOOR.toISOString())
+    })
+
+    it('404s a missing connection and 409s one that is not the active connected destination', async () => {
+      expect((await authed('POST', '/accounting/connections/fortnox/backfill', { since: '2026-01-01' })).statusCode).toBe(404)
+      rows.set(`${USER}::fortnox`, row('fortnox', { is_active_destination: false, feed_from: FLOOR }))
+      const inactive = await authed('POST', '/accounting/connections/fortnox/backfill', { since: '2026-01-01' })
+      expect(inactive.statusCode).toBe(409)
+      expect(inactive.json()).toMatchObject({ error_code: 'NOT_ACTIVE' })
+      rows.set(`${USER}::fortnox`, row('fortnox', { is_active_destination: true, status: 'needs_reauthorisation', feed_from: FLOOR }))
+      expect((await authed('POST', '/accounting/connections/fortnox/backfill', { since: '2026-01-01' })).statusCode).toBe(409)
+      expect(repo.recordBackfill).not.toHaveBeenCalled()
+      expect(orchestratorMocks.syncUser).not.toHaveBeenCalled()
+    })
+
+    it('requires authentication', async () => {
+      expect((await app.inject({ method: 'POST', url: '/accounting/connections/fortnox/backfill', payload: { since: '2026-01-01' } })).statusCode).toBe(401)
+    })
+  })
+
+  describe('PATCH /accounting/connections/:provider/settings (#2867)', () => {
+    const withLog = () => rows.set(`${USER}::fortnox`, row('fortnox', { settings: { companySwitches: [{ at: '2026-05-01T00:00:00.000Z', fromCompanyId: '1', fromCompanyName: null, toCompanyId: '1234567', toCompanyName: 'Ada AB' }], backfill: { since: '2026-01-01T00:00:00.000Z', requestedAt: '2026-06-01T00:00:00.000Z' } } }))
+
+    it('stores suggested_account and auto_feed as a MERGE — the company-switch log and the backfill record survive', async () => {
+      withLog()
+      const res = await authed('PATCH', '/accounting/connections/fortnox/settings', { suggested_account: '6540', auto_feed: false })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().connection).toMatchObject({ provider: 'fortnox', settings: { suggestedAccount: '6540', autoFeed: false } })
+      expectMatchesSpec('PATCH', '/accounting/connections/{provider}/settings', res.json())
+      expect(repo.mergeSettings).toHaveBeenCalledWith(USER, 'fortnox', { suggested_account: '6540', auto_feed: false })
+      const stored = rows.get(`${USER}::fortnox`)!.settings as Record<string, unknown>
+      expect(stored).toMatchObject({ suggested_account: '6540', auto_feed: false })
+      expect(stored.companySwitches).toHaveLength(1)
+      expect(stored.backfill).toEqual({ since: '2026-01-01T00:00:00.000Z', requestedAt: '2026-06-01T00:00:00.000Z' })
+      // The wire summary never exposes the raw JSONB.
+      expect(res.json().connection.settings).not.toHaveProperty('companySwitches')
+      expect(leaks(res.body)).toBe(false)
+
+      // One key at a time, and null clears the hint.
+      const clear = await authed('PATCH', '/accounting/connections/fortnox/settings', { suggested_account: null })
+      expect(clear.json().connection.settings).toEqual({ suggestedAccount: null, autoFeed: false })
+      const on = await authed('PATCH', '/accounting/connections/fortnox/settings', { auto_feed: true })
+      expect(on.json().connection.settings).toEqual({ suggestedAccount: null, autoFeed: true })
+      // GET reads the same thing back.
+      const list = await authed('GET', '/accounting/connections')
+      expect(list.json().connections[0].settings).toEqual({ suggestedAccount: null, autoFeed: true })
+    })
+
+    it('a non-BAS account is refused for Fortnox with a 400 that names the key — nothing stored', async () => {
+      withLog()
+      // MUTATION TARGET: loosen `BAS_ACCOUNT_RE` (e.g. to three digits) and
+      // the 3-digit case below is accepted.
+      for (const bad of ['654', '65400', '9540', '0540', 'abcd', '', ' ']) {
+        const res = await authed('PATCH', '/accounting/connections/fortnox/settings', { suggested_account: bad })
+        expect(res.statusCode, JSON.stringify(bad)).toBe(400)
+        expect(res.json()).toEqual({ error: expect.stringContaining('four-digit BAS account'), error_code: 'INVALID_SETTING', key: 'suggested_account' })
+        expectMatchesSpec('PATCH', '/accounting/connections/{provider}/settings', res.json(), '400')
+      }
+      expect(repo.mergeSettings).not.toHaveBeenCalled()
+      expect(rows.get(`${USER}::fortnox`)!.settings).not.toHaveProperty('suggested_account')
+      // The positive control for the regex: the four BAS classes' edges.
+      for (const ok of ['1000', '8999', ' 6540 ']) {
+        expect((await authed('PATCH', '/accounting/connections/fortnox/settings', { suggested_account: ok })).statusCode).toBe(200)
+      }
+      expect(rows.get(`${USER}::fortnox`)!.settings).toMatchObject({ suggested_account: '6540' })
+    })
+
+    it('a non-Fortnox provider takes any non-empty account of at most 32 characters', async () => {
+      rows.set(`${USER}::memory`, row('memory'))
+      expect((await authed('PATCH', '/accounting/connections/memory/settings', { suggested_account: 'Travel:Software' })).statusCode).toBe(200)
+      const long = await authed('PATCH', '/accounting/connections/memory/settings', { suggested_account: 'x'.repeat(33) })
+      expect(long.statusCode).toBe(400)
+      expect(long.json()).toMatchObject({ error_code: 'INVALID_SETTING', key: 'suggested_account' })
+      expect((await authed('PATCH', '/accounting/connections/memory/settings', { suggested_account: '' })).statusCode).toBe(400)
+    })
+
+    it('an unknown key or a wrong type is a 400 that names the key; nothing else in the patch is applied', async () => {
+      withLog()
+      const unknown = await authed('PATCH', '/accounting/connections/fortnox/settings', { auto_feed: false, supplier_strategy: 'per_payment' })
+      expect(unknown.statusCode).toBe(400)
+      expect(unknown.json()).toEqual({ error: expect.stringContaining('supplier_strategy'), error_code: 'INVALID_SETTING', key: 'supplier_strategy' })
+      const typed = await authed('PATCH', '/accounting/connections/fortnox/settings', { auto_feed: 'no' })
+      expect(typed.statusCode).toBe(400)
+      expect(typed.json()).toMatchObject({ error_code: 'INVALID_SETTING', key: 'auto_feed' })
+      const camel = await authed('PATCH', '/accounting/connections/fortnox/settings', { suggestedAccount: '6540' })
+      expect(camel.statusCode).toBe(400)
+      expect(camel.json()).toMatchObject({ key: 'suggestedAccount' })
+      expect(repo.mergeSettings).not.toHaveBeenCalled()
+      expect(rows.get(`${USER}::fortnox`)!.settings).not.toHaveProperty('auto_feed')
+    })
+
+    it('an empty patch is a no-op that still answers with the row; a missing connection is 404', async () => {
+      withLog()
+      const res = await authed('PATCH', '/accounting/connections/fortnox/settings', {})
+      expect(res.statusCode).toBe(200)
+      expect(res.json().connection.settings).toEqual({ suggestedAccount: null, autoFeed: true })
+      expect(repo.mergeSettings).not.toHaveBeenCalled()
+      expect((await authed('PATCH', '/accounting/connections/memory/settings', { auto_feed: false })).statusCode).toBe(404)
+    })
+
+    it('requires authentication', async () => {
+      expect((await app.inject({ method: 'PATCH', url: '/accounting/connections/fortnox/settings', payload: { auto_feed: false } })).statusCode).toBe(401)
     })
   })
 })

@@ -211,6 +211,11 @@ describe('FortnoxConnector (#496)', () => {
     ).SupplierInvoice
     expect(payload).not.toHaveProperty('Account')
     expect(payload.YourReference).toBe('suggested account 6540')
+    // #2867: the connection-level `suggested_account` setting arrives on the
+    // same `suggestedAccount` field, so this ONE hint field is the only place
+    // it can surface. MUTATION TARGET: carry it as `Account` instead and the
+    // push throws on `assertNonAsserting` before any request is made.
+    expect(calls.filter((c) => c.url.includes('/supplierinvoices'))).toHaveLength(1)
   })
 
   it('attaches the receipt underlag: inbox upload + file connection (#498)', async () => {
@@ -333,6 +338,10 @@ describe('helpers', () => {
     expect(() => assertNonAsserting({ Total: 1 })).not.toThrow()
     expect(() => assertNonAsserting({ SupplierInvoiceRows: [] })).toThrow(/non-asserting/)
     expect(() => assertNonAsserting({ VAT: 25 })).toThrow(/non-asserting/)
+    // #2867: a suggested account that leaked into an `Account` key is exactly
+    // what the guard exists for — the setting may only ever be the hint.
+    expect(() => assertNonAsserting({ Account: '6540', YourReference: 'suggested account 6540' })).toThrow(/payload carries Account/)
+    expect(() => assertNonAsserting({ YourReference: 'suggested account 6540' })).not.toThrow()
   })
 
   it('externalInvoiceNumber is stable and capped at 50 chars', () => {

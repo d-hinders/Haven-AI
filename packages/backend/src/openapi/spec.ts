@@ -579,6 +579,27 @@ const accountingProvider = {
 } as const
 
 /**
+ * The user's per-connection settings (#2867), defaults applied — what
+ * `PATCH /accounting/connections/{provider}/settings` writes, read back.
+ */
+const accountingConnectionSettings = {
+  type: 'object',
+  required: ['suggestedAccount', 'autoFeed'],
+  properties: {
+    suggestedAccount: {
+      type: ['string', 'null'],
+      description:
+        'A hint for the accountant, carried on every pushed document ONLY in the connector\'s non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint.',
+    },
+    autoFeed: {
+      type: 'boolean',
+      description:
+        'Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push.',
+    },
+  },
+} as const
+
+/**
  * One accounting connection — SAFE METADATA ONLY (#2862). Never the secrets
  * blob, never a token or key; the route tests are written as redaction tests.
  */
@@ -587,7 +608,7 @@ const accountingConnection = {
   required: [
     'provider', 'displayName', 'authKind', 'status', 'statusReason', 'isActiveDestination', 'feedFrom',
     'grantedScope', 'missingScopes', 'tokenExpiresAt', 'externalCompanyId', 'externalCompanyName', 'baseCurrency', 'lastPushAt', 'lastError',
-    'connectedAt', 'updatedAt',
+    'connectedAt', 'updatedAt', 'settings',
   ],
   properties: {
     provider: { type: 'string', examples: ['fortnox'] },
@@ -600,7 +621,11 @@ const accountingConnection = {
     },
     statusReason: { type: ['string', 'null'] },
     isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
-    feedFrom: { type: ['string', 'null'], format: 'date-time', description: 'Nothing settled before this is fed. Set to now by activate.' },
+    feedFrom: {
+      type: ['string', 'null'],
+      format: 'date-time',
+      description: 'Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.',
+    },
     grantedScope: { type: ['string', 'null'] },
     missingScopes: {
       type: 'array',
@@ -619,6 +644,7 @@ const accountingConnection = {
     lastError: { type: ['string', 'null'] },
     connectedAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
+    settings: accountingConnectionSettings,
   },
 } as const
 
@@ -3361,7 +3387,7 @@ export const openapiSpec = {
         operationId: 'activateAccountingConnection',
         summary: 'Make this connection the feed destination; feed_from = now.',
         description:
-          "Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (a later slice). Only a `connected` connection can be activated.",
+          "Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (`POST /accounting/connections/{provider}/backfill`, #2867). Only a `connected` connection can be activated.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
@@ -3376,6 +3402,104 @@ export const openapiSpec = {
           '401': errorResponse,
           '404': { ...errorResponse, description: 'No connection for this provider.' },
           '409': { ...errorResponse, description: 'The connection is not in the `connected` state.' },
+        },
+      },
+    },
+    '/accounting/connections/{provider}/backfill': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'backfillAccountingConnection',
+        summary: 'Include history: move feed_from EARLIER to `since` and run one bounded sync.',
+        description:
+          "The user's explicit choice to feed payments settled before the connection became the destination (#2867). Every connection gets `feedFrom = now` at connect and at activate, so nothing is re-fed unasked; this is the ONE call that moves it earlier. `since` must be an ISO date in the past and not before 2020-01-01 (400 `SINCE_INVALID`), and EARLIER than the current `feedFrom` (400 `SINCE_NOT_EARLIER` — a backfill only ever includes more history; moving the floor forward is activate's job; a connection with no floor already feeds everything and is refused the same way). Only the active, `connected` destination can be backfilled (409 `NOT_ACTIVE`). The choice is recorded on the connection and one sync runs, bounded to 200 payments and resumable — press Sync now for the rest. Ignores `autoFeed: false`: this is a manual action.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['since'],
+                properties: { since: { type: 'string', format: 'date-time', description: 'ISO date or date-time; the new feed-from floor.', examples: ['2026-01-01'] } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The new floor and how many payments this call fed (0 is normal when the history is already pushed or empty).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['feedFrom', 'fed'],
+                  properties: {
+                    feedFrom: { type: 'string', format: 'date-time', description: 'The connection\'s feed-from after the move — `since`, normalised.' },
+                    fed: { type: 'integer', description: 'Payments fed by this call (at most 200).' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: '`SINCE_INVALID` (not a date, in the future, before 2020-01-01) or `SINCE_NOT_EARLIER` (not earlier than the current feed-from, or the connection has no floor).' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No connection for this provider.' },
+          '409': { ...errorResponse, description: 'The connection is not the active `connected` destination (`NOT_ACTIVE`).' },
+        },
+      },
+    },
+    '/accounting/connections/{provider}/settings': {
+      patch: {
+        tags: ['Dashboard'],
+        operationId: 'updateAccountingConnectionSettings',
+        summary: 'Per-connection settings: suggested account and auto-feed.',
+        description:
+          'Exactly two keys, each optional (#2867). `suggested_account`: for Fortnox a four-digit BAS account (`^[1-8]\\d{3}$`), for other providers a non-empty string of at most 32 characters, `null` to clear; it reaches the ledger only as the connector\'s non-asserting hint, never as an account field. `auto_feed`: `false` makes the settlement hook and the retry sweep skip this user while Sync now and the backfill still push; absent = `true`. Any other key, or an invalid value, is a 400 that names the key. Other stored connection state (the company-switch log, the backfill record) is preserved — the write is a merge. Supplier strategy is not a setting (one supplier per merchant, fixed).',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  suggested_account: { type: ['string', 'null'], description: 'Fortnox: a four-digit BAS account. Null clears.', examples: ['6540'] },
+                  auto_feed: { type: 'boolean', description: 'False = manual only.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The connection with its settings after the merge.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', required: ['connection'], properties: { connection: accountingConnection } },
+              },
+            },
+          },
+          '400': {
+            description: 'An unknown key or an invalid value; `key` names it.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code', 'key'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['INVALID_SETTING'] },
+                    key: { type: ['string', 'null'], description: 'The offending setting, or null when the body itself is not an object.' },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No connection for this provider.' },
         },
       },
     },

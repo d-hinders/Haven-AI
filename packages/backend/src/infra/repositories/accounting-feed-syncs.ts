@@ -320,11 +320,19 @@ export type DueRetryRow = Pick<FeedSyncRow, 'id' | 'user_id' | 'provider' | 'pay
  * MUTATION TARGETS (accounting-feed-syncs.test.ts): `c.status = 'connected'`
  * (the needs_reauthorisation test), `s.attempts < $2` (the cap test), the
  * backoff predicate (the "not before" test).
+ *
+ * #2867: a connection with `settings.auto_feed = false` is "manual only" —
+ * the user asked that nothing be pushed unless they press Sync now, and the
+ * sweep follows the settlement hook's semantics, not the button's. Its rows
+ * are not enumerated at all (the same shape as a state-skipped row: they
+ * wait until the cause is gone), so a tick never spends its batch on rows
+ * it may not push. Absent key = true.
  */
 export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT s.id, s.user_id, s.provider, s.payment_id, s.status, s.attempts
      FROM accounting_feed_syncs s
      JOIN accounting_connections c ON c.user_id = s.user_id AND c.provider = s.provider
      WHERE c.status = 'connected' AND c.is_active_destination
+       AND COALESCE((c.settings ->> 'auto_feed')::boolean, true)
        AND s.attempts < $2::int
        AND (
          (s.status IN ('failed', 'skipped')

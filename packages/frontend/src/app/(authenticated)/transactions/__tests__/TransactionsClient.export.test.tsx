@@ -216,8 +216,12 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     feedState.truncated = true
     render(<TransactionsClient />)
 
-    expect(await screen.findByText(/Older transactions aren.t included/i)).toBeInTheDocument()
-    expect(screen.getByText(/not your full history/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Counts and exports cover the transactions loaded here/i),
+    ).toBeInTheDocument()
+    // Hedged, not flat: an account holding exactly one window on an
+    // Etherscan-shaped leg would make a flat claim false.
+    expect(screen.getByText(/may\s+not be your full history/i)).toBeInTheDocument()
     // The header's blanket claim must soften with it — it is the louder of
     // the two, and the one a user reads first.
     expect(screen.getByText('Recent activity across your accounts.')).toBeInTheDocument()
@@ -227,7 +231,9 @@ describe('TransactionsClient — CSV export (#2871)', () => {
   it('says nothing when the feed is complete', () => {
     render(<TransactionsClient />)
 
-    expect(screen.queryByText(/Older transactions aren.t included/i)).toBeNull()
+    expect(
+      screen.queryByText(/Counts and exports cover the transactions loaded here/i),
+    ).toBeNull()
     expect(screen.getByText('All activity across your accounts.')).toBeInTheDocument()
   })
 })

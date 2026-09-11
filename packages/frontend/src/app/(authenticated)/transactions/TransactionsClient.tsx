@@ -422,17 +422,22 @@ export default function TransactionsClient() {
           #2882: `total` counts what the explorers returned, not what the
           account holds — each source is capped at a fixed window. This line
           qualifies that count, so it lives inside the count row rather than
-          floating above the table. It corrects the SCREEN; the downloaded CSV
+          floating above the table.
+
+          Hedged on purpose. Blockscout answers by cursor, so there the cap is
+          certain; the Etherscan-shaped legs infer it from a full page, and an
+          account holding exactly one window would otherwise be told flatly
+          that older transactions exist when none do. "May not be" is true in
+          every state at no cost. It corrects the SCREEN; the downloaded CSV
           carries no such note, which is recorded on the PR.
         */}
         {!loadingInitial && truncated && (
           <div className="w-full text-xs text-[var(--v2-ink-3)]">
-            Older transactions aren&apos;t included, so counts and exports cover
-            what&apos;s shown here, not your full history.
+            Counts and exports cover the transactions loaded here, which may
+            not be your full history.
           </div>
         )}
       </div>
-
 
       <Card hover={false}>
         <TransactionsTable

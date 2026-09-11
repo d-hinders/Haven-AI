@@ -87,6 +87,38 @@ function stubBlockscout(safe: string, opts: LegOptions) {
   return fetchMock
 }
 
+/**
+ * Stubs the Gnosis (etherscan-v2) legs. That provider has no cursor, so
+ * `hasMore` there is `rows.length >= offset` — a different mechanism from
+ * Blockscout's, live for every Gnosis account, and the half these tests
+ * would otherwise leave unpinned.
+ */
+function stubEtherscan(safe: string, nativeRows: number) {
+  const result = Array.from({ length: nativeRows }, (_, i) => ({
+    blockNumber: String(45_000_000 + i),
+    timeStamp: '1778240999',
+    hash: `0x${(i + 9001).toString(16).padStart(64, '0')}`,
+    from: SENDER,
+    to: safe,
+    value: '1000000000000000000',
+    gas: '21000',
+    gasUsed: '21000',
+    isError: '0',
+    functionName: '',
+  }))
+
+  const fetchMock = vi.fn((input: string | URL) => {
+    const url = String(input)
+    if (url.includes('action=txlist') && !url.includes('txlistinternal')) {
+      return jsonResponse({ status: '1', message: 'OK', result })
+    }
+    return jsonResponse({ status: '1', message: 'OK', result: [] })
+  })
+
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
 function routeDbQueries(safes: unknown[]) {
   return vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown) => {
@@ -236,6 +268,28 @@ describe('GET /transactions — truncation signal (#2882)', () => {
 
     const second = await get()
     expect(second.json().truncated).toBe(true)
+  })
+
+  it('reports truncated on a cursorless provider when a leg returns a full page', async () => {
+    // Gnosis: `offset` really is requested, so a full page IS evidence the
+    // source had more. This is the other mechanism, and it is live.
+    const safe = uniqueSafe(100)
+    stubEtherscan(safe.address, EXPLORER_PAGE_SIZE)
+    routeDbQueries(safe.rows)
+
+    const response = await get('?fresh=1')
+
+    expect(response.json().truncated).toBe(true)
+  })
+
+  it('does not report truncated on a cursorless provider one row below the window', async () => {
+    const safe = uniqueSafe(100)
+    stubEtherscan(safe.address, EXPLORER_PAGE_SIZE - 1)
+    routeDbQueries(safe.rows)
+
+    const response = await get('?fresh=1')
+
+    expect(response.json().truncated).toBe(false)
   })
 
   it('is independent of partialFailure', async () => {

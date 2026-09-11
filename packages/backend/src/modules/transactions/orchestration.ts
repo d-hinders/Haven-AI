@@ -28,6 +28,14 @@ export interface AggregateSafeTransactionsResult {
    * Aggregated with OR: one capped account makes the whole feed incomplete,
    * because the rows are merged into one list and the caller cannot tell
    * which account's tail is missing.
+   *
+   * Computed BEFORE `filterEnrichedTransactions`, deliberately. A view
+   * filtered down to a small, complete account still reports truncation when
+   * some other account is capped — one caveat too many rather than a false
+   * claim of completeness, which is the direction every judgement call in
+   * this feature errs toward. Making it filter-aware would mean deciding
+   * which accounts a filter can still reach, and the honest answer for an
+   * unfiltered `total` is the one here.
    */
   truncated: boolean
 }

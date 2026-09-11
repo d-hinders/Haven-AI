@@ -32,6 +32,15 @@ export interface Transaction {
   /** Book-time SEK value (P0 #463); null for non-machine / unpriced transactions. */
   amountSek?: string | null
   /**
+   * The book-time FX rate `amountSek` was struck at, and where it came from —
+   * `machine_payment_evidence.fx_rate_sek` / `.fx_source` (#463, migration
+   * 026), surfaced for the CSV export (#2871). Null wherever `amountSek` is:
+   * they are written by the same pricing step, so a row never carries an
+   * amount without its rate.
+   */
+  fxRateSek?: string | null
+  fxSource?: string | null
+  /**
    * Who initiated the money movement that produced this row — recorded by
    * the backend (#2097), never derived in the frontend.
    *

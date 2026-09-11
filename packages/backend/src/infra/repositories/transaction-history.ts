@@ -72,6 +72,8 @@ export interface PaymentIntentAgentRow {
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
   amount_sek: string | null
+  fx_rate_sek: string | null
+  fx_source: string | null
 }
 
 export interface DelegateSweepAgentRow {
@@ -104,6 +106,8 @@ export interface X402PaymentIntentRow {
   payment_proof_status: string | null
   payment_reconciliation_event_type: string | null
   amount_sek: string | null
+  fx_rate_sek: string | null
+  fx_source: string | null
   settlement_scheme: string | null
   confirmed_at: string | null
   created_at: string
@@ -223,6 +227,8 @@ export const FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL = `SELECT pi.id,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS merchant_address,
               mpe.proof_status AS payment_proof_status,
               mpe.amount_sek AS amount_sek,
+              mpe.fx_rate_sek AS fx_rate_sek,
+              mpe.fx_source AS fx_source,
               mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id
@@ -318,6 +324,8 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
             pi.x402_resource_url,
             mpe.proof_status AS payment_proof_status,
             mpe.amount_sek AS amount_sek,
+            mpe.fx_rate_sek AS fx_rate_sek,
+            mpe.fx_source AS fx_source,
             pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             mpre.event_type AS payment_reconciliation_event_type,
             pi.confirmed_at,

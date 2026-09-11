@@ -5184,6 +5184,47 @@ export const openapiSpec = {
         },
       },
     },
+    '/transactions/export.csv': {
+      get: {
+        tags: ['Transactions'],
+        operationId: 'exportTransactionsCsv',
+        summary: 'Download the filtered transaction list as a CSV file.',
+        description:
+          'Applies the same filters as `GET /transactions` over the whole ' +
+          'result set rather than one page, and adds `direction` and ' +
+          '`chainId`. UTF-8 with a byte-order mark and RFC 4180 quoting. ' +
+          'Bounded at 10 000 rows; above that the request is refused with 413 ' +
+          'rather than truncated.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'safeId', in: 'query', schema: uuid },
+          { name: 'agentId', in: 'query', schema: { type: 'string' } },
+          { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
+          { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] } },
+          { name: 'chainId', in: 'query', schema: { type: 'integer', examples: [8453] } },
+          { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'The CSV file.',
+            headers: {
+              'Content-Disposition': {
+                schema: { type: 'string' },
+                description: 'attachment; filename="haven-transactions-YYYYMMDD.csv"',
+              },
+              'X-Export-Row-Count': {
+                schema: { type: 'string' },
+                description: 'Rows written, excluding the header.',
+              },
+            },
+            content: { 'text/csv': { schema: { type: 'string' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '413': errorResponse,
+        },
+      },
+    },
     '/transactions/filters': {
       get: {
         tags: ['Dashboard'],

@@ -74,6 +74,8 @@ const X402_ROW: X402PaymentIntentRow = {
   payment_proof_status: 'payment_confirmed',
   payment_reconciliation_event_type: null,
   amount_sek: null,
+  fx_rate_sek: null,
+  fx_source: null,
   settlement_scheme: 'eip3009',
   confirmed_at: '2026-08-01T00:00:00.000Z',
   created_at: '2026-08-01T00:00:00.000Z',
@@ -93,6 +95,8 @@ const PI_ROW: PaymentIntentAgentRow = {
   payment_proof_status: 'payment_confirmed',
   payment_reconciliation_event_type: null,
   amount_sek: null,
+  fx_rate_sek: null,
+  fx_source: null,
 }
 
 /** Delegate-sweep attribution row returned by `findDelegateSweepAgentMatches`. */

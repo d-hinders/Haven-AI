@@ -14,11 +14,8 @@ import {
   buildTransactionSummary,
 } from '@/lib/transaction-scope'
 import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
-import {
-  buildCsvFilename,
-  downloadCsv,
-  transactionsToCsv,
-} from '@/lib/transaction-csv'
+import { buildCsvFilename, downloadCsv } from '@/lib/transaction-csv'
+import { api, ApiRequestError } from '@/lib/api'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
@@ -41,6 +38,8 @@ export default function TransactionsClient() {
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const [filters, setFilters] = useState<TransactionFilterState>(() => {
     const direction = searchParams.get('direction')
     return {
@@ -145,18 +144,33 @@ export default function TransactionsClient() {
     handleFilterChange({})
   }
 
-  // Export reflects the current filter scope: we export exactly what's loaded
-  // and visible (same client-side direction filter as the table). Name
-  // resolution mirrors the table — address book first, then the user's own
-  // Safes — so the CSV and the on-screen rows agree.
-  const handleExportCsv = () => {
-    const csv = transactionsToCsv(visibleTransactions, {
-      resolveName: (address, chainId) =>
-        resolveAddress(address) ??
-        safeNamesByAddress.get(`${address.toLowerCase()}:${chainId}`) ??
-        null,
-    })
-    downloadCsv(csv, buildCsvFilename(new Date()))
+  // The backend generates the file (#2871): it sees the whole filtered result
+  // set, where the browser only ever had the pages it had loaded. Every filter
+  // the table applies goes on the query — including `direction` and the
+  // network scope, which used to be applied here in memory — so the file and
+  // the on-screen rows agree.
+  const handleExportCsv = async () => {
+    const params = new URLSearchParams()
+    if (filters.safeId) params.set('safeId', filters.safeId)
+    if (filters.agentId) params.set('agentId', filters.agentId)
+    if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
+    if (filters.direction) params.set('direction', filters.direction)
+    if (scope !== 'all') params.set('chainId', String(scope))
+
+    setExporting(true)
+    setExportError(null)
+    try {
+      const csv = await api.getText(`/transactions/export.csv?${params.toString()}`)
+      downloadCsv(csv, buildCsvFilename(new Date()))
+    } catch (err) {
+      setExportError(
+        err instanceof ApiRequestError
+          ? err.message
+          : 'The export could not be generated. Try again.',
+      )
+    } finally {
+      setExporting(false)
+    }
   }
 
   if (!hasSafes) {
@@ -187,12 +201,18 @@ export default function TransactionsClient() {
           <Button
             variant="tertiary"
             onClick={handleExportCsv}
-            disabled={!canExport}
+            disabled={!canExport || exporting}
           >
-            Export CSV
+            {exporting ? 'Preparing…' : 'Export CSV'}
           </Button>
         }
       />
+
+      {exportError && (
+        <div className="mb-4 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+          {exportError}
+        </div>
+      )}
 
       {partialFailure && (
         <div className="mb-4 rounded-lg border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">

@@ -22,7 +22,7 @@ export const version = '080_accounting_connections'
  * unprotected. Dev's rows stay exactly as exposed as they are today until the
  * operator sets the key — no worse, and one boot away from better.
  *
- * ## Rename, not drop
+ * ## Rename, not drop — and what the overlap window actually looks like
  *
  * `fortnox_connections` becomes `fortnox_connections_retired`. The hazard is
  * specific: a rolling deploy with overlap, where OLD replicas still serve —
@@ -30,10 +30,26 @@ export const version = '080_accounting_connections'
  * migrates before it listens (`docs/operations/backend-scaling.md`), so new
  * code never writes during the window, but an old replica's insert committing
  * between the copy's read and a drop would be lost with the table. With a
- * rename inside the same transaction nothing committed is lost, and a
- * deploy-level rollback fails loudly at boot on the missing table name instead
- * of silently reading an empty one (a drop's `down()` recreates the table —
- * empty). #2872 drops the retired table after the product verification.
+ * rename inside the same transaction nothing committed is lost.
+ *
+ * "Nothing lost" is not "nothing breaks", and the difference should be said
+ * (haven-reviewer, #2887). Once this commits, an old replica that is still
+ * serving cannot use `fortnox_connections` at all: its OAuth callback fails
+ * (the code is consumed, the user sees `?fortnox=error`), its status route
+ * 500s, and its settlement hook finds no `'reporting_feed'` entitlement —
+ * rows are rewritten below — so it silently skips the feed for that payment,
+ * recoverable later via `POST /accounting/feed/sync`. That is the price of the
+ * overlap window, bounded by how long old replicas serve after the first new
+ * one migrates. Prod holds zero rows, so on prod the window costs nothing.
+ *
+ * A deploy-level rollback (`down()`) fails loudly at boot on the missing table
+ * name instead of silently reading an empty one — a drop's `down()` would
+ * recreate the table empty. But rollback is a SCHEMA operation, not a
+ * credential restore: `fortnox_connections_retired` holds the tokens as they
+ * were at migration time, and every refresh since has rotated them, so a
+ * rollback restores refresh tokens Fortnox has already consumed, and drops
+ * every connection created after the migration. #2872 drops the retired
+ * table after the product verification.
  *
  * ## One active destination per user
  *

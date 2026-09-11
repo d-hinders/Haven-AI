@@ -64,14 +64,21 @@ describeDb('Fortnox token lifecycle on the real database (#2860)', () => {
     expect(new Date(row.token_expires_at!).getTime()).toBeGreaterThan(Date.now())
   })
 
-  it('FAILS CLOSED: without HAVEN_SECRETS_KEY a refresh throws and the row is UNTOUCHED', async () => {
+  it('FAILS CLOSED BEFORE THE PROVIDER CALL: without HAVEN_SECRETS_KEY the stored refresh token is never consumed', async () => {
     const userId = await seedExpiredPlaintextConnection('lc-nokey@example.test')
     refreshTokens.mockResolvedValue(FRESH)
 
     await expect(getValidFortnoxAccessToken(userId)).rejects.toThrow(SecretsKeyMissingError)
 
-    // The refusal came AFTER the provider call (the token was minted at Fortnox)
-    // but BEFORE any write: the stored row is exactly what was seeded.
+    // THE assertion that matters, and the one a first draft got backwards.
+    // Fortnox refresh tokens are single-use: if the refusal came after the
+    // provider call, the stored token would already be burned at Fortnox and
+    // the connection dead until re-consent — which also fails closed. The
+    // provider must not have been called at all.
+    expect(refreshTokens).not.toHaveBeenCalled()
+
+    // And the row is exactly what was seeded — still holding a token Fortnox
+    // will still honour once the key is set.
     const row = (await getConnection(userId, 'fortnox'))!
     expect(row.secrets_key_version).toBe(0)
     expect(decryptSecrets(row.secrets_ciphertext!, 0)).toEqual(STORED)

@@ -17,6 +17,13 @@
  * - **Per-row, not all-or-nothing.** A row whose plaintext blob does not parse
  *   is logged and skipped, not allowed to abort the others. It stays at
  *   version 0, visible to the next boot and to the on-call schema query.
+ * - **Never overwrites a rotated credential.** The write is a compare-and-swap
+ *   on `secrets_key_version = 0`. A refresh committed by a serving replica
+ *   between this job's read and its write has already rotated the secrets to
+ *   version 1; the job's copy is then STALE — it holds a refresh token Fortnox
+ *   has already consumed — and writing it back would brick the connection.
+ *   Reproduced in review before the guard existed. A zero-row update is
+ *   counted as `moved`, not retried and not an error.
  * - **Never blocks boot.** Called after migrations and before `listen()`, but
  *   its own failure is caught and logged — a re-encrypt hiccup must not turn
  *   into "the backend will not start".
@@ -25,7 +32,7 @@
  */
 import {
   listPlaintextConnections,
-  updateSecrets,
+  reencryptIfStillPlaintext,
   type AccountingConnectionRow,
   type Executor,
 } from '../../infra/repositories/accounting-connections.js'
@@ -36,6 +43,9 @@ export interface ReencryptOutcome {
   skipped: boolean
   considered: number
   encrypted: number
+  /** Rows that were no longer at version 0 by the time the job wrote: someone
+   *  (a refresh, a reconnect) encrypted them first. Left exactly as they found them. */
+  moved: number
   failed: number
 }
 
@@ -50,39 +60,39 @@ export async function reencryptPlaintextSecrets(
 
   if (!secretsKeyConfigured(env)) {
     log('[accounting] HAVEN_SECRETS_KEY not set — plaintext connection secrets left as-is (#2860)')
-    return { skipped: true, considered: 0, encrypted: 0, failed: 0 }
+    return { skipped: true, considered: 0, encrypted: 0, moved: 0, failed: 0 }
   }
 
   const rows = await listPlaintextConnections(db)
   let encrypted = 0
+  let moved = 0
   let failed = 0
   for (const row of rows) {
     try {
       const secrets = decryptSecrets<Record<string, unknown>>(row.secrets_ciphertext as Buffer, row.secrets_key_version, env)
       const { ciphertext, keyVersion } = encryptSecrets(secrets, env)
-      await updateSecrets(
+      const written = await reencryptIfStillPlaintext(
         row.user_id,
         row.provider,
-        {
-          secretsCiphertext: ciphertext,
-          secretsKeyVersion: keyVersion,
-          tokenExpiresAt: row.token_expires_at ? new Date(row.token_expires_at) : null,
-        },
+        { secretsCiphertext: ciphertext, secretsKeyVersion: keyVersion },
         db,
       )
-      encrypted += 1
+      if (written) encrypted += 1
+      else moved += 1
     } catch (err) {
       failed += 1
+      // The row id and the error NAME only — never `err.message`. A JSON
+      // parse error embeds a prefix of the input, and the input is a secret.
       log(
-        `[accounting] could not re-encrypt secrets for user=${row.user_id} provider=${row.provider}: ` +
-          `${err instanceof Error ? err.message : String(err)} — row left at key version 0`,
+        `[accounting] could not re-encrypt secrets for connection=${row.id} ` +
+          `(${err instanceof Error ? err.name : 'Error'}) — row left at key version 0`,
       )
     }
   }
   if (rows.length > 0) {
-    log(`[accounting] re-encrypted ${encrypted}/${rows.length} plaintext connection secret(s); ${failed} failed`)
+    log(`[accounting] re-encrypted ${encrypted}/${rows.length} plaintext connection secret(s); ${moved} moved by a concurrent write, ${failed} failed`)
   }
-  return { skipped: false, considered: rows.length, encrypted, failed }
+  return { skipped: false, considered: rows.length, encrypted, moved, failed }
 }
 
 /** The boot hook: never throws. */

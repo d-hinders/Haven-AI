@@ -6,6 +6,7 @@
 import { randomBytes } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
+import type { Executor, QueryRow } from '../../transaction.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
   disconnect,
@@ -51,7 +52,7 @@ describeDb('accounting_connections repository (#2860)', () => {
     expect(row).not.toBeNull()
     expect(row!.status).toBe('connected')
     expect(row!.secrets_key_version).toBe(1)
-    expect(row!.secrets_ciphertext!.toString('latin1')).not.toContain('at')
+    expect(row!.secrets_ciphertext!.toString('latin1')).not.toContain('accessToken')
     expect(decryptSecrets(row!.secrets_ciphertext!, row!.secrets_key_version, withKey)).toEqual(TOKENS)
   })
 
@@ -67,7 +68,7 @@ describeDb('accounting_connections repository (#2860)', () => {
     expect((await getActiveConnection(userId))!.provider).toBe('fortnox')
   })
 
-  it('setActiveDestination is ATOMIC: the flag moves in one statement and the index never trips', async () => {
+  it('setActiveDestination moves the flag without tripping the index (clear-then-set, one transaction)', async () => {
     const userId = await seedUser('ac-switch@example.test')
     await upsertConnection(userId, { provider: 'fortnox', authKind: 'oauth2', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
     await upsertConnection(userId, { provider: 'accounted', authKind: 'api_key', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
@@ -108,6 +109,25 @@ describeDb('accounting_connections repository (#2860)', () => {
     expect(row.is_active_destination).toBe(true)
   })
 
+  it('RECONNECT after DISCONNECT reclaims the active flag — the user never ends with zero destinations', async () => {
+    // Disconnect clears the flag; a first draft's ON CONFLICT path preserved
+    // whatever the row had, so the reconnect kept `false` and the user had a
+    // connected row that fed nowhere. Reproduced in review via
+    // DELETE /accounting/fortnox → connect.
+    const userId = await seedUser('ac-reconnect-active@example.test')
+    await upsertConnection(userId, { provider: 'fortnox', authKind: 'oauth2', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
+    await disconnect(userId, 'fortnox', 'user disconnected')
+    expect(await getActiveConnection(userId)).toBeNull()
+    await upsertConnection(userId, { provider: 'fortnox', authKind: 'oauth2', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
+    expect((await getActiveConnection(userId))!.provider).toBe('fortnox')
+    // …but if ANOTHER provider already holds the flag, a reconnect does not steal it.
+    await upsertConnection(userId, { provider: 'accounted', authKind: 'api_key', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
+    await setActiveDestination(userId, 'accounted')
+    await disconnect(userId, 'fortnox', 'again')
+    await upsertConnection(userId, { provider: 'fortnox', authKind: 'oauth2', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
+    expect((await getActiveConnection(userId))!.provider).toBe('accounted')
+  })
+
   it('status transitions persist their reason', async () => {
     const userId = await seedUser('ac-status@example.test')
     await upsertConnection(userId, { provider: 'fortnox', authKind: 'oauth2', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
@@ -143,14 +163,14 @@ describeDb('accounting_connections repository (#2860)', () => {
       const userId = await seedPlaintext('re-key@example.test')
       expect((await listPlaintextConnections()).map((r) => r.user_id)).toContain(userId)
       const first = await reencryptPlaintextSecrets({ env: withKey, log: () => {} })
-      expect(first).toEqual({ skipped: false, considered: 1, encrypted: 1, failed: 0 })
+      expect(first).toEqual({ skipped: false, considered: 1, encrypted: 1, moved: 0, failed: 0 })
       const row = (await getConnection(userId, 'fortnox'))!
       expect(row.secrets_key_version).toBe(1)
       expect(row.secrets_ciphertext!.toString('latin1')).not.toContain('"accessToken"')
       expect(decryptSecrets(row.secrets_ciphertext!, 1, withKey)).toEqual(TOKENS)
       expect(new Date(row.token_expires_at!).toISOString()).toBe('2027-01-01T00:00:00.000Z')
       // Idempotent.
-      expect(await reencryptPlaintextSecrets({ env: withKey, log: () => {} })).toEqual({ skipped: false, considered: 0, encrypted: 0, failed: 0 })
+      expect(await reencryptPlaintextSecrets({ env: withKey, log: () => {} })).toEqual({ skipped: false, considered: 0, encrypted: 0, moved: 0, failed: 0 })
     })
 
     it('WITHOUT the key: rows are left alone, logged, and can be decrypted as version 0', async () => {
@@ -164,16 +184,44 @@ describeDb('accounting_connections repository (#2860)', () => {
       expect(decryptSecrets(row.secrets_ciphertext!, 0, noKey)).toEqual(TOKENS)
     })
 
+    it('NEVER overwrites a credential rotated between the worklist read and the write (compare-and-swap)', async () => {
+      // The lost-update review reproduced: a serving replica refreshes the
+      // token — rotating the secrets to version 1 — after this job has read
+      // its worklist but before it writes. The job's copy holds a refresh
+      // token Fortnox has already consumed. Writing it back bricks the
+      // connection. Simulated by interposing on the executor: the moment the
+      // job lists its worklist, a "refresh" lands on the same row.
+      const userId = await seedPlaintext('re-race@example.test')
+      const rotated = encryptSecrets({ ...TOKENS, refreshToken: 'ROTATED' }, withKey)
+      let interposed = false
+      const racing: Executor = {
+        query: async <R extends QueryRow = QueryRow>(sql: string, values?: unknown[]) => {
+          const out = await db.query<R>(sql, values)
+          if (!interposed && /secrets_key_version = 0 AND secrets_ciphertext IS NOT NULL/.test(sql)) {
+            interposed = true
+            await updateSecrets(userId, 'fortnox', { secretsCiphertext: rotated.ciphertext, secretsKeyVersion: rotated.keyVersion, tokenExpiresAt: new Date('2028-01-01T00:00:00Z') })
+          }
+          return out
+        },
+      }
+      const out = await reencryptPlaintextSecrets({ db: racing, env: withKey, log: () => {} })
+      expect(interposed).toBe(true)
+      expect(out).toEqual({ skipped: false, considered: 1, encrypted: 0, moved: 1, failed: 0 })
+      const row = (await getConnection(userId, 'fortnox'))!
+      expect(decryptSecrets(row.secrets_ciphertext!, 1, withKey)).toMatchObject({ refreshToken: 'ROTATED' })
+      expect(new Date(row.token_expires_at!).toISOString()).toBe('2028-01-01T00:00:00.000Z')
+    })
+
     it('a row whose plaintext does not parse is skipped and counted, not allowed to abort the pass', async () => {
       const good = await seedPlaintext('re-good@example.test')
       const bad = await seedUser('re-bad@example.test')
       await upsertConnection(bad, { provider: 'fortnox', authKind: 'oauth2', secretsCiphertext: Buffer.from('not json', 'utf8'), secretsKeyVersion: 0, grantedScope: null, tokenExpiresAt: null })
       const logs: string[] = []
       const out = await reencryptPlaintextSecrets({ env: withKey, log: (m) => logs.push(m) })
-      expect(out).toEqual({ skipped: false, considered: 2, encrypted: 1, failed: 1 })
+      expect(out).toEqual({ skipped: false, considered: 2, encrypted: 1, moved: 0, failed: 1 })
       expect((await getConnection(good, 'fortnox'))!.secrets_key_version).toBe(1)
       expect((await getConnection(bad, 'fortnox'))!.secrets_key_version).toBe(0)
-      expect(logs.join('\n')).toMatch(new RegExp(`could not re-encrypt secrets for user=${bad}`))
+      expect(logs.join('\n')).toMatch(/could not re-encrypt secrets for connection=[0-9a-f-]+ \(SyntaxError\)/)
     })
   })
 })

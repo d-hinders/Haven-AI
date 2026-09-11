@@ -5,7 +5,7 @@ import {
   updateSecrets,
   type AccountingConnectionRow,
 } from '../../infra/repositories/accounting-connections.js'
-import { decryptSecrets, encryptSecrets } from '../../infra/secrets.js'
+import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
 import { config } from '../../config.js'
 import {
   type FortnoxCredentials,
@@ -132,6 +132,15 @@ export async function getValidFortnoxAccessToken(
   if (new Date(conn.expires_at).getTime() > Date.now()) {
     return conn.access_token
   }
+
+  // ORDER MATTERS, and a first draft had it wrong (haven-reviewer, #2887).
+  // Fortnox refresh tokens are single-use: the call below CONSUMES the stored
+  // one and mints a new pair. If the key check came after it, a replica
+  // without HAVEN_SECRETS_KEY would burn the token at Fortnox, then throw
+  // before persisting the replacement — and the connection is dead until the
+  // user re-consents, which also fails closed. So the refusal happens here,
+  // before any provider call, with the stored token still valid.
+  if (!secretsKeyConfigured()) throw new SecretsKeyMissingError()
 
   const refreshed = await refreshTokens(fortnoxCredentials(), conn.refresh_token, fetchImpl)
   const secrets: FortnoxSecrets = {

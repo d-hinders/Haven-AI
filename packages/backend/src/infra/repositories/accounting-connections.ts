@@ -60,14 +60,15 @@ export interface AccountingConnectionRow {
   status: ConnectionStatus
   status_reason: string | null
   granted_scope: string | null
-  token_expires_at: string | null
+  /** pg returns TIMESTAMPTZ as a Date; the type is honest about that. */
+  token_expires_at: Date | null
   is_active_destination: boolean
-  feed_from: string | null
+  feed_from: Date | null
   settings: Record<string, unknown>
-  last_push_at: string | null
+  last_push_at: Date | null
   last_error: string | null
-  created_at: string
-  updated_at: string
+  created_at: Date
+  updated_at: Date
 }
 
 const COLUMNS = `id, user_id, provider, auth_kind, secrets_ciphertext, secrets_key_version,
@@ -87,11 +88,18 @@ export const LIST_ACCOUNTING_CONNECTIONS_SQL = `SELECT ${COLUMNS}
 
 /**
  * Connect or reconnect. On conflict the row is REUSED: secrets, scope, expiry
- * and status are replaced, while `settings`, `feed_from` and
- * `is_active_destination` are preserved — a re-consent must not lose what the
- * user configured (#2865's contract, honoured from the start). A first
- * connection for a user becomes the active destination automatically; a later
- * one does not steal it.
+ * and status are replaced, while `settings` and `feed_from` are preserved — a
+ * re-consent must not lose what the user configured (#2865's contract,
+ * honoured from the start).
+ *
+ * The active flag on the conflict path is "keep it if you had it, take it if
+ * nobody has it". A first draft preserved the flag unconditionally, and that
+ * left a real hole: disconnect clears the flag, a reconnect then hit the
+ * conflict path and kept `false`, and the user ended with a connected row and
+ * ZERO active destinations (haven-reviewer reproduced it via
+ * DELETE /accounting/fortnox → connect). A later provider still does not
+ * steal an existing destination — the OR only fires when no OTHER row holds
+ * the flag.
  */
 export const UPSERT_ACCOUNTING_CONNECTION_SQL = `INSERT INTO accounting_connections
        (user_id, provider, auth_kind, secrets_ciphertext, secrets_key_version,
@@ -108,6 +116,10 @@ export const UPSERT_ACCOUNTING_CONNECTION_SQL = `INSERT INTO accounting_connecti
        status = 'connected',
        status_reason = NULL,
        last_error = NULL,
+       is_active_destination = accounting_connections.is_active_destination
+         OR NOT EXISTS (SELECT 1 FROM accounting_connections o
+                        WHERE o.user_id = EXCLUDED.user_id AND o.is_active_destination
+                          AND o.provider <> EXCLUDED.provider),
        updated_at = NOW()
      RETURNING ${COLUMNS}`
 
@@ -142,6 +154,18 @@ export const DELETE_ACCOUNTING_CONNECTION_SQL = `DELETE FROM accounting_connecti
 /** Rows still stored as plaintext — the boot-time re-encrypt job's worklist. */
 export const LIST_PLAINTEXT_CONNECTIONS_SQL = `SELECT ${COLUMNS}
      FROM accounting_connections WHERE secrets_key_version = 0 AND secrets_ciphertext IS NOT NULL`
+
+/**
+ * The re-encrypt job's write: a COMPARE-AND-SWAP on the key version. Only a
+ * row that is STILL at version 0 is touched. A refresh committed by a serving
+ * replica between the worklist read and this write has already rotated the
+ * secrets to version 1 — writing the job's stale copy over it would put a
+ * dead refresh token back (haven-reviewer reproduced this, #2887). Zero rows
+ * updated means "someone else moved it", which the job counts, not retries.
+ */
+export const REENCRYPT_PLAINTEXT_SECRETS_SQL = `UPDATE accounting_connections
+     SET secrets_ciphertext = $3, secrets_key_version = $4, updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2 AND secrets_key_version = 0`
 
 export async function getConnection(
   userId: string,
@@ -233,6 +257,17 @@ export async function disconnect(
 
 export async function deleteConnection(userId: string, provider: string, db: Executor = pool): Promise<void> {
   await db.query(DELETE_ACCOUNTING_CONNECTION_SQL, [userId, provider])
+}
+
+/** Returns true if the row was still plaintext and is now encrypted; false if it had moved. */
+export async function reencryptIfStillPlaintext(
+  userId: string,
+  provider: string,
+  input: { secretsCiphertext: Buffer; secretsKeyVersion: number },
+  db: Executor = pool,
+): Promise<boolean> {
+  const r = await db.query(REENCRYPT_PLAINTEXT_SECRETS_SQL, [userId, provider, input.secretsCiphertext, input.secretsKeyVersion])
+  return (r.rowCount ?? 0) === 1
 }
 
 export async function listPlaintextConnections(db: Executor = pool): Promise<AccountingConnectionRow[]> {

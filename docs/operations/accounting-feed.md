@@ -25,10 +25,13 @@ accounts, or VAT.
 > `HAVEN_REPORTING_FEED_ENABLED` is still honoured with a boot warning, and the
 > new name wins whenever it is set, including when set to `false`.
 >
-> Two names deliberately did **not** change here and still appear below: the
-> `reporting_feed_syncs` table and the `reporting_feed` entitlement string.
-> #2860 renames both in one migration, so this slice carried no migration at
-> all. Until it lands, on-call reads the table under its old name.
+> Two names #2859 left behind — the `reporting_feed_syncs` table and the
+> `reporting_feed` entitlement string — were renamed by #2860's migration to
+> `accounting_feed_syncs` and `accounting_feed`. That same migration replaced
+> `fortnox_connections` with the provider-generic `accounting_connections`
+> (secrets encrypted at rest; see *Secrets at rest* below) and left the old
+> table as `fortnox_connections_retired` for #2872 to drop after the product
+> verification.
 
 ## Who is entitled (#2861)
 
@@ -63,13 +66,13 @@ machine_payment_evidence row written (with book-time SEK amount when FX is ready
   │
   ▼
 feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settlement
-  ├─ entitlement gate: hosted + flag + user entitlement ('reporting_feed',
+  ├─ entitlement gate: hosted + flag + user entitlement ('accounting_feed',
   │    or every account when HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all — #2861)
-  ├─ claimSync(user, 'fortnox', payment) → reporting_feed_syncs row 'pending'
+  ├─ claimSync(user, 'fortnox', payment) → accounting_feed_syncs row 'pending'
   │    (unique on (provider, payment_id, user_id) — the double-post guard)
   ├─ build AccountingEntry → ReportingTransaction (VAT/account fields STRIPPED)
   ├─ FortnoxConnector.pushTransaction:
-  │    ├─ token refresh if needed (fortnox_connections)
+  │    ├─ token refresh if needed (accounting_connections, secrets decrypted in-process)
   │    ├─ find-or-create supplier (name only, nothing asserted)
   │    ├─ POST /supplierinvoices  → UNATTESTED invoice,
   │    │     ExternalInvoiceNumber = HAVEN-<paymentId>, Total in SEK,
@@ -229,7 +232,7 @@ Three layers, in order of convenience:
 
 ## Troubleshooting: "my payment didn't sync"
 
-Work the sync row's `status` on `/accounting` (or `reporting_feed_syncs`):
+Work the sync row's `status` on `/accounting` (or `accounting_feed_syncs`):
 
 | Status | Meaning | Action |
 | --- | --- | --- |
@@ -259,7 +262,43 @@ Common causes, from live experience:
   capture route late-attaches onto the existing invoice; a late-attach failure
   becomes a note on the row.
 
-## Schema for on-call: `reporting_feed_syncs`
+## Secrets at rest (#2860)
+
+Provider credentials — today the user's Fortnox OAuth token pair — live in
+`accounting_connections.secrets_ciphertext` as an AES-256-GCM blob, with the
+key in `HAVEN_SECRETS_KEY` (32 bytes, base64; `openssl rand -base64 32`) and
+**never** in the database. `secrets_key_version` says how a row is stored:
+
+| version | meaning | needs the key to read? |
+|---|---|---|
+| `0` | plaintext JSON — a row migration 080 copied as-is | no |
+| `1` | encrypted under the current key | yes |
+
+- **Rows are encrypted at boot, not by the migration.** The migration reads no
+  environment (it runs on every replica, prod included, and in CI). On the
+  first boot that has the key, `reencryptPlaintextSecretsAtBoot` rewrites
+  every version-0 row; it is idempotent, per-row on a bad blob, and a
+  compare-and-swap on the version so it can never overwrite a token a serving
+  replica rotated in the meantime. Without the key it logs one line and
+  touches nothing.
+- **Set the key on dev BEFORE this deploys, or right after — but before the
+  next token expiry.** Without a key a NEW connection is refused, and a token
+  refresh is refused *before* the provider is called, so the stored refresh
+  token is never consumed. That refusal is deliberate: the alternative was
+  storing a fresh OAuth grant in plaintext. Fortnox access tokens live one
+  hour, so a dev backend without the key will start refusing refreshes within
+  an hour of the first settlement after deploy. Prod holds zero rows and gets
+  its key in #2876.
+- **On-call check:** `SELECT provider, status, secrets_key_version FROM
+  accounting_connections WHERE user_id = '<uuid>'`. A `0` after the key has
+  been set for more than one boot means the re-encrypt job logged a failure
+  for that row — search the boot log for `could not re-encrypt secrets for
+  connection=`.
+- A rollback of 080 (`down()`) restores `fortnox_connections_retired`, whose
+  tokens are whatever they were AT migration time; every refresh since has
+  rotated them. Rollback is a schema operation, not a credential restore.
+
+## Schema for on-call: `accounting_feed_syncs`
 
 One row per (user, provider, payment). `status`:
 `pending → pushed | failed | skipped` (failed AND skipped are re-claimable,

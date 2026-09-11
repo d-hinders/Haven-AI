@@ -78,14 +78,17 @@ export class SecretsKeyInvalidError extends Error {
 function readKey(env: NodeJS.ProcessEnv = process.env): Buffer | null {
   const raw = env[SECRETS_KEY_ENV]
   if (raw === undefined || raw === '') return null
-  let key: Buffer
-  try {
-    key = Buffer.from(raw, 'base64')
-  } catch (err) {
-    throw new SecretsKeyInvalidError(err instanceof Error ? err.message : String(err))
-  }
+  // `Buffer.from(raw, 'base64')` never throws — it silently skips characters
+  // it cannot decode. A key with one corrupted character therefore still
+  // yields 32 bytes and would be accepted as a DIFFERENT key, and every v1 row
+  // would then fail on its auth tag with no hint why. Re-encoding and
+  // comparing is what turns that into a config error at first use.
+  const key = Buffer.from(raw, 'base64')
   if (key.length !== KEY_BYTES) {
     throw new SecretsKeyInvalidError(`decoded to ${key.length} bytes`)
+  }
+  if (key.toString('base64') !== raw.trim()) {
+    throw new SecretsKeyInvalidError('not canonical base64 — a character was skipped or altered')
   }
   return key
 }

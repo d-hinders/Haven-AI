@@ -110,6 +110,20 @@ type ButtonProps = {
    * (WCAG 2.5.3 Label in Name) — a voice-control user says what they can see.
    */
   'aria-label'?: string
+  /**
+   * Marks the button as busy while its action is in flight (#2871), for the
+   * label-swap pattern this primitive expects — disable, swap the label to
+   * `Verbing…`.
+   *
+   * Scope, stated because it is easy to over-read: this exposes the state, it
+   * does not announce it. A `disabled` button is not focusable, so a screen
+   * reader reaches `aria-busy` only if the user navigates to it, and the
+   * attribute is not a live region. Where the *outcome* needs announcing, say
+   * it in a `role="alert"`/`role="status"` node — which is what the
+   * transactions export does. Anchors have no busy state, so this applies to
+   * the `button` branch only.
+   */
+  'aria-busy'?: boolean
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
   variant?: Variant
@@ -126,6 +140,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   type = 'button',
   form,
   'aria-label': ariaLabel,
+  'aria-busy': ariaBusy,
   disabled,
   onClick,
   variant = 'primary',
@@ -147,7 +162,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
   if (!href) {
     return (
-      <button ref={ref} type={type} form={form} aria-label={ariaLabel} disabled={disabled} onClick={onClick} className={classes}>
+      <button ref={ref} type={type} form={form} aria-label={ariaLabel} aria-busy={ariaBusy} disabled={disabled} onClick={onClick} className={classes}>
         {content}
       </button>
     )

@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/db.ts
   - packages/backend/src/rails/execution-rail.ts
-  - packages/backend/src/modules/reporting/**
+  - packages/backend/src/modules/accounting/**
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md

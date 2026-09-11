@@ -18,7 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-11"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)

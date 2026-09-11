@@ -881,7 +881,7 @@ export async function getMerchantReceiptRow(
   return result.rows[0] ?? null
 }
 
-// ── Receipt underlag source (moved from modules/reporting/receipt-underlag.ts, #999)
+// ── Receipt underlag source (moved from modules/accounting/receipt-underlag.ts, #999)
 
 export const LOAD_RECEIPT_UNDERLAG_SOURCE_SQL = `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
             pi.sign_hash, pi.signature, pi.delegate_address

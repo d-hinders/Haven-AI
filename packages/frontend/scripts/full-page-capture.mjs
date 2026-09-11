@@ -336,6 +336,7 @@ export const BUSY_TOLERANT_CAPTURES = [
     pattern: /^\/design-system$/,
     reason:
       'the skeleton/loading-state showcase renders aria-busy regions as documented CONTENT, ' +
+      'and since #2871 the Buttons card carries a permanently aria-busy example button, ' +
       'so they never resolve and never should',
   },
 ]

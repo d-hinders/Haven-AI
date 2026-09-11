@@ -1,146 +1,64 @@
-import { describe, expect, it } from 'vitest'
-import {
-  buildCsvFilename,
-  transactionsToCsv,
-  type TransactionCsvLookups,
-} from '@/lib/transaction-csv'
-import type { AggregatedTransaction } from '@/types/transactions'
+/**
+ * What is left of the browser-side export after #2871 moved generation to the
+ * backend: the filename and the download shim. The CSV contract itself — the
+ * column order, quoting, formula-injection neutralisation and per-column
+ * mapping — is now proven where the file is built, in the backend's
+ * `domain/__tests__/csv.test.ts` and
+ * `modules/transactions/__tests__/csv-export.test.ts`.
+ */
+import { describe, expect, it, vi, afterEach } from 'vitest'
+import { buildCsvFilename, downloadCsv } from '@/lib/transaction-csv'
 
-function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransaction {
-  return {
-    hash: '0xabc',
-    type: 'erc20',
-    from: '0x1111111111111111111111111111111111111111',
-    to: '0x2222222222222222222222222222222222222222',
-    value: '1000000',
-    valueFormatted: '1.00',
-    asset: 'USDC',
-    decimals: 6,
-    direction: 'out',
-    timestamp: 1_700_000_000,
-    blockNumber: 100,
-    isError: false,
-    tokenAddress: '0x3333333333333333333333333333333333333333',
-    tokenSymbol: 'USDC',
-    chainId: 8453,
-    safeId: 'safe-1',
-    safeAddress: '0x4444444444444444444444444444444444444444',
-    safeName: 'Main',
-    ...overrides,
-  }
-}
-
-const noNames: TransactionCsvLookups = { resolveName: () => null }
-
-function rows(csv: string): string[] {
-  return csv.split('\r\n')
-}
-
-function cells(line: string): string[] {
-  // Test inputs have no embedded commas/quotes except where asserted explicitly,
-  // so a naive split is adequate for the header and simple rows.
-  return line.split(',')
-}
-
-describe('transactionsToCsv', () => {
-  it('emits the header in the documented column order', () => {
-    const csv = transactionsToCsv([], noNames)
-    expect(rows(csv)[0]).toBe(
-      'date,type,status,direction,amount,token_symbol,token_address,' +
-        'counterparty_address,counterparty_name,safe_address,agent_name,tx_hash,chain_id,' +
-        'amount_sek,fee_sek,initiator',
+describe('buildCsvFilename', () => {
+  it('stamps the UTC date as haven-transactions-YYYYMMDD.csv', () => {
+    expect(buildCsvFilename(new Date('2026-05-08T11:49:59.000Z'))).toBe(
+      'haven-transactions-20260508.csv',
     )
   })
 
-  it('uses CRLF line endings', () => {
-    const csv = transactionsToCsv([tx()], noNames)
-    expect(csv).toContain('\r\n')
-    expect(csv.split('\r\n')).toHaveLength(2)
-  })
-
-  it('formats the date as ISO 8601 UTC from a unix-seconds timestamp', () => {
-    const csv = transactionsToCsv([tx({ timestamp: 1_700_000_000 })], noNames)
-    expect(csv).toContain('2023-11-14T22:13:20.000Z')
-  })
-
-  it('derives type from source, sweep activity, then direction', () => {
-    const t = (o: Partial<AggregatedTransaction>) =>
-      cells(rows(transactionsToCsv([tx(o)], noNames))[1])[1].replace(/"/g, '')
-    expect(t({ source: 'x402' })).toBe('x402')
-    expect(t({ source: 'mpp_demo' })).toBe('mpp')
-    expect(t({ activityType: 'delegate_sweep' })).toBe('allowance funding')
-    expect(t({ direction: 'in', source: 'direct' })).toBe('receive')
-    expect(t({ direction: 'out', source: 'direct' })).toBe('send')
-  })
-
-  it('derives status from error and payment flow state', () => {
-    const s = (o: Partial<AggregatedTransaction>) =>
-      cells(rows(transactionsToCsv([tx(o)], noNames))[1])[2].replace(/"/g, '')
-    expect(s({ isError: true })).toBe('failed')
-    expect(s({ paymentFlowStatus: 'confirming_merchant' })).toBe('pending')
-    expect(s({})).toBe('executed')
-  })
-
-  it('picks the counterparty by direction and resolves its name', () => {
-    const lookups: TransactionCsvLookups = {
-      resolveName: (addr) =>
-        addr === '0x1111111111111111111111111111111111111111' ? 'Alice' : null,
-    }
-    const incoming = transactionsToCsv([tx({ direction: 'in' })], lookups)
-    const cols = cells(rows(incoming)[1]).map((c) => c.replace(/"/g, ''))
-    expect(cols[7]).toBe('0x1111111111111111111111111111111111111111') // counterparty_address = from
-    expect(cols[8]).toBe('Alice') // counterparty_name
-  })
-
-  it('leaves token_address empty for native transfers and falls back to asset for symbol', () => {
-    const csv = transactionsToCsv(
-      [tx({ tokenAddress: undefined, tokenSymbol: undefined, asset: 'ETH' })],
-      noNames,
+  it('names the same export alike from either side of midnight UTC', () => {
+    // Was the local date before #2871; UTC now, matching the backend's
+    // `buildTransactionCsvFilename` so the two never disagree.
+    expect(buildCsvFilename(new Date('2026-01-05T23:30:00.000Z'))).toBe(
+      'haven-transactions-20260105.csv',
     )
-    const cols = cells(rows(csv)[1]).map((c) => c.replace(/"/g, ''))
-    expect(cols[5]).toBe('ETH') // token_symbol falls back to asset
-    expect(cols[6]).toBe('') // token_address empty
   })
 
-  it('emits book-time SEK and leaves fee_sek empty (until #386)', () => {
-    const withSek = transactionsToCsv([tx({ amountSek: '132.50' })], noNames)
-    const cols = cells(rows(withSek)[1]).map((c) => c.replace(/"/g, ''))
-    expect(cols[13]).toBe('132.50') // amount_sek
-    expect(cols[14]).toBe('') // fee_sek reserved
-    // null SEK (non-machine transfer) → empty cell
-    const noSek = transactionsToCsv([tx({ amountSek: null })], noNames)
-    expect(cells(rows(noSek)[1])[13].replace(/"/g, '')).toBe('')
-  })
-
-  // #2097 — the initiator column carries the raw attribution enum from the
-  // unified schema, never the display string "You".
-  it('emits the initiator attribution enum — never "You"', () => {
-    const i = (o: Partial<AggregatedTransaction>) =>
-      cells(rows(transactionsToCsv([tx(o)], noNames))[1])[15].replace(/"/g, '')
-    expect(i({})).toBe('') // no attribution recorded → intentionally empty
-    expect(i({ initiatedBy: 'agent' })).toBe('agent')
-    expect(i({ initiatedBy: 'human' })).toBe('human')
-    expect(i({ initiatedBy: 'unknown' })).toBe('unknown')
-  })
-
-  it('escapes embedded quotes and neutralises spreadsheet formula injection', () => {
-    const lookups: TransactionCsvLookups = {
-      resolveName: () => '=SUM(A1:A2)',
-    }
-    const csv = transactionsToCsv([tx()], lookups)
-    // Leading = is prefixed with a single quote, wrapped and quote-escaped.
-    expect(csv).toContain('"\'=SUM(A1:A2)"')
-  })
-
-  it('quotes a counterparty name that contains a comma so columns stay aligned', () => {
-    const lookups: TransactionCsvLookups = { resolveName: () => 'Acme, Inc.' }
-    const csv = transactionsToCsv([tx()], lookups)
-    expect(csv).toContain('"Acme, Inc."')
+  it('zero-pads month and day', () => {
+    expect(buildCsvFilename(new Date('2026-02-03T12:00:00.000Z'))).toBe(
+      'haven-transactions-20260203.csv',
+    )
   })
 })
 
-describe('buildCsvFilename', () => {
-  it('stamps the local date as haven-transactions-YYYYMMDD.csv', () => {
-    expect(buildCsvFilename(new Date(2026, 5, 8))).toBe('haven-transactions-20260608.csv')
+describe('downloadCsv', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('downloads the body verbatim under the given filename', () => {
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:csv')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL })
+
+    const anchor = document.createElement('a')
+    const click = vi.spyOn(anchor, 'click').mockImplementation(() => {})
+    vi.spyOn(document, 'createElement').mockReturnValue(anchor)
+
+    // The backend already prefixed the BOM; prepending a second one here
+    // would write a stray character into the first header cell.
+    const body = '﻿a,b\r\n"1","2"'
+    downloadCsv(body, 'haven-transactions-20260508.csv')
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    const blob = createObjectURL.mock.calls[0][0]
+    expect(blob.type).toBe('text/csv;charset=utf-8')
+    // jsdom's Blob has no async `text()`; size is the checkable surrogate —
+    // a second BOM would make it two bytes longer.
+    expect(blob.size).toBe(new Blob([body]).size)
+    expect(anchor.download).toBe('haven-transactions-20260508.csv')
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:csv')
   })
 })

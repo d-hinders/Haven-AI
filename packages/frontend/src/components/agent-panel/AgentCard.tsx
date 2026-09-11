@@ -363,7 +363,7 @@ export function AgentCard({
                     aria-label={`Pause ${agent.name}`}
                     className={ACTION_BUTTON_CLASS}
                   >
-                    {busyAction === 'pause' ? 'Pausing...' : 'Pause'}
+                    {busyAction === 'pause' ? 'Pausing…' : 'Pause'}
                   </button>
                 ) : (
                   <button

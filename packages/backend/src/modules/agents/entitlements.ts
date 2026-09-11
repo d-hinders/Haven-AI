@@ -49,7 +49,7 @@ export async function revokeEntitlement(userId: string, entitlement: string): Pr
  * hosted deployment, the global flag must be on, AND the account must hold the
  * entitlement. All three — env alone can never enable it on a self-hosted box.
  */
-export async function reportingFeedAvailable(userId: string): Promise<boolean> {
-  if (!config.hosted || !config.reportingFeedEnabled) return false
+export async function accountingFeedAvailable(userId: string): Promise<boolean> {
+  if (!config.hosted || !config.accountingEnabled) return false
   return hasEntitlement(userId, REPORTING_FEED)
 }

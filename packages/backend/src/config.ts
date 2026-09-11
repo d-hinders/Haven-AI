@@ -393,10 +393,16 @@ export const config = {
   legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
 
   // Managed-deployment marker — true only on Haven's hosted backend. The
-  // reporting feed (#491) is a hosted-only paid add-on and never runs elsewhere.
+  // accounting feed (#491) is a hosted-only add-on and never runs elsewhere.
   hosted: process.env.HAVEN_HOSTED === 'true',
-  // Global kill-switch for the reporting feed; dark by default.
-  reportingFeedEnabled: process.env.HAVEN_REPORTING_FEED_ENABLED === 'true',
+  // Global kill-switch for the accounting feed; dark by default.
+  //
+  // #2859 renamed this from HAVEN_REPORTING_FEED_ENABLED. The old name is still
+  // honoured so a deployed backend keeps working across the deploy that carries
+  // this rename — the operator step that sets the new one lands after merge.
+  // The NEW name wins when both are set, so flipping the variable is safe in
+  // either order. `readAccountingEnabled` warns once on the deprecated name.
+  accountingEnabled: readAccountingEnabled(),
 
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
@@ -416,4 +422,27 @@ export const config = {
  */
 export function relayerPrivateKeyForChain(chainId: number): string {
   return process.env[`RELAYER_PRIVATE_KEY_${chainId}`] || config.relayerPrivateKey
+}
+
+/**
+ * `HAVEN_ACCOUNTING_ENABLED`, falling back to the pre-#2859
+ * `HAVEN_REPORTING_FEED_ENABLED` with one warning.
+ *
+ * The new name wins whenever it is SET — not merely when it is `'true'`. An
+ * operator who sets it to `false` to turn the feed off would otherwise be
+ * overridden by a stale `HAVEN_REPORTING_FEED_ENABLED=true` still sitting in
+ * the environment, which is the opposite of what they asked for.
+ */
+function readAccountingEnabled(): boolean {
+  const current = process.env.HAVEN_ACCOUNTING_ENABLED
+  const deprecated = process.env.HAVEN_REPORTING_FEED_ENABLED
+  if (current !== undefined) return current === 'true'
+  if (deprecated !== undefined) {
+    console.warn(
+      '[config] HAVEN_REPORTING_FEED_ENABLED is deprecated (#2859) — rename it to ' +
+        'HAVEN_ACCOUNTING_ENABLED. The old name is still honoured for now.',
+    )
+    return deprecated === 'true'
+  }
+  return false
 }

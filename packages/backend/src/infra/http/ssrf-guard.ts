@@ -16,7 +16,7 @@
  *      EVERY returned address is classified (`ip-classification.ts`); a
  *      hostname whose A record is `169.254.169.254` is refused here, where a
  *      hostname regex would wave it through. This is the DNS-rebinding gap
- *      that `modules/reporting/receipt-underlag.ts` documents as a residual.
+ *      that `modules/accounting/receipt-underlag.ts` documents as a residual.
  *   3. **Connection pinning.** The socket connects to the address we just
  *      validated, because resolution happens INSIDE the connection through
  *      the `lookup` hook. A resolver that answers "public" to our check and

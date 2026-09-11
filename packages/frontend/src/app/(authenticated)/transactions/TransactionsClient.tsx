@@ -14,11 +14,8 @@ import {
   buildTransactionSummary,
 } from '@/lib/transaction-scope'
 import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
-import {
-  buildCsvFilename,
-  downloadCsv,
-  transactionsToCsv,
-} from '@/lib/transaction-csv'
+import { buildCsvFilename, downloadCsv } from '@/lib/transaction-csv'
+import { api, ApiRequestError } from '@/lib/api'
 import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
@@ -26,6 +23,70 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
+
+/**
+ * What the export tells the user when it does not hand back a file.
+ *
+ * Two tones, because two different things happen: `error` is a refusal, and
+ * `info` is the export succeeding over an empty result set — which is not a
+ * failure and must not be painted as one.
+ *
+ * The headline/detail split mirrors the partial-failure banner already on
+ * this screen: a short first line, the specifics beneath.
+ */
+interface ExportNotice {
+  tone: 'error' | 'info'
+  headline: string
+  detail?: string
+}
+
+/**
+ * What to show the user when an export fails.
+ *
+ * The refusal that matters is the row cap: the backend's `details` carries the
+ * count, the limit and the way out ("narrow the filters"), and `message` is
+ * only the three-word summary — so `details` is read where the route sends
+ * one, via the `body` escape hatch `ApiRequestError` exists for. Every other
+ * status gets a written sentence rather than a passthrough: the remaining
+ * refusals on this route are validation strings for query parameters the UI
+ * builds itself, and a 500 would otherwise surface Fastify's
+ * "Internal Server Error" as product copy.
+ */
+function exportFailureNotice(err: unknown): ExportNotice {
+  if (err instanceof ApiRequestError) {
+    const details = (err.body as { details?: unknown } | undefined)?.details
+    if (err.status === 413 && typeof details === 'string' && details.length > 0) {
+      return { tone: 'error', headline: err.message, detail: details }
+    }
+  }
+  return {
+    tone: 'error',
+    headline: 'The export could not be generated.',
+    detail: 'Try again in a moment.',
+  }
+}
+
+/**
+ * Does this CSV body carry any record, or only the header?
+ *
+ * The export applies `direction` and the network scope server-side while the
+ * table applies them in memory, so the two can disagree about whether there
+ * is anything to show: the button is gated on the server's `total`, which
+ * does not know about either. Rather than hand the user a silent header-only
+ * file, the empty result is read back off the body and reported.
+ *
+ * This reads the body because it has to: the route sends the count in
+ * `X-Export-Row-Count`, but the backend's CORS registration sets no
+ * `exposedHeaders`, so no browser client can read it. The test below is exact
+ * rather than heuristic — the backend's `toCsv` joins lines with CRLF and
+ * writes no trailing terminator (pinned by `domain/__tests__/csv.test.ts`:
+ * `toCsv(columns, [])` is the bare header), so a record-free body contains no
+ * CRLF and any record guarantees one. A CRLF inside a quoted field cannot
+ * cause a false positive, since such a field only exists inside a record.
+ */
+function hasCsvRecords(csv: string): boolean {
+  return csv.replace(/^\uFEFF/, '').includes('\r\n')
+}
 
 function chainName(chainId: number): string {
   try {
@@ -41,6 +102,8 @@ export default function TransactionsClient() {
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
   const [filters, setFilters] = useState<TransactionFilterState>(() => {
     const direction = searchParams.get('direction')
     return {
@@ -82,8 +145,10 @@ export default function TransactionsClient() {
   const chainIds = Array.from(new Set(userSafes.map((s) => s.chain_id))).sort((a, b) => a - b)
   const showNetworkFilter = chainIds.length > 1
 
-  // Client-side direction + network filters — the API doesn't yet support these
-  // dimensions, so we filter the fetched page in memory. Honest UX caveat: when
+  // Client-side direction + network filters — the LIST endpoint doesn't support
+  // these dimensions, so we filter the fetched page in memory. (The export
+  // route does, since #2871, which is why `handleExportCsv` sends both and why
+  // its result can disagree with what this list shows.) Honest UX caveat: when
   // combined with paginated results this only filters what's loaded, same
   // constraint as the client-side sort.
   const visibleTransactions = useMemo(() => {
@@ -130,6 +195,9 @@ export default function TransactionsClient() {
   const showSummary = hasActiveFilters && visibleTransactions.length > 0
   const handleFilterChange = (nextFilters: TransactionFilterState) => {
     setFilters(nextFilters)
+    // Both notices name the filters as the thing to change; leaving one up
+    // once the user has makes it assert something no longer true.
+    setExportNotice(null)
 
     const params = new URLSearchParams()
     if (nextFilters.safeId) params.set('safeId', nextFilters.safeId)
@@ -145,18 +213,50 @@ export default function TransactionsClient() {
     handleFilterChange({})
   }
 
-  // Export reflects the current filter scope: we export exactly what's loaded
-  // and visible (same client-side direction filter as the table). Name
-  // resolution mirrors the table — address book first, then the user's own
-  // Safes — so the CSV and the on-screen rows agree.
-  const handleExportCsv = () => {
-    const csv = transactionsToCsv(visibleTransactions, {
-      resolveName: (address, chainId) =>
-        resolveAddress(address) ??
-        safeNamesByAddress.get(`${address.toLowerCase()}:${chainId}`) ??
-        null,
-    })
-    downloadCsv(csv, buildCsvFilename(new Date()))
+  // The backend generates the file (#2871): it sees the whole filtered result
+  // set, where the browser only ever had the pages it had loaded. Every filter
+  // the table applies goes on the query — including `direction` and the
+  // network scope, which used to be applied here in memory — so the file and
+  // the on-screen rows agree.
+  const handleExportCsv = async () => {
+    const params = new URLSearchParams()
+    if (filters.safeId) params.set('safeId', filters.safeId)
+    if (filters.agentId) params.set('agentId', filters.agentId)
+    if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
+    if (filters.direction) params.set('direction', filters.direction)
+    if (scope !== 'all') params.set('chainId', String(scope))
+
+    setExporting(true)
+    setExportNotice(null)
+    try {
+      const csv = await api.getText(`/transactions/export.csv?${params.toString()}`)
+      if (!hasCsvRecords(csv)) {
+        // An empty body has two causes and they need different copy: no row
+        // matched, or the explorers that feed the aggregation failed. Claiming
+        // "nothing matched" during an outage is a confident wrong diagnosis.
+        setExportNotice(
+          partialFailure
+            ? {
+                tone: 'info',
+                headline: 'Nothing to export yet.',
+                detail:
+                  'Some accounts failed to load, so there was nothing to write. ' +
+                  'Reload the page and try again.',
+              }
+            : {
+                tone: 'info',
+                headline: 'Nothing to export.',
+                detail: 'No transactions match these filters. Widen them and try again.',
+              },
+        )
+        return
+      }
+      downloadCsv(csv, buildCsvFilename(new Date()))
+    } catch (err) {
+      setExportNotice(exportFailureNotice(err))
+    } finally {
+      setExporting(false)
+    }
   }
 
   if (!hasSafes) {
@@ -176,7 +276,15 @@ export default function TransactionsClient() {
     )
   }
 
-  const canExport = !loadingInitial && visibleTransactions.length > 0
+  // Gated on the server's total for the FETCHED filter scope (safeId, agentId,
+  // tokenKey — not direction or network, which the list applies in memory),
+  // rather than on the rows the browser happens to hold: since #2871 the export
+  // covers the whole result set, so gating on `visibleTransactions` would
+  // disable the button whenever the loaded page held no row matching the
+  // in-memory filter while the server still had plenty. The cost of the looser
+  // gate is that the export can legitimately come back empty — which is why
+  // that is a designed state below rather than a silent download.
+  const canExport = !loadingInitial && total > 0
 
   return (
     <div className="max-w-6xl">
@@ -187,12 +295,35 @@ export default function TransactionsClient() {
           <Button
             variant="tertiary"
             onClick={handleExportCsv}
-            disabled={!canExport}
+            disabled={!canExport || exporting}
+            aria-busy={exporting}
           >
-            Export CSV
+            {exporting ? 'Preparing…' : 'Export CSV'}
           </Button>
         }
       />
+
+      {exportNotice && (
+        <div
+          role={exportNotice.tone === 'error' ? 'alert' : 'status'}
+          className={
+            exportNotice.tone === 'error'
+              ? 'mb-4 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]'
+              : 'mb-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-sm text-[var(--v2-ink-2)]'
+          }
+        >
+          <div
+            className={
+              exportNotice.tone === 'error' ? 'font-medium' : 'font-medium text-[var(--v2-ink)]'
+            }
+          >
+            {exportNotice.headline}
+          </div>
+          {exportNotice.detail && (
+            <div className="mt-1 text-xs">{exportNotice.detail}</div>
+          )}
+        </div>
+      )}
 
       {partialFailure && (
         <div className="mb-4 rounded-lg border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
@@ -225,9 +356,10 @@ export default function TransactionsClient() {
             id="tx-network"
             aria-label="Filter transactions by network"
             value={scope === 'all' ? 'all' : String(scope)}
-            onChange={(e) =>
+            onChange={(e) => {
               setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))
-            }
+              setExportNotice(null)
+            }}
             className="max-w-[200px]"
           >
             <option value="all">All networks</option>
@@ -276,7 +408,7 @@ export default function TransactionsClient() {
         </div>
         {!loadingInitial && hasMore && visibleTransactions.length > 0 && (
           <span className="text-xs text-[var(--v2-ink-3)]">
-            Showing <span className="v2-tabular">{visibleTransactions.length}</span> of <span className="v2-tabular">{total}</span>
+            Showing <span className="v2-tabular">{visibleTransactions.length.toLocaleString('en-US')}</span> of <span className="v2-tabular">{total.toLocaleString('en-US')}</span>
           </span>
         )}
       </div>
@@ -313,7 +445,7 @@ export default function TransactionsClient() {
               disabled={loadingMore}
               className="min-w-36"
             >
-              {loadingMore ? 'Loading...' : 'Load more'}
+              {loadingMore ? 'Loading…' : 'Load more'}
             </Button>
           ) : (
             <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end</span>

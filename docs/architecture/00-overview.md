@@ -8,14 +8,14 @@ covers:
   - packages/backend/src/modules/catalog/merchant-catalog.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/lifecycle.ts
-  - packages/backend/src/modules/reporting/**
+  - packages/backend/src/modules/accounting/**
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/delegation-rail.ts
-  - packages/backend/src/routes/reporting.ts
+  - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/catalog.ts
   - packages/connect/src/api.ts
   - packages/connect/src/args.ts
@@ -31,7 +31,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/frontend/src/app/**
   - packages/frontend/src/lib/chains.ts
-  - packages/frontend/src/hooks/useReporting.ts
+  - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/hooks/useAccounting.ts
   - packages/cli/src/**
   - packages/qa-agent/src/**

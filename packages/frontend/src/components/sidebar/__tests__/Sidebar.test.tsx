@@ -55,7 +55,7 @@ describe('Sidebar', () => {
       a.getAttribute('href'),
     )
     const nav = links.filter((href) =>
-      ['/dashboard', '/accounts', '/transactions', '/agents', '/approvals', '/catalog', '/contacts', '/reporting', '/custody'].includes(href ?? ''),
+      ['/dashboard', '/accounts', '/transactions', '/agents', '/approvals', '/catalog', '/contacts', '/accounting', '/custody'].includes(href ?? ''),
     )
     // '/approvals' stays in the FILTER above deliberately: the filter is what
     // makes this assertion able to see a re-added Approvals entry. Removing it
@@ -63,7 +63,7 @@ describe('Sidebar', () => {
     expect(nav).toEqual([
       '/dashboard', '/accounts', '/transactions', '/agents',
       '/catalog', '/contacts',
-      '/reporting', '/custody',
+      '/accounting', '/custody',
     ])
     // The Money label precedes the Agent tools label in the DOM:
     const money = screen.getByText('Money')

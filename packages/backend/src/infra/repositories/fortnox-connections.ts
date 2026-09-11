@@ -3,7 +3,7 @@
  *
  * One aggregate: `fortnox_connections` — one row per user, holding the OAuth
  * token set (P2 #465). Extracted verbatim from
- * `modules/reporting/fortnox-connection.ts`; the token LIFECYCLE (refresh,
+ * `modules/accounting/fortnox-connection.ts`; the token LIFECYCLE (refresh,
  * expiry) stays in that module — this file only persists. Convention:
  * `README.md` in this directory.
  *

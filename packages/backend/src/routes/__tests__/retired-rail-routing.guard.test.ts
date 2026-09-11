@@ -75,10 +75,12 @@ import { bannedModuleRefs, parseImportFacts, type ImportFacts } from './helpers/
  *    `app.register(routes, someConfigObject)`, or a template-literal prefix,
  *    binds no literal it can read. Named because it is invisible, not because
  *    it is likely.
- * 9. **`/safe` stays mounted on purpose.** `safe-deploy.ts` is a 410 tombstone
- *    and `safe-exec.ts` is deliberately LIVE (passkey approver management,
- *    #1229). Rule 4 therefore bans `/approvals` and not `/safe` — a prefix ban
- *    is a claim about a DELETED surface, not about the word "safe".
+ * 9. **`/safe` stays mounted on purpose — as a tombstone only.** Since #2847
+ *    deleted `safe-exec.ts` and `safe-details.ts`, `safe-deploy.ts`'s 410 is
+ *    the ONLY thing mounted under `/safe`; no live route answers there any
+ *    more. Rule 4 therefore bans `/approvals` and not `/safe` — a prefix ban
+ *    is a claim about a DELETED surface, not about the word "safe", and the
+ *    tombstone route keeps the 410 semantics a 404 would lose (#834/#1328).
  */
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
@@ -101,6 +103,13 @@ const DELETED_RAIL_MODULES = [
   'infra/repositories/approval-requests', // #2055
   'routes/approvals', // #2055
   'loop-harness/reference-allowance-module', // #2020
+  'routes/safe-exec', // #2847 — the last live Safe-rail execution route
+  'infra/chain/safe-exec-contract', // #2847
+  'infra/chain/safe-proxy-deployer', // #2847
+  'routes/safe-details', // #2847
+  'modules/accounts/safe-details', // #2847
+  'modules/accounts/passkey-signer', // #2847
+  'infra/repositories/owner-aliases', // #2847
 ] as const
 
 /**

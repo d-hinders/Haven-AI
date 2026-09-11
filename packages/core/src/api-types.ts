@@ -881,50 +881,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/user/owners": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * The owner directory across every linked Safe, with aliases.
-         * @description Reads each linked Safe's owners LIVE from the chain and groups them by address, so one owner appearing on three accounts is one entry listing three. Aliases are looked up ONLY for the addresses just confirmed on-chain, which is what stops a removed owner's alias from reappearing. **A partial chain failure is reported, never hidden**: partialFailure/failedSafeIds name the Safes whose owners could not be read, so a caller can tell an incomplete directory from a complete one. Those two fields are camelCase, unlike the rest of this API — documented as-is rather than silently normalised.
-         */
-        get: operations["listUserOwners"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/owners/{ownerAddress}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Name an owner address.
-         * @description An alias is a label, never a grant — naming an address confers no authority over any Safe. The address must be a CURRENT owner of a linked account, checked against the live directory: an unknown address is a 404, but if the chain read partially failed the answer is **503 rather than 404**, because 'not an owner' and 'could not check' must not look the same.
-         */
-        put: operations["setOwnerAlias"];
-        post?: never;
-        /**
-         * Remove an owner's alias.
-         * @description Drops the label only. Idempotent — removing an alias that does not exist still succeeds, and no ownership check is needed because no authority is involved either way.
-         */
-        delete: operations["deleteOwnerAlias"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/accounting/export": {
         parameters: {
             query?: never;
@@ -1386,11 +1342,7 @@ export type paths = {
          */
         get: operations["listPasskeys"];
         put?: never;
-        /**
-         * Enroll a passkey signer for the caller.
-         * @description Derives the Safe passkey-signer address from the P256 public key and records it. **A second passkey on the same chain is allowed and is the point** (#1229): it is a BACKUP SIGNER, and this rail's only recovery — refusing it used to lock out exactly the users who most needed protection. Only a duplicate credential_id is refused. HONEST LIMITATION: the attestation object is persisted for future verification but is NOT cryptographically verified yet, so a bad enrollment harms only the enrolling user. The response is NARROWER than the list read below — an id, the credential, the derived signer address and the chain, never the public-key coordinates or the stored attestation.
-         */
-        post: operations["registerPasskey"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2277,23 +2229,6 @@ export type paths = {
         };
         /** Fiat-valued portfolio breakdown for one Safe. */
         get: operations["getSafePortfolio"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/safe/{safeAddress}/details": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** On-chain Safe details: owners, threshold, nonce. */
-        get: operations["getSafeDetails"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3679,14 +3614,6 @@ export type components = {
             totalUsd: number;
             totalEur: number;
             breakdown: components["schemas"]["PortfolioBreakdown"][];
-        };
-        SafeDetails: {
-            /** @description Echoed back as supplied — not re-checksummed. */
-            address: string;
-            /** @description Checksummed owner addresses from the contract. */
-            owners: string[];
-            threshold: number;
-            nonce: number;
         };
         TransactionFilterOptionsResponse: {
             safes: {
@@ -7874,203 +7801,6 @@ export interface operations {
             };
         };
     };
-    listUserOwners: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Owners grouped by address, plus the partial-failure report. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        owners: {
-                            /** @description Lowercased for grouping. */
-                            owner_address: string;
-                            /** @description The stored alias, or null. */
-                            name: string | null;
-                            accounts: {
-                                /** Format: uuid */
-                                id: string;
-                                /** @example 0x1111111111111111111111111111111111111111 */
-                                safe_address: string;
-                                chain_id: number;
-                                name: string;
-                            }[];
-                        }[];
-                        partialFailure: boolean;
-                        failedSafeIds: string[];
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    setOwnerAlias: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Owner address; matched case-insensitively (stored lowercase). */
-                ownerAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The stored alias. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        owner_address: string;
-                        name: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Not a current owner of any linked account. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Owners could not be verified — distinct from "not an owner". */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    deleteOwnerAlias: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Owner address; matched case-insensitively (stored lowercase). */
-                ownerAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Alias removed (or was already absent). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     exportAccounting: {
         parameters: {
             query?: {
@@ -10000,92 +9730,6 @@ export interface operations {
             };
             /** @description Error response */
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    registerPasskey: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Non-empty base64url. */
-                    credential_id: string;
-                    /** @description 32-byte 0x-hex. */
-                    public_key_x: string;
-                    /** @description 32-byte 0x-hex. */
-                    public_key_y: string;
-                    chain_id: number;
-                    /** @description Optional base64url attestation. Stored, not yet verified. */
-                    raw_attestation_object?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Passkey enrolled. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        credential_id: string;
-                        /** @description Derived from the public key; stored lowercase. */
-                        signer_address: string;
-                        chain_id: number;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict. */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13964,75 +13608,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    getSafeDetails: {
-        parameters: {
-            query?: {
-                chain_id?: number;
-            };
-            header?: never;
-            path: {
-                safeAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Safe details. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SafeDetails"];
                 };
             };
             /** @description Error response */

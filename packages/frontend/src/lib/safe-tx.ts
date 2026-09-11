@@ -11,17 +11,22 @@
  * ERC-20 transfer ABI and the Gnosis `TOKENS` map. Their only consumers were
  * `SendModal` / `useSendTransaction` / `ApprovalQueue`.
  *
+ * #2847 deleted `executeSafeTx` with its backend: the relayed
+ * `POST /safe/exec` leg and the `SAFE_EXEC_ABI` write-contract shape went
+ * with it (the direct-signing half had no production caller either — the
+ * route was the client). What remains of the execution half is the
+ * Transaction-Service proposal.
+ *
  * KEPT, with the consumer that requires each:
  *
  *  - `getChainTokens` — a generic per-chain token list, and the one export a
  *    DELEGATION-rail surface reads: `DelegationSendModal`,
  *    `useAgentConnectionSetup`, `agent-panel/agent-display` (and
  *    `EditAgentModal`). Nothing about it is AllowanceModule code.
- *  - `getSafeNonce` / `getSafeTxHash` / `signSafeTx` / `executeSafeTx` /
- *    `proposeSafeTx` / `SafeTxParams` / `SafeTxReceiptTimeoutError` — retained
- *    owner-signed Safe execution helpers for the compatibility route and its
- *    tests. No dashboard agent surface calls these helpers after the legacy
- *    agent lifecycle is retired.
+ *  - `getSafeNonce` / `getSafeTxHash` / `signSafeTx` / `proposeSafeTx` /
+ *    `SafeTxParams` / `SafeTxReceiptTimeoutError` — owner-signed Safe
+ *    construction and signing helpers retained for slices 2–4 of this
+ *    retirement (#2848 takes the rest). No dashboard surface calls them.
  *
  * The #1229 approver-recovery consumer (`lib/approver-tx.ts`) is NOT in that
  * list any more: #1988 deleted all five `/user/safes/:id/approvers*` routes,
@@ -32,17 +37,12 @@
  */
 import type { SafeCapableSigner } from './signer'
 import {
-  encodeFunctionData,
   hashTypedData,
-  WaitForTransactionReceiptTimeoutError,
-  ContractFunctionRevertedError,
-  ContractFunctionExecutionError,
   type Address,
   type Hash,
   type PublicClient,
 } from 'viem'
 import { getChainConfig, DEFAULT_CHAIN_ID } from './chains'
-import { api } from './api'
 import { signSafeHashWithPasskey } from './passkey-sign'
 import type { HavenUserSigner } from './signer'
 
@@ -67,29 +67,6 @@ export class SafeTxReceiptTimeoutError extends Error {
     this.txHash = txHash
   }
 }
-
-// ERC-20 transfer ABI
-// Safe v1.3.0 execTransaction ABI
-const SAFE_EXEC_ABI = [
-  {
-    name: 'execTransaction',
-    type: 'function',
-    stateMutability: 'payable',
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'value', type: 'uint256' },
-      { name: 'data', type: 'bytes' },
-      { name: 'operation', type: 'uint8' },
-      { name: 'safeTxGas', type: 'uint256' },
-      { name: 'baseGas', type: 'uint256' },
-      { name: 'gasPrice', type: 'uint256' },
-      { name: 'gasToken', type: 'address' },
-      { name: 'refundReceiver', type: 'address' },
-      { name: 'signatures', type: 'bytes' },
-    ],
-    outputs: [{ name: 'success', type: 'bool' }],
-  },
-] as const
 
 // Safe nonce() ABI
 const SAFE_NONCE_ABI = [
@@ -252,133 +229,6 @@ function normaliseSignatureV(sig: `0x${string}`): `0x${string}` {
   return sig
 }
 
-/** Execute the Safe transaction on-chain (threshold = 1) */
-export async function executeSafeTx(
-  signer: SafeCapableSigner,
-  publicClient: PublicClient,
-  safeAddress: Address,
-  tx: SafeTxParams,
-  signature: `0x${string}`,
-  chainId: number = DEFAULT_CHAIN_ID,
-): Promise<{ txHash: Hash }> {
-  if (signer.type === 'eoa') {
-    const adjustedSig = normaliseSignatureV(signature)
-    const { viemChain } = getChainConfig(chainId)
-
-    const execArgs = [
-      tx.to,
-      tx.value,
-      tx.data,
-      tx.operation,
-      tx.safeTxGas,
-      tx.baseGas,
-      tx.gasPrice,
-      tx.gasToken,
-      tx.refundReceiver,
-      adjustedSig,
-    ] as const
-
-    // Pre-flight simulation — catch reverts BEFORE MetaMask shows the
-    // confirmation prompt. Without this, a reverted tx causes MetaMask to
-    // display "Your transaction was canceled" while `writeContract` keeps its
-    // promise pending until the user dismisses the popup, freezing the UI.
-    try {
-      await publicClient.simulateContract({
-        address: safeAddress,
-        abi: SAFE_EXEC_ABI,
-        functionName: 'execTransaction',
-        args: execArgs,
-        account: signer.address,
-      })
-    } catch (err) {
-      // Case 1: direct revert from simulateContract
-      if (err instanceof ContractFunctionRevertedError) {
-        const reason = err.data?.errorName ?? err.shortMessage ?? 'unknown revert'
-        throw new Error(
-          `Transaction would revert on-chain: ${reason}. ` +
-            `Check that the Safe has the AllowanceModule enabled and the delegate address is valid.`,
-        )
-      }
-      // Case 2: viem wraps the revert inside ContractFunctionExecutionError
-      if (
-        err instanceof ContractFunctionExecutionError &&
-        err.cause instanceof ContractFunctionRevertedError
-      ) {
-        const reason = err.cause.data?.errorName ?? err.cause.shortMessage ?? 'unknown revert'
-        throw new Error(
-          `Transaction would revert on-chain: ${reason}. ` +
-            `Check that the Safe has the AllowanceModule enabled and the delegate address is valid.`,
-        )
-      }
-      // Case 3: network / RPC failure — replace raw viem internals with a
-      // human-readable message so the modal never shows "RPC Request failed."
-      const raw = err instanceof Error ? err.message : String(err)
-      throw new Error(
-        `Could not verify the transaction — network or RPC error. ` +
-          `Check your connection and try again. (${raw})`,
-      )
-    }
-
-    const txHash = await signer.walletClient.writeContract({
-      address: safeAddress,
-      abi: SAFE_EXEC_ABI,
-      functionName: 'execTransaction',
-      args: execArgs,
-      chain: viemChain,
-      account: signer.address,
-    })
-
-    // Wait up to 120 s for the receipt. If the chain is congested or gas was
-    // underpriced the tx may still land — throw a user-friendly error that
-    // includes the hash so the UI can surface a block-explorer link.
-    try {
-      await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 })
-    } catch (err) {
-      if (err instanceof WaitForTransactionReceiptTimeoutError) {
-        // The tx was broadcast and may still land. Throw a typed error carrying
-        // the hash so callers can route to "finish saving" instead of re-running
-        // the on-chain batch (which would double-apply or collide on the nonce).
-        throw new SafeTxReceiptTimeoutError(txHash)
-      }
-      throw err
-    }
-
-    return { txHash }
-  }
-
-  const result = await api.execSafe({
-    chain_id: chainId,
-    safe_address: safeAddress,
-    to: tx.to,
-    value: tx.value.toString(),
-    data: tx.data,
-    operation: tx.operation,
-    safe_tx_gas: tx.safeTxGas.toString(),
-    base_gas: tx.baseGas.toString(),
-    gas_price: tx.gasPrice.toString(),
-    gas_token: tx.gasToken,
-    refund_receiver: tx.refundReceiver,
-    nonce: tx.nonce.toString(),
-    signatures: signature,
-    // #1229: an account can hold a backup passkey now, so "the user's passkey
-    // on this chain" no longer names one credential. Say which one signed —
-    // the relay resolves the signer contract from it.
-    credential_id: signer.credentialId,
-  })
-
-  // #1754: the relay answers 202 + `status: 'pending'` when it broadcast the
-  // transaction but stopped waiting for the receipt. Same fact as the
-  // direct-signing path's 120 s timeout above, so raise the same typed error
-  // — callers already route it to "finish saving" instead of re-running the
-  // batch. Before #1754 this arrived as a 502 "reverted on-chain" and surfaced
-  // to the user as a definite failure of a transaction that may have landed.
-  if (result.status === 'pending') {
-    throw new SafeTxReceiptTimeoutError(result.tx_hash as Hash)
-  }
-
-  return { txHash: result.tx_hash as Hash }
-}
-
 /**
  * The Safe Transaction Service base URL per chain, inlined locally since
  * #2849 (safe-retirement slice 3) dropped the service URL field from the
@@ -392,7 +242,12 @@ const SAFE_TX_SERVICE_BASE_URLS: Record<number, string> = {
   84532: 'https://api.safe.global/tx-service/basesep',
 }
 
-/** Propose a multi-sig transaction to the Safe Transaction Service */
+/**
+ * Propose a multi-sig transaction to the Safe Transaction Service
+ *
+ * `executeSafeTx` — the on-chain execution this proposal used to precede —
+ * was deleted in #2847 with its backend (`POST /safe/exec`).
+ */
 export async function proposeSafeTx(
   safeAddress: Address,
   tx: SafeTxParams,

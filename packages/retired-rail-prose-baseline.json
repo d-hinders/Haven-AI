@@ -95,6 +95,9 @@
   "packages/frontend/src/lib/transaction-labels.ts": {
     "stays-readable": 1
   },
+  "packages/frontend/public/docs/security-model.md": {
+    "still-readable": 2
+  },
   "packages/qa-agent/src/scenarios/x402-delegation-3009.ts": {
     "either-rail": 1
   },

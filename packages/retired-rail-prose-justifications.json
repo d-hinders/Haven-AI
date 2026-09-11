@@ -197,6 +197,12 @@
       "note": "Historical mpp_demo rows stay readable by design; the mpp_demo family (#1328)."
     }
   },
+  "packages/frontend/public/docs/security-model.md": {
+    "still-readable": {
+      "category": "route-db-readability",
+      "note": "Generated copy (packages/frontend/scripts/serve-docs.mjs, from next.config.ts) of docs/security/delegation-rail-security-model.md, which lives under docs/ outside this ratchet's packages/ scan — the generated copy is the only place its phrases are counted. The claim is the #2669-scoped one and stays true after #2847: legacy Safe rows are readable to a direct database query, never a dashboard surface."
+    }
+  },
   "packages/qa-agent/src/scenarios/x402-delegation-3009.ts": {
     "either-rail": {
       "category": "test-instrument",

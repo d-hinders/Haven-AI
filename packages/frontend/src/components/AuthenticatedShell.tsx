@@ -4,7 +4,6 @@ import dynamic from 'next/dynamic'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import TopBar from '@/components/TopBar'
-import { OwnerDirectoryProvider } from '@/context/OwnerDirectoryContext'
 import { ToastProvider, Toaster } from '@/components/ui/Toast'
 
 const Sidebar = dynamic(() => import('@/components/sidebar/Sidebar'), {
@@ -24,8 +23,7 @@ export default function AuthenticatedShell({
 }) {
   return (
     <ProtectedRoute>
-      <OwnerDirectoryProvider>
-        <ToastProvider>
+      <ToastProvider>
           {/*
             Two deliberate departures from the one focus-ring treatment (#1746),
             both because this control is unlike every other one:
@@ -96,7 +94,6 @@ export default function AuthenticatedShell({
           </div>
           <Toaster />
         </ToastProvider>
-      </OwnerDirectoryProvider>
     </ProtectedRoute>
   )
 }

@@ -47,8 +47,10 @@
  * remains at each of the four addresses is this tombstone and nothing else.
  * Every READ and every EDIT of an existing account is still untouched —
  * listing, renaming, re-defaulting, unlinking, balances and history behave
- * exactly as before, and `POST /safe/exec` (owner-signed execution) stays
- * open, which is how an owner still moves funds out of an account they hold.
+ * exactly as before. The owner-signed relayed execution route stayed open
+ * after #1988 (owner authority, #1229 recovery) until #2847 deleted it with
+ * the last of the rail's live behaviour; these tombstones are the backstop
+ * the epic keeps behind the filter.
  */
 
 import type { FastifyReply, FastifyRequest } from 'fastify'

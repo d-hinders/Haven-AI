@@ -36,7 +36,6 @@ const mocks = vi.hoisted(() => ({
   openChainModal: vi.fn(),
   openConnectModal: vi.fn(),
   openConnectModalHook: vi.fn(),
-  useOwnerDirectory: vi.fn(),
   useActiveSigner: vi.fn(),
   useSafeOperationGate: vi.fn(),
   useAuth: vi.fn(),
@@ -72,10 +71,6 @@ vi.mock('wagmi', () => ({
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mocks.useAuth(),
-}))
-
-vi.mock('@/context/OwnerDirectoryContext', () => ({
-  useOwnerDirectory: () => mocks.useOwnerDirectory(),
 }))
 
 vi.mock('@/lib/signer', async (importOriginal) => {
@@ -118,9 +113,6 @@ describe('WalletButton', () => {
       activeSafe: ACTIVE_SAFE,
       passkeys: [],
     })
-    mocks.useOwnerDirectory.mockReturnValue({
-      getOwnerAlias: vi.fn(() => null),
-    })
     mocks.useActiveSigner.mockReturnValue(null)
     mocks.useSafeOperationGate.mockReturnValue({ kind: 'no_signer' })
 
@@ -144,27 +136,6 @@ describe('WalletButton', () => {
 
     expect(screen.getByRole('button', { name: 'Passkey' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).not.toBeInTheDocument()
-  })
-
-  it('uses an owner alias for the active passkey label and dropdown', () => {
-    mocks.useOwnerDirectory.mockReturnValue({
-      getOwnerAlias: vi.fn((address: string) =>
-        address.toLowerCase() === PASSKEY_ADDRESS.toLowerCase() ? 'Daniel passkey' : null,
-      ),
-    })
-    mocks.useActiveSigner.mockReturnValue({
-      type: 'passkey',
-      address: PASSKEY_ADDRESS,
-      credentialId: 'credential-1',
-      chainId: 100,
-    })
-
-    render(<WalletButton />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Daniel passkey' }))
-
-    expect(screen.getAllByText('Daniel passkey')).toHaveLength(2)
-    expect(screen.getByText('0x0802…0ce2')).toBeInTheDocument()
   })
 
   it('opens a passkey dropdown with the passkey address and copy action', async () => {
@@ -307,28 +278,6 @@ describe('WalletButton', () => {
     expect(screen.queryByRole('button', { name: 'Wrong wallet' })).not.toBeInTheDocument()
   })
 
-  it('uses an owner alias for the connected wallet label and dropdown', () => {
-    setConnectedWallet()
-    mocks.useOwnerDirectory.mockReturnValue({
-      getOwnerAlias: vi.fn((address: string) =>
-        address.toLowerCase() === EOA_ADDRESS.toLowerCase() ? 'Ledger main' : null,
-      ),
-    })
-    mocks.useActiveSigner.mockReturnValue({
-      type: 'eoa',
-      address: EOA_ADDRESS,
-      walletClient: {},
-    })
-
-    render(<WalletButton />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Ledger main' }))
-
-    expect(screen.getByRole('dialog', { name: 'Wallet menu' })).toBeInTheDocument()
-    expect(screen.getAllByText('Ledger main')).toHaveLength(2)
-    expect(screen.getByText('0x5555…5555')).toBeInTheDocument()
-  })
-
   it('shows a passkey unavailable note in the connected-wallet dropdown', () => {
     setConnectedWallet()
     mocks.useAuth.mockReturnValue({
@@ -407,7 +356,7 @@ describe('WalletButton', () => {
       expect(nameOf(screen.getByRole('button', { name: 'Wrong network' }))).toBe('Wrong network')
     })
 
-    it('names the passkey state, and follows the owner alias when there is one', () => {
+    it('names the passkey state', () => {
       mocks.useActiveSigner.mockReturnValue({
         type: 'passkey',
         address: PASSKEY_ADDRESS,
@@ -415,18 +364,8 @@ describe('WalletButton', () => {
         chainId: 100,
       })
 
-      const plain = render(<WalletButton />)
-      expect(nameOf(screen.getByRole('button', { name: 'Passkey' }))).toBe('Passkey')
-      plain.unmount()
-
-      mocks.useOwnerDirectory.mockReturnValue({
-        getOwnerAlias: vi.fn((address: string) =>
-          address.toLowerCase() === PASSKEY_ADDRESS.toLowerCase() ? 'Daniel passkey' : null,
-        ),
-      })
-
       render(<WalletButton />)
-      expect(nameOf(screen.getByRole('button', { name: 'Daniel passkey' }))).toBe('Daniel passkey')
+      expect(nameOf(screen.getByRole('button', { name: 'Passkey' }))).toBe('Passkey')
     })
 
     it('names the Hybrid DeleGator state', () => {
@@ -455,20 +394,12 @@ describe('WalletButton', () => {
         walletClient: {},
       })
 
-      const truncated = render(<WalletButton />)
-      // No alias, no ENS: the truncated address IS the label, so the name must
-      // be the same string rather than a generic "Wallet".
-      expect(nameOf(screen.getByRole('button', { name: '0x5555…5555' }))).toBe('0x5555…5555')
-      truncated.unmount()
-
-      mocks.useOwnerDirectory.mockReturnValue({
-        getOwnerAlias: vi.fn((address: string) =>
-          address.toLowerCase() === EOA_ADDRESS.toLowerCase() ? 'Ledger main' : null,
-        ),
-      })
-
       render(<WalletButton />)
-      expect(nameOf(screen.getByRole('button', { name: 'Ledger main' }))).toBe('Ledger main')
+      // No ENS: the truncated address IS the label, so the name must be the
+      // same string rather than a generic "Wallet". (The owner-alias branch
+      // this test used to also pin is gone with the /user/owners directory,
+      // #2847.)
+      expect(nameOf(screen.getByRole('button', { name: '0x5555…5555' }))).toBe('0x5555…5555')
     })
   })
 

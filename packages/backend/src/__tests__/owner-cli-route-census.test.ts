@@ -304,7 +304,9 @@ describe('owner_cli route census (#2526)', () => {
       { method: 'POST', path: '/agents/{id}/delegations/{hash}/activate' },
       { method: 'POST', path: '/agents/{id}/delegations/{hash}/revoke/submit' },
       { method: 'POST', path: '/agents/{id}/delegations/revoke-all/submit' },
-      { method: 'POST', path: '/safe/exec' },
+      // `POST /safe/exec` left this list with #2847: the route is deleted, so
+      // the refusal it pinned is structural now — there is no surface for an
+      // owner_cli token to reach, allow-list or no allow-list.
       { method: 'POST', path: '/agents/{id}/rotate-key' },
       { method: 'POST', path: '/auth/device/approve' },
     ]

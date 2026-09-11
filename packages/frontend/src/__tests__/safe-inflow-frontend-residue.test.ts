@@ -128,10 +128,12 @@ describe('retired Safe inflow routes have no frontend caller (#2261, epic #1440)
     // matched nothing, the assertions below would be vacuous, which is the
     // exact failure mode this repo keeps finding in its own guards. These are
     // LIVE routes; the extractor that finds them would find a retired one.
+    // (`POST /safe/exec` belonged here too until #2847 deleted it — its
+    // disappearance from this list is the deletion working, and the retired
+    // set below is what would catch it coming back.)
     const all = files.flatMap((f) => literalPaths(sources.get(f)!, 'post'))
     expect(all).toContain('/accounts/hybrid')
     expect(all).toContain('/auth/signup')
-    expect(all).toContain('/safe/exec')
   })
 
   it('no frontend module POSTs to a retired inflow route', () => {

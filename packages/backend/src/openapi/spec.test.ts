@@ -487,12 +487,10 @@ describe('TransactionBase settlementScheme (#1705)', () => {
     const aggregated = openapiSpec.components.schemas.Transaction
     const base = openapiSpec.components.schemas.TransactionBase
 
-    // Both schemas are flat objects, not `allOf`-composed (#2885): the
-    // composition trap in `response-shape.ts` (`closeObjects`) leaves any
-    // `allOf`-composed schema's `additionalProperties` open forever, so an
-    // undeclared field (the exact #2885 defect — the feed always returns
-    // `chainId`/`safeId`/`safeAddress`/`safeName`) could never fail
-    // `expectMatchesSpec`. Flat schemas let `closeObjects` close them, so the
+    // Both schemas are flat objects, not `allOf`-composed (#2885): a `$ref`'d
+    // member is registered closed by `response-shape.ts`, so the composed
+    // `Transaction` rejected the four sibling-declared fields on every real
+    // row and could never be asserted. Flat schemas close truthfully, so the
     // field is declared once in `transactionBaseProperties` (spec.ts) and
     // spread into both — checked here as the properties agreeing by value.
     expect('allOf' in aggregated).toBe(false)

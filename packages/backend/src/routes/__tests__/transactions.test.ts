@@ -432,8 +432,8 @@ describe('transaction routes', () => {
       expect(body.transactions[0]).not.toHaveProperty(field)
     }
     // Full payload against the spec's own schema — the same assertion the
-    // feed test above makes, on the route the narrow `Transaction` schema was
-    // always correct for.
+    // feed test above makes, on the route whose `TransactionBase` schema was
+    // never the composed one.
     expectMatchesSpec('GET', '/transactions/{safeAddress}', body)
   })
 })
@@ -1408,7 +1408,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       const text = String(sql)
       if (text.includes('FROM user_safes')) {
         return {
-          rows: [{ id: 'safe-csv', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+          rows: [{ id: '11111111-2222-4333-8444-555555555501', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
         } as never
       }
       if (text.includes('FROM payment_intents pi') && text.includes('JOIN agents a')) {
@@ -1417,9 +1417,9 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
             {
               id: 'payment-csv',
               tx_hash: TX_HASH,
-              agent_id: 'agent-csv',
+              agent_id: '11111111-2222-4333-8444-555555555502',
               agent_name: 'Research assistant',
-              safe_id: 'safe-csv',
+              safe_id: '11111111-2222-4333-8444-555555555501',
               safe_address: SAFE_ADDRESS,
               safe_name: 'Main wallet',
               chain_id: 8453,
@@ -1432,6 +1432,8 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
               x402_resource_url: 'https://api.example.com/data',
               payment_proof_status: 'protocol_receipt_attached',
               amount_sek: '0.21',
+              fx_rate_sek: '10.5000',
+              fx_source: 'riksbank',
               payment_reconciliation_event_type: null,
               confirmed_at: '2026-05-08T11:50:10Z',
               created_at: '2026-05-08T11:49:55Z',
@@ -1464,6 +1466,8 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       chainId: 8453,
       agentName: 'Research assistant',
       amountSek: '0.21',
+      fxRateSek: '10.5000',
+      fxSource: 'riksbank',
       isError: false,
       paymentFlowStatus: 'paid',
       source: 'x402',
@@ -1471,5 +1475,10 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
     expect(typeof tx.timestamp).toBe('number')
     expect(tx.timestamp).toBeGreaterThan(0)
     expect(tx.activityType).toBeUndefined()
+    // #2885: this is the one fixture that carries `fxRateSek`/`fxSource`, so it
+    // is the assertion that keeps them declared on the spec — removing either
+    // property from `transactionBaseProperties` fails here with
+    // "must NOT have additional properties".
+    expectMatchesSpec('GET', '/transactions', response.json())
   })
 })

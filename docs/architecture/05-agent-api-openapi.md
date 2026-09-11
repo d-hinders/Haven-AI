@@ -326,30 +326,36 @@ spec's back.
 A schema composed with `allOf` is also left open, on purpose. `additionalProperties`
 only sees the properties declared at its own level, so closing one `allOf` member
 makes it reject the properties its siblings contribute — a valid payload would be
-reported as a spec violation. The spec has such shapes (`mpp`,
-`AgentConnectionAllowance`); this is guarded by a test (see below) rather than
-rediscovered as a baffling false failure during the #1446 backfill.
+reported as a spec violation. That protection covers *inline* members only:
+a `$ref`'d member points at a component schema, and every component is
+registered already closed. An `allOf` over a `$ref` therefore rejects the
+sibling-declared fields on every real payload — a false failure, not an open
+schema — while an `allOf` over an inline, open member can hide an undeclared
+field. Both halves are guarded by tests in `openapi/spec.test.ts`.
 
-**`Transaction` used to be one of those `allOf` shapes, and it hid a real drift
+**`Transaction` used to be the `$ref` case, and it could not be asserted at all
 (#2885).** `Transaction` (`GET /transactions`, the aggregated feed) was
 `allOf: [{ $ref: TransactionBase }, { chainId, safeId, safeAddress, safeName }]`
-— composed specifically so the ~25 shared fields were written once (#984). That
-composition is exactly what the paragraph above warns about: because
-`additionalProperties` never closes across an `allOf`, the schema could never
-have failed `expectMatchesSpec` on an undeclared field, so nothing caught that
-the feed also always returns `fxRateSek`/`fxSource` (#2871) undeclared, or would
-have caught it if `chainId`/`safeId`/`safeAddress`/`safeName` had ever drifted
-out of the composed object. `TransactionBase` and `Transaction` are now two flat
-object schemas sharing one TypeScript object (`transactionBaseProperties` /
+— composed so the ~25 shared fields were written once (#984). Because the
+`$ref`'d `TransactionBase` was closed, every feed row failed on the four fields
+the sibling declared, so the route carried no `expectMatchesSpec`, and
+`fxRateSek`/`fxSource` (#2871) landed with no assertion able to notice they were
+undeclared. `TransactionBase` and `Transaction` are now two flat object schemas
+sharing one TypeScript object (`transactionBaseProperties` /
 `transactionBaseRequired` in `openapi/spec.ts`) instead of composing via `$ref`
-+ `allOf` — same DRY source, but each compiles to a schema `closeObjects` can
-actually close. `mpp` and `AgentConnectionAllowance` still compose via `allOf`
-and are not on an asserted route; the trap remains live for them.
++ `allOf` — same DRY source, but each closes truthfully, and both routes now
+assert their full payload. Other `allOf` shapes remain: `CreateAgentResponse`
+(over an open inline `Agent`, on an asserted route — the hiding case),
+`X402SignablePayment`, `AgentConnectionAllowance` and
+`AgentPaymentStatus.mpp` (over closed `$ref`s, not on asserted routes — the
+false-failure case once they are). Flattening them the same way is follow-up
+work.
 
-Coverage: six assertions today (`GET /agents`, `GET /agents/{id}`,
-`POST /agents/{id}/archive`, `GET /machine-payments/agent`, `GET /transactions`,
-`GET /transactions/{safeAddress}`). Widening it further is per-route work that
-belongs with the #1446 backfill rather than a big-bang sweep.
+Coverage: `expectMatchesSpec` is asserted per route (count the call sites under
+`packages/backend/src/**/__tests__` rather than trusting a number here — an
+earlier figure in this paragraph was stale by an order of magnitude). Widening it
+further is per-route work that belongs with the #1446 backfill rather than a
+big-bang sweep.
 
 ### Four Contract Corrections The Type Migration Surfaced (#1445)
 

@@ -26,17 +26,18 @@ const tokenSymbol = {
 /**
  * Shared between `TransactionBase` and `Transaction` (#2885). The two used to
  * be `allOf`-composed (`Transaction: { allOf: [{ $ref: TransactionBase }, {...}] }`,
- * #984) so the 25-odd shared fields were written once. That composition is
- * exactly the shape `openapi/response-shape.ts`'s `closeObjects` deliberately
- * leaves OPEN — `additionalProperties` only sees one `allOf` member's own
- * properties, so closing any member would reject the fields its siblings
- * contribute. The consequence: an `allOf`-composed `Transaction` can never
- * fail an `expectMatchesSpec` assertion on an undeclared field, which is the
- * exact defect #2885 fixes (the feed always returns `chainId`/`safeId`/
- * `safeAddress`/`safeName`, and the schema silently allowed them whether or
- * not it declared them). Spreading this object into two FLAT schemas keeps
- * the source DRY without composing — `closeObjects` can close each one, and
- * `expectMatchesSpec` can actually catch a field going missing from either.
+ * #984) so the 25-odd shared fields were written once. That composition met
+ * `openapi/response-shape.ts` the wrong way round: `closeObjects` leaves
+ * inline `allOf` members open, but every component schema is registered
+ * ALREADY closed (`ajv.addSchema(closeObjects(definition))`), so the `$ref`'d
+ * `TransactionBase` rejected the four fields its sibling declared —
+ * `chainId`/`safeId`/`safeAddress`/`safeName` — on every feed row. The
+ * composed schema could not be asserted at all: a correct payload was a
+ * "must NOT have additional properties" failure, which is why the feed route
+ * carried no `expectMatchesSpec` and why `fxRateSek`/`fxSource` (#2871) could
+ * land undeclared. Spreading this object into two FLAT schemas keeps the
+ * source DRY without composing — `closeObjects` closes each one truthfully,
+ * so `expectMatchesSpec` passes on a correct row and fails on a drifted one.
  */
 const transactionBaseProperties = {
   hash: { type: 'string' },

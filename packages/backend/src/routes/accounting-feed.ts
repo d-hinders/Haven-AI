@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { requireAccountingFeed } from '../middleware/accountingFeed.js'
-import { accountingFeedAvailable } from '../modules/agents/index.js'
+import { accountingFeedAvailability } from '../modules/agents/index.js'
 import { getAccountingFeedStatus, syncUser } from '../modules/accounting/index.js'
 import { hasLiveConnector } from '../modules/accounting/index.js'
 import { getFortnoxConnection, verifyFortnoxInvoice, reopenMissingPushed } from '../modules/accounting/index.js'
@@ -23,12 +23,17 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
     // `liveSyncReady` is true when the live Fortnox adapter (#496/#498) is
     // registered (i.e. Fortnox is configured) — false flags the UI that sync
     // is a preview not delivering anywhere. See modules/accounting/connector.ts.
+    // #2861: say WHY the feed is or is not available, not only whether. The
+    // UI renders three different states from these — off, not entitled, ready —
+    // and a bare `available:false` could not tell the second from the first.
+    const { available, entitled, entitlementMode } = await accountingFeedAvailability(sub)
     const base = {
       hosted: config.hosted,
       flagEnabled: config.accountingEnabled,
       liveSyncReady: hasLiveConnector(),
+      entitled,
+      entitlementMode,
     }
-    const available = await accountingFeedAvailable(sub)
     if (!available) {
       return { ...base, available: false, connected: false, syncs: [] }
     }

@@ -20,12 +20,15 @@ import { config } from '../../config.js'
  * changes when tiers land — only who holds which entitlement.
  *
  * **Manual grant/revoke (v1, until billing exists):**
- *   grant:  SELECT entitlement … or call grantEntitlement(userId, 'reporting_feed')
- *   psql:   INSERT INTO account_entitlements (user_id, entitlement)
- *           VALUES ('<uuid>', 'reporting_feed')
- *           ON CONFLICT (user_id, entitlement) DO UPDATE SET revoked_at = NULL;
- *   revoke: UPDATE account_entitlements SET revoked_at = NOW()
- *           WHERE user_id = '<uuid>' AND entitlement = 'reporting_feed';
+ *   how an account becomes entitled (#2861):
+ *     HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all      every account on the deployment
+ *                                               (dev; no row needed, none written)
+ *     HAVEN_ACCOUNTING_ENTITLEMENT_MODE=granted  the account must hold a row
+ *                                               (the default; what prod runs)
+ *   In `granted` mode a row is written with grantEntitlement(userId,
+ *   'reporting_feed') — there is deliberately no route for it yet; a paid
+ *   tier will own that. The hand-written INSERT this comment used to carry is
+ *   gone: dev no longer needs it, and prod has no tier to grant.
  */
 export const REPORTING_FEED = 'reporting_feed'
 
@@ -45,11 +48,32 @@ export async function revokeEntitlement(userId: string, entitlement: string): Pr
 }
 
 /**
- * Whether the reporting feed (#491) is available to this account: it must be the
- * hosted deployment, the global flag must be on, AND the account must hold the
- * entitlement. All three — env alone can never enable it on a self-hosted box.
+ * Whether the accounting feed (#491) is available to this account: it must be
+ * the hosted deployment, the global flag must be on, AND the account must be
+ * entitled. Env alone can never enable it on a self-hosted box.
+ *
+ * #2861: "entitled" is decided by `config.accountingEntitlementMode`. In
+ * `granted` mode (the default, and what prod runs) the account must hold the
+ * entitlement row — today's gate, unchanged. In `all` mode every account on the
+ * deployment is entitled and the row is not consulted; that is what dev runs so
+ * a new user can connect without anyone inserting a row by hand. The
+ * hosted + flag checks come FIRST either way, so `all` on a self-hosted box or
+ * with the flag off still answers false.
  */
 export async function accountingFeedAvailable(userId: string): Promise<boolean> {
-  if (!config.hosted || !config.accountingEnabled) return false
-  return hasEntitlement(userId, REPORTING_FEED)
+  return (await accountingFeedAvailability(userId)).available
+}
+
+/** The three-part answer the status endpoint renders, so the UI can say WHY. */
+export async function accountingFeedAvailability(userId: string): Promise<{
+  available: boolean
+  entitled: boolean
+  entitlementMode: 'granted' | 'all'
+}> {
+  const entitlementMode = config.accountingEntitlementMode
+  if (!config.hosted || !config.accountingEnabled) {
+    return { available: false, entitled: false, entitlementMode }
+  }
+  const entitled = entitlementMode === 'all' ? true : await hasEntitlement(userId, REPORTING_FEED)
+  return { available: entitled, entitled, entitlementMode }
 }

@@ -24,8 +24,21 @@ const { configMock } = vi.hoisted(() => ({
 }))
 vi.mock('../../config.js', () => ({ config: configMock }))
 
-const entitlementMocks = vi.hoisted(() => ({ accountingFeedAvailable: vi.fn() }))
+// #2861: the status route reads the three-part answer (available / entitled /
+// mode) so it can say WHY; the gating middleware still reads the boolean. Both
+// are mocked from ONE factory — two factories on one specifier would have the
+// second silently win.
+const entitlementMocks = vi.hoisted(() => ({
+  accountingFeedAvailable: vi.fn(),
+  accountingFeedAvailability: vi.fn(),
+}))
 vi.mock('../../modules/agents/index.js', () => entitlementMocks)
+
+/** Keep the two mocks in step: the boolean is the `available` half of the triple. */
+function setAvailability(available: boolean, entitled = available, entitlementMode: 'granted' | 'all' = 'granted') {
+  entitlementMocks.accountingFeedAvailable.mockReset().mockResolvedValue(available)
+  entitlementMocks.accountingFeedAvailability.mockReset().mockResolvedValue({ available, entitled, entitlementMode })
+}
 
 const orchestratorMocks = vi.hoisted(() => ({
   getAccountingFeedStatus: vi.fn(),
@@ -65,7 +78,7 @@ describe('reporting routes', () => {
   beforeEach(() => {
     configMock.hosted = true
     configMock.accountingEnabled = true
-    entitlementMocks.accountingFeedAvailable.mockReset().mockResolvedValue(true)
+    setAvailability(true)
     orchestratorMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
     orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
@@ -92,9 +105,29 @@ describe('reporting routes', () => {
     })
   })
 
+  describe('entitlement mode (#2861)', () => {
+    it('mode all: a user with no entitlement row sees the feed as available, and the status says so', async () => {
+      setAvailability(true, true, 'all')
+      connectorMocks.hasLiveConnector.mockReturnValue(true)
+      fortnoxMocks.getFortnoxConnection.mockResolvedValue(null)
+      orchestratorMocks.getAccountingFeedStatus.mockResolvedValue([])
+      const res = await authed('GET', '/accounting/feed/status')
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ available: true, entitled: true, entitlementMode: 'all', connected: false })
+    })
+
+    it('mode granted: the same user without a row is refused on the gated routes (404) and the status says why', async () => {
+      setAvailability(false, false, 'granted')
+      const status = await authed('GET', '/accounting/feed/status')
+      expect(status.json()).toMatchObject({ available: false, entitled: false, entitlementMode: 'granted' })
+      const sync = await authed('POST', '/accounting/feed/sync')
+      expect(sync.statusCode).toBe(404)
+    })
+  })
+
   describe('GET /status', () => {
     it('reports base flags without the gated data path when the feed is unavailable', async () => {
-      entitlementMocks.accountingFeedAvailable.mockResolvedValue(false)
+      setAvailability(false)
       configMock.accountingEnabled = false
       connectorMocks.hasLiveConnector.mockReturnValue(false)
 
@@ -105,6 +138,8 @@ describe('reporting routes', () => {
         hosted: true,
         flagEnabled: false,
         liveSyncReady: false,
+        entitled: false,
+        entitlementMode: 'granted',
         available: false,
         connected: false,
         syncs: [],
@@ -118,7 +153,7 @@ describe('reporting routes', () => {
     })
 
     it('returns availability, connection state and syncs when entitled', async () => {
-      entitlementMocks.accountingFeedAvailable.mockResolvedValue(true)
+      setAvailability(true)
       connectorMocks.hasLiveConnector.mockReturnValue(true)
       fortnoxMocks.getFortnoxConnection.mockResolvedValue({ user_id: USER })
       // A whole FeedSyncRow, as listSyncs really returns one (#1446) — a
@@ -144,6 +179,8 @@ describe('reporting routes', () => {
         hosted: true,
         flagEnabled: true,
         liveSyncReady: true,
+        entitled: true,
+        entitlementMode: 'granted',
         available: true,
         connected: true,
         syncs,

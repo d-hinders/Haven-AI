@@ -2937,12 +2937,22 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'available', 'connected', 'syncs'],
+                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'syncs'],
                   properties: {
                     hosted: { type: 'boolean' },
                     flagEnabled: { type: 'boolean' },
                     liveSyncReady: { type: 'boolean', description: 'A real provider adapter is registered.' },
-                    available: { type: 'boolean', description: 'The caller is entitled to the feed.' },
+                    entitled: {
+                      type: 'boolean',
+                      description:
+                        '#2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `flagEnabled` is false, so the UI can tell "feature off" from "not entitled" without a second call.',
+                    },
+                    entitlementMode: {
+                      type: 'string',
+                      enum: ['granted', 'all'],
+                      description: 'How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.',
+                    },
+                    available: { type: 'boolean', description: 'hosted AND flagEnabled AND entitled — the one field a caller needs to decide whether to render the feed.' },
                     connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
                     syncs: { type: 'array', items: feedSyncRow },
                   },

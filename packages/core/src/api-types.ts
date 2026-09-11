@@ -8197,7 +8197,14 @@ export interface operations {
                         flagEnabled: boolean;
                         /** @description A real provider adapter is registered. */
                         liveSyncReady: boolean;
-                        /** @description The caller is entitled to the feed. */
+                        /** @description #2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `flagEnabled` is false, so the UI can tell "feature off" from "not entitled" without a second call. */
+                        entitled: boolean;
+                        /**
+                         * @description How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.
+                         * @enum {string}
+                         */
+                        entitlementMode: "granted" | "all";
+                        /** @description hosted AND flagEnabled AND entitled — the one field a caller needs to decide whether to render the feed. */
                         available: boolean;
                         /** @description The caller has a live provider connection. */
                         connected: boolean;

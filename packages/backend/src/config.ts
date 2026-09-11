@@ -403,6 +403,15 @@ export const config = {
   // The NEW name wins when both are set, so flipping the variable is safe in
   // either order. `readAccountingEnabled` warns once on the deprecated name.
   accountingEnabled: readAccountingEnabled(),
+  // Who is entitled to the accounting feed once it is on (#2861):
+  //   granted — the account must hold the entitlement row (today's behaviour;
+  //             the default, so prod is unchanged by this variable's absence)
+  //   all     — every account on this deployment is entitled. Dev only. The
+  //             entitlement table stays for the tiers that come later.
+  // An invalid non-empty value refuses the boot, on the same reasoning as
+  // HAVEN_CONNECTOR_CHANNEL above: a typo must not silently fall back to
+  // "granted" and look like the feature is off when it is merely misspelled.
+  accountingEntitlementMode: parseAccountingEntitlementMode(process.env.HAVEN_ACCOUNTING_ENTITLEMENT_MODE),
 
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
@@ -445,4 +454,26 @@ function readAccountingEnabled(): boolean {
     return deprecated === 'true'
   }
   return false
+}
+
+export type AccountingEntitlementMode = 'granted' | 'all'
+export const ACCOUNTING_ENTITLEMENT_MODES: readonly AccountingEntitlementMode[] = ['granted', 'all']
+
+/**
+ * `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` (#2861). Unset or empty → `granted`, so a
+ * deployment that never heard of this variable keeps today's gate. Any other
+ * non-empty value that is not one of the two modes throws at import time and
+ * refuses the boot — the `parseConnectorChannel` precedent.
+ */
+export function parseAccountingEntitlementMode(raw: string | undefined | null): AccountingEntitlementMode {
+  if (raw === undefined || raw === null) return 'granted'
+  const value = raw.trim()
+  if (value === '') return 'granted'
+  if (value === 'granted' || value === 'all') return value
+  throw new Error(
+    `HAVEN_ACCOUNTING_ENTITLEMENT_MODE is set to ${JSON.stringify(raw)}; it must be "granted" ` +
+      '(the account holds an entitlement row) or "all" (every account on this deployment). ' +
+      'Refusing to start rather than falling back, because a misspelled "all" on dev would ' +
+      'silently mean "granted" and look like the feed is off for everyone.',
+  )
 }

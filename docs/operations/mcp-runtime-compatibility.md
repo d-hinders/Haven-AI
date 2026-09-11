@@ -101,6 +101,23 @@ last-verified: "2026-09-11"
 > read for x402 retries is produced by the same `buildAgentGuidance` call as
 > before, so the dual-wire-name rule this document pins is unaffected by the
 > move.
+>
+> **Recent re-verification (#2812):** the same for the hosted server's
+> paid-MCP completion handlers — `haven_complete_mcp_tool` and
+> `haven_settle_mcp_tool` — which moved from `tools.ts` into
+> `src/tools/paid-mcp-completion.ts`, together with the merchant delivery /
+> context-rehydration helpers #2808 had parked in shared support
+> (`resolveMerchantCallContext`, `deliverMerchantPayment`,
+> `preflightMcpPaymentHeader` and the `ResolvedMerchantCallContext` shape) —
+> they were single-slice by call-site and now live with their only caller.
+> `tools.ts` is now a composition-only facade: every hosted tool is owned by
+> exactly one capability module, `createToolHandlers` is capability spreads
+> only, and the permanent ownership/import-boundary guard lives in
+> `src/tools/module-boundaries.test.ts`. The runtime contract is again
+> unchanged: the same tool names are registered, both completion tools remain
+> strict-input, schemas and descriptions still come from the #2807 contracts
+> module, and the #2282 fail-closed ordering (merchant-call context resolved
+> BEFORE any funding relay, on both schemes) moved with the handlers verbatim.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

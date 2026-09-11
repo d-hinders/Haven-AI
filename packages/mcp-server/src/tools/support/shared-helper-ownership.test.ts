@@ -76,6 +76,7 @@ import * as catalogEntry from './catalog-entry.js'
 import * as errors from './errors.js'
 import * as guidance from './guidance.js'
 import * as mcpContext from './mcp-context.js'
+import * as paidMcpCompletion from '../paid-mcp-completion.js'
 import * as quoteResponse from './quote-response.js'
 import * as signerCompat from './signer-compat.js'
 import { parse, parseStrict } from '../parsing.js'
@@ -148,7 +149,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   SIGNER_CAPABILITY_KEY: { module: 'signer-compat', slices: ['s2810', 's2811'] },
   signerCompatibilityNotice: { module: 'signer-compat', slices: ['s2810', 's2811'] },
   // tools/support/mcp-context.ts — transport serialization/context validation,
-  // merchant delivery, signing context, relay wrappers.
+  // signing context, relay wrappers. The merchant delivery/context-rehydration
+  // helpers that #2808 parked here moved to their owning capability module in
+  // #2812 (see CAPABILITY_OWNED below).
   delegationSignFields: { module: 'mcp-context', slices: ['s2809', 's2810', 's2811'] },
   buildX402SigningContext: { module: 'mcp-context', slices: ['s2810', 's2811'] },
   serializeMcpTransport: { module: 'mcp-context', slices: ['s2810', 's2812'] },
@@ -156,13 +159,16 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   isMerchantEndpointMiss: { module: 'mcp-context', slices: ['s2810'] },
   withDiscoveryGuidance: { module: 'mcp-context', slices: ['s2810'] },
   quoteMcpToolCall: { module: 'mcp-context', slices: ['s2810'] },
-  resolveMerchantCallContext: { module: 'mcp-context', slices: ['s2812'] },
-  ResolvedMerchantCallContext: { module: 'mcp-context', slices: ['s2812'] },
-  deliverMerchantPayment: { module: 'mcp-context', slices: ['s2812'] },
-  preflightMcpPaymentHeader: { module: 'mcp-context', slices: ['s2812'] },
   submitSignatureWithExpiryMapping: { module: 'mcp-context', slices: ['s2809', 's2812'] },
   submitErc7710WithExpiryMapping: { module: 'mcp-context', slices: ['s2809'] },
   coerceJsonField: { module: 'mcp-context', slices: ['s2811'] },
+  // tools/paid-mcp-completion.ts — the #2812 capability module itself now owns
+  // its single-slice merchant helpers (the carve-out the #2808 map retained
+  // them for has landed, so "until #2812 moves them" is satisfied).
+  resolveMerchantCallContext: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  ResolvedMerchantCallContext: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  deliverMerchantPayment: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  preflightMcpPaymentHeader: { module: 'paid-mcp-completion', slices: ['s2812'] },
   // tools/support/quote-response.ts — quote responses + status predicates.
   buildMcpToolQuoteResponse: { module: 'quote-response', slices: ['s2810', 's2811'] },
   isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
@@ -219,16 +225,12 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'into tools/catalog-purchase.ts would put a contract #2811 depends on inside another ' +
     'capability, and the dependency rule in this file forbids #2811 importing it there — so ' +
     'the move would trade a support export for a rule violation.',
-  // s2812 (#2812 paid-MCP completion capability, to come):
-  resolveMerchantCallContext:
-    'Only the #2812 handlers call it; retained in support until #2812 moves it into its capability module.',
-  ResolvedMerchantCallContext:
-    'Type-only shape of resolveMerchantCallContext; retained alongside it until #2812 moves the pair.',
-  deliverMerchantPayment:
-    'Only the #2812 handlers call it; retained in support until #2812 moves it into its capability module.',
-  preflightMcpPaymentHeader:
-    'Only the #2812 handlers call it; retained in support until #2812 moves it into its capability module.',
-  // s2809 (#2809 state/direct/recovery capability, to come):
+  // s2812 (#2812 paid-MCP completion capability): the four helpers the map
+  // retained "until #2812 moves them" are MOVED — they live in
+  // tools/paid-mcp-completion.ts now, mapped there in HELPER_OWNERSHIP. The
+  // single-slice rule does not allow a capability module to be an undeclared
+  // exception, so no s2812 entry remains here.
+  // s2809 (#2809 state/direct/recovery capability):
   submitErc7710WithExpiryMapping:
     'Only the #2809 handlers call it — from tools/state-direct-recovery.ts since #2809 landed — but it ' +
     'is DELIBERATE: it shares the expiry-mapping pattern with submitSignatureWithExpiryMapping ' +
@@ -287,6 +289,18 @@ const CAPABILITY_ALLOWED_IMPORTS = [
   './support/',
 ]
 
+/**
+ * Per-capability additions to the allow-list, for node built-ins a module
+ * genuinely needs. Declared PER MODULE and named, never a blanket `node:`
+ *
+ *   paid-mcp-completion — `node:crypto` for randomUUID: the JSON-RPC envelope
+ *   id (`haven-mcp-<uuid>`) of every paid merchant delivery. Moving the
+ *   delivery helpers here in #2812 carried the id minting with them.
+ */
+const CAPABILITY_EXTRA_ALLOWED_IMPORTS: Record<string, string[]> = {
+  'paid-mcp-completion': ['node:crypto'],
+}
+
 /** Support module → its runtime export names, enumerated (not derived). */
 const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
   'cap-price': [
@@ -318,12 +332,18 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'quoteMcpToolCall',
     'serializeMcpTransport',
     'parseMcpTransport',
-    'resolveMerchantCallContext',
-    'deliverMerchantPayment',
     'buildX402SigningContext',
     'coerceJsonField',
     'submitSignatureWithExpiryMapping',
     'submitErc7710WithExpiryMapping',
+  ],
+  // The #2812 capability module — a single-slice owner, not shared support,
+  // but the four helpers it owns are mapped in HELPER_OWNERSHIP like any
+  // other, so the same runtime↔enumeration ground-truth checks cover them.
+  'paid-mcp-completion': [
+    'resolveMerchantCallContext',
+    'ResolvedMerchantCallContext',
+    'deliverMerchantPayment',
     'preflightMcpPaymentHeader',
   ],
   'quote-response': [
@@ -334,6 +354,47 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
   ],
   'signer-compat': ['SIGNER_CAPABILITY_KEY', 'signerCompatibilityNotice'],
 }
+
+/**
+ * Capability modules that own helpers OUTRIGHT — the #2808 carve-out rule
+ * ("a helper called from exactly one slice belongs to that capability"),
+ * completed when #2812 moved its four merchant helpers out of support.
+ *
+ * Same ground-truth contract as the support maps: the imported namespace is
+ * the forward direction (every runtime export must be mapped or excluded),
+ * the enumeration the reverse (every mapped name must exist). The module's
+ * REGISTRATION SURFACE — the `_TOOLS` tuple, the `create*Handlers` factory
+ * and the tuple's name type — is deliberately not enumerated here: those are
+ * handlers and contracts, guarded by `tools/module-boundaries.test.ts` and
+ * the per-capability contribution tests, not helpers.
+ */
+const HELPER_HOST_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
+  'paid-mcp-completion': paidMcpCompletion,
+}
+
+const HELPER_HOST_MODULE_EXPORTS: Record<string, string[]> = {
+  'paid-mcp-completion': [
+    'resolveMerchantCallContext',
+    'ResolvedMerchantCallContext',
+    'deliverMerchantPayment',
+    'preflightMcpPaymentHeader',
+  ],
+}
+
+const ALL_MODULE_EXPORTS = { ...SUPPORT_MODULE_EXPORTS, ...HELPER_HOST_MODULE_EXPORTS }
+
+/**
+ * Exact-name exclusion for the capability registration surface — the `_TOOLS`
+ * tuple and the `create*Handlers` factory are the module's handler/contract
+ * API, not helpers, and must never enter the helper map (a helper map that
+ * "owned" a handler factory would let the handler-only check below forbid the
+ * module from defining its own handlers). Listed explicitly — NOT a prefix —
+ * so a future real helper named like these can never hide behind it.
+ */
+const REGISTRATION_SURFACE_EXPORTS = new Set([
+  'PAID_MCP_COMPLETION_TOOLS',
+  'createPaidMcpCompletionHandlers',
+])
 
 /** Type-only exports: mapped for ownership, absent at runtime by design. */
 const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext'])
@@ -357,20 +418,27 @@ const SUPPORT_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
   'signer-compat': signerCompat,
 }
 
+/** All helper-bearing modules: shared support + the capability helper hosts. */
+const ALL_MODULE_OBJECTS = { ...SUPPORT_MODULE_OBJECTS, ...HELPER_HOST_MODULE_OBJECTS }
+
 // Type-level names ride the mapped export; the TYPE_ONLY set covers their
 // absence at runtime in the checks above.
 
 describe('shared-helper ownership map (#2808)', () => {
-  it('maps every support-module export to exactly one ownership entry', () => {
-    // Ground truth is the IMPORTED NAMESPACE, not the SUPPORT_MODULE_EXPORTS
-    // enumeration: an export added to a module but forgotten in the list must
-    // still fail here (the runtime→enumeration direction). Vitest-visible
-    // module-internal symbols are excluded by exact name, never by prefix —
-    // a blanket prefix filter could hide a future real helper.
+  it('maps every helper-bearing module export to exactly one ownership entry', () => {
+    // Ground truth is the IMPORTED NAMESPACE, not the enumeration lists: an
+    // export added to a module but forgotten in the list must still fail here
+    // (the runtime→enumeration direction). Vitest-visible module-internal
+    // symbols are excluded by exact name, never by prefix — a blanket prefix
+    // filter could hide a future real helper. The namespace set spans shared
+    // support AND the capability helper hosts (#2812's paid-mcp-completion);
+    // a host's registration surface (_TOOLS tuple, create*Handlers factory)
+    // is handler/contract API, excluded by exact name.
     const unowned: string[] = []
-    for (const [moduleName, runtime] of Object.entries(SUPPORT_MODULE_OBJECTS)) {
+    for (const [moduleName, runtime] of Object.entries(ALL_MODULE_OBJECTS)) {
       for (const name of Object.keys(runtime)) {
         if (MODULE_INTERNAL_SYMBOLS.has(name) || TYPE_ONLY_EXPORTS.has(name)) continue
+        if (REGISTRATION_SURFACE_EXPORTS.has(name)) continue
         const owner = HELPER_OWNERSHIP[name]
         if (!owner) unowned.push(`${moduleName}.${name} (no HELPER_OWNERSHIP entry)`)
         else if (owner.module !== moduleName) unowned.push(`${moduleName}.${name} (mapped to ${owner.module})`)
@@ -378,28 +446,28 @@ describe('shared-helper ownership map (#2808)', () => {
     }
     expect(
       unowned,
-      `support exports without exactly one matching ownership entry (add them to HELPER_OWNERSHIP with their module and slices): ${unowned.join(', ')}`,
+      `exports without exactly one matching ownership entry (add them to HELPER_OWNERSHIP with their module and slices): ${unowned.join(', ')}`,
     ).toEqual([])
     const unmapped: string[] = []
-    for (const [moduleName, exports] of Object.entries(SUPPORT_MODULE_EXPORTS)) {
-      const runtime = SUPPORT_MODULE_OBJECTS[moduleName] as Record<string, unknown>
+    for (const [moduleName, exports] of Object.entries(ALL_MODULE_EXPORTS)) {
+      const runtime = ALL_MODULE_OBJECTS[moduleName] as Record<string, unknown>
       for (const name of exports) {
         if (!TYPE_ONLY_EXPORTS.has(name) && !(name in runtime)) {
-          throw new Error(`support/${moduleName}.ts declares export "${name}" that does not exist at runtime`)
+          throw new Error(`module ${moduleName} declares export "${name}" that does not exist at runtime`)
         }
         if (!HELPER_OWNERSHIP[name]) unmapped.push(`${moduleName}.${name}`)
       }
     }
-    expect(unmapped, `unmapped support exports (add them to HELPER_OWNERSHIP with their slices): ${unmapped.join(', ')}`).toEqual([])
+    expect(unmapped, `unmapped module exports (add them to HELPER_OWNERSHIP with their slices): ${unmapped.join(', ')}`).toEqual([])
   })
 
-  it('maps only names that exist in a support module', () => {
+  it('maps only names that exist in a helper-bearing module', () => {
     const phantom: string[] = []
     for (const [name, owner] of Object.entries(HELPER_OWNERSHIP)) {
       // Type-only exports carry no runtime export; the module is still their
       // single owner (declared there, exported nowhere else).
       if (TYPE_ONLY_EXPORTS.has(name)) continue
-      const moduleExports = SUPPORT_MODULE_EXPORTS[owner.module] ?? []
+      const moduleExports = ALL_MODULE_EXPORTS[owner.module] ?? []
       if (!moduleExports.includes(name)) phantom.push(`${owner.module}⊥${name}`)
     }
     expect(phantom, `ownership entries naming helpers their module does not carry: ${phantom.join(', ')}`).toEqual([])
@@ -407,12 +475,13 @@ describe('shared-helper ownership map (#2808)', () => {
 
   it('keeps parse/parseStrict owned by the #2807 parsing seam, never support', () => {
     // The issue is explicit: parse/parseStrict remain #2807's contract/parsing
-    // seam. No support module may carry them.
-    for (const [moduleName, exports] of Object.entries(SUPPORT_MODULE_EXPORTS)) {
+    // seam. No helper-bearing module may carry them — support or a capability
+    // helper host.
+    for (const [moduleName, exports] of Object.entries(ALL_MODULE_EXPORTS)) {
       expect(exports, `${moduleName} must not own the parsing seam`).not.toContain('parse')
       expect(exports, `${moduleName} must not own the parsing seam`).not.toContain('parseStrict')
     }
-    for (const runtime of Object.values(SUPPORT_MODULE_OBJECTS)) {
+    for (const runtime of Object.values(ALL_MODULE_OBJECTS)) {
       expect('parse' in runtime, 'parse must stay in tools/parsing.ts').toBe(false)
       expect('parseStrict' in runtime, 'parseStrict must stay in tools/parsing.ts').toBe(false)
     }
@@ -436,11 +505,19 @@ describe('shared-helper ownership map (#2808)', () => {
     // exists to prevent (the issue names submitSignatureWithExpiryMapping,
     // on the signing path, as the crossing that must not fork), and checking
     // only tools.ts would have blessed a fork the moment the handlers left it.
+    //
+    // #2812: the ban is over SHARED ownership only. A capability helper host
+    // (paid-mcp-completion owns resolveMerchantCallContext et al. outright)
+    // may define the helpers HELPER_OWNERSHIP assigns to it — re-defining
+    // THOSE there is ownership, not a fork. What stays forbidden everywhere
+    // is re-defining a helper whose owner is a DIFFERENT module.
     const src = fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
-    for (const name of Object.keys(HELPER_OWNERSHIP)) {
+    const ownStem = _label.startsWith('tools/') ? _label.slice('tools/'.length).replace(/\.ts$/, '') : ''
+    for (const [name, owner] of Object.entries(HELPER_OWNERSHIP)) {
+      if (ownStem && owner.module === ownStem) continue
       expect(
         src.match(new RegExp(`(export )?(async )?function ${name}\\b|(export )?class ${name}\\b|(export )?const ${name}\\b`)),
-        `"${name}" must live in support, not be re-defined in ${_label}`,
+        `"${name}" must live in ${owner.module}, not be re-defined in ${_label}`,
       ).toBeNull()
     }
   })
@@ -479,6 +556,11 @@ describe('shared-helper ownership map (#2808)', () => {
     const undeclared: string[] = []
     for (const [name, entry] of Object.entries(HELPER_OWNERSHIP)) {
       if (entry.slices.length >= 2) continue
+      // A single-slice helper whose owner is a capability helper host IS the
+      // rule's success outcome (#2812 moved the four merchant helpers there):
+      // nothing to declare. Only a single-slice helper still sitting in
+      // SHARED support needs a retained reason (or a move).
+      if (entry.module in HELPER_HOST_MODULE_EXPORTS) continue
       const reason = SINGLE_SLICE_RETAINED[name]
       if (typeof reason !== 'string' || reason.trim().length === 0) {
         undeclared.push(`${name} (${entry.slices.join('+')})`)
@@ -568,13 +650,19 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     // The allow-list is the positive form of the rule above. It also catches
     // the case the sibling check cannot see: a capability reaching BACKWARDS
     // into `tools.ts`, the facade that composes it, which would make the
-    // module graph cyclic and the extraction cosmetic.
+    // module graph cyclic and the extraction cosmetic. Node built-ins are
+    // allowed only per module, declared by name in
+    // CAPABILITY_EXTRA_ALLOWED_IMPORTS — never a blanket `node:` prefix.
+    const allowed = [
+      ...CAPABILITY_ALLOWED_IMPORTS,
+      ...(CAPABILITY_EXTRA_ALLOWED_IMPORTS[stem] ?? []),
+    ]
     const disallowed = importSpecifiers(stem).filter(
-      (spec) => !CAPABILITY_ALLOWED_IMPORTS.some((allowed) => spec.startsWith(allowed)),
+      (spec) => !allowed.some((a) => spec.startsWith(a)),
     )
     expect(
       disallowed,
-      `${stem} imports outside the capability contract (contracts/parsing/registry seams, support, SDK): ${disallowed.join(', ')}`,
+      `${stem} imports outside the capability contract (contracts/parsing/registry seams, support, SDK, declared node built-ins): ${disallowed.join(', ')}`,
     ).toEqual([])
   })
 
@@ -609,7 +697,7 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
   })
 
   it('is not shadowed: no capability tool is re-declared in the tools.ts literal', () => {
-    // The gap haven-reviewer measured on this PR. A key written into the
+    // The gap haven-reviewer measured on #2809. A key written into the
     // facade's own object literal AFTER the spread silently shadows the
     // capability's handler: TS1117 does not reach across a spread, and no key
     // is excess because both sides are HostedToolName, so `tsc` exits 0 on a
@@ -620,16 +708,37 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     // Source-read, because the shadow is invisible at runtime: by the time a
     // map exists the duplicate has already collapsed last-wins, which is the
     // same reason the #2807 registry twin takes entry LISTS rather than maps.
+    //
+    // #2812: the facade no longer carries ANY literal key — createToolHandlers
+    // is capability spreads only — so a keys parse of the honest facade finds
+    // zero keys and a shadow scan over that empty list can never fire. The
+    // assertion therefore moved up a level: the composition body must contain
+    // NOTHING BUT spreads. Any literal key — duplicate or not — is red here,
+    // which subsumes the shadow case and keeps the failure mode (a silent
+    // last-wins override) structurally unreachable rather than merely
+    // unobserved.
     const facade = fs.readFileSync(new URL('../../tools.ts', import.meta.url), 'utf8')
-    // The optional quotes are load-bearing: `'haven_pay':` is a valid duplicate
-    // key that an unquoted-only pattern walks straight past, and the union
-    // check below would NOT catch it (the name is in `owned`, so the union is
-    // still 22). Nothing normalises the quoting away — the repository has no
-    // prettier or eslint config and no code-formatting or style-lint job. (Its
-    // twenty `lint:*` scripts are prose and contract ratchets — copy, wire
-    // types, db mocks, workspace pins, retired-rail prose — not formatters, so
-    // none of them would rewrite a quoted key.)
-    const literalKeys = [...facade.matchAll(/^ {4}'?(haven_[a-z0-9_]+)'?:/gm)].map((m) => m[1])
+    const fnStart = facade.indexOf('export function createToolHandlers')
+    expect(fnStart, 'createToolHandlers not found in tools.ts — the probe is broken').toBeGreaterThan(-1)
+    const openBrace = facade.indexOf('{', fnStart)
+    const bodyEnd = facade.indexOf('\n}', openBrace)
+    expect(openBrace, 'createToolHandlers body not opened — the probe is broken').toBeGreaterThan(fnStart)
+    expect(bodyEnd, 'createToolHandlers body not terminated — the probe is broken').toBeGreaterThan(openBrace)
+    const body = facade.slice(openBrace + 1, bodyEnd)
+    // The ONLY statements the composition may contain: the return opener, the
+    // capability spreads, and the object closer. Anything else — a literal
+    // `haven_x:` key (quoted or not), a helper call, a conditional — is red.
+    const statements = body
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((t) => t !== '' && !t.startsWith('//'))
+    const unexpected = statements.filter(
+      (t) => t !== 'return {' && t !== '}' && !/^\.{3}create[A-Za-z0-9]+Handlers\(haven\),$/.test(t),
+    )
+    expect(
+      unexpected,
+      `tools.ts's createToolHandlers must compose capability spreads ONLY — a literal key here silently shadows a capability handler: ${unexpected.join(' | ')}`,
+    ).toEqual([])
     const owned = new Set<string>()
     for (const stem of CAPABILITY_MODULES) {
       const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
@@ -647,17 +756,13 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
       for (const [, name] of tuple.matchAll(/'(haven_[a-z0-9_]+)'/g)) owned.add(name)
     }
     expect(owned.size, 'the capability tuple parse found no tools — the probe is broken').toBeGreaterThan(0)
-    expect(literalKeys.length, 'the facade literal parse found no keys — the probe is broken').toBeGreaterThan(0)
-    const shadowed = literalKeys.filter((k) => owned.has(k))
+    // …and the capability tuples alone must still cover the whole hosted
+    // surface: with the facade a pure composition, the only way a tool loses
+    // its owner is a capability tuple dropping it (the compile-checked
+    // direction is TS2741 on this very composition; this is the data twin).
     expect(
-      shadowed,
-      `tools.ts re-declares handlers a capability module already owns; the literal wins silently: ${shadowed.join(', ')}`,
-    ).toEqual([])
-    // …and the two halves together still cover the whole surface, so this
-    // check cannot be satisfied by a facade that simply lost its literal.
-    expect(
-      new Set([...literalKeys, ...owned]).size,
-      'the facade literal plus the capability tuples must still cover the whole hosted surface — a short union means one side parsed less than it should',
+      owned.size,
+      'the capability tuples must cover the whole hosted surface — a short count means a tool lost its owner',
     ).toBe(Object.keys(toolSchemas).length)
   })
 

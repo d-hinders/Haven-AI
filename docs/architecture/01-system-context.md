@@ -20,6 +20,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/connect/src/runtime.ts
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/tools/**
   - packages/sdk/src/tool-descriptions.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
@@ -143,7 +144,9 @@ flowchart LR
   payment headers. Direct SDK and fully local MCP integrations collapse some
   boxes in the diagram but preserve the same local-key boundary
   ([signer core](../../packages/signer/src/core.ts),
-  [hosted tools](../../packages/mcp-server/src/tools.ts)).
+  [hosted tools](../../packages/mcp-server/src/tools.ts) — since #2812 the
+  composition-only facade over the capability modules under
+  `src/tools/`, which own the handlers and their helpers)).
 - **API authentication is identity, not spending authority.** Agent creation
   accepts and stores a public `delegate_address`, not a private key. Payments
   require the corresponding delegate signature, and the AllowanceModule

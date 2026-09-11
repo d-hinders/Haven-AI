@@ -2152,6 +2152,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/transactions/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the filtered transaction list as a CSV file.
+         * @description Applies the same filters as `GET /transactions` over the whole result set rather than one page, and adds `direction` and `chainId`. UTF-8 with a byte-order mark and RFC 4180 quoting. Bounded at 10 000 rows; above that the request is refused with 413 rather than truncated.
+         */
+        get: operations["exportTransactionsCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/transactions/filters": {
         parameters: {
             query?: never;
@@ -13343,6 +13363,82 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    exportTransactionsCsv: {
+        parameters: {
+            query?: {
+                safeId?: string;
+                agentId?: string;
+                tokenKey?: string;
+                direction?: "in" | "out";
+                chainId?: number;
+                fresh?: "1" | "true";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The CSV file. */
+            200: {
+                headers: {
+                    /** @description attachment; filename="haven-transactions-YYYYMMDD.csv" */
+                    "Content-Disposition"?: string;
+                    /** @description Rows written, excluding the header. */
+                    "X-Export-Row-Count"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

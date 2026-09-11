@@ -1,9 +1,10 @@
 /**
  * Public entry point for the transactions module (#992, epic #980 M4).
  * Outside callers (routes, tests) must import ONLY from this file — see the
- * `module-entry-transactions` dependency-cruiser rule in
+ * `no-deep-cross-module-import` dependency-cruiser rule in
  * `.dependency-cruiser.cjs`. Internal files (`aggregate.ts`, `enrichment.ts`,
- * `x402.ts`, `ordering.ts`, `cache-key.ts`, `orchestration.ts`) are private.
+ * `x402.ts`, `ordering.ts`, `cache-key.ts`, `orchestration.ts`, `csv-export.ts`) are
+ * private.
  *
  * `routes/transactions.ts` keeps request validation, auth wiring, and
  * response serialization; aggregation, enrichment, and caching live here.
@@ -22,6 +23,16 @@ export type {
 } from './types.js'
 
 export { buildTransactionCacheKey } from './cache-key.js'
+export {
+  EXPORT_ROW_CAP,
+  TRANSACTION_CSV_COLUMNS,
+  exceedsExportRowCap,
+  buildTransactionCsvFilename,
+  transactionCsvRow,
+  transactionsToCsv,
+  type TransactionCsvColumn,
+  type TransactionCsvLookups,
+} from './csv-export.js'
 export { compareTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 export { fetchSafeTransactions } from './aggregate.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'

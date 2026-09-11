@@ -6,20 +6,31 @@ import {
   findSafeOwnership,
   listBasicSafesForUser,
 } from '../infra/repositories/transaction-history.js'
+import { listContactsForUser } from '../infra/repositories/contacts.js'
 import { getChain, isSupportedChain } from '../domain/chains.js'
 import {
   aggregateSafeTransactions,
   buildSafeTransactionsPage,
+  EXPORT_ROW_CAP,
+  buildTransactionCsvFilename,
+  exceedsExportRowCap,
   filterEnrichedTransactions,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
   resolveTransactionFilters,
+  transactionsToCsv,
   type ParsedTokenFilter,
 } from '../modules/transactions/index.js'
+import { CSV_BOM } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/** Own-account name lookup key — address is case-insensitive, chain is not. */
+function accountNameKey(address: string, chainId: number): string {
+  return `${address.toLowerCase()}:${chainId}`
+}
 
 function parsePositiveInt(
   value: string | undefined,
@@ -189,6 +200,131 @@ export default async function transactionRoutes(
       }
     },
   )
+
+  /**
+   * GET /transactions/export.csv — the filtered list as a CSV file (#2871).
+   *
+   * Filter-faithful over the WHOLE result set, not the page the dashboard has
+   * loaded: it accepts the same `safeId` / `agentId` / `tokenKey` filters as
+   * `GET /`, plus the `direction` and `chainId` the dashboard used to apply in
+   * the browser. Bounded by `EXPORT_ROW_CAP` with a structured refusal above
+   * it, so one request can never stream an unbounded result set.
+   */
+  app.get<{
+    Querystring: {
+      safeId?: string
+      agentId?: string
+      tokenKey?: string
+      direction?: string
+      chainId?: string
+      fresh?: string
+    }
+  }>('/export.csv', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const fresh = parseFreshFlag(request.query.fresh)
+
+    if (request.query.safeId && !UUID_RE.test(request.query.safeId)) {
+      return reply.code(400).send({ error: 'Invalid safeId' })
+    }
+
+    if (
+      request.query.agentId &&
+      request.query.agentId !== 'user' &&
+      !UUID_RE.test(request.query.agentId)
+    ) {
+      return reply.code(400).send({ error: 'Invalid agentId' })
+    }
+
+    const tokenFilter = parseTokenKey(request.query.tokenKey)
+    if (request.query.tokenKey && !tokenFilter) {
+      return reply.code(400).send({ error: 'Invalid tokenKey' })
+    }
+
+    const direction = request.query.direction
+    if (direction !== undefined && direction !== 'in' && direction !== 'out') {
+      return reply.code(400).send({ error: 'Invalid direction' })
+    }
+
+    const chainId = parseChainId(request.query.chainId)
+    if (Number.isNaN(chainId)) {
+      return reply.code(400).send({ error: 'Invalid chainId' })
+    }
+    if (chainId !== null && !isSupportedChain(chainId)) {
+      return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
+    }
+
+    // Kept unfiltered for name resolution below: a transfer between two of
+    // the user's own accounts must still name the far side when the export is
+    // scoped to one of them, exactly as the dashboard table does.
+    const allSafes = await listBasicSafesForUser(sub)
+    let safes = allSafes
+
+    if (request.query.safeId) {
+      safes = safes.filter((safe) => safe.id === request.query.safeId)
+      if (safes.length === 0) {
+        return reply.code(400).send({ error: 'Invalid safeId' })
+      }
+    }
+
+    if (request.query.agentId && request.query.agentId !== 'user') {
+      const agentOwned = await agentExistsForUser(request.query.agentId, sub)
+      if (!agentOwned) {
+        return reply.code(400).send({ error: 'Invalid agentId' })
+      }
+    }
+
+    let filtered: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>> = []
+    if (safes.length > 0) {
+      const { merged } = await aggregateSafeTransactions(safes, request.log, fresh)
+      const enriched = await mergeSortDedupeAndEnrich(sub, safes, merged)
+      filtered = filterEnrichedTransactions(enriched, {
+        agentId: request.query.agentId,
+        tokenFilter,
+        direction,
+        chainId: chainId ?? undefined,
+      })
+    }
+
+    if (exceedsExportRowCap(filtered.length)) {
+      return reply.code(413).send({
+        error: 'Export too large',
+        statusCode: 413,
+        // Grouped digits: `10001` and `10000` are near-indistinguishable at a
+        // glance, which defeats the sentence's job of conveying how far over
+        // the export is.
+        details:
+          `This export would contain ${filtered.length.toLocaleString('en-US')} rows; ` +
+          `the limit is ${EXPORT_ROW_CAP.toLocaleString('en-US')}. Narrow the filters — ` +
+          'by account, agent, token, network or direction — and export again.',
+      })
+    }
+
+    // The address book is chain-agnostic (`contacts` has no chain_id), the
+    // user's own accounts are not — the same two-step resolution, in the same
+    // order, as the dashboard table.
+    const contacts = await listContactsForUser(sub)
+    const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
+    const safeNames = new Map(
+      allSafes.map((safe) => [accountNameKey(safe.safe_address, safe.chain_id), safe.name]),
+    )
+
+    const csv = transactionsToCsv(filtered, {
+      resolveName: (address, addressChainId) => {
+        const contactName = contactNames.get(address.toLowerCase())
+        if (contactName) return contactName
+        return safeNames.get(accountNameKey(address, addressChainId)) ?? null
+      },
+    })
+
+    return reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header(
+        'Content-Disposition',
+        `attachment; filename="${buildTransactionCsvFilename(new Date())}"`,
+      )
+      .header('X-Export-Row-Count', String(filtered.length))
+      .send(`${CSV_BOM}${csv}`)
+  })
 
   app.get<{ Querystring: { fresh?: string } }>('/filters', async (request) => {
     const { sub } = request.user as { sub: string }

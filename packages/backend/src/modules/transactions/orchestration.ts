@@ -93,6 +93,17 @@ export async function mergeSortDedupeAndEnrich(
 export interface TransactionFilterOptions {
   agentId?: string
   tokenFilter?: ParsedTokenFilter | null
+  /**
+   * Direction and chain, applied server-side for the CSV export (#2871).
+   *
+   * The dashboard has always filtered these two in the browser, over the page
+   * it had loaded (`TransactionsClient`'s `visibleTransactions`). The export
+   * runs over the whole result set, so it has to apply them here or the file
+   * would not match the list it was taken from. Both are optional and the
+   * `GET /` feed passes neither, so its behaviour is unchanged.
+   */
+  direction?: 'in' | 'out'
+  chainId?: number
 }
 
 /** The agentId (including the synthetic `user`) and tokenKey filters applied to the GET / feed. */
@@ -101,6 +112,9 @@ export function filterEnrichedTransactions(
   options: TransactionFilterOptions,
 ): EnrichedTransaction[] {
   return transactions.filter((tx) => {
+    if (options.direction && tx.direction !== options.direction) return false
+    if (options.chainId !== undefined && tx.chainId !== options.chainId) return false
+
     if (options.agentId === 'user') {
       return tx.direction === 'out' && !tx.agentId
     }

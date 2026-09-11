@@ -15,8 +15,13 @@ covers:
   - packages/connect/src/**
   - packages/frontend/src/lib/transaction-csv.ts
   - packages/frontend/src/lib/__tests__/transaction-csv.test.ts
+  - packages/backend/src/domain/csv.ts
+  - packages/backend/src/domain/__tests__/csv.test.ts
+  - packages/backend/src/modules/transactions/csv-export.ts
+  - packages/backend/src/modules/transactions/__tests__/csv-export.test.ts
+  - packages/backend/src/routes/__tests__/transactions-export-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-09-08"
+last-verified: "2026-09-11"
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -47,7 +52,7 @@ document for the remaining exploratory checklist.
 | Mobile-viewport layout overflow on the primary authenticated routes | `e2e/navigation.mobile.spec.ts` (Pixel 5 emulation, gates every PR since #1770) |
 | Dialog/overlay layout overflow **at a mobile viewport** | `e2e/receive-modal.mobile.spec.ts` (Pixel 5, #1797). The three desktop callers of `measureDialogOverflow` run only at 1280px, where a dialog is least likely to overflow |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |
-| CSV export shape + injection guard | unit tests (`transaction-csv`, #2097) — the export gained the `initiator` column (`human` \| `agent` \| `unknown`, empty for inbound/unattributed rows); column count is asserted so the shape is pinned |
+| CSV export shape + injection guard | backend unit tests (`domain/__tests__/csv.test.ts` for RFC 4180 quoting and formula-injection neutralisation, `modules/transactions/__tests__/csv-export.test.ts` for the column contract) plus the route test `routes/__tests__/transactions-export-csv.test.ts`. #2871 moved generation server-side, so the frontend `transaction-csv` test no longer covers either property — it is down to the filename and the download shim. The `initiator` column (#2097 — `human` \| `agent` \| `unknown`, empty for inbound/unattributed rows) survives the move; column order is asserted against `TRANSACTION_CSV_COLUMNS` so the shape stays pinned |
 
 Run the regular mocked frontend suite with:
 

@@ -40,6 +40,8 @@ export async function enrichTransactionsWithAgents(
         paymentAttentionReason: string | null
         activityType?: 'delegate_sweep'
         amountSek: string | null
+        fxRateSek: string | null
+        fxSource: string | null
         settlementScheme?: string | null
       }
     >()
@@ -62,6 +64,8 @@ export async function enrichTransactionsWithAgents(
           paymentFlowStatus: lifecycle.paymentFlowStatus,
           paymentAttentionReason: lifecycle.paymentAttentionReason,
           amountSek: row.amount_sek,
+          fxRateSek: row.fx_rate_sek,
+          fxSource: row.fx_source,
         },
       )
     }
@@ -85,6 +89,8 @@ export async function enrichTransactionsWithAgents(
           paymentAttentionReason: null,
           activityType: 'delegate_sweep',
           amountSek: null,
+          fxRateSek: null,
+          fxSource: null,
         },
       )
     }
@@ -113,6 +119,8 @@ export async function enrichTransactionsWithAgents(
         paymentAttentionReason: agent?.paymentAttentionReason ?? tx.paymentAttentionReason,
         activityType: agent?.activityType ?? tx.activityType,
         amountSek: agent?.amountSek ?? tx.amountSek,
+        fxRateSek: agent?.fxRateSek ?? tx.fxRateSek,
+        fxSource: agent?.fxSource ?? tx.fxSource,
         settlementScheme: agent?.settlementScheme ?? tx.settlementScheme,
         initiatedBy: attributedAgentId
           ? 'agent'

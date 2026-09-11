@@ -2,9 +2,9 @@
 owner: "@d-hinders"
 status: research
 covers:
-  - packages/backend/src/modules/accounting/accounting-entry.ts
-  - packages/backend/src/modules/reporting/fortnox-connection.ts
-  - packages/backend/src/modules/reporting/reporting-transaction.ts
+  - packages/backend/src/modules/accounting/entry.ts
+  - packages/backend/src/modules/accounting/fortnox-connection.ts
+  - packages/backend/src/modules/accounting/feed-transaction.ts
 last-verified: "2026-07-16"
 ---
 

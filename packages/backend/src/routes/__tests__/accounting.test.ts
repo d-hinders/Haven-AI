@@ -25,12 +25,21 @@ vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQu
 const { buildAccountingEntries } = vi.hoisted(() => ({ buildAccountingEntries: vi.fn() }))
 const { sieExport } = vi.hoisted(() => ({ sieExport: vi.fn() }))
 const { reconcileEntries } = vi.hoisted(() => ({ reconcileEntries: vi.fn() }))
-// accounting-entry.ts, sie-exporter.ts and reconcile.ts all fold into one
-// public entry point post-#998 (modules/accounting/index.ts) — a single mock
-// factory, not three vi.mock calls to the same specifier (the last one
-// silently wins otherwise).
+// TWO specifiers since #2859 split the module: the shared, non-asserting data
+// assembly (`buildAccountingEntries`, from `entry.ts`) stays on the module's
+// public entry point, while the ASSERTING exporters this legacy route drives —
+// SIE serialization and reconciliation — moved behind `legacy/index.ts` and are
+// no longer re-exported. One factory per specifier, never two calls to the same
+// one (the last silently wins).
+//
+// The split is why `mock-factory-exports.guard.test.ts` (#2307) went red on
+// this file: `sieExporter` and `reconcileEntries` were still declared against a
+// module that had stopped exporting them, which makes every assertion written
+// against them unfalsifiable.
 vi.mock('../../modules/accounting/index.js', () => ({
   buildAccountingEntries,
+}))
+vi.mock('../../modules/accounting/legacy/index.js', () => ({
   sieExporter: { export: sieExport },
   reconcileEntries,
 }))

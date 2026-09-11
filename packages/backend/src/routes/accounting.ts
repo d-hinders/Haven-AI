@@ -4,8 +4,8 @@ import pool from '../db.js'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { buildAccountingEntries } from '../modules/accounting/index.js'
-import { sieExporter } from '../modules/accounting/index.js'
-import { reconcileEntries } from '../modules/accounting/index.js'
+import { sieExporter } from '../modules/accounting/legacy/index.js'
+import { reconcileEntries } from '../modules/accounting/legacy/index.js'
 
 interface ExportQuery {
   format?: string

@@ -270,6 +270,25 @@ export const BANNED = [
   ['haven approves', "the owner-signed budget: 'the on-chain budget the user signed'"],
   ['haven grants', 'the user approves; Haven constructs and relays'],
   ['haven permits', 'the user approves; Haven constructs and relays'],
+  // ── The accounting feed's non-asserting invariant (#2859, epic #2858) ─────
+  // `CLAUDE.md` and epic #491 state it as an invariant: the feed never asserts
+  // VAT, accounts or rows, and copy never claims "audit-ready" or "your books
+  // are done". Until now that was remembered, not enforced — this gate had
+  // neither phrase, so nothing would have caught the claim reappearing in the
+  // Settings card or the feed page that epic #2858 is about to build.
+  //
+  // Measured before adding, the way the two entries below were: ZERO
+  // occurrences across the scanned set (166 files). The phrases DO occur in
+  // `docs/research/*` and `docs/security/*`, but those are prose stating the
+  // rule, and docs are not in SCAN_DIRS — the gate reads product copy.
+  //
+  // `books are done` rather than the doc's "we do your books": the claim to
+  // catch is the outcome promise, and it survives the pronoun ("your books are
+  // done", "their books are done", "books are done for you"). The verb form is
+  // what makes it unambiguous enough for this deliberately conservative list.
+  ['audit-ready', 'what the feed actually does — the payment appears with its evidence attached'],
+  ['audit ready', 'what the feed actually does — the payment appears with its evidence attached'],
+  ['books are done', "the accountant books it; Haven is the data source"],
   // ── The two CASP avoid-list phrases themselves (#2246) ─────────────────────
   // #2334 added five phrases DERIVED from the § Core principle attribution
   // rule. These two are different: they are avoid-list entries of

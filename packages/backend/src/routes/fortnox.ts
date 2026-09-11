@@ -5,10 +5,9 @@ import { buildAccountingEntries } from '../modules/accounting/index.js'
 import {
   buildFortnoxAuthorizeUrl,
   exchangeCodeForTokens,
-  pushVoucher,
-  toFortnoxVoucher,
   FortnoxError,
-} from '../modules/reporting/index.js'
+} from '../modules/accounting/index.js'
+import { pushVoucher, toFortnoxVoucher } from '../modules/accounting/legacy/index.js'
 import {
   deleteFortnoxConnection,
   fortnoxConfigured,
@@ -16,7 +15,7 @@ import {
   getFortnoxConnection,
   getValidFortnoxAccessToken,
   saveFortnoxConnection,
-} from '../modules/reporting/index.js'
+} from '../modules/accounting/index.js'
 
 interface CallbackQuery {
   code?: string

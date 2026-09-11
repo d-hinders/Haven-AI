@@ -35,7 +35,7 @@ import {
   externalInvoiceNumber,
   underlagFromData,
   type ReportingTransaction,
-} from '../src/modules/reporting/index.js'
+} from '../src/modules/accounting/index.js'
 
 const TOKEN_PATH = path.join(homedir(), '.haven', 'fortnox-sandbox.json')
 

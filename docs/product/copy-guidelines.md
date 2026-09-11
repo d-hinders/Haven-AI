@@ -692,7 +692,7 @@ precedents:
   the payment-token example.
 - The "payment evidence document" rule above is not yet reflected in the one
   shipped string that remains: the generated underlag PDF is titled "HAVEN
-  PAYMENT RECEIPT" (`packages/backend/src/modules/reporting/receipt-underlag.ts:91`),
+  PAYMENT RECEIPT" (`packages/backend/src/modules/accounting/receipt-underlag.ts:91`),
   and "betalningsbevis" appears nowhere in the Swedish catalog. The bullet also
   named the approval and send surfaces as labelling it "Payment receipt"; those
   surfaces were deleted with the Safe rail (#1989) and the label survives on no

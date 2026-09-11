@@ -68,7 +68,7 @@ import {
   LIST_UNPUSHED_PAYMENT_IDS_SQL,
   MARK_SYNC_FAILED_SQL,
   MARK_SYNC_PUSHED_SQL,
-} from '../src/infra/repositories/reporting-feed-syncs.js'
+} from '../src/infra/repositories/accounting-feed-syncs.js'
 import {
   FIND_PASSKEY_FOR_SAFE_SQL,
   INSERT_USER_PASSKEY_SQL,
@@ -553,20 +553,20 @@ const QUERIES: SmokeQuery[] = [
     sql: HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
   },
   // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
-  // Fortnox connection, reporting-feed dedup ledger, user passkeys, safe
+  // Fortnox connection, accounting-feed dedup ledger, user passkeys, safe
   // ownership-with-type, receipt underlag. All IMPORTED.
   { name: 'fees: idempotent settled-fee insert (#386)', sql: INSERT_PAYMENT_FEE_SQL },
   { name: 'fees: recorded-fee read (#386)', sql: GET_RECORDED_FEE_SQL },
   { name: 'fortnox: connection upsert (#465)', sql: UPSERT_FORTNOX_CONNECTION_SQL },
   { name: 'fortnox: connection read (#465)', sql: GET_FORTNOX_CONNECTION_SQL },
   { name: 'fortnox: connection delete (#465)', sql: DELETE_FORTNOX_CONNECTION_SQL },
-  { name: 'reporting feed: claim insert (first writer wins, #497)', sql: CLAIM_SYNC_INSERT_SQL },
-  { name: 'reporting feed: re-claim failed row (#497)', sql: CLAIM_SYNC_RECLAIM_FAILED_SQL },
-  { name: 'reporting feed: mark pushed (note #498)', sql: MARK_SYNC_PUSHED_SQL },
-  { name: 'reporting feed: mark failed (#497)', sql: MARK_SYNC_FAILED_SQL },
-  { name: 'reporting feed: sync state read (#497)', sql: GET_SYNC_STATE_SQL },
-  { name: 'reporting feed: per-user listing (#500)', sql: LIST_SYNCS_FOR_USER_SQL },
-  { name: 'reporting feed: unpushed payment ids (#499)', sql: LIST_UNPUSHED_PAYMENT_IDS_SQL },
+  { name: 'accounting feed: claim insert (first writer wins, #497)', sql: CLAIM_SYNC_INSERT_SQL },
+  { name: 'accounting feed: re-claim failed row (#497)', sql: CLAIM_SYNC_RECLAIM_FAILED_SQL },
+  { name: 'accounting feed: mark pushed (note #498)', sql: MARK_SYNC_PUSHED_SQL },
+  { name: 'accounting feed: mark failed (#497)', sql: MARK_SYNC_FAILED_SQL },
+  { name: 'accounting feed: sync state read (#497)', sql: GET_SYNC_STATE_SQL },
+  { name: 'accounting feed: per-user listing (#500)', sql: LIST_SYNCS_FOR_USER_SQL },
+  { name: 'accounting feed: unpushed payment ids (#499)', sql: LIST_UNPUSHED_PAYMENT_IDS_SQL },
   { name: 'passkeys: enrollment insert', sql: INSERT_USER_PASSKEY_SQL },
   { name: 'passkeys: per-user listing', sql: LIST_USER_PASSKEYS_SQL },
   { name: 'passkeys: safe-exec ownership read', sql: FIND_PASSKEY_FOR_SAFE_SQL },

@@ -890,7 +890,7 @@ export type paths = {
         };
         /**
          * Legacy SIE export — GATED OFF by default.
-         * @description Superseded by the non-asserting reporting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.
+         * @description Superseded by the non-asserting accounting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.
          */
         get: operations["exportAccounting"];
         put?: never;
@@ -949,7 +949,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/status": {
+    "/accounting/feed/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -957,10 +957,10 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * Whether the reporting feed is available, connected, and live — plus recent syncs.
+         * Whether the accounting feed is available, connected, and live — plus recent syncs.
          * @description Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.
          */
-        get: operations["getReportingStatus"];
+        get: operations["getAccountingFeedStatus"];
         put?: never;
         post?: never;
         delete?: never;
@@ -969,7 +969,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/sync": {
+    "/accounting/feed/sync": {
         parameters: {
             query?: never;
             header?: never;
@@ -982,14 +982,14 @@ export type paths = {
          * Backfill and retry the feed for the caller.
          * @description Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.
          */
-        post: operations["syncReportingFeed"];
+        post: operations["syncAccountingFeed"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/verify/{paymentId}": {
+    "/accounting/feed/verify/{paymentId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1000,7 +1000,7 @@ export type paths = {
          * Read back a pushed invoice from the provider's own records.
          * @description Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.
          */
-        get: operations["verifyReportingInvoice"];
+        get: operations["verifyAccountingFeedInvoice"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1009,7 +1009,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/reopen/{paymentId}": {
+    "/accounting/feed/reopen/{paymentId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1022,7 +1022,7 @@ export type paths = {
          * Reopen a pushed row for retry — only when the provider confirms the invoice is gone.
          * @description The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.
          */
-        post: operations["reopenReportingPush"];
+        post: operations["reopenAccountingFeedPush"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7862,7 +7862,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The default: SIE export is retired in favour of the reporting feed. */
+            /** @description The default: SIE export is retired in favour of the accounting feed. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -8106,7 +8106,7 @@ export interface operations {
             };
         };
     };
-    getReportingStatus: {
+    getAccountingFeedStatus: {
         parameters: {
             query?: never;
             header?: never;
@@ -8169,7 +8169,7 @@ export interface operations {
             };
         };
     };
-    syncReportingFeed: {
+    syncAccountingFeed: {
         parameters: {
             query?: never;
             header?: never;
@@ -8204,7 +8204,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The reporting feed is not available for this caller. */
+            /** @description The accounting feed is not available for this caller. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8221,7 +8221,7 @@ export interface operations {
             };
         };
     };
-    verifyReportingInvoice: {
+    verifyAccountingFeedInvoice: {
         parameters: {
             query?: never;
             header?: never;
@@ -8276,7 +8276,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The reporting feed is not available for this caller. */
+            /** @description The accounting feed is not available for this caller. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8307,7 +8307,7 @@ export interface operations {
             };
         };
     };
-    reopenReportingPush: {
+    reopenAccountingFeedPush: {
         parameters: {
             query?: never;
             header?: never;
@@ -8348,7 +8348,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The reporting feed is not available for this caller. */
+            /** @description The accounting feed is not available for this caller. */
             404: {
                 headers: {
                     [name: string]: unknown;

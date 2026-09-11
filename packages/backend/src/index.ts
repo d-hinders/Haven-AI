@@ -65,10 +65,10 @@ import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import fortnoxRoutes from './routes/fortnox.js'
-import reportingRoutes from './routes/reporting.js'
-import { registerConnector } from './modules/reporting/index.js'
-import { FortnoxConnector } from './modules/reporting/index.js'
-import { fortnoxConfigured } from './modules/reporting/index.js'
+import accountingFeedRoutes from './routes/accounting-feed.js'
+import { registerConnector } from './modules/accounting/index.js'
+import { FortnoxConnector } from './modules/accounting/index.js'
+import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
   refreshCatalog,
   runCatalogIngestTick,
@@ -270,7 +270,7 @@ await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
-await app.register(reportingRoutes, { prefix: '/accounting/reporting' })
+await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
 // #496: the live Fortnox feed adapter. Registering it flips hasLiveConnector()
 // → true, which removes the Reporting page's "preview" banner. Gated on env:
 // deployments without Fortnox credentials keep the feed inert (no-op), same

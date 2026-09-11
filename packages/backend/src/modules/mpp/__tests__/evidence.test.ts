@@ -43,7 +43,7 @@ vi.mock('../../fee/index.js', () => ({
   recordSettledFee: (...args: unknown[]) => mockRecordSettledFee(...args),
 }))
 
-vi.mock('../../reporting/index.js', () => ({
+vi.mock('../../accounting/index.js', () => ({
   feedSettledPaymentBestEffort: (...args: unknown[]) => mockFeedSettledPaymentBestEffort(...args),
 }))
 

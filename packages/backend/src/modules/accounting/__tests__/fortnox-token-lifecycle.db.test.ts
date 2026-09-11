@@ -70,7 +70,7 @@ let seq = 0
  * every call. Each refresh rotates to a NEW pair (`rotated-refresh-N`), which
  * is how a second refresh — the bug — becomes visible in the stored row.
  */
-function fortnoxStub(opts: { refresh?: 'ok' | 'invalid_grant' | 'rate_limited'; revoke?: 'ok' | 'fail'; delayMs?: number } = {}) {
+function fortnoxStub(opts: { refresh?: 'ok' | 'invalid_grant' | 'invalid_client' | 'rate_limited'; revoke?: 'ok' | 'fail'; delayMs?: number } = {}) {
   const calls = { refresh: 0, revoke: 0, revokeBodies: [] as string[], other: [] as string[] }
   const impl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url)
@@ -82,6 +82,9 @@ function fortnoxStub(opts: { refresh?: 'ok' | 'invalid_grant' | 'rate_limited'; 
         return new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Refresh token expired or revoked' }), { status: 400 })
       }
       if (opts.refresh === 'rate_limited') return new Response('', { status: 429 })
+      if (opts.refresh === 'invalid_client') {
+        return new Response(JSON.stringify({ error: 'invalid_client', error_description: 'Client authentication failed' }), { status: 401 })
+      }
       return new Response(
         JSON.stringify({ access_token: `rotated-access-${n}`, refresh_token: `rotated-refresh-${n}`, token_type: 'Bearer', scope: 'bookkeeping', expires_in: 3600 }),
         { status: 200 },
@@ -229,6 +232,27 @@ describeDb('Fortnox token lifecycle: lock, needs_reauthorisation, revoke (#2863)
     expect(decryptSecrets(row.secrets_ciphertext!, row.secrets_key_version)).toEqual(STORED)
 
     await expect(getValidFortnoxAccessToken(userId, impl)).rejects.toThrow(/HTTP 429/)
+    expect(calls.refresh).toBe(2)
+  })
+
+  it("a 401 invalid_client is HAVEN's credential problem, not the user's grant: the row stays connected and the refresh token is unconsumed (review on #2895)", async () => {
+    const { userId } = await seedUser()
+    await seedExpiredConnection(userId)
+    const { impl, calls } = fortnoxStub({ refresh: 'invalid_client' })
+
+    // MUTATION TARGET: treating every 4xx as a dead grant flips this row —
+    // and with a rotated client secret, every user's row — to
+    // needs_reauthorisation, sending them all through a re-consent that
+    // fails for the same reason.
+    await expect(getValidFortnoxAccessToken(userId, impl)).rejects.toThrow(/HTTP 401.*invalid_client/)
+    const row = (await getConnection(userId, 'fortnox'))!
+    expect(row.status).toBe('connected')
+    expect(row.status_reason).toBeNull()
+    expect(decryptSecrets(row.secrets_ciphertext!, row.secrets_key_version)).toEqual(STORED)
+
+    // Once the operator fixes the client credentials, the next call refreshes
+    // with the SAME stored refresh token — nothing was consumed or flipped.
+    await expect(getValidFortnoxAccessToken(userId, impl)).rejects.toThrow(/HTTP 401/)
     expect(calls.refresh).toBe(2)
   })
 

@@ -69,8 +69,10 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      per-connection row lock (`withLockedConnection`, `SELECT … FOR UPDATE`
      — two concurrent callers make one provider call, the rotated refresh
      token is committed before the access token is returned); the flip to
-     `needs_reauthorisation` on a token-endpoint refusal (`invalid_grant` or
-     any other 4xx except 408/429), after which the flow throws
+     `needs_reauthorisation` on a token-endpoint refusal that is a verdict on
+     the GRANT (`invalid_grant`, or a bare 400/403 — never `invalid_client`
+     and the other client-side RFC 6749 codes, never 401/408/429/5xx, which
+     leave the row untouched), after which the flow throws
      `ConnectionNeedsReauthorisationError` without calling the provider and
      the orchestrator records each sync as `skipped` with
      `connection needs_reauthorisation: <provider error>`; and the

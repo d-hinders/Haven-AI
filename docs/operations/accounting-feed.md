@@ -352,16 +352,23 @@ generic `oauth-flow.ts` so every OAuth2 provider inherits them:
   The rotated pair is committed before either caller sees the new access
   token, so a crash between "Fortnox rotated" and "we stored it" cannot leave
   a dead token in the row for a caller that already proceeded.
-- **A refused refresh is not retried.** `invalid_grant` — or any other 4xx
-  from the token endpoint that is not a 408/429 — means the grant is dead
-  (expired after 45 idle days, revoked in Fortnox, or burned by a refresh
-  Haven never got to store). The row flips to **`needs_reauthorisation`**
+- **A refused refresh is not retried.** `invalid_grant` (or a 400/403 with
+  no readable error code) means the grant is dead (expired after 45 idle
+  days, revoked in Fortnox, or burned by a refresh Haven never got to
+  store). The row flips to **`needs_reauthorisation`**
   with `status_reason = refresh refused: fortnox token request failed
   (HTTP 400): invalid_grant` (the provider's error code only — never token
   material), the connection stays the active destination, and every later
-  token request is refused BEFORE any provider call. A 429 (Fortnox's rate
-  limit: 25 calls / 5 s, no `Retry-After`) and a 5xx leave the row
-  `connected`; the next sync simply tries again.
+  token request is refused BEFORE any provider call. Everything else leaves
+  the row `connected` with the refresh token unconsumed, and the next sync
+  simply tries again: a 429 (Fortnox's rate limit: 25 calls / 5 s, no
+  `Retry-After`), a 408, a 5xx, a network failure or the 15 s timeout — and
+  a **401 `invalid_client`** (or `invalid_request`, `unauthorized_client`,
+  `unsupported_grant_type`, `invalid_scope`), which is about HAVEN's client
+  credentials, not the user's grant. **On-call read for a burst of 401s
+  in the log:** `FORTNOX_CLIENT_ID`/`FORTNOX_CLIENT_SECRET` on the backend
+  no longer match the Fortnox app (rotated secret, wrong environment). Fix
+  the variables; nothing was flipped, so no user has to reconnect.
 
 **On-call read for `needs_reauthorisation`.**
 `SELECT provider, status, status_reason, is_active_destination,

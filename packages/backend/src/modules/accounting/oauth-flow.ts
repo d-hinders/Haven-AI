@@ -36,8 +36,8 @@
  * that token without a provider call. The rotated pair is committed with the
  * lock, BEFORE the access token is handed to the caller.
  *
- * A refresh the provider REFUSES (`invalid_grant`, or any other 4xx that is
- * not a rate limit) means the grant is dead: the row flips to
+ * A refresh the provider REFUSES with `invalid_grant` (or a 400/403 with no
+ * readable code — see `isGrantRefusal`) means the grant is dead: the row flips to
  * `needs_reauthorisation` with the provider's error code as the reason (never
  * token material), the caller gets `ConnectionNeedsReauthorisationError`, and
  * no later call retries the refresh until the user re-consents. A 429 (Fortnox
@@ -170,13 +170,19 @@ async function postToken(
   }
   if (!res.ok) {
     const code = await readOAuthErrorCode(res)
-    throw new ProviderError(
-      `${cfg.providerId} token request failed (HTTP ${res.status})${code ? `: ${code}` : '.'}`,
-      res.status,
-      cfg.providerId,
-    )
+    throw new OAuthTokenRefusal(cfg.providerId, res.status, code)
   }
   return toTokens((await res.json()) as TokenResponse)
+}
+
+/** A non-2xx from the token endpoint, carrying the RFC 6749 `error` code (or null) for the grant verdict below. */
+export class OAuthTokenRefusal extends ProviderError {
+  oauthError: string | null
+  constructor(provider: string, status: number, oauthError: string | null) {
+    super(`${provider} token request failed (HTTP ${status})${oauthError ? `: ${oauthError}` : '.'}`, status, provider)
+    this.name = 'OAuthTokenRefusal'
+    this.oauthError = oauthError
+  }
 }
 
 /**
@@ -361,13 +367,32 @@ export function isTokenDeadStatus(status: AccountingConnectionRow['status']): st
 }
 
 /**
- * A token-endpoint refusal that means the GRANT is dead, as opposed to a
- * transient. 429 is Fortnox's rate limit (no Retry-After) and 408 a timeout:
- * both are retried by the next sync, never a reason to demand a re-consent.
- * A 5xx and a network failure (status 0) are the provider's problem.
+ * RFC 6749 §5.2 error codes that are about HAVEN's request or client
+ * credentials, not about the user's grant. A rotated or wrong client secret
+ * answers `invalid_client` (401) for every user at once — flipping them all
+ * to needs_reauthorisation would send every user through a re-consent that
+ * fails for the same reason (review on #2895). These stay transient: the row
+ * is untouched, the refresh token is unconsumed, and the fix is the
+ * operator's (`FORTNOX_CLIENT_ID`/`FORTNOX_CLIENT_SECRET`).
  */
-function isGrantRefusal(err: unknown): err is ProviderError {
-  return err instanceof ProviderError && err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429
+const CLIENT_SIDE_OAUTH_ERRORS = new Set(['invalid_client', 'invalid_request', 'unauthorized_client', 'unsupported_grant_type', 'invalid_scope'])
+
+/**
+ * A token-endpoint refusal that means the GRANT is dead, as opposed to a
+ * transient. `invalid_grant` is the one code RFC 6749 defines as a verdict on
+ * the grant; a 400/403 with no readable code is treated the same (Fortnox
+ * answers a burned or expired refresh token with 400 invalid_grant, and a
+ * bodyless 400 on a refresh has no other plausible meaning). Everything else
+ * is retried by the next sync, never a reason to demand a re-consent: 401 and
+ * the client-side codes above (Haven's credentials), 429 (Fortnox's rate
+ * limit, no Retry-After), 408 (timeout), 5xx and a network failure
+ * (status 0 — the provider's problem).
+ */
+function isGrantRefusal(err: unknown): err is OAuthTokenRefusal {
+  if (!(err instanceof OAuthTokenRefusal)) return false
+  if (err.oauthError === 'invalid_grant') return true
+  if (err.oauthError !== null) return !CLIENT_SIDE_OAUTH_ERRORS.has(err.oauthError) && (err.status === 400 || err.status === 403)
+  return err.status === 400 || err.status === 403
 }
 
 const stillValid = (row: AccountingConnectionRow): boolean =>

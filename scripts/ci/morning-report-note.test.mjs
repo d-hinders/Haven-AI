@@ -205,9 +205,28 @@ describe('reworded restatements — the topic key', () => {
     assert.equal(r.post, true, 'a genuine change in the same work must be reportable')
   })
 
-  test('the topic window is shorter than the exact window, on purpose', () => {
-    // Coarser signal, shorter licence to suppress.
-    assert.ok(DEFAULT_TOPIC_WINDOW_DAYS < DEFAULT_WINDOW_DAYS)
+  test('EXACTLY half overlap still posts — the boundary, and the dangerous side of it', () => {
+    // A roundup cites six; next morning brings real news about three of them.
+    // Jaccard is exactly 0.50 and the comparison is strict, so it posts. If this
+    // ever goes red, the guard has started eating news.
+    const roundup = 'Status: #2806, #2810, #2811, #2812, #2841, #2854.'
+    const news = '#2806, #2810 and #2811 were rolled back this morning.'
+    assert.equal(refOverlap(issueRefs(news), issueRefs(roundup)), 0.5)
+    assert.equal(decide({ body: news, comments: [posted(roundup, 0.5)], now: NOW }).post, true)
+  })
+
+  test('a ONE-issue prior cannot suppress, however well it overlaps', () => {
+    // {#2857} vs {#2857,#2900} is exactly 0.5 too, and the prior is below the
+    // ref floor. Both guards have to hold for this to post.
+    const r = decide({ body: '#2857 is red and it now blocks #2900.', comments: [posted('#2857 slice 4 landed.', 0.2)], now: NOW })
+    assert.equal(r.post, true)
+  })
+
+  test('just above half is suppressed — the other side of the same boundary', () => {
+    const prior = 'Work on #2806, #2810, #2811 and #2812.'
+    const same = 'Restating: #2806, #2810, #2811, #2812 all moved.'
+    assert.ok(refOverlap(issueRefs(same), issueRefs(prior)) > 0.5)
+    assert.equal(decide({ body: same, comments: [posted(prior, 0.5)], now: NOW }).post, false)
   })
 
   test('the observed pair is not set-EQUAL — why equality would not have worked', () => {
@@ -273,6 +292,38 @@ describe('reworded restatements — the topic key', () => {
     const body = 'Legacy note about #2806 and #2810.'
     const legacy = { body: `<!-- morning-report-note fp:${fingerprint(body)} -->\n📣 **FYI**\n\n> ${body}`, created_at: agoDays(1) }
     assert.equal(decide({ body, comments: [legacy], now: NOW }).post, false)
+  })
+})
+
+describe('topicWindowDays validation and the topic path', () => {
+  const prior = () => [posted('Roundup of #2806, #2810, #2811 and #2812.', 0.5)]
+  const same = 'Again: #2806, #2810, #2811 and #2812.'
+
+  for (const bad of [Number('abc'), 0, -1, null, undefined]) {
+    test(`a window of ${String(bad)} falls back to the default rather than disabling the topic check`, () => {
+      const r = decide({ body: same, comments: prior(), now: NOW, topicWindowDays: bad })
+      assert.equal(r.post, false, 'an invalid topic window must not silently disable the guard')
+    })
+  }
+
+  test('a longer topic window suppresses further back', () => {
+    const old = [posted('Roundup of #2806, #2810, #2811 and #2812.', 5)]
+    assert.equal(decide({ body: same, comments: old, now: NOW }).post, true, 'default window lets it through')
+    assert.equal(decide({ body: same, comments: old, now: NOW, topicWindowDays: 10 }).post, false)
+  })
+
+  test('an undated comment is treated as recent on the topic path too', () => {
+    const body = 'Roundup of #2806, #2810, #2811 and #2812.'
+    const undated = { body: render({ body, fp: fingerprint(body), refs: issueRefs(body) }) } // no created_at
+    assert.equal(decide({ body: same, comments: [undated], now: NOW }).post, false)
+  })
+
+  test('citations survive a fully-rendered note, run URL and actor included', () => {
+    // The run URL carries digits; none of them are citations. This is the
+    // contamination risk the fallback reader has to not have.
+    const body = 'Both #2806 and #2810 moved.'
+    const out = render({ body, fp: fingerprint(body), refs: issueRefs(body), runUrl: 'https://github.com/x/y/actions/runs/34584232051/job/103198260687', actor: 'd-hinders' })
+    assert.deepEqual(refsOf(out), ['#2806', '#2810'])
   })
 })
 

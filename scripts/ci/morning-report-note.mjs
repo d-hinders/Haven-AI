@@ -66,6 +66,17 @@ export const TOPIC_MIN_REFS = 2
 export const TOPIC_OVERLAP = 0.5
 
 /**
+ * The comparison is STRICTLY greater, and the strictness is the safety margin.
+ *
+ * A set against a superset of exactly twice its size scores exactly 0.5, and
+ * that shape is common here: a roundup cites six issues, and the next morning
+ * brings genuinely new news about three of them. Suppressing that is the
+ * failure this guard must not have — it silences a channel autonomous sessions
+ * depend on. Strict `>` lets the exact-half case through while still catching
+ * the observed restatement at 0.67.
+ */
+
+/**
  * Text a note may not contain. The note is machine-written from repository
  * content — issue titles, PR titles, branch names, commit subjects — all of
  * which a contributor can influence. It lands in #1289, the thread every
@@ -113,17 +124,18 @@ export function fingerprint(body) {
 }
 
 /**
- * The set of issues a note is ABOUT, as a stable key: every `#NNNN` it
- * references, de-duplicated and sorted, hashed. Two notes stating the same fact
- * in different words cite the same issues; two notes about different work do
- * not. That makes the citation set a better topic signal than the prose.
+ * The set of issues a note is ABOUT: every `#NNNN` it references, de-duplicated
+ * and sorted numerically. Two notes stating the same fact in different words
+ * cite the same issues; two notes about different work do not. That makes the
+ * citation set a better topic signal than the prose.
  *
- * Returns null when the note cites fewer than TOPIC_MIN_REFS distinct issues,
- * which means "no topic key" rather than "empty topic" — callers must not treat
- * null as a match.
+ * Returns an array, possibly empty. The TOPIC_MIN_REFS floor is applied by
+ * `decide`, not here, so this stays a plain accessor.
  */
 export function issueRefs(body) {
-  return [...new Set((String(body ?? '').match(/#\d{1,6}\b/g) || []))].sort()
+  return [...new Set((String(body ?? '').match(/#\d{1,6}\b/g) || []))].sort(
+    (a, b) => Number(a.slice(1)) - Number(b.slice(1)),
+  )
 }
 
 /**
@@ -175,8 +187,9 @@ export function refsOf(commentBody) {
  * @param {string} o.body            the proposed note text
  * @param {Array<{body: string, created_at: string}>} o.comments  existing comments on the target
  * @param {number} o.now             epoch ms
- * @param {number} [o.windowDays]
- * @returns {{post: boolean, reason: string, fingerprint: string|null}}
+ * @param {number} [o.windowDays]       exact-match suppression window
+ * @param {number} [o.topicWindowDays]  citation-overlap suppression window
+ * @returns {{post: boolean, reason: string, fingerprint: string|null, refs: string[]}}
  */
 export function decide({
   body,
@@ -233,9 +246,13 @@ export function decide({
     }
 
     // The reworded-restatement case: different bytes, overlapping citations.
-    if (refs.length >= TOPIC_MIN_REFS && recent(topicCutoff)) {
-      const overlap = refOverlap(refs, refsOf(c.body))
-      if (overlap >= TOPIC_OVERLAP) {
+    // BOTH notes must clear the ref floor. A one-issue note as the PRIOR could
+    // otherwise suppress: {#2857} against {#2857,#2900} overlaps at exactly 0.5,
+    // so "#2857 is red and now blocks #2900" would vanish behind "#2857 landed".
+    const priorRefs = refsOf(c.body)
+    if (refs.length >= TOPIC_MIN_REFS && priorRefs.length >= TOPIC_MIN_REFS && recent(topicCutoff)) {
+      const overlap = refOverlap(refs, priorRefs)
+      if (overlap > TOPIC_OVERLAP) {
         return {
           post: false,
           reason: `a note covering the same issues was posted within ${topicDays}d (overlap ${overlap.toFixed(2)})`,
@@ -320,15 +337,20 @@ if (isMain) {
   const commentsPath = arg('comments')
   const outPath = arg('out')
   if (!notePath || !commentsPath || !outPath) {
-    console.error('usage: morning-report-note.mjs --note <file> --comments <file> --out <file> [--window-days N]')
+    console.error(
+      'usage: morning-report-note.mjs --note <file> --comments <file> --out <file> [--window-days N] [--topic-window-days N]',
+    )
     process.exit(2)
   }
 
   const body = readFileSync(notePath, 'utf8')
   const comments = JSON.parse(readFileSync(commentsPath, 'utf8'))
   const windowDays = Number(arg('window-days', String(DEFAULT_WINDOW_DAYS)))
+  // A guard whose failure mode is SILENCE needs a way to turn it down without a
+  // code change, the same way --window-days exists for the exact check.
+  const topicWindowDays = Number(arg('topic-window-days', String(DEFAULT_TOPIC_WINDOW_DAYS)))
 
-  const d = decide({ body, comments, now: Date.now(), windowDays })
+  const d = decide({ body, comments, now: Date.now(), windowDays, topicWindowDays })
   if (d.post) {
     writeFileSync(
       outPath,

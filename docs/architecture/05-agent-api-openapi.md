@@ -327,14 +327,29 @@ A schema composed with `allOf` is also left open, on purpose. `additionalPropert
 only sees the properties declared at its own level, so closing one `allOf` member
 makes it reject the properties its siblings contribute — a valid payload would be
 reported as a spec violation. The spec has such shapes (`mpp`,
-`AgentConnectionAllowance`); none is on an asserted route yet, which is exactly why
-this is guarded by a test now rather than rediscovered as a baffling false failure
-during the #1446 backfill.
+`AgentConnectionAllowance`); this is guarded by a test (see below) rather than
+rediscovered as a baffling false failure during the #1446 backfill.
 
-Coverage is deliberately partial: four assertions today (`GET /agents`,
-`GET /agents/{id}`, `POST /agents/{id}/archive`,
-`GET /machine-payments/agent`). Widening it is per-route work that belongs with
-the #1446 backfill rather than a big-bang sweep.
+**`Transaction` used to be one of those `allOf` shapes, and it hid a real drift
+(#2885).** `Transaction` (`GET /transactions`, the aggregated feed) was
+`allOf: [{ $ref: TransactionBase }, { chainId, safeId, safeAddress, safeName }]`
+— composed specifically so the ~25 shared fields were written once (#984). That
+composition is exactly what the paragraph above warns about: because
+`additionalProperties` never closes across an `allOf`, the schema could never
+have failed `expectMatchesSpec` on an undeclared field, so nothing caught that
+the feed also always returns `fxRateSek`/`fxSource` (#2871) undeclared, or would
+have caught it if `chainId`/`safeId`/`safeAddress`/`safeName` had ever drifted
+out of the composed object. `TransactionBase` and `Transaction` are now two flat
+object schemas sharing one TypeScript object (`transactionBaseProperties` /
+`transactionBaseRequired` in `openapi/spec.ts`) instead of composing via `$ref`
++ `allOf` — same DRY source, but each compiles to a schema `closeObjects` can
+actually close. `mpp` and `AgentConnectionAllowance` still compose via `allOf`
+and are not on an asserted route; the trap remains live for them.
+
+Coverage: six assertions today (`GET /agents`, `GET /agents/{id}`,
+`POST /agents/{id}/archive`, `GET /machine-payments/agent`, `GET /transactions`,
+`GET /transactions/{safeAddress}`). Widening it further is per-route work that
+belongs with the #1446 backfill rather than a big-bang sweep.
 
 ### Four Contract Corrections The Type Migration Surfaced (#1445)
 

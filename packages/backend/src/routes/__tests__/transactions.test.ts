@@ -13,6 +13,7 @@ import {
   mergeX402Transactions,
 } from '../../modules/transactions/index.js'
 import pool from '../../db.js'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 const LOWERCASE_SAFE_ADDRESS = SAFE_ADDRESS.toLowerCase()
@@ -370,13 +371,16 @@ describe('transaction routes', () => {
         return {
           rows: [
             {
-              id: 'safe-gnosis',
+              // #2885: expectMatchesSpec below actually checks the uuid
+              // format now — a fixture id of `'safe-gnosis'` fails it,
+              // correctly (same lesson #1444 recorded for `'agent-1'`).
+              id: '11111111-1111-4111-8111-111111111111',
               safe_address: SAFE_ADDRESS,
               chain_id: 100,
               name: 'Gnosis wallet',
             },
             {
-              id: 'safe-base',
+              id: '22222222-2222-4222-8222-222222222222',
               safe_address: SAFE_ADDRESS,
               chain_id: 8453,
               name: 'Base wallet',
@@ -400,6 +404,37 @@ describe('transaction routes', () => {
       100,
       8453,
     ])
+    // #2885: the FULL response, not an emptied stand-in — `Transaction` now
+    // declares `chainId`/`safeId`/`safeAddress`/`safeName` (and `fxRateSek`/
+    // `fxSource`, also missing from the contract), so this can actually pass.
+    expectMatchesSpec('GET', '/transactions', body)
+  })
+
+  it('strips the aggregated-feed-only account fields from the legacy per-Safe response (#2885)', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubOneNativeTransactionFetch()
+    const queryMock = mockSafeRows([{ id: 'safe-base', chain_id: 8453 }])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=8453&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(queryMock).toHaveBeenCalled()
+    const body = response.json()
+    expect(body.transactions).toHaveLength(1)
+    // The legacy route's destructure (`routes/transactions.ts`) drops these —
+    // `TransactionsPageResponse` uses the narrow `TransactionBase`, which does
+    // not declare them, so a leak would also fail `expectMatchesSpec` below.
+    for (const field of ['chainId', 'safeId', 'safeAddress', 'safeName', 'agentId']) {
+      expect(body.transactions[0]).not.toHaveProperty(field)
+    }
+    // Full payload against the spec's own schema — the same assertion the
+    // feed test above makes, on the route the narrow `Transaction` schema was
+    // always correct for.
+    expectMatchesSpec('GET', '/transactions/{safeAddress}', body)
   })
 })
 

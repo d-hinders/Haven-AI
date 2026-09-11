@@ -24,6 +24,103 @@ const tokenSymbol = {
 } as const
 
 /**
+ * Shared between `TransactionBase` and `Transaction` (#2885). The two used to
+ * be `allOf`-composed (`Transaction: { allOf: [{ $ref: TransactionBase }, {...}] }`,
+ * #984) so the 25-odd shared fields were written once. That composition is
+ * exactly the shape `openapi/response-shape.ts`'s `closeObjects` deliberately
+ * leaves OPEN — `additionalProperties` only sees one `allOf` member's own
+ * properties, so closing any member would reject the fields its siblings
+ * contribute. The consequence: an `allOf`-composed `Transaction` can never
+ * fail an `expectMatchesSpec` assertion on an undeclared field, which is the
+ * exact defect #2885 fixes (the feed always returns `chainId`/`safeId`/
+ * `safeAddress`/`safeName`, and the schema silently allowed them whether or
+ * not it declared them). Spreading this object into two FLAT schemas keeps
+ * the source DRY without composing — `closeObjects` can close each one, and
+ * `expectMatchesSpec` can actually catch a field going missing from either.
+ */
+const transactionBaseProperties = {
+  hash: { type: 'string' },
+  type: { type: 'string', enum: ['native', 'erc20', 'internal'] },
+  // Deliberately NOT the `address` helper: Safe Transaction Service
+  // transfers with a null counterparty are emitted as '' (#984 spec
+  // correction — the old pattern rejected real responses).
+  from: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
+  to: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
+  value: { type: 'string' },
+  valueFormatted: { type: 'string' },
+  asset: { type: 'string', description: 'Token ticker where known; falls back to the raw contract address for unknown tokens.' },
+  decimals: { type: 'integer' },
+  direction: { type: 'string', enum: ['in', 'out'] },
+  timestamp: { type: 'integer' },
+  blockNumber: { type: 'integer', description: '0 for x402-synthesized rows with no on-chain receipt yet.' },
+  isError: { type: 'boolean' },
+  tokenAddress: address,
+  tokenSymbol: { type: 'string' },
+  source: { type: 'string', description: "Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values." },
+  x402ResourceUrl: { type: ['string', 'null'] },
+  x402MerchantAddress: { type: ['string', 'null'] },
+  paymentId: { type: 'string' },
+  paymentProofStatus: { type: ['string', 'null'] },
+  paymentFlowStatus: {
+    type: ['string', 'null'],
+    enum: ['paid', 'confirming_merchant', 'needs_attention', null],
+  },
+  paymentAttentionReason: {
+    type: ['string', 'null'],
+    enum: ['merchant_retry_rejected_after_payment', null],
+  },
+  activityType: { type: 'string', enum: ['delegate_sweep'] },
+  agentName: { type: 'string' },
+  // #2097: backend-recorded initiator classification — never derived
+  // in the frontend. `agent` = row carries agent attribution (confirmed
+  // x402 intents, delegate sweeps, raw transfers matched to a
+  // confirmed intent). `human` = reserved; no dashboard-initiated send
+  // path populates it (mpp demo & /send retired). `unknown` = outbound
+  // raw transfer with no matched intent. Absent for `direction: in`
+  // rows.
+  initiatedBy: {
+    type: 'string',
+    enum: ['agent', 'human', 'unknown'],
+    description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.',
+  },
+  // #1705 (epic #1704). Read from the intent's `machine_metadata`
+  // JSONB, which both delegation-rail branches already stamp
+  // (`modules/x402/delegation-authorize.ts`).
+  settlementScheme: {
+    type: ['string', 'null'],
+    enum: ['eip3009', 'erc7710', null],
+    description:
+      'Which settlement branch actually moved the money: `erc7710` (direct settlement, ' +
+      'account → merchant, no funding leg) or `eip3009` (funded transfer — the budget ' +
+      'delegation funds the delegate EOA, which then signs the standard EIP-3009 header). ' +
+      'This is the settlement SCHEME and is three-way distinct from its neighbours: ' +
+      '`source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account\'s ' +
+      '`execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy ' +
+      'AllowanceModule). Do not collapse them. Null when no scheme was recorded — ' +
+      'non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but ' +
+      'never stamp the key. Null-in-null-out: nothing is inferred or backfilled.',
+  },
+  // #984 spec correction: emitted on every enriched row (string | null),
+  // was missing while additionalProperties:false claimed completeness.
+  amountSek: { type: ['string', 'null'] },
+  /**
+   * The book-time FX rate `amountSek` was struck at, and where it came from
+   * (#2885 spec correction — emitted on every enriched row, string | null,
+   * same as `amountSek`, but was entirely absent from the contract).
+   * `modules/transactions/types.ts`'s `fxRateSek` / `fxSource`, surfaced for
+   * the CSV export (#2871). Null wherever `amountSek` is: they are written by
+   * the same pricing step, so a row never carries an amount without its rate.
+   */
+  fxRateSek: { type: ['string', 'null'] },
+  fxSource: { type: ['string', 'null'] },
+} as const
+
+const transactionBaseRequired = [
+  'hash', 'type', 'from', 'to', 'value', 'valueFormatted', 'asset', 'decimals',
+  'direction', 'timestamp', 'blockNumber', 'isError',
+] as const
+
+/**
  * ── The two allowance amount shapes (#2295) ──────────────────────────────────
  *
  * `allowance_amount` carries TWO incompatible wire shapes under one field name,
@@ -7299,92 +7396,23 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       TransactionBase: {
-        description: 'Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`).',
+        description: 'Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above.',
         type: 'object',
-        required: ['hash', 'type', 'from', 'to', 'value', 'valueFormatted', 'asset', 'decimals', 'direction', 'timestamp', 'blockNumber', 'isError'],
-        properties: {
-          hash: { type: 'string' },
-          type: { type: 'string', enum: ['native', 'erc20', 'internal'] },
-          // Deliberately NOT the `address` helper: Safe Transaction Service
-          // transfers with a null counterparty are emitted as '' (#984 spec
-          // correction — the old pattern rejected real responses).
-          from: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
-          to: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
-          value: { type: 'string' },
-          valueFormatted: { type: 'string' },
-          asset: { type: 'string', description: 'Token ticker where known; falls back to the raw contract address for unknown tokens.' },
-          decimals: { type: 'integer' },
-          direction: { type: 'string', enum: ['in', 'out'] },
-          timestamp: { type: 'integer' },
-          blockNumber: { type: 'integer', description: '0 for x402-synthesized rows with no on-chain receipt yet.' },
-          isError: { type: 'boolean' },
-          tokenAddress: address,
-          tokenSymbol: { type: 'string' },
-          source: { type: 'string', description: "Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values." },
-          x402ResourceUrl: { type: ['string', 'null'] },
-          x402MerchantAddress: { type: ['string', 'null'] },
-          paymentId: { type: 'string' },
-          paymentProofStatus: { type: ['string', 'null'] },
-          paymentFlowStatus: {
-            type: ['string', 'null'],
-            enum: ['paid', 'confirming_merchant', 'needs_attention', null],
-          },
-          paymentAttentionReason: {
-            type: ['string', 'null'],
-            enum: ['merchant_retry_rejected_after_payment', null],
-          },
-          activityType: { type: 'string', enum: ['delegate_sweep'] },
-          agentName: { type: 'string' },
-          // #2097: backend-recorded initiator classification — never derived
-          // in the frontend. `agent` = row carries agent attribution (confirmed
-          // x402 intents, delegate sweeps, raw transfers matched to a
-          // confirmed intent). `human` = reserved; no dashboard-initiated send
-          // path populates it (mpp demo & /send retired). `unknown` = outbound
-          // raw transfer with no matched intent. Absent for `direction: in`
-          // rows.
-          initiatedBy: {
-            type: 'string',
-            enum: ['agent', 'human', 'unknown'],
-            description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.',
-          },
-          // #1705 (epic #1704). Read from the intent's `machine_metadata`
-          // JSONB, which both delegation-rail branches already stamp
-          // (`modules/x402/delegation-authorize.ts`).
-          settlementScheme: {
-            type: ['string', 'null'],
-            enum: ['eip3009', 'erc7710', null],
-            description:
-              'Which settlement branch actually moved the money: `erc7710` (direct settlement, ' +
-              'account → merchant, no funding leg) or `eip3009` (funded transfer — the budget ' +
-              'delegation funds the delegate EOA, which then signs the standard EIP-3009 header). ' +
-              'This is the settlement SCHEME and is three-way distinct from its neighbours: ' +
-              '`source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account\'s ' +
-              '`execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy ' +
-              'AllowanceModule). Do not collapse them. Null when no scheme was recorded — ' +
-              'non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but ' +
-              'never stamp the key. Null-in-null-out: nothing is inferred or backfilled.',
-          },
-          // #984 spec correction: emitted on every enriched row (string | null),
-          // was missing while additionalProperties:false claimed completeness.
-          amountSek: { type: ['string', 'null'] },
-        },
+        required: [...transactionBaseRequired],
+        properties: { ...transactionBaseProperties },
       },
       Transaction: {
-        description: 'Aggregated-feed transaction: the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields.',
-        allOf: [
-          { $ref: '#/components/schemas/TransactionBase' },
-          {
-            type: 'object',
-            required: ['chainId', 'safeId', 'safeAddress', 'safeName'],
-            properties: {
-              chainId: { type: 'integer' },
-              safeId: uuid,
-              safeAddress: address,
-              safeName: { type: 'string' },
-              agentId: uuid,
-            },
-          },
-        ],
+        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
+        type: 'object',
+        required: [...transactionBaseRequired, 'chainId', 'safeId', 'safeAddress', 'safeName'],
+        properties: {
+          ...transactionBaseProperties,
+          chainId: { type: 'integer' },
+          safeId: uuid,
+          safeAddress: address,
+          safeName: { type: 'string' },
+          agentId: uuid,
+        },
       },
       TransactionsPageResponse: {
         description: 'Per-Safe paginated transaction list (`GET /transactions/{safeAddress}`). Items carry no Safe scope — the Safe is the path parameter.',

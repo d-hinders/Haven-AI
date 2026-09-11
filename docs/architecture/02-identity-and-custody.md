@@ -13,15 +13,12 @@ covers:
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/rails/delegation-policy.ts
-  - packages/backend/src/routes/safe-exec.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/allowance-module.ts
   - packages/backend/src/modules/agents/agent-connection-setup.ts
   - packages/backend/src/domain/chains.ts
-  - packages/backend/src/modules/accounts/passkey-signer.ts
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/rails/sweep.ts
-  - packages/backend/src/modules/accounts/safe-details.ts
   - packages/backend/src/config.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/db/migrations/006_user_passkeys.ts
@@ -36,7 +33,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-11"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -145,7 +142,7 @@ flowchart TB
   DELEGATEKEY -->|produces signatures for| DELEGATE_ADDR
   DELEGATE_ADDR -->|signature verified as calldata| AM
   RELAYERKEY -->|pays gas for authorized calls| AM
-  RELAYERKEY -->|deploys accounts/signers or relays<br/>threshold-valid passkey Safe tx| SAFE
+  RELAYERKEY -->|deploys accounts and pays gas for<br/>signed operations (nothing on the<br/>legacy Safe rail since #2847)| SAFE
   BINDINGKEY -.->|context signature verified locally| SIGNER
   AM -->|spends within allowance| SAFE
 ```
@@ -195,7 +192,9 @@ flowchart TB
    by the on-chain allowance. Owner actions need enough valid signatures to meet
    the Safe threshold.
 2. **Relayers provide gas, not authority.** They can deploy Haven wallets and
-   passkey signer contracts and submit already authorized calls. Compromise can
+   submit already authorized calls — and since #2847 they submit nothing on the
+   legacy Safe rail at all: the passkey signer-contract deployment and the
+   relayed Safe execution went with the rail's last live behaviour. Compromise can
    lose relayer gas funds, but cannot forge a delegate or threshold-valid owner
    signature.
 3. **Haven cannot impersonate an agent on-chain.** The AllowanceModule verifies

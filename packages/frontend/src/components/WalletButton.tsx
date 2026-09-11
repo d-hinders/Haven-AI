@@ -28,7 +28,6 @@ import {
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { BRAND_COLOURS } from '@/lib/brand-colours'
 import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
-import { useOwnerDirectory } from '@/context/OwnerDirectoryContext'
 import { truncateAddress } from '@/components/haven'
 
 // Generative identicon gradient stops — decorative art hashed from an address
@@ -629,7 +628,6 @@ export default function WalletButton() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const { activeSafe, passkeys } = useAuth()
-  const { getOwnerAlias } = useOwnerDirectory()
   const activeSafeAddress = activeSafe?.safe_address as Address | undefined
   const activeSigner = useActiveSigner({
     safeAddress: activeSafeAddress,
@@ -735,14 +733,12 @@ export default function WalletButton() {
         }
 
         if (passkeySigner) {
-          const passkeyAlias = getOwnerAlias(passkeySigner.address)
           const connectedWallet =
             connected && account
               ? {
                   label: 'Connected wallet',
                   address: account.address,
                   chainName: chain?.name,
-                  displayName: getOwnerAlias(account.address),
                 }
               : undefined
 
@@ -754,12 +750,12 @@ export default function WalletButton() {
                 onClick={() => setPopoverOpen((v) => !v)}
                 aria-haspopup="dialog"
                 aria-expanded={popoverOpen}
-                aria-label={passkeyAlias ?? 'Passkey'}
-                title={passkeyAlias ?? 'Passkey'}
+                aria-label="Passkey"
+                title="Passkey"
                 className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
               >
                 <AddressAvatar address={passkeySigner.address} />
-                <span className={LABEL_BELOW_SM}>{passkeyAlias ?? 'Passkey'}</span>
+                <span className={LABEL_BELOW_SM}>Passkey</span>
               </button>
 
               <WalletPopover
@@ -767,7 +763,6 @@ export default function WalletButton() {
                   label: 'Passkey',
                   address: passkeySigner.address,
                   chainName: safeChainName,
-                  displayName: passkeyAlias,
                 }}
                 secondary={connectedWallet}
                 open={popoverOpen}
@@ -783,7 +778,6 @@ export default function WalletButton() {
         }
 
         if (delegatorSigner) {
-          const accountAlias = getOwnerAlias(delegatorSigner.accountAddress)
           // #1126/#1679: name the credential the same way AccountSignersCard
           // does — "Passkey · added {date}", never a platform brand or a
           // positional label. No address: Hybrid passkeys have none.
@@ -819,7 +813,6 @@ export default function WalletButton() {
                   label: 'Connected wallet',
                   address: account.address,
                   chainName: chain?.name,
-                  displayName: getOwnerAlias(account.address),
                 }
               : undefined
 
@@ -844,7 +837,6 @@ export default function WalletButton() {
                   label: 'Haven account',
                   address: delegatorSigner.accountAddress,
                   chainName: safeChainName,
-                  displayName: accountAlias,
                 }}
                 signingWith={signingWith}
                 secondary={connectedWallet}
@@ -901,10 +893,10 @@ export default function WalletButton() {
           )
         }
 
-        const accountAlias = getOwnerAlias(account.address)
+        const accountAlias = account.ensName
         // One expression, used for the visible label AND the accessible name,
         // so the two cannot drift once the label stops rendering below `sm`.
-        const walletLabel = accountAlias ?? account.ensName ?? truncateAddress(account.address)
+        const walletLabel = accountAlias ?? truncateAddress(account.address)
 
         // #2073: a connected wallet that is not the hybrid account's named
         // owner gets the "Wrong network" treatment — same danger-soft pill,
@@ -956,7 +948,7 @@ export default function WalletButton() {
                 label: 'Connected wallet',
                 address: account.address,
                 chainName: chain.name,
-                displayName: accountAlias ?? account.ensName,
+                displayName: account.ensName,
               }}
               unavailablePasskey={passkeyUnavailableOnDevice}
               wrongWalletOwner={

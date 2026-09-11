@@ -108,4 +108,3 @@ export type BalanceItem = ApiSchema<'BalanceItem'> & { chainId?: number }
 export type BalancesResponse = ApiSchema<'BalancesResponse'>
 export type PortfolioBreakdown = ApiSchema<'PortfolioBreakdown'>
 export type PortfolioResponse = ApiSchema<'PortfolioResponse'>
-export type SafeDetails = ApiSchema<'SafeDetails'>

@@ -3,8 +3,13 @@
  *
  * One aggregate: `user_passkeys` — the WebAuthn credentials users enroll as
  * Safe passkey signers (POC flow). Extracted verbatim from
- * `routes/passkeys.ts` and `routes/safe-exec.ts`. Convention: `README.md` in
- * this directory.
+ * `routes/passkeys.ts`. Convention: `README.md` in this directory.
+ *
+ * #2847 deleted the enrolment route (`POST /passkeys`) and `safe-exec.ts`,
+ * the two callers that wrote through this aggregate; `GET /passkeys` still
+ * reads it. The enrol/bind helpers below have no route caller until the
+ * `user_passkeys` slice of the retirement takes them — they are NOT live
+ * surface.
  *
  * Invariant a reader must not break: the insert deliberately does NOT verify
  * the attestation cryptographically (POC — a bad enrollment only harms the
@@ -188,6 +193,8 @@ export async function bindPasskeyToSafe(
 
 // `bindPasskeySignerToSafe` — bind by signer ADDRESS rather than credential id,
 // the form the approver routes had — is deleted with them (#1988). Nothing
-// else called it. `bindPasskeyToSafe` above stays: `POST /safe/exec` claims an
-// unbound backup passkey on the fast path once it has verified the signer
-// against the Safe's live on-chain owner list, and that route stays open.
+// else called it. `bindPasskeyToSafe` above stays: the owner-signed execution
+// route used to claim an unbound backup passkey on the fast path once it had
+// verified the signer against the Safe's live on-chain owner list, until
+// #2847 deleted that route; the helper has no route caller since, and goes
+// with the `user_passkeys` table in a later slice.

@@ -189,7 +189,17 @@
     "It diffs the promotion head against the green run's SHA and matches the",
     "changed files against `globs` (evaluate()'s changedMoneyPathFiles). So the",
     "label a human put on issue #2282 never reached the gate -- only a file entry",
-    "can -- which makes the file half the ONLY half that gates promotion."
+    "can -- which makes the file half the ONLY half that gates promotion.",
+    "",
+    "2026-09-11 (#2847, epic #1440): routes/safe-exec.ts REMOVED -- the file is",
+    "DELETED by the safe-retirement slice, the #1987 shape: a glob naming a file",
+    "that does not exist protects nothing and the phantom test fails CI on it.",
+    "The relayed owner-signed execution route and its `safe_exec` relayer-budget",
+    "operation are gone from the backend, so there is no runtime money-path code",
+    "left to cover; the surviving Safe-rail surfaces are 410 tombstones and the",
+    "fail-closed middleware, which are not spend paths. labeler.yml and the",
+    "SKILL.md Merge Gate line moved with this entry (money-path.test.mjs pins",
+    "the three copies to each other)."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
@@ -219,7 +229,6 @@
     "packages/backend/src/routes/hybrid-accounts.ts",
     "packages/backend/src/routes/machine-payments.ts",
     "packages/backend/src/routes/payments.ts",
-    "packages/backend/src/routes/safe-exec.ts",
     "packages/backend/src/routes/x402.ts",
     "packages/core/src/machine-payment-lifecycle.ts",
     "packages/mcp-server/src/**",

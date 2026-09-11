@@ -242,9 +242,10 @@ app.get<{ Params: { safeId: string } }>(
   //
   // WHAT THIS COSTS, stated rather than buried: this was Haven's only surface
   // for adding a backup owner to a legacy Safe (#1229's preventive recovery).
-  // It is not the last way an owner reaches their account. `POST /safe/exec`
-  // stays OPEN, so an owner-signed Safe transaction — including moving funds
-  // out — is still relayable, and a passkey already enrolled as an on-chain
+  // It is not the last way an owner reaches their account: an owner-signed
+  // Safe transaction — including moving funds out — was relayable while the
+  // owner-signed execution route stayed open (#2847 later deleted that last
+  // live Safe-rail route), and a passkey already enrolled as an on-chain
   // owner still authorises there against the live owner list. Every one of the
   // 15 Safes in the epic's census is owned by an external EOA (or, in one
   // case, the prod relayer, wound down in #1985), and an EOA owner manages

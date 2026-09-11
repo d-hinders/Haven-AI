@@ -29,12 +29,11 @@ covers:
   - packages/backend/src/routes/dashboard.ts
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
-  - packages/backend/src/routes/safe-details.ts
   - packages/backend/src/domain/request-origin.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-11"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -570,7 +569,7 @@ allowlist is now empty. Deep model:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 **How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-08-24 for #1988):**
-131 registered routes, **2 of them undocumented** — only safe-deploy.ts and safe-exec.ts, deliberately, under the #1440 Safe-rail retirement. Re-counted 2026-09-04 after #2542 added documented public `/health` and operator-only `/health/ops` routes; the live delegation-rail x402 routes remain registered. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
+129 registered routes, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes. Re-counted 2026-09-11 at #2847; the count was 131/2 before the cut (re-counted 2026-09-04 after #2542 added documented public `/health` and operator-only `/health/ops` routes; the live delegation-rail x402 routes remain registered). (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
 (#1446 is working the backfill one domain at a time: `contacts.ts` came off the
 list first, then the whole `agent-delegations.ts` lifecycle — grant, activate,
 per-hash and batch revocation, signer management — then the x402 demo-resource

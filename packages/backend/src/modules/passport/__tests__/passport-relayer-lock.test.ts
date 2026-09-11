@@ -221,7 +221,6 @@ const WRITE_SHAPED = /\.(sendTransaction|attest|revoke|execTransaction|executeAl
 const LEGACY_LOCK_ONLY = new Set([
   'infra/relayer.ts', // the lock's home; no broadcast of its own
   'infra/outbound-queue.ts', // the pipeline itself broadcasts, by design
-  'routes/safe-exec.ts',
   // Shrunk by #1988 (epic #1440), three entries at once:
   //   - `modules/accounts/safe-deployer.ts` — DELETED by this slice;
   //   - `routes/safe-deploy.ts` — now a 410 tombstone that never touches the
@@ -237,7 +236,11 @@ const LEGACY_LOCK_ONLY = new Set([
   // merge with #1987 rather than months later. It is exempt from the FIRST
   // test by that test's own `writes.length === 0` skip, so removing it here
   // loosens nothing: the file has no write-shaped line left to police.
-  'infra/chain/safe-proxy-deployer.ts',
+  //
+  // #2847 removed the last two relayer-lock consumers left here:
+  // `routes/safe-exec.ts` (DELETED with the route) and
+  // `infra/chain/safe-proxy-deployer.ts` (DELETED with it). The set is now
+  // only the two structural members above.
 ])
 
 describe('scan: no submitter outside the outbound pipeline (#1559)', () => {

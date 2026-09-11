@@ -21,10 +21,6 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../modules/accounts/index.js', () => ({
-  getSafeDetails: vi.fn(),
-}))
-
 import { buildApp } from '../../__tests__/helpers.js'
 
 describe('user preferences (characterization, #1167)', () => {

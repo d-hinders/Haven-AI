@@ -161,10 +161,6 @@
     "db-mock": 1,
     "positional": 1
   },
-  "packages/backend/src/routes/__tests__/passkeys.test.ts": {
-    "db-mock": 1,
-    "positional": 2
-  },
   "packages/backend/src/routes/__tests__/passport-verify.test.ts": {
     "db-mock": 1,
     "positional": 8
@@ -179,14 +175,6 @@
   "packages/backend/src/routes/__tests__/portfolio.test.ts": {
     "db-mock": 1,
     "positional": 4
-  },
-  "packages/backend/src/routes/__tests__/safe-details.test.ts": {
-    "db-mock": 1,
-    "positional": 4
-  },
-  "packages/backend/src/routes/__tests__/safe-exec.test.ts": {
-    "db-mock": 1,
-    "positional": 12
   },
   "packages/backend/src/routes/__tests__/transactions.test.ts": {
     "positional": 11
@@ -208,7 +196,7 @@
   },
   "packages/backend/src/routes/__tests__/user.test.ts": {
     "db-mock": 1,
-    "positional": 13
+    "positional": 2
   },
   "packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts": {
     "db-mock": 1,

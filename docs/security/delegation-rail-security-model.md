@@ -18,6 +18,7 @@ covers:
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
   - packages/backend/src/infra/repositories/user-safes.ts
+  - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
@@ -34,7 +35,7 @@ covers:
   - packages/frontend/src/hooks/useSafeOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-09"
+last-verified: "2026-09-11"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -55,9 +56,10 @@ Safe rows are untouched and still readable to a direct database query, though
 no account, agent or dashboard surface displays them (the transactions
 surface is not among the filtered queries: `LIST_BASIC_SAFES_FOR_USER_SQL` and
 `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` have no rail predicate, so it still spans
-every account and agent row),
-and `POST /safe/exec` remains open for
-owner-signed execution relayed for gas; neither is a policy rail. Read every
+every account and agent row);
+since #2847 the relayed owner-signed execution route is deleted with the last
+live Safe-rail behaviour, so nothing on the legacy rail answers with live
+behaviour at all. Neither was ever a policy rail. Read every
 "vs the Safe/session stack" comparison below as a comparison against a
 **retired** baseline, not a live alternative.) The implementation issues are #831 (CI
 invariants) and #832 (exit tool); this doc is their contract.

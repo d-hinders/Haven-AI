@@ -23,7 +23,6 @@ import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
-import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
@@ -58,7 +57,6 @@ import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
-import safeExecRoutes from './routes/safe-exec.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
@@ -244,7 +242,9 @@ await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
-await app.register(safeDetailRoutes, { prefix: '/safe' })
+// #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are
+// deleted. `/safe` no longer mounts anything here but the safe-deploy
+// tombstone below — the prefix survives only because that 410 does.
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
@@ -264,7 +264,6 @@ await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
-await app.register(safeExecRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })

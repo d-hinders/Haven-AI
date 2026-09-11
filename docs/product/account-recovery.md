@@ -10,8 +10,7 @@ covers:
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
-  - packages/backend/src/routes/safe-exec.ts
-last-verified: "2026-09-04"
+last-verified: "2026-09-11"
 ---
 
 # Account recovery (delegation-rail accounts)

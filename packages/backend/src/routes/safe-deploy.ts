@@ -14,9 +14,10 @@
  *
  * Deleting the handler also buries #1753 (a bare `tx.wait()` awaited inside an
  * open Postgres transaction on a pooled client) and the `relaySafeDeploy` half
- * of #1755. The OTHER half of #1755 — `ensurePasskeySignerDeployed` — is NOT
- * buried: it is still reached from `routes/safe-exec.ts`, which stays open.
- * See the PR for #1988 and the note on #1755.
+ * of #1755. The OTHER half of #1755 — `ensurePasskeySignerDeployed` — stayed
+ * reachable through `routes/safe-exec.ts` until #2847 deleted that route and
+ * `infra/chain/safe-proxy-deployer.ts` with it; both halves of #1755 are now
+ * buried. See the PRs for #1988 and #2847 and the note on #1755.
  */
 
 import type { FastifyInstance } from 'fastify'

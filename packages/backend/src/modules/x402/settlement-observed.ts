@@ -3,7 +3,8 @@
  *
  * ## The gap this closes
  *
- * On EIP-3009 (both rails) Haven submits a transaction, so it learns the hash
+ * EIP-3009 and erc7710 direct settlement are two schemes on the one live
+ * execution rail. On EIP-3009 Haven submits a transaction, so it learns the hash
  * and flips the intent to `confirmed` itself. On erc7710 direct settlement the
  * MERCHANT redeems the delegation chain and Haven submits nothing, so
  * `POST /x402/:id/settle` left the intent at `submitted` forever. Everything

@@ -2639,118 +2639,10 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/owners': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listUserOwners',
-        summary: 'The owner directory across every linked Safe, with aliases.',
-        description:
-          "Reads each linked Safe's owners LIVE from the chain and groups them by address, so one owner appearing on three accounts is one entry listing three. Aliases are looked up ONLY for the addresses just confirmed on-chain, which is what stops a removed owner's alias from reappearing. **A partial chain failure is reported, never hidden**: partialFailure/failedSafeIds name the Safes whose owners could not be read, so a caller can tell an incomplete directory from a complete one. Those two fields are camelCase, unlike the rest of this API — documented as-is rather than silently normalised.",
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '200': {
-            description: 'Owners grouped by address, plus the partial-failure report.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['owners', 'partialFailure', 'failedSafeIds'],
-                  properties: {
-                    owners: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['owner_address', 'name', 'accounts'],
-                        properties: {
-                          owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Lowercased for grouping.' },
-                          name: { type: ['string', 'null'], description: 'The stored alias, or null.' },
-                          accounts: {
-                            type: 'array',
-                            items: {
-                              type: 'object',
-                              required: ['id', 'safe_address', 'chain_id', 'name'],
-                              properties: {
-                                id: { type: 'string', format: 'uuid' },
-                                safe_address: address,
-                                chain_id: { type: 'integer' },
-                                name: { type: 'string' },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                    partialFailure: { type: 'boolean' },
-                    failedSafeIds: { type: 'array', items: { type: 'string' } },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/user/owners/{ownerAddress}': {
-      put: {
-        tags: ['Dashboard'],
-        operationId: 'setOwnerAlias',
-        summary: 'Name an owner address.',
-        description:
-          "An alias is a label, never a grant — naming an address confers no authority over any Safe. The address must be a CURRENT owner of a linked account, checked against the live directory: an unknown address is a 404, but if the chain read partially failed the answer is **503 rather than 404**, because 'not an owner' and 'could not check' must not look the same.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['name'],
-                properties: { name: { type: 'string', minLength: 1, maxLength: 80 } },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'The stored alias.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['owner_address', 'name'],
-                  properties: {
-                    owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
-                    name: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: 'Not a current owner of any linked account.' },
-          '503': { ...errorResponse, description: 'Owners could not be verified — distinct from "not an owner".' },
-        },
-      },
-      delete: {
-        tags: ['Dashboard'],
-        operationId: 'deleteOwnerAlias',
-        summary: "Remove an owner's alias.",
-        description: 'Drops the label only. Idempotent — removing an alias that does not exist still succeeds, and no ownership check is needed because no authority is involved either way.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
-        responses: {
-          '200': {
-            description: 'Alias removed (or was already absent).',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-        },
-      },
-    },
+    // #2847 (epic #1440): the /user/owners directory is deleted. It probed
+    // each linked account's owners over the Safe ABI and answered
+    // { owners: [], partialFailure: true } on every delegation account, and
+    // the alias writes behind it served no surviving surface.
     // ── Bookkeeping: export, reconcile, categories (#1446, epic #462) ───────
     // Read-only over settled-payment data. No custody surface: nothing here
     // moves money, and the reporting feed below is deliberately NON-ASSERTING
@@ -3699,54 +3591,9 @@ export const openapiSpec = {
       },
     },
     '/passkeys': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'registerPasskey',
-        summary: 'Enroll a passkey signer for the caller.',
-        description:
-          "Derives the Safe passkey-signer address from the P256 public key and records it. **A second passkey on the same chain is allowed and is the point** (#1229): it is a BACKUP SIGNER, and this rail's only recovery — refusing it used to lock out exactly the users who most needed protection. Only a duplicate credential_id is refused. HONEST LIMITATION: the attestation object is persisted for future verification but is NOT cryptographically verified yet, so a bad enrollment harms only the enrolling user. The response is NARROWER than the list read below — an id, the credential, the derived signer address and the chain, never the public-key coordinates or the stored attestation.",
-        security: [{ DashboardJwt: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['credential_id', 'public_key_x', 'public_key_y', 'chain_id'],
-                properties: {
-                  credential_id: { type: 'string', description: 'Non-empty base64url.' },
-                  public_key_x: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
-                  public_key_y: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
-                  chain_id: { type: 'integer' },
-                  raw_attestation_object: { type: 'string', description: 'Optional base64url attestation. Stored, not yet verified.' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '201': {
-            description: 'Passkey enrolled.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'credential_id', 'signer_address', 'chain_id'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    credential_id: { type: 'string' },
-                    signer_address: { type: 'string', description: 'Derived from the public key; stored lowercase.' },
-                    chain_id: { type: 'integer' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '409': { ...errorResponse, description: 'This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict.' },
-        },
-      },
+      // #2847 (epic #1440): POST — the Safe WebAuthn signer enrolment — is
+      // deleted with the Safe rail. The list read stays: AuthContext reads it
+      // every session.
       get: {
         tags: ['Dashboard'],
         operationId: 'listPasskeys',
@@ -5439,27 +5286,9 @@ export const openapiSpec = {
         },
       },
     },
-    '/safe/{safeAddress}/details': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'getSafeDetails',
-        summary: 'On-chain Safe details: owners, threshold, nonce.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' } },
-        ],
-        responses: {
-          '200': {
-            description: 'Safe details.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SafeDetails' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '403': errorResponse,
-        },
-      },
-    },
+    // #2847 (epic #1440): /safe/{safeAddress}/details is deleted — it read
+    // Safe getOwners/getThreshold and 409'd for every delegation account, so
+    // no surviving account type could ever be answered by it.
     '/contacts': {
       get: {
         tags: ['Contacts'],
@@ -7614,17 +7443,6 @@ export const openapiSpec = {
           totalUsd: { type: 'number' },
           totalEur: { type: 'number' },
           breakdown: { type: 'array', items: { $ref: '#/components/schemas/PortfolioBreakdown' } },
-        },
-        additionalProperties: false,
-      },
-      SafeDetails: {
-        type: 'object',
-        required: ['address', 'owners', 'threshold', 'nonce'],
-        properties: {
-          address: { type: 'string', description: 'Echoed back as supplied — not re-checksummed.' },
-          owners: { type: 'array', items: address, description: 'Checksummed owner addresses from the contract.' },
-          threshold: { type: 'integer' },
-          nonce: { type: 'integer' },
         },
         additionalProperties: false,
       },

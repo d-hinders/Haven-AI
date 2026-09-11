@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
 const mockUseAuth = vi.fn()
-const mockUseOwnerDirectory = vi.fn()
 const mockUseUserSafes = vi.fn()
 const mockUsePreferences = vi.fn()
 const mockUseContacts = vi.fn()
@@ -22,10 +21,6 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
-}))
-
-vi.mock('@/context/OwnerDirectoryContext', () => ({
-  useOwnerDirectory: () => mockUseOwnerDirectory(),
 }))
 
 vi.mock('@/hooks/useUserSafes', () => ({
@@ -133,12 +128,6 @@ describe('AccountDetailClient', () => {
       setActiveSafe: vi.fn(),
       loading: false,
       passkeys: [],
-    })
-    mockUseOwnerDirectory.mockReturnValue({
-      getOwnerAlias: (address: string) =>
-        address.toLowerCase() === '0x5555555555555555555555555555555555555555'
-          ? 'Personal wallet'
-          : null,
     })
     mockUseUserSafes.mockReturnValue({
       renameSafe: vi.fn(),

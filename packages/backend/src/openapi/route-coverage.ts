@@ -66,10 +66,8 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
     file: 'safe-deploy.ts',
     because: 'Safe deployment — retired (#1440). As of #1988 the module is a TOMBSTONE: one route, answering 410, with no implementation behind it. Do not document; it comes off this list by being unregistered, not by being written up.',
   },
-  {
-    file: 'safe-exec.ts',
-    because: 'Relayed Safe execution. NOT retired and deliberately still live (#1986 boundary, held by #1988): owner-signed, relayed for gas only, and the way an owner still moves funds out of a legacy Safe. Undocumented because it is a dashboard-session route on a rail nothing new joins, not because it is going away.',
-  },
+  // `safe-exec.ts` left this list in #2847 — by being DELETED (with
+  // `safe-details.ts`, which was documented), not by being written up.
   // ── Integrations ──
 ]
 
@@ -86,6 +84,12 @@ export const UNDOCUMENTED_MODULES: UndocumentedModule[] = [
  * simply started seeing two more routes — the ones declared inline in
  * `index.ts` — and one of them (`GET /chains`) turned out to be undocumented.
  * That is the gate earning its keep on its first run, not slack being taken.
+ *
+ * #2847 lowered both by one: `safe-exec.ts` was deleted (its deliberately-
+ * undocumented `POST /safe/exec` went with it) and `safe-details.ts` left the
+ * UNDOCUMENTED_MODULES list by deletion too, leaving only the safe-deploy
+ * tombstone. A lower ceiling is the ratchet tightening — the only direction
+ * it may move.
  */
-export const MAX_UNDOCUMENTED_MODULES = 2
-export const MAX_UNDOCUMENTED_ROUTES = 2
+export const MAX_UNDOCUMENTED_MODULES = 1
+export const MAX_UNDOCUMENTED_ROUTES = 1

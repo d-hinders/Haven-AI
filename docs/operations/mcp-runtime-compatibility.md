@@ -78,6 +78,21 @@ last-verified: "2026-09-10"
 > local twin is unaffected — the #1301 bounded discovery helper it shares still
 > lives in `@haven_ai/sdk`, so the skew-flatness this document asserts is a
 > property of the SDK helper, not of which mcp-server file calls it.
+>
+> **Recent re-verification (#2811):** the same for the hosted server's
+> plain-HTTP x402 lifecycle handlers — `haven_quote_x402`,
+> `haven_pay_x402_quote`, `haven_resume_x402_payment` and
+> `haven_report_x402_outcome` — which moved from `tools.ts` into
+> `src/tools/plain-http-x402.ts` and are composed back into
+> `createToolHandlers` from there. The runtime contract is again unchanged:
+> the same tool names are registered, the strict input policy on all four is
+> untouched (these four parse inside a failure envelope, as before), schemas
+> and descriptions still come from the #2807 contracts module, and the
+> signing-context helper this slice calls still lives in the #2808 shared
+> support — the module itself never signs. The header-name guidance agents
+> read for x402 retries is produced by the same `buildAgentGuidance` call as
+> before, so the dual-wire-name rule this document pins is unaffected by the
+> move.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

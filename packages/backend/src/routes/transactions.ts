@@ -13,6 +13,7 @@ import {
   buildSafeTransactionsPage,
   EXPORT_ROW_CAP,
   buildTransactionCsvFilename,
+  enrichTransactionsWithAccounting,
   exceedsExportRowCap,
   filterEnrichedTransactions,
   mergeSortDedupeAndEnrich,
@@ -168,9 +169,12 @@ export default async function transactionRoutes(
       tokenFilter,
     })
     const { page: paginated, hasMore } = paginateByOffset(filtered, offset, limit)
+    // #2870: the accounting badge rides the PAGE, not the whole feed — one
+    // ledger query per response, and none for an unentitled account.
+    const transactions = await enrichTransactionsWithAccounting(sub, paginated)
 
     return {
-      transactions: paginated,
+      transactions,
       total: filtered.length,
       offset,
       limit,

@@ -114,6 +114,12 @@ const transactionBaseProperties = {
    */
   fxRateSek: { type: ['string', 'null'] },
   fxSource: { type: ['string', 'null'] },
+  // #2870: accounting-feed state joined from the sync ledger by
+  // `paymentId`. PRESENT only when the feed is available to the
+  // account, the user has a provider connection, and a sync row exists
+  // for the payment — otherwise the key is absent (never null). No
+  // `booked` field: the ledger stores no verify result.
+  accounting: { $ref: '#/components/schemas/TransactionAccounting' },
 } as const
 
 const transactionBaseRequired = [
@@ -7411,6 +7417,27 @@ export const openapiSpec = {
         type: 'object',
         required: [...transactionBaseRequired],
         properties: { ...transactionBaseProperties },
+      },
+      TransactionAccounting: {
+        description:
+          'Accounting-feed state for one transaction (#2870), read from the sync ledger — no live ' +
+          'provider call. Present on a row only when the feed is available to the account, the ' +
+          'user has a provider connection, and the payment has a sync row; absent otherwise.',
+        type: 'object',
+        required: ['provider', 'status', 'externalRef', 'error'],
+        properties: {
+          provider: { type: 'string', description: "Ledger provider key, e.g. 'fortnox'.", examples: ['fortnox'] },
+          status: { type: 'string', enum: ['pending', 'pushed', 'failed', 'skipped'] },
+          externalRef: {
+            type: ['string', 'null'],
+            description: "Provider-side reference once pushed ('fortnox:supplierinvoice:<n>'); null otherwise.",
+          },
+          error: {
+            type: ['string', 'null'],
+            description: 'Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean.',
+          },
+        },
+        additionalProperties: false,
       },
       Transaction: {
         description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',

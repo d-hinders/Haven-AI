@@ -9,7 +9,7 @@
  * Each transition is exercised on both sides: the row that must move and
  * the row that must not.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
@@ -19,6 +19,7 @@ import {
   markSkipped,
   reopenMissingPushed,
   getSyncState,
+  listSyncsForPaymentIds,
 } from '../accounting-feed-syncs.js'
 
 let seq = 0
@@ -102,5 +103,59 @@ describeDb('accounting-feed-syncs repository (#1365)', () => {
     expect(await reopenMissingPushed(otherUser, 'fortnox', 'pay-2', 'x')).toBe(false)
     expect(await reopenMissingPushed(userId, 'other-provider', 'pay-2', 'x')).toBe(false)
     expect((await getSyncState(userId, 'fortnox', 'pay-2'))?.status).toBe('pushed')
+  })
+
+  // ── #2870: the per-page join behind the Transactions badge ──────────────
+
+  it('listSyncsForPaymentIds returns one row per fed payment on the page, in ONE query', async () => {
+    const userId = await seedUser()
+    await claimSync(userId, 'fortnox', 'pay-1')
+    await markPushed(userId, 'fortnox', 'pay-1', 'fortnox:supplierinvoice:11')
+    await claimSync(userId, 'fortnox', 'pay-2')
+    await markFailed(userId, 'fortnox', 'pay-2', 'timeout')
+    // A third fed payment that is NOT on the page must not come back.
+    await claimSync(userId, 'fortnox', 'pay-3')
+
+    const querySpy = vi.spyOn(db, 'query')
+    const rows = await listSyncsForPaymentIds(userId, ['pay-1', 'pay-2', 'pay-unfed'])
+    expect(querySpy).toHaveBeenCalledTimes(1)
+    querySpy.mockRestore()
+
+    expect(rows.map((r) => r.payment_id).sort()).toEqual(['pay-1', 'pay-2'])
+    expect(rows.find((r) => r.payment_id === 'pay-1')).toEqual({
+      provider: 'fortnox',
+      payment_id: 'pay-1',
+      status: 'pushed',
+      external_ref: 'fortnox:supplierinvoice:11',
+      error: null,
+    })
+    expect(rows.find((r) => r.payment_id === 'pay-2')).toMatchObject({
+      status: 'failed',
+      external_ref: null,
+      error: 'timeout',
+    })
+  })
+
+  it('MUTATION PROOF: listSyncsForPaymentIds never crosses tenants', async () => {
+    // Dropping the `user_id = $1` predicate from LIST_SYNCS_FOR_PAYMENT_IDS_SQL
+    // makes the other tenant's row for the SAME payment id come back here.
+    const userId = await seedUser()
+    const otherUser = await seedUser()
+    await claimSync(otherUser, 'fortnox', 'pay-shared')
+    await markPushed(otherUser, 'fortnox', 'pay-shared', 'fortnox:supplierinvoice:99')
+
+    expect(await listSyncsForPaymentIds(userId, ['pay-shared'])).toEqual([])
+
+    // The other side: the owner still sees it.
+    const own = await listSyncsForPaymentIds(otherUser, ['pay-shared'])
+    expect(own.map((r) => r.payment_id)).toEqual(['pay-shared'])
+  })
+
+  it('listSyncsForPaymentIds with no payment ids never touches the pool', async () => {
+    const userId = await seedUser()
+    const querySpy = vi.spyOn(db, 'query')
+    expect(await listSyncsForPaymentIds(userId, [])).toEqual([])
+    expect(querySpy).not.toHaveBeenCalled()
+    querySpy.mockRestore()
   })
 })

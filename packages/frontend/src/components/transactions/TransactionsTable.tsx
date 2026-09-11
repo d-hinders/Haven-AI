@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DirectionMark, ExternalDetailsLink } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { Amount } from '@/components/haven'
 
@@ -412,6 +413,12 @@ export default function TransactionsTable({
                       ) : tx.isError ? (
                         <StatusBadge tone="danger">Failed</StatusBadge>
                       ) : null}
+                      {/* #2870: the feed's state for this payment, beside the
+                          lifecycle badge; renders nothing when the row carries
+                          no `accounting` (feature off, not connected, or never
+                          fed). Same flex-wrap line, so it drops below the title
+                          exactly as the status badge does. */}
+                      <AccountingBadge accounting={tx.accounting} />
                     </div>
                     {showCol('fromTo') ? (
                       <div className={`mt-0.5 text-xs text-[var(--v2-ink-2)] ${tableHideFromClass('md')}`}>

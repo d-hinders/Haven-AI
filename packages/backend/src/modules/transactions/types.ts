@@ -58,6 +58,25 @@ export interface Transaction {
    * initiator record at all.
    */
   initiatedBy?: 'agent' | 'human' | 'unknown'
+  /**
+   * Accounting-feed state for this payment (#2870), joined from the sync
+   * ledger by `paymentId`. PRESENT only when the feed is available to the
+   * account, the user has a provider connection, AND a sync row exists;
+   * otherwise the key is absent (never null). No `booked` field: the ledger
+   * stores no verify result. See `accounting.ts`.
+   */
+  accounting?: TransactionAccounting
+}
+
+/** The `accounting` object on a transaction row (#2870). */
+export interface TransactionAccounting {
+  /** Ledger provider key, e.g. `'fortnox'`. The UI maps it to a display name. */
+  provider: string
+  status: 'pending' | 'pushed' | 'failed' | 'skipped'
+  /** Provider-side reference (`fortnox:supplierinvoice:<n>`) once pushed. */
+  externalRef: string | null
+  /** Failure / skip reason, or the #498 non-fatal note on a pushed row. */
+  error: string | null
 }
 
 export interface EnrichedTransaction extends Transaction {

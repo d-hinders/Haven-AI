@@ -110,6 +110,19 @@ export const dashboardTransaction = {
   source: 'x402',
   x402ResourceUrl: 'https://research.example/report',
   x402MerchantAddress: testRecipientAddress,
+  // #2870: the payment-intent id the accounting badge is keyed on, and the
+  // badge's own object. Carried on the row itself so the fixture-shape parity
+  // test (`fixture-shape-parity.test.ts`) sees the same keys the screenshot
+  // dataset has. Rendered only by `/transactions` (table + drawer); the
+  // dashboard's recent-transactions preview reads neither key, so its
+  // baseline is unchanged.
+  paymentId: 'pay-research-1',
+  accounting: {
+    provider: 'fortnox',
+    status: 'pushed',
+    externalRef: 'fortnox:supplierinvoice:11',
+    error: null,
+  },
 }
 
 const balances = [

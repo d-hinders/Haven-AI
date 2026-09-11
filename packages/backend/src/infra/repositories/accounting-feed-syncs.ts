@@ -88,6 +88,14 @@ export const GET_SYNC_STATE_SQL = `SELECT * FROM reporting_feed_syncs
 export const LIST_SYNCS_FOR_USER_SQL = `SELECT * FROM reporting_feed_syncs
      WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2`
 
+// #2870: the per-page join the Transactions badge reads. ONE query for the
+// whole page (`= ANY($2)` over the page's payment ids), tenant-scoped by
+// `user_id` — the sync ledger is keyed per user, so a payment id that
+// collides across tenants must never surface another user's row.
+export const LIST_SYNCS_FOR_PAYMENT_IDS_SQL = `SELECT provider, payment_id, status, external_ref, error
+     FROM reporting_feed_syncs
+     WHERE user_id = $1 AND payment_id = ANY($2)`
+
 /**
  * Atomically claim a payment for pushing. The concurrency guard is the unique
  * constraint: the first caller inserts a `pending` row and owns the push; a
@@ -193,6 +201,31 @@ export async function listSyncs(
   db: Executor = pool,
 ): Promise<FeedSyncRow[]> {
   const result = await db.query<FeedSyncRow>(LIST_SYNCS_FOR_USER_SQL, [userId, limit])
+  return result.rows
+}
+
+/** The projection the Transactions badge (#2870) needs — nothing more. */
+export type FeedSyncBadgeRow = Pick<
+  FeedSyncRow,
+  'provider' | 'payment_id' | 'status' | 'external_ref' | 'error'
+>
+
+/**
+ * Sync rows for a page of payment ids, in one round trip (#2870). Returns
+ * only rows that exist — a payment with no sync row is simply absent, which
+ * the caller renders as "no badge" (it predates `feed_from`, or was never
+ * fed). An empty `paymentIds` short-circuits without touching the pool.
+ */
+export async function listSyncsForPaymentIds(
+  userId: string,
+  paymentIds: string[],
+  db: Executor = pool,
+): Promise<FeedSyncBadgeRow[]> {
+  if (paymentIds.length === 0) return []
+  const result = await db.query<FeedSyncBadgeRow>(LIST_SYNCS_FOR_PAYMENT_IDS_SQL, [
+    userId,
+    paymentIds,
+  ])
   return result.rows
 }
 

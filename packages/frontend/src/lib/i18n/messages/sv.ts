@@ -8,6 +8,12 @@ export const sv: Messages = {
   common: {
     comingSoon: 'Kommer snart',
   },
+  accountingBadge: {
+    inProvider: (provider: string) => `I ${provider}`,
+    feeding: 'Matas…',
+    notFed: 'Inte matad',
+    openAccounting: (label: string) => `${label}. Öppna bokföring.`,
+  },
   settings: {
     title: 'Inställningar',
     subtitle: 'Hantera inställningar, kontoåtkomst, notiser och datakontroller.',

@@ -26,26 +26,43 @@ vi.mock('../../../config.js', () => ({
 const { refreshTokens } = vi.hoisted(() => ({ refreshTokens: vi.fn() }))
 vi.mock('../fortnox.js', () => ({ refreshTokens }))
 
+import { randomBytes } from 'node:crypto'
 import {
   getValidFortnoxAccessToken,
   fortnoxConfigured,
 } from '../fortnox-connection.js'
+import { SECRETS_KEY_ENV, SecretsKeyMissingError, decryptSecrets, plaintextSecrets } from '../../../infra/secrets.js'
 
+// #2860: the row is the generic `accounting_connections` shape. Secrets travel
+// as a blob + key version; a version-0 (plaintext JSON) blob needs no key to
+// read, which is what lets the "still valid" path run without configuring one.
 function connectionRow(over: Record<string, unknown> = {}) {
-  return {
-    user_id: 'user-1',
-    access_token: 'stored-access',
-    refresh_token: 'stored-refresh',
-    token_type: 'Bearer',
+  const { ciphertext, keyVersion } = plaintextSecrets({
+    accessToken: 'stored-access',
+    refreshToken: 'stored-refresh',
+    tokenType: 'Bearer',
     scope: 'bookkeeping',
-    expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  })
+  return {
+    id: 'conn-1',
+    user_id: 'user-1',
+    provider: 'fortnox',
+    auth_kind: 'oauth2',
+    secrets_ciphertext: ciphertext,
+    secrets_key_version: keyVersion,
+    status: 'connected',
+    token_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    is_active_destination: true,
     ...over,
   }
 }
 
+const KEY = randomBytes(32).toString('base64')
+
 afterEach(() => {
   mockQuery.mockReset()
   refreshTokens.mockReset()
+  delete process.env[SECRETS_KEY_ENV]
 })
 
 describe('fortnoxConfigured', () => {
@@ -67,24 +84,9 @@ describe('getValidFortnoxAccessToken', () => {
     expect(refreshTokens).not.toHaveBeenCalled()
   })
 
-  it('refreshes and persists when the stored token has expired', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [connectionRow({ expires_at: new Date(Date.now() - 1000).toISOString() })] })
-      .mockResolvedValueOnce({ rows: [] }) // the persist (saveFortnoxConnection) write
-    refreshTokens.mockResolvedValueOnce({
-      accessToken: 'fresh-access',
-      refreshToken: 'fresh-refresh',
-      tokenType: 'Bearer',
-      scope: 'bookkeeping',
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-    })
-
-    expect(await getValidFortnoxAccessToken('user-1')).toBe('fresh-access')
-    expect(refreshTokens).toHaveBeenCalledOnce()
-    // The refreshed token was persisted back (the second query is the upsert).
-    const upsert = mockQuery.mock.calls[1]
-    expect(String(upsert[0])).toMatch(/INSERT INTO fortnox_connections/)
-    expect(upsert[1]).toContain('fresh-access')
-    expect(upsert[1]).toContain('fresh-refresh')
-  })
+  // The refresh-and-persist path and the fail-closed-without-a-key path are
+  // DATABASE behaviour now (#2860): an encrypted UPDATE against a real table,
+  // and a refusal that must leave the row untouched. Both live on the real
+  // harness in `fortnox-connection.db.test.ts`, not behind a positional
+  // `db.js` mock — which is where `lint:db-mocks` wants them.
 })

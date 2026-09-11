@@ -13,8 +13,8 @@ import { config } from '../../config.js'
  * to a set of entitlements:
  *
  *   free       → {}
- *   pro        → { 'reporting_feed' }
- *   enterprise → { 'reporting_feed', ... }
+ *   pro        → { 'accounting_feed' }
+ *   enterprise → { 'accounting_feed', ... }
  *
  * …by granting/revoking rows in `account_entitlements`. No code in this gate
  * changes when tiers land — only who holds which entitlement.
@@ -26,11 +26,11 @@ import { config } from '../../config.js'
  *     HAVEN_ACCOUNTING_ENTITLEMENT_MODE=granted  the account must hold a row
  *                                               (the default; what prod runs)
  *   In `granted` mode a row is written with grantEntitlement(userId,
- *   'reporting_feed') — there is deliberately no route for it yet; a paid
+ *   'accounting_feed') — there is deliberately no route for it yet; a paid
  *   tier will own that. The hand-written INSERT this comment used to carry is
  *   gone: dev no longer needs it, and prod has no tier to grant.
  */
-export const REPORTING_FEED = 'reporting_feed'
+export const ACCOUNTING_FEED = 'accounting_feed'
 
 /** True when the user holds the entitlement and it has not been revoked. */
 export async function hasEntitlement(userId: string, entitlement: string): Promise<boolean> {
@@ -74,6 +74,6 @@ export async function accountingFeedAvailability(userId: string): Promise<{
   if (!config.hosted || !config.accountingEnabled) {
     return { available: false, entitled: false, entitlementMode }
   }
-  const entitled = entitlementMode === 'all' ? true : await hasEntitlement(userId, REPORTING_FEED)
+  const entitled = entitlementMode === 'all' ? true : await hasEntitlement(userId, ACCOUNTING_FEED)
   return { available: entitled, entitled, entitlementMode }
 }

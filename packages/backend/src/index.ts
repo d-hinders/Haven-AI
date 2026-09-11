@@ -11,6 +11,7 @@ import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware
 import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
+import { reencryptPlaintextSecretsAtBoot } from './modules/accounting/index.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
@@ -329,6 +330,12 @@ const start = async () => {
   try {
     await runMigrations()
     app.log.info('Database migrations complete')
+
+    // #2860: migration 080 copies provider secrets as plaintext (a migration
+    // reads no environment); this is where they get encrypted, on the first
+    // boot that has HAVEN_SECRETS_KEY. Inert without it, idempotent with it,
+    // and it never blocks listen().
+    await reencryptPlaintextSecretsAtBoot((m) => app.log.info(m))
 
     await app.listen({ port: config.port, host: '0.0.0.0' })
     app.log.info(`Haven backend running on port ${config.port}`)

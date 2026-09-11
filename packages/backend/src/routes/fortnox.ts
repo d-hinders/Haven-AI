@@ -111,7 +111,17 @@ export default async function fortnoxRoutes(app: FastifyInstance): Promise<void>
     try {
       const tokens = await exchangeCodeForTokens(fortnoxCredentials(), code)
       await saveFortnoxConnection(userId, tokens)
-    } catch {
+    } catch (err) {
+      // #2860 added a failure class here that is NOT "Fortnox declined": the
+      // secrets key is missing or invalid on this replica, or two providers
+      // raced to be the first active destination. The redirect is the same
+      // — the user sees "error" either way — but an operator must be able to
+      // tell them apart, so the NAME is logged (never the message: a token
+      // exchange error can carry the provider's response body).
+      request.log.warn(
+        { err: err instanceof Error ? err.name : 'Error', userId },
+        'fortnox oauth callback failed after code exchange',
+      )
       return reply.redirect(`${settingsUrl}?fortnox=error`)
     }
     return reply.redirect(`${settingsUrl}?fortnox=connected`)

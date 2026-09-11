@@ -1,7 +1,7 @@
 /**
  * Data access for the reporting-feed dedup ledger (#999, epic #980).
  *
- * One aggregate: `reporting_feed_syncs` — what has been fed to which
+ * One aggregate: `accounting_feed_syncs` — what has been fed to which
  * bookkeeping provider (epic #491, P1 #497), keyed uniquely on
  * (provider, payment_id, user_id). Extracted verbatim from
  * `modules/accounting/feed-sync.ts` (which re-exports these functions) and
@@ -45,21 +45,21 @@ export interface ClaimResult {
   status: SyncStatus | null
 }
 
-export const CLAIM_SYNC_INSERT_SQL = `INSERT INTO reporting_feed_syncs (user_id, provider, payment_id, status, attempts)
+export const CLAIM_SYNC_INSERT_SQL = `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, status, attempts)
      VALUES ($1, $2, $3, 'pending', 1)
      ON CONFLICT (provider, payment_id, user_id) DO NOTHING
      RETURNING id`
 
-export const CLAIM_SYNC_RECLAIM_FAILED_SQL = `UPDATE reporting_feed_syncs
+export const CLAIM_SYNC_RECLAIM_FAILED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'pending', attempts = attempts + 1, error = NULL, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1 AND status IN ('failed', 'skipped')
      RETURNING id`
 
-export const MARK_SYNC_PUSHED_SQL = `UPDATE reporting_feed_syncs
+export const MARK_SYNC_PUSHED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'pushed', external_ref = $4, error = $5, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
 
-export const MARK_SYNC_FAILED_SQL = `UPDATE reporting_feed_syncs
+export const MARK_SYNC_FAILED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'failed', error = $4, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
 
@@ -68,7 +68,7 @@ export const MARK_SYNC_FAILED_SQL = `UPDATE reporting_feed_syncs
 // DROPPED), which read as "Synced" in the UI and was never revisited by the
 // backfill. The reason lands in `error` (the same column the #498 note
 // contract already uses for non-fatal detail).
-export const MARK_SYNC_SKIPPED_SQL = `UPDATE reporting_feed_syncs
+export const MARK_SYNC_SKIPPED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'skipped', error = $4, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
 
@@ -77,15 +77,15 @@ export const MARK_SYNC_SKIPPED_SQL = `UPDATE reporting_feed_syncs
 // flips, only to `failed` (the normal retry path), and the CALLER must first
 // have Fortnox itself confirm the invoice no longer exists — see
 // `reopenMissingPushed`'s contract in routes/accounting-feed.ts.
-export const REOPEN_PUSHED_SQL = `UPDATE reporting_feed_syncs
+export const REOPEN_PUSHED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'failed', error = $4, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1 AND status = 'pushed'
      RETURNING id`
 
-export const GET_SYNC_STATE_SQL = `SELECT * FROM reporting_feed_syncs
+export const GET_SYNC_STATE_SQL = `SELECT * FROM accounting_feed_syncs
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
 
-export const LIST_SYNCS_FOR_USER_SQL = `SELECT * FROM reporting_feed_syncs
+export const LIST_SYNCS_FOR_USER_SQL = `SELECT * FROM accounting_feed_syncs
      WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2`
 
 // #2870: the per-page join the Transactions badge reads. ONE query for the
@@ -233,7 +233,7 @@ export async function listSyncsForPaymentIds(
 
 export const LIST_UNPUSHED_PAYMENT_IDS_SQL = `SELECT COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) AS payment_id
      FROM machine_payment_evidence mpe
-     LEFT JOIN reporting_feed_syncs s
+     LEFT JOIN accounting_feed_syncs s
        ON s.user_id = mpe.user_id AND s.provider = $2
       AND s.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
       AND s.status = 'pushed'

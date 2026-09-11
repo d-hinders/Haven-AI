@@ -78,6 +78,7 @@ import * as viaMarker from './076_via_marker.js'
 import * as setupRunMode from './077_setup_run_mode.js'
 import * as deviceAuthorizations from './078_device_authorizations.js'
 import * as schemaLocalConstraintRepair from './079_schema_local_constraint_repair.js'
+import * as accountingConnections from './080_accounting_connections.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -215,4 +216,5 @@ export const migrations: Migration[] = [
   setupRunMode,
   deviceAuthorizations,
   schemaLocalConstraintRepair,
+  accountingConnections,
 ]

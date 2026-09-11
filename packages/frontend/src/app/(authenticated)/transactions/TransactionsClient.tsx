@@ -74,6 +74,15 @@ function exportFailureNotice(err: unknown): ExportNotice {
  * is anything to show: the button is gated on the server's `total`, which
  * does not know about either. Rather than hand the user a silent header-only
  * file, the empty result is read back off the body and reported.
+ *
+ * This reads the body because it has to: the route sends the count in
+ * `X-Export-Row-Count`, but the backend's CORS registration sets no
+ * `exposedHeaders`, so no browser client can read it. The test below is exact
+ * rather than heuristic — the backend's `toCsv` joins lines with CRLF and
+ * writes no trailing terminator (pinned by `domain/__tests__/csv.test.ts`:
+ * `toCsv(columns, [])` is the bare header), so a record-free body contains no
+ * CRLF and any record guarantees one. A CRLF inside a quoted field cannot
+ * cause a false positive, since such a field only exists inside a record.
  */
 function hasCsvRecords(csv: string): boolean {
   return csv.replace(/^\uFEFF/, '').includes('\r\n')
@@ -136,8 +145,10 @@ export default function TransactionsClient() {
   const chainIds = Array.from(new Set(userSafes.map((s) => s.chain_id))).sort((a, b) => a - b)
   const showNetworkFilter = chainIds.length > 1
 
-  // Client-side direction + network filters — the API doesn't yet support these
-  // dimensions, so we filter the fetched page in memory. Honest UX caveat: when
+  // Client-side direction + network filters — the LIST endpoint doesn't support
+  // these dimensions, so we filter the fetched page in memory. (The export
+  // route does, since #2871, which is why `handleExportCsv` sends both and why
+  // its result can disagree with what this list shows.) Honest UX caveat: when
   // combined with paginated results this only filters what's loaded, same
   // constraint as the client-side sort.
   const visibleTransactions = useMemo(() => {
@@ -220,11 +231,24 @@ export default function TransactionsClient() {
     try {
       const csv = await api.getText(`/transactions/export.csv?${params.toString()}`)
       if (!hasCsvRecords(csv)) {
-        setExportNotice({
-          tone: 'info',
-          headline: 'Nothing to export.',
-          detail: 'No transactions match these filters. Widen them and try again.',
-        })
+        // An empty body has two causes and they need different copy: no row
+        // matched, or the explorers that feed the aggregation failed. Claiming
+        // "nothing matched" during an outage is a confident wrong diagnosis.
+        setExportNotice(
+          partialFailure
+            ? {
+                tone: 'info',
+                headline: 'Nothing to export yet.',
+                detail:
+                  'Some accounts failed to load, so there was nothing to write. ' +
+                  'Reload the page and try again.',
+              }
+            : {
+                tone: 'info',
+                headline: 'Nothing to export.',
+                detail: 'No transactions match these filters. Widen them and try again.',
+              },
+        )
         return
       }
       downloadCsv(csv, buildCsvFilename(new Date()))
@@ -252,11 +276,14 @@ export default function TransactionsClient() {
     )
   }
 
-  // Gated on the server's filtered total, not on the rows the browser happens
-  // to hold: since #2871 the export covers the whole result set, so gating on
-  // `visibleTransactions` would disable the button whenever the loaded page
-  // held no row matching the in-memory direction/network filter while the
-  // server still had plenty.
+  // Gated on the server's total for the FETCHED filter scope (safeId, agentId,
+  // tokenKey — not direction or network, which the list applies in memory),
+  // rather than on the rows the browser happens to hold: since #2871 the export
+  // covers the whole result set, so gating on `visibleTransactions` would
+  // disable the button whenever the loaded page held no row matching the
+  // in-memory filter while the server still had plenty. The cost of the looser
+  // gate is that the export can legitimately come back empty — which is why
+  // that is a designed state below rather than a silent download.
   const canExport = !loadingInitial && total > 0
 
   return (
@@ -285,7 +312,13 @@ export default function TransactionsClient() {
               : 'mb-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-sm text-[var(--v2-ink-2)]'
           }
         >
-          <div className="font-medium">{exportNotice.headline}</div>
+          <div
+            className={
+              exportNotice.tone === 'error' ? 'font-medium' : 'font-medium text-[var(--v2-ink)]'
+            }
+          >
+            {exportNotice.headline}
+          </div>
           {exportNotice.detail && (
             <div className="mt-1 text-xs">{exportNotice.detail}</div>
           )}
@@ -375,7 +408,7 @@ export default function TransactionsClient() {
         </div>
         {!loadingInitial && hasMore && visibleTransactions.length > 0 && (
           <span className="text-xs text-[var(--v2-ink-3)]">
-            Showing <span className="v2-tabular">{visibleTransactions.length}</span> of <span className="v2-tabular">{total}</span>
+            Showing <span className="v2-tabular">{visibleTransactions.length.toLocaleString('en-US')}</span> of <span className="v2-tabular">{total.toLocaleString('en-US')}</span>
           </span>
         )}
       </div>

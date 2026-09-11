@@ -69,6 +69,8 @@ const TX = {
   safeName: 'Main',
 }
 
+const { feedState } = vi.hoisted(() => ({ feedState: { partialFailure: false } }))
+
 vi.mock('@/hooks/useTransactionsFeed', () => ({
   useTransactionsFeed: () => ({
     transactions: [TX],
@@ -77,7 +79,7 @@ vi.mock('@/hooks/useTransactionsFeed', () => ({
     loadingMore: false,
     hasMore: false,
     error: null,
-    partialFailure: false,
+    partialFailure: feedState.partialFailure,
     failedSafeIds: [],
     loadMore: vi.fn(),
     refresh: vi.fn(),
@@ -89,6 +91,7 @@ const TransactionsClient = (await import('../TransactionsClient')).default
 beforeEach(() => {
   mockGetText.mockReset()
   mockDownloadCsv.mockReset()
+  feedState.partialFailure = false
 })
 
 function exportButton(): HTMLElement {
@@ -161,6 +164,21 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     expect(mockDownloadCsv).not.toHaveBeenCalled()
     // Not a failure: it must not be painted as one.
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not blame the filters when the accounts themselves failed to load', async () => {
+    // Same empty body, different cause. Saying "nothing matched" during an
+    // explorer outage is a confident wrong diagnosis.
+    feedState.partialFailure = true
+    mockGetText.mockResolvedValue('\uFEFFsettled_at,type,status')
+    render(<TransactionsClient />)
+
+    fireEvent.click(exportButton())
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('Some accounts failed to load')
+    expect(notice).not.toHaveTextContent('No transactions match these filters')
+    expect(mockDownloadCsv).not.toHaveBeenCalled()
   })
 
   it('does not surface a raw server string for any other failure', async () => {

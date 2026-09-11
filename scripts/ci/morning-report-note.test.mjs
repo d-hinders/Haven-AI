@@ -16,13 +16,19 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  DEFAULT_TOPIC_WINDOW_DAYS,
   DEFAULT_WINDOW_DAYS,
+  TOPIC_MIN_REFS,
+  TOPIC_OVERLAP,
   MAX_BODY_CHARS,
   decide,
   fingerprint,
   fingerprintOf,
   normalise,
   render,
+  issueRefs,
+  refOverlap,
+  refsOf,
 } from './morning-report-note.mjs'
 
 const CLI = fileURLToPath(new URL('./morning-report-note.mjs', import.meta.url))
@@ -32,7 +38,10 @@ const DAY = 24 * 60 * 60 * 1000
 const agoDays = (d) => new Date(NOW - d * DAY).toISOString()
 
 /** A previously-posted note, as GitHub would return it. */
-const posted = (body, days) => ({ body: render({ body, fp: fingerprint(body), runUrl: null }), created_at: agoDays(days) })
+const posted = (body, days) => ({
+  body: render({ body, fp: fingerprint(body), refs: issueRefs(body), runUrl: null }),
+  created_at: agoDays(days),
+})
 
 describe('decide', () => {
   test('a fresh note posts', () => {
@@ -161,6 +170,109 @@ describe('refusals that protect the coordination thread', () => {
   test('a nested blockquote marker is escaped too', () => {
     const out = render({ body: '> pretending to quote someone', fp: 'a'.repeat(16) })
     assert.match(out, /^> \\> pretending/m)
+  })
+})
+
+describe('reworded restatements — the topic key', () => {
+  // These two are VERBATIM the notes that both reached issue #2879 on
+  // 2026-09-11, hours after this module shipped. Same fact, different words, so
+  // their fingerprints differed and exact matching let the second through. This
+  // is the regression: if it ever passes again, the guard has stopped working.
+  const FIRST =
+    'The sub-issue checklist on #2806 (hosted-MCP decomposition) is stale: #2810 (catalog and quote handlers) and #2811 (plain-HTTP x402 lifecycle) are still shown unticked there, but both are closed and merged to dev as #2841 and #2854. Only #2812 (paid-MCP completion) is actually left in that queue.'
+  const SECOND =
+    'The sub-issue checklist on #2806 (hosted-MCP decomposition) is stale: #2810 (catalog, quote and prepare handlers) and #2811 (plain-HTTP x402 lifecycle) are shown unticked but both are closed and merged to dev. Only #2812 (paid-MCP completion) is actually left.'
+
+  test('the observed pair has DIFFERENT fingerprints — why exact matching failed', () => {
+    assert.notEqual(fingerprint(FIRST), fingerprint(SECOND))
+  })
+
+  test('the observed pair is suppressed by topic', () => {
+    const r = decide({ body: SECOND, comments: [posted(FIRST, 0.5)], now: NOW })
+    assert.equal(r.post, false, 'the second note must not post')
+    assert.match(r.reason, /same issues/)
+  })
+
+  test('a note about DIFFERENT issues still posts', () => {
+    // The guard must not become a blanket mute. This is the cost of coarsening,
+    // and the line it must not cross.
+    const r = decide({ body: '#2848 (frontend mirror) must land before #2851 (schema migration).', comments: [posted(FIRST, 0.5)], now: NOW })
+    assert.equal(r.post, true)
+  })
+
+  test('the same issues are reportable again once the topic window passes', () => {
+    const r = decide({ body: SECOND, comments: [posted(FIRST, DEFAULT_TOPIC_WINDOW_DAYS + 1)], now: NOW })
+    assert.equal(r.post, true, 'a genuine change in the same work must be reportable')
+  })
+
+  test('the topic window is shorter than the exact window, on purpose', () => {
+    // Coarser signal, shorter licence to suppress.
+    assert.ok(DEFAULT_TOPIC_WINDOW_DAYS < DEFAULT_WINDOW_DAYS)
+  })
+
+  test('the observed pair is not set-EQUAL — why equality would not have worked', () => {
+    // The first note also cites the two PRs. Equality misses this; overlap does not.
+    assert.notDeepEqual(issueRefs(FIRST), issueRefs(SECOND))
+    assert.ok(refOverlap(issueRefs(FIRST), issueRefs(SECOND)) >= TOPIC_OVERLAP)
+  })
+
+  test('a single-issue note is below the threshold, so updates on one issue still post', () => {
+    // '#2857 is red' then '#2857 is fixed' are both worth saying. Only exact
+    // matching applies below TOPIC_MIN_REFS.
+    assert.ok(issueRefs('#2857 (slice 4) is red.').length < TOPIC_MIN_REFS)
+    const r = decide({ body: '#2857 (slice 4) is green now.', comments: [posted('#2857 (slice 4) is red.', 0.2)], now: NOW })
+    assert.equal(r.post, true)
+  })
+
+  test('citation order and repeats do not change the set', () => {
+    assert.deepEqual(issueRefs('#2810 then #2806'), issueRefs('#2806, #2810 and #2806 again'))
+  })
+
+  test('overlap is 0 against an empty set and 1 against itself', () => {
+    assert.equal(refOverlap(['#1'], []), 0)
+    assert.equal(refOverlap([], ['#1']), 0)
+    assert.equal(refOverlap(['#1', '#2'], ['#1', '#2']), 1)
+  })
+
+  test('one shared issue out of many is NOT the same topic', () => {
+    // Two notes that happen to mention the same epic in passing must not
+    // suppress each other.
+    assert.ok(refOverlap(['#2806', '#2810', '#2811'], ['#2806', '#2848', '#2851']) < TOPIC_OVERLAP)
+  })
+
+  test('a rendered note carries a recoverable citation set', () => {
+    const body = 'Both #2806 and #2810 moved.'
+    const out = render({ body, fp: fingerprint(body), refs: issueRefs(body) })
+    assert.deepEqual(refsOf(out), issueRefs(body))
+  })
+
+  test('a note whose marker predates refs: is read from its own text', () => {
+    // Every note already on the thread when this shipped carries `fp:` only.
+    // Those are exactly the ones a restatement would duplicate, so the reader
+    // recovers their citations from the quoted body rather than giving up.
+    const body = 'Both #2806 and #2810 moved.'
+    const legacy = `<!-- morning-report-note fp:${fingerprint(body)} -->\n📣 **FYI**\n\n> ${body}`
+    assert.deepEqual(refsOf(legacy), ['#2806', '#2810'])
+  })
+
+  test('a comment that is NOT one of our notes contributes no citations', () => {
+    // The coordination thread carries CLAIM lines and human discussion full of
+    // issue numbers. None of it may suppress a note.
+    assert.deepEqual(refsOf('🔒 CLAIM #2806 — branch x — touches: #2810 — session A'), [])
+    assert.deepEqual(refsOf('Just chatting about #2806 and #2810.'), [])
+  })
+
+  test('an unrelated thread comment does not suppress a note', () => {
+    const comments = [{ body: 'Discussion of #2806, #2810, #2811 and #2812 by a person.', created_at: agoDays(0.1) }]
+    assert.equal(decide({ body: 'Checklist on #2806 stale; #2810, #2811, #2812.', comments, now: NOW }).post, true)
+  })
+
+  test('notes posted BEFORE this change still dedupe by fingerprint', () => {
+    // Comments already on the thread carry `fp:` with no `tk:`. Exact matching
+    // must keep working against them.
+    const body = 'Legacy note about #2806 and #2810.'
+    const legacy = { body: `<!-- morning-report-note fp:${fingerprint(body)} -->\n📣 **FYI**\n\n> ${body}`, created_at: agoDays(1) }
+    assert.equal(decide({ body, comments: [legacy], now: NOW }).post, false)
   })
 })
 

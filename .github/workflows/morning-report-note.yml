@@ -20,14 +20,29 @@ name: Morning report note
 #
 # The caller is an LLM on a cron. When a condition persists — a stalled
 # promotion, an unreviewed PR — it will reach the same conclusion tomorrow and
-# try to say it again. `scripts/ci/morning-report-note.mjs` fingerprints each
-# note and drops one already posted inside the dedupe window. That catches a
-# verbatim repeat, which is the common case; it does NOT catch tomorrow's
-# rephrasing of the same condition, because a fingerprint coarse enough to do
-# that would also collapse notes about two different issue numbers, and a
-# coordination channel should fail toward saying something twice rather than
-# toward silence. It also refuses a note that could forge a coordination
-# directive. A refusal is a normal outcome: the job succeeds and says why.
+# try to say it again. `scripts/ci/morning-report-note.mjs` refuses that on two
+# axes, and it also refuses a note that could forge a coordination directive.
+#
+#   1. EXACT: the fingerprint of the note's normalised text, 7-day window.
+#   2. TOPIC: the set of issues the note cites, 2-day window, suppressing only
+#      when the citation sets overlap by MORE than half and both notes cite at
+#      least two issues.
+#
+# The second axis was added after the first proved insufficient in production:
+# the model restated the same fact in different words and both notes posted.
+# An earlier version of this comment argued against exactly that check, on the
+# grounds that a coarser signal would collapse notes about different issues and
+# that this channel should fail toward saying something twice rather than toward
+# silence. The second half of that still governs — it is why the topic window is
+# two days rather than seven, why the comparison is strict, and why an exactly
+# half-overlapping note posts. The first half was answered by changing the
+# signal rather than coarsening it: what a note CITES is not what a note SAYS.
+#
+# The cost is real and deliberate: a genuinely new note whose citations mostly
+# repeat yesterday's can be suppressed for a day. `topic_window_days` is the
+# dial if that starts costing more than the noise did.
+#
+# A refusal is a normal outcome: the job succeeds and says why.
 #
 # Comment only. This workflow never files, closes, assigns, labels or edits an
 # issue body, and `permissions` grants nothing that would let it.
@@ -43,9 +58,13 @@ on:
         description: 'The heads-up. One or two sentences. Empty means nothing worth saying — the job will skip.'
         required: true
       window_days:
-        description: 'Suppress an identical note posted within this many days'
+        description: 'Suppress a BYTE-IDENTICAL note posted within this many days'
         required: false
         default: '7'
+      topic_window_days:
+        description: 'Suppress a note whose cited issues mostly repeat one posted within this many days'
+        required: false
+        default: '2'
 
 permissions:
   contents: read
@@ -73,6 +92,7 @@ jobs:
           ISSUE: ${{ inputs.issue }}
           NOTE_BODY: ${{ inputs.body }}
           WINDOW_DAYS: ${{ inputs.window_days }}
+          TOPIC_WINDOW_DAYS: ${{ inputs.topic_window_days }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ACTOR: ${{ github.actor }}
         run: |
@@ -83,6 +103,9 @@ jobs:
           esac
           case "${WINDOW_DAYS:-7}" in
             ''|*[!0-9]*) echo "::error::window_days must be a number, got '$WINDOW_DAYS'"; exit 1 ;;
+          esac
+          case "${TOPIC_WINDOW_DAYS:-2}" in
+            ''|*[!0-9]*) echo "::error::topic_window_days must be a number, got '$TOPIC_WINDOW_DAYS'"; exit 1 ;;
           esac
 
           # Assert POSITIVELY that the target is an issue, and let any API
@@ -108,7 +131,8 @@ jobs:
 
           node scripts/ci/morning-report-note.mjs \
             --note note.txt --comments comments.json --out rendered.md \
-            --window-days "${WINDOW_DAYS:-7}" | tee decision.txt
+            --window-days "${WINDOW_DAYS:-7}" \
+            --topic-window-days "${TOPIC_WINDOW_DAYS:-2}" | tee decision.txt
 
           # head -1: read only the FIRST match of each field, so a reason that
           # ever quoted the note text could not inject a second `post=` line.

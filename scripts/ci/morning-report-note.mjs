@@ -28,6 +28,55 @@ export const MARKER = 'morning-report-note'
 export const DEFAULT_WINDOW_DAYS = 7
 
 /**
+ * The TOPIC window, deliberately shorter than the exact-match one.
+ *
+ * Exact fingerprinting only catches a verbatim repeat, and the caller is a
+ * language model: asked the same question on two mornings it produces the same
+ * FACT in different WORDS. Observed on 2026-09-11, hours after this module
+ * shipped — two notes about the same stale checklist, one saying "catalog and
+ * quote handlers" and the other "catalog, quote and prepare handlers", both
+ * posted because their bytes differed.
+ *
+ * The topic key below closes that. It is windowed at two days rather than
+ * seven because it is a coarser, more fallible signal: a note covering the same
+ * issues might be genuinely new news about them. Two days suppresses the
+ * morning-after restatement, which is the observed failure, while letting a
+ * real change in the same work be reported the day after that.
+ */
+export const DEFAULT_TOPIC_WINDOW_DAYS = 2
+
+/**
+ * A note must reference at least this many distinct issues before the topic
+ * check applies. A note about ONE issue is as likely to be a genuine update on
+ * it ("#2857 is red" then "#2857 is fixed") as a restatement, so those are left
+ * to exact matching alone. The observed failure referenced six.
+ */
+export const TOPIC_MIN_REFS = 2
+
+/**
+ * How much two notes' citation sets must overlap to count as the same topic,
+ * as |intersection| / |union|.
+ *
+ * Set EQUALITY is too strict, and the observed failure proves it: the first
+ * note cited #2806, #2810, #2811, #2812 plus the two PRs #2841 and #2854; the
+ * reworded second cited only the four issues. Identical fact, different sets.
+ * Their overlap is 4/6 = 0.67, comfortably over this threshold, while a note
+ * about unrelated work overlaps at 0.
+ */
+export const TOPIC_OVERLAP = 0.5
+
+/**
+ * The comparison is STRICTLY greater, and the strictness is the safety margin.
+ *
+ * A set against a superset of exactly twice its size scores exactly 0.5, and
+ * that shape is common here: a roundup cites six issues, and the next morning
+ * brings genuinely new news about three of them. Suppressing that is the
+ * failure this guard must not have — it silences a channel autonomous sessions
+ * depend on. Strict `>` lets the exact-half case through while still catching
+ * the observed restatement at 0.67.
+ */
+
+/**
  * Text a note may not contain. The note is machine-written from repository
  * content — issue titles, PR titles, branch names, commit subjects — all of
  * which a contributor can influence. It lands in #1289, the thread every
@@ -74,10 +123,61 @@ export function fingerprint(body) {
   return createHash('sha256').update(normalise(body)).digest('hex').slice(0, 16)
 }
 
+/**
+ * The set of issues a note is ABOUT: every `#NNNN` it references, de-duplicated
+ * and sorted numerically. Two notes stating the same fact in different words
+ * cite the same issues; two notes about different work do not. That makes the
+ * citation set a better topic signal than the prose.
+ *
+ * Returns an array, possibly empty. The TOPIC_MIN_REFS floor is applied by
+ * `decide`, not here, so this stays a plain accessor.
+ */
+export function issueRefs(body) {
+  return [...new Set((String(body ?? '').match(/#\d{1,6}\b/g) || []))].sort(
+    (a, b) => Number(a.slice(1)) - Number(b.slice(1)),
+  )
+}
+
+/**
+ * Jaccard overlap of two citation sets: |intersection| / |union|, 0 when either
+ * is empty. Chosen over set equality because a restatement routinely drops or
+ * adds an incidental reference while making the same point.
+ */
+export function refOverlap(a, b) {
+  if (!a.length || !b.length) return 0
+  const A = new Set(a)
+  const B = new Set(b)
+  let shared = 0
+  for (const r of A) if (B.has(r)) shared++
+  return shared / (A.size + B.size - shared)
+}
+
 /** Pull the fingerprint out of an existing comment body, or null. */
 export function fingerprintOf(commentBody) {
   const m = String(commentBody ?? '').match(/<!--\s*morning-report-note fp:([0-9a-f]{16})\s*-->/)
   return m ? m[1] : null
+}
+
+/**
+ * The citation set of an existing comment. Prefers the marker, and falls back
+ * to reading `#NNNN` out of the comment text itself.
+ *
+ * The fallback is what makes this guard work on day one rather than in a week:
+ * every note already on the thread was rendered before the marker carried a
+ * citation set, and those are exactly the notes a restatement would duplicate.
+ * The quoted note text is right there in the body, so the references can be
+ * recovered without it. The marker stays the preferred source because it
+ * records what the author actually cited, not what the rendering happens to
+ * contain.
+ */
+export function refsOf(commentBody) {
+  const text = String(commentBody ?? '')
+  const m = text.match(/<!--\s*morning-report-note fp:[0-9a-f]{16}(?: refs:([#\d,]+))?\s*-->/)
+  if (m && m[1]) return m[1].split(',').filter(Boolean)
+  // Only fall back for OUR OWN notes: an arbitrary comment on the thread is not
+  // a note and its issue mentions must not suppress anything.
+  if (!m) return []
+  return issueRefs(text)
 }
 
 /**
@@ -87,10 +187,17 @@ export function fingerprintOf(commentBody) {
  * @param {string} o.body            the proposed note text
  * @param {Array<{body: string, created_at: string}>} o.comments  existing comments on the target
  * @param {number} o.now             epoch ms
- * @param {number} [o.windowDays]
- * @returns {{post: boolean, reason: string, fingerprint: string|null}}
+ * @param {number} [o.windowDays]       exact-match suppression window
+ * @param {number} [o.topicWindowDays]  citation-overlap suppression window
+ * @returns {{post: boolean, reason: string, fingerprint: string|null, refs: string[]}}
  */
-export function decide({ body, comments = [], now = Date.now(), windowDays = DEFAULT_WINDOW_DAYS }) {
+export function decide({
+  body,
+  comments = [],
+  now = Date.now(),
+  windowDays = DEFAULT_WINDOW_DAYS,
+  topicWindowDays = DEFAULT_TOPIC_WINDOW_DAYS,
+}) {
   const text = normalise(body)
 
   // An empty note is the LLM having nothing to say. That is a correct outcome
@@ -118,17 +225,45 @@ export function decide({ body, comments = [], now = Date.now(), windowDays = DEF
   const fp = fingerprint(body)
   const cutoff = now - days * DAY_MS
 
+  const topicDays =
+    Number.isFinite(topicWindowDays) && topicWindowDays > 0 ? topicWindowDays : DEFAULT_TOPIC_WINDOW_DAYS
+  const refs = issueRefs(body)
+  const topicCutoff = now - topicDays * DAY_MS
+
   for (const c of comments) {
-    if (fingerprintOf(c.body) !== fp) continue
     const at = Date.parse(c.created_at ?? '')
     // An unparseable timestamp is treated as recent: when in doubt, do not
     // repeat yourself. Staying quiet costs less than duplicating a note.
-    if (Number.isNaN(at) || at >= cutoff) {
-      return { post: false, reason: `identical note already posted within ${days}d (fp ${fp})`, fingerprint: fp }
+    const recent = (edge) => Number.isNaN(at) || at >= edge
+
+    if (fingerprintOf(c.body) === fp && recent(cutoff)) {
+      return {
+        post: false,
+        reason: `identical note already posted within ${days}d (fp ${fp})`,
+        fingerprint: fp,
+        refs,
+      }
+    }
+
+    // The reworded-restatement case: different bytes, overlapping citations.
+    // BOTH notes must clear the ref floor. A one-issue note as the PRIOR could
+    // otherwise suppress: {#2857} against {#2857,#2900} overlaps at exactly 0.5,
+    // so "#2857 is red and now blocks #2900" would vanish behind "#2857 landed".
+    const priorRefs = refsOf(c.body)
+    if (refs.length >= TOPIC_MIN_REFS && priorRefs.length >= TOPIC_MIN_REFS && recent(topicCutoff)) {
+      const overlap = refOverlap(refs, priorRefs)
+      if (overlap > TOPIC_OVERLAP) {
+        return {
+          post: false,
+          reason: `a note covering the same issues was posted within ${topicDays}d (overlap ${overlap.toFixed(2)})`,
+          fingerprint: fp,
+          refs,
+        }
+      }
     }
   }
 
-  return { post: true, reason: 'new note', fingerprint: fp }
+  return { post: true, reason: 'new note', fingerprint: fp, refs }
 }
 
 /**
@@ -141,7 +276,7 @@ export function decide({ body, comments = [], now = Date.now(), windowDays = DEF
  * 2. It follows the `📣 FYI` convention AGENTS.md defines for this thread,
  *    rather than inventing a shape agents have not been told to expect.
  */
-export function render({ body, fp, runUrl, actor }) {
+export function render({ body, fp, refs, runUrl, actor }) {
   // The body is quoted, one `> ` per line. Quoting is structural, not
   // decorative: it stops any line of machine-written text from being a
   // top-level construct in the thread, so even if something slipped past
@@ -166,7 +301,7 @@ export function render({ body, fp, runUrl, actor }) {
   const link = runUrl ? ` ([run](${runUrl}))` : ''
 
   return [
-    `<!-- ${MARKER} fp:${fp} -->`,
+    `<!-- ${MARKER} fp:${fp}${refs && refs.length ? ` refs:${refs.join(',')}` : ''} -->`,
     '📣 **FYI** — automated note from the weekday morning report',
     '',
     quoted,
@@ -202,19 +337,30 @@ if (isMain) {
   const commentsPath = arg('comments')
   const outPath = arg('out')
   if (!notePath || !commentsPath || !outPath) {
-    console.error('usage: morning-report-note.mjs --note <file> --comments <file> --out <file> [--window-days N]')
+    console.error(
+      'usage: morning-report-note.mjs --note <file> --comments <file> --out <file> [--window-days N] [--topic-window-days N]',
+    )
     process.exit(2)
   }
 
   const body = readFileSync(notePath, 'utf8')
   const comments = JSON.parse(readFileSync(commentsPath, 'utf8'))
   const windowDays = Number(arg('window-days', String(DEFAULT_WINDOW_DAYS)))
+  // A guard whose failure mode is SILENCE needs a way to turn it down without a
+  // code change, the same way --window-days exists for the exact check.
+  const topicWindowDays = Number(arg('topic-window-days', String(DEFAULT_TOPIC_WINDOW_DAYS)))
 
-  const d = decide({ body, comments, now: Date.now(), windowDays })
+  const d = decide({ body, comments, now: Date.now(), windowDays, topicWindowDays })
   if (d.post) {
     writeFileSync(
       outPath,
-      render({ body, fp: d.fingerprint, runUrl: process.env.RUN_URL || null, actor: process.env.ACTOR || null }),
+      render({
+        body,
+        fp: d.fingerprint,
+        refs: d.refs,
+        runUrl: process.env.RUN_URL || null,
+        actor: process.env.ACTOR || null,
+      }),
     )
   }
 

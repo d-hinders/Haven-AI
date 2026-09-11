@@ -126,9 +126,10 @@ const DELETED_RAIL_MODULES = [
  * point of this list.
  *
  * Still deliberately NOT listed: `getTokenBalance`, `getProvider`,
- * `getRelayerWallet`. Those survive on `rails/allowance-module.ts` and are
- * LIVE shared chain infrastructure — the #946 bridge, sweep, and the
- * delegate-balance monitor all read them.
+ * `getRelayerWallet`. Those survive on `infra/chain/relayer-reads.ts` — the
+ * reads-only shared chain module #2850 renamed out of its AllowanceModule-era
+ * filename — and are LIVE shared chain infrastructure: the #946 bridge, sweep,
+ * and the delegate-balance monitor all read them.
  */
 const RETIRED_RAIL_SYMBOLS = [
   'executeAllowanceTransfer',
@@ -152,8 +153,10 @@ const RETIRED_RAIL_SYMBOLS = [
 /**
  * The live agent-payment ENTRY POINTS — every route an agent's spend request
  * can enter through. Rule 3 holds these to a stricter module ban than the rest
- * of the backend: they may not name the SURVIVING `rails/allowance-module`
- * either, in any literal, static or runtime.
+ * of the backend: they may not name the retired rail's modules, INCLUDING its
+ * reads-only survivor — `rails/allowance-module` under its pre-#2850 name
+ * (kept below as a tombstone) and `infra/chain/relayer-reads`, the same
+ * module's name since #2850 renamed it to what it is.
  */
 const PAYMENT_ENTRY_POINTS = [
   'routes/payments.ts',
@@ -162,10 +165,11 @@ const PAYMENT_ENTRY_POINTS = [
   'routes/agent-delegations.ts',
 ] as const
 
-/** Rule 3's ban: everything deleted, PLUS the reads-only survivor. */
+/** Rule 3's ban: everything deleted, PLUS the reads-only survivor under BOTH names. */
 const ENTRY_POINT_BANNED_MODULES = [
   ...DELETED_RAIL_MODULES,
-  'rails/allowance-module',
+  'rails/allowance-module', // pre-#2850 name of the reads-only survivor — tombstone
+  'infra/chain/relayer-reads', // #2850 rename of the same module
 ] as const
 
 /** Route prefixes the epic deregistered. See limit 8 above for what is NOT here. */
@@ -355,12 +359,14 @@ describe('safe-retirement (#1993): nothing routes to the retired AllowanceModule
     const facts = parseImportFacts(
       [
         `const AM = await import('../rails/allowance-module.js')`,
+        `const RR = await import('../infra/chain/relayer-reads.js')`,
         `const req = createRequire(import.meta.url)`,
         `const legacy = req('../modules/x402/legacy-authorize.js')`,
         `const computed = await import('../rails/' + name)`,
       ].join('\n'),
     )
     expect(bannedModuleRefs(facts.codeStringLiterals, ENTRY_POINT_BANNED_MODULES).sort()).toEqual([
+      '../infra/chain/relayer-reads.js',
       '../modules/x402/legacy-authorize.js',
       '../rails/allowance-module.js',
     ])
@@ -439,8 +445,9 @@ describe('safe-retirement (#1993): nothing routes to the retired AllowanceModule
         // #2259 retired `getTokenAllowance`; `getTokenBalance` is a genuine
         // surviving read (the #946 bridge, sweep, the delegate-balance monitor),
         // so it keeps this control's point: rule 2 must not over-read a LIVE
-        // allowance-module import just because of the module it comes from.
-        `import { getTokenBalance } from '../rails/allowance-module.js'`,
+        // import of the shared chain-read module (#2850 name) just because of
+        // the module it comes from.
+        `import { getTokenBalance } from '../infra/chain/relayer-reads.js'`,
         `import * as chains from '../domain/chains.js'`,
         `export { resolveExecutionRail } from '../rails/execution-rail.js'`,
         `await app.register(agentDelegationRoutes, { prefix: '/agents' })`,
@@ -462,11 +469,13 @@ describe('safe-retirement (#1993): nothing routes to the retired AllowanceModule
     )).toBe(true) // rule 5
 
     // The one deliberate asymmetry, stated so it cannot be mistaken for a gap:
-    // rule 3's ENTRY-POINT ban DOES catch the surviving reads-only module — the
-    // same import that is correct in `agent-connection-setups.ts` is a finding
-    // on `routes/payments.ts`, and that is the point.
+    // rule 3's ENTRY-POINT ban DOES catch the surviving reads-only module —
+    // here under its #2850 name; the tombstone pre-#2850 spelling is proven
+    // caught by rule 3's positive control above. The same import that is
+    // correct in `agent-connection-setups.ts` is a finding on
+    // `routes/payments.ts`, and that is the point.
     expect(bannedModuleRefs(facts.staticModuleRefs, ENTRY_POINT_BANNED_MODULES)).toEqual([
-      '../rails/allowance-module.js',
+      '../infra/chain/relayer-reads.js',
     ])
   })
 })

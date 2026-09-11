@@ -83,8 +83,9 @@ packages/backend/src/
   domain/     PURE: money, address, chains, policy, rail decision, taxonomy
               — no fastify, no pg, no ethers/viem
   modules/    accounts, agents, policy, payments, x402, mpp, reporting, fee
-  rails/      allowance-module/, delegation/, registry.ts
-  infra/      repositories (SQL lives here only), chain clients, relayer,
+  rails/      delegation/, execution-rail.ts, hybrid-*, sweep.ts
+  infra/      repositories (SQL lives here only), chain clients (the shared
+              chain reads live in infra/chain/relayer-reads.ts), relayer,
               explorers, outbound HTTP (the SSRF-guarded reader in
               infra/http/ — NOT the top-level http/ routes directory below)
   http/       thin fastify routes: validate -> call module -> serialize

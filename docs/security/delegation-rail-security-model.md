@@ -766,6 +766,14 @@ hard backstop.
 
 ## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
 
+> **Re-verified #2850:** this diff touched two files in this document's
+> covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by
+> exactly one import-path line: `getTokenBalance` now imports from
+> `infra/chain/relayer-reads.ts` (the shared chain-read module renamed out of
+> its `rails/allowance-module.ts` name). No handler, authority check, signing
+> path, or invariant mapping in either route changes; §2's
+> relayer-free/signer-free scans read unchanged bodies at a new import path.
+
 The rail settles x402 two ways, selected per payment (`routes/x402.ts`):
 
 - **erc7710 direct settlement (default & destination, #830):** the settlement

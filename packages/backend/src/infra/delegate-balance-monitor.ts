@@ -29,7 +29,7 @@ import {
 } from './repositories/delegate-monitoring.js'
 import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
-import { getTokenBalance } from '../rails/allowance-module.js'
+import { getTokenBalance } from '../infra/chain/relayer-reads.js'
 
 const USDC_DECIMALS = 6
 

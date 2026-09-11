@@ -41,7 +41,7 @@ vi.mock('ethers', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../rails/allowance-module.js', () => ({
+vi.mock('../../../infra/chain/relayer-reads.js', () => ({
   getProvider: () => ({ getBalance: mockEthersGetBalance }),
 }))
 
@@ -74,7 +74,7 @@ describe('the factory is a genuine two-SDK choice', () => {
 // The conformance suite. Both implementations, identical expectations.
 describe.each([
   ['viem (delegation rail)', () => viemChainClient],
-  ['ethers (allowance-module rail)', () => ethersChainClient],
+  ['ethers (relayer-reads)', () => ethersChainClient],
 ])('%s', (_name, client) => {
   it('reads a native balance', async () => {
     await expect(client().getNativeBalance(CHAIN, HOLDER)).resolves.toBe(1_000n)

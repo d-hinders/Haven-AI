@@ -50,7 +50,7 @@ import {
  *   3. **It compares against ground truth, not a list.** The expected key set is
  *      read out of the real module every run, so it stays correct when the
  *      module's exports change — including under #2259, which will delete three
- *      of `rails/allowance-module.ts`'s six exports. A hard-coded roster would
+ *      of `infra/chain/relayer-reads.ts`'s six exports. A hard-coded roster would
  *      have to be edited in lockstep, and would go stale exactly the way the
  *      CASP claim this issue corrects went stale.
  */
@@ -148,7 +148,7 @@ describe('the guard itself is falsifiable', () => {
   }
 
   const withRealModule = (testSource: string) => ({
-    'rails/allowance-module.ts': REAL_MODULE_SOURCE,
+    'infra/chain/relayer-reads.ts': REAL_MODULE_SOURCE,
     'routes/__tests__/thing.test.ts': testSource,
   })
 
@@ -196,7 +196,7 @@ describe('the guard itself is falsifiable', () => {
   it('flags a phantom override in the `async (importOriginal) => ({ ...spread })` form', () => {
     // The blind spot review found on #2307. The first parser required a
     // literal empty `()` parameter list, so this shape — 26 occurrences in the
-    // backend tree, three of them on `rails/allowance-module.js` — was not
+    // backend tree, three of them on `infra/chain/relayer-reads.js` — was not
     // checked, not reported, just invisible. A phantom injected into one of
     // them went undetected. That is a silent skip, the exact thing this
     // module's contract forbids.
@@ -267,7 +267,7 @@ describe('the guard itself is falsifiable', () => {
     // convenience: what remains is exactly the three shared, rail-agnostic
     // reads `docs/archive/decision-log.md` names (moved out of CLAUDE.md by
     // #2639), and no AllowanceModule contract binding at all.
-    const { names } = moduleExportNames(path.resolve(BACKEND_SRC, 'rails/allowance-module.ts'))
+    const { names } = moduleExportNames(path.resolve(BACKEND_SRC, 'infra/chain/relayer-reads.ts'))
     expect(names).not.toBeNull()
     expect([...(names ?? [])].sort()).toEqual([
       'getProvider',

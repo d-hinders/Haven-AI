@@ -66,7 +66,7 @@ import fastifyJwt from '@fastify/jwt'
  *      **#2307 corrected this clause.** It used to end "and
  *      `executeAllowanceTransfer` was never called", asserted with a spy. That
  *      assertion could not fail: #1987 deleted the executor, and
- *      `rails/allowance-module.ts` has never exported that name since, so the
+ *      `infra/chain/relayer-reads.ts` has never exported that name since, so the
  *      `vi.mock` factory entry was a function nothing could reach. Vitest
  *      accepts such an entry silently, which is how 56 of these accumulated
  *      across seven files before #2307 counted them.
@@ -136,7 +136,7 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, x402DelegationMoc
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
 
@@ -1025,7 +1025,7 @@ describe('#1986/#1987: the spend machinery is GONE, not merely refused', () => {
     // The falsifiability floor (#1897's "false zeros" lesson): prove the
     // instrument can see anything before a zero is allowed to mean something.
     expect(sources.length).toBeGreaterThan(150)
-    expect(sources.some((f) => f.endsWith('rails/allowance-module.ts'))).toBe(true)
+    expect(sources.some((f) => f.endsWith('infra/chain/relayer-reads.ts'))).toBe(true)
   })
 
   it('proves the instrument can say YES — a surviving read IS found by the same scan', () => {

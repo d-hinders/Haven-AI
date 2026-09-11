@@ -31,7 +31,8 @@ vi.mock('../../../rails/execution-rail.js', () => ({
 // `../allowances.js` does not import the agents repository at all — so the mock
 // replaced a module this unit never loads with a function that no longer
 // exists. Removed. (Found by `testing/__tests__/mock-factory-exports.guard`,
-// not by the #2307 census, which only looked for five allowance-module names.)
+// not by the #2307 census, which only looked for five of the retired rail's
+// export names.)
 
 const { handleGetAllowances } = await import('../allowances.js')
 

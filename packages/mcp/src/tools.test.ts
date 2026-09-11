@@ -47,6 +47,32 @@ const x402PaymentRequired = {
   ],
 }
 
+// The live funding-leg wire shape (#946): every sign_data the backend emits
+// carries 'eip712_userop' plus the account's typed data. Fixtures updated by
+// #2850, which retired the SDK's scheme-less bare-hash fallback — a sign_data
+// without signature_scheme is now rejected by the client.
+const userOpTypedData = {
+  domain: {
+    chainId: 8453,
+    name: 'HybridDeleGator',
+    version: '1',
+    verifyingContract: `0x${'dd'.repeat(20)}`,
+  },
+  types: {
+    PackedUserOperation: [
+      { name: 'sender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'entryPoint', type: 'address' },
+    ],
+  },
+  primaryType: 'PackedUserOperation',
+  message: {
+    sender: `0x${'dd'.repeat(20)}`,
+    nonce: '1',
+    entryPoint: `0x${'ee'.repeat(20)}`,
+  },
+}
+
 // resourceUrl is used by the #190 security tests below
 const resourceUrl = challenge.resource
 
@@ -278,6 +304,8 @@ describe('Haven MCP tool handlers', () => {
           resource_url: x402PaymentRequired.resource.url,
           sign_data: {
             hash: `0x${'22'.repeat(32)}`,
+            signature_scheme: 'eip712_userop',
+            typed_data: userOpTypedData,
             components: {
               safe: safeAddress,
               token: x402PaymentRequired.accepts[0].asset,
@@ -378,6 +406,8 @@ describe('Haven MCP tool handlers', () => {
           resource_url: x402PaymentRequired.resource.url,
           sign_data: {
             hash: `0x${'33'.repeat(32)}`,
+            signature_scheme: 'eip712_userop',
+            typed_data: userOpTypedData,
             components: {
               safe: safeAddress,
               token: x402PaymentRequired.accepts[0].asset,
@@ -617,6 +647,8 @@ describe('Haven MCP tool handlers', () => {
           resource_url: resourceUrl,
           sign_data: {
             hash: `0x${'22'.repeat(32)}`,
+            signature_scheme: 'eip712_userop',
+            typed_data: userOpTypedData,
             components: {
               safe: safeAddress,
               token: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
@@ -1157,6 +1189,8 @@ describe('haven_pay_mcp_tool', () => {
           expires_at: '2099-01-01T00:00:00.000Z',
           sign_data: {
             hash: SIGN_HASH,
+            signature_scheme: 'eip712_userop',
+            typed_data: userOpTypedData,
             components: { safe: '0xSafe', token: '0xToken', to: '0xTo', amount: '10000', payment_token: '0x0', payment: '0', nonce: 1 },
           },
         }, 201)
@@ -1269,6 +1303,8 @@ describe('merchant MCP endpoint discovery (#1301)', () => {
           expires_at: '2099-01-01T00:00:00.000Z',
           sign_data: {
             hash: DISCOVERY_SIGN_HASH,
+            signature_scheme: 'eip712_userop',
+            typed_data: userOpTypedData,
             components: {
               safe: '0xSafe',
               token: '0xToken',
@@ -1619,6 +1655,8 @@ describe('haven_discover_tools (#349)', () => {
         safe_address: safeAddress,
         sign_data: {
           hash: `0x${'11'.repeat(32)}`,
+          signature_scheme: 'eip712_userop',
+          typed_data: userOpTypedData,
           components: {
             safe: safeAddress,
             token: x402PaymentRequired.accepts[0].asset,

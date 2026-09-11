@@ -97,7 +97,8 @@ const challenge = {
  * #2307 removed five of the six assertions that used to live here
  * (`getLatestBlockTimeSec`, `computeEffectiveAllowance`, `generateTransferHash`,
  * `recoverSigner`, `executeAllowanceTransfer`). None is an export of
- * `rails/allowance-module.ts` — #1987 deleted them all — so each was a mock
+ * `infra/chain/relayer-reads.ts` (named `rails/allowance-module.ts` when #1987
+ * ran) — #1987 deleted them all — so each was a mock
  * factory entry nothing could call, and each assertion passed unconditionally.
  *
  * `getTokenAllowance` IS a real export, so it stays. It is a weak guard on this

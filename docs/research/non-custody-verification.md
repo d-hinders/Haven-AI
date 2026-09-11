@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: research
 covers:
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
@@ -345,5 +345,5 @@ change that path, add authority, or move funds.
 ## References
 
 - [`casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md) — the source of every invariant above.
-- [`allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts) — on-chain allowance READ. (The relayer-gas-only transfer it also held was deleted by #1987; see the addendum above.)
+- [`infra/chain/relayer-reads.ts`](../../packages/backend/src/infra/chain/relayer-reads.ts) — the shared chain reads (`rails/allowance-module.ts` before #2850 renamed it). On-chain allowance READ as of #1987. (The relayer-gas-only transfer it also held was deleted by #1987; see the addendum above.)
 - [`02-identity-and-custody.md`](../architecture/02-identity-and-custody.md) — the custody model this makes provable.

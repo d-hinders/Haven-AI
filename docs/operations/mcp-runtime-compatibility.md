@@ -14,7 +14,7 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
-last-verified: "2026-09-10"
+last-verified: "2026-09-11"
 ---
 
 # MCP Runtime Compatibility
@@ -78,6 +78,14 @@ last-verified: "2026-09-10"
 > local twin is unaffected — the #1301 bounded discovery helper it shares still
 > lives in `@haven_ai/sdk`, so the skew-flatness this document asserts is a
 > property of the SDK helper, not of which mcp-server file calls it.
+>
+> **Recent re-verification (#2850):** the CLI's transaction CSV/JSON export
+> relabelled `delegate_sweep` from "allowance funding" to "sweep" — the old
+> label was the retired rail's name for what is now the shared gasless-sweep
+> lane (`infra/chain/relayer-reads.ts` feeds it its wallet). One display string
+> in `exportType` (`packages/cli/src/commands.ts`); no command surface, flag,
+> auth step, consent hash, or version-skew contract changes, and nothing about
+> the local runtime's capabilities moves.
 >
 > **Recent re-verification (#2811):** the same for the hosted server's
 > plain-HTTP x402 lifecycle handlers — `haven_quote_x402`,

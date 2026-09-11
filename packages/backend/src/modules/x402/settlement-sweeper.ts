@@ -178,7 +178,7 @@ import {
   type RedemptionIndex,
   type ScanRange,
 } from '../../infra/chain/redeemed-delegation-scanner.js'
-import { getProvider } from '../../rails/allowance-module.js'
+import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { observeErc7710Settlement } from './settlement-observed.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../mpp/index.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'

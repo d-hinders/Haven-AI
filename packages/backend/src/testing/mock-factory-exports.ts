@@ -1,7 +1,7 @@
 /**
  * The mechanism behind a defect this repository has regrown three times.
  *
- * `vi.mock('../../rails/allowance-module.js', () => allowanceMocks)` replaces a
+ * `vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)` replaces a
  * module wholesale. Vitest does NOT check the factory's keys against the real
  * module's exports, so a factory entry for a name the module does not export is
  * silently accepted as a brand-new function that nothing can ever call. Every
@@ -63,7 +63,7 @@ const TEST_FILE_RE = /\.test\.ts$/
  *
  * Round-two review of #2307 found the detector and the count-pinning auditor
  * each carried their OWN single-quote-only regex, so a double-quoted
- * `vi.mock("../../rails/allowance-module.js", …)` was invisible to both at once
+ * `vi.mock("../../infra/chain/relayer-reads.js", …)` was invisible to both at once
  * — the phantom undetected AND the invariant silent. Two regexes meant to
  * cross-check each other cannot do so while they can drift apart, so there is
  * now one exported source of truth and both read it. The invariant's promise —
@@ -277,7 +277,7 @@ export function moduleExportNames(
  * #2307 found the first draft silently ignored `vi.mock(spec, async
  * (importOriginal) => ({ ...(await importOriginal()), key: vi.fn() }))` — it
  * insisted on a literal empty `()` parameter list — which left 26 factories
- * unscanned, three of them on `rails/allowance-module.js` itself, and a phantom
+ * unscanned, three of them on `infra/chain/relayer-reads.js` itself, and a phantom
  * key injected into one of them was not detected. A guard with a silent blind
  * spot over the exact module the defect keeps regrowing on is the failure this
  * file exists to prevent, so the parser now walks the call rather than

@@ -8,7 +8,8 @@
 # production schema changes and must not inherit this gate.
 #
 # All OTHER money-path changes (x402 / payments / machine-payments /
-# payment-coverage / allowance-module / agentAuth / release tooling) are NOT
+# payment-coverage / relayer-reads (ex-allowance-module) / agentAuth / release
+# tooling) are NOT
 # hard-gated here, and as of #1024 they are not gated in-session either.
 #
 # The pause that used to exist applied ONLY to PRs opened through ship-next; a

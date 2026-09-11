@@ -44,7 +44,7 @@
  */
 import { ethers } from 'ethers'
 import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
-import { getProvider } from '../../rails/allowance-module.js'
+import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { getDelegationContracts } from '../../rails/delegation-contracts.js'
 
 /**

@@ -26,7 +26,7 @@ import {
 } from '../../infra/repositories/machine-payments.js'
 import { findAgentDelegateAddress } from '../../infra/repositories/agents.js'
 import { getBookTimeSekValue } from '../../infra/fiat-values.js'
-import { getTokenBalance } from '../../rails/allowance-module.js'
+import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../reporting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'

@@ -1080,7 +1080,7 @@ async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<num
 }
 
 function exportType(t: Txn): string {
-  if (t.activityType === 'delegate_sweep') return 'allowance funding'
+  if (t.activityType === 'delegate_sweep') return 'sweep'
   if (t.source === 'x402') return 'x402'
   if (t.source === 'mpp_demo') return 'mpp'
   return t.direction === 'in' ? 'receive' : 'send'

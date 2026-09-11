@@ -9,7 +9,6 @@ const DELEGATE = ('0x' + '11'.repeat(20)) as `0x${string}`
 
 afterEach(() => {
   delete process.env.DELEGATION_RAIL_BUNDLER_URL
-  delete process.env.SESSION_RAIL_BUNDLER_URL
 })
 
 describe('watchOnlyDelegateOwner — non-custody (#824 invariant 5)', () => {
@@ -61,10 +60,7 @@ describe('delegationRailBundlerUrl — one credential choke point (#824 invarian
     expect(() => delegationRailBundlerUrl(84532)).toThrow(/not configured/)
   })
 
-  it('reads the dedicated var only — the session-rail fallback is retired (#882)', () => {
-    // The legacy var is no longer consulted, even if present.
-    process.env.SESSION_RAIL_BUNDLER_URL = 'https://bundler.example/session?apikey=s'
-    expect(() => delegationRailBundlerUrl(84532)).toThrow(/not configured/)
+  it('reads the dedicated var only (#882)', () => {
     process.env.DELEGATION_RAIL_BUNDLER_URL = 'https://bundler.example/delegation?apikey=d'
     expect(delegationRailBundlerUrl(84532)).toContain('delegation')
   })

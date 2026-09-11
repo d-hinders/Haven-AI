@@ -33,8 +33,8 @@ vi.mock('../../agents/index.js', async (importOriginal) => ({
   reportingFeedAvailable,
 }))
 
-vi.mock('../../../rails/allowance-module.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../rails/allowance-module.js')>()),
+vi.mock('../../../infra/chain/relayer-reads.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../infra/chain/relayer-reads.js')>()),
   getProvider: () => ({ getTransactionReceipt, getBlock, getLogs }),
 }))
 

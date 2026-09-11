@@ -212,11 +212,17 @@ export default async function transactionRoutes(
   /**
    * GET /transactions/export.csv — the filtered list as a CSV file (#2871).
    *
-   * Filter-faithful over the WHOLE result set, not the page the dashboard has
-   * loaded: it accepts the same `safeId` / `agentId` / `tokenKey` filters as
-   * `GET /`, plus the `direction` and `chainId` the dashboard used to apply in
-   * the browser. Bounded by `EXPORT_ROW_CAP` with a structured refusal above
-   * it, so one request can never stream an unbounded result set.
+   * Filter-faithful over the whole set the aggregation returned, not the page
+   * the dashboard has loaded: it accepts the same `safeId` / `agentId` /
+   * `tokenKey` filters as `GET /`, plus the `direction` and `chainId` the
+   * dashboard used to apply in the browser.
+   *
+   * Two bounds, not one. `EXPORT_ROW_CAP` refuses above a ceiling, so one
+   * request can never stream an unbounded result set. Underneath it the feed
+   * itself is capped at the explorer window per account (#2882) — which is
+   * why "whole" above is the aggregation's result set and not the account's
+   * history. The page says so next to its count; the file carries no such
+   * note, which is recorded on #2882's pull request.
    */
   app.get<{
     Querystring: {

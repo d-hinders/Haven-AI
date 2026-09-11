@@ -185,11 +185,18 @@ function isoToUnix(iso: string): string {
 }
 
 /**
- * Rows requested per source per account, on every leg and both providers
- * (#2882). Exported because it is not only a request parameter: a leg that
- * comes back with exactly this many rows was almost certainly cut off at the
- * window rather than exhausted, which is how `aggregate.ts` detects a
- * truncated read. Raising it, or paginating past it, is #2884.
+ * Rows one leg yields per account (#2882). What it means differs by provider,
+ * and the difference is why `ExplorerLeg.hasMore` exists:
+ *
+ * - On the **Etherscan-compatible v1 legs** it is genuinely requested — sent
+ *   as `offset` — so a full page is evidence the source had more.
+ * - On the **Blockscout v2 legs** (Base, the default chain) nothing is
+ *   requested. `fetchFromV2` sends no page-size parameter; the provider
+ *   returns its own page and the rows are capped here afterwards. A row count
+ *   there measures Blockscout's default, which Haven neither sets nor
+ *   asserts, so the cursor is read instead.
+ *
+ * Raising it, or paginating past it, is #2884.
  */
 export const EXPLORER_PAGE_SIZE = 50
 

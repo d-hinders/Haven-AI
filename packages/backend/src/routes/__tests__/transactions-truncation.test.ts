@@ -18,6 +18,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import transactionRoutes from '../transactions.js'
 import pool from '../../db.js'
 import { EXPLORER_PAGE_SIZE } from '../../infra/explorer-api.js'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const SENDER = '0xAAAA0000000000000000000000000000000000A1'
 
@@ -142,6 +143,27 @@ describe('GET /transactions — truncation signal (#2882)', () => {
       headers: { authorization: `Bearer ${token}` },
     })
   }
+
+  it('matches the documented response shape, truncated field included', async () => {
+    // The backend playbook (#1444) asks for this whenever a documented
+    // route's response changes. It is also the guard that catches a fixture
+    // modelling a response the server cannot emit: `truncated` is required
+    // and the schema is `additionalProperties: false`.
+    const safe = uniqueSafe()
+    stubBlockscout(safe.address, { native: 10, nativeNextPage: true })
+    routeDbQueries(safe.rows)
+
+    const response = await get('?fresh=1')
+
+    // Envelope only, deliberately. Asserting the whole payload fails on a
+    // PRE-EXISTING drift this assertion surfaced: the spec's `Transaction`
+    // schema is `additionalProperties: false` and omits `chainId`, `safeId`,
+    // `safeAddress` and `safeName`, which this route has always returned.
+    // That is not #2882's to fix — whether those four belong in the public
+    // contract is a real decision — so it is filed as #2885 and the rows
+    // are emptied here rather than the guard dropped.
+    expectMatchesSpec('GET', '/transactions', { ...response.json(), transactions: [] })
+  })
 
   it('reports truncated when Blockscout offers another page', async () => {
     const safe = uniqueSafe()

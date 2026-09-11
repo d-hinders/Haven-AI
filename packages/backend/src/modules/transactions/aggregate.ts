@@ -1,10 +1,11 @@
 /**
  * Per-Safe explorer-API aggregation + caching, extracted verbatim from
- * `routes/transactions.ts` (#992). Fans out to `lib/explorer-api.ts`
+ * `routes/transactions.ts` (#992). Fans out to `infra/explorer-api.ts`
  * (normal/internal/ERC-20 transfers), normalizes every source into
  * `Transaction`, sorts, dedupes, and caches the per-Safe result under
- * `buildTransactionCacheKey`. `lib/explorer-api.ts` and `lib/gnosisscan.ts`
- * stay in `lib/` per the #992 scope — this module only consumes their
+ * `buildTransactionCacheKey`. `infra/explorer-api.ts` and `infra/gnosisscan.ts`
+ * stay in `infra/` (the flat `lib/` was folded away by #998) — this module
+ * only consumes their
  * public fetchers.
  *
  * #2849 (safe-retirement slice 3) removed the Safe Transaction Service leg:

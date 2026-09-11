@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { EXPLORER_PAGE_SIZE } from './explorer-api.js'
 
 // Etherscan V2 API (unified endpoint for all chains)
 const BASE_URL = 'https://api.etherscan.io/v2/api'
@@ -97,7 +98,7 @@ async function fetchFromGnosisscan<T>(
 export async function fetchNormalTransactions(
   address: string,
   page = 1,
-  offset = 50,
+  offset = EXPLORER_PAGE_SIZE,
 ): Promise<RawNormalTx[]> {
   return fetchFromGnosisscan<RawNormalTx>({
     module: 'account',
@@ -114,7 +115,7 @@ export async function fetchNormalTransactions(
 export async function fetchInternalTransactions(
   address: string,
   page = 1,
-  offset = 50,
+  offset = EXPLORER_PAGE_SIZE,
 ): Promise<RawInternalTx[]> {
   return fetchFromGnosisscan<RawInternalTx>({
     module: 'account',
@@ -131,7 +132,7 @@ export async function fetchInternalTransactions(
 export async function fetchERC20Transfers(
   address: string,
   page = 1,
-  offset = 50,
+  offset = EXPLORER_PAGE_SIZE,
 ): Promise<RawERC20Transfer[]> {
   return fetchFromGnosisscan<RawERC20Transfer>({
     module: 'account',

@@ -3949,7 +3949,7 @@ export type components = {
             hasMore: boolean;
             partialFailure: boolean;
             failedSafeIds: string[];
-            /** @description At least one account's history came back at the explorer window, so these rows and `total` are a capped view rather than the full history. Independent of `partialFailure`. Pagination past the window is #2884. */
+            /** @description At least one account's explorer read stopped at the pagination budget with the source still offering more, so these rows and `total` are a capped view rather than the full history (#2884). Independent of `partialFailure`. */
             truncated: boolean;
         };
     };

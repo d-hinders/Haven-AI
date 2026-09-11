@@ -173,13 +173,13 @@ export async function fetchSafeTransactions({
       return true
     })
 
-    // Each leg reports for itself whether the provider has more beyond what
-    // it returned — Blockscout by its `next_page_params` cursor, the
-    // Etherscan-shaped legs by a full page, since they offer no cursor. Where
-    // the count IS the signal it errs toward "there may be more": a source
-    // holding exactly one window reports one caveat too many rather than
-    // claiming a completeness it cannot know. #2884 removes the remaining
-    // guess by paginating; this only stops the silence.
+    // Each leg pages to exhaustion or to EXPLORER_MAX_PAGES and reports which
+    // (#2884): Blockscout by following its `next_page_params` cursor, the
+    // Etherscan-shaped legs by walking pages until one comes back short. A
+    // leg that stopped at the budget sets `hasMore`, and a failed leg is
+    // unknown, not capped (logFail above pins it to `hasMore: false`), so
+    // `truncated` still means exactly "this read was capped" — only now the
+    // cap is the page budget, four windows deep, rather than the first one.
     const truncated = normal.hasMore || internal.hasMore || erc20.hasMore
 
     txCache.set(cacheKey, { transactions: deduped, truncated })

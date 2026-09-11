@@ -17,6 +17,9 @@ covers:
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
+  - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
+  - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
+  - packages/frontend/src/hooks/useTransactionsFeed.ts
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/sweep.ts

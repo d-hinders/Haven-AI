@@ -3,10 +3,9 @@
  * `routes/transactions.ts` (#992). Fans out to `infra/explorer-api.ts`
  * (normal/internal/ERC-20 transfers), normalizes every source into
  * `Transaction`, sorts, dedupes, and caches the per-Safe result under
- * `buildTransactionCacheKey`. `infra/explorer-api.ts`
- * stay in `infra/` (the flat `lib/` was folded away by #998) — this module
- * only consumes their
- * public fetchers.
+ * `buildTransactionCacheKey`. `infra/explorer-api.ts` stays in `infra/` (the
+ * flat `lib/` was folded away by #998) — this module only consumes its public
+ * fetchers.
  *
  * #2849 (safe-retirement slice 3) removed the Safe Transaction Service leg:
  * it was fetched unconditionally for every account, but a Hybrid DeleGator

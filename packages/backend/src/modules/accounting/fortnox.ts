@@ -22,6 +22,10 @@ import { ProviderError } from './provider.js'
  */
 export const FORTNOX_AUTHORIZE_URL = 'https://apps.fortnox.se/oauth-v1/auth'
 export const FORTNOX_TOKEN_URL = 'https://apps.fortnox.se/oauth-v1/token'
+// #2863: RFC 7009 revocation. Disconnect posts the REFRESH token here with
+// `token_type_hint=refresh_token` before the stored secrets are cleared; the
+// access token dies with it (Fortnox invalidates the pair).
+export const FORTNOX_REVOKE_URL = 'https://apps.fortnox.se/oauth-v1/revoke'
 export const FORTNOX_API_BASE = 'https://api.fortnox.se/3'
 // #496: the feed adapter creates unattested SUPPLIER INVOICES (+ suppliers)
 // rather than vouchers, and #498 attaches the receipt underlag via the INBOX
@@ -76,6 +80,7 @@ export function fortnoxOAuth2Config(creds: FortnoxCredentials): OAuth2ProviderCo
     providerId: 'fortnox',
     authorizeUrl: FORTNOX_AUTHORIZE_URL,
     tokenUrl: FORTNOX_TOKEN_URL,
+    revokeUrl: FORTNOX_REVOKE_URL,
     clientId: creds.clientId,
     clientSecret: creds.clientSecret,
     redirectUri: creds.redirectUri,

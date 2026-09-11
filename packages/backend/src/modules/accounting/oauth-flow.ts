@@ -25,14 +25,34 @@
  * stored token still valid, not burn it at the provider and then fail to
  * persist the replacement (haven-reviewer, #2887). The Fortnox-specific
  * predecessor had this invariant; it is kept here for every provider.
+ *
+ * ## The refresh runs under a per-connection lock (#2863)
+ *
+ * Two workers refreshing the same single-use token — the settlement hook and
+ * a "Sync now" click — used to burn each other's rotation and lock the
+ * connection out. The refresh path now runs inside `withLockedConnection`
+ * (`SELECT … FOR UPDATE` on the `accounting_connections` row): the second
+ * caller waits, re-reads the row the first one already rotated, and uses
+ * that token without a provider call. The rotated pair is committed with the
+ * lock, BEFORE the access token is handed to the caller.
+ *
+ * A refresh the provider REFUSES (`invalid_grant`, or any other 4xx that is
+ * not a rate limit) means the grant is dead: the row flips to
+ * `needs_reauthorisation` with the provider's error code as the reason (never
+ * token material), the caller gets `ConnectionNeedsReauthorisationError`, and
+ * no later call retries the refresh until the user re-consents. A 429 (Fortnox
+ * rate limit, 25 calls / 5 s, no Retry-After) and a 408 are transient and
+ * surface as `ProviderError` without touching the row.
  */
 
 import {
   getConnection,
   setCompanyInfo,
+  setStatus,
   stampFeedFromIfUnset,
   updateSecrets,
   upsertConnection,
+  withLockedConnection,
   type AccountingConnectionRow,
 } from '../../infra/repositories/accounting-connections.js'
 import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
@@ -55,6 +75,8 @@ export interface OAuth2ProviderConfig {
   scope: string
   /** Provider-specific authorize parameters (Fortnox: access_type, account_type). */
   extraAuthorizeParams?: Record<string, string>
+  /** RFC 7009 revocation endpoint; required when the descriptor declares `capabilities.revoke`. */
+  revokeUrl?: string
 }
 
 export interface OAuth2Tokens {
@@ -113,6 +135,15 @@ function toTokens(data: TokenResponse): OAuth2Tokens {
   }
 }
 
+/**
+ * Upper bound on one token-endpoint round trip. The refresh runs while the
+ * connection row is locked (`withLockedConnection`), so an unanswered
+ * provider must not pin a pool connection and the row forever: the abort
+ * surfaces as a `ProviderError` with status 0 — transient, never a grant
+ * verdict — and the transaction rolls back.
+ */
+export const OAUTH2_PROVIDER_TIMEOUT_MS = 15_000
+
 async function postToken(
   cfg: OAuth2ProviderConfig,
   body: URLSearchParams,
@@ -128,6 +159,7 @@ async function postToken(
         Accept: 'application/json',
       },
       body: body.toString(),
+      signal: AbortSignal.timeout(OAUTH2_PROVIDER_TIMEOUT_MS),
     })
   } catch (err) {
     throw new ProviderError(
@@ -137,9 +169,69 @@ async function postToken(
     )
   }
   if (!res.ok) {
-    throw new ProviderError(`${cfg.providerId} token request failed (HTTP ${res.status}).`, res.status, cfg.providerId)
+    const code = await readOAuthErrorCode(res)
+    throw new ProviderError(
+      `${cfg.providerId} token request failed (HTTP ${res.status})${code ? `: ${code}` : '.'}`,
+      res.status,
+      cfg.providerId,
+    )
   }
   return toTokens((await res.json()) as TokenResponse)
+}
+
+/**
+ * The RFC 6749 `error` code from a token-endpoint refusal (`invalid_grant`,
+ * `invalid_client`, …), or null. Only the short code is read — never the
+ * description, never the body as a whole — so what reaches a log line or a
+ * `status_reason` is one identifier, not provider free text.
+ */
+async function readOAuthErrorCode(res: Response): Promise<string | null> {
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    const code = typeof body?.error === 'string' ? body.error : null
+    return code && /^[a-z_]{1,64}$/.test(code) ? code : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Revoke a token at the provider (RFC 7009): `token` + `token_type_hint`,
+ * Basic client auth. Fortnox: `POST /oauth-v1/revoke` with the refresh token.
+ * Throws `ProviderError` on a non-2xx; the caller (disconnect) treats that as
+ * "log and clear locally anyway".
+ */
+export async function revokeToken(
+  cfg: OAuth2ProviderConfig,
+  token: string,
+  tokenTypeHint: 'refresh_token' | 'access_token',
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  if (!cfg.revokeUrl) {
+    throw new ProviderError(`${cfg.providerId} declares no revocation endpoint.`, 0, cfg.providerId)
+  }
+  let res: Response
+  try {
+    res = await fetchImpl(cfg.revokeUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: basicAuthHeader(cfg),
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: new URLSearchParams({ token, token_type_hint: tokenTypeHint }).toString(),
+      signal: AbortSignal.timeout(OAUTH2_PROVIDER_TIMEOUT_MS),
+    })
+  } catch (err) {
+    throw new ProviderError(
+      `Could not reach ${cfg.providerId}: ${err instanceof Error ? err.message : String(err)}`,
+      0,
+      cfg.providerId,
+    )
+  }
+  if (!res.ok) {
+    throw new ProviderError(`${cfg.providerId} revoke request failed (HTTP ${res.status}).`, res.status, cfg.providerId)
+  }
 }
 
 /** Exchange an authorization code for tokens. */
@@ -246,13 +338,63 @@ export async function completeOAuth2Connect(input: {
 }
 
 /**
+ * Thrown when the stored grant is dead and only a re-consent can revive it.
+ * Carries no token material — `status` names the row's state, `reason` the
+ * provider's error code as recorded in `status_reason`.
+ */
+export class ConnectionNeedsReauthorisationError extends Error {
+  readonly provider: string
+  readonly status: 'needs_reauthorisation' | 'revoked_at_provider'
+  readonly reason: string | null
+  constructor(provider: string, status: ConnectionNeedsReauthorisationError['status'], reason: string | null) {
+    super(`${provider} connection is ${status.replace(/_/g, ' ')}${reason ? ` (${reason})` : ''} — reconnect it.`)
+    this.name = 'ConnectionNeedsReauthorisationError'
+    this.provider = provider
+    this.status = status
+    this.reason = reason
+  }
+}
+
+/** The states in which the stored grant cannot be used and must not be refreshed. */
+export function isTokenDeadStatus(status: AccountingConnectionRow['status']): status is 'needs_reauthorisation' | 'revoked_at_provider' {
+  return status === 'needs_reauthorisation' || status === 'revoked_at_provider'
+}
+
+/**
+ * A token-endpoint refusal that means the GRANT is dead, as opposed to a
+ * transient. 429 is Fortnox's rate limit (no Retry-After) and 408 a timeout:
+ * both are retried by the next sync, never a reason to demand a re-consent.
+ * A 5xx and a network failure (status 0) are the provider's problem.
+ */
+function isGrantRefusal(err: unknown): err is ProviderError {
+  return err instanceof ProviderError && err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429
+}
+
+const stillValid = (row: AccountingConnectionRow): boolean =>
+  (row.token_expires_at ? new Date(row.token_expires_at).getTime() : 0) > Date.now()
+
+type LockedRefreshOutcome =
+  | { kind: 'token'; accessToken: string }
+  | { kind: 'dead'; status: 'needs_reauthorisation' | 'revoked_at_provider'; reason: string | null }
+  | { kind: 'none' }
+
+/**
  * Return a usable access token for the user, refreshing (and persisting) it if
- * it has expired. Returns null if the user has no live connection.
+ * it has expired. Returns null if the user has no live connection. Throws
+ * `ConnectionNeedsReauthorisationError` when the grant is dead (see the file
+ * header) and `SecretsKeyMissingError` when a refresh would land in plaintext.
  *
- * The refreshed token set is written through `updateSecrets`, which also
- * re-encrypts a version-0 row as a side effect — the first refresh after the
- * key is set is what moves a migrated row off plaintext. (#2863 adds the
- * per-connection lock; this keeps the pre-existing unlocked shape.)
+ * The unlocked fast path answers the common case (a valid token) with one
+ * read. Only an expired token takes the lock; inside it the row is re-read,
+ * so a caller that queued behind another worker's refresh finds a valid
+ * token and returns it without touching the provider. The refreshed set is
+ * written through `updateSecrets` ON THE LOCK's transaction — which also
+ * re-encrypts a version-0 row as a side effect (the first refresh after the
+ * key is set is what moves a migrated row off plaintext) — and committed
+ * before the caller sees the new access token.
+ *
+ * The `dead` outcome is a RETURN, not a throw, on purpose: `withTransaction`
+ * rolls back on a throw, and the `needs_reauthorisation` write must commit.
  */
 export async function getValidOAuth2AccessToken(
   cfg: OAuth2ProviderConfig,
@@ -261,20 +403,48 @@ export async function getValidOAuth2AccessToken(
 ): Promise<string | null> {
   const conn = await readOAuth2Connection(cfg.providerId, userId)
   if (!conn) return null
-
-  const expiresAt = conn.row.token_expires_at ? new Date(conn.row.token_expires_at).getTime() : 0
-  if (expiresAt > Date.now()) return conn.secrets.accessToken
+  if (isTokenDeadStatus(conn.row.status)) {
+    throw new ConnectionNeedsReauthorisationError(cfg.providerId, conn.row.status, conn.row.status_reason)
+  }
+  if (stillValid(conn.row)) return conn.secrets.accessToken
 
   // ORDER MATTERS — see the file header. The refusal happens here, before any
   // provider call, with the stored single-use refresh token still valid.
   if (!secretsKeyConfigured()) throw new SecretsKeyMissingError()
 
-  const refreshed = await refreshAccessToken(cfg, conn.secrets.refreshToken, fetchImpl)
-  const { ciphertext, keyVersion } = encryptSecrets(tokensToSecrets(refreshed) as unknown as Record<string, unknown>)
-  await updateSecrets(userId, cfg.providerId, {
-    secretsCiphertext: ciphertext,
-    secretsKeyVersion: keyVersion,
-    tokenExpiresAt: refreshed.expiresAt,
+  // MUTATION TARGET (fortnox-connection.db.test.ts, "two concurrent callers"):
+  // without the lock both callers refresh and the second rotation kills the
+  // first caller's freshly stored refresh token.
+  const outcome = await withLockedConnection<LockedRefreshOutcome>(userId, cfg.providerId, async (row, tx) => {
+    if (!row || !row.secrets_ciphertext || row.status === 'disconnected') return { kind: 'none' }
+    if (isTokenDeadStatus(row.status)) return { kind: 'dead', status: row.status, reason: row.status_reason }
+    const secrets = decryptSecrets<OAuth2Secrets>(row.secrets_ciphertext, row.secrets_key_version)
+    // Another worker refreshed while we waited for the lock: its token is
+    // the live one, and its refresh token is the only one Fortnox honours.
+    if (stillValid(row)) return { kind: 'token', accessToken: secrets.accessToken }
+
+    let refreshed: OAuth2Tokens
+    try {
+      refreshed = await refreshAccessToken(cfg, secrets.refreshToken, fetchImpl)
+    } catch (err) {
+      // MUTATION TARGET (fortnox-connection.db.test.ts, "invalid_grant"):
+      // without this flip the dead grant is retried on every sync.
+      if (!isGrantRefusal(err)) throw err
+      const reason = `refresh refused: ${err.message}`
+      await setStatus(userId, cfg.providerId, 'needs_reauthorisation', reason, tx)
+      return { kind: 'dead', status: 'needs_reauthorisation', reason }
+    }
+    const { ciphertext, keyVersion } = encryptSecrets(tokensToSecrets(refreshed) as unknown as Record<string, unknown>)
+    await updateSecrets(
+      userId,
+      cfg.providerId,
+      { secretsCiphertext: ciphertext, secretsKeyVersion: keyVersion, tokenExpiresAt: refreshed.expiresAt },
+      tx,
+    )
+    return { kind: 'token', accessToken: refreshed.accessToken }
   })
-  return refreshed.accessToken
+
+  if (outcome.kind === 'none') return null
+  if (outcome.kind === 'dead') throw new ConnectionNeedsReauthorisationError(cfg.providerId, outcome.status, outcome.reason)
+  return outcome.accessToken
 }

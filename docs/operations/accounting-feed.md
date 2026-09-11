@@ -299,7 +299,7 @@ there is exactly one per user.
 | `POST /accounting/connections/:provider/connect-url` | session | consent URL for a live OAuth2 provider; signed, purpose-scoped, provider-bound, **single-use** `state` (10 min) |
 | `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error` |
 | `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409) |
-| `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it |
+| `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it (Fortnox does, #2863 — `POST /oauth-v1/revoke` with the refresh token; a failed revoke still disconnects locally) |
 | `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
 | `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), recent syncs |
 | `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from` |
@@ -328,7 +328,8 @@ accounting_connections WHERE user_id = '<uuid>'`. A user who wants history in
 the new ledger takes the backfill (#2867), which passes an explicit earlier
 date.
 
-**`scope_missing`.** A pushed invoice whose attachment step failed with
+**`scope_missing`.** (For `needs_reauthorisation`, see *Token lifecycle*
+below.) A pushed invoice whose attachment step failed with
 Fortnox's scope error (`[2000663]`) leaves the sync row `pushed` with the
 note and flips the CONNECTION to `scope_missing` — the feed then has no
 active destination until the user reconnects (Disconnect, then Connect on
@@ -336,6 +337,56 @@ active destination until the user reconnects (Disconnect, then Connect on
 and without an active `connected` row the orchestrator feeds nothing — it
 never falls back to asking a connector whether it "has secrets". The invoice
 stands; nothing is re-pushed.
+
+## Token lifecycle (#2863)
+
+Fortnox access tokens live one hour; refresh tokens are **single-use and
+rotate on every refresh** (45-day life). Two things follow, both in the
+generic `oauth-flow.ts` so every OAuth2 provider inherits them:
+
+- **One refresh at a time per connection.** The refresh runs under a row
+  lock (`SELECT … FOR UPDATE` on the `accounting_connections` row, inside a
+  transaction that spans the provider call). A second caller — the
+  settlement hook racing a "Sync now" click — waits, re-reads the row the
+  first caller already rotated, and uses that token with no provider call.
+  The rotated pair is committed before either caller sees the new access
+  token, so a crash between "Fortnox rotated" and "we stored it" cannot leave
+  a dead token in the row for a caller that already proceeded.
+- **A refused refresh is not retried.** `invalid_grant` — or any other 4xx
+  from the token endpoint that is not a 408/429 — means the grant is dead
+  (expired after 45 idle days, revoked in Fortnox, or burned by a refresh
+  Haven never got to store). The row flips to **`needs_reauthorisation`**
+  with `status_reason = refresh refused: fortnox token request failed
+  (HTTP 400): invalid_grant` (the provider's error code only — never token
+  material), the connection stays the active destination, and every later
+  token request is refused BEFORE any provider call. A 429 (Fortnox's rate
+  limit: 25 calls / 5 s, no `Retry-After`) and a 5xx leave the row
+  `connected`; the next sync simply tries again.
+
+**On-call read for `needs_reauthorisation`.**
+`SELECT provider, status, status_reason, is_active_destination,
+token_expires_at FROM accounting_connections WHERE user_id = '<uuid>'` —
+and `SELECT payment_id, status, error FROM accounting_feed_syncs WHERE
+user_id = '<uuid>' AND status = 'skipped'`: while the grant is dead each
+sync records the payment as `skipped` with
+`connection needs_reauthorisation: …` (the state is the first thing in the
+reason, so a grep finds it). Nothing is pushed, nothing is refreshed. The
+fix is the user's: Disconnect, then Connect on `/accounting` — a re-consent
+replaces the secrets, sets the row back to `connected`, and the skipped rows
+are re-claimable (#1365), so the next sync feeds them. There is no operator
+action that revives a dead grant; do not hand-edit `status` — the stored
+refresh token is dead at Fortnox regardless of what the row says.
+
+**Disconnect revokes at Fortnox.** `DELETE /accounting/connections/fortnox`
+posts the refresh token to `POST /oauth-v1/revoke`
+(`token_type_hint=refresh_token`, Basic client auth) BEFORE clearing the
+stored secrets, so a grant Haven no longer holds is one Fortnox no longer
+honours either. A failed revoke (Fortnox down, token already dead) still
+clears locally — `status_reason` is `user disconnected` instead of
+`user disconnected (grant revoked at provider)`, the route still answers
+204, and the backend logs one warning line carrying the failure's error
+NAME only (`accounting provider revoke failed on disconnect`). The user can
+always also remove the integration inside Fortnox.
 
 ## Secrets at rest (#2860)
 

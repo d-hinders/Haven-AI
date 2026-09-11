@@ -23,11 +23,11 @@ export const FORTNOX: AccountingProvider = {
   id: 'fortnox',
   displayName: 'Fortnox',
   authKind: 'oauth2',
-  // `revoke` is false on purpose: Fortnox has no documented programmatic
-  // revoke for a connected integration that this codebase has exercised; the
-  // user removes the integration in Fortnox. Disconnect clears the stored
-  // secrets and stops the feed either way.
-  capabilities: { attachments: true, verify: true, revoke: false, companyInfo: true },
+  // `revoke` (#2863): disconnect posts the refresh token to Fortnox's
+  // `/oauth-v1/revoke` (RFC 7009) before clearing the stored secrets, so a
+  // grant Haven no longer holds is also one Fortnox no longer honours. A
+  // failed revoke still disconnects locally (`connections.ts`).
+  capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
   availability: 'live',
   requiredScopes: FORTNOX_SCOPE.split(' '),
 }

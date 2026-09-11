@@ -1,13 +1,16 @@
 import {
   FORTNOX_API_BASE,
   FortnoxError,
+  fortnoxOAuth2Config,
   isFortnoxScopeError,
 } from './fortnox.js'
 import {
   fortnoxConfigured,
+  fortnoxCredentials,
   getFortnoxConnection,
   getValidFortnoxAccessToken,
 } from './fortnox-connection.js'
+import { revokeToken } from './oauth-flow.js'
 import { getSyncState, markPushed } from './feed-sync.js'
 import type {
   AccountingConnector,
@@ -18,7 +21,7 @@ import type {
   VerifyOutcome,
 } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
-import type { ProviderCompanyInfo } from './provider.js'
+import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 import {
   loadReceiptUnderlag,
   merchantReceiptPdf,
@@ -408,13 +411,23 @@ export class FortnoxConnector implements AccountingConnector {
   }
 
   /**
-   * Fortnox declares `capabilities.revoke: false` (registry.ts): there is no
-   * programmatic revoke this codebase has exercised, so disconnect clears the
-   * stored secrets and the user removes the integration in Fortnox. The
-   * generic disconnect never calls this for Fortnox; it is a no-op by
-   * contract, not an omission.
+   * #2863: revoke the grant at Fortnox (`POST /oauth-v1/revoke`, Basic client
+   * auth, `token_type_hint=refresh_token`). The generic disconnect calls this
+   * with the secrets still in hand and clears them afterwards whether or not
+   * the call succeeded — a Fortnox outage must not keep a grant the user
+   * asked to drop stored here. A secrets blob without a refresh token (a
+   * corrupt or foreign shape) is a provider error, not a silent success.
    */
-  async revoke(): Promise<void> {}
+  async revoke(secrets: ProviderSecrets): Promise<void> {
+    const refreshToken = typeof secrets.refreshToken === 'string' ? secrets.refreshToken : null
+    if (!refreshToken) throw new FortnoxError('Fortnox connection holds no refresh token to revoke.', 0)
+    try {
+      await revokeToken(fortnoxOAuth2Config(fortnoxCredentials()), refreshToken, 'refresh_token', this.fetchImpl)
+    } catch (err) {
+      if (err instanceof ProviderError && !(err instanceof FortnoxError)) throw new FortnoxError(err.message, err.status)
+      throw err
+    }
+  }
 
   /** Upload one file to the Inbox and connect it to the invoice (#498/#956). */
   private async attachFile(

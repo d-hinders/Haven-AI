@@ -379,6 +379,19 @@ export async function executeSafeTx(
   return { txHash: result.tx_hash as Hash }
 }
 
+/**
+ * The Safe Transaction Service base URL per chain, inlined locally since
+ * #2849 (safe-retirement slice 3) dropped the service URL field from the
+ * shared chain registry — history no longer reads the service, and this
+ * helper is its only remaining consumer. #2848 (safe-retirement slice 2)
+ * deletes this map along with `proposeSafeTx` itself.
+ */
+const SAFE_TX_SERVICE_BASE_URLS: Record<number, string> = {
+  100: 'https://api.safe.global/tx-service/gno',
+  8453: 'https://api.safe.global/tx-service/base',
+  84532: 'https://api.safe.global/tx-service/basesep',
+}
+
 /** Propose a multi-sig transaction to the Safe Transaction Service */
 export async function proposeSafeTx(
   safeAddress: Address,
@@ -389,8 +402,12 @@ export async function proposeSafeTx(
   chainId: number = DEFAULT_CHAIN_ID,
 ): Promise<void> {
   const adjustedSig = normaliseSignatureV(signature)
-  const { safeTxServiceUrl } = getChainConfig(chainId)
-  const url = `${safeTxServiceUrl}/api/v1/safes/${safeAddress}/multisig-transactions/`
+  const txServiceBaseUrl = SAFE_TX_SERVICE_BASE_URLS[chainId]
+  if (!txServiceBaseUrl) {
+    // Same message shape getChainConfig threw before #2849.
+    throw new Error(`Unsupported chain: ${chainId}`)
+  }
+  const url = `${txServiceBaseUrl}/api/v1/safes/${safeAddress}/multisig-transactions/`
 
   const response = await fetch(url, {
     method: 'POST',

@@ -1,23 +1,30 @@
 /**
  * Per-Safe explorer-API aggregation + caching, extracted verbatim from
  * `routes/transactions.ts` (#992). Fans out to `lib/explorer-api.ts`
- * (normal/internal/ERC-20 transfers + Safe Transaction Service transfers),
- * normalizes every source into `Transaction`, sorts, dedupes, and caches the
- * per-Safe result under `buildTransactionCacheKey`. `lib/explorer-api.ts`
- * and `lib/gnosisscan.ts` stay in `lib/` per the #992 scope — this module
- * only consumes their public fetchers.
+ * (normal/internal/ERC-20 transfers), normalizes every source into
+ * `Transaction`, sorts, dedupes, and caches the per-Safe result under
+ * `buildTransactionCacheKey`. `lib/explorer-api.ts` and `lib/gnosisscan.ts`
+ * stay in `lib/` per the #992 scope — this module only consumes their
+ * public fetchers.
+ *
+ * #2849 (safe-retirement slice 3) removed the Safe Transaction Service leg:
+ * it was fetched unconditionally for every account, but a Hybrid DeleGator
+ * is unknown to that service, so the leg failed on every delegation-rail
+ * history read and permanently pinned `hadFailures` — the partial-failure
+ * signal was always on. Blockscout is the source for retired-rail rows too
+ * (#2669), so rows are unchanged; a healthy read now reports
+ * `hadFailures: false`.
  */
 import {
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
-  fetchSafeServiceTransfers,
 } from '../../infra/explorer-api.js'
 import { getChain } from '../../domain/chains.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { createCache } from '../../platform/cache.js'
 import { buildTransactionCacheKey } from './cache-key.js'
-import { compareTransactions, transactionDedupKey, parseIsoTimestamp } from './ordering.js'
+import { compareTransactions, transactionDedupKey } from './ordering.js'
 import type {
   FetchSafeTransactionsParams,
   FetchSafeTransactionsResult,
@@ -69,9 +76,6 @@ export async function fetchSafeTransactions({
     )
     const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(
       logFail('erc20'),
-    )
-    const safeTransfers = await fetchSafeServiceTransfers(chainId, safeAddress).catch(
-      logFail('safe-transfers'),
     )
 
     const transactions: Transaction[] = []
@@ -135,53 +139,6 @@ export async function fetchSafeTransactions({
         tokenAddress: tx.contractAddress,
         tokenSymbol: symbol,
       })
-    }
-
-    for (const transfer of safeTransfers) {
-      if (transfer.type === 'ETHER_TRANSFER') {
-        if (!transfer.value || transfer.value === '0') continue
-
-        transactions.push({
-          hash: transfer.transactionHash,
-          type: 'native',
-          from: transfer.from ?? '',
-          to: transfer.to ?? '',
-          value: transfer.value,
-          valueFormatted: formatTokenValue(transfer.value, nativeToken.decimals),
-          asset: nativeToken.symbol,
-          decimals: nativeToken.decimals,
-          direction: transfer.to?.toLowerCase() === addrLower ? 'in' : 'out',
-          timestamp: parseIsoTimestamp(transfer.executionDate),
-          blockNumber: transfer.blockNumber,
-          isError: false,
-        })
-      }
-
-      if (transfer.type === 'ERC20_TRANSFER') {
-        if (!transfer.value || !transfer.tokenAddress) continue
-
-        const knownToken = chain.tokenByAddress[transfer.tokenAddress.toLowerCase()]
-        const symbol =
-          knownToken?.symbol ?? transfer.tokenInfo?.symbol ?? transfer.tokenAddress
-        const decimals = knownToken?.decimals ?? transfer.tokenInfo?.decimals ?? 18
-
-        transactions.push({
-          hash: transfer.transactionHash,
-          type: 'erc20',
-          from: transfer.from ?? '',
-          to: transfer.to ?? '',
-          value: transfer.value,
-          valueFormatted: formatTokenValue(transfer.value, decimals),
-          asset: symbol,
-          decimals,
-          direction: transfer.to?.toLowerCase() === addrLower ? 'in' : 'out',
-          timestamp: parseIsoTimestamp(transfer.executionDate),
-          blockNumber: transfer.blockNumber,
-          isError: false,
-          tokenAddress: transfer.tokenAddress,
-          tokenSymbol: symbol,
-        })
-      }
     }
 
     transactions.sort(compareTransactions)

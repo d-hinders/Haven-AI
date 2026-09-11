@@ -1,9 +1,9 @@
 /**
  * Backend chain configuration — environment wiring over the shared registry.
  *
- * The per-chain FACTS (identity, explorer/Safe URLs, contracts, passkey,
- * token data) live in `@haven_ai/core` (#986) — ONE definition shared with
- * the frontend. This module adds what only the backend knows: RPC URLs and
+ * The per-chain FACTS (identity, explorer URLs, passkey, token data) live in
+ * `@haven_ai/core` (#986) — ONE definition shared with the backend. This
+ * module adds what only the backend knows: RPC URLs and
  * explorer API credentials from `config.ts`, the explorer API provider
  * selection, and the backend's token Record representation (keyed
  * `USDCE`-style, native first — the balances API iterates in this order).
@@ -41,13 +41,6 @@ export interface ChainConfig {
   explorerApiUrl: string     // e.g. https://api.etherscan.io/v2/api
   explorerApiKey: string     // empty allowed for Blockscout
   explorerApiProvider: ExplorerApiProvider
-  safeTxServiceUrl: string   // e.g. https://api.safe.global/tx-service/gno
-  contracts: {
-    safeProxyFactory: string
-    safeSingletonL2: string
-    fallbackHandler: string
-    multiSendCallOnly: string
-  }
   passkey: {
     /** P-256 verifier the Safe passkey signer will call. */
     verifier: string
@@ -129,8 +122,6 @@ function buildChainConfig(core: CoreChainConfig): ChainConfig {
     explorerApiUrl: env.explorerApiUrl,
     explorerApiKey: env.explorerApiKey,
     explorerApiProvider: env.explorerApiProvider,
-    safeTxServiceUrl: core.safeTxServiceUrl,
-    contracts: core.contracts,
     passkey: core.passkey,
     tokens,
     tokenByAddress: buildTokenByAddress(tokens),

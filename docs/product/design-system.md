@@ -556,6 +556,17 @@ none of `Button`'s guarantees — sizes, tap target, disabled treatment, or focu
 
 #### Shared by every variant
 
+**Busy state: no spinner, no `loading` prop (#2871).** An action in flight
+disables its button and swaps the label to `Verbing…` — `Preparing…`,
+`Sending…`, `Pausing…` — and sets `aria-busy`. That is the whole pattern, and
+it is the one already used by the budget-grant action's `busyLabel`, the agent
+pause action and the accounting sync button; `aria-busy` was added to the
+primitive so the state is exposed rather than only painted. Read its scope
+narrowly: `aria-busy` exposes, it does not announce — a `disabled` button is
+not focusable, so anything the user must actually be told belongs in a
+`role="alert"` (failure) or `role="status"` (neutral) node, the way the
+transactions CSV export reports a refusal or an empty result.
+
 These live in `Button`'s base class string, so they are variant-independent and stated once
 rather than repeated per entry:
 

@@ -25,6 +25,22 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
+ * What the export tells the user when it does not hand back a file.
+ *
+ * Two tones, because two different things happen: `error` is a refusal, and
+ * `info` is the export succeeding over an empty result set — which is not a
+ * failure and must not be painted as one.
+ *
+ * The headline/detail split mirrors the partial-failure banner already on
+ * this screen: a short first line, the specifics beneath.
+ */
+interface ExportNotice {
+  tone: 'error' | 'info'
+  headline: string
+  detail?: string
+}
+
+/**
  * What to show the user when an export fails.
  *
  * The refusal that matters is the row cap: the backend's `details` carries the
@@ -36,14 +52,31 @@ import { PageHeader } from '@/components/ui/PageHeader'
  * builds itself, and a 500 would otherwise surface Fastify's
  * "Internal Server Error" as product copy.
  */
-function exportFailureMessage(err: unknown): string {
+function exportFailureNotice(err: unknown): ExportNotice {
   if (err instanceof ApiRequestError) {
     const details = (err.body as { details?: unknown } | undefined)?.details
     if (err.status === 413 && typeof details === 'string' && details.length > 0) {
-      return details
+      return { tone: 'error', headline: err.message, detail: details }
     }
   }
-  return 'The export could not be generated. Try again.'
+  return {
+    tone: 'error',
+    headline: 'The export could not be generated.',
+    detail: 'Try again in a moment.',
+  }
+}
+
+/**
+ * Does this CSV body carry any record, or only the header?
+ *
+ * The export applies `direction` and the network scope server-side while the
+ * table applies them in memory, so the two can disagree about whether there
+ * is anything to show: the button is gated on the server's `total`, which
+ * does not know about either. Rather than hand the user a silent header-only
+ * file, the empty result is read back off the body and reported.
+ */
+function hasCsvRecords(csv: string): boolean {
+  return csv.replace(/^\uFEFF/, '').includes('\r\n')
 }
 
 function chainName(chainId: number): string {
@@ -61,7 +94,7 @@ export default function TransactionsClient() {
   const { resolveAddress } = useContacts()
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const [exporting, setExporting] = useState(false)
-  const [exportError, setExportError] = useState<string | null>(null)
+  const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
   const [filters, setFilters] = useState<TransactionFilterState>(() => {
     const direction = searchParams.get('direction')
     return {
@@ -151,9 +184,9 @@ export default function TransactionsClient() {
   const showSummary = hasActiveFilters && visibleTransactions.length > 0
   const handleFilterChange = (nextFilters: TransactionFilterState) => {
     setFilters(nextFilters)
-    // The dominant failure tells the user to narrow the filters; leaving the
-    // banner up once they have makes it assert something no longer true.
-    setExportError(null)
+    // Both notices name the filters as the thing to change; leaving one up
+    // once the user has makes it assert something no longer true.
+    setExportNotice(null)
 
     const params = new URLSearchParams()
     if (nextFilters.safeId) params.set('safeId', nextFilters.safeId)
@@ -183,12 +216,20 @@ export default function TransactionsClient() {
     if (scope !== 'all') params.set('chainId', String(scope))
 
     setExporting(true)
-    setExportError(null)
+    setExportNotice(null)
     try {
       const csv = await api.getText(`/transactions/export.csv?${params.toString()}`)
+      if (!hasCsvRecords(csv)) {
+        setExportNotice({
+          tone: 'info',
+          headline: 'Nothing to export.',
+          detail: 'No transactions match these filters. Widen them and try again.',
+        })
+        return
+      }
       downloadCsv(csv, buildCsvFilename(new Date()))
     } catch (err) {
-      setExportError(exportFailureMessage(err))
+      setExportNotice(exportFailureNotice(err))
     } finally {
       setExporting(false)
     }
@@ -235,12 +276,19 @@ export default function TransactionsClient() {
         }
       />
 
-      {exportError && (
+      {exportNotice && (
         <div
-          role="alert"
-          className="mb-4 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]"
+          role={exportNotice.tone === 'error' ? 'alert' : 'status'}
+          className={
+            exportNotice.tone === 'error'
+              ? 'mb-4 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]'
+              : 'mb-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-sm text-[var(--v2-ink-2)]'
+          }
         >
-          {exportError}
+          <div className="font-medium">{exportNotice.headline}</div>
+          {exportNotice.detail && (
+            <div className="mt-1 text-xs">{exportNotice.detail}</div>
+          )}
         </div>
       )}
 
@@ -277,7 +325,7 @@ export default function TransactionsClient() {
             value={scope === 'all' ? 'all' : String(scope)}
             onChange={(e) => {
               setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))
-              setExportError(null)
+              setExportNotice(null)
             }}
             className="max-w-[200px]"
           >

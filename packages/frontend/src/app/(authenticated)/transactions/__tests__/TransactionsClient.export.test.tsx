@@ -128,7 +128,7 @@ describe('TransactionsClient — CSV export (#2871)', () => {
 
   it('shows the row-cap refusal in full, in a live region', async () => {
     const details =
-      'This export would contain 10001 rows; the limit is 10000. Narrow the ' +
+      'This export would contain 10,001 rows; the limit is 10,000. Narrow the ' +
       'filters — by account, agent, token, network or direction — and export again.'
     mockGetText.mockRejectedValue(
       new ApiRequestError('Export too large', 413, { error: 'Export too large', details }),
@@ -140,9 +140,27 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     // The three-word `error` alone tells the user nothing to do; `details`
     // carries the count, the limit and the way out.
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('10001')
+    expect(alert).toHaveTextContent('Export too large')
+    expect(alert).toHaveTextContent('10,001')
     expect(alert).toHaveTextContent('Narrow the filters')
     expect(mockDownloadCsv).not.toHaveBeenCalled()
+  })
+
+  it('reports an empty result instead of downloading a header-only file', async () => {
+    // The button is gated on the server's `total`, which does not know about
+    // the in-memory direction/network filters the export request DOES send —
+    // so an enabled button can legitimately produce no rows.
+    mockGetText.mockResolvedValue('\uFEFFsettled_at,type,status')
+    render(<TransactionsClient />)
+
+    fireEvent.click(exportButton())
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('Nothing to export')
+    expect(notice).toHaveTextContent('No transactions match these filters')
+    expect(mockDownloadCsv).not.toHaveBeenCalled()
+    // Not a failure: it must not be painted as one.
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('does not surface a raw server string for any other failure', async () => {
@@ -152,7 +170,7 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     fireEvent.click(exportButton())
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('The export could not be generated. Try again.')
+    expect(alert).toHaveTextContent('The export could not be generated.')
     expect(alert).not.toHaveTextContent('Internal Server Error')
   })
 

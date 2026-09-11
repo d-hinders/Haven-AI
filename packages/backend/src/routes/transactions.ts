@@ -289,10 +289,13 @@ export default async function transactionRoutes(
       return reply.code(413).send({
         error: 'Export too large',
         statusCode: 413,
+        // Grouped digits: `10001` and `10000` are near-indistinguishable at a
+        // glance, which defeats the sentence's job of conveying how far over
+        // the export is.
         details:
-          `This export would contain ${filtered.length} rows; the limit is ` +
-          `${EXPORT_ROW_CAP}. Narrow the filters — by account, agent, token, ` +
-          'network or direction — and export again.',
+          `This export would contain ${filtered.length.toLocaleString('en-US')} rows; ` +
+          `the limit is ${EXPORT_ROW_CAP.toLocaleString('en-US')}. Narrow the filters — ` +
+          'by account, agent, token, network or direction — and export again.',
       })
     }
 

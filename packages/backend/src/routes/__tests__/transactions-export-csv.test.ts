@@ -135,12 +135,6 @@ function stubManyBaseTransactions(count: number) {
 }
 
 /**
- * `count` confirmed x402 payment intents for the Base account — the row-cap
- * fixture. This leg, not the explorer one, is what makes EXPORT_ROW_CAP
- * reachable: `FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL` carries no `LIMIT` and
- * `mergeX402Transactions` appends every row.
- */
-/**
  * Two accounts on ONE chain — name resolution is keyed by address AND chain,
  * so a cross-chain pair resolves to nothing on the dashboard too and would
  * not exercise this. The first account pays the second.
@@ -188,6 +182,12 @@ function stubTransferBetweenOwnAccounts() {
   return fetchMock
 }
 
+/**
+ * `count` confirmed x402 payment intents for the Base account — the row-cap
+ * fixture. This leg, not the explorer one, is what makes EXPORT_ROW_CAP
+ * reachable: `FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL` carries no `LIMIT` and
+ * `mergeX402Transactions` appends every row.
+ */
 function x402Rows(count: number) {
   return Array.from({ length: count }, (_, i) => ({
     id: `pi-${i}`,
@@ -455,8 +455,9 @@ describe('GET /transactions/export.csv', () => {
     expect(response.headers['content-type']).toContain('application/json')
     expect(response.json()).toMatchObject({ error: 'Export too large', statusCode: 413 })
     // The actionable half: the count, the limit and the way out.
-    expect(response.json().details).toContain('10002')
-    expect(response.json().details).toContain('10000')
+    // Grouped digits — the copy reads '10,002' / '10,000'.
+    expect(response.json().details).toContain('10,002')
+    expect(response.json().details).toContain('10,000')
     expect(response.json().details).toContain('Narrow the filters')
     // Nothing is emitted — a refusal, never a truncated file.
     expect(response.body).not.toContain('settled_at')

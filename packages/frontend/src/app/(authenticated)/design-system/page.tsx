@@ -429,6 +429,21 @@ export default function DesignSystemPage() {
               widening it would let a button steal taps from its neighbour in a tight
               toolbar.
             </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button variant="tertiary" disabled aria-busy>
+                Preparing…
+              </Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              There is no spinner and no <code>loading</code> prop. An action in
+              flight disables its button and swaps the label to{' '}
+              <code>Verbing…</code> — Preparing, Sending, Pausing — with{' '}
+              <code>aria-busy</code> set so the state is exposed, not merely
+              painted. <code>aria-busy</code> exposes; it does not announce: a
+              disabled button is not focusable, so anything the user must be
+              told goes in a <code>role=&quot;alert&quot;</code> or{' '}
+              <code>role=&quot;status&quot;</code> node instead.
+            </p>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs attention</StatusBadge>

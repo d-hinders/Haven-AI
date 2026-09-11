@@ -113,10 +113,15 @@ type ButtonProps = {
   /**
    * Marks the button as busy while its action is in flight (#2871), for the
    * label-swap pattern this primitive expects — disable, swap the label to
-   * `Verbing…`. Without it the swap is silent to assistive technology: the
-   * control goes disabled, focus is dropped, and the new label sits in no
-   * live region. Anchors have no busy state, so it applies to the `button`
-   * branch only.
+   * `Verbing…`.
+   *
+   * Scope, stated because it is easy to over-read: this exposes the state, it
+   * does not announce it. A `disabled` button is not focusable, so a screen
+   * reader reaches `aria-busy` only if the user navigates to it, and the
+   * attribute is not a live region. Where the *outcome* needs announcing, say
+   * it in a `role="alert"`/`role="status"` node — which is what the
+   * transactions export does. Anchors have no busy state, so this applies to
+   * the `button` branch only.
    */
   'aria-busy'?: boolean
   disabled?: boolean

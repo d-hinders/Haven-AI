@@ -59,7 +59,7 @@
       "note": "Historical mpp_demo payment/receipt/evidence/status rows remain readable; the mpp_demo family (#1328) really does stay readable."
     }
   },
-  "packages/backend/src/modules/reporting/__tests__/feed-rail-parity.test.ts": {
+  "packages/backend/src/modules/accounting/__tests__/feed-rail-parity.test.ts": {
     "both-rails": {
       "category": "test-instrument",
       "note": "Feed-rail parity test: a re-sync of both rails must leave exactly one row and one push each; a fixture/assertion description."

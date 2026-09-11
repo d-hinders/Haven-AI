@@ -29,7 +29,7 @@
   "packages/backend/src/modules/mpp/challenge.ts": {
     "remain-readable": 1
   },
-  "packages/backend/src/modules/reporting/__tests__/feed-rail-parity.test.ts": {
+  "packages/backend/src/modules/accounting/__tests__/feed-rail-parity.test.ts": {
     "both-rails": 2
   },
   "packages/backend/src/modules/x402/settlement-observed.ts": {

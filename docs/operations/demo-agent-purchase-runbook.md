@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/demo-merchant-mcp/**
-  - packages/backend/src/modules/reporting/**
+  - packages/backend/src/modules/accounting/**
 last-verified: "2026-09-05"
 ---
 

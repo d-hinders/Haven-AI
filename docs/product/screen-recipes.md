@@ -16,7 +16,7 @@ covers:
   - packages/frontend/src/components/ui/Input.tsx
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
-  - packages/frontend/src/hooks/useReporting.ts
+  - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/sweep.ts

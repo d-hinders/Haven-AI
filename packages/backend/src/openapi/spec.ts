@@ -421,7 +421,7 @@ const userIdentity = {
 
 // ── Bookkeeping building blocks (#1446, epics #462/#491) ─────────────────────
 
-/** One reporting-feed sync row, as the status route returns it. */
+/** One accounting-feed sync row, as the status route returns it. */
 const feedSyncRow = {
   type: 'object',
   required: ['id', 'user_id', 'provider', 'payment_id', 'external_ref', 'status', 'error', 'attempts', 'created_at', 'updated_at'],
@@ -2645,7 +2645,7 @@ export const openapiSpec = {
     // the alias writes behind it served no surviving surface.
     // ── Bookkeeping: export, reconcile, categories (#1446, epic #462) ───────
     // Read-only over settled-payment data. No custody surface: nothing here
-    // moves money, and the reporting feed below is deliberately NON-ASSERTING
+    // moves money, and the accounting feed below is deliberately NON-ASSERTING
     // (#491) — it hands the accounting tool a draft, never a booked verdict.
     '/accounting/export': {
       get: {
@@ -2653,7 +2653,7 @@ export const openapiSpec = {
         operationId: 'exportAccounting',
         summary: 'Legacy SIE export — GATED OFF by default.',
         description:
-          "Superseded by the non-asserting reporting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.",
+          "Superseded by the non-asserting accounting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'format', in: 'query', schema: { type: 'string', enum: ['sie'] }, description: "Defaults to 'sie'; anything else is a 400." },
@@ -2672,7 +2672,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
-          '410': { ...errorResponse, description: 'The default: SIE export is retired in favour of the reporting feed.' },
+          '410': { ...errorResponse, description: 'The default: SIE export is retired in favour of the accounting feed.' },
         },
       },
     },
@@ -2824,11 +2824,11 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/reporting/status': {
+    '/accounting/feed/status': {
       get: {
         tags: ['Dashboard'],
-        operationId: 'getReportingStatus',
-        summary: 'Whether the reporting feed is available, connected, and live — plus recent syncs.',
+        operationId: 'getAccountingFeedStatus',
+        summary: 'Whether the accounting feed is available, connected, and live — plus recent syncs.',
         description:
           'Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.',
         security: [{ DashboardJwt: [] }],
@@ -2856,10 +2856,10 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/reporting/sync': {
+    '/accounting/feed/sync': {
       post: {
         tags: ['Dashboard'],
-        operationId: 'syncReportingFeed',
+        operationId: 'syncAccountingFeed',
         summary: 'Backfill and retry the feed for the caller.',
         description:
           'Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.',
@@ -2878,14 +2878,14 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '404': { ...errorResponse, description: 'The accounting feed is not available for this caller.' },
         },
       },
     },
-    '/accounting/reporting/verify/{paymentId}': {
+    '/accounting/feed/verify/{paymentId}': {
       get: {
         tags: ['Dashboard'],
-        operationId: 'verifyReportingInvoice',
+        operationId: 'verifyAccountingFeedInvoice',
         summary: "Read back a pushed invoice from the provider's own records.",
         description:
           'Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.',
@@ -2897,7 +2897,7 @@ export const openapiSpec = {
             content: { 'application/json': { schema: invoiceVerification } },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '404': { ...errorResponse, description: 'The accounting feed is not available for this caller.' },
           '409': {
             description: 'Not verifiable — not pushed, not connected, or no invoice reference.',
             content: {
@@ -2917,10 +2917,10 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/reporting/reopen/{paymentId}': {
+    '/accounting/feed/reopen/{paymentId}': {
       post: {
         tags: ['Dashboard'],
-        operationId: 'reopenReportingPush',
+        operationId: 'reopenAccountingFeedPush',
         summary: 'Reopen a pushed row for retry — only when the provider confirms the invoice is gone.',
         description:
           "The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.",
@@ -2944,7 +2944,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '404': { ...errorResponse, description: 'The accounting feed is not available for this caller.' },
           '409': {
             description: 'Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us.',
             content: {
@@ -3097,7 +3097,7 @@ export const openapiSpec = {
         operationId: 'pushFortnoxVouchers',
         summary: 'Legacy asserting voucher push — GATED OFF by default.',
         description:
-          "The asserting counterpart to the reporting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
+          "The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
@@ -4984,7 +4984,7 @@ export const openapiSpec = {
         summary: "Report the merchant's own receipt for a settled payment.",
         description:
           "Captures the receipt document the merchant handed back in the paid response (invoice number, VAT breakdown — facts Haven's own payment evidence cannot assert). " +
-          'The reporting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. ' +
+          'The accounting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. ' +
           'Provide either `url` (https, fetched at feed time under strict guards) or `json` (the inline receipt document, max 64KB).',
         security: [{ AgentApiKey: [] }],
         parameters: [

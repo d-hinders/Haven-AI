@@ -33,8 +33,8 @@ const getTransactionReceipt = vi.fn()
 const getBlock = vi.fn()
 const getLogs = vi.fn()
 
-vi.mock('../../reporting/index.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../reporting/index.js')>()),
+vi.mock('../../accounting/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../accounting/index.js')>()),
   feedSettledPaymentBestEffort: (...args: unknown[]) => feedSettledPaymentBestEffort(...args),
 }))
 

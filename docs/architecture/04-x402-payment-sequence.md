@@ -41,7 +41,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-10"
+last-verified: "2026-09-11"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1173,8 +1173,9 @@ scheme, so nothing flipped it to `confirmed` and it never acquired a
 `recordMachinePaymentEvidenceBase` (book-time FX in `amount_sek`, the
 fee-ledger row, and `feedSettledPaymentBestEffort`), `GET /receipts`,
 `POST /machine-payments/:id/merchant-receipt`, and dashboard transaction
-history. erc7710 payments were therefore absent from the Fortnox reporting
-feed and from the UI, while EIP-3009 payments reached both.
+history. erc7710 payments were therefore absent from the Fortnox accounting
+feed (named the "reporting feed" until #2859) and from the UI, while EIP-3009
+payments reached both.
 
 The completion seam is **scheme-agnostic by construction**: no consumer knows
 about schemes. `POST /machine-payments/evidence` — the call the SDK already

@@ -17,7 +17,7 @@ vi.mock('../../../rails/allowance-module.js', () => ({
 }))
 vi.mock('../../../infra/fiat-values.js', () => ({ getBookTimeSekValue: vi.fn() }))
 vi.mock('../../fee/index.js', () => ({ quoteFee: vi.fn(), recordSettledFee: vi.fn() }))
-vi.mock('../../reporting/index.js', () => ({ feedSettledPaymentBestEffort: vi.fn() }))
+vi.mock('../../accounting/index.js', () => ({ feedSettledPaymentBestEffort: vi.fn() }))
 
 const { reconcileDelegateResidueAfterSettlement } = await import('../evidence.js')
 

@@ -10,10 +10,6 @@
     "packages/backend/src/routes/agent-rekey.ts",
     "packages/connect/src/rekey.ts"
   ],
-  "docs/architecture/03-payment-sequence.md": [
-    "packages/frontend/src/components/agent-panel/AllowanceBar.tsx",
-    "packages/frontend/src/lib/allowance-math.ts"
-  ],
   "docs/architecture/04-x402-payment-sequence.md": [
     "packages/backend/src/infra/repositories/__tests__/erc7710-sweep-eligibility.test.ts",
     "packages/backend/src/infra/repositories/payment-intents.ts",
@@ -77,9 +73,6 @@
     "packages/core/src/api-types.ts",
     "packages/frontend/Dockerfile"
   ],
-  "docs/contributing/loop-harness-index.md": [
-    "packages/frontend/src/components/agent-panel/AllowanceBar.tsx"
-  ],
   "docs/contributing/pr-workflow-checklist.md": [
     "packages/backend/src/db/advisory-lock.ts",
     "scripts/ci/verify-merged-head.mjs",
@@ -113,7 +106,6 @@
     "packages/frontend/src/components/ProtectedRoute.tsx",
     "packages/frontend/src/components/ReceiveFundsModal.tsx",
     "packages/frontend/src/components/agent-panel/AgentCard.tsx",
-    "packages/frontend/src/components/agent-panel/AllowanceBar.tsx",
     "packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx",
     "packages/frontend/src/components/connect-agent/CopyBlock.tsx",
     "packages/frontend/src/components/sidebar/Sidebar.tsx",

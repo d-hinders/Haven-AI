@@ -11,10 +11,8 @@
  * page at all.)
  *
  * #2413: no rail marker is read here any more — the account list is
- * delegation-only, so every account this page renders is on the live rail.
- * Both rails live in the same `user.safes` list, so the branch is per ACCOUNT,
- * not per page — and there is no third state: an account is either on the
- * delegation rail or it is a legacy Safe.
+ * delegation-only, so every account this page renders is on the live rail,
+ * and there is no second branch: a legacy Safe reaches no screen at all.
  *
  * What each branch may claim, and what backs it:
  *
@@ -92,7 +90,7 @@ function tokenSymbol(address: string, chainId: number): string {
   return match?.symbol ?? 'token'
 }
 
-/** Card chrome shared by both rails — identity block plus one external link. */
+/** Account card chrome — identity block plus one external link. */
 function AccountCardHeader({
   safe,
   linkHref,

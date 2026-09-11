@@ -14,8 +14,7 @@ covers:
   - packages/backend/src/rails/delegation-authorization.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/domain/chains.ts
-  - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-11"
 ---
 
 # Haven — Payment Execution Sequence
@@ -134,9 +133,8 @@ sequenceDiagram
 > the diagram above.** The banner earlier in this document scoped only the
 > *diagram*, so this section read as current until #2265. Nothing here is
 > live: the BACKEND's `computeEffectiveAllowance` and the AllowanceModule
-> signature path were deleted by #1987 — note the frontend keeps a
-> same-named helper (`packages/frontend/src/lib/allowance-math.ts`, used by
-> `AllowanceBar`), which is a different function and is untouched — and the owner
+> signature path were deleted by #1987 — the frontend's same-named helper and
+> its `AllowanceBar` consumer are gone too since #2848 (epic #1440) — and the owner
 > approval state machine went with `approval_requests` (#2055 / migration 070
 > — the routes now answer **404**). For the live rail see
 > [Delegation rail](#delegation-rail-new-accounts) below and

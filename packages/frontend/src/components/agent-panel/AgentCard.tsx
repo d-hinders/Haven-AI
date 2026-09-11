@@ -11,7 +11,7 @@ import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-c
 import ConfirmDialog from '../ConfirmDialog'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
-import { ConfiguredAllowanceRow } from './AllowanceBar'
+import { ConfiguredAllowanceRow } from './ConfiguredAllowanceRow'
 import { BotIcon } from './agent-display'
 import type { AgentBusyAction } from '@/hooks/useAgentPanelState'
 

@@ -39,9 +39,10 @@
  *    and `PUT /user/safes/:id`, both live).
  * 4. `.post` / `.put` call shape only, not a bare `fetch`. What makes that
  *    adequate TODAY is that `ApiClient.request` is private (`lib/api.ts`), so
- *    these are the frontend's only POST/PUT channel to the Haven backend — the
- *    sole raw `fetch` outside `api.ts` is `lib/safe-tx.ts`, which targets Safe's
- *    own transaction service. If that ever stops being true, widen this guard.
+ *    these are the frontend's only POST/PUT channel to the Haven backend. The
+ *    one raw `fetch` that used to sit outside `api.ts` (in `lib/safe-tx.ts`,
+ *    targeting Safe's transaction service) went with the retired rail in
+ *    #2848. If a second raw-fetch channel ever appears, widen this guard.
  */
 
 import { describe, expect, it } from 'vitest'

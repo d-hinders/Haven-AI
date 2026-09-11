@@ -123,9 +123,8 @@ describe('readContentProbe', () => {
 
   it('reproduces the exact /agents shape the guard refuses', () => {
     // Three budget-loading rows in three `AgentCard`s, transcribed from
-    // `components/agent-panel/{AllowanceBar,AgentCard}.tsx` as this change
-    // leaves them. This is the DOM behind the measured 886 chars / 150 elements
-    // / 1856px capture.
+    // the agent-panel budget rows as this change leaves them. This is the DOM
+    // behind the measured 886 chars / 150 elements / 1856px capture.
     //
     // Note where the attributes sit, because #2204's design review moved them:
     // the LIVE REGION is the per-card wrapper (one announcement per surface,

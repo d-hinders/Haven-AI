@@ -65,12 +65,6 @@
       "note": "Feed-rail parity test: a re-sync of both rails must leave exactly one row and one push each; a fixture/assertion description."
     }
   },
-  "packages/backend/src/modules/x402/settlement-observed.ts": {
-    "both-rails": {
-      "category": "live-rail-architecture",
-      "note": "On EIP-3009 (both rails) Haven submits a transaction and learns the hash; both rails are live settlement paths."
-    }
-  },
   "packages/backend/src/openapi/spec.ts": {
     "remain-readable": {
       "category": "mpp_demo",
@@ -113,6 +107,12 @@
       "note": "Generated mirror of the OpenAPI mpp_demo endpoint description; the mpp_demo family (#1328)."
     }
   },
+  "packages/frontend/public/docs/security-model.md": {
+    "still-readable": {
+      "category": "route-db-readability",
+      "note": "Generated copy (packages/frontend/scripts/serve-docs.mjs, from next.config.ts) of docs/security/delegation-rail-security-model.md, which lives under docs/ outside this ratchet's packages/ scan — the generated copy is the only place its phrases are counted. The claim is the #2669-scoped one and stays true after #2847: legacy Safe rows are readable to a direct database query, never a dashboard surface."
+    }
+  },
   "packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
     "both-rails": {
       "category": "past-tense-history",
@@ -126,10 +126,6 @@
     }
   },
   "packages/frontend/src/app/(authenticated)/custody/page.tsx": {
-    "both-rails": {
-      "category": "live-rail-architecture",
-      "note": "Both rails live in the same user.safes list, so the branch is per account; and the card chrome is shared by both rails. True of the current architecture."
-    },
     "remain-readable": {
       "category": "past-tense-history",
       "note": "A #2673 correction note quoting what the OLD text said ('while legacy accounts remain readable') and why it is gone; past-tense, not a present claim."
@@ -163,16 +159,6 @@
       "note": "Archive (#1401) — the agent moves to Removed; history stays readable. The archived-agent contract."
     }
   },
-  "packages/frontend/src/components/connect-agent/ConnectionVerificationFooter.tsx": {
-    "both-rails": {
-      "category": "live-rail-architecture",
-      "note": "The approval step's footer is shared by both rails (#1073); both rails are live."
-    },
-    "rail-conditional": {
-      "category": "live-rail-architecture",
-      "note": "The Safe-specific 'Approvals required' row is rail-conditional; a true statement about the current dual-rail UI."
-    }
-  },
   "packages/frontend/src/components/ui/CopyButton.tsx": {
     "still-readable": {
       "category": "ui-affordance",
@@ -195,12 +181,6 @@
     "stays-readable": {
       "category": "mpp_demo",
       "note": "Historical mpp_demo rows stay readable by design; the mpp_demo family (#1328)."
-    }
-  },
-  "packages/frontend/public/docs/security-model.md": {
-    "still-readable": {
-      "category": "route-db-readability",
-      "note": "Generated copy (packages/frontend/scripts/serve-docs.mjs, from next.config.ts) of docs/security/delegation-rail-security-model.md, which lives under docs/ outside this ratchet's packages/ scan — the generated copy is the only place its phrases are counted. The claim is the #2669-scoped one and stays true after #2847: legacy Safe rows are readable to a direct database query, never a dashboard surface."
     }
   },
   "packages/qa-agent/src/scenarios/x402-delegation-3009.ts": {

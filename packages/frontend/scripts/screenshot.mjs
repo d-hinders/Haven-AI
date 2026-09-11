@@ -709,12 +709,23 @@ const tx = (i, over = {}) => ({
   safeName: FIXTURE_SAFE.name,
   ...over,
 })
+// #2870: the accounting badge's three states on three agent rows — pushed
+// ("In Fortnox"), pending ("Feeding…"), failed ("Not fed", reason on hover).
+// The inbound rows and the plain ETH transfer carry none, which is the
+// fourth state the capture has to show: an unfed row renders no badge.
+const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
-  tx(1, { agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports' }),
+  tx(1, {
+    agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
+    paymentId: 'pay-1', accounting: accounting('pushed', { externalRef: 'fortnox:supplierinvoice:11' }),
+  }),
   tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_SAFE.safe_address, valueFormatted: '150.00', value: '150000000' }),
-  tx(3, { agentName: 'Ops agent' }),
+  tx(3, { agentName: 'Ops agent', paymentId: 'pay-3', accounting: accounting('pending') }),
   tx(4, { asset: 'ETH', tokenSymbol: undefined, type: 'native', decimals: 18, value: '12000000000000000', valueFormatted: '0.012' }),
-  tx(5, { isError: true, agentName: 'Research agent' }),
+  tx(5, {
+    isError: true, agentName: 'Research agent',
+    paymentId: 'pay-5', accounting: accounting('failed', { error: 'Fortnox answered 502 — will retry on the next sync' }),
+  }),
   tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_SAFE.safe_address, valueFormatted: '75.50', value: '75500000' }),
 ]
 

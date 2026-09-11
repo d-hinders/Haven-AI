@@ -3,8 +3,8 @@
  * Outside callers (routes, tests) must import ONLY from this file — see the
  * `no-deep-cross-module-import` dependency-cruiser rule in
  * `.dependency-cruiser.cjs`. Internal files (`aggregate.ts`, `enrichment.ts`,
- * `x402.ts`, `ordering.ts`, `cache-key.ts`, `orchestration.ts`, `csv-export.ts`) are
- * private.
+ * `x402.ts`, `ordering.ts`, `cache-key.ts`, `orchestration.ts`, `csv-export.ts`,
+ * `accounting.ts`) are private.
  *
  * `routes/transactions.ts` keeps request validation, auth wiring, and
  * response serialization; aggregation, enrichment, and caching live here.
@@ -19,6 +19,7 @@ export type {
   FetchSafeTransactionsResult,
   ParsedTokenFilter,
   Transaction,
+  TransactionAccounting,
   UserSafeRow,
 } from './types.js'
 
@@ -36,6 +37,7 @@ export {
 export { compareTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 export { fetchSafeTransactions } from './aggregate.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
+export { enrichTransactionsWithAccounting } from './accounting.js'
 export { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 
 export {

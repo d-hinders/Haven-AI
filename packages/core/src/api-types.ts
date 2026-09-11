@@ -3552,6 +3552,21 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            accounting?: components["schemas"]["TransactionAccounting"];
+        };
+        /** @description Accounting-feed state for one transaction (#2870), read from the sync ledger — no live provider call. Present on a row only when the feed is available to the account, the user has a provider connection, and the payment has a sync row; absent otherwise. */
+        TransactionAccounting: {
+            /**
+             * @description Ledger provider key, e.g. 'fortnox'.
+             * @example fortnox
+             */
+            provider: string;
+            /** @enum {string} */
+            status: "pending" | "pushed" | "failed" | "skipped";
+            /** @description Provider-side reference once pushed ('fortnox:supplierinvoice:<n>'); null otherwise. */
+            externalRef: string | null;
+            /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
+            error: string | null;
         };
         /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
         Transaction: {
@@ -3602,6 +3617,7 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            accounting?: components["schemas"]["TransactionAccounting"];
             chainId: number;
             /** Format: uuid */
             safeId: string;

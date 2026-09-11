@@ -15,6 +15,7 @@ import { getChain } from '../../domain/chains.js'
 import { fetchSafeTransactions } from './aggregate.js'
 import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 import { enrichTransactionsWithAgents } from './enrichment.js'
+import { enrichTransactionsWithAccounting } from './accounting.js'
 import { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 import type { EnrichedTransaction, ParsedTokenFilter, Transaction, UserSafeRow } from './types.js'
 
@@ -231,7 +232,10 @@ export async function buildSafeTransactionsPage(
   const start = (page - 1) * limit
   const paginated = enrichedAllTransactions.slice(start, start + limit)
 
-  const transactions = await enrichTransactionsWithAgents(userId, paginated)
+  const attributed = await enrichTransactionsWithAgents(userId, paginated)
+  // #2870: after agent enrichment — that is what puts `paymentId` on raw
+  // explorer rows — and over the PAGE only, so this is one ledger query.
+  const transactions = await enrichTransactionsWithAccounting(userId, attributed, log)
 
   return { transactions, total }
 }

@@ -10,6 +10,15 @@ export const en = {
   common: {
     comingSoon: 'Coming soon',
   },
+  /** The per-transaction accounting badge (#2870). */
+  accountingBadge: {
+    /** `provider` is the display name, e.g. "Fortnox". */
+    inProvider: (provider: string) => `In ${provider}`,
+    feeding: 'Feeding…',
+    notFed: 'Not fed',
+    /** Accessible name for the badge link — the label, then where it goes. */
+    openAccounting: (label: string) => `${label}. Open accounting.`,
+  },
   settings: {
     title: 'Settings',
     subtitle: 'Manage preferences, account access, notifications, and data controls.',

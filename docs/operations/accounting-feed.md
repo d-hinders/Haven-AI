@@ -30,6 +30,25 @@ accounts, or VAT.
 > #2860 renames both in one migration, so this slice carried no migration at
 > all. Until it lands, on-call reads the table under its old name.
 
+## Who is entitled (#2861)
+
+`HAVEN_ACCOUNTING_ENTITLEMENT_MODE` decides how an account passes the
+entitlement gate — the hosted and `HAVEN_ACCOUNTING_ENABLED` checks still come
+first and are unchanged:
+
+| Mode | Who passes | Where |
+|------|------------|-------|
+| `granted` (default, also when unset) | accounts holding an `account_entitlements` row for the feed | prod — nobody is entitled until a paid tier grants rows |
+| `all` | every account on the deployment; no row is read or written | dev, so the team uses the feed without hand-written SQL grants |
+
+Any other value refuses the boot with a message naming both modes: a
+misspelled `all` on dev must never silently mean `granted`. `GET
+/accounting/feed/status` reports `entitlementMode` and `entitled` next to
+`available`, so on-call can read from one response whether an account is
+entitled by mode or by row. The pre-#2861 recipe of inserting an
+`account_entitlements` row by hand on dev is retired; nothing on prod changes
+because prod never sets the variable.
+
 Design references: `docs/research/accounting-data-feed.md` (architecture),
 `docs/research/fortnox-non-asserting-feed.md` (the #494 sandbox spike that
 proved the mechanism live on 2026-07-16).
@@ -44,7 +63,8 @@ machine_payment_evidence row written (with book-time SEK amount when FX is ready
   │
   ▼
 feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settlement
-  ├─ entitlement gate: hosted + flag + user entitlement ('reporting_feed')
+  ├─ entitlement gate: hosted + flag + user entitlement ('reporting_feed',
+  │    or every account when HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all — #2861)
   ├─ claimSync(user, 'fortnox', payment) → reporting_feed_syncs row 'pending'
   │    (unique on (provider, payment_id, user_id) — the double-post guard)
   ├─ build AccountingEntry → ReportingTransaction (VAT/account fields STRIPPED)
@@ -217,7 +237,7 @@ Work the sync row's `status` on `/accounting` (or `reporting_feed_syncs`):
 | `failed` | Fortnox push failed; `error` carries the Fortnox message verbatim | Fix the named cause (often token/scope), press **Sync now** — failed rows are re-claimed and retried |
 | `pending` | Claimed but in flight (or a crashed in-flight push) | Wait; a stuck pending row is not auto-recovered (deliberate — the claim IS the concurrency guard). If genuinely stuck, escalate rather than editing the row |
 | `skipped` | A connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped) | Fix the named cause (usually: connect Fortnox), then **Sync now** — skipped rows are re-claimed and retried exactly like failed ones |
-| *(no row)* | The settle-time hook never ran (entitlement off, feature flag off) or the payment predates the feed | Check `GET /accounting/feed/status` base flags; **Sync now** backfills once entitled |
+| *(no row)* | The settle-time hook never ran (entitlement off, feature flag off) or the payment predates the feed | Check `GET /accounting/feed/status` base flags and `entitlementMode`/`entitled`; **Sync now** backfills once entitled |
 
 Common causes, from live experience:
 

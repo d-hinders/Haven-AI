@@ -281,7 +281,9 @@ the live state of an environment is read from the environment, not from prose.
       service — only now.** Set earlier, the dashboard hands out a tag npm
       cannot resolve. The value must match `/^[a-z][a-z0-9-]{0,31}$/`
       (`parseConnectorChannel`, `packages/backend/src/config.ts`); unrelated
-      backend configuration such as `HAVEN_OPS_TOKEN` does not affect this
+      backend configuration such as `HAVEN_OPS_TOKEN` or the accounting feed's
+      `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` (#2861, the same refuse-the-boot
+      shape for its own two values) does not affect this
       package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than
       fall back to `alpha`. Verify by creating a setup in the dev dashboard and

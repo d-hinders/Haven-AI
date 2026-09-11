@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockConfig, mockQuery } = vi.hoisted(() => ({
-  mockConfig: { hosted: false, accountingEnabled: false },
+  mockConfig: { hosted: false, accountingEnabled: false, accountingEntitlementMode: 'granted' as 'granted' | 'all' },
   mockQuery: vi.fn(),
 }))
 
@@ -13,6 +13,7 @@ import {
   grantEntitlement,
   revokeEntitlement,
   accountingFeedAvailable,
+  accountingFeedAvailability,
   REPORTING_FEED,
 } from '../entitlements.js'
 
@@ -23,6 +24,7 @@ describe('entitlements', () => {
     mockQuery.mockReset()
     mockConfig.hosted = false
     mockConfig.accountingEnabled = false
+    mockConfig.accountingEntitlementMode = 'granted'
   })
   afterEach(() => vi.clearAllMocks())
 
@@ -60,6 +62,31 @@ describe('entitlements', () => {
       mockConfig.accountingEnabled = true
       mockQuery.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
       expect(await accountingFeedAvailable(USER)).toBe(true)
+    })
+  })
+
+  describe('entitlement mode all (#2861) — every account is entitled, the row is not consulted', () => {
+    it('a user with NO entitlement row is available, and no lookup is made', async () => {
+      mockConfig.hosted = true
+      mockConfig.accountingEnabled = true
+      mockConfig.accountingEntitlementMode = 'all'
+      expect(await accountingFeedAvailability(USER)).toEqual({ available: true, entitled: true, entitlementMode: 'all' })
+      expect(mockQuery).not.toHaveBeenCalled()
+    })
+
+    it('the hosted and flag checks still come FIRST: all on a self-hosted box is false', async () => {
+      mockConfig.hosted = false
+      mockConfig.accountingEnabled = true
+      mockConfig.accountingEntitlementMode = 'all'
+      expect(await accountingFeedAvailability(USER)).toEqual({ available: false, entitled: false, entitlementMode: 'all' })
+      expect(mockQuery).not.toHaveBeenCalled()
+    })
+
+    it('mode granted reports WHY: entitled false when the row is missing', async () => {
+      mockConfig.hosted = true
+      mockConfig.accountingEnabled = true
+      mockQuery.mockResolvedValue({ rows: [] }) // not the positional Once form: the db-mock ratchet is shrink-only (#1227)
+      expect(await accountingFeedAvailability(USER)).toEqual({ available: false, entitled: false, entitlementMode: 'granted' })
     })
   })
 

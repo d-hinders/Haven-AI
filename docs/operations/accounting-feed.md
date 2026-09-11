@@ -199,7 +199,7 @@ Two dashboard surfaces read the ledger, both read-only:
 - **`/transactions` (from #2870)** — a compact badge on each fed row, in the
   table and in the detail drawer: *In Fortnox* (`pushed`), *Feeding…*
   (`pending`), *Not fed* (`failed` / `skipped`, the `error` on hover). It
-  links to `/accounting`. The list endpoint joins `reporting_feed_syncs` by
+  links to `/accounting`. The list endpoint joins `accounting_feed_syncs` by
   `payment_id` in one query per page and emits an `accounting` object only
   when the account is entitled (`accountingFeedAvailable`), has a Fortnox
   connection, AND a sync row exists — so a row with no badge means "not

@@ -111,7 +111,7 @@ describe('reporting routes', () => {
     it('mode all: a user with no entitlement row sees the feed as available, and the status says so', async () => {
       setAvailability(true, true, 'all')
       connectorMocks.hasLiveConnector.mockReturnValue(true)
-      fortnoxMocks.getFortnoxConnection.mockResolvedValue(null)
+      fortnoxMocks.hasActiveConnection.mockResolvedValue(false)
       orchestratorMocks.getAccountingFeedStatus.mockResolvedValue([])
       const res = await authed('GET', '/accounting/feed/status')
       expect(res.statusCode).toBe(200)

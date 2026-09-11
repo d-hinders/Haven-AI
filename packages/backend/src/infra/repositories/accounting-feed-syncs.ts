@@ -93,7 +93,7 @@ export const LIST_SYNCS_FOR_USER_SQL = `SELECT * FROM accounting_feed_syncs
 // `user_id` — the sync ledger is keyed per user, so a payment id that
 // collides across tenants must never surface another user's row.
 export const LIST_SYNCS_FOR_PAYMENT_IDS_SQL = `SELECT provider, payment_id, status, external_ref, error
-     FROM reporting_feed_syncs
+     FROM accounting_feed_syncs
      WHERE user_id = $1 AND payment_id = ANY($2)`
 
 /**

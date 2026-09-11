@@ -8,7 +8,7 @@
  * connection. Same harness shape as `transactions-export-csv.test.ts`: the
  * explorer leg is stubbed at `fetch` and the DB leg is routed by SQL table
  * (the db-mock ratchet, #1227), so the REAL `accountingFeedAvailable` and
- * `getFortnoxConnection` run against routed rows rather than being mocked.
+ * `hasActiveConnection` run against routed rows rather than being mocked.
  */
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
@@ -102,14 +102,15 @@ function routeDbQueries({ entitled = true, connected = true, syncs = [FED_SYNC_R
       if (text.includes('FROM user_safes')) return { rows: SAFES }
       if (text.includes('FROM payment_intents')) return { rows: x402Rows() }
       if (text.includes('FROM account_entitlements')) return { rows: entitled ? [{ '?column?': 1 }] : [] }
-      if (text.includes('FROM fortnox_connections')) {
+      if (text.includes('FROM accounting_connections')) {
+        // #2862: the gate asks for the ACTIVE, connected row.
         return {
           rows: connected
-            ? [{ user_id: 'user-1', access_token: 'a', refresh_token: 'r', token_type: 'bearer', scope: '', expires_at: new Date(Date.now() + 3_600_000).toISOString() }]
+            ? [{ id: 'conn-1', user_id: 'user-1', provider: 'fortnox', auth_kind: 'oauth2', status: 'connected', status_reason: null, is_active_destination: true, feed_from: null, secrets_ciphertext: null, secrets_key_version: 1, granted_scope: null, token_expires_at: null, external_company_id: null, external_company_name: null, base_currency: null, created_at: new Date(), updated_at: new Date() }]
             : [],
         }
       }
-      if (text.includes('FROM reporting_feed_syncs')) {
+      if (text.includes('FROM accounting_feed_syncs')) {
         ledgerReads.push(params ?? [])
         return { rows: syncs }
       }
@@ -247,7 +248,7 @@ describe('GET /transactions — accounting badge (#2870)', () => {
       (async (sql: unknown) => {
         const text = String(sql)
         if (text.includes('FROM user_safes')) return { rows: SAFES }
-        if (text.includes('FROM reporting_feed_syncs')) ledgerReads.push([])
+        if (text.includes('FROM accounting_feed_syncs')) ledgerReads.push([])
         return { rows: [] }
       }) as never,
     )
@@ -258,7 +259,7 @@ describe('GET /transactions — accounting badge (#2870)', () => {
     expect(ledgerReads).toHaveLength(0)
     const tablesRead = spy.mock.calls.map((c) => String(c[0]))
     expect(tablesRead.some((t) => t.includes('FROM account_entitlements'))).toBe(false)
-    expect(tablesRead.some((t) => t.includes('FROM fortnox_connections'))).toBe(false)
+    expect(tablesRead.some((t) => t.includes('FROM accounting_connections'))).toBe(false)
   })
 })
 
@@ -287,7 +288,7 @@ describe('GET /transactions — accounting badge is fail-soft (#2870)', () => {
     const { spy } = routeDbQueries()
     const healthy = spy.getMockImplementation()!
     spy.mockImplementation((async (sql: unknown, params?: unknown[]) => {
-      if (String(sql).includes('FROM reporting_feed_syncs')) throw new Error('ledger unavailable')
+      if (String(sql).includes('FROM accounting_feed_syncs')) throw new Error('ledger unavailable')
       return (healthy as (s: unknown, p?: unknown[]) => unknown)(sql, params)
     }) as never)
 

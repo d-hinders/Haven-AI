@@ -2,14 +2,14 @@
  * Per-page accounting-feed enrichment for the Transactions list (#2870,
  * epic #2858 slice 12).
  *
- * Joins the sync ledger (`reporting_feed_syncs`, keyed on the payment-intent
+ * Joins the sync ledger (`accounting_feed_syncs`, keyed on the payment-intent
  * id the row already carries as `paymentId`) onto a PAGE of transactions in
  * one query, so the dashboard can show "In Fortnox" / "Feeding…" / "Not fed"
  * where the user already looks. Read-only: no provider call, no write.
  *
  * The key is present ONLY when all three hold — the feed is available to the
  * account (`accountingFeedAvailable`: hosted + flag + entitlement), the user
- * has a provider connection, and a sync row exists for that payment id.
+ * has an ACTIVE provider connection (`hasActiveConnection`, #2862), and a sync row exists for that payment id.
  * Otherwise the key is ABSENT, never null: an unentitled or disconnected
  * account must not learn that the ledger exists, and a fed account's rows
  * that predate `feed_from` legitimately carry nothing.
@@ -20,7 +20,7 @@
  * to join. The issue allows omitting it.
  */
 import { accountingFeedAvailable } from '../agents/index.js'
-import { getFortnoxConnection } from '../accounting/index.js'
+import { hasActiveConnection } from '../accounting/index.js'
 import {
   listSyncsForPaymentIds,
   type FeedSyncBadgeRow,
@@ -58,7 +58,7 @@ export async function enrichTransactionsWithAccounting<T extends Transaction>(
     // Gate BEFORE the connection read and the ledger read: an unentitled
     // account never touches either (mutation-tested at the route).
     if (!(await accountingFeedAvailable(userId))) return transactions
-    if (!(await getFortnoxConnection(userId))) return transactions
+    if (!(await hasActiveConnection(userId))) return transactions
 
     rows = await listSyncsForPaymentIds(userId, paymentIds)
   } catch (err) {

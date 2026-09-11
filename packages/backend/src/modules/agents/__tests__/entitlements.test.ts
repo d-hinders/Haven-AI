@@ -14,7 +14,7 @@ import {
   revokeEntitlement,
   accountingFeedAvailable,
   accountingFeedAvailability,
-  REPORTING_FEED,
+  ACCOUNTING_FEED,
 } from '../entitlements.js'
 
 const USER = 'u1'
@@ -30,9 +30,9 @@ describe('entitlements', () => {
 
   it('hasEntitlement reflects an unrevoked row', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
-    expect(await hasEntitlement(USER, REPORTING_FEED)).toBe(true)
+    expect(await hasEntitlement(USER, ACCOUNTING_FEED)).toBe(true)
     mockQuery.mockResolvedValueOnce({ rows: [] })
-    expect(await hasEntitlement(USER, REPORTING_FEED)).toBe(false)
+    expect(await hasEntitlement(USER, ACCOUNTING_FEED)).toBe(false)
   })
 
   describe('accountingFeedAvailable — requires hosted AND flag AND entitlement', () => {
@@ -92,7 +92,7 @@ describe('entitlements', () => {
 
   it('grant uses an idempotent upsert that clears revocation', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] })
-    await grantEntitlement(USER, REPORTING_FEED)
+    await grantEntitlement(USER, ACCOUNTING_FEED)
     const sql = mockQuery.mock.calls[0][0] as string
     expect(sql).toContain('INSERT INTO account_entitlements')
     expect(sql).toContain('ON CONFLICT')
@@ -101,7 +101,7 @@ describe('entitlements', () => {
 
   it('revoke stamps revoked_at and is a no-op when not granted', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] })
-    await revokeEntitlement(USER, REPORTING_FEED)
+    await revokeEntitlement(USER, ACCOUNTING_FEED)
     const sql = mockQuery.mock.calls[0][0] as string
     expect(sql).toContain('UPDATE account_entitlements')
     expect(sql).toContain('revoked_at = NOW()')

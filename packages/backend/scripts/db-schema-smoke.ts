@@ -56,10 +56,18 @@ import {
   INSERT_PAYMENT_FEE_SQL,
 } from '../src/infra/repositories/payment-fees.js'
 import {
-  DELETE_FORTNOX_CONNECTION_SQL,
-  GET_FORTNOX_CONNECTION_SQL,
-  UPSERT_FORTNOX_CONNECTION_SQL,
-} from '../src/infra/repositories/fortnox-connections.js'
+  CLEAR_ACTIVE_DESTINATION_SQL,
+  DELETE_ACCOUNTING_CONNECTION_SQL,
+  DISCONNECT_ACCOUNTING_CONNECTION_SQL,
+  GET_ACCOUNTING_CONNECTION_SQL,
+  GET_ACTIVE_ACCOUNTING_CONNECTION_SQL,
+  LIST_ACCOUNTING_CONNECTIONS_SQL,
+  LIST_PLAINTEXT_CONNECTIONS_SQL,
+  SET_ACCOUNTING_STATUS_SQL,
+  SET_ACTIVE_DESTINATION_SQL,
+  UPDATE_ACCOUNTING_SECRETS_SQL,
+  UPSERT_ACCOUNTING_CONNECTION_SQL,
+} from '../src/infra/repositories/accounting-connections.js'
 import {
   CLAIM_SYNC_INSERT_SQL,
   CLAIM_SYNC_RECLAIM_FAILED_SQL,
@@ -557,9 +565,20 @@ const QUERIES: SmokeQuery[] = [
   // ownership-with-type, receipt underlag. All IMPORTED.
   { name: 'fees: idempotent settled-fee insert (#386)', sql: INSERT_PAYMENT_FEE_SQL },
   { name: 'fees: recorded-fee read (#386)', sql: GET_RECORDED_FEE_SQL },
-  { name: 'fortnox: connection upsert (#465)', sql: UPSERT_FORTNOX_CONNECTION_SQL },
-  { name: 'fortnox: connection read (#465)', sql: GET_FORTNOX_CONNECTION_SQL },
-  { name: 'fortnox: connection delete (#465)', sql: DELETE_FORTNOX_CONNECTION_SQL },
+  // #2860: one provider-generic table replaces fortnox_connections. Eleven
+  // statements, every one the repository exports, so the smoke list and the
+  // code cannot drift apart.
+  { name: 'accounting connections: upsert / reconnect (#2860)', sql: UPSERT_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: read one (#2860)', sql: GET_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: read active destination (#2860)', sql: GET_ACTIVE_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: list (#2860)', sql: LIST_ACCOUNTING_CONNECTIONS_SQL },
+  { name: 'accounting connections: update secrets (#2860)', sql: UPDATE_ACCOUNTING_SECRETS_SQL },
+  { name: 'accounting connections: set status (#2860)', sql: SET_ACCOUNTING_STATUS_SQL },
+  { name: 'accounting connections: clear active destination (#2860)', sql: CLEAR_ACTIVE_DESTINATION_SQL },
+  { name: 'accounting connections: set active destination (#2860)', sql: SET_ACTIVE_DESTINATION_SQL },
+  { name: 'accounting connections: disconnect keeping history (#2860)', sql: DISCONNECT_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: delete (#2860)', sql: DELETE_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: plaintext worklist for re-encrypt (#2860)', sql: LIST_PLAINTEXT_CONNECTIONS_SQL },
   { name: 'accounting feed: claim insert (first writer wins, #497)', sql: CLAIM_SYNC_INSERT_SQL },
   { name: 'accounting feed: re-claim failed row (#497)', sql: CLAIM_SYNC_RECLAIM_FAILED_SQL },
   { name: 'accounting feed: mark pushed (note #498)', sql: MARK_SYNC_PUSHED_SQL },

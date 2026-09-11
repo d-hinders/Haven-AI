@@ -35,7 +35,7 @@ import {
  * offers a better "externally paid" marking is the #494 open question 2; the
  * sandbox round-trip decides it and this comment records the outcome.
  *
- * Idempotency: the orchestrator's dedup ledger (`reporting_feed_syncs`, #497)
+ * Idempotency: the orchestrator's dedup ledger (`accounting_feed_syncs`, #497)
  * is the guarantee — `claimSync` ensures one push per (user, provider,
  * payment). Connector-side, the supplier-invoice `ExternalInvoiceNumber`
  * carries `HAVEN-<paymentId>` so a duplicate is also *detectable* in Fortnox

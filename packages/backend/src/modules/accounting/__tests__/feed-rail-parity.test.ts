@@ -198,7 +198,7 @@ async function syncedRows(userId: string, expected: number) {
 const readSyncs = async (userId: string) =>
   (
     await db.query(
-      `SELECT payment_id, status, external_ref FROM reporting_feed_syncs WHERE user_id = $1 ORDER BY payment_id`,
+      `SELECT payment_id, status, external_ref FROM accounting_feed_syncs WHERE user_id = $1 ORDER BY payment_id`,
       [userId],
     )
   ).rows

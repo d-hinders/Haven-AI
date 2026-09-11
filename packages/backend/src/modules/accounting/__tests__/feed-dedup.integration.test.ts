@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * mocks `feed-sync`, and `feed-sync` pre-scripts the DB's conflict outcomes — so
  * neither exercises the real dedup mechanism reacting to its OWN prior write.
  * This test runs the real `claimSync` / `markPushed` / `markFailed` and the real
- * orchestrator against an in-memory oracle of the `reporting_feed_syncs` unique
+ * orchestrator against an in-memory oracle of the `accounting_feed_syncs` unique
  * constraint, then feeds the same payment repeatedly.
  *
  * What it guards (that the boundary-mocked unit tests can't): the end-to-end
@@ -23,7 +23,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * job (`feed-sync.test.ts` asserts the claim SQL) and ultimately the migration's.
  */
 
-// ── Oracle: in-memory model of the reporting_feed_syncs table ────────────────
+// ── Oracle: in-memory model of the accounting_feed_syncs table ────────────────
 // Enforces uniqueness on (provider, payment_id, user_id) — the same key as the
 // migration and the ON CONFLICT target — by interpreting the exact SQL that
 // feed-sync.ts issues. Reads the real query shapes; it is not a generic SQL
@@ -45,7 +45,7 @@ const { ledger } = vi.hoisted(() => {
 
   async function query(sql: unknown, params: unknown[] = []) {
     const s = String(sql)
-    if (s.includes('INSERT INTO reporting_feed_syncs')) {
+    if (s.includes('INSERT INTO accounting_feed_syncs')) {
       const [userId, provider, paymentId] = params as string[]
       const k = key(provider, paymentId, userId)
       if (rows.has(k)) return { rows: [] } // ON CONFLICT DO NOTHING — first writer won
@@ -86,7 +86,7 @@ const { ledger } = vi.hoisted(() => {
       const [userId] = params as string[]
       return { rows: [...rows.values()].filter((r) => r.user_id === userId) }
     }
-    if (s.includes('SELECT * FROM reporting_feed_syncs')) { // getSyncState
+    if (s.includes('SELECT * FROM accounting_feed_syncs')) { // getSyncState
       const [userId, provider, paymentId] = params as string[]
       const row = rows.get(key(provider, paymentId, userId))
       return { rows: row ? [row] : [] }

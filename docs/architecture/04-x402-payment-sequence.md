@@ -30,6 +30,7 @@ covers:
   - packages/mcp-server/src/tools/state-direct-recovery.test.ts
   - packages/mcp-server/src/tools/catalog-purchase.test.ts
   - packages/mcp-server/src/tools/plain-http-x402.test.ts
+  - packages/mcp-server/src/tools/paid-mcp-completion.test.ts
   - packages/mcp-server/src/strict-tool-input.test.ts
   - packages/backend/src/__tests__/x402-resume-producer-pin.test.ts
   - packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts
@@ -130,8 +131,9 @@ Source of truth:
   the settlement *compiler* (typed-data / header assembly primitives), not
   route orchestration.
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
-- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts) — the hosted facade: the catalog/quote/prepare, plain-HTTP x402 and paid-MCP completion handlers
+- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts) — the hosted facade: since #2812 a composition-only facade (no handler, no tool-specific branching; every hosted tool is owned by a capability module under [`src/tools/`](../../packages/mcp-server/src/tools/paid-mcp-completion.ts))
 - [`packages/mcp-server/src/tools/state-direct-recovery.ts`](../../packages/mcp-server/src/tools/state-direct-recovery.ts) — the hosted state, direct-payment and recovery handlers since #2809, including `haven_submit`'s settlement-scheme branch and both expiry mappings
+- [`packages/mcp-server/src/tools/paid-mcp-completion.ts`](../../packages/mcp-server/src/tools/paid-mcp-completion.ts) — the hosted paid-MCP completion since #2812: `haven_complete_mcp_tool` and `haven_settle_mcp_tool` plus the merchant delivery / context-rehydration helpers, carrying the #2282 resolve-before-relay ordering
 - [`packages/backend/src/modules/mpp/reconciliation.ts`](../../packages/backend/src/modules/mpp/reconciliation.ts) — `POST /machine-payments/reconciliation-events`, and the #2292 acceptance-is-terminal precedence rule.
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
 

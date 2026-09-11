@@ -14,24 +14,19 @@
  * connector channel, and sibling support modules only. Never imports a
  * capability module.
  */
-import { randomUUID } from 'node:crypto'
 import {
-  AgentPaymentFailureCode,
   AgentPaymentNextAction,
   HavenApiError,
-  MerchantTimeoutError,
   X402UnexpectedStatusError,
   HavenClient,
   discoverMerchantMcpUrl,
   sameUrl,
-  validateStandardX402PaymentHeader,
-  X402PaymentHeaderValidationError,
   type X402McpTransport,
   type X402Quote,
 } from '@haven_ai/sdk'
 import { MCP_TRANSPORT_CASE_HINT } from '../contracts.js'
 import { signerCompatibilityNotice } from './signer-compat.js'
-import { HostedToolError, paymentWindowExpiredError, paymentWindowExpiredErrorFor } from './errors.js'
+import { HostedToolError, paymentWindowExpiredErrorFor } from './errors.js'
 
 /**
  * #1254: the delegation-rail signing fields, forwarded VERBATIM whenever the
@@ -229,224 +224,6 @@ function mcpTransportShapeError(input: unknown): HostedToolError {
   })
 }
 
-/**
- * #1307: resolve merchant_url/tool_name/arguments/mcp_transport for
- * haven_complete_mcp_tool / haven_settle_mcp_tool. Explicit args are the
- * version-skew fallback and win OUTRIGHT when BOTH merchant_url and
- * tool_name are present — never merged with a rehydrated value, so a partial
- * caller-supplied context can't silently combine with stored state for the
- * same call. Omitting either one rehydrates the FULL stored context by
- * payment_id (the #1263 sign-context precedent, applied to the settle leg).
- */
-export interface ResolvedMerchantCallContext {
-  merchantUrl: string
-  toolName: string
-  toolArguments: Record<string, unknown>
-  mcpTransport: X402McpTransport | undefined
-}
-
-export async function resolveMerchantCallContext(
-  haven: HavenClient,
-  args: Record<string, any>,
-): Promise<ResolvedMerchantCallContext> {
-  const hasUrl = typeof args.merchant_url === 'string'
-  const hasTool = typeof args.tool_name === 'string'
-  if (hasUrl && hasTool) {
-    return {
-      merchantUrl: args.merchant_url,
-      toolName: args.tool_name,
-      toolArguments: (args.arguments as Record<string, unknown> | undefined) ?? {},
-      // #2282: parse the transport HERE, where the caller can still act on a
-      // refusal, rather than deep inside the merchant call after funding.
-      mcpTransport: parseMcpTransport(args.mcp_transport),
-    }
-  }
-  // #1307 review: exactly ONE of the pair present is refused, not silently
-  // overridden — an agent that supplied merchant_url expects it to be used,
-  // and half-explicit input must never be combined with stored state.
-  if (hasUrl !== hasTool) {
-    throw new HostedToolError({
-      code: 'INVALID_INPUT',
-      message:
-        'merchant_url and tool_name must be supplied TOGETHER (explicit context) or both ' +
-        'omitted (rehydrated from payment_id). Passing only one is refused rather than ' +
-        'silently overridden by stored state.',
-      statusCode: 400,
-      paymentId: args.payment_id,
-      status: 'invalid_input',
-      phase: 'not_started',
-      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-      rail: 'x402',
-    })
-  }
-  try {
-    const ctx = await haven.getX402MerchantCallContext(args.payment_id)
-    return {
-      merchantUrl: ctx.merchantUrl,
-      toolName: ctx.toolName,
-      toolArguments: ctx.arguments,
-      mcpTransport: parseMcpTransport(
-        ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
-      ),
-    }
-  } catch (err) {
-    if (err instanceof HavenApiError) {
-      if (err.statusCode === 410) {
-        throw paymentWindowExpiredError({
-          paymentId: args.payment_id,
-          status: 'expired',
-          phase: 'expired',
-          nextAction: AgentPaymentNextAction.PaymentWindowExpired,
-          rail: 'x402',
-        })
-      }
-      // 404 (unknown/foreign payment_id) and 409 (no stored context, or not
-      // an x402 intent) both land here: the fix is the same either way —
-      // re-send the fields explicitly.
-      throw new HostedToolError({
-        code: AgentPaymentFailureCode.MerchantCallContextUnavailable,
-        message:
-          `merchant_url/tool_name were omitted and Haven could not rehydrate a stored merchant ` +
-          `call context for payment ${args.payment_id} (${err.message}). Re-send merchant_url, ` +
-          'tool_name, arguments, and mcp_transport explicitly.',
-        statusCode: err.statusCode,
-        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-        paymentId: args.payment_id,
-        rail: 'x402',
-      })
-    }
-    throw err
-  }
-}
-
-/**
- * Deliver the signed X-PAYMENT header to the merchant and shape the result.
- * Shared by haven_complete_mcp_tool (decomposed flow) and haven_settle_mcp_tool
- * (fast flow). Funding has already confirmed before this runs, so a non-2xx
- * merchant response means the delegate holds stranded funds — surface a typed
- * MERCHANT_REJECTED_AFTER_FUNDING (not a soft ok:false) so the agent reconciles
- * via haven_sweep_delegate. The X-PAYMENT header is a signed authorization the
- * edge signer produced — Haven relays it but never holds the key.
- */
-export async function deliverMerchantPayment(
-  haven: HavenClient,
-  // Parsed haven_complete_mcp_tool / haven_settle_mcp_tool args (Zod-validated).
-  args: Record<string, any>,
-  // Funding tx hash from haven_submit when known (settle path); the wait falls
-  // back to the payment status when omitted (complete path).
-  fundingTxHash?: string,
-  // #1508: a scheme with NO funding leg (erc7710) must skip the funding wait
-  // ENTIRELY. Omitting fundingTxHash above does NOT achieve that — see below.
-  options?: { noFundingLeg?: boolean; context?: ResolvedMerchantCallContext },
-): Promise<{ status: number; ok: boolean; result: unknown; settlement_tx_hash: string | null }> {
-  // #1307: resolve merchant_url/tool_name/arguments/mcp_transport BEFORE
-  // waiting on funding confirmation — a version-skew refusal (no stored
-  // context) should surface immediately, not after a pointless wait.
-  //
-  // #2282: on the settle fast path that is no longer early enough — funding is
-  // already relayed by the time this runs — so `haven_settle_mcp_tool` resolves
-  // the context itself, pre-funding, and hands the result in. Resolving once
-  // and passing it through also keeps the two calls from diverging (the stored
-  // context could change, and a second GET is a second chance to disagree).
-  const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
-
-  // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
-  // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
-  // races the not-yet-mined funding tx and returns "Payment verification
-  // failed". No-op if BASE_RPC_URL isn't configured (chainRpcs unset).
-  //
-  // #1508: on a no-funding-leg scheme this must not run AT ALL, and passing
-  // `undefined` for fundingTxHash is not the same thing — the bug this fixes.
-  // `ensureFundingConfirmed` reads GET /payments/:id UNCONDITIONALLY before it
-  // ever looks at the hash, and by this point an erc7710 settle has already
-  // flipped the intent to 'submitted', which the backend maps to HTTP 409
-  // (`agentPaymentStatusHttpCode`). The SDK turns that into a throw, so a
-  // payment whose settlement SUCCEEDED was reported to the agent as a failure —
-  // deterministically, on every hosted erc7710 call, with the merchant never
-  // contacted.
-  if (!options?.noFundingLeg) {
-    await haven.ensureFundingConfirmed(args.payment_id, fundingTxHash)
-  }
-
-  const envelope = {
-    jsonrpc: '2.0',
-    id: `haven-mcp-${randomUUID()}`,
-    method: 'tools/call',
-    params: { name: context.toolName, arguments: context.toolArguments },
-  }
-  let result: Awaited<ReturnType<HavenClient['completeX402MerchantCall']>>
-  try {
-    result = await haven.completeX402MerchantCall({
-      url: context.merchantUrl,
-      init: {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(envelope),
-      },
-      paymentId: args.payment_id,
-      paymentHeader: args.payment_header,
-      mcpTransport: context.mcpTransport,
-      // #1508: the same flag that skips the funding wait above also has to
-      // reach the SDK's completion gate, which is where the real refusal was.
-      noFundingLeg: options?.noFundingLeg === true,
-    })
-  } catch (err) {
-    // #1300 review finding: at this point funding is CONFIRMED on-chain, so a
-    // merchant that never answers leaves the same money-at-risk state as one
-    // that rejects — but a timeout is NOT proof of rejection: the merchant
-    // holds a valid EIP-3009 authorization and may settle late. Route it to
-    // its own guidance (verify-then-sweep), never the bare 504 and never a
-    // blind sweep that could race a late settlement.
-    if (err instanceof MerchantTimeoutError) {
-      throw new HostedToolError({
-        code: AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding,
-        message:
-          `The funding leg is confirmed on-chain, but the merchant did not answer the paid ` +
-          `retry before the timeout. The merchant may still settle late. Check ` +
-          `haven_get_payment_status and retry haven_complete_mcp_tool ONCE before considering ` +
-          `a sweep — sweep only if no settlement appears. ${err.message}`,
-        statusCode: 504,
-        paymentId: args.payment_id,
-        status: 'merchant_unresponsive_after_funding',
-        phase: 'funded_but_unsettled',
-        nextAction: AgentPaymentNextAction.SweepStrandedFunds,
-        rail: 'x402',
-        suggestedTool: 'haven_get_payment_status',
-      })
-    }
-    throw err
-  }
-  if (!result.ok) {
-    let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
-    try {
-      status = await haven.getPaymentStatus(args.payment_id)
-    } catch {
-      // Preserve the merchant rejection even if status lookup is unavailable.
-    }
-    throw new HostedToolError({
-      code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
-      message:
-        `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
-        `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
-        `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
-      statusCode: result.status,
-      paymentId: args.payment_id,
-      status: status?.status ?? 'merchant_rejected_after_funding',
-      phase: status?.phase ?? 'funded_but_unsettled',
-      nextAction: status?.nextAction ?? AgentPaymentNextAction.SweepStrandedFunds,
-      rail: status?.rail ?? 'x402',
-      idempotencyKey: status?.idempotencyKey,
-      suggestedTool: 'haven_sweep_delegate',
-    })
-  }
-  return {
-    status: result.status,
-    ok: result.ok,
-    result: result.body,
-    settlement_tx_hash: result.settlementTxHash ?? null,
-  }
-}
-
 /** Shape returned by haven_pay_x402_quote and used by haven_resume_x402_payment. */
 export function buildX402SigningContext(
   intent: Awaited<ReturnType<HavenClient['createX402Intent']>>,
@@ -582,52 +359,5 @@ export async function submitErc7710WithExpiryMapping(
     const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
     if (mapped) throw mapped
     throw err
-  }
-}
-
-/**
- * Hosted fast-path preflight (#1398). The status read is agent-scoped and
- * exposes the intent's captured delegate, unlike getAgent() which may have
- * changed after the intent was created. Never include an untrusted header in a
- * thrown error: MCP error payloads and observability consumers serialize it.
- */
-export async function preflightMcpPaymentHeader(haven: HavenClient, args: Record<string, any>): Promise<void> {
-  const status = await haven.getPaymentStatus(args.payment_id)
-  try {
-    if (
-      status.rail !== 'x402' ||
-      !status.merchantAddress ||
-      !status.amountAtomic ||
-      !status.asset ||
-      !status.network ||
-      !status.resourceUrl ||
-      !status.payerAddress
-    ) {
-      throw new X402PaymentHeaderValidationError()
-    }
-    await validateStandardX402PaymentHeader(args.payment_header, {
-      merchantTo: status.merchantAddress,
-      amountAtomic: status.amountAtomic,
-      asset: status.asset,
-      network: status.network,
-      resourceUrl: status.resourceUrl,
-      payer: status.payerAddress,
-      chainId: status.chainId,
-    })
-  } catch (err) {
-    if (!(err instanceof X402PaymentHeaderValidationError)) throw err
-    throw new HostedToolError({
-      code: 'INVALID_PAYMENT_HEADER',
-      message:
-        'The signed payment header did not match the funded x402 intent. No funding was relayed. ' +
-        'Recreate the header with the local signer from this payment_id, then retry.',
-      statusCode: 400,
-      paymentId: args.payment_id,
-      status: 'invalid_payment_header',
-      phase: 'not_started',
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
-      rail: 'x402',
-      suggestedTool: 'haven_sign_x402',
-    })
   }
 }

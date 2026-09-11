@@ -985,8 +985,10 @@ same way.
 asserts **31 of the 47 globs**: the 33 runtime `globs` minus the two `EXEMPT`
 entries above, and none of the 14 `controlGlobs`. The addition that moved it
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
-`tools.ts` decides whether a funding userop is relayed and in what order
-(#2282), and which shipped four money defects (#2051, #2282, #2312, #2348) with
+capability modules decide whether a funding userop is relayed and in what
+order (the completion capability, `src/tools/paid-mcp-completion.ts`, carries
+the #2282 ordering since #2812 moved it out of `tools.ts`), and which shipped
+four money defects (#2051, #2282, #2312, #2348) with
 no money-path label by the file half. This document had covered
 `packages/mcp-server/src/**` since before the money-path list did, so the pin
 was satisfied on the day the entry landed with no `covers:` change — the

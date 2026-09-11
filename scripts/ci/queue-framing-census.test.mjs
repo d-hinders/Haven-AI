@@ -110,6 +110,13 @@ const GUARDED_FILES = [
   'packages/mcp-server/src/tools/parsing.ts',
   'packages/mcp-server/src/tools/registry.ts',
   'packages/mcp-server/src/tools/state-direct-recovery.ts',
+  // #2812 — the final capability module (paid-MCP completion: the two
+  // settle/complete handlers and the merchant delivery/context-rehydration
+  // helpers #2808 parked in support until this slice moved them). Registered
+  // per the completeness rule below; the capability's TEST files stay out —
+  // the completeness scan deliberately covers non-test source only, exactly
+  // as for the #2809–#2811 siblings.
+  'packages/mcp-server/src/tools/paid-mcp-completion.ts',
   'packages/mcp-server/src/tools/support/cap-price.ts',
   'packages/mcp-server/src/tools/support/catalog-entry.ts',
   'packages/mcp-server/src/tools/support/errors.ts',

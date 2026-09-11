@@ -465,7 +465,11 @@ from the columns the ledger already has — no schema change:
 `updated_at + backoff(attempts) <= now`. A `pending` row is due once it is
 older than 15 min (`STALE_PENDING_CLAIM_MS`): the sweep flips it to `failed`
 without touching `attempts` (`releaseStalePending`) and the normal re-claim
-takes it. Each due row goes through the same `feedSettledPayment` the
+takes it. That release is safe only because a live push cannot be that old:
+every Fortnox API call carries an abort timeout (15 s per JSON request, 60 s
+for the inbox upload) and a push is at most six sequential requests. The
+sweep's own terminal write (`exhausted:`) is guarded — it never touches a row
+a manual "Sync now" re-claimed or pushed in the meantime. Each due row goes through the same `feedSettledPayment` the
 settlement hook uses, so the dedup ledger, the feed-from floor, the FX gate
 and the degraded-destination skip all apply.
 
@@ -492,7 +496,9 @@ window). On a 429 the whole connection is deferred to the next tick: the row
 that hit it is recorded as failed (its attempt was real), every remaining row
 of that connection is left untouched — no claim, no `attempts + 1`. A
 `Retry-After` is honoured as a courtesy when a provider sends one, never
-depended on.
+depended on, and clamped to the 1 h backoff cap so a bogus header cannot
+park a connection until the next restart. `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`
+has a 10 s floor (a negative value would otherwise spin the interval).
 
 **On-call read.** One structured line per tick, `Accounting retry sweep`
 (`info` when anything was considered, `debug` when idle):

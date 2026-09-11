@@ -8285,7 +8285,7 @@ export interface operations {
                             /** Format: date-time */
                             updated_at: string;
                         }[];
-                        /** @description #2866: sync rows by retry state, over ALL of the caller's rows (the `syncs` list is capped). `pending` is in flight (or a stale claim the sweep will release), `failed` is retryable — the background sweep re-feeds it with backoff — and `exhausted` is a `failed` row at the attempt cap (8) that the sweep has given up on; its `error` starts with `exhausted:`. "Sync now" still retries exhausted rows. Zeros when the feed is unavailable. */
+                        /** @description #2866: sync rows by retry state, over ALL of the caller's rows (the `syncs` list is capped). `pending` is in flight (or a stale claim the sweep will release), `failed` is retryable — the background sweep re-feeds it with backoff — and `exhausted` is a `failed` row at the attempt cap (8) that the sweep has given up on; its `error` starts with `exhausted:` until a manual "Sync now" re-claims it (a later failure then carries the plain reason while `attempts` keeps it in this count). "Sync now" still retries exhausted rows. Zeros when the feed is unavailable. */
                         counts: {
                             pending: number;
                             failed: number;

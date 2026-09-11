@@ -22,6 +22,16 @@ import type {
 } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
+
+/**
+ * Upper bounds on one Fortnox API round trip (#2866). A push is a handful of
+ * sequential requests; with these bounds it cannot outlive the retry sweep's
+ * stale-claim threshold (`STALE_PENDING_CLAIM_MS`, 15 min), which is what
+ * makes releasing a stale `pending` row safe from a double post. undici's
+ * defaults (300 s per phase) would not have guaranteed that.
+ */
+export const FORTNOX_REQUEST_TIMEOUT_MS = 15_000
+export const FORTNOX_UPLOAD_TIMEOUT_MS = 60_000
 import {
   loadReceiptUnderlag,
   merchantReceiptPdf,
@@ -132,6 +142,7 @@ async function fortnoxGet<T>(accessToken: string, path: string, fetchImpl: typeo
   try {
     res = await fetchImpl(`${FORTNOX_API_BASE}${path}`, {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(FORTNOX_REQUEST_TIMEOUT_MS),
     })
   } catch (err) {
     throw new FortnoxError(`Could not reach Fortnox: ${err instanceof Error ? err.message : String(err)}`, 0)
@@ -156,6 +167,7 @@ async function fortnoxPost<T>(
         Accept: 'application/json',
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FORTNOX_REQUEST_TIMEOUT_MS),
     })
   } catch (err) {
     throw new FortnoxError(`Could not reach Fortnox: ${err instanceof Error ? err.message : String(err)}`, 0)
@@ -193,6 +205,7 @@ async function fortnoxUploadPdf(
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
       body: form,
+      signal: AbortSignal.timeout(FORTNOX_UPLOAD_TIMEOUT_MS),
     })
   } catch (err) {
     throw new FortnoxError(`Could not reach Fortnox: ${err instanceof Error ? err.message : String(err)}`, 0)

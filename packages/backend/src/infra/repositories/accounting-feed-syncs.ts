@@ -284,8 +284,12 @@ export const RETRY_BACKOFF_CAP_MS = 60 * 60_000
 /**
  * A `pending` row older than this is a claim whose owner died mid-push (the
  * claim IS the concurrency guard, so nothing else releases it). Longer than
- * any single push can take — the Fortnox client's per-request timeout is
- * 15 s and a push makes a handful of requests.
+ * any single push can take: every Fortnox API call carries an AbortSignal
+ * (15 s per JSON request, 60 s for the inbox upload —
+ * `FORTNOX_REQUEST_TIMEOUT_MS` / `FORTNOX_UPLOAD_TIMEOUT_MS`) and a push is
+ * at most six sequential requests, so a live owner is never older than a
+ * few minutes. Releasing a claim whose owner is still alive would let two
+ * pushes race — which is why this margin is large, not tight.
  */
 export const STALE_PENDING_CLAIM_MS = 15 * 60_000
 
@@ -324,7 +328,7 @@ export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT s.id, s.user_id, s.provider, s.p
        AND s.attempts < $2::int
        AND (
          (s.status IN ('failed', 'skipped')
-            AND s.updated_at + LEAST($3::float8 * power(2, GREATEST(s.attempts, 1) - 1), $4::float8) * interval '1 millisecond' <= $1::timestamptz)
+            AND s.updated_at + LEAST($3::float8 * power(2, LEAST(GREATEST(s.attempts, 1) - 1, 30)), $4::float8) * interval '1 millisecond' <= $1::timestamptz)
          OR (s.status = 'pending' AND s.updated_at + $5::float8 * interval '1 millisecond' <= $1::timestamptz)
        )
      ORDER BY s.user_id, s.provider, s.updated_at ASC, s.id ASC
@@ -337,6 +341,18 @@ export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT s.id, s.user_id, s.provider, s.p
  * `pending` and still older than the timeout at `$2`, so a push that
  * completed between the selection and this statement is never undone.
  */
+/**
+ * The sweep's terminal write (#2866): only a row that is STILL failed/skipped
+ * and at the attempt cap takes the `exhausted:` reason. Unlike MARK_SYNC_FAILED_SQL
+ * this never flips a row a manual sync re-claimed (pending) or pushed in the
+ * meantime — review on #2899.
+ */
+export const MARK_SYNC_EXHAUSTED_SQL = `UPDATE accounting_feed_syncs
+     SET error = $4, updated_at = NOW()
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1
+       AND status IN ('failed', 'skipped') AND attempts >= $5::int
+     RETURNING id`
+
 export const RELEASE_STALE_PENDING_SQL = `UPDATE accounting_feed_syncs
      SET status = 'failed', error = $4, updated_at = NOW()
      WHERE id = $1 AND status = 'pending'
@@ -379,6 +395,18 @@ export async function listDueRetrySyncs(
 }
 
 /** True when the row was released (it was still a stale `pending`). */
+/** See MARK_SYNC_EXHAUSTED_SQL. Returns true when the row took the terminal reason. */
+export async function markExhausted(
+  userId: string,
+  provider: string,
+  paymentId: string,
+  error: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(MARK_SYNC_EXHAUSTED_SQL, [userId, provider, paymentId, error.slice(0, 1000), RETRY_MAX_ATTEMPTS])
+  return (result.rowCount ?? 0) === 1
+}
+
 export async function releaseStalePending(
   id: string,
   now: Date,

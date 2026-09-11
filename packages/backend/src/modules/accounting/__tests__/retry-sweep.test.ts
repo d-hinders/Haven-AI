@@ -16,7 +16,7 @@ vi.mock('../../../config.js', () => ({ config: configMock }))
 const repo = vi.hoisted(() => ({
   listDueRetrySyncs: vi.fn(),
   releaseStalePending: vi.fn(),
-  markFailed: vi.fn(),
+  markExhausted: vi.fn(),
 }))
 vi.mock('../../../infra/repositories/accounting-feed-syncs.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../infra/repositories/accounting-feed-syncs.js')>()
@@ -24,6 +24,7 @@ vi.mock('../../../infra/repositories/accounting-feed-syncs.js', async (importOri
 })
 
 import { ProviderError } from '../provider.js'
+import { RETRY_BACKOFF_CAP_MS } from '../../../infra/repositories/accounting-feed-syncs.js'
 import {
   PROVIDER_RATE_LIMIT,
   REQUESTS_PER_PUSH,
@@ -67,7 +68,7 @@ describe('accounting retry sweep (#2866)', () => {
     for (const m of Object.values(repo)) m.mockReset()
     repo.listDueRetrySyncs.mockResolvedValue([])
     repo.releaseStalePending.mockResolvedValue(true)
-    repo.markFailed.mockResolvedValue(undefined)
+    repo.markExhausted.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -217,7 +218,7 @@ describe('accounting retry sweep (#2866)', () => {
       expect(feed.mock.calls.map((c) => c[1])).toEqual(['a', 'd'])
       expect(result).toMatchObject({ considered: 4, pushed: 1, failed: 1, deferred: 2, rateLimited: 1, connections: 2 })
       // Nothing was written for b and c by the sweep itself.
-      expect(repo.markFailed).not.toHaveBeenCalled()
+      expect(repo.markExhausted).not.toHaveBeenCalled()
     })
 
     it('a non-429 failure does NOT defer the rest of the connection', async () => {
@@ -251,6 +252,19 @@ describe('accounting retry sweep (#2866)', () => {
       expect(await runRetrySweep({ now, sleep, feed })).toMatchObject({ considered: 2, deferred: 0, pushed: 2 })
     })
 
+    it('a Retry-After beyond the backoff cap is clamped to it — a courtesy can never park a connection until restart (review on #2899)', async () => {
+      const err = Object.assign(limited(), { retryAfterMs: 99_999_999_000 })
+      repo.listDueRetrySyncs.mockResolvedValue([due('u1', 'a'), due('u1', 'b')])
+      const feed = vi.fn(async (_u: string, paymentId: string) =>
+        paymentId === 'a' ? { outcome: 'failed' as const, reason: '429', error: err } : { outcome: 'pushed' as const },
+      )
+      expect(await runRetrySweep({ now, sleep, feed })).toMatchObject({ deferred: 1, rateLimited: 1 })
+      feed.mockImplementation(async () => ({ outcome: 'pushed' as const }))
+      // MUTATION TARGET: without the clamp this tick is still deferred.
+      clock += RETRY_BACKOFF_CAP_MS + 1_000
+      expect(await runRetrySweep({ now, sleep, feed })).toMatchObject({ considered: 2, deferred: 0, pushed: 2 })
+    })
+
     it('without a Retry-After (Fortnox), the connection is simply retried on the next tick', async () => {
       repo.listDueRetrySyncs.mockResolvedValue([due('u1', 'a'), due('u1', 'b')])
       const feed = vi.fn(async (_u: string, paymentId: string) =>
@@ -272,7 +286,7 @@ describe('accounting retry sweep (#2866)', () => {
       )
       const result = await runRetrySweep({ now, sleep, feed })
       expect(result).toMatchObject({ exhausted: 2, failed: 1, skipped: 0 })
-      expect(repo.markFailed.mock.calls.map((c) => [c[2], c[3]])).toEqual([
+      expect(repo.markExhausted.mock.calls.map((c) => [c[2], c[3]])).toEqual([
         ['last', 'exhausted: fortnox request failed (HTTP 500)'],
         ['skip', 'exhausted: skipped: not_outbound'],
       ])

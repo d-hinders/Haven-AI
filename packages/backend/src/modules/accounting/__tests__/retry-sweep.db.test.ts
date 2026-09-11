@@ -39,7 +39,7 @@ import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/hel
 import { setStatus, upsertConnection } from '../../../infra/repositories/accounting-connections.js'
 import {
   getSyncState,
-  countSyncsForUser,
+  markExhausted, countSyncsForUser,
   retryBackoffMs,
   RETRY_MAX_ATTEMPTS,
   STALE_PENDING_CLAIM_MS,
@@ -92,7 +92,7 @@ async function seedConnection(userId: string): Promise<void> {
 }
 
 async function seedSync(
-  userId: string, paymentId: string, status: 'failed' | 'skipped' | 'pending', attempts: number, agoMs: number,
+  userId: string, paymentId: string, status: 'failed' | 'skipped' | 'pending' | 'pushed', attempts: number, agoMs: number,
 ): Promise<void> {
   await db.query(
     `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, status, attempts, error, updated_at)
@@ -172,6 +172,24 @@ describeDb('accounting retry sweep on the real ledger (#2866)', () => {
     // Terminal for the sweep: neither is due again, ever.
     expect(await sweep(at(365 * 24 * 60 * 60_000))).toMatchObject({ considered: 0 })
     expect(await countSyncsForUser(userId)).toEqual({ pending: 0, failed: 0, exhausted: 2 })
+  })
+
+  it('the terminal write is guarded: a row a manual sync re-claimed (pending) or pushed meanwhile is left alone (review on #2899)', async () => {
+    const userId = await seedUser()
+    await seedConnection(userId)
+    // A row that LOOKS exhausted to the sweep's bookkeeping but has since
+    // been re-claimed by "Sync now" (pending) — and one that was pushed.
+    await seedSync(userId, 'pay-pending', 'pending', RETRY_MAX_ATTEMPTS, 60_000)
+    await seedSync(userId, 'pay-pushed', 'pushed', RETRY_MAX_ATTEMPTS, 60_000)
+    // MUTATION TARGET: the unguarded MARK_SYNC_FAILED_SQL would flip both to failed.
+    expect(await markExhausted(userId, 'memory', 'pay-pending', `${EXHAUSTED_PREFIX} x`)).toBe(false)
+    expect(await markExhausted(userId, 'memory', 'pay-pushed', `${EXHAUSTED_PREFIX} x`)).toBe(false)
+    expect((await row(userId, 'pay-pending')).status).toBe('pending')
+    expect((await row(userId, 'pay-pushed')).status).toBe('pushed')
+    // And a failed row below the cap is not "exhausted" either.
+    await seedSync(userId, 'pay-low', 'failed', 2, 60_000)
+    expect(await markExhausted(userId, 'memory', 'pay-low', `${EXHAUSTED_PREFIX} x`)).toBe(false)
+    expect((await row(userId, 'pay-low')).error).not.toContain(EXHAUSTED_PREFIX)
   })
 
   it('a 429 defers the remaining rows of that connection without incrementing their attempts; the next tick retries them', async () => {

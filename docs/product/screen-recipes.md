@@ -388,9 +388,8 @@ Money and risk clarity:
   end"). Softening one and leaving the others is worse than softening none:
   the louder claim is the one the reader believes. The same rule binds any
   other surface fed by the same hook — the account detail page's transaction
-  count included. Hedge the wording ("may not be your full history"): one
-  provider answers by cursor and is certain, the other infers from a full
-  page and can be one window out.
+  count included. Hedge the wording ("may not be your full history"); the
+  detection is not exact on every provider, and the reason lives in the code.
 - Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
   one merchant-facing row such as `Agent payment by [agent name]`. Live
@@ -436,6 +435,12 @@ Structure:
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.
 - Technical disclosure is allowed here, but label it gently and keep it visually subordinate.
+- The transaction count on this page comes from the same capped feed as
+  Transaction History, so it softens with it (#2882) — see that section's
+  rule. A preview card earns the shortened form ("N recent transactions",
+  the count marked "loaded") rather than the full caveat sentence: a
+  disclaimer longer than the thing it qualifies is worse than the terse one,
+  and `View all` carries the reader to the surface that explains itself.
 
 ## Recover Agent-Wallet Funds
 

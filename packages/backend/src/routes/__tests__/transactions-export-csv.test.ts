@@ -413,12 +413,14 @@ describe('GET /transactions/export.csv', () => {
   })
 
   it('exports every row the pipeline yields, well past one page of the list', async () => {
-    // The list route pages at 25; the export takes the lot. One
-    // `EXPLORER_PAGE_SIZE` window is the most a single source yields today —
-    // sliced locally on Blockscout, which takes no page-size parameter, and
-    // requested as `offset` on the Etherscan-shaped legs. That is why
-    // EXPORT_ROW_CAP's refusal is not reachable through this leg; it is
-    // reached through the unbounded x402 leg below.
+    // The list route pages at 25; the export takes the lot. #2882 capped a
+    // source at one window (fifty of these eighty rows reached the CSV);
+    // #2884 removed that cap — the explorer leg reads past the first window
+    // (up to EXPLORER_MAX_PAGES pages), so all eighty rows the stub offers
+    // on its single page are exported. EXPORT_ROW_CAP's refusal is still not
+    // reachable through this leg — the page budget keeps an explorer-sourced
+    // export far under it — it is reached through the unbounded x402 leg
+    // below.
     stubManyBaseTransactions(80)
     routeDbQueries({ user_safes: [BOTH_SAFES[0]] })
 
@@ -426,8 +428,8 @@ describe('GET /transactions/export.csv', () => {
     const { records } = parseCsv(response.body.slice(1))
 
     expect(response.statusCode).toBe(200)
-    expect(records).toHaveLength(50)
-    expect(response.headers['x-export-row-count']).toBe('50')
+    expect(records).toHaveLength(80)
+    expect(response.headers['x-export-row-count']).toBe('80')
   })
 
   it('names the far side of a transfer between two of the user\'s own accounts', async () => {

@@ -1,13 +1,16 @@
 /**
  * The truncation signal on `GET /transactions` (#2882).
  *
- * Each explorer leg reports for itself whether more rows exist beyond the
- * ones it returned. On Blockscout (the default chain's provider) that is the
- * `next_page_params` cursor, NOT a row count: `fetchFromV2` sends no page-size
- * parameter and slices locally, so counting rows there would measure
- * Blockscout's own default rather than anything Haven asked for, and would
- * start lying the day that default changed. The Etherscan-shaped legs have no
- * cursor, so they fall back to a full page.
+ * Each explorer leg reports for itself whether the read was capped. On
+ * Blockscout (the default chain's provider) that is the `next_page_params`
+ * cursor, NOT a row count: `fetchFromV2` sends no page-size parameter, so
+ * counting rows there would measure Blockscout's own default rather than
+ * anything Haven asked for, and would start lying the day that default
+ * changed. Since #2884 the cursor is FOLLOWED — up to `EXPLORER_MAX_PAGES`
+ * pages — and `truncated` reports the budget being spent with the provider
+ * still offering more. The Etherscan-shaped legs have no cursor; they walk
+ * `page` until a short page (a real completion signal, `offset` being
+ * requested explicitly) and report the budget spent on a full page.
  *
  * These tests pin both mechanisms, both directions, and the per-account cache
  * — which is where a naive implementation drops the flag.
@@ -88,10 +91,12 @@ function stubBlockscout(safe: string, opts: LegOptions) {
 }
 
 /**
- * Stubs the Gnosis (etherscan-v2) legs. That provider has no cursor, so
- * `hasMore` there is `rows.length >= offset` — a different mechanism from
- * Blockscout's, live for every Gnosis account, and the half these tests
- * would otherwise leave unpinned.
+ * Stubs the Gnosis (etherscan-v2) legs. That provider has no cursor: the
+ * loop walks `page` until a short page, and `hasMore` there means the
+ * budget was spent on full pages — a different mechanism from Blockscout's,
+ * live for every Gnosis account, and the half these tests would otherwise
+ * leave unpinned. This stub answers every page identically, so the loop
+ * runs out its full budget: exactly the capped case.
  */
 function stubEtherscan(safe: string, nativeRows: number) {
   const result = Array.from({ length: nativeRows }, (_, i) => ({
@@ -271,9 +276,10 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     expect(second.json().truncated).toBe(true)
   })
 
-  it('reports truncated on a cursorless provider when a leg returns a full page', async () => {
-    // Gnosis: `offset` really is requested, so a full page IS evidence the
-    // source had more. This is the other mechanism, and it is live.
+  it('reports truncated on a cursorless provider when every page comes back full', async () => {
+    // Gnosis: `offset` is requested explicitly, so the loop pages until a
+    // short page. This stub answers full on every page, so the budget is
+    // spent with the source still holding more — the capped read, reported.
     const safe = uniqueSafe(100)
     stubEtherscan(safe.address, EXPLORER_PAGE_SIZE)
     routeDbQueries(safe.rows)
@@ -283,7 +289,11 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     expect(response.json().truncated).toBe(true)
   })
 
-  it('does not report truncated on a cursorless provider one row below the window', async () => {
+  it('does not report truncated on a cursorless provider whose page walk ends on a short page', async () => {
+    // 49 rows on page 1 is SHORT — the loop ends there and the read is
+    // complete. This is the case #2882 could only hedge about (a full page
+    // might have had more); with pagination, one row below the window is a
+    // definite answer.
     const safe = uniqueSafe(100)
     stubEtherscan(safe.address, EXPLORER_PAGE_SIZE - 1)
     routeDbQueries(safe.rows)

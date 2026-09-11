@@ -419,17 +419,15 @@ export default function TransactionsClient() {
           </span>
         )}
         {/*
-          #2882: `total` counts what the explorers returned, not what the
-          account holds — each source is capped at a fixed window. This line
-          qualifies that count, so it lives inside the count row rather than
-          floating above the table.
+          #2882/#2884: `total` counts what the explorers returned, not what
+          the account holds — each source is read only up to a fixed page
+          budget. This line qualifies that count, so it lives inside the count
+          row rather than floating above the table.
 
-          Hedged on purpose. Blockscout answers by cursor, so there the cap is
-          certain; the Etherscan-shaped legs infer it from a full page, and an
-          account holding exactly one window would otherwise be told flatly
-          that older transactions exist when none do. "May not be" is true in
-          every state at no cost. It corrects the SCREEN; the downloaded CSV
-          carries no such note, which is recorded on the PR.
+          Hedged on purpose. The feed stops at the budget when a source has
+          more, and a failed leg is unknown rather than capped, so "may not
+          be" is true in every state at no cost. It corrects the SCREEN; the
+          downloaded CSV carries no such note, which is recorded on the PR.
         */}
         {!loadingInitial && truncated && (
           <div className="w-full text-xs text-[var(--v2-ink-3)]">

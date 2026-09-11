@@ -383,8 +383,9 @@ Money and risk clarity:
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
 - **Never present a capped list as a complete one (#2882).** The feed reads a
-  fixed window per source per account, so `total` counts what was returned,
-  not what the account holds. When the response reports `truncated`, every
+  bounded window per source per account — a fixed page budget (#2884) — so
+  `total` counts what was returned, not what the account holds. When the
+  response reports `truncated`, every
   claim on the screen softens together — the page subtitle ("Recent activity"
   rather than "All activity"), a caveat line inside the count row, and the
   end-of-list string ("End of what's loaded" rather than "You've reached the

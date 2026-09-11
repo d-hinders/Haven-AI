@@ -3,7 +3,7 @@ import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { requireAccountingFeed } from '../middleware/accountingFeed.js'
 import { accountingFeedAvailability } from '../modules/agents/index.js'
-import { getAccountingFeedStatus, syncUser } from '../modules/accounting/index.js'
+import { getAccountingFeedStatus, getAccountingFeedCounts, syncUser } from '../modules/accounting/index.js'
 import { hasLiveConnector } from '../modules/accounting/index.js'
 import { hasActiveConnection, verifyPushedPayment, reopenMissingPushed } from '../modules/accounting/index.js'
 
@@ -41,10 +41,16 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
       entitlementMode,
     }
     if (!available) {
-      return { ...base, available: false, connected: false, syncs: [] }
+      return { ...base, available: false, connected: false, syncs: [], counts: { pending: 0, failed: 0, exhausted: 0 } }
     }
-    const [connected, syncs] = await Promise.all([hasActiveConnection(sub), getAccountingFeedStatus(sub)])
-    return { ...base, available: true, connected, syncs }
+    // #2866: `counts` is over EVERY row, not the 100 the list shows — the
+    // retry sweep's pending / retryable / given-up numbers.
+    const [connected, syncs, counts] = await Promise.all([
+      hasActiveConnection(sub),
+      getAccountingFeedStatus(sub),
+      getAccountingFeedCounts(sub),
+    ])
+    return { ...base, available: true, connected, syncs, counts }
   })
 
   // POST /accounting/feed/sync — backfill + retry (gated)

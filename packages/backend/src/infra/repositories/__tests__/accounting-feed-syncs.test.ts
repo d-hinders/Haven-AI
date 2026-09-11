@@ -20,7 +20,16 @@ import {
   reopenMissingPushed,
   getSyncState,
   listSyncsForPaymentIds,
+  listDueRetrySyncs,
+  releaseStalePending,
+  countSyncsForUser,
+  retryBackoffMs,
+  RETRY_MAX_ATTEMPTS,
+  RETRY_BACKOFF_BASE_MS,
+  RETRY_BACKOFF_CAP_MS,
+  STALE_PENDING_CLAIM_MS,
 } from '../accounting-feed-syncs.js'
+import { upsertConnection, setStatus } from '../accounting-connections.js'
 
 let seq = 0
 
@@ -157,5 +166,150 @@ describeDb('accounting-feed-syncs repository (#1365)', () => {
     expect(await listSyncsForPaymentIds(userId, [])).toEqual([])
     expect(querySpy).not.toHaveBeenCalled()
     querySpy.mockRestore()
+  })
+
+  // ── #2866: the retry sweep's due-rows selection ─────────────────────────
+  //
+  // The clock is INJECTED (`now`) and the rows' `updated_at` is set directly,
+  // so every backoff edge is exercised without a sleep. `attempts` is set
+  // directly too — the curve is a function of the column, not of how the
+  // row got there.
+
+  async function seedConnected(userId: string, provider = 'fortnox'): Promise<void> {
+    await upsertConnection(userId, {
+      provider, authKind: 'oauth2', secretsCiphertext: Buffer.from('{}'), secretsKeyVersion: 0,
+      grantedScope: null, tokenExpiresAt: null,
+    })
+  }
+
+  /** A sync row in `status` with `attempts`, last touched `agoMs` before `now`. */
+  async function seedSync(
+    userId: string, paymentId: string, status: 'failed' | 'skipped' | 'pending' | 'pushed', attempts: number, agoMs: number, now: Date, provider = 'fortnox',
+  ): Promise<string> {
+    const r = await db.query<{ id: string }>(
+      `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, status, attempts, error, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'boom', $6::timestamptz - ($7::float8 * interval '1 millisecond')) RETURNING id`,
+      [userId, provider, paymentId, status, attempts, now, agoMs],
+    )
+    return r.rows[0].id
+  }
+
+  const NOW = new Date('2026-09-11T12:00:00.000Z')
+
+  it('retryBackoffMs is the documented curve: 1 min doubling to the 1 h cap', () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map(retryBackoffMs)).toEqual([
+      60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, RETRY_BACKOFF_CAP_MS, RETRY_BACKOFF_CAP_MS,
+    ])
+    expect(retryBackoffMs(0)).toBe(RETRY_BACKOFF_BASE_MS)
+    expect(RETRY_MAX_ATTEMPTS).toBe(8)
+  })
+
+  it('a failed row with attempts 1 is due after its backoff and NOT before (mutation target: the backoff predicate)', async () => {
+    const userId = await seedUser()
+    await seedConnected(userId)
+    // 1 s short of the first step: not due.
+    await seedSync(userId, 'pay-early', 'failed', 1, retryBackoffMs(1) - 1_000, NOW)
+    expect((await listDueRetrySyncs(NOW, 100)).map((r) => r.payment_id)).toEqual([])
+    // Exactly the step later: due.
+    expect((await listDueRetrySyncs(new Date(NOW.getTime() + 1_000), 100)).map((r) => r.payment_id)).toEqual(['pay-early'])
+  })
+
+  it('the curve is read off attempts: a row at attempts 4 waits 8 min, one at 7 waits the 1 h cap', async () => {
+    const userId = await seedUser()
+    await seedConnected(userId)
+    await seedSync(userId, 'pay-4-early', 'failed', 4, 7 * 60_000, NOW)
+    await seedSync(userId, 'pay-4-due', 'failed', 4, 8 * 60_000, NOW)
+    await seedSync(userId, 'pay-7-early', 'skipped', 7, 59 * 60_000, NOW)
+    await seedSync(userId, 'pay-7-due', 'skipped', 7, 60 * 60_000, NOW)
+    expect((await listDueRetrySyncs(NOW, 100)).map((r) => r.payment_id).sort()).toEqual(['pay-4-due', 'pay-7-due'])
+  })
+
+  it('a row at the attempt cap is never due, however old (mutation target: attempts < cap)', async () => {
+    const userId = await seedUser()
+    await seedConnected(userId)
+    await seedSync(userId, 'pay-capped', 'failed', RETRY_MAX_ATTEMPTS, 30 * 24 * 60 * 60_000, NOW)
+    await seedSync(userId, 'pay-over', 'failed', RETRY_MAX_ATTEMPTS + 3, 30 * 24 * 60 * 60_000, NOW)
+    // Positive control on the same clock: one under the cap IS due.
+    await seedSync(userId, 'pay-under', 'failed', RETRY_MAX_ATTEMPTS - 1, 30 * 24 * 60 * 60_000, NOW)
+    expect((await listDueRetrySyncs(NOW, 100)).map((r) => r.payment_id)).toEqual(['pay-under'])
+  })
+
+  it("rows for a needs_reauthorisation connection are not due, and become due once it is connected again (mutation target: c.status = 'connected')", async () => {
+    const userId = await seedUser()
+    await seedConnected(userId)
+    await setStatus(userId, 'fortnox', 'needs_reauthorisation', 'refresh refused: invalid_grant')
+    await seedSync(userId, 'pay-dead', 'skipped', 2, 24 * 60 * 60_000, NOW)
+    expect(await listDueRetrySyncs(NOW, 100)).toEqual([])
+
+    // The cause is gone: the user re-consented (upsert flips the row back).
+    await seedConnected(userId)
+    expect((await listDueRetrySyncs(NOW, 100)).map((r) => r.payment_id)).toEqual(['pay-dead'])
+
+    // scope_missing / disconnected hold the row back the same way.
+    await setStatus(userId, 'fortnox', 'scope_missing', 'attachments')
+    expect(await listDueRetrySyncs(NOW, 100)).toEqual([])
+  })
+
+  it('a row whose provider is not the active destination is not due; a pushed row never is', async () => {
+    const userId = await seedUser()
+    await seedConnected(userId, 'fortnox') // active
+    await seedConnected(userId, 'memory') // second row, NOT active
+    await seedSync(userId, 'pay-other', 'failed', 1, 24 * 60 * 60_000, NOW, 'memory')
+    await seedSync(userId, 'pay-pushed', 'pushed', 1, 24 * 60 * 60_000, NOW)
+    await seedSync(userId, 'pay-noconn', 'failed', 1, 24 * 60 * 60_000, NOW, 'ghost')
+    expect(await listDueRetrySyncs(NOW, 100)).toEqual([])
+  })
+
+  it('a stale pending claim is due after the claim timeout, not before, and releaseStalePending flips it without touching attempts', async () => {
+    const userId = await seedUser()
+    await seedConnected(userId)
+    const fresh = await seedSync(userId, 'pay-inflight', 'pending', 3, STALE_PENDING_CLAIM_MS - 1_000, NOW)
+    const stale = await seedSync(userId, 'pay-stale', 'pending', 3, STALE_PENDING_CLAIM_MS, NOW)
+    const due = await listDueRetrySyncs(NOW, 100)
+    expect(due.map((r) => r.payment_id)).toEqual(['pay-stale'])
+    expect(due[0]).toMatchObject({ id: stale, status: 'pending', attempts: 3 })
+
+    // The in-flight one is refused by the guarded release; the stale one flips.
+    expect(await releaseStalePending(fresh, NOW, 'released')).toBe(false)
+    expect(await releaseStalePending(stale, NOW, 'released')).toBe(true)
+    const row = await getSyncState(userId, 'fortnox', 'pay-stale')
+    expect(row).toMatchObject({ status: 'failed', attempts: 3, error: 'released' })
+    // Idempotent: a second release finds nothing pending.
+    expect(await releaseStalePending(stale, NOW, 'released')).toBe(false)
+  })
+
+  it('due rows come back grouped by connection, oldest first, and the limit bounds the batch', async () => {
+    const userA = await seedUser()
+    const userB = await seedUser()
+    await seedConnected(userA)
+    await seedConnected(userB)
+    await seedSync(userA, 'a-newer', 'failed', 1, 2 * 60_000, NOW)
+    await seedSync(userA, 'a-older', 'failed', 1, 3 * 60_000, NOW)
+    await seedSync(userB, 'b-1', 'failed', 1, 2 * 60_000, NOW)
+    const due = await listDueRetrySyncs(NOW, 100)
+    const byUser = new Map<string, string[]>()
+    for (const r of due) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), r.payment_id])
+    expect(byUser.get(userA)).toEqual(['a-older', 'a-newer'])
+    expect(byUser.get(userB)).toEqual(['b-1'])
+    // Contiguous per user.
+    const order = due.map((r) => r.user_id)
+    expect(order.indexOf(userA) === order.lastIndexOf(userA) - 1).toBe(true)
+    expect(await listDueRetrySyncs(NOW, 2)).toHaveLength(2)
+  })
+
+  it('countSyncsForUser: pending / retryable failed / exhausted, keyed on the same cap as the sweep, per tenant', async () => {
+    const userId = await seedUser()
+    const other = await seedUser()
+    await seedSync(userId, 'p1', 'pending', 1, 0, NOW)
+    await seedSync(userId, 'f1', 'failed', 1, 0, NOW)
+    await seedSync(userId, 'f2', 'failed', RETRY_MAX_ATTEMPTS - 1, 0, NOW)
+    await seedSync(userId, 'x1', 'failed', RETRY_MAX_ATTEMPTS, 0, NOW)
+    await seedSync(userId, 'x2', 'failed', RETRY_MAX_ATTEMPTS + 5, 0, NOW)
+    await seedSync(userId, 's1', 'skipped', 2, 0, NOW)
+    await seedSync(userId, 'ok', 'pushed', 1, 0, NOW)
+    await seedSync(other, 'f-other', 'failed', 1, 0, NOW)
+    expect(await countSyncsForUser(userId)).toEqual({ pending: 1, failed: 2, exhausted: 2 })
+    expect(await countSyncsForUser(other)).toEqual({ pending: 0, failed: 1, exhausted: 0 })
+    expect(await countSyncsForUser(await seedUser())).toEqual({ pending: 0, failed: 0, exhausted: 0 })
   })
 })

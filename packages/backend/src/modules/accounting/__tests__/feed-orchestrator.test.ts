@@ -146,7 +146,11 @@ describe('feed orchestrator (#499)', () => {
       revoke: async () => {},
     }
     registerConnector(throwing)
-    await expect(feedSettledPayment(USER, PID)).resolves.toBeUndefined()
+    // #2866: the outcome carries the thrown error so the retry sweep can
+    // tell a provider 429 from anything else; nothing is thrown at the caller.
+    const err = new Error('fortnox down')
+    throwing.pushTransaction = async () => { throw err }
+    await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'failed', reason: 'fortnox down', error: err })
     expect(mocks.markFailed).toHaveBeenCalledWith(USER, 'fortnox', PID, 'fortnox down')
   })
 })

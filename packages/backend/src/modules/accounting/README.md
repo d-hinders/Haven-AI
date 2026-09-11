@@ -78,6 +78,14 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      `connection needs_reauthorisation: <provider error>`; and the
      `secretsKeyConfigured()` check BEFORE the single-use refresh token is
      consumed. Do not add a second refresh path in the connector.
+   - **Retries are the sweep's, not yours (#2866).** A thrown error or a
+     `failed` result lands in the ledger and `retry-sweep.ts` re-feeds the
+     row with backoff (1 min doubling to 1 h, 8 attempts, then
+     `exhausted:`), one connection at a time under a 25 requests / 5 s floor.
+     Throw a `ProviderError` with `status: 429` on the provider's rate limit
+     — that is what defers the rest of the connection to the next tick —
+     and set `retryAfterMs` on it if the provider sends `Retry-After`
+     (honoured as a courtesy). Do not retry inside `pushTransaction`.
 4. **Register the instance** at boot in `src/index.ts`, gated on the
    provider's credentials being configured (the Fortnox pattern), so a
    deployment without them lists the provider as `configured: false`.

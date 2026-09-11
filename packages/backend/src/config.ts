@@ -412,6 +412,12 @@ export const config = {
   // HAVEN_CONNECTOR_CHANNEL above: a typo must not silently fall back to
   // "granted" and look like the feature is off when it is merely misspelled.
   accountingEntitlementMode: parseAccountingEntitlementMode(process.env.HAVEN_ACCOUNTING_ENTITLEMENT_MODE),
+  // Cadence of the background retry sweep (#2866): every tick re-feeds the
+  // failed / skipped / stale-pending sync rows whose backoff has elapsed. A
+  // few minutes is the intended shape — the per-row backoff (1 min doubling
+  // to 1 h) does the spacing, the tick only bounds how soon a due row is
+  // seen. Inert with the flag off regardless of this value.
+  accountingRetrySweepIntervalMs: Number(process.env.HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS) || 5 * 60 * 1000,
 
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,

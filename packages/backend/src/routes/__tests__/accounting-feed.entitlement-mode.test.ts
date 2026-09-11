@@ -28,6 +28,7 @@ vi.mock('../../infra/repositories/account-entitlements.js', () => repoMocks)
 
 const accountingMocks = vi.hoisted(() => ({
   getAccountingFeedStatus: vi.fn(),
+  getAccountingFeedCounts: vi.fn(),
   syncUser: vi.fn(),
   hasLiveConnector: vi.fn(),
   hasActiveConnection: vi.fn(),
@@ -56,6 +57,7 @@ describe('accounting feed routes × real entitlement gate (#2861)', () => {
     // A fresh user: the entitlement table has NO row for them.
     repoMocks.hasEntitlementRow.mockReset().mockResolvedValue(false)
     accountingMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
+    accountingMocks.getAccountingFeedCounts.mockReset().mockResolvedValue({ pending: 0, failed: 0, exhausted: 0 })
     accountingMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     accountingMocks.hasLiveConnector.mockReset().mockReturnValue(true)
     accountingMocks.hasActiveConnection.mockReset().mockResolvedValue(false)

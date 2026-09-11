@@ -13,6 +13,7 @@ import {
   mergeX402Transactions,
 } from '../../modules/transactions/index.js'
 import pool from '../../db.js'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 const LOWERCASE_SAFE_ADDRESS = SAFE_ADDRESS.toLowerCase()
@@ -370,13 +371,16 @@ describe('transaction routes', () => {
         return {
           rows: [
             {
-              id: 'safe-gnosis',
+              // #2885: expectMatchesSpec below actually checks the uuid
+              // format now — a fixture id of `'safe-gnosis'` fails it,
+              // correctly (same lesson #1444 recorded for `'agent-1'`).
+              id: '11111111-1111-4111-8111-111111111111',
               safe_address: SAFE_ADDRESS,
               chain_id: 100,
               name: 'Gnosis wallet',
             },
             {
-              id: 'safe-base',
+              id: '22222222-2222-4222-8222-222222222222',
               safe_address: SAFE_ADDRESS,
               chain_id: 8453,
               name: 'Base wallet',
@@ -400,6 +404,37 @@ describe('transaction routes', () => {
       100,
       8453,
     ])
+    // #2885: the FULL response, not an emptied stand-in — `Transaction` now
+    // declares `chainId`/`safeId`/`safeAddress`/`safeName` (and `fxRateSek`/
+    // `fxSource`, also missing from the contract), so this can actually pass.
+    expectMatchesSpec('GET', '/transactions', body)
+  })
+
+  it('strips the aggregated-feed-only account fields from the legacy per-Safe response (#2885)', async () => {
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    stubOneNativeTransactionFetch()
+    const queryMock = mockSafeRows([{ id: 'safe-base', chain_id: 8453 }])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=8453&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(queryMock).toHaveBeenCalled()
+    const body = response.json()
+    expect(body.transactions).toHaveLength(1)
+    // The legacy route's destructure (`routes/transactions.ts`) drops these —
+    // `TransactionsPageResponse` uses the narrow `TransactionBase`, which does
+    // not declare them, so a leak would also fail `expectMatchesSpec` below.
+    for (const field of ['chainId', 'safeId', 'safeAddress', 'safeName', 'agentId']) {
+      expect(body.transactions[0]).not.toHaveProperty(field)
+    }
+    // Full payload against the spec's own schema — the same assertion the
+    // feed test above makes, on the route whose `TransactionBase` schema was
+    // never the composed one.
+    expectMatchesSpec('GET', '/transactions/{safeAddress}', body)
   })
 })
 
@@ -1373,7 +1408,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       const text = String(sql)
       if (text.includes('FROM user_safes')) {
         return {
-          rows: [{ id: 'safe-csv', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+          rows: [{ id: '11111111-2222-4333-8444-555555555501', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
         } as never
       }
       if (text.includes('FROM payment_intents pi') && text.includes('JOIN agents a')) {
@@ -1382,9 +1417,9 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
             {
               id: 'payment-csv',
               tx_hash: TX_HASH,
-              agent_id: 'agent-csv',
+              agent_id: '11111111-2222-4333-8444-555555555502',
               agent_name: 'Research assistant',
-              safe_id: 'safe-csv',
+              safe_id: '11111111-2222-4333-8444-555555555501',
               safe_address: SAFE_ADDRESS,
               safe_name: 'Main wallet',
               chain_id: 8453,
@@ -1397,6 +1432,8 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
               x402_resource_url: 'https://api.example.com/data',
               payment_proof_status: 'protocol_receipt_attached',
               amount_sek: '0.21',
+              fx_rate_sek: '10.5000',
+              fx_source: 'riksbank',
               payment_reconciliation_event_type: null,
               confirmed_at: '2026-05-08T11:50:10Z',
               created_at: '2026-05-08T11:49:55Z',
@@ -1429,6 +1466,8 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       chainId: 8453,
       agentName: 'Research assistant',
       amountSek: '0.21',
+      fxRateSek: '10.5000',
+      fxSource: 'riksbank',
       isError: false,
       paymentFlowStatus: 'paid',
       source: 'x402',
@@ -1436,5 +1475,10 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
     expect(typeof tx.timestamp).toBe('number')
     expect(tx.timestamp).toBeGreaterThan(0)
     expect(tx.activityType).toBeUndefined()
+    // #2885: this is the one fixture that carries `fxRateSek`/`fxSource`, so it
+    // is the assertion that keeps them declared on the spec — removing either
+    // property from `transactionBaseProperties` fails here with
+    // "must NOT have additional properties".
+    expectMatchesSpec('GET', '/transactions', response.json())
   })
 })

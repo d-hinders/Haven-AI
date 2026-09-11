@@ -3503,7 +3503,7 @@ export type components = {
             explorer_url: string;
             idempotent_replay?: boolean;
         };
-        /** @description Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). */
+        /** @description Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above. */
         TransactionBase: {
             hash: string;
             /** @enum {string} */
@@ -3550,9 +3550,58 @@ export type components = {
              */
             settlementScheme?: "eip3009" | "erc7710" | null;
             amountSek?: string | null;
+            fxRateSek?: string | null;
+            fxSource?: string | null;
         };
-        /** @description Aggregated-feed transaction: the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. */
-        Transaction: components["schemas"]["TransactionBase"] & {
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        Transaction: {
+            hash: string;
+            /** @enum {string} */
+            type: "native" | "erc20" | "internal";
+            /** @description Counterparty address, or the empty string when the explorer reported none. */
+            from: string;
+            /** @description Counterparty address, or the empty string when the explorer reported none. */
+            to: string;
+            value: string;
+            valueFormatted: string;
+            /** @description Token ticker where known; falls back to the raw contract address for unknown tokens. */
+            asset: string;
+            decimals: number;
+            /** @enum {string} */
+            direction: "in" | "out";
+            timestamp: number;
+            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
+            blockNumber: number;
+            isError: boolean;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            tokenAddress?: string;
+            tokenSymbol?: string;
+            /** @description Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values. */
+            source?: string;
+            x402ResourceUrl?: string | null;
+            x402MerchantAddress?: string | null;
+            paymentId?: string;
+            paymentProofStatus?: string | null;
+            /** @enum {string|null} */
+            paymentFlowStatus?: "paid" | "confirming_merchant" | "needs_attention" | null;
+            /** @enum {string|null} */
+            paymentAttentionReason?: "merchant_retry_rejected_after_payment" | null;
+            /** @enum {string} */
+            activityType?: "delegate_sweep";
+            agentName?: string;
+            /**
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @enum {string}
+             */
+            initiatedBy?: "agent" | "human" | "unknown";
+            /**
+             * @description Which settlement branch actually moved the money: `erc7710` (direct settlement, account → merchant, no funding leg) or `eip3009` (funded transfer — the budget delegation funds the delegate EOA, which then signs the standard EIP-3009 header). This is the settlement SCHEME and is three-way distinct from its neighbours: `source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account's `execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy AllowanceModule). Do not collapse them. Null when no scheme was recorded — non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but never stamp the key. Null-in-null-out: nothing is inferred or backfilled.
+             * @enum {string|null}
+             */
+            settlementScheme?: "eip3009" | "erc7710" | null;
+            amountSek?: string | null;
+            fxRateSek?: string | null;
+            fxSource?: string | null;
             chainId: number;
             /** Format: uuid */
             safeId: string;

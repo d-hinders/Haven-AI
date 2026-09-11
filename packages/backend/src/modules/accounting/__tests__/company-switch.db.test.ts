@@ -258,6 +258,67 @@ describeDb('company switch on reconnect (#2864)', () => {
     expect(await getSyncState(userId, 'fortnox', inBeta)).toMatchObject({ status: 'failed' })
   })
 
+  it('round trip Alpha → Beta → Alpha: an Alpha-era row is attributed to Alpha and IS reopenable again; a Beta-era row is not (review on #2898)', async () => {
+    const { userId, agentId } = await seedUser()
+    const alpha = fortnoxCompany(111, 'Alpha AB')
+    const beta = fortnoxCompany(222, 'Beta AB')
+    const connect = async (c: ReturnType<typeof fortnoxCompany>, code: string) => {
+      clearConnectors()
+      registerConnector(new FortnoxConnector(c.impl))
+      await completeOAuth2Connect({ provider: FORTNOX, cfg: CFG, connector: new FortnoxConnector(c.impl), userId, code, fetchImpl: c.impl })
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    await connect(alpha, 'code-1')
+    const inAlpha = await seedSettled(userId, agentId, 0)
+    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    await connect(beta, 'code-2')
+    const inBeta = await seedSettled(userId, agentId, 0)
+    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    await connect(alpha, 'code-3')
+    expect(companySwitchLog((await getConnection(userId, 'fortnox'))!)).toHaveLength(2)
+
+    // Alpha genuinely lost its invoice: the Alpha-era row belongs to the
+    // CURRENT company again, so reopen is allowed.
+    alpha.state.invoices.clear()
+    // MUTATION TARGET: comparing only against the LATEST switch attributes
+    // this row to Beta and refuses it.
+    expect(await reopenPushedPayment(userId, 'fortnox', inAlpha, 'reopened: gone')).toEqual({ reopened: true })
+    // The Beta-era row was pushed under Beta: refused, naming Beta.
+    expect(await reopenPushedPayment(userId, 'fortnox', inBeta, 'reopened: gone')).toEqual({
+      reopened: false, error_code: 'previous_company', switched_at: expect.any(String), company_name: 'Beta AB',
+    })
+  })
+
+  it('a scope-refused reconnect keeps the known company id, so the NEXT reconnect to another company is still a switch (review on #2898)', async () => {
+    const { userId } = await seedUser()
+    const alpha = fortnoxCompany(111, 'Alpha AB')
+    registerConnector(new FortnoxConnector(alpha.impl))
+    await completeOAuth2Connect({ provider: FORTNOX, cfg: CFG, connector: new FortnoxConnector(alpha.impl), userId, code: 'code-1', fetchImpl: alpha.impl })
+
+    // A Fortnox whose grant lacks companyinformation: 403 on the read.
+    const blind = fortnoxCompany(111, 'Alpha AB')
+    const blindImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/companyinformation')) return new Response(JSON.stringify({ ErrorInformation: { error: 1, message: 'forbidden', code: 2000663 } }), { status: 403 })
+      return blind.impl(url, init)
+    }) as typeof fetch
+    clearConnectors()
+    registerConnector(new FortnoxConnector(blindImpl))
+    await completeOAuth2Connect({ provider: FORTNOX, cfg: CFG, connector: new FortnoxConnector(blindImpl), userId, code: 'code-2', fetchImpl: blindImpl })
+    const afterBlind = (await getConnection(userId, 'fortnox'))!
+    expect(afterBlind.status).toBe('scope_missing')
+    // MUTATION TARGET: an unconditional SET external_company_id = $3 erases 111 here.
+    expect(afterBlind.external_company_id).toBe('111')
+    expect(afterBlind.external_company_name).toBe('Alpha AB')
+
+    await new Promise((r) => setTimeout(r, 25))
+    const beta = fortnoxCompany(222, 'Beta AB')
+    clearConnectors()
+    registerConnector(new FortnoxConnector(beta.impl))
+    const switched = await completeOAuth2Connect({ provider: FORTNOX, cfg: CFG, connector: new FortnoxConnector(beta.impl), userId, code: 'code-3', fetchImpl: beta.impl })
+    expect(switched.external_company_id).toBe('222')
+    expect(companySwitchLog((await getConnection(userId, 'fortnox'))!)).toMatchObject([{ fromCompanyId: '111', toCompanyId: '222' }])
+  })
+
   it('a reconnect to the SAME company is not a switch: the floor and the log are untouched', async () => {
     const { userId } = await seedUser()
     const alpha = fortnoxCompany(111, 'Alpha AB')

@@ -328,16 +328,18 @@ export async function completeOAuth2Connect(input: {
 
   const tokens = await exchangeCode(input.cfg, input.code, fetchImpl)
   const freshSecrets = tokensToSecrets(tokens) as unknown as Record<string, unknown>
-  const info: ProviderCompanyInfo = input.provider.capabilities.companyInfo
-    ? await input.connector.getCompanyInfo(freshSecrets)
-    : { externalCompanyId: null, name: null, baseCurrency: null }
+  let info: ProviderCompanyInfo
   try {
+    info = input.provider.capabilities.companyInfo
+      ? await input.connector.getCompanyInfo(freshSecrets)
+      : { externalCompanyId: null, name: null, baseCurrency: null }
     assertSupportedBaseCurrency(info)
   } catch (err) {
-    // #2864: the code is already exchanged, so a refused grant exists at the
-    // provider but will never be stored here. #2863's rule — a grant Haven
-    // drops is also revoked at the provider — applies; best-effort, the
-    // refusal is the answer either way.
+    // #2864: the code is already exchanged, so a grant exists at the
+    // provider but will never be stored here — whether the company read
+    // failed (401/429/5xx/network) or the currency was refused. #2863's rule
+    // — a grant Haven drops is also revoked at the provider — applies;
+    // best-effort, the error is the answer either way (review on #2898).
     if (input.provider.capabilities.revoke) await input.connector.revoke(freshSecrets).catch(() => {})
     throw err
   }

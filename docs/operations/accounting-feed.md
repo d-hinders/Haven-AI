@@ -397,8 +397,9 @@ settings -> 'companySwitches' FROM accounting_connections WHERE user_id = '<uuid
 
 **Reopen after a switch.** The verification-gated reopen (#1365) is
 company-aware: `POST /accounting/feed/reopen/:paymentId` on a `pushed` row
-created BEFORE the connection's latest switch answers 409 `previous_company`
-(*"belongs to the previous company"*, with `switched_at`) and writes
+that was pushed under a company OTHER than the current one answers 409
+`previous_company` (*"belongs to the previous company"*, with `switched_at`
+and the name of the company it was pushed under) and writes
 nothing — otherwise a switch would flip every pre-switch row `pushed →
 failed` and re-feed all of it into the new company. A post-switch row the new
 company genuinely lost still reopens.
@@ -407,10 +408,14 @@ company genuinely lost still reopens.
 `accounting_feed_syncs` has no company column and this slice adds no
 migration, so attribution is by TIME: the sync row's `created_at` against the
 switch times in `settings.companySwitches` (the connection's JSONB column —
-never an overloaded text column). Exact for the sequence connect → push →
-switch, which is the only sequence the flow produces, because every push
-runs against the connection's current company and every switch moves
-`feed_from`. Two limits: (1) the switch time is the application clock at the
+never an overloaded text column). The whole log is walked (`companyIdAt`):
+the row belongs to the `toCompanyId` of the last switch at or before its
+`created_at`, else to the company the first later switch moved away from —
+so a round trip Alpha → Beta → Alpha attributes an Alpha-era row to Alpha,
+and it is reopenable again once Alpha is current. A scope-refused read never
+erases a known id (`COALESCE` in `SET_COMPANY_INFO_SQL`), so a blind
+reconnect followed by a reconnect to another company is still detected as a
+switch. Two limits: (1) the switch time is the application clock at the
 callback and `created_at` is the database clock at the claim — a push in
 flight during the callback itself (sub-second) could be attributed to the
 new company; (2) a row whose stored id is NULL (a pre-#2864 grant that could

@@ -19,6 +19,7 @@
  */
 
 import {
+  companyIdAt,
   disconnect as disconnectRow,
   getActiveConnection,
   getConnection,
@@ -311,9 +312,20 @@ export async function reopenPushedPayment(
   // this guard a company switch lets every pre-switch pushed row flip to
   // failed and re-push into the new company.
   const connection = await getConnection(userId, providerId)
-  const lastSwitch = connection ? companySwitchLog(connection).at(-1) : undefined
-  if (lastSwitch && new Date(sync.created_at).getTime() < new Date(lastSwitch.at).getTime()) {
-    return { reopened: false, error_code: 'previous_company', switched_at: lastSwitch.at, company_name: lastSwitch.fromCompanyName }
+  if (connection && connection.external_company_id) {
+    const pushedUnder = companyIdAt(connection, new Date(sync.created_at))
+    if (pushedUnder && pushedUnder !== connection.external_company_id) {
+      // Name the company the row was pushed under, and the switch that moved
+      // the connection away from it.
+      const log = companySwitchLog(connection)
+      const away = log.find((e) => e.fromCompanyId === pushedUnder && new Date(e.at).getTime() > new Date(sync.created_at).getTime())
+      return {
+        reopened: false,
+        error_code: 'previous_company',
+        switched_at: away?.at ?? log.at(-1)!.at,
+        company_name: away?.fromCompanyName ?? null,
+      }
+    }
   }
 
   const reopened = await reopenMissingPushed(userId, providerId, paymentId, reason)

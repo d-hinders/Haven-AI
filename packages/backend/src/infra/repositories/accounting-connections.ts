@@ -171,8 +171,16 @@ export const STAMP_FEED_FROM_IF_UNSET_SQL = `UPDATE accounting_connections
      RETURNING *`
 
 /** #2862: what the provider said about the company at connect time. */
+/**
+ * A null id/name (a scope-refused read) never erases a known one: otherwise a
+ * scope-refused reconnect followed by a reconnect to a different company
+ * would not be detected as a switch (review on #2898).
+ */
 export const SET_COMPANY_INFO_SQL = `UPDATE accounting_connections
-     SET external_company_id = $3, external_company_name = $4, base_currency = $5, updated_at = NOW()
+     SET external_company_id = COALESCE($3, external_company_id),
+         external_company_name = COALESCE($4, external_company_name),
+         base_currency = COALESCE($5, base_currency),
+         updated_at = NOW()
      WHERE user_id = $1 AND provider = $2`
 
 /**
@@ -348,6 +356,24 @@ export interface CompanySwitchEntry {
   fromCompanyName: string | null
   toCompanyId: string
   toCompanyName: string | null
+}
+
+/**
+ * Which company the connection pointed at when `at` happened: the `toCompanyId`
+ * of the last switch at or before `at`, else the `fromCompanyId` of the first
+ * switch after it, else the row's current id (no switch ever). Walks the whole
+ * log, so a round trip A → B → A attributes an A-era row to A (review on
+ * #2898), not to whichever company the latest entry names.
+ */
+export function companyIdAt(row: Pick<AccountingConnectionRow, 'settings' | 'external_company_id'>, at: Date): string | null {
+  const log = companySwitchLog(row)
+  const t = at.getTime()
+  let current: string | null = null
+  for (const entry of log) {
+    if (new Date(entry.at).getTime() <= t) current = entry.toCompanyId
+    else return current ?? entry.fromCompanyId
+  }
+  return current ?? row.external_company_id
 }
 
 /** The append-only switch log on a row, oldest first; empty when the row never switched company. */

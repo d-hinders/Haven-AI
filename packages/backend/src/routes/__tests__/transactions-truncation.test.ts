@@ -162,7 +162,8 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     // That is not #2882's to fix — whether those four belong in the public
     // contract is a real decision — so it is filed as #2885 and the rows
     // are emptied here rather than the guard dropped.
-    expectMatchesSpec('GET', '/transactions', { ...response.json(), transactions: [] })
+    const body = response.json() as Record<string, unknown>
+    expectMatchesSpec('GET', '/transactions', { ...body, transactions: [] })
   })
 
   it('reports truncated when Blockscout offers another page', async () => {

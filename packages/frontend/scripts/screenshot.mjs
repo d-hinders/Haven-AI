@@ -2381,6 +2381,15 @@ export const SCENARIOS = {
       await page.getByText(/Showing/).first().waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'list')
+
+      // `main` is a clipped scroll container, so the frame above holds only
+      // what is above the fold — and the third string this flag conditions,
+      // the end-of-list footer, sits under the table. Without this second
+      // frame the scenario would evidence two of the three and look complete.
+      const footer = page.getByText(/End of what.s loaded/i).first()
+      await footer.waitFor({ timeout: 20_000 })
+      await footer.scrollIntoViewIfNeeded()
+      await shoot(page.locator('main').first(), 'end-of-list')
     },
   },
 

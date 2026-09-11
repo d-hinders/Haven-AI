@@ -190,7 +190,7 @@ export default function TransactionsClient() {
         // it is the false one when the feed is capped at the explorer window.
         truncated ? 'Recent activity across your accounts.' : undefined,
       ),
-    [filters, safeNamesById, agentNamesById, tokenSymbolsByKey],
+    [filters, safeNamesById, agentNamesById, tokenSymbolsByKey, truncated],
   )
 
   // Cheap summary stats — count by direction over what's currently loaded.
@@ -426,7 +426,7 @@ export default function TransactionsClient() {
           carries no such note, which is recorded on the PR.
         */}
         {!loadingInitial && truncated && (
-          <div className="mt-1 w-full text-xs text-[var(--v2-ink-3)]">
+          <div className="w-full text-xs text-[var(--v2-ink-3)]">
             Older transactions aren&apos;t included, so counts and exports cover
             what&apos;s shown here, not your full history.
           </div>
@@ -471,7 +471,7 @@ export default function TransactionsClient() {
           ) : (
             <span className="text-xs text-[var(--v2-ink-3)]">
               {truncated
-                ? 'End of the activity loaded here'
+                ? 'End of what\u2019s loaded'
                 : 'You\u2019ve reached the end'}
             </span>
           )}

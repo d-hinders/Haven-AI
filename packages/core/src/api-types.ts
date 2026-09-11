@@ -3844,6 +3844,8 @@ export type components = {
             hasMore: boolean;
             partialFailure: boolean;
             failedSafeIds: string[];
+            /** @description At least one account's history came back at the explorer window, so these rows and `total` are a capped view rather than the full history. Independent of `partialFailure`. Pagination past the window is #2884. */
+            truncated: boolean;
         };
     };
     responses: never;

@@ -69,7 +69,9 @@ const TX = {
   safeName: 'Main',
 }
 
-const { feedState } = vi.hoisted(() => ({ feedState: { partialFailure: false } }))
+const { feedState } = vi.hoisted(() => ({
+  feedState: { partialFailure: false, truncated: false },
+}))
 
 vi.mock('@/hooks/useTransactionsFeed', () => ({
   useTransactionsFeed: () => ({
@@ -80,6 +82,7 @@ vi.mock('@/hooks/useTransactionsFeed', () => ({
     hasMore: false,
     error: null,
     partialFailure: feedState.partialFailure,
+    truncated: feedState.truncated,
     failedSafeIds: [],
     loadMore: vi.fn(),
     refresh: vi.fn(),
@@ -92,6 +95,7 @@ beforeEach(() => {
   mockGetText.mockReset()
   mockDownloadCsv.mockReset()
   feedState.partialFailure = false
+  feedState.truncated = false
 })
 
 function exportButton(): HTMLElement {
@@ -204,5 +208,22 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     fireEvent.click(screen.getByRole('button', { name: /^outgoing$/i }))
 
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('says so when the feed is capped at the explorer window', async () => {
+    // #2882: without this the page presents a capped list as the whole
+    // history, and the export inherits the same silent claim.
+    feedState.truncated = true
+    render(<TransactionsClient />)
+
+    expect(await screen.findByText(/Showing the most recent activity per account/i))
+      .toBeInTheDocument()
+    expect(screen.getByText(/rather than your full history/i)).toBeInTheDocument()
+  })
+
+  it('says nothing when the feed is complete', () => {
+    render(<TransactionsClient />)
+
+    expect(screen.queryByText(/Showing the most recent activity per account/i)).toBeNull()
   })
 })

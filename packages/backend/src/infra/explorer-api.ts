@@ -180,13 +180,22 @@ function isoToUnix(iso: string): string {
   return Number.isNaN(ms) ? '0' : String(Math.floor(ms / 1000))
 }
 
+/**
+ * Rows requested per source per account, on every leg and both providers
+ * (#2882). Exported because it is not only a request parameter: a leg that
+ * comes back with exactly this many rows was almost certainly cut off at the
+ * window rather than exhausted, which is how `aggregate.ts` detects a
+ * truncated read. Raising it, or paginating past it, is #2884.
+ */
+export const EXPLORER_PAGE_SIZE = 50
+
 // ── Public fetchers (provider-aware) ──────────────────────────────
 
 export async function fetchNormalTransactions(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
+  offset = EXPLORER_PAGE_SIZE,
 ): Promise<RawNormalTx[]> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
@@ -223,7 +232,7 @@ export async function fetchInternalTransactions(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
+  offset = EXPLORER_PAGE_SIZE,
 ): Promise<RawInternalTx[]> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
@@ -251,7 +260,7 @@ export async function fetchERC20Transfers(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
+  offset = EXPLORER_PAGE_SIZE,
 ): Promise<RawERC20Transfer[]> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {

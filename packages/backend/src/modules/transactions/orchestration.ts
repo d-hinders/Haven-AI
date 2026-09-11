@@ -23,6 +23,13 @@ import type { EnrichedTransaction, ParsedTokenFilter, Transaction, UserSafeRow }
 export interface AggregateSafeTransactionsResult {
   merged: EnrichedTransaction[]
   failedSafeIds: string[]
+  /**
+   * Any account's history came back cut off at the explorer window (#2882).
+   * Aggregated with OR: one capped account makes the whole feed incomplete,
+   * because the rows are merged into one list and the caller cannot tell
+   * which account's tail is missing.
+   */
+  truncated: boolean
 }
 
 /** Fans `fetchSafeTransactions` out across every Safe, tagging each transaction with its Safe. */
@@ -33,10 +40,11 @@ export async function aggregateSafeTransactions(
 ): Promise<AggregateSafeTransactionsResult> {
   const merged: EnrichedTransaction[] = []
   const failedSafeIds: string[] = []
+  let truncated = false
 
   for (const safe of safes) {
     try {
-      const { transactions, hadFailures } = await fetchSafeTransactions({
+      const { transactions, hadFailures, truncated: safeTruncated } = await fetchSafeTransactions({
         safeId: safe.id,
         safeAddress: safe.safe_address,
         chainId: safe.chain_id,
@@ -46,6 +54,10 @@ export async function aggregateSafeTransactions(
 
       if (hadFailures) {
         failedSafeIds.push(safe.id)
+      }
+
+      if (safeTruncated) {
+        truncated = true
       }
 
       for (const tx of transactions) {
@@ -66,7 +78,7 @@ export async function aggregateSafeTransactions(
     }
   }
 
-  return { merged, failedSafeIds }
+  return { merged, failedSafeIds, truncated }
 }
 
 /** x402-merge, sort, dedupe, and agent-enrich the full merged feed (pre-filter, pre-paginate). */

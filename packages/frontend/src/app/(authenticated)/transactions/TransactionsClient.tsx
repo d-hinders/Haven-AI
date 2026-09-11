@@ -129,6 +129,7 @@ export default function TransactionsClient() {
     error,
     partialFailure,
     failedSafeIds,
+    truncated,
     loadMore,
     refresh,
   } = useTransactionsFeed(filters, 25)
@@ -412,6 +413,20 @@ export default function TransactionsClient() {
           </span>
         )}
       </div>
+
+      {/*
+        #2882: `total` is the count of what the explorers returned, not what
+        the account holds — each source is capped at a fixed window. Saying so
+        once, next to the count it qualifies, is the whole of this change; the
+        export reads the same feed, so the caveat covers the file too.
+      */}
+      {!loadingInitial && truncated && (
+        <div className="mb-4 text-xs text-[var(--v2-ink-3)]">
+          Showing the most recent activity per account. Older transactions are
+          not loaded yet, so counts and exports cover this window rather than
+          your full history.
+        </div>
+      )}
 
       <Card hover={false}>
         <TransactionsTable

@@ -16,6 +16,7 @@
  * `hadFailures: false`.
  */
 import {
+  EXPLORER_PAGE_SIZE,
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
@@ -31,7 +32,18 @@ import type {
   Transaction,
 } from './types.js'
 
-const txCache = createCache<Transaction[]>(30_000)
+/**
+ * Cached per account. The truncation flag rides WITH the rows (#2882) rather
+ * than beside them: it is a property of the read that produced them, so a
+ * cache hit that returned only the rows would report a capped read as a
+ * complete one for the rest of the TTL.
+ */
+interface CachedRead {
+  transactions: Transaction[]
+  truncated: boolean
+}
+
+const txCache = createCache<CachedRead>(30_000)
 const txInflight = new Map<string, Promise<FetchSafeTransactionsResult>>()
 
 export async function fetchSafeTransactions({
@@ -51,7 +63,7 @@ export async function fetchSafeTransactions({
 
   const cached = txCache.get(cacheKey)
   if (cached !== undefined) {
-    return { transactions: cached, hadFailures: false }
+    return { transactions: cached.transactions, hadFailures: false, truncated: cached.truncated }
   }
 
   const inflight = txInflight.get(cacheKey)
@@ -151,11 +163,24 @@ export async function fetchSafeTransactions({
       return true
     })
 
-    txCache.set(cacheKey, deduped)
+    // A leg that came back holding exactly the window it asked for was cut
+    // off at that window rather than exhausted — there is no cursor in the
+    // response to say so, and at 50 rows the false-positive case (a Safe with
+    // exactly 50 native transfers and no more) reports one page too few
+    // rather than claiming completeness it does not have. Erring toward
+    // "there may be more" is the honest direction. #2884 removes the guess by
+    // paginating; this only stops the silence.
+    const truncated =
+      normalTxs.length >= EXPLORER_PAGE_SIZE ||
+      internalTxs.length >= EXPLORER_PAGE_SIZE ||
+      erc20Txs.length >= EXPLORER_PAGE_SIZE
+
+    txCache.set(cacheKey, { transactions: deduped, truncated })
 
     return {
       transactions: deduped,
       hadFailures,
+      truncated,
     }
   })().finally(() => {
     txInflight.delete(cacheKey)

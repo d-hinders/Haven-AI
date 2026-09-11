@@ -153,10 +153,15 @@ export default async function transactionRoutes(
         hasMore: false,
         partialFailure: false,
         failedSafeIds: [],
+        truncated: false,
       }
     }
 
-    const { merged, failedSafeIds } = await aggregateSafeTransactions(safes, request.log, fresh)
+    const { merged, failedSafeIds, truncated } = await aggregateSafeTransactions(
+      safes,
+      request.log,
+      fresh,
+    )
     const enriched = await mergeSortDedupeAndEnrich(sub, safes, merged)
     const filtered = filterEnrichedTransactions(enriched, {
       agentId: request.query.agentId,
@@ -172,6 +177,9 @@ export default async function transactionRoutes(
       hasMore,
       partialFailure: failedSafeIds.length > 0,
       failedSafeIds: Array.from(new Set(failedSafeIds)),
+      // #2882: the rows above are capped at the explorer window per account,
+      // so `total` is the truncated count, not the account's history.
+      truncated,
     }
   })
 

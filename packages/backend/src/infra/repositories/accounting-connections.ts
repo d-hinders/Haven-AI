@@ -159,6 +159,17 @@ export const SET_FEED_FROM_SQL = `UPDATE accounting_connections
      SET feed_from = $3, updated_at = NOW()
      WHERE user_id = $1 AND provider = $2`
 
+/**
+ * #2862 (review on #2894): a connect that takes the active flag because no
+ * other destination held it is an activation too, so it carries the feed-from
+ * floor. Only a row with NO floor yet — a migrated pre-#2862 Fortnox row keeps
+ * its NULL (it fed everything) and a reconnect keeps whatever it had.
+ */
+export const STAMP_FEED_FROM_IF_UNSET_SQL = `UPDATE accounting_connections
+     SET feed_from = $3, updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2 AND is_active_destination AND feed_from IS NULL
+     RETURNING *`
+
 /** #2862: what the provider said about the company at connect time. */
 export const SET_COMPANY_INFO_SQL = `UPDATE accounting_connections
      SET external_company_id = $3, external_company_name = $4, base_currency = $5, updated_at = NOW()
@@ -271,6 +282,17 @@ export async function setActiveDestination(
     await tx.query(SET_ACTIVE_DESTINATION_SQL, [userId, provider])
     if (opts.feedFrom) await tx.query(SET_FEED_FROM_SQL, [userId, provider, opts.feedFrom])
   })
+}
+
+/** See `STAMP_FEED_FROM_IF_UNSET_SQL`. Returns the row when it stamped, null when nothing qualified. */
+export async function stampFeedFromIfUnset(
+  userId: string,
+  provider: string,
+  at: Date,
+  db: Executor = pool,
+): Promise<AccountingConnectionRow | null> {
+  const result = await db.query<AccountingConnectionRow>(STAMP_FEED_FROM_IF_UNSET_SQL, [userId, provider, at])
+  return result.rows[0] ?? null
 }
 
 export async function setCompanyInfo(

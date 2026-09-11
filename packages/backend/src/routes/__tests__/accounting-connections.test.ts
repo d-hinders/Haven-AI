@@ -55,6 +55,7 @@ const { rows, repo } = vi.hoisted(() => {
       if (r) { r.status = 'disconnected'; r.status_reason = reason; r.secrets_ciphertext = null; r.is_active_destination = false }
     }),
     setCompanyInfo: vi.fn(async () => {}),
+    stampFeedFromIfUnset: vi.fn(async () => null),
     updateSecrets: vi.fn(async () => {}),
     upsertConnection: vi.fn(async () => { throw new Error('not used here') }),
   }

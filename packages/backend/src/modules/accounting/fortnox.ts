@@ -9,8 +9,9 @@ import { ProviderError } from './provider.js'
  * wrappers that keep the historical names (`buildFortnoxAuthorizeUrl`,
  * `exchangeCodeForTokens`, `refreshTokens`) and the `FortnoxError` type for
  * callers and tests. No behaviour change: the URL, the Basic-auth token post
- * and the minute-early expiry are the generic flow's, byte-for-byte the same
- * request Fortnox saw before.
+ * and the minute-early expiry are the generic flow's — the same requests
+ * Fortnox saw before (the authorize URL's query-parameter order changed;
+ * the parameters did not).
  *
  * #2859: the VOUCHER mapping and push moved to `legacy/fortnox-voucher.ts`.
  * They are the asserting half — `toFortnoxVoucher` calls `buildBookingLines`,

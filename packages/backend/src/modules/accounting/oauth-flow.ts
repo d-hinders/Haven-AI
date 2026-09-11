@@ -30,6 +30,7 @@
 import {
   getConnection,
   setCompanyInfo,
+  stampFeedFromIfUnset,
   updateSecrets,
   upsertConnection,
   type AccountingConnectionRow,
@@ -232,7 +233,14 @@ export async function completeOAuth2Connect(input: {
     : { externalCompanyId: null, name: null, baseCurrency: null }
   assertSupportedBaseCurrency(info)
 
-  const row = await saveOAuth2Connection(input.provider.id, input.userId, tokens)
+  const existed = await getConnection(input.userId, input.provider.id)
+  const saved = await saveOAuth2Connection(input.provider.id, input.userId, tokens)
+  // A FIRST connect that became the destination is an activation: the
+  // feed-from rule applies (review on #2894 — disconnect A → connect B
+  // re-fed A's history). A reconnect keeps the floor it had.
+  const row = (!existed && saved.is_active_destination
+    ? await stampFeedFromIfUnset(input.userId, input.provider.id, new Date())
+    : null) ?? saved
   await setCompanyInfo(input.userId, input.provider.id, info)
   return { ...row, external_company_id: info.externalCompanyId, external_company_name: info.name, base_currency: info.baseCurrency }
 }

@@ -1,5 +1,5 @@
 import { listUnpushedPaymentIds } from '../../infra/repositories/accounting-feed-syncs.js'
-import { getActiveConnection, setStatus } from '../../infra/repositories/accounting-connections.js'
+import { getActiveConnection, listConnections, setStatus } from '../../infra/repositories/accounting-connections.js'
 import { accountingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from './entry.js'
 import { toFeedTransaction } from './feed-transaction.js'
@@ -26,10 +26,15 @@ interface ActiveDestination {
  * registry supplies the instance. Returns null when the row's connector is
  * not registered on this deployment or reports the user as not connected.
  *
- * Without an active row — a connector that keeps its own connection state,
- * which today is only the in-memory test connector — the first registered
- * connector that reports the user connected is used, as before #2862, with
- * no feed-from floor.
+ * A user who has ANY `accounting_connections` row is row-backed: without an
+ * active `connected` row there is no destination, full stop — a row demoted
+ * to `scope_missing`/`needs_reauthorization` must not keep feeding through a
+ * connector whose `isConnected` only checks for secrets (review on #2894:
+ * that fallback bypassed the feed-from floor while every user-facing surface
+ * said "not connected"). Only a user with NO row at all — a connector that
+ * keeps its own connection state, which today is only the in-memory test
+ * connector — falls back to the first registered connector that reports the
+ * user connected, as before #2862, with no feed-from floor.
  *
  * The live Fortnox adapter (#496/#498/#956) IS registered at startup when
  * Fortnox is configured (`registerConnector` in `src/index.ts`), so auto-feed
@@ -43,6 +48,10 @@ async function getActiveDestination(userId: string): Promise<ActiveDestination |
     if (!connector || !(await connector.isConnected(userId))) return null
     return { connector, feedFrom: active.feed_from ? new Date(active.feed_from) : null }
   }
+  // MUTATION TARGET (feed-from.db.test.ts "a degraded active row feeds
+  // nothing"): removing this guard re-opens the registry scan for row-backed
+  // users.
+  if ((await listConnections(userId)).length > 0) return null
   for (const connector of listConnectors()) {
     if (await connector.isConnected(userId)) return { connector, feedFrom: null }
   }

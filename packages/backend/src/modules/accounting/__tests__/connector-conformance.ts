@@ -245,8 +245,10 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
       expect(row?.error).toMatch(/attachment failed/)
       expect(await connection(c.userId)).toMatchObject({ status: 'scope_missing', is_active_destination: true })
 
-      // Never re-pushable: the connection is degraded, so no destination is
-      // active — and even if it were, the pushed row is not re-claimable.
+      // Never re-pushable: the pushed row is not re-claimable (this case
+      // re-feeds the SAME payment). That a degraded row also yields no
+      // destination for NEW payments is proven on the real database in
+      // feed-from.db.test.ts, not here.
       await feedSettledPayment(c.userId, pid)
       expect(c.createCalls()).toBe(1)
       expect(await syncRow(c.userId, pid)).toMatchObject({ status: 'pushed', external_ref: row!.external_ref })

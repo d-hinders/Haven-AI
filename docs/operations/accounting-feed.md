@@ -315,9 +315,14 @@ no connection. Existing connections are unaffected — the change is the
 consent round-trip, not the stored grant.
 
 **Switching destination and `feed_from`.** Activating a second provider
-stamps `feed_from` in the same transaction as the active flag; the backfill
-selection and the settlement hook both skip anything settled before it, so a
-switch never re-feeds history into the new ledger. On-call read:
+stamps `feed_from` in the same transaction as the active flag, and a FIRST
+connect that takes the flag because nothing else held it (disconnect A, then
+connect B) stamps it too — a connect that becomes the destination is an
+activation. A reconnect of an existing row keeps the floor it had, and a
+pre-#2862 Fortnox row migrated with no floor keeps its NULL (it fed
+everything). The backfill selection and the settlement hook both skip
+anything settled before the floor, so a switch never re-feeds history into
+the new ledger. On-call read:
 `SELECT provider, status, is_active_destination, feed_from FROM
 accounting_connections WHERE user_id = '<uuid>'`. A user who wants history in
 the new ledger takes the backfill (#2867), which passes an explicit earlier
@@ -327,7 +332,10 @@ date.
 Fortnox's scope error (`[2000663]`) leaves the sync row `pushed` with the
 note and flips the CONNECTION to `scope_missing` — the feed then has no
 active destination until the user reconnects (Disconnect, then Connect on
-`/accounting`). The invoice stands; nothing is re-pushed.
+`/accounting`): a user with any `accounting_connections` row is row-backed,
+and without an active `connected` row the orchestrator feeds nothing — it
+never falls back to asking a connector whether it "has secrets". The invoice
+stands; nothing is re-pushed.
 
 ## Secrets at rest (#2860)
 

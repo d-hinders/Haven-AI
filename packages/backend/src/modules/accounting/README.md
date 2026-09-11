@@ -62,13 +62,17 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    deployment without them lists the provider as `configured: false`.
 5. **Conformance.** Add `__tests__/<provider>-connector.conformance.test.ts`:
    a `ConformanceHarness` for your connector, then
-   `runConnectorConformance(name, harness, oracle)`. The suite
+   `runConnectorConformance(name, harness)`. The suite
    (`__tests__/connector-conformance.ts`) is the contract's executable form —
    idempotent re-push, the non-asserting guard, attachment degradation, verify
    verdicts, revoke-on-disconnect, post-push scope loss, non-SEK refusal — and
-   runs the real orchestrator and flows against the feed oracle; your harness
-   supplies recorded HTTP fixtures under `__tests__/fixtures/<provider>/` (see
-   the Fortnox runner). It must pass before the descriptor goes `live`.
+   runs the real orchestrator and flows; your harness supplies HTTP fixtures
+   under `__tests__/fixtures/<provider>/` (see the Fortnox runner — its
+   fixtures are hand-authored in the shapes the #494 spike recorded, not raw
+   captures). An `api_key` connector's `getCompanyInfo` must throw a
+   `ProviderError` with status 401/403 for a rejected key — that is what the
+   flow maps to `InvalidApiKeyError`; anything else surfaces as a 500. It must
+   pass before the descriptor goes `live`.
 6. **Docs.** The route table in `docs/operations/accounting-feed.md` does not
    change (the routes are generic); add the provider's operator steps
    (credentials, redirect URI) to that runbook, and a CASP shard if the

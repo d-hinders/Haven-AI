@@ -23,9 +23,15 @@ vi.mock('../feed-sync.js', () => ({
   listSyncs: mocks.listSyncs,
 }))
 // #2862: the orchestrator resolves the ACTIVE destination from the
-// connections table first. No row here → it falls back to the first
-// registered connector that reports the user connected (the in-memory one).
-const connectionMocks = vi.hoisted(() => ({ getActiveConnection: vi.fn(async () => null), setStatus: vi.fn(async () => {}) }))
+// connections table first. No row AT ALL here (`listConnections` → []) → it
+// falls back to the first registered connector that reports the user
+// connected (the in-memory one). A row-backed user never takes that path
+// (feed-from.db.test.ts, review on #2894).
+const connectionMocks = vi.hoisted(() => ({
+  getActiveConnection: vi.fn(async () => null),
+  listConnections: vi.fn(async () => []),
+  setStatus: vi.fn(async () => {}),
+}))
 vi.mock('../../../infra/repositories/accounting-connections.js', () => connectionMocks)
 
 import { feedSettledPayment } from '../feed-orchestrator.js'

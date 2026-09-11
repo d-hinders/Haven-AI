@@ -11,7 +11,7 @@
  * storage are already there.
  */
 
-import { getConnection, setCompanyInfo, upsertConnection, type AccountingConnectionRow } from '../../infra/repositories/accounting-connections.js'
+import { getConnection, setCompanyInfo, stampFeedFromIfUnset, upsertConnection, type AccountingConnectionRow } from '../../infra/repositories/accounting-connections.js'
 import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
 import type { AccountingConnector } from './connector.js'
 import { ProviderError, assertSupportedBaseCurrency, type AccountingProvider, type ProviderCompanyInfo } from './provider.js'
@@ -64,7 +64,8 @@ export async function connectWithApiKey(input: {
   assertSupportedBaseCurrency(info)
 
   const { ciphertext, keyVersion } = encryptSecrets(secrets as unknown as Record<string, unknown>)
-  const row = await upsertConnection(input.userId, {
+  const existed = await getConnection(input.userId, input.provider.id)
+  const saved = await upsertConnection(input.userId, {
     provider: input.provider.id,
     authKind: 'api_key',
     secretsCiphertext: ciphertext,
@@ -72,6 +73,11 @@ export async function connectWithApiKey(input: {
     grantedScope: null,
     tokenExpiresAt: null,
   })
+  // Same rule as the OAuth flow: a first connect that took the flag is an
+  // activation and carries the feed-from floor; a reconnect keeps its own.
+  const row = (!existed && saved.is_active_destination
+    ? await stampFeedFromIfUnset(input.userId, input.provider.id, new Date())
+    : null) ?? saved
   await setCompanyInfo(input.userId, input.provider.id, info)
   return { ...row, external_company_id: info.externalCompanyId, external_company_name: info.name, base_currency: info.baseCurrency }
 }

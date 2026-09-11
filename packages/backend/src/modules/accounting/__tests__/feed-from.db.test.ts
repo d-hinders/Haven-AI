@@ -24,11 +24,23 @@ vi.mock('../entry.js', () => ({ buildAccountingEntryForPayment: mocks.buildAccou
 
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { getConnection, upsertConnection } from '../../../infra/repositories/accounting-connections.js'
+import { disconnect, getConnection, setStatus, upsertConnection } from '../../../infra/repositories/accounting-connections.js'
 import { listUnpushedPaymentIds } from '../../../infra/repositories/accounting-feed-syncs.js'
 import { SECRETS_KEY_ENV, encryptSecrets } from '../../../infra/secrets.js'
 import { InMemoryConnector, clearConnectors, registerConnector } from '../connector.js'
 import { activateProvider } from '../connections.js'
+import { connectWithApiKey } from '../api-key-flow.js'
+import type { AccountingProvider } from '../provider.js'
+
+/** The in-memory connector's descriptor (the same shape the conformance runner registers). */
+const MEMORY: AccountingProvider = {
+  id: 'memory',
+  displayName: 'Memory',
+  authKind: 'api_key',
+  capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
+  availability: 'live',
+  requiredScopes: [],
+}
 import { syncUser } from '../feed-orchestrator.js'
 import { accountingEntry } from './connector-conformance.js'
 
@@ -163,5 +175,55 @@ describeDb('feed-from on activate (#2862)', () => {
       `SELECT payment_id, status FROM accounting_feed_syncs WHERE user_id = $1`, [userId],
     )
     expect(synced.rows).toEqual([{ payment_id: fresh, status: 'pushed' }])
+  })
+
+  it('a degraded active row feeds NOTHING — no fallback to the registry scan for a row-backed user (review on #2894)', async () => {
+    const { userId, agentId } = await seedUser()
+    connector.connect(userId) // the in-memory connector would say "connected" from its own state
+    const history = await seedSettled(userId, agentId, 2 * 86_400)
+    await seedConnection(userId, 'fortnox')
+    await seedConnection(userId, 'memory')
+    await activateProvider(userId, 'memory')
+    expect(await syncUser(userId)).toEqual({ fed: 0 }) // the floor holds
+
+    // A post-push scope error demoted the active row: no destination now.
+    await setStatus(userId, 'memory', 'scope_missing', 'attachment scope missing')
+    // MUTATION TARGET: without the row-backed guard in getActiveDestination
+    // the registry scan finds the connector "connected" and pushes the
+    // two-day-old history with no floor.
+    expect(await syncUser(userId)).toEqual({ fed: 0 })
+    expect(connector.pushed).toHaveLength(0)
+    const rows = await db.query(`SELECT payment_id FROM accounting_feed_syncs WHERE user_id = $1`, [userId])
+    expect(rows.rows).toEqual([])
+    expect(history).toBeTruthy()
+  })
+
+  it('disconnect A → first connect of B: B takes the flag AND the floor, so A-era history is not re-fed', async () => {
+    const { userId, agentId } = await seedUser()
+    connector.connect(userId)
+    const aEra = await seedSettled(userId, agentId, 2 * 86_400)
+    await seedConnection(userId, 'fortnox') // active, no floor (a migrated-style row)
+    await db.query(
+      `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, status, attempts, external_ref)
+       VALUES ($1, 'fortnox', $2, 'pushed', 1, 'fortnox:supplierinvoice:1')`,
+      [userId, aEra],
+    )
+    await disconnect(userId, 'fortnox', 'user')
+
+    const before = Date.now()
+    const row = await connectWithApiKey({ provider: MEMORY, connector, userId, apiKey: 'memory-key' })
+    expect(row.is_active_destination).toBe(true)
+    // MUTATION TARGET: without the stamp the floor is NULL and the next sync
+    // pushes the fortnox-era payment into the memory ledger.
+    expect(row.feed_from).not.toBeNull()
+    expect(new Date(row.feed_from!).getTime()).toBeGreaterThanOrEqual(before - 1000)
+    expect(await syncUser(userId)).toEqual({ fed: 0 })
+    expect(connector.pushed).toHaveLength(0)
+
+    // A reconnect of an existing row keeps whatever floor it had: memory
+    // again → same stamp, not a fresh one.
+    await new Promise((r) => setTimeout(r, 20))
+    const again = await connectWithApiKey({ provider: MEMORY, connector, userId, apiKey: 'memory-key-2' })
+    expect(again.feed_from!.toISOString()).toBe(row.feed_from!.toISOString())
   })
 })

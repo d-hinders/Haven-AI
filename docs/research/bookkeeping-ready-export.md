@@ -10,7 +10,6 @@ covers:
   - packages/backend/src/domain/vat.ts
   - packages/backend/src/modules/accounting/fortnox.ts
   - packages/backend/src/routes/accounting.ts
-  - packages/backend/src/routes/fortnox.ts
 last-verified: "2026-08-10"
 ---
 

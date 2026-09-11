@@ -5,7 +5,7 @@ import { requireAccountingFeed } from '../middleware/accountingFeed.js'
 import { accountingFeedAvailability } from '../modules/agents/index.js'
 import { getAccountingFeedStatus, syncUser } from '../modules/accounting/index.js'
 import { hasLiveConnector } from '../modules/accounting/index.js'
-import { getFortnoxConnection, verifyFortnoxInvoice, reopenMissingPushed } from '../modules/accounting/index.js'
+import { hasActiveConnection, verifyPushedPayment, reopenMissingPushed } from '../modules/accounting/index.js'
 
 /**
  * Reporting feed surface for the dashboard (epic #491, P2 #500).
@@ -13,6 +13,12 @@ import { getFortnoxConnection, verifyFortnoxInvoice, reopenMissingPushed } from 
  * Status is NOT hard-gated — the page needs to know whether to render the full
  * UI, an add-on upsell, or hide entirely. The data-moving `/sync` action is
  * gated (404 when unavailable).
+ *
+ * Verify, reopen, sync and status keep their feed-scoped home here (#2862
+ * review, 2026-09-11): they act on the ACTIVE destination, which is the right
+ * shape while exactly one is active, so there is no provider-scoped
+ * duplicate of them under `/accounting/connections/*`. Internally they
+ * dispatch to the active connection's connector `verify()`.
  */
 export default async function accountingFeedRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
@@ -37,8 +43,8 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
     if (!available) {
       return { ...base, available: false, connected: false, syncs: [] }
     }
-    const [conn, syncs] = await Promise.all([getFortnoxConnection(sub), getAccountingFeedStatus(sub)])
-    return { ...base, available: true, connected: Boolean(conn), syncs }
+    const [connected, syncs] = await Promise.all([hasActiveConnection(sub), getAccountingFeedStatus(sub)])
+    return { ...base, available: true, connected, syncs }
   })
 
   // POST /accounting/feed/sync — backfill + retry (gated)
@@ -49,8 +55,8 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
 
   // POST /accounting/feed/reopen/:paymentId — verification-gated reopen
   // (#1365). The ONLY path that ever flips a pushed row back to retryable,
-  // and it is conditional on Fortnox ITSELF: the server re-runs the #1362
-  // read-back and reopens only when the invoice is confirmed gone (or a
+  // and it is conditional on the PROVIDER ITSELF: the server re-runs the
+  // #1362 read-back and reopens only when the invoice is confirmed gone (or a
   // number collision made it provably not-ours — same registered:false
   // verdict). An invoice that still exists refuses (409, nothing written) —
   // the double-post guard is preserved because the one added transition is
@@ -62,15 +68,15 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { paymentId } = request.params
-      const result = await verifyFortnoxInvoice(sub, paymentId)
+      const result = await verifyPushedPayment(sub, paymentId)
       if (!result.ok) {
         return reply.code(409).send({
           error:
             result.error_code === 'not_pushed'
               ? `Nothing to reopen — the payment is not pushed (sync status: ${result.status ?? 'none'}).`
               : result.error_code === 'not_connected'
-                ? 'Fortnox is not connected — reconnect and try again.'
-                : 'The sync row carries no Fortnox invoice reference.',
+                ? 'Your accounting software is not connected — reconnect and try again.'
+                : 'The sync row carries no invoice reference.',
           error_code: result.error_code,
         })
       }
@@ -79,7 +85,7 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
         // that reopen would re-push a live invoice and double-post.
         return reply.code(409).send({
           error:
-            `Fortnox invoice ${result.verification.invoice_number} still exists — reopening would ` +
+            `Invoice ${result.verification.invoice_number} still exists at the provider — reopening would ` +
             'create a duplicate. Nothing was changed.',
           error_code: 'invoice_exists',
           invoice_number: result.verification.invoice_number,
@@ -87,13 +93,13 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
       }
       const reopened = await reopenMissingPushed(
         sub,
-        'fortnox',
+        result.provider,
         paymentId,
         // #1376 review: the audit string must not say "no longer exists"
         // about a foreign invoice that exists — distinguish the two verdicts.
         result.verification.missing === 'foreign_invoice'
-          ? `reopened ${result.verification.checked_at}: Fortnox invoice ${result.verification.invoice_number} belongs to a different external invoice number (company-switch collision) — our record was never delivered under it`
-          : `reopened ${result.verification.checked_at}: Fortnox invoice ${result.verification.invoice_number} no longer exists`,
+          ? `reopened ${result.verification.checked_at}: ${result.provider} invoice ${result.verification.invoice_number} belongs to a different external invoice number (company-switch collision) — our record was never delivered under it`
+          : `reopened ${result.verification.checked_at}: ${result.provider} invoice ${result.verification.invoice_number} no longer exists`,
       )
       if (!reopened) {
         // The row moved between the verification and the flip (raced by a
@@ -108,24 +114,25 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
   )
 
   // GET /accounting/feed/verify/:paymentId — read-back verification
-  // (#1362): confirm against Fortnox's own records that the pushed supplier
-  // invoice exists (registered) and whether a human has booked it (accounted,
-  // with the voucher reference). Strictly read-only — asserts nothing, cannot
-  // modify the invoice; the non-asserting principle (#491) is untouched.
+  // (#1362): confirm against the provider's own records that the pushed
+  // supplier invoice exists (registered) and whether a human has booked it
+  // (accounted, with the voucher reference). Strictly read-only — asserts
+  // nothing, cannot modify the invoice; the non-asserting principle (#491) is
+  // untouched. Dispatches to the ACTIVE connection's connector (#2862).
   app.get<{ Params: { paymentId: string } }>(
     '/verify/:paymentId',
     { onRequest: requireAccountingFeed },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const result = await verifyFortnoxInvoice(sub, request.params.paymentId)
+      const result = await verifyPushedPayment(sub, request.params.paymentId)
       if (!result.ok) {
         return reply.code(409).send({
           error:
             result.error_code === 'not_pushed'
-              ? `This payment has not been pushed to Fortnox (sync status: ${result.status ?? 'none'}).`
+              ? `This payment has not been pushed to your accounting software (sync status: ${result.status ?? 'none'}).`
               : result.error_code === 'not_connected'
-                ? 'Fortnox is not connected — reconnect and try again.'
-                : 'The sync row carries no Fortnox invoice reference.',
+                ? 'Your accounting software is not connected — reconnect and try again.'
+                : 'The sync row carries no invoice reference.',
           error_code: result.error_code,
           status: result.status,
         })

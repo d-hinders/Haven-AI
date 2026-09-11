@@ -2,8 +2,10 @@
 //
 // Two halves live under this directory and only one is exported here:
 //
-//   this file    the non-asserting accounting FEED (#491) — connectors, the
-//                dedup ledger, the orchestrator, Fortnox OAuth — plus the
+//   this file    the non-asserting accounting FEED (#491) — the provider
+//                registry and connector contract (#2862), the generic OAuth2
+//                and API-key flows, the connection service, the dedup
+//                ledger, the orchestrator, the Fortnox adapter — plus the
 //                shared `entry.ts` data assembly it reads settled payments
 //                through.
 //   legacy/      the asserting #462 bookkeeping export (SIE, vouchers,
@@ -19,7 +21,13 @@
 // demotes the account to `suggestedAccount`, and `assertNonAsserting()` bans
 // the asserting keys on the outgoing payload at runtime.
 export * from './entry.js'
+export * from './provider.js'
+export * from './registry.js'
 export * from './connector.js'
+export * from './oauth-flow.js'
+export * from './oauth-state.js'
+export * from './api-key-flow.js'
+export * from './connections.js'
 export * from './feed-orchestrator.js'
 export * from './feed-sync.js'
 export * from './fortnox-connection.js'

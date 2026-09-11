@@ -349,6 +349,27 @@ export const GOVERNED_PACKAGE_DOCS = [
     // to place the section).
     'last-verified': '2026-09-02',
   },
+  {
+    doc: 'packages/backend/src/modules/accounting/README.md',
+    owner: '@AntonioSaaranen',
+    status: 'current',
+    // #2862: the recipe for adding an accounting provider — descriptor,
+    // connector, generic flows, conformance runner. Couples to the contract
+    // files it describes, not to the Fortnox adapter (the runbook covers
+    // `modules/accounting/**` for operations).
+    covers: [
+      'packages/backend/src/modules/accounting/provider.ts',
+      'packages/backend/src/modules/accounting/registry.ts',
+      'packages/backend/src/modules/accounting/connector.ts',
+      'packages/backend/src/modules/accounting/connections.ts',
+      'packages/backend/src/modules/accounting/oauth-flow.ts',
+      'packages/backend/src/modules/accounting/oauth-state.ts',
+      'packages/backend/src/modules/accounting/api-key-flow.ts',
+      'packages/backend/src/modules/accounting/__tests__/connector-conformance.ts',
+      'packages/backend/src/routes/accounting-connections.ts',
+    ],
+    'last-verified': '2026-09-11',
+  },
 ]
 
 /**
@@ -389,6 +410,10 @@ export const EXEMPT_PACKAGE_DOCS = {
   'packages/sdk/src/__fixtures__/README.md':
     'Provenance record for one generated test fixture — a regeneration recipe, not a description ' +
     'of behaviour. It is correct or it is not; there is no state it can drift out of sync with.',
+  'packages/backend/src/modules/accounting/__tests__/fixtures/fortnox/README.md':
+    'Provenance index for the recorded Fortnox HTTP fixtures the conformance runner serves ' +
+    '(#2862): a file-to-request table, not a description of behaviour. The runner that reads ' +
+    'them is what catches drift — a renamed fixture fails the suite, not a doc gate.',
 }
 
 /**

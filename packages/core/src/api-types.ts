@@ -1029,7 +1029,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox/status": {
+    "/accounting/providers": {
         parameters: {
             query?: never;
             header?: never;
@@ -1037,10 +1037,10 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * Whether Fortnox is configured on this deployment and connected for the caller.
-         * @description Returns SAFE METADATA ONLY: the granted scope and the token expiry, never the tokens themselves. Two shapes, deliberately: when the deployment has no Fortnox credentials the answer omits scope/expiresAt entirely (there is nothing to report), and when it is configured they are present but null until a connection exists. `legacyBookkeeping` tells the UI whether the asserting voucher-push surface below is reachable at all — off by default (#492).
+         * The accounting providers Haven knows about, live or coming soon.
+         * @description Four today: Fortnox (`live`) and Accounted, Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.
          */
-        get: operations["getFortnoxStatus"];
+        get: operations["listAccountingProviders"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1049,7 +1049,27 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox/connect-url": {
+    "/accounting/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's accounting connections — metadata only, never secrets.
+         * @description One entry per provider the caller has ever connected; a disconnected one stays as `status: disconnected` (history stays, secrets cleared). Exactly one carries `isActiveDestination: true` while any is connected.
+         */
+        get: operations["listAccountingConnections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/connect-url": {
         parameters: {
             query?: never;
             header?: never;
@@ -1059,37 +1079,17 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Get the Fortnox consent URL as JSON.
-         * @description The JSON twin of /connect, and it exists for a concrete reason: a single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes and carries a purpose claim — see the callback.
+         * Get the consent URL for a live OAuth2 provider, as JSON.
+         * @description A single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes, carries a purpose claim `authMiddleware` rejects, is bound to the provider, and is SINGLE-USE (a `jti` the callback consumes) — see the callback.
          */
-        post: operations["getFortnoxConnectUrl"];
+        post: operations["getAccountingConnectUrl"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox/connect": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Redirect the browser to Fortnox consent.
-         * @description The redirect twin of /connect-url, for a navigation that can carry the session. Same signed, 10-minute, purpose-scoped state.
-         */
-        get: operations["startFortnoxConnect"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/accounting/fortnox/callback": {
+    "/accounting/connections/{provider}/callback": {
         parameters: {
             query?: never;
             header?: never;
@@ -1098,9 +1098,9 @@ export type paths = {
         };
         /**
          * PUBLIC OAuth callback — authenticated by the signed state, not by a session.
-         * @description Hit by a browser redirect from Fortnox, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, and it must carry the fortnox_oauth PURPOSE claim — an ordinary session token is rejected here, so a valid Haven token cannot be replayed as OAuth state. **Every outcome is a redirect, never JSON**, and every failure collapses to the same `?fortnox=error` regardless of cause: a bad state, a failed code exchange and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `?fortnox=denied` because that is the user's own action, not a failure to hide.
+         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key, a ledger in a non-SEK currency and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `connect=denied` because that is the user's own action, not a failure to hide.
          */
-        get: operations["fortnoxOAuthCallback"];
+        get: operations["accountingOAuthCallback"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1109,7 +1109,27 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox": {
+    "/accounting/connections/{provider}/api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connect a live API-key provider: validate the key at the provider, then store it encrypted.
+         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409). No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.
+         */
+        post: operations["connectAccountingApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1120,10 +1140,30 @@ export type paths = {
         put?: never;
         post?: never;
         /**
-         * Disconnect Fortnox for the caller.
-         * @description Deletes the stored connection, tokens included. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.
+         * Disconnect a provider for the caller.
+         * @description Clears the stored secrets and marks the connection `disconnected` — the row stays because sync history references it (owner decision). When the provider declares the `revoke` capability the grant is revoked at the provider first. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.
          */
-        delete: operations["disconnectFortnox"];
+        delete: operations["disconnectAccountingProvider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make this connection the feed destination; feed_from = now.
+         * @description Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (a later slice). Only a `connected` connection can be activated.
+         */
+        post: operations["activateAccountingConnection"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1140,7 +1180,7 @@ export type paths = {
         put?: never;
         /**
          * Legacy asserting voucher push — GATED OFF by default.
-         * @description The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.
+         * @description The one Fortnox-shaped path left after #2862 replaced `/accounting/fortnox/*` with the provider-generic connections above: it is provider-specific by nature. The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.
          */
         post: operations["pushFortnoxVouchers"];
         delete?: never;
@@ -8473,7 +8513,7 @@ export interface operations {
             };
         };
     };
-    getFortnoxStatus: {
+    listAccountingProviders: {
         parameters: {
             query?: never;
             header?: never;
@@ -8482,27 +8522,35 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Connection metadata. */
+            /** @description The registry. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        /** @enum {boolean} */
-                        configured: false;
-                        /** @enum {boolean} */
-                        connected: false;
-                        legacyBookkeeping: boolean;
-                    } | {
-                        /** @enum {boolean} */
-                        configured: true;
-                        connected: boolean;
-                        /** @description The granted OAuth scope. Null until connected. */
-                        scope: string | null;
-                        /** @description Access-token expiry. Null until connected. */
-                        expiresAt: string | null;
-                        legacyBookkeeping: boolean;
+                        providers: {
+                            /** @example fortnox */
+                            id: string;
+                            /** @example Fortnox */
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            capabilities: {
+                                attachments: boolean;
+                                verify: boolean;
+                                revoke: boolean;
+                                companyInfo: boolean;
+                            };
+                            /**
+                             * @description Only a `live` provider accepts a connect; `coming_soon` ones are listed so the dashboard can show them.
+                             * @enum {string}
+                             */
+                            availability: "live" | "coming_soon";
+                            requiredScopes: string[];
+                            /** @description Whether THIS deployment can connect the provider (its connector is registered). A live provider without credentials configured is listed but refuses connect with 503. */
+                            configured: boolean;
+                        }[];
                     };
                 };
             };
@@ -8523,11 +8571,86 @@ export interface operations {
             };
         };
     };
-    getFortnoxConnectUrl: {
+    listAccountingConnections: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connections. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connections: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect. */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAccountingConnectUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider id from /accounting/providers. */
+                provider: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -8558,7 +8681,34 @@ export interface operations {
                     };
                 };
             };
-            /** @description Fortnox is not configured on this deployment. */
+            /** @description Unknown provider. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`) or the flow does not match its auth kind (`WRONG_AUTH_KIND`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        error_code: string;
+                    };
+                };
+            };
+            /** @description The provider is live but not configured on this deployment. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -8575,21 +8725,110 @@ export interface operations {
             };
         };
     };
-    startFortnoxConnect: {
+    accountingOAuthCallback: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Authorization code from the provider. */
+                code?: string;
+                /** @description The signed, purpose-scoped, single-use state this flow issued. */
+                state?: string;
+                /** @description Present when the user declined consent. */
+                error?: string;
+            };
             header?: never;
-            path?: never;
+            path: {
+                provider: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to the Fortnox consent screen. */
+            /** @description Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`. */
             302: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    connectAccountingApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    apiKey: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Connected. Metadata only. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connection: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect. */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                        };
+                    };
+                };
+            };
+            /** @description Missing key, or the provider rejected it. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Error response */
             401: {
@@ -8606,7 +8845,34 @@ export interface operations {
                     };
                 };
             };
-            /** @description Fortnox is not configured on this deployment. */
+            /** @description Unknown provider. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`) or the flow does not match its auth kind (`WRONG_AUTH_KIND`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        error_code: string;
+                    };
+                };
+            };
+            /** @description The provider is live but not configured on this deployment. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -8623,36 +8889,13 @@ export interface operations {
             };
         };
     };
-    fortnoxOAuthCallback: {
-        parameters: {
-            query?: {
-                /** @description Authorization code from Fortnox. */
-                code?: string;
-                /** @description The signed, purpose-scoped state this flow issued. */
-                state?: string;
-                /** @description Present when the user declined consent. */
-                error?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Always a redirect to the settings page: ?fortnox=connected, ?fortnox=denied, or ?fortnox=error. */
-            302: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    disconnectFortnox: {
+    disconnectAccountingProvider: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                provider: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -8666,6 +8909,110 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    activateAccountingConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The now-active connection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connection: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect. */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No connection for this provider. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The connection is not in the `connected` state. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

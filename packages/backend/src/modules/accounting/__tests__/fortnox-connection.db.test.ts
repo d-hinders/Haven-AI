@@ -16,8 +16,15 @@
 import { randomBytes } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { refreshTokens } = vi.hoisted(() => ({ refreshTokens: vi.fn() }))
-vi.mock('../fortnox.js', () => ({ refreshTokens }))
+// #2862: the refresh is the generic OAuth2 token post behind the injectable
+// `fetch`, so the provider seam is a fetch stub answering Fortnox's token
+// endpoint. "The provider was not called" is then literally that.
+const fetchImpl = vi.fn()
+const FRESH_TOKEN_RESPONSE = () =>
+  new Response(
+    JSON.stringify({ access_token: 'fresh-access', refresh_token: 'fresh-refresh', token_type: 'Bearer', scope: 'bookkeeping', expires_in: 3600 }),
+    { status: 200 },
+  )
 
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
@@ -27,7 +34,6 @@ import { getValidFortnoxAccessToken } from '../fortnox-connection.js'
 
 const KEY = randomBytes(32).toString('base64')
 const STORED = { accessToken: 'stored-access', refreshToken: 'stored-refresh', tokenType: 'Bearer', scope: 'bookkeeping' }
-const FRESH = { accessToken: 'fresh-access', refreshToken: 'fresh-refresh', tokenType: 'Bearer', scope: 'bookkeeping', expiresAt: new Date(Date.now() + 3600e3) }
 
 async function seedExpiredPlaintextConnection(email: string): Promise<string> {
   const { rows } = await db.query<{ id: string }>(`INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`, [email])
@@ -44,17 +50,18 @@ describeDb('Fortnox token lifecycle on the real database (#2860)', () => {
   beforeAll(initDbHarness)
   beforeEach(resetDb)
   afterEach(() => {
-    refreshTokens.mockReset()
+    fetchImpl.mockReset()
     delete process.env[SECRETS_KEY_ENV]
   })
 
   it('refreshes an expired token and persists the new set ENCRYPTED — which is also what moves a migrated plaintext row off version 0', async () => {
     process.env[SECRETS_KEY_ENV] = KEY
     const userId = await seedExpiredPlaintextConnection('lc-refresh@example.test')
-    refreshTokens.mockResolvedValue(FRESH)
+    fetchImpl.mockResolvedValue(FRESH_TOKEN_RESPONSE())
 
-    expect(await getValidFortnoxAccessToken(userId)).toBe('fresh-access')
-    expect(refreshTokens).toHaveBeenCalledOnce()
+    expect(await getValidFortnoxAccessToken(userId, fetchImpl as unknown as typeof fetch)).toBe('fresh-access')
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(String(fetchImpl.mock.calls[0][1].body)).toContain('grant_type=refresh_token')
 
     const row = (await getConnection(userId, 'fortnox'))!
     expect(row.secrets_key_version).toBe(1)
@@ -66,16 +73,16 @@ describeDb('Fortnox token lifecycle on the real database (#2860)', () => {
 
   it('FAILS CLOSED BEFORE THE PROVIDER CALL: without HAVEN_SECRETS_KEY the stored refresh token is never consumed', async () => {
     const userId = await seedExpiredPlaintextConnection('lc-nokey@example.test')
-    refreshTokens.mockResolvedValue(FRESH)
+    fetchImpl.mockResolvedValue(FRESH_TOKEN_RESPONSE())
 
-    await expect(getValidFortnoxAccessToken(userId)).rejects.toThrow(SecretsKeyMissingError)
+    await expect(getValidFortnoxAccessToken(userId, fetchImpl as unknown as typeof fetch)).rejects.toThrow(SecretsKeyMissingError)
 
     // THE assertion that matters, and the one a first draft got backwards.
     // Fortnox refresh tokens are single-use: if the refusal came after the
     // provider call, the stored token would already be burned at Fortnox and
     // the connection dead until re-consent — which also fails closed. The
     // provider must not have been called at all.
-    expect(refreshTokens).not.toHaveBeenCalled()
+    expect(fetchImpl).not.toHaveBeenCalled()
 
     // And the row is exactly what was seeded — still holding a token Fortnox
     // will still honour once the key is set.

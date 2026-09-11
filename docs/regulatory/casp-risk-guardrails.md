@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting.ts
-  - packages/backend/src/routes/fortnox.ts
+  - packages/backend/src/routes/accounting-connections.ts
   - packages/backend/src/modules/accounting/fortnox.ts
   - packages/backend/src/modules/accounting/fortnox-connection.ts
   - packages/backend/src/rails/**

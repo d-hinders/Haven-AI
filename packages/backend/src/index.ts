@@ -65,7 +65,7 @@ import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
-import fortnoxRoutes from './routes/fortnox.js'
+import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
 import { registerConnector } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
@@ -270,7 +270,9 @@ await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
-await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
+// #2862: provider-generic connections (`/accounting/providers`,
+// `/accounting/connections/*`) replaced the Fortnox-shaped router.
+await app.register(accountingConnectionsRoutes, { prefix: '/accounting' })
 await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
 // #496: the live Fortnox feed adapter. Registering it flips hasLiveConnector()
 // → true, which removes the Reporting page's "preview" banner. Gated on env:

@@ -57,7 +57,7 @@
   },
   "packages/backend/src/modules/accounting/__tests__/fortnox-connection.test.ts": {
     "db-mock": 1,
-    "positional": 5
+    "positional": 2
   },
   "packages/backend/src/modules/accounting/__tests__/fortnox-connector.test.ts": {
     "positional": 2

@@ -543,6 +543,84 @@ const feedSyncRow = {
   },
 } as const
 
+/** An accounting provider descriptor, as the registry lists it (#2862). */
+const accountingProvider = {
+  type: 'object',
+  required: ['id', 'displayName', 'authKind', 'capabilities', 'availability', 'requiredScopes', 'configured'],
+  properties: {
+    id: { type: 'string', examples: ['fortnox'] },
+    displayName: { type: 'string', examples: ['Fortnox'] },
+    authKind: { type: 'string', enum: ['oauth2', 'api_key'] },
+    capabilities: {
+      type: 'object',
+      required: ['attachments', 'verify', 'revoke', 'companyInfo'],
+      properties: {
+        attachments: { type: 'boolean' },
+        verify: { type: 'boolean' },
+        revoke: { type: 'boolean' },
+        companyInfo: { type: 'boolean' },
+      },
+    },
+    availability: {
+      type: 'string',
+      enum: ['live', 'coming_soon'],
+      description: 'Only a `live` provider accepts a connect; `coming_soon` ones are listed so the dashboard can show them.',
+    },
+    requiredScopes: { type: 'array', items: { type: 'string' } },
+    configured: {
+      type: 'boolean',
+      description: 'Whether THIS deployment can connect the provider (its connector is registered). A live provider without credentials configured is listed but refuses connect with 503.',
+    },
+  },
+} as const
+
+/**
+ * One accounting connection — SAFE METADATA ONLY (#2862). Never the secrets
+ * blob, never a token or key; the route tests are written as redaction tests.
+ */
+const accountingConnection = {
+  type: 'object',
+  required: [
+    'provider', 'displayName', 'authKind', 'status', 'statusReason', 'isActiveDestination', 'feedFrom',
+    'grantedScope', 'tokenExpiresAt', 'externalCompanyName', 'baseCurrency', 'lastPushAt', 'lastError',
+    'connectedAt', 'updatedAt',
+  ],
+  properties: {
+    provider: { type: 'string', examples: ['fortnox'] },
+    displayName: { type: 'string' },
+    authKind: { type: 'string', enum: ['oauth2', 'api_key'] },
+    status: {
+      type: 'string',
+      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
+      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.',
+    },
+    statusReason: { type: ['string', 'null'] },
+    isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
+    feedFrom: { type: ['string', 'null'], format: 'date-time', description: 'Nothing settled before this is fed. Set to now by activate.' },
+    grantedScope: { type: ['string', 'null'] },
+    tokenExpiresAt: { type: ['string', 'null'], format: 'date-time', description: 'Access-token expiry (OAuth2 providers). Null for API-key providers.' },
+    externalCompanyName: { type: ['string', 'null'] },
+    baseCurrency: { type: ['string', 'null'], description: 'ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect.' },
+    lastPushAt: { type: ['string', 'null'], format: 'date-time' },
+    lastError: { type: ['string', 'null'] },
+    connectedAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+const providerRefusal = {
+  description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`) or the flow does not match its auth kind (`WRONG_AUTH_KIND`).',
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['error', 'error_code'],
+        properties: { error: { type: 'string' }, error_code: { type: 'string' } },
+      },
+    },
+  },
+} as const
+
 /**
  * The read-back verdict from the provider's OWN records (#1362). Strictly
  * read-only: it asserts nothing and cannot modify an invoice.
@@ -3078,52 +3156,38 @@ export const openapiSpec = {
         },
       },
     },
-    // ── Fortnox OAuth connect + legacy voucher push (#1446, epic #462) ──────
-    // CREDENTIAL BOUNDARY: the OAuth access and refresh tokens live server-side
-    // only. NOTHING in this surface returns them — /status exposes the granted
-    // scope and an expiry timestamp and nothing else, and the callback
-    // redirects without echoing anything it received. Pinned by the route
-    // tests, which are written as redaction tests rather than shape tests.
+    // ── Accounting connections, provider-generic (#2862, epic #2858) ─────────
+    // Replaces `/accounting/fortnox/*`. CREDENTIAL BOUNDARY: OAuth tokens and
+    // API keys live server-side only, encrypted at rest. NOTHING in this
+    // surface returns them — every connection answer is metadata, the API-key
+    // route never echoes the key, and the callback redirects without echoing
+    // anything it received. Pinned by the route tests, written as redaction
+    // tests rather than shape tests.
     //
     // This router is registered WITHOUT the global auth hook, deliberately:
-    // the callback is a browser redirect from Fortnox and carries no JWT, so
-    // every other route opts into authentication per-route instead.
-    '/accounting/fortnox/status': {
+    // the callback is a browser redirect from the provider and carries no JWT,
+    // so every other route opts into authentication per-route instead.
+    //
+    // Verify, reopen, sync and status keep their feed-scoped home under
+    // `/accounting/feed/*` (review, 2026-09-11): they act on the ACTIVE
+    // destination, so there is no provider-scoped duplicate of them here.
+    '/accounting/providers': {
       get: {
         tags: ['Dashboard'],
-        operationId: 'getFortnoxStatus',
-        summary: 'Whether Fortnox is configured on this deployment and connected for the caller.',
+        operationId: 'listAccountingProviders',
+        summary: 'The accounting providers Haven knows about, live or coming soon.',
         description:
-          "Returns SAFE METADATA ONLY: the granted scope and the token expiry, never the tokens themselves. Two shapes, deliberately: when the deployment has no Fortnox credentials the answer omits scope/expiresAt entirely (there is nothing to report), and when it is configured they are present but null until a connection exists. `legacyBookkeeping` tells the UI whether the asserting voucher-push surface below is reachable at all — off by default (#492).",
+          'Four today: Fortnox (`live`) and Accounted, Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
-            description: 'Connection metadata.',
+            description: 'The registry.',
             content: {
               'application/json': {
                 schema: {
-                  oneOf: [
-                    {
-                      type: 'object',
-                      required: ['configured', 'connected', 'legacyBookkeeping'],
-                      properties: {
-                        configured: { type: 'boolean', enum: [false] },
-                        connected: { type: 'boolean', enum: [false] },
-                        legacyBookkeeping: { type: 'boolean' },
-                      },
-                    },
-                    {
-                      type: 'object',
-                      required: ['configured', 'connected', 'scope', 'expiresAt', 'legacyBookkeeping'],
-                      properties: {
-                        configured: { type: 'boolean', enum: [true] },
-                        connected: { type: 'boolean' },
-                        scope: { type: ['string', 'null'], description: 'The granted OAuth scope. Null until connected.' },
-                        expiresAt: { type: ['string', 'null'], description: 'Access-token expiry. Null until connected.' },
-                        legacyBookkeeping: { type: 'boolean' },
-                      },
-                    },
-                  ],
+                  type: 'object',
+                  required: ['providers'],
+                  properties: { providers: { type: 'array', items: accountingProvider } },
                 },
               },
             },
@@ -3132,76 +3196,147 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/fortnox/connect-url': {
+    '/accounting/connections': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listAccountingConnections',
+        summary: "The caller's accounting connections — metadata only, never secrets.",
+        description:
+          'One entry per provider the caller has ever connected; a disconnected one stays as `status: disconnected` (history stays, secrets cleared). Exactly one carries `isActiveDestination: true` while any is connected.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Connections.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['connections'],
+                  properties: { connections: { type: 'array', items: accountingConnection } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/connections/{provider}/connect-url': {
       post: {
         tags: ['Dashboard'],
-        operationId: 'getFortnoxConnectUrl',
-        summary: 'Get the Fortnox consent URL as JSON.',
+        operationId: 'getAccountingConnectUrl',
+        summary: 'Get the consent URL for a live OAuth2 provider, as JSON.',
         description:
-          "The JSON twin of /connect, and it exists for a concrete reason: a single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes and carries a purpose claim — see the callback.",
+          "A single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes, carries a purpose claim `authMiddleware` rejects, is bound to the provider, and is SINGLE-USE (a `jti` the callback consumes) — see the callback.",
         security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' }, description: 'Provider id from /accounting/providers.' }],
         responses: {
           '200': {
             description: 'The consent URL. Carries no token material.',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['url'],
-                  properties: { url: { type: 'string' } },
-                },
+                schema: { type: 'object', required: ['url'], properties: { url: { type: 'string' } } },
               },
             },
           },
           '401': errorResponse,
-          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
+          '404': { ...errorResponse, description: 'Unknown provider.' },
+          '409': providerRefusal,
+          '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
         },
       },
     },
-    '/accounting/fortnox/connect': {
+    '/accounting/connections/{provider}/callback': {
       get: {
         tags: ['Dashboard'],
-        operationId: 'startFortnoxConnect',
-        summary: 'Redirect the browser to Fortnox consent.',
-        description: 'The redirect twin of /connect-url, for a navigation that can carry the session. Same signed, 10-minute, purpose-scoped state.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '302': { description: 'Redirect to the Fortnox consent screen.' },
-          '401': errorResponse,
-          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
-        },
-      },
-    },
-    '/accounting/fortnox/callback': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'fortnoxOAuthCallback',
+        operationId: 'accountingOAuthCallback',
         summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
         description:
-          "Hit by a browser redirect from Fortnox, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, and it must carry the fortnox_oauth PURPOSE claim — an ordinary session token is rejected here, so a valid Haven token cannot be replayed as OAuth state. **Every outcome is a redirect, never JSON**, and every failure collapses to the same `?fortnox=error` regardless of cause: a bad state, a failed code exchange and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `?fortnox=denied` because that is the user's own action, not a failure to hide.",
+          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key, a ledger in a non-SEK currency and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `connect=denied` because that is the user's own action, not a failure to hide.",
         security: [],
         parameters: [
-          { name: 'code', in: 'query', schema: { type: 'string' }, description: 'Authorization code from Fortnox.' },
-          { name: 'state', in: 'query', schema: { type: 'string' }, description: 'The signed, purpose-scoped state this flow issued.' },
+          { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'code', in: 'query', schema: { type: 'string' }, description: 'Authorization code from the provider.' },
+          { name: 'state', in: 'query', schema: { type: 'string' }, description: 'The signed, purpose-scoped, single-use state this flow issued.' },
           { name: 'error', in: 'query', schema: { type: 'string' }, description: 'Present when the user declined consent.' },
         ],
         responses: {
           '302': {
-            description: 'Always a redirect to the settings page: ?fortnox=connected, ?fortnox=denied, or ?fortnox=error.',
+            description: 'Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`.',
           },
         },
       },
     },
-    '/accounting/fortnox': {
+    '/accounting/connections/{provider}/api-key': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'connectAccountingApiKey',
+        summary: 'Connect a live API-key provider: validate the key at the provider, then store it encrypted.',
+        description:
+          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409). No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object', required: ['apiKey'], properties: { apiKey: { type: 'string' } } },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Connected. Metadata only.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', required: ['connection'], properties: { connection: accountingConnection } },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Missing key, or the provider rejected it.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Unknown provider.' },
+          '409': providerRefusal,
+          '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
+        },
+      },
+    },
+    '/accounting/connections/{provider}': {
       delete: {
         tags: ['Dashboard'],
-        operationId: 'disconnectFortnox',
-        summary: 'Disconnect Fortnox for the caller.',
-        description: 'Deletes the stored connection, tokens included. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.',
+        operationId: 'disconnectAccountingProvider',
+        summary: 'Disconnect a provider for the caller.',
+        description:
+          'Clears the stored secrets and marks the connection `disconnected` — the row stays because sync history references it (owner decision). When the provider declares the `revoke` capability the grant is revoked at the provider first. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.',
         security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '204': { description: 'Disconnected (or was never connected).' },
           '401': errorResponse,
+        },
+      },
+    },
+    '/accounting/connections/{provider}/activate': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'activateAccountingConnection',
+        summary: 'Make this connection the feed destination; feed_from = now.',
+        description:
+          "Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (a later slice). Only a `connected` connection can be activated.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'The now-active connection.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', required: ['connection'], properties: { connection: accountingConnection } },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No connection for this provider.' },
+          '409': { ...errorResponse, description: 'The connection is not in the `connected` state.' },
         },
       },
     },
@@ -3211,7 +3346,7 @@ export const openapiSpec = {
         operationId: 'pushFortnoxVouchers',
         summary: 'Legacy asserting voucher push — GATED OFF by default.',
         description:
-          "The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
+          "The one Fortnox-shaped path left after #2862 replaced `/accounting/fortnox/*` with the provider-generic connections above: it is provider-specific by nature. The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },

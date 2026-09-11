@@ -23,8 +23,11 @@ vi.mock('../../../config.js', () => ({
   },
 }))
 
-const { refreshTokens } = vi.hoisted(() => ({ refreshTokens: vi.fn() }))
-vi.mock('../fortnox.js', () => ({ refreshTokens }))
+// #2862: the refresh is the generic `oauth-flow.ts` token post, reached
+// through the injectable `fetch` — so the seam to observe is fetch itself,
+// not a module export. A refresh that should not happen is "fetch was never
+// called".
+const fetchImpl = vi.fn()
 
 import { randomBytes } from 'node:crypto'
 import {
@@ -61,7 +64,7 @@ const KEY = randomBytes(32).toString('base64')
 
 afterEach(() => {
   mockQuery.mockReset()
-  refreshTokens.mockReset()
+  fetchImpl.mockReset()
   delete process.env[SECRETS_KEY_ENV]
 })
 
@@ -74,14 +77,14 @@ describe('fortnoxConfigured', () => {
 describe('getValidFortnoxAccessToken', () => {
   it('returns null when the user has no connection', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] })
-    expect(await getValidFortnoxAccessToken('user-1')).toBeNull()
-    expect(refreshTokens).not.toHaveBeenCalled()
+    expect(await getValidFortnoxAccessToken('user-1', fetchImpl as unknown as typeof fetch)).toBeNull()
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('returns the stored access token while it is still valid', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [connectionRow()] })
-    expect(await getValidFortnoxAccessToken('user-1')).toBe('stored-access')
-    expect(refreshTokens).not.toHaveBeenCalled()
+    expect(await getValidFortnoxAccessToken('user-1', fetchImpl as unknown as typeof fetch)).toBe('stored-access')
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   // The refresh-and-persist path and the fail-closed-without-a-key path are

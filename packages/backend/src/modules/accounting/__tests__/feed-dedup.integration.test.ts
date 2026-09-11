@@ -86,6 +86,9 @@ const { ledger } = vi.hoisted(() => {
       const [userId] = params as string[]
       return { rows: [...rows.values()].filter((r) => r.user_id === userId) }
     }
+    if (s.includes('FROM accounting_connections')) { // #2862: getActiveConnection — no row, so the orchestrator falls back to the registered connector
+      return { rows: [] }
+    }
     if (s.includes('SELECT * FROM accounting_feed_syncs')) { // getSyncState
       const [userId, provider, paymentId] = params as string[]
       const row = rows.get(key(provider, paymentId, userId))

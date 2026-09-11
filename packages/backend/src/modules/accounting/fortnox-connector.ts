@@ -1,6 +1,7 @@
 import {
   FORTNOX_API_BASE,
   FortnoxError,
+  isFortnoxScopeError,
 } from './fortnox.js'
 import {
   fortnoxConfigured,
@@ -8,8 +9,16 @@ import {
   getValidFortnoxAccessToken,
 } from './fortnox-connection.js'
 import { getSyncState, markPushed } from './feed-sync.js'
-import type { AccountingConnector, PushResult } from './connector.js'
+import type {
+  AccountingConnector,
+  AccountingVerification,
+  DegradedConnectionStatus,
+  ProviderSecrets,
+  PushResult,
+  VerifyOutcome,
+} from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
+import type { ProviderCompanyInfo } from './provider.js'
 import {
   loadReceiptUnderlag,
   merchantReceiptPdf,
@@ -159,6 +168,7 @@ async function fortnoxPost<T>(
     throw new FortnoxError(
       `Fortnox POST ${path} failed (HTTP ${res.status}${detail?.message ? `: ${detail.message}` : ''}${detail?.code ? ` [${detail.code}]` : ''}).`,
       res.status,
+      detail?.code,
     )
   }
   return (await res.json()) as T
@@ -192,6 +202,7 @@ async function fortnoxUploadPdf(
     throw new FortnoxError(
       `Fortnox inbox upload failed (HTTP ${res.status}${detail?.message ? `: ${detail.message}` : ''}${detail?.code ? ` [${detail.code}]` : ''}).`,
       res.status,
+      detail?.code,
     )
   }
   const body = (await res.json()) as { File?: { Id?: string } }
@@ -310,6 +321,11 @@ export class FortnoxConnector implements AccountingConnector {
     // always expected) and the merchant's OWN receipt (#956, present only
     // when the agent captured one — absence is the normal case, not a note).
     const notes: string[] = []
+    // #2862: a scope error on the attachment step is a finding about the
+    // GRANT — the invoice is delivered, the sync row stays pushed with its
+    // note, and only the connection's status changes so the dashboard can
+    // ask for a re-consent. Never re-pushable: that would double-post.
+    let connectionStatus: DegradedConnectionStatus | undefined
     if (givenNumber == null) {
       notes.push('receipt not attached: Fortnox returned no invoice number')
     } else {
@@ -320,6 +336,7 @@ export class FortnoxConnector implements AccountingConnector {
           await this.attachFile(accessToken, givenNumber, underlag)
         } catch (err) {
           notes.push(`receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
+          if (isFortnoxScopeError(err)) connectionStatus = 'scope_missing'
         }
       }
 
@@ -330,6 +347,7 @@ export class FortnoxConnector implements AccountingConnector {
           )
         } catch (err) {
           notes.push(`merchant receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
+          if (isFortnoxScopeError(err)) connectionStatus = 'scope_missing'
         }
       }
     }
@@ -339,8 +357,64 @@ export class FortnoxConnector implements AccountingConnector {
       externalRef: givenNumber != null ? `fortnox:supplierinvoice:${givenNumber}` : null,
       status: 'pushed',
       ...(note ? { note } : {}),
+      ...(connectionStatus ? { connectionStatus } : {}),
     }
   }
+
+  /**
+   * Read-back verification (#1362) against Fortnox's own records — the
+   * contract's `verify`. See `verifyFortnoxInvoice` for the payment-keyed
+   * entry point the feed routes used before #2862; it now delegates here.
+   */
+  async verify(userId: string, externalRef: string, paymentId: string): Promise<VerifyOutcome> {
+    const match = externalRef.match(/^fortnox:supplierinvoice:(\d+)$/)
+    if (!match) return { ok: false, error_code: 'no_invoice_ref' }
+    const givenNumber = Number(match[1])
+
+    const accessToken = await getValidFortnoxAccessToken(userId, this.fetchImpl)
+    if (!accessToken) return { ok: false, error_code: 'not_connected' }
+
+    return { ok: true, verification: await readBackInvoice(accessToken, givenNumber, paymentId, this.fetchImpl) }
+  }
+
+  /**
+   * Who the grant belongs to. `GET /companyinformation` needs the
+   * `companyinformation` scope, which the feed's grant does not carry
+   * (widening the scope means re-registering the integration's permissions in
+   * the developer portal, and is out of this slice) — so a scope refusal
+   * degrades to "unknown company" rather than blocking the connect. The base
+   * currency is reported as SEK regardless: a Fortnox company books in SEK
+   * (Fortnox's bookkeeping currency is fixed), which is why the generic
+   * flow's currency rule passes here by construction.
+   */
+  async getCompanyInfo(secrets: ProviderSecrets): Promise<ProviderCompanyInfo> {
+    const accessToken = String(secrets.accessToken ?? '')
+    try {
+      const body = await fortnoxGet<{
+        CompanyInformation?: { CompanyName?: string; OrganizationNumber?: string; DatabaseNumber?: number | string }
+      }>(accessToken, '/companyinformation', this.fetchImpl)
+      const info = body.CompanyInformation
+      return {
+        externalCompanyId: info?.DatabaseNumber != null ? String(info.DatabaseNumber) : (info?.OrganizationNumber ?? null),
+        name: info?.CompanyName ?? null,
+        baseCurrency: 'SEK',
+      }
+    } catch (err) {
+      if (err instanceof FortnoxError && (err.status === 403 || isFortnoxScopeError(err))) {
+        return { externalCompanyId: null, name: null, baseCurrency: 'SEK' }
+      }
+      throw err
+    }
+  }
+
+  /**
+   * Fortnox declares `capabilities.revoke: false` (registry.ts): there is no
+   * programmatic revoke this codebase has exercised, so disconnect clears the
+   * stored secrets and the user removes the integration in Fortnox. The
+   * generic disconnect never calls this for Fortnox; it is a no-op by
+   * contract, not an omission.
+   */
+  async revoke(): Promise<void> {}
 
   /** Upload one file to the Inbox and connect it to the invoice (#498/#956). */
   private async attachFile(
@@ -404,29 +478,7 @@ async function attachMerchantReceiptFiles(
  * carries `Booked: false` and no voucher until a human attests it; booking
  * fills `VoucherNumber`/`VoucherSeries`/`VoucherYear`.
  */
-export interface FortnoxInvoiceVerification {
-  /** The invoice exists in Fortnox under our external_ref. */
-  registered: boolean
-  /**
-   * Why registered is false (#1376 review): 'deleted' = Fortnox 404s the
-   * number; 'foreign_invoice' = an invoice EXISTS at that number but carries
-   * someone else's ExternalInvoiceNumber (company-switch collision). Null
-   * when registered. Both cases mean OUR record was never delivered under
-   * our ref — but an audit trail must not say "no longer exists" about an
-   * invoice that exists.
-   */
-  missing: 'deleted' | 'foreign_invoice' | null
-  /** A human has booked it (Fortnox `Booked`). Null when not registered. */
-  booked: boolean | null
-  /** Cancelled in Fortnox — registered but struck. Null when not registered. */
-  cancelled: boolean | null
-  invoice_number: number
-  /** `<series><number> <year>` when booked, e.g. "A123 2026". Null until booked. */
-  voucher: string | null
-  invoice_date: string | null
-  total: number | null
-  checked_at: string
-}
+export type FortnoxInvoiceVerification = AccountingVerification
 
 export async function verifyFortnoxInvoice(
   userId: string,
@@ -440,13 +492,18 @@ export async function verifyFortnoxInvoice(
   if (!sync || sync.status !== 'pushed') {
     return { ok: false, error_code: 'not_pushed', status: sync?.status ?? null }
   }
-  const match = sync.external_ref?.match(/^fortnox:supplierinvoice:(\d+)$/)
-  if (!match) return { ok: false, error_code: 'no_invoice_ref', status: sync.status }
-  const givenNumber = Number(match[1])
+  if (!sync.external_ref) return { ok: false, error_code: 'no_invoice_ref', status: sync.status }
+  const result = await new FortnoxConnector(fetchImpl).verify(userId, sync.external_ref, paymentId)
+  return result.ok ? result : { ...result, status: sync.status }
+}
 
-  const accessToken = await getValidFortnoxAccessToken(userId, fetchImpl)
-  if (!accessToken) return { ok: false, error_code: 'not_connected', status: sync.status }
-
+/** The read itself, given a token. */
+async function readBackInvoice(
+  accessToken: string,
+  givenNumber: number,
+  paymentId: string,
+  fetchImpl: typeof fetch,
+): Promise<FortnoxInvoiceVerification> {
   const checkedAt = new Date().toISOString()
   let invoice: {
     GivenNumber?: number
@@ -472,12 +529,9 @@ export async function verifyFortnoxInvoice(
       // The invoice we pushed is GONE in Fortnox (deleted). Honest answer,
       // not an error — this is exactly what verification exists to surface.
       return {
-        ok: true,
-        verification: {
-          registered: false, missing: 'deleted', booked: null, cancelled: null,
-          invoice_number: givenNumber, voucher: null, invoice_date: null,
-          total: null, checked_at: checkedAt,
-        },
+        registered: false, missing: 'deleted', booked: null, cancelled: null,
+        invoice_number: givenNumber, voucher: null, invoice_date: null,
+        total: null, checked_at: checkedAt,
       }
     }
     throw err
@@ -488,12 +542,9 @@ export async function verifyFortnoxInvoice(
   // company switch) must not read as "your payment is registered".
   if (invoice.ExternalInvoiceNumber !== externalInvoiceNumber(paymentId)) {
     return {
-      ok: true,
-      verification: {
-        registered: false, missing: 'foreign_invoice', booked: null, cancelled: null,
-        invoice_number: givenNumber, voucher: null, invoice_date: null,
-        total: null, checked_at: checkedAt,
-      },
+      registered: false, missing: 'foreign_invoice', booked: null, cancelled: null,
+      invoice_number: givenNumber, voucher: null, invoice_date: null,
+      total: null, checked_at: checkedAt,
     }
   }
 
@@ -502,18 +553,15 @@ export async function verifyFortnoxInvoice(
       ? `${invoice.VoucherSeries ?? ''}${invoice.VoucherNumber}${invoice.VoucherYear ? ` ${invoice.VoucherYear}` : ''}`
       : null
   return {
-    ok: true,
-    verification: {
-      registered: true,
-      missing: null,
-      booked: Boolean(invoice.Booked),
-      cancelled: Boolean(invoice.Cancelled),
-      invoice_number: givenNumber,
-      voucher,
-      invoice_date: invoice.InvoiceDate ?? null,
-      total: invoice.Total ?? null,
-      checked_at: checkedAt,
-    },
+    registered: true,
+    missing: null,
+    booked: Boolean(invoice.Booked),
+    cancelled: Boolean(invoice.Cancelled),
+    invoice_number: givenNumber,
+    voucher,
+    invoice_date: invoice.InvoiceDate ?? null,
+    total: invoice.Total ?? null,
+    checked_at: checkedAt,
   }
 }
 

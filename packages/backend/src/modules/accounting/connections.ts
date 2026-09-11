@@ -19,6 +19,7 @@
  */
 
 import {
+  companyIdAt,
   disconnect as disconnectRow,
   getActiveConnection,
   getConnection,
@@ -30,8 +31,9 @@ import {
 } from '../../infra/repositories/accounting-connections.js'
 import { decryptSecrets } from '../../infra/secrets.js'
 import { connectWithApiKey } from './api-key-flow.js'
+import { companySwitchLog } from './company-info.js'
 import { getConnector, type AccountingVerification, type ProviderSecrets } from './connector.js'
-import { getSyncState } from './feed-sync.js'
+import { getSyncState, reopenMissingPushed } from './feed-sync.js'
 import { fortnoxConfigured, fortnoxCredentials } from './fortnox-connection.js'
 import { fortnoxOAuth2Config } from './fortnox.js'
 import { buildAuthorizeUrl, completeOAuth2Connect, type OAuth2ProviderConfig } from './oauth-flow.js'
@@ -49,6 +51,8 @@ export interface ConnectionSummary {
   feedFrom: string | null
   grantedScope: string | null
   tokenExpiresAt: string | null
+  /** #2864: the provider's own tenant id (Fortnox: `DatabaseNumber`); null until a grant with the scope read it. */
+  externalCompanyId: string | null
   externalCompanyName: string | null
   baseCurrency: string | null
   lastPushAt: string | null
@@ -70,6 +74,7 @@ export function toConnectionSummary(row: AccountingConnectionRow): ConnectionSum
     feedFrom: iso(row.feed_from),
     grantedScope: row.granted_scope,
     tokenExpiresAt: iso(row.token_expires_at),
+    externalCompanyId: row.external_company_id,
     externalCompanyName: row.external_company_name,
     baseCurrency: row.base_currency,
     lastPushAt: iso(row.last_push_at),
@@ -95,6 +100,16 @@ export async function listConnectionSummaries(userId: string): Promise<Connectio
 /** Whether the user has a connected, active feed destination. */
 export async function hasActiveConnection(userId: string): Promise<boolean> {
   return (await getActiveConnection(userId)) !== null
+}
+
+/**
+ * The active destination as the wire summary, or null — what
+ * `GET /accounting/feed/status` reads so the UI can say
+ * "Connected to <Company AB>" (#2864).
+ */
+export async function getActiveConnectionSummary(userId: string): Promise<ConnectionSummary | null> {
+  const row = await getActiveConnection(userId)
+  return row ? toConnectionSummary(row) : null
 }
 
 // ── OAuth2 ───────────────────────────────────────────────────────────────────
@@ -256,4 +271,63 @@ export async function verifyPushedPayment(userId: string, paymentId: string): Pr
   const result = await pair.connector.verify(userId, sync.external_ref, paymentId)
   if (!result.ok) return { ok: false, error_code: result.error_code, status: sync.status }
   return { ok: true, provider: active.provider, verification: result.verification }
+}
+
+// ── Reopen (#1365), company-aware since #2864 ────────────────────────────────
+
+/** Why a `pushed` row belongs to a company the connection no longer points at. */
+export const PREVIOUS_COMPANY_REASON = 'belongs to the previous company'
+
+export type ReopenPushedPaymentResult =
+  | { reopened: true }
+  | { reopened: false; error_code: 'not_pushed' }
+  | { reopened: false; error_code: 'previous_company'; switched_at: string; company_name: string | null }
+
+/**
+ * The verification-gated reopen, made aware of company switches (review,
+ * 2026-09-11). The caller has already had the provider confirm the record is
+ * gone (or foreign). Before the row flips, the sync row's `created_at` is
+ * compared with the connection's company-switch log (`settings.companySwitches`,
+ * written by `company-info.ts`): a `pushed` row created BEFORE the latest
+ * switch was delivered into the PREVIOUS company — its invoice is missing
+ * in the current one by construction, and reopening it would re-feed the
+ * previous company's history into the new one. Refused with
+ * `previous_company`; the row stays `pushed`.
+ *
+ * Attribution mechanism and its limit: `accounting_feed_syncs` has no
+ * company column, so a row is attributed by time — `created_at` against the
+ * switch time — which is exact for the sequence connect → push → switch,
+ * and is the only signal available for rows that predate #2864.
+ */
+export async function reopenPushedPayment(
+  userId: string,
+  providerId: string,
+  paymentId: string,
+  reason: string,
+): Promise<ReopenPushedPaymentResult> {
+  const sync = await getSyncState(userId, providerId, paymentId)
+  if (!sync || sync.status !== 'pushed') return { reopened: false, error_code: 'not_pushed' }
+
+  // MUTATION TARGET (company-switch.db.test.ts "reopen … refused"): without
+  // this guard a company switch lets every pre-switch pushed row flip to
+  // failed and re-push into the new company.
+  const connection = await getConnection(userId, providerId)
+  if (connection && connection.external_company_id) {
+    const pushedUnder = companyIdAt(connection, new Date(sync.created_at))
+    if (pushedUnder && pushedUnder !== connection.external_company_id) {
+      // Name the company the row was pushed under, and the switch that moved
+      // the connection away from it.
+      const log = companySwitchLog(connection)
+      const away = log.find((e) => e.fromCompanyId === pushedUnder && new Date(e.at).getTime() > new Date(sync.created_at).getTime())
+      return {
+        reopened: false,
+        error_code: 'previous_company',
+        switched_at: away?.at ?? log.at(-1)!.at,
+        company_name: away?.fromCompanyName ?? null,
+      }
+    }
+  }
+
+  const reopened = await reopenMissingPushed(userId, providerId, paymentId, reason)
+  return reopened ? { reopened: true } : { reopened: false, error_code: 'not_pushed' }
 }

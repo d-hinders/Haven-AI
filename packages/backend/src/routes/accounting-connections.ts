@@ -62,8 +62,11 @@ const PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{1,31}$/
  */
 export default async function accountingConnectionsRoutes(app: FastifyInstance): Promise<void> {
   const accountingUrl = `${config.frontendUrl}/accounting`
-  const redirect = (provider: string, outcome: 'connected' | 'denied' | 'error') =>
-    `${accountingUrl}?provider=${encodeURIComponent(provider)}&connect=${outcome}`
+  // #2864: a connect refused because the company books in another currency
+  // is the one failure the user can act on differently (pick another
+  // company), so the redirect names it: `&reason=unsupported_currency`.
+  const redirect = (provider: string, outcome: 'connected' | 'denied' | 'error', reason?: 'unsupported_currency') =>
+    `${accountingUrl}?provider=${encodeURIComponent(provider)}&connect=${outcome}${reason ? `&reason=${reason}` : ''}`
 
   function providerRefusal(err: unknown): { status: number; body: { error: string; error_code: string } } | null {
     if (err instanceof ProviderNotConnectableError) {
@@ -149,6 +152,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
           { err: err instanceof Error ? err.name : 'Error', userId: claims.sub, provider },
           'accounting oauth callback failed after state verification',
         )
+        if (err instanceof UnsupportedBaseCurrencyError) return reply.redirect(redirect(provider, 'error', 'unsupported_currency'))
         return reply.redirect(redirect(provider, 'error'))
       }
       return reply.redirect(redirect(provider, 'connected'))

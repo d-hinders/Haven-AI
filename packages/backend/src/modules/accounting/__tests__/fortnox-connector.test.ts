@@ -515,3 +515,55 @@ describe('verifyFortnoxInvoice (#1362)', () => {
     expect(mockMarkPushed).not.toHaveBeenCalled()
   })
 })
+
+describe('getCompanyInfo (#2864)', () => {
+  const SECRETS = { accessToken: 'at-1', refreshToken: 'rt-1', tokenType: 'Bearer', scope: 'bookkeeping companyinformation' }
+
+  it('a fresh consent with the scope reads DatabaseNumber → id, CompanyName → name, SEK by construction — no degradation', async () => {
+    const { impl, calls } = fetchStub({
+      '/companyinformation': () => ({
+        body: { CompanyInformation: { CompanyName: 'Haven Sandbox AB', OrganizationNumber: '556677-8899', DatabaseNumber: 1234567 } },
+      }),
+    })
+    const info = await new FortnoxConnector(impl).getCompanyInfo(SECRETS)
+    expect(info).toEqual({ externalCompanyId: '1234567', name: 'Haven Sandbox AB', baseCurrency: 'SEK' })
+    expect(info.scopeMissing).toBeUndefined()
+    const call = calls.find((c) => c.url.endsWith('/companyinformation'))!
+    expect(call.url).toBe('https://api.fortnox.se/3/companyinformation')
+    expect((call.init?.headers as Record<string, string>).Authorization).toBe('Bearer at-1')
+  })
+
+  it('a grant WITHOUT the scope (pre-#2864 consent) degrades to an unknown company and reports scopeMissing — HTTP 403', async () => {
+    const { impl } = fetchStub({
+      '/companyinformation': () => ({ status: 403, body: { ErrorInformation: { error: 1, message: 'Har inte behörighet för scope.', code: 2000663 } } }),
+    })
+    expect(await new FortnoxConnector(impl).getCompanyInfo(SECRETS)).toEqual({
+      externalCompanyId: null, name: null, baseCurrency: 'SEK', scopeMissing: true,
+    })
+  })
+
+  it('… and the scope code [2000663] on any status is the same refusal (the file-connection POST answered it as 400)', async () => {
+    const { impl } = fetchStub({
+      '/companyinformation': () => ({ status: 400, body: { ErrorInformation: { error: 1, message: 'Har inte behörighet för scope.', code: 2000663 } } }),
+    })
+    expect(await new FortnoxConnector(impl).getCompanyInfo(SECRETS)).toMatchObject({ scopeMissing: true, externalCompanyId: null })
+  })
+
+  it('MUTATION PROOF: a network error, a 401, a 429 and a 500 are THROWN — an outage is never a missing scope', async () => {
+    // Widening the catch to every FortnoxError turns each of these into a
+    // scope_missing row at connect; the assertion is that none degrades.
+    const failing = (async () => { throw new TypeError('fetch failed') }) as unknown as typeof fetch
+    await expect(new FortnoxConnector(failing).getCompanyInfo(SECRETS)).rejects.toMatchObject({ name: 'FortnoxError', status: 0 })
+    for (const status of [401, 429, 500]) {
+      const { impl } = fetchStub({ '/companyinformation': () => ({ status, body: { ErrorInformation: { error: 1, message: 'x', code: 1 } } }) })
+      await expect(new FortnoxConnector(impl).getCompanyInfo(SECRETS)).rejects.toMatchObject({ name: 'FortnoxError', status })
+    }
+  })
+
+  it('carries no token material in the error message', async () => {
+    const { impl } = fetchStub({ '/companyinformation': () => ({ status: 500, body: { ErrorInformation: { message: 'Internt fel.', code: 2000000 } } }) })
+    const err = await new FortnoxConnector(impl).getCompanyInfo(SECRETS).catch((e: Error) => e)
+    expect(String((err as Error).message)).not.toContain('at-1')
+    expect(String((err as Error).message)).toBe('Fortnox GET /companyinformation failed (HTTP 500: Internt fel. [2000000]).')
+  })
+})

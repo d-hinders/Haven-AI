@@ -52,6 +52,15 @@ export interface ProviderCompanyInfo {
   name: string | null
   /** ISO-4217, upper-case, or null when the provider cannot say. */
   baseCurrency: string | null
+  /**
+   * #2864: the connector TRIED to read the company and the provider refused
+   * for a missing scope (Fortnox: a grant consented before `companyinformation`
+   * joined the scope list). The generic flows store the connection and mark it
+   * `scope_missing` so the dashboard asks for a re-consent. A connector sets
+   * this ONLY on a scope refusal — a network error or a 5xx is thrown, never
+   * reported as a missing scope.
+   */
+  scopeMissing?: boolean
 }
 
 /**
@@ -73,19 +82,24 @@ export class ProviderError extends Error {
 }
 
 /**
- * The connect-time currency rule. Kept as one named function so the generic
- * flows call exactly one thing and #2864 has exactly one place to widen it.
- * Null (provider cannot say) passes: refusing the unknown would refuse every
- * provider that has no company endpoint, and the feed pushes SEK regardless.
+ * The connect-time currency rule (owner decision 2026-09-11, enforced by
+ * #2864 for EVERY provider, at connect and on a company switch). Kept as one
+ * named function so the generic flows call exactly one thing and a
+ * multi-currency follow-on has exactly one place to widen it. Null (provider
+ * cannot say) passes: refusing the unknown would refuse every provider that
+ * has no company endpoint, and the feed pushes SEK regardless.
  */
 export const SUPPORTED_BASE_CURRENCY = 'SEK'
+
+/** The user-facing refusal, verbatim — the route and the UI show this sentence. */
+export const UNSUPPORTED_BASE_CURRENCY_MESSAGE = 'Haven currently feeds SEK ledgers only'
 
 export class UnsupportedBaseCurrencyError extends Error {
   readonly code = 'UNSUPPORTED_BASE_CURRENCY' as const
   constructor(public readonly baseCurrency: string) {
     super(
-      `The connected company books in ${baseCurrency}; the accounting feed delivers ` +
-        `${SUPPORTED_BASE_CURRENCY} amounts and cannot be connected to a ${baseCurrency} ledger.`,
+      `${UNSUPPORTED_BASE_CURRENCY_MESSAGE} — the connected company books in ${baseCurrency}, ` +
+        `so it was not connected and nothing was stored.`,
     )
     this.name = 'UnsupportedBaseCurrencyError'
   }

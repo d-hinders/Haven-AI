@@ -1098,7 +1098,7 @@ export type paths = {
         };
         /**
          * PUBLIC OAuth callback — authenticated by the signed state, not by a session.
-         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key, a ledger in a non-SEK currency and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `connect=denied` because that is the user's own action, not a failure to hide.
+         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a non-SEK currency is `connect=error&reason=unsupported_currency` (#2864: "Haven currently feeds SEK ledgers only" — nothing was stored; an existing connection is left as it was, and the user can pick another company).
          */
         get: operations["accountingOAuthCallback"];
         put?: never;
@@ -1120,7 +1120,7 @@ export type paths = {
         put?: never;
         /**
          * Connect a live API-key provider: validate the key at the provider, then store it encrypted.
-         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409). No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.
+         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven currently feeds SEK ledgers only") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.
          */
         post: operations["connectAccountingApiKey"];
         delete?: never;
@@ -8264,6 +8264,8 @@ export interface operations {
                         available: boolean;
                         /** @description The caller has a live provider connection. */
                         connected: boolean;
+                        /** @description The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, or when the grant could not read it (`scope_missing`). Absent when the feed is unavailable. */
+                        companyName?: string | null;
                         syncs: {
                             /** Format: uuid */
                             id: string;
@@ -8505,7 +8507,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us. */
+            /** @description Refused, nothing written — the invoice still exists, the row is not pushed, it moved under us, or (#2864, `previous_company`) the row was delivered into the company the connection pointed at BEFORE its latest company switch: its record lives in that company, "missing" in the current one is the correct verdict, and reopening would re-feed the previous company's history into the new one. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8514,8 +8516,13 @@ export interface operations {
                     "application/json": {
                         error: string;
                         /** @enum {string} */
-                        error_code: "not_pushed" | "not_connected" | "no_invoice_ref" | "invoice_exists";
+                        error_code: "not_pushed" | "not_connected" | "no_invoice_ref" | "invoice_exists" | "previous_company";
                         invoice_number?: number;
+                        /**
+                         * Format: date-time
+                         * @description With `previous_company`: when the connection switched company.
+                         */
+                        switched_at?: string;
                     };
                 };
             };
@@ -8602,7 +8609,7 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.
                              * @enum {string}
                              */
                             status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
@@ -8620,8 +8627,11 @@ export interface operations {
                              * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
                              */
                             tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
                             externalCompanyName: string | null;
-                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect. */
+                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
                             baseCurrency: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;
@@ -8751,7 +8761,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`. */
+            /** @description Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal. */
             302: {
                 headers: {
                     [name: string]: unknown;
@@ -8791,7 +8801,7 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.
                              * @enum {string}
                              */
                             status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
@@ -8809,8 +8819,11 @@ export interface operations {
                              * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
                              */
                             tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
                             externalCompanyName: string | null;
-                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect. */
+                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
                             baseCurrency: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;
@@ -8868,7 +8881,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`) or the flow does not match its auth kind (`WRONG_AUTH_KIND`). */
+            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a non-SEK currency (`UNSUPPORTED_BASE_CURRENCY`, #2864 — nothing stored). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8957,7 +8970,7 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.
                              * @enum {string}
                              */
                             status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
@@ -8975,8 +8988,11 @@ export interface operations {
                              * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
                              */
                             tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
                             externalCompanyName: string | null;
-                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect. */
+                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
                             baseCurrency: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;

@@ -93,6 +93,7 @@ import accountingConnectionsRoutes from '../accounting-connections.js'
 import {
   InMemoryConnector,
   OAUTH_STATE_PURPOSE,
+  UnsupportedBaseCurrencyError,
   clearConnectors,
   clearTestProviders,
   registerConnector,
@@ -117,7 +118,7 @@ function row(provider: string, over: Record<string, unknown> = {}) {
     auth_kind: 'oauth2',
     secrets_ciphertext: Buffer.from(JSON.stringify({ accessToken: ACCESS_TOKEN, refreshToken: REFRESH_TOKEN })),
     secrets_key_version: 0,
-    external_company_id: null,
+    external_company_id: '1234567',
     external_company_name: 'Ada AB',
     base_currency: 'SEK',
     status: 'connected',
@@ -224,7 +225,10 @@ describe('accounting connection routes (#2862)', () => {
         isActiveDestination: true,
         grantedScope: 'bookkeeping',
         tokenExpiresAt: '2099-01-01T00:00:00.000Z',
+        // #2864: the company the connection points at — id, name, currency.
+        externalCompanyId: '1234567',
         externalCompanyName: 'Ada AB',
+        baseCurrency: 'SEK',
       })
       expect(connections[0]).not.toHaveProperty('secrets_ciphertext')
       expect(leaks(res.body)).toBe(false)
@@ -347,11 +351,21 @@ describe('accounting connection routes (#2862)', () => {
       expect(flowMocks.completeOAuth2Connect).not.toHaveBeenCalled()
     })
 
-    it('collapses a failed connect (provider declined, key missing, currency refused) to the same error redirect', async () => {
+    it('collapses a failed connect (provider declined, key missing) to the same error redirect', async () => {
       const state = await issueState()
       flowMocks.completeOAuth2Connect.mockRejectedValueOnce(new Error('token exchange failed: body with ' + ACCESS_TOKEN))
       const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
       expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error')
+      expect(leaks(res.headers.location as string)).toBe(false)
+    })
+
+    it('#2864: a non-SEK ledger is the one named refusal — connect=error&reason=unsupported_currency, nothing stored', async () => {
+      const state = await issueState()
+      flowMocks.completeOAuth2Connect.mockRejectedValueOnce(new UnsupportedBaseCurrencyError('EUR'))
+      const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
+      expect(res.statusCode).toBe(302)
+      expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=unsupported_currency')
+      expect(rows.size).toBe(0)
       expect(leaks(res.headers.location as string)).toBe(false)
     })
   })
@@ -369,6 +383,23 @@ describe('accounting connection routes (#2862)', () => {
       expect(res.json().connection).toMatchObject({ provider: 'keyed', authKind: 'api_key', status: 'connected' })
       expect(leaks(res.body)).toBe(false)
       expectMatchesSpec('POST', '/accounting/connections/{provider}/api-key', res.json(), '201')
+    })
+
+    it('#2864: a company that books in a non-SEK currency is refused with "Haven currently feeds SEK ledgers only" (409), and nothing is stored', async () => {
+      registerTestProvider(KEYED)
+      registerConnector(stubConnector('keyed'))
+      // The flow throws BEFORE it stores (proven on the real database by the
+      // conformance suite's case 7 for both flows); the route maps the error.
+      flowMocks.connectWithApiKey.mockRejectedValueOnce(new UnsupportedBaseCurrencyError('EUR'))
+      const res = await authed('POST', '/accounting/connections/keyed/api-key', { apiKey: API_KEY })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'UNSUPPORTED_BASE_CURRENCY' })
+      expect(res.json().error).toContain('Haven currently feeds SEK ledgers only')
+      expect(res.json().error).toContain('EUR')
+      expect(res.json()).not.toHaveProperty('connection')
+      expect(rows.size).toBe(0)
+      expect(leaks(res.body)).toBe(false)
+      expectMatchesSpec('POST', '/accounting/connections/{provider}/api-key', res.json(), '409')
     })
 
     it('400s a missing key, 409s an OAuth provider and a coming_soon provider — before any provider call', async () => {

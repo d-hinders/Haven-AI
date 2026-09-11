@@ -52,9 +52,28 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    - `verify(userId, externalRef, paymentId)` reads back the record and
      reports `registered` / `booked` / `missing: 'deleted' | 'foreign_invoice'`
      (a record at that number that is not ours).
-   - `getCompanyInfo(secrets)` reports the ledger's `baseCurrency`; the
-     generic flows refuse a non-SEK ledger at connect (`assertSupportedBaseCurrency`,
-     policy owned by #2864). Report `null` if the provider cannot say.
+   - `getCompanyInfo(secrets)` reports the company behind the grant —
+     `externalCompanyId` (the provider's tenant id; Fortnox: `DatabaseNumber`),
+     `name`, and the ledger's `baseCurrency`. The generic flows refuse a
+     non-SEK ledger at connect BEFORE any secret is stored
+     (`assertSupportedBaseCurrency`, owner decision 2026-09-11, enforced by
+     #2864 for every provider: "Haven currently feeds SEK ledgers only"; an
+     existing row is left as it was). Report `null` if the provider cannot
+     say. A connector that TRIED and was refused for a missing scope reports
+     `scopeMissing: true` — the flow stores the connection and marks it
+     `scope_missing` so the dashboard asks for a re-consent; a network error
+     or a 5xx is thrown, never reported as a missing scope (the Fortnox
+     connector is the example: HTTP 403 or `[2000663]` degrade, everything
+     else throws).
+   - **Company switch (#2864) is the generic flow's, not yours.** A reconnect
+     whose `externalCompanyId` differs from the stored one keeps the row,
+     replaces the company fields, sets `feed_from = now`, writes a
+     `status_reason` and appends to the row's `settings.companySwitches` log
+     (`company-info.ts`, `recordCompanySwitch`). Existing `pushed` sync rows
+     keep their external refs; `reopenPushedPayment` (`connections.ts`)
+     refuses a `pushed` row created before the latest switch with
+     `previous_company`. The attribution is by time — `accounting_feed_syncs`
+     has no company column — and its limits are in the runbook.
    - `revoke(secrets)` is called on disconnect **only** when the descriptor
      declares `capabilities.revoke`; implement it as a no-op otherwise. The
      generic disconnect calls it BEFORE the secrets are cleared and clears
@@ -94,8 +113,9 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    `runConnectorConformance(name, harness)`. The suite
    (`__tests__/connector-conformance.ts`) is the contract's executable form —
    idempotent re-push, the non-asserting guard, attachment degradation, verify
-   verdicts, revoke-on-disconnect, post-push scope loss, non-SEK refusal — and
-   runs the real orchestrator and flows; your harness supplies HTTP fixtures
+   verdicts, revoke-on-disconnect, post-push scope loss, non-SEK refusal
+   (before any secret is stored, on connect and on reconnect), company switch
+   on reconnect — and runs the real orchestrator and flows; your harness supplies HTTP fixtures
    under `__tests__/fixtures/<provider>/` (see the Fortnox runner — its
    fixtures are hand-authored in the shapes the #494 spike recorded, not raw
    captures). An `api_key` connector's `getCompanyInfo` must throw a

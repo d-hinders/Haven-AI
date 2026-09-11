@@ -274,8 +274,8 @@ Common causes, from live experience:
   connections with Fortnox error `[2000663]` — the row is `pushed` with a
   degradation note. Fix: **Disconnect, then Connect** on `/accounting` to
   re-consent with the current scope set
-  (`bookkeeping supplierinvoice supplier archive inbox connectfile`). There is
-  no automatic re-consent flow today.
+  (`bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation`).
+  There is no automatic re-consent flow today.
 - **Non-ASCII rejection** (Fortnox error `2000359`): Comments/Name reject
   middle dots, `://`, and the app's `…` ellipsis. The connector already
   sanitizes; a new occurrence means a new field slipped through — fix the
@@ -298,14 +298,14 @@ there is exactly one per user.
 | `GET /accounting/providers` | session | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
 | `GET /accounting/connections` | session | the caller's connections — metadata only, never secrets |
 | `POST /accounting/connections/:provider/connect-url` | session | consent URL for a live OAuth2 provider; signed, purpose-scoped, provider-bound, **single-use** `state` (10 min) |
-| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error` |
-| `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409) |
+| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error`, plus `&reason=unsupported_currency` on a non-SEK refusal (#2864) |
+| `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409); a non-SEK company is 409 `UNSUPPORTED_BASE_CURRENCY` before the key is stored (#2864) |
 | `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it (Fortnox does, #2863 — `POST /oauth-v1/revoke` with the refresh token; a failed revoke still disconnects locally) |
 | `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
-| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), recent syncs |
+| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), recent syncs |
 | `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from` |
 | `GET /accounting/feed/verify/:paymentId` | session + entitlement | read-back through the active connection's connector |
-| `POST /accounting/feed/reopen/:paymentId` | session + entitlement | verification-gated reopen on the active connection's provider |
+| `POST /accounting/feed/reopen/:paymentId` | session + entitlement | verification-gated reopen on the active connection's provider; a row from before the connection's latest company switch is refused 409 `previous_company` (#2864) |
 | `POST /accounting/fortnox/push` | session | LEGACY asserting voucher push; 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
 
 **Operator step when this deploys** (the callback path moved): the Fortnox
@@ -338,6 +338,92 @@ active destination until the user reconnects (Disconnect, then Connect on
 and without an active `connected` row the orchestrator feeds nothing — it
 never falls back to asking a connector whether it "has secrets". The invoice
 stands; nothing is re-pushed.
+
+## Company info, SEK-only, company switch (#2864)
+
+**What connect records.** The generic flows ask the connector who the grant
+belongs to BEFORE anything is stored (`getCompanyInfo`) and write
+`external_company_id`, `external_company_name` and `base_currency` on the
+row. Fortnox: `GET /3/companyinformation` — `DatabaseNumber` is the id,
+`CompanyName` the name, and the currency is `SEK` by construction (a Fortnox
+company books in SEK). `GET /accounting/connections` carries all three as
+`externalCompanyId` / `externalCompanyName` / `baseCurrency`, and
+`GET /accounting/feed/status` carries the active destination's name as
+`companyName`, so the page can say *Connected to Haven Sandbox AB*.
+
+**SEK only.** A company whose base currency is not SEK is refused with
+*"Haven currently feeds SEK ledgers only"* — nothing is stored, and on a
+reconnect the existing row is left exactly as it was. The API-key route
+answers 409 `UNSUPPORTED_BASE_CURRENCY`; the OAuth callback redirects with
+`connect=error&reason=unsupported_currency` — and because the code was
+already exchanged, the refused grant is revoked at the provider best-effort
+(Fortnox declares `revoke`), so a grant Haven does not store does not linger
+there either. The rule is one function
+(`assertSupportedBaseCurrency`, `provider.ts`); a provider that cannot say
+(`baseCurrency: null`) passes. Multi-currency is a follow-on placeholder.
+
+**The `companyinformation` scope.** In `FORTNOX_SCOPE` since #2864. Adding a
+scope does not invalidate existing grants: a connection consented before
+this keeps refreshing and pushing without it. Only a fresh consent (a new
+authorization code) carries the scope, and only the connect flow reads the
+company — so a pre-#2864 connection is untouched until the user reconnects.
+When a connect DOES try and Fortnox refuses for scope (HTTP 403, or
+`[2000663]`), the connection is stored and marked `scope_missing` with
+`status_reason = company info unavailable: …reconnect to obtain it`; the
+feed has no destination until the re-consent, like any `scope_missing`. A
+network error or a 5xx on that read is NOT a missing scope: the connect
+fails, nothing is stored. Operator step after merge: the integration's
+registered permissions in the Fortnox developer portal must include
+*Företagsinformation* (`companyinformation`), and the dev sandbox connection
+must be reconnected from the dev dashboard (Disconnect, then Connect) to
+obtain the scope — until then its `external_company_id` stays NULL.
+
+**Company switch.** A reconnect whose `external_company_id` differs from the
+stored one (Fortnox: a different `DatabaseNumber`) is a company switch.
+One row is kept; the company fields are replaced; `feed_from` is set to the
+switch time — nothing settled before it is fed into the new company, the
+same rule as activate; `status_reason` names both companies (`company
+switched <iso>: Alpha AB (111) → Beta AB (222) — …`); the switch is appended
+to `settings.companySwitches` (`{at, fromCompanyId, fromCompanyName,
+toCompanyId, toCompanyName}`, oldest first, append-only) and one structured
+log line `{"event":"accounting_company_switch",…}` is written. Existing
+`pushed` sync rows are untouched: their invoices live in the previous
+company, so *Check in Fortnox* through the new company reports them
+`missing` — which is correct. A reconnect to the SAME company is not a
+switch: the floor and the log are untouched. A user who wants the previous
+company's history in the new one takes the backfill (#2867). On-call read:
+`SELECT external_company_id, external_company_name, feed_from, status_reason,
+settings -> 'companySwitches' FROM accounting_connections WHERE user_id = '<uuid>'`.
+
+**Reopen after a switch.** The verification-gated reopen (#1365) is
+company-aware: `POST /accounting/feed/reopen/:paymentId` on a `pushed` row
+that was pushed under a company OTHER than the current one answers 409
+`previous_company` (*"belongs to the previous company"*, with `switched_at`
+and the name of the company it was pushed under) and writes
+nothing — otherwise a switch would flip every pre-switch row `pushed →
+failed` and re-feed all of it into the new company. A post-switch row the new
+company genuinely lost still reopens.
+
+**How a pushed row is attributed to a company, and the limits.**
+`accounting_feed_syncs` has no company column and this slice adds no
+migration, so attribution is by TIME: the sync row's `created_at` against the
+switch times in `settings.companySwitches` (the connection's JSONB column —
+never an overloaded text column). The whole log is walked (`companyIdAt`):
+the row belongs to the `toCompanyId` of the last switch at or before its
+`created_at`, else to the company the first later switch moved away from —
+so a round trip Alpha → Beta → Alpha attributes an Alpha-era row to Alpha,
+and it is reopenable again once Alpha is current. A scope-refused read never
+erases a known id (`COALESCE` in `SET_COMPANY_INFO_SQL`), so a blind
+reconnect followed by a reconnect to another company is still detected as a
+switch. Two limits: (1) the switch time is the application clock at the
+callback and `created_at` is the database clock at the claim — a push in
+flight during the callback itself (sub-second) could be attributed to the
+new company; (2) a row whose stored id is NULL (a pre-#2864 grant that could
+not read the company) gaining an id on reconnect is NOT a switch — there is
+nothing to compare — so its floor is kept and no log entry is written; if
+that grant in fact pointed at another company, its earlier pushed rows are
+reopenable. The dev-sandbox reconnect in the operator step above is what
+closes that window for the one live connection.
 
 ## Token lifecycle (#2863)
 

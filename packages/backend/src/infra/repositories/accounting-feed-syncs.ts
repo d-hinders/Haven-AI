@@ -101,8 +101,10 @@ export const LIST_SYNCS_FOR_PAYMENT_IDS_SQL = `SELECT provider, payment_id, stat
  * constraint: the first caller inserts a `pending` row and owns the push; a
  * concurrent caller hits the conflict and does not. A previously `failed` row
  * is re-claimable for retry. A `pushed` row is never re-claimed. (Recovering
- * a stuck in-flight `pending` is a separate sweep concern, not handled here,
- * to keep the live concurrency guard intact.)
+ * a stuck in-flight `pending` is NOT done here, to keep the live concurrency
+ * guard intact — the retry sweep (#2866) releases one via
+ * `releaseStalePending` after `STALE_PENDING_CLAIM_MS`, and only then does
+ * this re-claim take it.)
  *
  * `userId` is REQUIRED — it is part of the ledger key.
  */
@@ -261,4 +263,162 @@ export async function listUnpushedPaymentIds(
     feedFrom,
   ])
   return result.rows.map((r) => r.payment_id).filter((id): id is string => Boolean(id))
+}
+
+// ── Retry sweep selection (#2866, epic #2858) ─────────────────────────────────
+//
+// Backoff is DERIVED from the columns the ledger already has — `attempts` and
+// `updated_at` — so the sweep needed no migration. A row is due when
+// `updated_at + backoff(attempts)` has passed, where
+// backoff(n) = min(base · 2^(n−1), cap): base 1 min, cap 1 h, so a row waits
+// 1, 2, 4, 8, 16, 32, 60 min between its attempts and is exhausted at the
+// eighth. Every constant is a parameter of the statement so the sweep, the
+// status counts and the real-database test read ONE definition.
+
+/** Attempts after which the sweep stops retrying a row (#2866). */
+export const RETRY_MAX_ATTEMPTS = 8
+/** First backoff step (attempts = 1). */
+export const RETRY_BACKOFF_BASE_MS = 60_000
+/** The longest a row waits between attempts. */
+export const RETRY_BACKOFF_CAP_MS = 60 * 60_000
+/**
+ * A `pending` row older than this is a claim whose owner died mid-push (the
+ * claim IS the concurrency guard, so nothing else releases it). Longer than
+ * any single push can take: every Fortnox API call carries an AbortSignal
+ * (15 s per JSON request, 60 s for the inbox upload —
+ * `FORTNOX_REQUEST_TIMEOUT_MS` / `FORTNOX_UPLOAD_TIMEOUT_MS`) and a push is
+ * at most six sequential requests, so a live owner is never older than a
+ * few minutes. Releasing a claim whose owner is still alive would let two
+ * pushes race — which is why this margin is large, not tight.
+ */
+export const STALE_PENDING_CLAIM_MS = 15 * 60_000
+
+/** Backoff for a row with `attempts` attempts, in ms — the SQL below, in TypeScript. */
+export function retryBackoffMs(attempts: number): number {
+  return Math.min(RETRY_BACKOFF_BASE_MS * 2 ** (Math.max(attempts, 1) - 1), RETRY_BACKOFF_CAP_MS)
+}
+
+/** What the sweep needs per due row — no `error`/`external_ref` payloads. */
+export type DueRetryRow = Pick<FeedSyncRow, 'id' | 'user_id' | 'provider' | 'payment_id' | 'status' | 'attempts'>
+
+/**
+ * Rows the sweep may touch, oldest first, grouped by connection. The JOIN
+ * is the state gate: only a row whose connection is `connected` AND the
+ * user's active destination is enumerated, so a row `skipped` for
+ * `connection needs_reauthorisation` (#2863) — or one behind a
+ * `scope_missing`/`disconnected` row — is left alone until the cause is
+ * gone and the row is `connected` again. FX-not-ready rows carry no state
+ * here (the orchestrator no-ops before claiming), so they are due like any
+ * other row.
+ *
+ *   $1 now            the sweep's clock (injectable, so a test never sleeps)
+ *   $2 max attempts   RETRY_MAX_ATTEMPTS — the cap, rows at it are never due
+ *   $3 base ms / $4 cap ms   the backoff curve
+ *   $5 stale claim ms a `pending` row older than this is due (released first)
+ *   $6 limit
+ *
+ * MUTATION TARGETS (accounting-feed-syncs.test.ts): `c.status = 'connected'`
+ * (the needs_reauthorisation test), `s.attempts < $2` (the cap test), the
+ * backoff predicate (the "not before" test).
+ */
+export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT s.id, s.user_id, s.provider, s.payment_id, s.status, s.attempts
+     FROM accounting_feed_syncs s
+     JOIN accounting_connections c ON c.user_id = s.user_id AND c.provider = s.provider
+     WHERE c.status = 'connected' AND c.is_active_destination
+       AND s.attempts < $2::int
+       AND (
+         (s.status IN ('failed', 'skipped')
+            AND s.updated_at + LEAST($3::float8 * power(2, LEAST(GREATEST(s.attempts, 1) - 1, 30)), $4::float8) * interval '1 millisecond' <= $1::timestamptz)
+         OR (s.status = 'pending' AND s.updated_at + $5::float8 * interval '1 millisecond' <= $1::timestamptz)
+       )
+     ORDER BY s.user_id, s.provider, s.updated_at ASC, s.id ASC
+     LIMIT $6`
+
+/**
+ * Release a stale in-flight claim so the normal re-claim can take it: the
+ * row flips `pending → failed` WITHOUT touching `attempts` (the attempt was
+ * the claim's; the release is bookkeeping). Guarded on the row still being
+ * `pending` and still older than the timeout at `$2`, so a push that
+ * completed between the selection and this statement is never undone.
+ */
+/**
+ * The sweep's terminal write (#2866): only a row that is STILL failed/skipped
+ * and at the attempt cap takes the `exhausted:` reason. Unlike MARK_SYNC_FAILED_SQL
+ * this never flips a row a manual sync re-claimed (pending) or pushed in the
+ * meantime — review on #2899.
+ */
+export const MARK_SYNC_EXHAUSTED_SQL = `UPDATE accounting_feed_syncs
+     SET error = $4, updated_at = NOW()
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1
+       AND status IN ('failed', 'skipped') AND attempts >= $5::int
+     RETURNING id`
+
+export const RELEASE_STALE_PENDING_SQL = `UPDATE accounting_feed_syncs
+     SET status = 'failed', error = $4, updated_at = NOW()
+     WHERE id = $1 AND status = 'pending'
+       AND updated_at + $3::float8 * interval '1 millisecond' <= $2::timestamptz
+     RETURNING id`
+
+/**
+ * The three numbers the dashboard shows next to the sync list (#2866):
+ * in-flight, retryable, and given up. `exhausted` is keyed on the SAME
+ * predicate the sweep uses (`attempts >= cap`), not on the reason prefix,
+ * so a row a manual "Sync now" pushed past the cap counts the same way.
+ */
+export const COUNT_SYNCS_FOR_USER_SQL = `SELECT
+       COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+       COUNT(*) FILTER (WHERE status = 'failed' AND attempts < $2::int)::int AS failed,
+       COUNT(*) FILTER (WHERE status = 'failed' AND attempts >= $2::int)::int AS exhausted
+     FROM accounting_feed_syncs
+     WHERE user_id = $1`
+
+export interface FeedSyncCounts {
+  pending: number
+  failed: number
+  exhausted: number
+}
+
+export async function listDueRetrySyncs(
+  now: Date,
+  limit: number,
+  db: Executor = pool,
+): Promise<DueRetryRow[]> {
+  const result = await db.query<DueRetryRow>(LIST_DUE_RETRY_SYNCS_SQL, [
+    now,
+    RETRY_MAX_ATTEMPTS,
+    RETRY_BACKOFF_BASE_MS,
+    RETRY_BACKOFF_CAP_MS,
+    STALE_PENDING_CLAIM_MS,
+    limit,
+  ])
+  return result.rows
+}
+
+/** True when the row was released (it was still a stale `pending`). */
+/** See MARK_SYNC_EXHAUSTED_SQL. Returns true when the row took the terminal reason. */
+export async function markExhausted(
+  userId: string,
+  provider: string,
+  paymentId: string,
+  error: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(MARK_SYNC_EXHAUSTED_SQL, [userId, provider, paymentId, error.slice(0, 1000), RETRY_MAX_ATTEMPTS])
+  return (result.rowCount ?? 0) === 1
+}
+
+export async function releaseStalePending(
+  id: string,
+  now: Date,
+  reason: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(RELEASE_STALE_PENDING_SQL, [id, now, STALE_PENDING_CLAIM_MS, reason.slice(0, 1000)])
+  return result.rows.length > 0
+}
+
+export async function countSyncsForUser(userId: string, db: Executor = pool): Promise<FeedSyncCounts> {
+  const result = await db.query<FeedSyncCounts>(COUNT_SYNCS_FOR_USER_SQL, [userId, RETRY_MAX_ATTEMPTS])
+  const row = result.rows[0]
+  return { pending: row?.pending ?? 0, failed: row?.failed ?? 0, exhausted: row?.exhausted ?? 0 }
 }

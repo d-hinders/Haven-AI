@@ -42,6 +42,8 @@ function setAvailability(available: boolean, entitled = available, entitlementMo
 
 const orchestratorMocks = vi.hoisted(() => ({
   getAccountingFeedStatus: vi.fn(),
+  // #2866: the pending / failed / exhausted counts next to the list.
+  getAccountingFeedCounts: vi.fn(),
   syncUser: vi.fn(),
 }))
 const connectorMocks = vi.hoisted(() => ({ hasLiveConnector: vi.fn() }))
@@ -82,6 +84,7 @@ describe('reporting routes', () => {
     configMock.accountingEnabled = true
     setAvailability(true)
     orchestratorMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
+    orchestratorMocks.getAccountingFeedCounts.mockReset().mockResolvedValue({ pending: 0, failed: 0, exhausted: 0 })
     orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
     fortnoxMocks.hasActiveConnection.mockReset().mockResolvedValue(false)
@@ -145,13 +148,16 @@ describe('reporting routes', () => {
         available: false,
         connected: false,
         syncs: [],
+        counts: { pending: 0, failed: 0, exhausted: 0 },
       })
+      expectMatchesSpec('GET', '/accounting/feed/status', res.json())
       // The synchronous connector-registry read for the base flags still runs
       // (it's not gated), but the gated DATA path — the Fortnox connection and
       // sync status — is never touched for an unentitled account.
       expect(connectorMocks.hasLiveConnector).toHaveBeenCalled()
       expect(fortnoxMocks.hasActiveConnection).not.toHaveBeenCalled()
       expect(orchestratorMocks.getAccountingFeedStatus).not.toHaveBeenCalled()
+      expect(orchestratorMocks.getAccountingFeedCounts).not.toHaveBeenCalled()
     })
 
     it('returns availability, connection state and syncs when entitled', async () => {
@@ -173,6 +179,9 @@ describe('reporting routes', () => {
         updated_at: '2026-08-13T09:00:05.000Z',
       }]
       orchestratorMocks.getAccountingFeedStatus.mockResolvedValue(syncs)
+      // #2866: counts are over EVERY row, not the capped list — 4 here
+      // against a one-row list is the point.
+      orchestratorMocks.getAccountingFeedCounts.mockResolvedValue({ pending: 1, failed: 2, exhausted: 1 })
 
       const res = await authed('GET', '/accounting/feed/status')
 
@@ -186,8 +195,10 @@ describe('reporting routes', () => {
         available: true,
         connected: true,
         syncs,
+        counts: { pending: 1, failed: 2, exhausted: 1 },
       })
       expect(orchestratorMocks.getAccountingFeedStatus).toHaveBeenCalledWith(USER)
+      expect(orchestratorMocks.getAccountingFeedCounts).toHaveBeenCalledWith(USER)
       expectMatchesSpec('GET', '/accounting/feed/status', res.json())
     })
 

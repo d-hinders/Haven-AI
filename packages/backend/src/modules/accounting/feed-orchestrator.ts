@@ -1,4 +1,4 @@
-import { listUnpushedPaymentIds } from '../../infra/repositories/accounting-feed-syncs.js'
+import { listUnpushedPaymentIds, countSyncsForUser, type FeedSyncCounts } from '../../infra/repositories/accounting-feed-syncs.js'
 import { getActiveConnection, listConnections, setStatus } from '../../infra/repositories/accounting-connections.js'
 import { accountingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from './entry.js'
@@ -80,32 +80,48 @@ export function degradedSkipReason(status: DegradedConnectionStatus, reason: str
   return `connection ${status}${reason ? `: ${reason}` : ''}`
 }
 
+/**
+ * What one `feedSettledPayment` call did — read by the retry sweep (#2866),
+ * ignored by the settlement hook and the backfill. `not_fed` means no claim
+ * was taken and no attempt consumed (feed unavailable, no destination, FX not
+ * ready, before the feed-from floor, or the row is owned elsewhere). `failed`
+ * carries the thrown error so the sweep can tell a provider 429 from
+ * anything else; the ledger row already holds its message.
+ */
+export type FeedOutcome =
+  | { outcome: 'pushed' }
+  | { outcome: 'skipped'; reason: string }
+  | { outcome: 'failed'; reason: string; error?: unknown }
+  | { outcome: 'not_fed' }
+
 /** Feed one settled payment. No-op unless the feed is available + a connector is connected. */
-export async function feedSettledPayment(userId: string, paymentId: string): Promise<void> {
-  if (!(await accountingFeedAvailable(userId))) return
+export async function feedSettledPayment(userId: string, paymentId: string): Promise<FeedOutcome> {
+  const notFed: FeedOutcome = { outcome: 'not_fed' }
+  if (!(await accountingFeedAvailable(userId))) return notFed
   const destination = await getActiveDestination(userId)
-  if (!destination) return
+  if (!destination) return notFed
   const { provider, feedFrom } = destination
 
   const entry = await buildAccountingEntryForPayment(userId, paymentId)
-  if (!entry) return
+  if (!entry) return notFed
   const tx = toFeedTransaction(entry)
   // Not ready: no book-time SEK yet. Don't feed an amount-less transaction —
   // backfill/retry picks it up once the FX is captured.
-  if (tx.amountSek == null) return
+  if (tx.amountSek == null) return notFed
   // Settled before the destination was activated: history stays where it
   // was booked. No claim row either — the backfill (#2867) must be able to
   // feed it later on the user's explicit choice.
-  if (feedFrom && new Date(tx.settledAt).getTime() < feedFrom.getTime()) return
+  if (feedFrom && new Date(tx.settledAt).getTime() < feedFrom.getTime()) return notFed
 
   const claim = await claimSync(userId, provider, paymentId)
-  if (!claim.owned) return // already pushed or another caller owns it
+  if (!claim.owned) return notFed // already pushed or another caller owns it
 
   // MUTATION TARGET (fortnox-connection.db.test.ts, "invalid_grant"): a dead
   // grant is never pushed against — that would be the retried refresh.
   if (destination.kind === 'degraded') {
-    await markSkipped(userId, provider, paymentId, degradedSkipReason(destination.status, destination.reason))
-    return
+    const reason = degradedSkipReason(destination.status, destination.reason)
+    await markSkipped(userId, provider, paymentId, reason)
+    return { outcome: 'skipped', reason }
   }
   const { connector } = destination
 
@@ -119,6 +135,7 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
       if (result.connectionStatus) {
         await setStatus(userId, connector.provider, result.connectionStatus, result.note ?? null)
       }
+      return { outcome: 'pushed' }
     } else if (result.status === 'skipped') {
       // #1365: a connector skip used to be recorded via markPushed — ledger
       // status 'pushed' with NULL external_ref and the reason DROPPED. The
@@ -128,12 +145,18 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
       // and push) was permanently lost. Now the row is a real 'skipped' with
       // its reason preserved, and skipped rows are re-claimable exactly like
       // failed ones.
-      await markSkipped(userId, connector.provider, paymentId, result.reason ?? 'skipped')
+      const reason = result.reason ?? 'skipped'
+      await markSkipped(userId, connector.provider, paymentId, reason)
+      return { outcome: 'skipped', reason }
     } else {
-      await markFailed(userId, connector.provider, paymentId, result.reason ?? 'push_failed')
+      const reason = result.reason ?? 'push_failed'
+      await markFailed(userId, connector.provider, paymentId, reason)
+      return { outcome: 'failed', reason }
     }
   } catch (err) {
-    await markFailed(userId, connector.provider, paymentId, err instanceof Error ? err.message : String(err))
+    const reason = err instanceof Error ? err.message : String(err)
+    await markFailed(userId, connector.provider, paymentId, reason)
+    return { outcome: 'failed', reason, error: err }
   }
 }
 
@@ -166,4 +189,9 @@ export async function syncUser(userId: string, opts: { limit?: number } = {}): P
 /** Per-user sync status for the Reporting UI (#500). */
 export async function getAccountingFeedStatus(userId: string): Promise<FeedSyncRow[]> {
   return listSyncs(userId)
+}
+
+/** The pending / failed / exhausted numbers next to that list (#2866). */
+export async function getAccountingFeedCounts(userId: string): Promise<FeedSyncCounts> {
+  return countSyncsForUser(userId)
 }

@@ -283,7 +283,9 @@ the live state of an environment is read from the environment, not from prose.
       (`parseConnectorChannel`, `packages/backend/src/config.ts`); unrelated
       backend configuration such as `HAVEN_OPS_TOKEN` or the accounting feed's
       `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` (#2861, the same refuse-the-boot
-      shape for its own two values) does not affect this
+      shape for its own two values) and
+      `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` (#2866, a plain
+      `Number(...) || default`) does not affect this
       package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than
       fall back to `alpha`. Verify by creating a setup in the dev dashboard and

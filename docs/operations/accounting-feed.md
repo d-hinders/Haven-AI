@@ -259,9 +259,10 @@ Work the sync row's `status` on `/accounting` (or `accounting_feed_syncs`):
 | Status | Meaning | Action |
 | --- | --- | --- |
 | `pushed` | Delivered. `error` column may carry a non-fatal **note** (e.g. "receipt attachment failed") — invoice exists, attachment degraded | Use *Check in Fortnox* for live state; reconnect Fortnox if the note names a scope error, then re-capture attachments is NOT automatic — the invoice stands |
-| `failed` | Fortnox push failed; `error` carries the Fortnox message verbatim | Fix the named cause (often token/scope), press **Sync now** — failed rows are re-claimed and retried |
-| `pending` | Claimed but in flight (or a crashed in-flight push) | Wait; a stuck pending row is not auto-recovered (deliberate — the claim IS the concurrency guard). If genuinely stuck, escalate rather than editing the row |
-| `skipped` | A connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped) | Fix the named cause (usually: connect Fortnox), then **Sync now** — skipped rows are re-claimed and retried exactly like failed ones |
+| `failed` | Fortnox push failed; `error` carries the Fortnox message verbatim | Nothing, at first: the [retry sweep](#background-retry-sweep-2866) re-feeds it with backoff (1 min doubling to 1 h, 8 attempts). Fix the named cause (often token/scope) if it keeps failing; **Sync now** retries immediately |
+| `failed` with `error` starting `exhausted:` | The sweep gave up — 8 attempts, the last reason follows the prefix | Fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
+| `pending` | Claimed but in flight (or a crashed in-flight push) | Wait; the sweep releases a `pending` row older than 15 min (the claim IS the concurrency guard, so nothing shorter) and re-feeds it. Do not edit the row |
+| `skipped` | A connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped), or `connection needs_reauthorisation: …` (#2863) | Fix the named cause (usually: connect Fortnox); the sweep retries skipped rows like failed ones — but NOT while the connection is `needs_reauthorisation` / `scope_missing`, which hold the row until the user re-consents. **Sync now** also re-claims them |
 | *(no row)* | The settle-time hook never ran (entitlement off, feature flag off) or the payment predates the feed | Check `GET /accounting/feed/status` base flags and `entitlementMode`/`entitled`; **Sync now** backfills once entitled |
 
 Common causes, from live experience:
@@ -380,7 +381,9 @@ sync records the payment as `skipped` with
 reason, so a grep finds it). Nothing is pushed, nothing is refreshed. The
 fix is the user's: Disconnect, then Connect on `/accounting` — a re-consent
 replaces the secrets, sets the row back to `connected`, and the skipped rows
-are re-claimable (#1365), so the next sync feeds them. There is no operator
+are re-claimable (#1365), so the next sync — or the retry sweep's next tick
+(#2866), which holds those rows back only while the connection is not
+`connected` — feeds them. There is no operator
 action that revives a dead grant; do not hand-edit `status` — the stored
 refresh token is dead at Fortnox regardless of what the row says.
 
@@ -431,6 +434,85 @@ key in `HAVEN_SECRETS_KEY` (32 bytes, base64; `openssl rand -base64 32`) and
   tokens are whatever they were AT migration time; every refresh since has
   rotated them. Rollback is a schema operation, not a credential restore.
 
+## Background retry sweep (#2866)
+
+Failed pushes are retried by three paths: the next settlement (fire-and-forget),
+**Sync now**, and — since #2866 — a background sweep on the same in-process
+interval pattern as the delegate monitor (`startRetrySweep` in
+`modules/accounting/retry-sweep.ts`, registered in `src/index.ts`, `unref()`ed,
+leader-locked on `LEADER_LOCK_KEYS.accountingRetrySweep`). **Cadence:**
+`HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`, default 5 min; the first tick runs
+at boot. **Inert** when `HAVEN_ACCOUNTING_ENABLED` is off — no interval is
+registered and nothing is queried.
+
+Each tick selects, in ONE query (`LIST_DUE_RETRY_SYNCS_SQL`, batch 200), the
+`failed` / `skipped` / stale-`pending` rows whose connection is `connected`
+and the active destination, and whose backoff has elapsed. Backoff is derived
+from the columns the ledger already has — no schema change:
+
+| `attempts` | waits after the last touch | cumulative |
+|---|---|---|
+| 1 | 1 min | 1 min |
+| 2 | 2 min | 3 min |
+| 3 | 4 min | 7 min |
+| 4 | 8 min | 15 min |
+| 5 | 16 min | 31 min |
+| 6 | 32 min | 63 min |
+| 7 | 60 min (cap) | ~2 h |
+| 8 | **exhausted** — never selected again | |
+
+`backoff(n) = min(1 min · 2^(n−1), 1 h)`; the row is due when
+`updated_at + backoff(attempts) <= now`. A `pending` row is due once it is
+older than 15 min (`STALE_PENDING_CLAIM_MS`): the sweep flips it to `failed`
+without touching `attempts` (`releaseStalePending`) and the normal re-claim
+takes it. That release is safe only because a live push cannot be that old:
+every Fortnox API call carries an abort timeout (15 s per JSON request, 60 s
+for the inbox upload) and a push is at most six sequential requests. The
+sweep's own terminal write (`exhausted:`) is guarded — it never touches a row
+a manual "Sync now" re-claimed or pushed in the meantime. Each due row goes through the same `feedSettledPayment` the
+settlement hook uses, so the dedup ledger, the feed-from floor, the FX gate
+and the degraded-destination skip all apply.
+
+**Terminal reason.** The attempt that reaches 8 leaves the row `failed` with
+`error = exhausted: <last reason>` — the string the dashboard keys on.
+`GET /accounting/feed/status` carries `counts: { pending, failed, exhausted }`
+over ALL the user's rows (`exhausted` = `failed` at the cap, the same
+predicate the sweep uses). **Sync now** still re-claims an exhausted row: the
+cap bounds the sweep, not the human.
+
+**State-skipped rows wait for the cause.** The selection joins the
+connection: a row `skipped` with `connection needs_reauthorisation: …`, or
+any row behind a `scope_missing` / `disconnected` connection, is not touched
+until the row is `connected` again (a re-consent flips it). FX-not-ready rows
+are selected normally — the orchestrator no-ops before claiming, so no
+attempt is consumed while the FX is missing.
+
+**Rate limits.** Fortnox allows 25 requests / 5 s per client-id + tenant and
+answers 429 **without** `Retry-After`. The sweep processes **one connection at
+a time**, and within a connection paces pushes under a fixed floor of 25 / 5 s
+(`RequestPacer`, budgeting 8 requests per push — supplier lookup/create,
+invoice, attachment upload + connect, merchant receipts — so three pushes per
+window). On a 429 the whole connection is deferred to the next tick: the row
+that hit it is recorded as failed (its attempt was real), every remaining row
+of that connection is left untouched — no claim, no `attempts + 1`. A
+`Retry-After` is honoured as a courtesy when a provider sends one, never
+depended on, and clamped to the 1 h backoff cap so a bogus header cannot
+park a connection until the next restart. `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`
+has a 10 s floor (a negative value would otherwise spin the interval).
+
+**On-call read.** One structured line per tick, `Accounting retry sweep`
+(`info` when anything was considered, `debug` when idle):
+`considered` / `pushed` / `failed` / `deferred` / `exhausted` / `skipped` /
+`connections` / `rateLimited`. A tick with `rateLimited > 0` on every run
+means another integration is spending the tenant's Fortnox budget — the
+sweep's own pacing cannot cause a 429. `exhausted > 0` is a row to look at:
+`SELECT payment_id, attempts, error FROM accounting_feed_syncs WHERE user_id =
+'<uuid>' AND status = 'failed' AND attempts >= 8` — the reason after
+`exhausted:` is the last Fortnox message. `Accounting retry sweep failed` is
+the leader-election or query layer, not a push. A tick that is still running
+when the next fires is skipped in-process (no overlap on one replica; the
+leader lock covers replicas).
+
 ## Schema for on-call: `accounting_feed_syncs`
 
 One row per (user, provider, payment). `status`:
@@ -439,8 +521,11 @@ One row per (user, provider, payment). `status`:
 reopen flips `pushed → failed` only after Fortnox itself confirms the invoice
 no longer exists, so re-pushing cannot double-post). `external_ref` =
 `fortnox:supplierinvoice:<GivenNumber>`. `error` doubles as the non-fatal
-degradation note on pushed rows (#498 contract). `attempts` increments per
-claim. Never hand-edit status: flipping `pushed` back re-posts the invoice.
+degradation note on pushed rows (#498 contract) and carries the `exhausted:`
+prefix once the retry sweep has given up (#2866). `attempts` increments per
+claim; the sweep stops at 8, backoff is derived from `attempts` and
+`updated_at`. Never hand-edit status: flipping `pushed` back re-posts the
+invoice.
 
 ## Boundaries (what this feed will never do)
 

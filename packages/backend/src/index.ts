@@ -67,7 +67,7 @@ import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
-import { registerConnector } from './modules/accounting/index.js'
+import { registerConnector, startRetrySweep } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
@@ -584,6 +584,14 @@ const start = async () => {
     }
     void runPassportSweep()
     setInterval(runPassportSweep, PASSPORT_SWEEP_INTERVAL_MS).unref()
+
+    // Accounting feed retry sweep (#2866, epic #2858): re-feeds failed /
+    // skipped / stale-pending sync rows whose backoff has elapsed, one
+    // connection at a time under Fortnox's 25 / 5 s floor. The interval is
+    // registered (and `unref()`ed) inside `startRetrySweep`, which returns
+    // null — registering nothing — when `HAVEN_ACCOUNTING_ENABLED` is off.
+    // Leader-locked on its own key like every tick above.
+    startRetrySweep({ log: app.log })
   } catch (err) {
     app.log.error(err)
     process.exit(1)

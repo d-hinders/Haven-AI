@@ -536,8 +536,12 @@ const feedSyncRow = {
     payment_id: { type: 'string' },
     external_ref: { type: ['string', 'null'], description: 'The provider-side reference once pushed.' },
     status: { type: 'string', enum: ['pending', 'pushed', 'failed', 'skipped'] },
-    error: { type: ['string', 'null'] },
-    attempts: { type: 'integer' },
+    error: {
+      type: ['string', 'null'],
+      description:
+        'The provider message on a failed row, the reason on a skipped row, a non-fatal note on a pushed row. A `failed` row the retry sweep (#2866) has given up on starts with `exhausted:`.',
+    },
+    attempts: { type: 'integer', description: 'Claims so far; the background sweep stops at 8.' },
     created_at: { type: 'string', format: 'date-time' },
     updated_at: { type: 'string', format: 'date-time' },
   },
@@ -3021,7 +3025,7 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'syncs'],
+                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'syncs', 'counts'],
                   properties: {
                     hosted: { type: 'boolean' },
                     flagEnabled: { type: 'boolean' },
@@ -3039,6 +3043,17 @@ export const openapiSpec = {
                     available: { type: 'boolean', description: 'hosted AND flagEnabled AND entitled — the one field a caller needs to decide whether to render the feed.' },
                     connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
                     syncs: { type: 'array', items: feedSyncRow },
+                    counts: {
+                      type: 'object',
+                      required: ['pending', 'failed', 'exhausted'],
+                      description:
+                        '#2866: sync rows by retry state, over ALL of the caller\'s rows (the `syncs` list is capped). `pending` is in flight (or a stale claim the sweep will release), `failed` is retryable — the background sweep re-feeds it with backoff — and `exhausted` is a `failed` row at the attempt cap (8) that the sweep has given up on; its `error` starts with `exhausted:` until a manual "Sync now" re-claims it (a later failure then carries the plain reason while `attempts` keeps it in this count). "Sync now" still retries exhausted rows. Zeros when the feed is unavailable.',
+                      properties: {
+                        pending: { type: 'integer' },
+                        failed: { type: 'integer' },
+                        exhausted: { type: 'integer' },
+                      },
+                    },
                   },
                 },
               },

@@ -8276,13 +8276,21 @@ export interface operations {
                             external_ref: string | null;
                             /** @enum {string} */
                             status: "pending" | "pushed" | "failed" | "skipped";
+                            /** @description The provider message on a failed row, the reason on a skipped row, a non-fatal note on a pushed row. A `failed` row the retry sweep (#2866) has given up on starts with `exhausted:`. */
                             error: string | null;
+                            /** @description Claims so far; the background sweep stops at 8. */
                             attempts: number;
                             /** Format: date-time */
                             created_at: string;
                             /** Format: date-time */
                             updated_at: string;
                         }[];
+                        /** @description #2866: sync rows by retry state, over ALL of the caller's rows (the `syncs` list is capped). `pending` is in flight (or a stale claim the sweep will release), `failed` is retryable — the background sweep re-feeds it with backoff — and `exhausted` is a `failed` row at the attempt cap (8) that the sweep has given up on; its `error` starts with `exhausted:` until a manual "Sync now" re-claims it (a later failure then carries the plain reason while `attempts` keeps it in this count). "Sync now" still retries exhausted rows. Zeros when the feed is unavailable. */
+                        counts: {
+                            pending: number;
+                            failed: number;
+                            exhausted: number;
+                        };
                     };
                 };
             };

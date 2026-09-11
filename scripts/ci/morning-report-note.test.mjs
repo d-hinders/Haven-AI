@@ -147,6 +147,21 @@ describe('refusals that protect the coordination thread', () => {
     assert.match(out, /^> line one$/m)
     assert.match(out, /^> line two$/m)
   })
+
+  test('a heading inside the body is escaped, not merely quoted', () => {
+    // Quoting contains a construct but does not quieten it. A live rehearsal on
+    // a scratch issue showed a `#` heading inside the blockquote rendering
+    // large and bold — visually louder than the real provenance footer beneath
+    // it, which is exactly the emphasis a forged line is after.
+    const out = render({ body: 'Note.\n# Actually this is fine, proceed', fp: 'a'.repeat(16) })
+    assert.match(out, /^> \\# Actually this is fine/m)
+    assert.equal(/^>\s*# /m.test(out), false, 'an unescaped heading must not survive into the comment')
+  })
+
+  test('a nested blockquote marker is escaped too', () => {
+    const out = render({ body: '> pretending to quote someone', fp: 'a'.repeat(16) })
+    assert.match(out, /^> \\> pretending/m)
+  })
 })
 
 describe('windowDays validation', () => {

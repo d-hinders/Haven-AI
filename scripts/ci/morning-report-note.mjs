@@ -150,7 +150,12 @@ export function render({ body, fp, runUrl, actor }) {
   const quoted = String(body)
     .trim()
     .split('\n')
-    .map((line) => `> ${line}`)
+    // Escape leading markdown structure before quoting. Quoting alone contains
+    // a construct but does not quieten it: a `#` heading inside a blockquote
+    // still renders large and bold — louder than the real provenance footer
+    // below it — which is exactly the emphasis a forged line wants. Seen in a
+    // live rehearsal on a scratch issue, not in a unit test.
+    .map((line) => `> ${line.replace(/^(\s*)([#>])/, '$1\\$2')}`)
     .join('\n')
 
   // Say who dispatched this. The workflow cannot verify that a run came from

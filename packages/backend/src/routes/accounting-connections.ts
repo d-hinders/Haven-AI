@@ -90,6 +90,11 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
 
   // POST /accounting/connections/:provider/connect-url → consent URL as JSON
   // (the SPA cannot carry its Bearer token through a plain browser navigation).
+  // #2865: also the RE-CONSENT path. An existing connection — `scope_missing`,
+  // `needs_reauthorisation`, or simply one the user wants re-granted — is not
+  // a refusal here: the same URL is issued, and the callback below UPDATES
+  // the existing row (secrets, scope, status → connected) while keeping its
+  // settings, feed_from, active flag and sync history (`completeOAuth2Connect`).
   app.post<{ Params: ProviderParams }>(
     '/connections/:provider/connect-url',
     { onRequest: authMiddleware },

@@ -54,7 +54,7 @@ import { clearConnectors, registerConnector } from '../connector.js'
 import { reopenPushedPayment, verifyPushedPayment } from '../connections.js'
 import { syncUser } from '../feed-orchestrator.js'
 import { FortnoxConnector } from '../fortnox-connector.js'
-import { FORTNOX_API_BASE, FORTNOX_TOKEN_URL, fortnoxOAuth2Config } from '../fortnox.js'
+import { FORTNOX_API_BASE, FORTNOX_SCOPE, FORTNOX_TOKEN_URL, fortnoxOAuth2Config } from '../fortnox.js'
 import { completeOAuth2Connect } from '../oauth-flow.js'
 import { FORTNOX } from '../registry.js'
 import { accountingEntry } from './connector-conformance.js'
@@ -119,7 +119,7 @@ function fortnoxCompany(databaseNumber: number, name: string) {
     const u = String(url)
     const method = (init?.method ?? 'GET').toUpperCase()
     if (u === FORTNOX_TOKEN_URL && method === 'POST') {
-      return json({ access_token: `at-${databaseNumber}-${++seq}`, refresh_token: `rt-${databaseNumber}-${seq}`, token_type: 'Bearer', expires_in: 3600, scope: 'bookkeeping companyinformation' })
+      return json({ access_token: `at-${databaseNumber}-${++seq}`, refresh_token: `rt-${databaseNumber}-${seq}`, token_type: 'Bearer', expires_in: 3600, scope: FORTNOX_SCOPE })
     }
     const path = u.startsWith(FORTNOX_API_BASE) ? u.slice(FORTNOX_API_BASE.length) : u
     if (path === '/companyinformation') return json({ CompanyInformation: { CompanyName: name, OrganizationNumber: '556677-8899', DatabaseNumber: databaseNumber } })

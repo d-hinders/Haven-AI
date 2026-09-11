@@ -37,7 +37,7 @@ import { getSyncState, reopenMissingPushed } from './feed-sync.js'
 import { fortnoxConfigured, fortnoxCredentials } from './fortnox-connection.js'
 import { fortnoxOAuth2Config } from './fortnox.js'
 import { buildAuthorizeUrl, completeOAuth2Connect, type OAuth2ProviderConfig } from './oauth-flow.js'
-import type { AccountingProvider } from './provider.js'
+import { missingScopesFor, type AccountingProvider } from './provider.js'
 import { assertConnectable, connectorFor, getProvider, listProviders, ProviderNotConnectableError } from './registry.js'
 
 /** Safe metadata about one connection — never secrets. The wire shape. */
@@ -50,6 +50,13 @@ export interface ConnectionSummary {
   isActiveDestination: boolean
   feedFrom: string | null
   grantedScope: string | null
+  /**
+   * #2865: the descriptor's scopes the grant does not carry — from
+   * `granted_scope` against `requiredScopes`, plus the scopes a push-time
+   * refusal named in `status_reason` while the row is `scope_missing`. Empty
+   * when nothing is missing. What the dashboard shows next to "Reconnect".
+   */
+  missingScopes: string[]
   tokenExpiresAt: string | null
   /** #2864: the provider's own tenant id (Fortnox: `DatabaseNumber`); null until a grant with the scope read it. */
   externalCompanyId: string | null
@@ -73,6 +80,7 @@ export function toConnectionSummary(row: AccountingConnectionRow): ConnectionSum
     isActiveDestination: row.is_active_destination,
     feedFrom: iso(row.feed_from),
     grantedScope: row.granted_scope,
+    missingScopes: missingScopesFor(row, getProvider(row.provider)),
     tokenExpiresAt: iso(row.token_expires_at),
     externalCompanyId: row.external_company_id,
     externalCompanyName: row.external_company_name,
@@ -109,6 +117,17 @@ export async function hasActiveConnection(userId: string): Promise<boolean> {
  */
 export async function getActiveConnectionSummary(userId: string): Promise<ConnectionSummary | null> {
   const row = await getActiveConnection(userId)
+  return row ? toConnectionSummary(row) : null
+}
+
+/**
+ * The row flagged as the destination WHATEVER its status, or null — so
+ * `GET /accounting/feed/status` can name the `missingScopes` of a
+ * `scope_missing` destination (#2865), which `getActiveConnectionSummary`
+ * (connected rows only) cannot see.
+ */
+export async function getDestinationSummary(userId: string): Promise<ConnectionSummary | null> {
+  const row = (await listConnections(userId)).find((r) => r.is_active_destination)
   return row ? toConnectionSummary(row) : null
 }
 

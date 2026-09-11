@@ -5,6 +5,7 @@ import { buildAccountingEntryForPayment } from './entry.js'
 import { toFeedTransaction } from './feed-transaction.js'
 import { getConnector, listConnectors, type AccountingConnector, type DegradedConnectionStatus } from './connector.js'
 import { isTokenDeadStatus } from './oauth-flow.js'
+import { missingScopesReason } from './provider.js'
 import { claimSync, markPushed, markFailed, markSkipped, listSyncs, type FeedSyncRow } from './feed-sync.js'
 
 /**
@@ -75,6 +76,15 @@ async function getActiveDestination(userId: string): Promise<ActiveDestination |
   return null
 }
 
+/**
+ * The connection's `status_reason` for a push-time grant finding: the
+ * scopes the connector named (if any) in the parseable shape the dashboard
+ * reads (`missingScopesReason`), then the connector's note or reason.
+ */
+function degradedReason(result: { note?: string; reason?: string; missingScopes?: string[] }): string {
+  return missingScopesReason(result.missingScopes ?? [], result.note ?? result.reason ?? 'refused by the provider')
+}
+
 /** The `skipped` reason for a dead grant: the state first, so an on-call grep finds it. */
 export function degradedSkipReason(status: DegradedConnectionStatus, reason: string | null): string {
   return `connection ${status}${reason ? `: ${reason}` : ''}`
@@ -129,11 +139,15 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
     const result = await connector.pushTransaction(userId, tx)
     if (result.status === 'pushed') {
       await markPushed(userId, connector.provider, paymentId, result.externalRef, result.note ?? null)
-      // #2862: a post-push finding about the GRANT (e.g. the attachment step
+      // #2862/#2865 POST-push: a finding about the GRANT (the attachment step
       // lacked a scope) flips the CONNECTION's status so the dashboard can ask
-      // for a re-consent. The sync row above stays pushed — never re-pushable.
+      // for a re-consent. The sync row above stays pushed — never `skipped`,
+      // never re-pushable: the record exists, and the retry sweep (#2866)
+      // re-feeds skipped rows after a reconnect, which would double-post.
+      // MUTATION TARGET (scope-missing.db.test.ts "exactly one POST"): marking
+      // the row skipped here makes the sweep create a second invoice.
       if (result.connectionStatus) {
-        await setStatus(userId, connector.provider, result.connectionStatus, result.note ?? null)
+        await setStatus(userId, connector.provider, result.connectionStatus, degradedReason(result))
       }
       return { outcome: 'pushed' }
     } else if (result.status === 'skipped') {
@@ -147,6 +161,15 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
       // failed ones.
       const reason = result.reason ?? 'skipped'
       await markSkipped(userId, connector.provider, paymentId, reason)
+      // #2865 PRE-push: the create call itself was refused for scope —
+      // nothing exists at the provider, so the row is a real `skipped`
+      // (re-claimable once the user re-consents) AND the connection flips,
+      // so no further payment is attempted until then.
+      // MUTATION TARGET (scope-missing.db.test.ts "pre-push"): without this
+      // flip the connection stays connected and the sweep retries the refusal.
+      if (result.connectionStatus) {
+        await setStatus(userId, connector.provider, result.connectionStatus, degradedReason(result))
+      }
       return { outcome: 'skipped', reason }
     } else {
       const reason = result.reason ?? 'push_failed'

@@ -3,10 +3,15 @@ import {
   buildFortnoxAuthorizeUrl,
   exchangeCodeForTokens,
   refreshTokens,
+  fortnoxScopeForPath,
+  isFortnoxScopeRefusal,
   FortnoxError,
+  FORTNOX_SCOPE,
   FORTNOX_TOKEN_URL,
   FORTNOX_API_BASE,
 } from '../fortnox.js'
+import { compareGrantedScopes, missingScopesFor, missingScopesReason, scopesFromStatusReason } from '../provider.js'
+import { FORTNOX } from '../registry.js'
 import {
   pushVoucher,
   toFortnoxVoucher,
@@ -142,5 +147,58 @@ describe('pushVoucher', () => {
     await expect(
       pushVoucher('at', toFortnoxVoucher(entry())!, fetchImpl as unknown as typeof fetch),
     ).rejects.toBeInstanceOf(FortnoxError)
+  })
+})
+
+describe('scope shortfall helpers (#2865)', () => {
+  it('compareGrantedScopes names what the grant lacks, in the descriptor order; null compares as complete', () => {
+    expect(compareGrantedScopes('bookkeeping supplierinvoice supplier archive inbox', FORTNOX.requiredScopes)).toEqual(['connectfile', 'companyinformation'])
+    expect(compareGrantedScopes(FORTNOX_SCOPE, FORTNOX.requiredScopes)).toEqual([])
+    expect(compareGrantedScopes(`  ${FORTNOX_SCOPE}  extra`, FORTNOX.requiredScopes)).toEqual([])
+    expect(compareGrantedScopes(null, FORTNOX.requiredScopes)).toEqual([])
+    expect(compareGrantedScopes('anything', [])).toEqual([])
+  })
+
+  it('missingScopesReason round-trips through scopesFromStatusReason; a reason without scopes parses to none', () => {
+    const reason = missingScopesReason(['connectfile', 'companyinformation'], 'receipt attachment failed: Fortnox POST /x failed (HTTP 400: Har inte behörighet för scope. [2000663]).')
+    expect(reason).toBe('missing scopes: connectfile, companyinformation — receipt attachment failed: Fortnox POST /x failed (HTTP 400: Har inte behörighet för scope. [2000663]).')
+    expect(scopesFromStatusReason(reason)).toEqual(['connectfile', 'companyinformation'])
+    expect(missingScopesReason([], 'detail')).toBe('scope refused — detail')
+    expect(scopesFromStatusReason('scope refused — detail')).toEqual([])
+    expect(scopesFromStatusReason('company info unavailable: …')).toEqual([])
+    expect(scopesFromStatusReason(null)).toEqual([])
+    // A scope name that is not a token is dropped, never echoed.
+    expect(missingScopesReason(['connectfile', 'not a scope!'], 'd')).toBe('missing scopes: connectfile — d')
+  })
+
+  it('missingScopesFor unions the grant shortfall with the reason ONLY while scope_missing', () => {
+    const full = FORTNOX_SCOPE
+    const reason = missingScopesReason(['connectfile'], 'refused')
+    expect(missingScopesFor({ status: 'scope_missing', status_reason: reason, granted_scope: full }, FORTNOX)).toEqual(['connectfile'])
+    expect(missingScopesFor({ status: 'connected', status_reason: reason, granted_scope: full }, FORTNOX)).toEqual([])
+    expect(missingScopesFor({ status: 'scope_missing', status_reason: missingScopesReason(['inbox'], 'r'), granted_scope: 'bookkeeping supplierinvoice supplier archive inbox connectfile' }, FORTNOX)).toEqual(['inbox', 'companyinformation'])
+    expect(missingScopesFor({ status: 'connected', status_reason: null, granted_scope: 'bookkeeping' }, undefined)).toEqual([])
+  })
+
+  it('fortnoxScopeForPath maps the API path to the scope the integration registered; unknown paths name nothing', () => {
+    expect(fortnoxScopeForPath('/supplierinvoices')).toBe('supplierinvoice')
+    expect(fortnoxScopeForPath('/supplierinvoices/777')).toBe('supplierinvoice')
+    expect(fortnoxScopeForPath('/supplierinvoicefileconnections')).toBe('connectfile')
+    expect(fortnoxScopeForPath('/supplierinvoicefileconnections?limit=500')).toBe('connectfile')
+    expect(fortnoxScopeForPath('/suppliers?name=x')).toBe('supplier')
+    expect(fortnoxScopeForPath('/inbox')).toBe('inbox')
+    expect(fortnoxScopeForPath('/companyinformation')).toBe('companyinformation')
+    expect(fortnoxScopeForPath('/vouchers')).toBeNull()
+    expect(fortnoxScopeForPath(undefined)).toBeNull()
+  })
+
+  it('isFortnoxScopeRefusal: [2000663] on any status or a bare 403 — never a 400 without the code, a 401, a 429 or a 500', () => {
+    expect(isFortnoxScopeRefusal(new FortnoxError('x', 400, 2000663))).toBe(true)
+    expect(isFortnoxScopeRefusal(new FortnoxError('x', 403))).toBe(true)
+    expect(isFortnoxScopeRefusal(new FortnoxError('x', 400, 2000359))).toBe(false)
+    expect(isFortnoxScopeRefusal(new FortnoxError('x', 401))).toBe(false)
+    expect(isFortnoxScopeRefusal(new FortnoxError('x', 429))).toBe(false)
+    expect(isFortnoxScopeRefusal(new FortnoxError('x', 500))).toBe(false)
+    expect(isFortnoxScopeRefusal(new Error('x'))).toBe(false)
   })
 })

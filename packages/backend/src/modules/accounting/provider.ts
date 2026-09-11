@@ -111,3 +111,68 @@ export function assertSupportedBaseCurrency(info: ProviderCompanyInfo): void {
     throw new UnsupportedBaseCurrencyError(info.baseCurrency.toUpperCase())
   }
 }
+
+// ── Scope shortfall (#2865) ───────────────────────────────────────────────────
+//
+// Two places can find a grant short of a scope: the OAuth callback (the
+// granted scope string is compared with `requiredScopes`) and a push (the
+// provider refuses a call for scope). Both record the finding as
+// `status = 'scope_missing'` with a `status_reason` in ONE shape —
+// `missing scopes: a, b — <detail>` — so that a single reader
+// (`scopesFromStatusReason`) can name the scopes for the dashboard without a
+// column and without a migration. The detail is the connector's message,
+// which describes the request, never a credential.
+
+/** The stable prefix of a `status_reason` that names missing scopes. */
+export const MISSING_SCOPES_REASON_PREFIX = 'missing scopes:'
+
+const SCOPE_TOKEN_RE = /^[a-z][a-z0-9_.:-]{0,63}$/
+
+/**
+ * The provider's scopes the grant does NOT carry, in the provider's order.
+ * A null granted string (a provider that does not echo the scope) compares
+ * as complete: nothing can be named, and refusing the unknown would refuse
+ * every provider that answers no `scope` field.
+ */
+export function compareGrantedScopes(granted: string | null | undefined, required: readonly string[]): string[] {
+  if (granted == null) return []
+  const have = new Set(granted.split(/\s+/).filter(Boolean))
+  return required.filter((s) => !have.has(s))
+}
+
+/** The `status_reason` for a scope shortfall: the scopes first (parseable), the detail after. */
+export function missingScopesReason(scopes: readonly string[], detail: string): string {
+  const named = scopes.filter((s) => SCOPE_TOKEN_RE.test(s))
+  return named.length > 0 ? `${MISSING_SCOPES_REASON_PREFIX} ${named.join(', ')} — ${detail}` : `scope refused — ${detail}`
+}
+
+/** The scopes a `missingScopesReason` named; empty for any other reason. */
+export function scopesFromStatusReason(reason: string | null | undefined): string[] {
+  if (!reason || !reason.startsWith(MISSING_SCOPES_REASON_PREFIX)) return []
+  const list = reason.slice(MISSING_SCOPES_REASON_PREFIX.length).split(' — ')[0]
+  return list
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => SCOPE_TOKEN_RE.test(s))
+}
+
+/**
+ * What a connection summary reports as `missingScopes`: the shortfall of the
+ * stored `granted_scope` against the descriptor, plus — while the row is
+ * `scope_missing` — whatever the reason named when the shortfall was found at
+ * push time (a grant whose scope string looked complete but whose provider
+ * still refused). Empty when nothing is missing. Order: the descriptor's.
+ */
+export function missingScopesFor(
+  row: { status: string; status_reason: string | null; granted_scope: string | null },
+  provider: Pick<AccountingProvider, 'requiredScopes'> | undefined,
+): string[] {
+  const required = provider?.requiredScopes ?? []
+  const fromGrant = compareGrantedScopes(row.granted_scope, required)
+  const fromReason = row.status === 'scope_missing' ? scopesFromStatusReason(row.status_reason) : []
+  // The descriptor's order first; a scope the reason named that the
+  // descriptor does not list (a connector's own vocabulary) follows.
+  const out = required.filter((r) => fromGrant.includes(r) || fromReason.includes(r))
+  for (const s of fromReason) if (!out.includes(s)) out.push(s)
+  return out
+}

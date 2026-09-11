@@ -32,6 +32,8 @@ const accountingMocks = vi.hoisted(() => ({
   syncUser: vi.fn(),
   hasLiveConnector: vi.fn(),
   getActiveConnectionSummary: vi.fn(),
+  // #2865: the status names the destination's missing scopes.
+  getDestinationSummary: vi.fn(),
   verifyPushedPayment: vi.fn(),
   reopenPushedPayment: vi.fn(),
   PREVIOUS_COMPANY_REASON: 'belongs to the previous company',
@@ -58,6 +60,7 @@ describe('accounting feed routes × real entitlement gate (#2861)', () => {
     // A fresh user: the entitlement table has NO row for them.
     repoMocks.hasEntitlementRow.mockReset().mockResolvedValue(false)
     accountingMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
+    accountingMocks.getDestinationSummary.mockReset().mockResolvedValue(null)
     accountingMocks.getAccountingFeedCounts.mockReset().mockResolvedValue({ pending: 0, failed: 0, exhausted: 0 })
     accountingMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     accountingMocks.hasLiveConnector.mockReset().mockReturnValue(true)

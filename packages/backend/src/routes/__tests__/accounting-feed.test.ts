@@ -53,12 +53,14 @@ const connectorMocks = vi.hoisted(() => ({ hasLiveConnector: vi.fn() }))
 // `reopenPushedPayment`, and the status carries the active company's name.
 const fortnoxMocks = vi.hoisted(() => ({
   getActiveConnectionSummary: vi.fn(),
+  // #2865: the DESTINATION row whatever its status — where `missingScopes` comes from.
+  getDestinationSummary: vi.fn(),
   verifyPushedPayment: vi.fn(),
   reopenPushedPayment: vi.fn(),
   PREVIOUS_COMPANY_REASON: 'belongs to the previous company',
 }))
 /** What `getActiveConnectionSummary` answers for a connected user — the summary's company half. */
-const ACTIVE = { provider: 'fortnox', externalCompanyId: '1234567', externalCompanyName: 'Haven Sandbox AB', baseCurrency: 'SEK', isActiveDestination: true, status: 'connected' }
+const ACTIVE = { provider: 'fortnox', externalCompanyId: '1234567', externalCompanyName: 'Haven Sandbox AB', baseCurrency: 'SEK', isActiveDestination: true, status: 'connected', missingScopes: [] as string[] }
 // feed-orchestrator.ts, connector.ts and fortnox-connection.ts all fold into
 // one public entry point post-#998 (modules/accounting/index.ts) — a single
 // mock factory merging all three, not three vi.mock calls to the same
@@ -97,6 +99,7 @@ describe('reporting routes', () => {
     orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
     fortnoxMocks.getActiveConnectionSummary.mockReset().mockResolvedValue(null)
+    fortnoxMocks.getDestinationSummary.mockReset().mockResolvedValue(null)
     fortnoxMocks.verifyPushedPayment.mockReset()
     fortnoxMocks.reopenPushedPayment.mockReset()
   })
@@ -156,6 +159,7 @@ describe('reporting routes', () => {
         entitlementMode: 'granted',
         available: false,
         connected: false,
+        missingScopes: [],
         syncs: [],
         counts: { pending: 0, failed: 0, exhausted: 0 },
       })
@@ -165,6 +169,7 @@ describe('reporting routes', () => {
       // sync status — is never touched for an unentitled account.
       expect(connectorMocks.hasLiveConnector).toHaveBeenCalled()
       expect(fortnoxMocks.getActiveConnectionSummary).not.toHaveBeenCalled()
+      expect(fortnoxMocks.getDestinationSummary).not.toHaveBeenCalled()
       expect(orchestratorMocks.getAccountingFeedStatus).not.toHaveBeenCalled()
       expect(orchestratorMocks.getAccountingFeedCounts).not.toHaveBeenCalled()
     })
@@ -173,6 +178,7 @@ describe('reporting routes', () => {
       setAvailability(true)
       connectorMocks.hasLiveConnector.mockReturnValue(true)
       fortnoxMocks.getActiveConnectionSummary.mockResolvedValue(ACTIVE)
+      fortnoxMocks.getDestinationSummary.mockResolvedValue(ACTIVE)
       // A whole FeedSyncRow, as listSyncs really returns one (#1446) — a
       // partial fixture describes a response the table cannot produce.
       const syncs = [{
@@ -205,6 +211,7 @@ describe('reporting routes', () => {
         connected: true,
         // #2864: "Connected to Haven Sandbox AB" — the active connection's company.
         companyName: 'Haven Sandbox AB',
+        missingScopes: [],
         syncs,
         counts: { pending: 1, failed: 2, exhausted: 1 },
       })
@@ -227,6 +234,16 @@ describe('reporting routes', () => {
       fortnoxMocks.getActiveConnectionSummary.mockResolvedValue({ ...ACTIVE, externalCompanyId: null, externalCompanyName: null })
       const res = await authed('GET', '/accounting/feed/status')
       expect(res.json()).toMatchObject({ connected: true, companyName: null })
+      expectMatchesSpec('GET', '/accounting/feed/status', res.json())
+    })
+
+    it('#2865: a scope_missing destination is connected:false AND names its missing scopes from the destination row', async () => {
+      // The active (connected) read sees nothing; the destination read sees
+      // the degraded row — the route must read the second one for the scopes.
+      fortnoxMocks.getActiveConnectionSummary.mockResolvedValue(null)
+      fortnoxMocks.getDestinationSummary.mockResolvedValue({ ...ACTIVE, status: 'scope_missing', missingScopes: ['connectfile', 'companyinformation'] })
+      const res = await authed('GET', '/accounting/feed/status')
+      expect(res.json()).toMatchObject({ connected: false, companyName: null, missingScopes: ['connectfile', 'companyinformation'] })
       expectMatchesSpec('GET', '/accounting/feed/status', res.json())
     })
   })

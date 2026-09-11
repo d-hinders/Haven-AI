@@ -8266,6 +8266,8 @@ export interface operations {
                         connected: boolean;
                         /** @description The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, or when the grant could not read it (`scope_missing`). Absent when the feed is unavailable. */
                         companyName?: string | null;
+                        /** @description #2865: the scopes the DESTINATION connection lacks (the row flagged as destination, whatever its status — a `scope_missing` destination reports `connected:false` and names them here), so the UI can say which scope a reconnect adds. Empty when nothing is missing or there is no destination; always present. */
+                        missingScopes: string[];
                         syncs: {
                             /** Format: uuid */
                             id: string;
@@ -8609,7 +8611,7 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
                             status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
@@ -8622,6 +8624,8 @@ export interface operations {
                              */
                             feedFrom: string | null;
                             grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
                             /**
                              * Format: date-time
                              * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
@@ -8801,7 +8805,7 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
                             status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
@@ -8814,6 +8818,8 @@ export interface operations {
                              */
                             feedFrom: string | null;
                             grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
                             /**
                              * Format: date-time
                              * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
@@ -8970,7 +8976,7 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
                             status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
@@ -8983,6 +8989,8 @@ export interface operations {
                              */
                             feedFrom: string | null;
                             grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
                             /**
                              * Format: date-time
                              * @description Access-token expiry (OAuth2 providers). Null for API-key providers.

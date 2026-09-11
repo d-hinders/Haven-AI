@@ -37,8 +37,14 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    add a case to `oauth2ConfigFor` in `connections.ts` — the generic
    `oauth-flow.ts` does the consent URL, the code exchange, the refresh, and
    the key-before-provider-call ordering that protects a single-use refresh
-   token. `api_key`: nothing at all — `api-key-flow.ts` validates the key by
-   calling your connector's `getCompanyInfo` and stores it encrypted.
+   token. It also compares the scope string the provider echoes with the
+   descriptor's `requiredScopes` (#2865): a shortfall stores the connection
+   as `scope_missing` naming the missing scopes (not a refusal), and the
+   same connect-url + callback on an existing connection is the re-consent
+   path — the row is updated, `settings`, `feed_from`, the active flag and
+   the sync history are kept. `api_key`: nothing at all — `api-key-flow.ts`
+   validates the key by calling your connector's `getCompanyInfo` and stores
+   it encrypted.
 3. **Connector.** Implement `AccountingConnector` against the provider's API.
    The invariants the contract carries, in the order they usually bite:
    - `pushTransaction` must send **no VAT, account or rows** — the accountant
@@ -49,6 +55,18 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      `connectionStatus: 'scope_missing'` on the result — the orchestrator
      flips the connection's status so the dashboard asks for a re-consent, and
      the sync row stays `pushed` (never re-pushable).
+   - **pre-push vs post-push scope refusal (#2865).** If the CREATE call
+     itself (or anything before it) is refused for scope — nothing exists at
+     the provider — return `status: 'skipped'` with the reason and
+     `connectionStatus: 'scope_missing'`: the row is a real `skipped`, the
+     connection flips, and the retry sweep re-feeds the row once the user
+     re-consents. Never `throw` a scope refusal (the sweep would retry it
+     eight times) and never mark a POST-push refusal `skipped` (the sweep
+     would push a second record). Name the scope(s) the refused call needed
+     in `missingScopes` when you can (Fortnox maps the endpoint:
+     `fortnoxScopeForPath`); the orchestrator writes them into the
+     connection's `status_reason` in the shape `missingScopesReason` defines,
+     which is what `missingScopes` on the API reads back.
    - `verify(userId, externalRef, paymentId)` reads back the record and
      reports `registered` / `booked` / `missing: 'deleted' | 'foreign_invoice'`
      (a record at that number that is not ours).
@@ -113,7 +131,9 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    `runConnectorConformance(name, harness)`. The suite
    (`__tests__/connector-conformance.ts`) is the contract's executable form —
    idempotent re-push, the non-asserting guard, attachment degradation, verify
-   verdicts, revoke-on-disconnect, post-push scope loss, non-SEK refusal
+   verdicts, revoke-on-disconnect, post-push scope loss (row stays pushed),
+   pre-push scope refusal (row skipped, delivered once after reconnect —
+   your harness supplies the `refuseInvoiceForScope` knob), non-SEK refusal
    (before any secret is stored, on connect and on reconnect), company switch
    on reconnect — and runs the real orchestrator and flows; your harness supplies HTTP fixtures
    under `__tests__/fixtures/<provider>/` (see the Fortnox runner — its

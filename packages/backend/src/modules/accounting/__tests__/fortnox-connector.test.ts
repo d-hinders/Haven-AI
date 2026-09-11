@@ -260,6 +260,53 @@ describe('FortnoxConnector (#496)', () => {
     expect(res.externalRef).toBe('fortnox:supplierinvoice:777')
     expect(res.note).toMatch(/receipt attachment failed/)
     expect(res.note).toMatch(/missing scope/)
+    // #2865: POST-push — the row stays pushed; the connection flip names the
+    // scope the refused path needed.
+    expect(res.connectionStatus).toBe('scope_missing')
+    expect(res.missingScopes).toEqual(['inbox'])
+  })
+})
+
+describe('pre-push scope refusal (#2865)', () => {
+  const suppliers = { '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '42', Name: 'NordShield VPN' }] } }) }
+  const scopeError = { ErrorInformation: { error: 1, message: 'Har inte behörighet för scope.', code: 2000663 } }
+
+  beforeEach(() => {
+    mockGetToken.mockResolvedValue('tok')
+    mockLoadUnderlag.mockResolvedValue(null)
+  })
+
+  it('[2000663] on the invoice POST is a SKIPPED result (nothing created) that flips the connection and names supplierinvoice', async () => {
+    const { impl, calls } = fetchStub({ ...suppliers, '/supplierinvoices': () => ({ status: 400, body: scopeError }) })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    expect(res).toEqual({
+      externalRef: null,
+      status: 'skipped',
+      reason: expect.stringMatching(/^scope refused before the invoice was created: Fortnox POST \/supplierinvoices failed .*\[2000663\]/),
+      connectionStatus: 'scope_missing',
+      missingScopes: ['supplierinvoice'],
+    })
+    // Nothing after the refused POST: no attachment attempt.
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/3/suppliers', '/3/supplierinvoices'])
+  })
+
+  it('a bare 403 on the invoice POST is the same refusal', async () => {
+    const { impl } = fetchStub({ ...suppliers, '/supplierinvoices': () => ({ status: 403, body: { ErrorInformation: { message: 'forbidden' } } }) })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    expect(res).toMatchObject({ status: 'skipped', externalRef: null, connectionStatus: 'scope_missing', missingScopes: ['supplierinvoice'] })
+  })
+
+  it('a scope refusal on the SUPPLIER step is pre-push too — nothing exists, the scope named is supplier', async () => {
+    const { impl } = fetchStub({ '/suppliers?name=': () => ({ status: 400, body: scopeError }) })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    expect(res).toMatchObject({ status: 'skipped', externalRef: null, connectionStatus: 'scope_missing', missingScopes: ['supplier'] })
+  })
+
+  it('MUTATION PROOF: a 400 without the code, a 401, a 429 and a 500 on the invoice POST are THROWN — a failure is not a missing scope', async () => {
+    for (const status of [400, 401, 429, 500]) {
+      const { impl } = fetchStub({ ...suppliers, '/supplierinvoices': () => ({ status, body: { ErrorInformation: { message: 'nope', code: 2000000 } } }) })
+      await expect(new FortnoxConnector(impl).pushTransaction('u1', TX)).rejects.toThrow(new RegExp(`HTTP ${status}`))
+    }
   })
 })
 

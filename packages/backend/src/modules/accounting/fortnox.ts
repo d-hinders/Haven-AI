@@ -56,9 +56,12 @@ export interface FortnoxCredentials {
 export type FortnoxTokens = OAuth2Tokens
 
 export class FortnoxError extends ProviderError {
-  constructor(message: string, status: number, code?: number) {
+  /** The API path the failing request went to (`/supplierinvoices`, …), when known — what `fortnoxScopeForPath` reads (#2865). */
+  path?: string
+  constructor(message: string, status: number, code?: number, path?: string) {
     super(message, status, 'fortnox', code)
     this.name = 'FortnoxError'
+    if (path !== undefined) this.path = path
   }
 }
 
@@ -72,6 +75,39 @@ export const FORTNOX_SCOPE_ERROR_CODE = 2000663
 
 export function isFortnoxScopeError(err: unknown): boolean {
   return err instanceof ProviderError && err.code === FORTNOX_SCOPE_ERROR_CODE
+}
+
+/**
+ * A refusal FOR SCOPE, as opposed to the scope error code alone: Fortnox
+ * answers a grant without the scope with `[2000663]` (as a 400 on the file
+ * connection POST, found live) or a bare 403. Both mean "re-consent", never
+ * "retry" — an outage, a 401, a 429 or a 5xx is none of these.
+ */
+export function isFortnoxScopeRefusal(err: unknown): err is FortnoxError {
+  return err instanceof FortnoxError && (err.status === 403 || isFortnoxScopeError(err))
+}
+
+/**
+ * #2865: which scope a Fortnox API path needs, so a refusal can NAME the
+ * scope a re-consent must add — Fortnox's `[2000663]` does not say. The
+ * mapping follows the integration's registered permissions (see
+ * `FORTNOX_SCOPE`): supplier invoices → `supplierinvoice`, suppliers →
+ * `supplier`, the inbox upload → `inbox`, the file connection →
+ * `connectfile`, company information → `companyinformation`. Unknown paths
+ * name nothing.
+ */
+const FORTNOX_PATH_SCOPES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^\/supplierinvoicefileconnections(\/|\?|$)/, 'connectfile'],
+  [/^\/supplierinvoices(\/|\?|$)/, 'supplierinvoice'],
+  [/^\/suppliers(\/|\?|$)/, 'supplier'],
+  [/^\/inbox(\/|\?|$)/, 'inbox'],
+  [/^\/companyinformation(\/|\?|$)/, 'companyinformation'],
+]
+
+export function fortnoxScopeForPath(path: string | undefined): string | null {
+  if (!path) return null
+  for (const [re, scope] of FORTNOX_PATH_SCOPES) if (re.test(path)) return scope
+  return null
 }
 
 /** Re-throw a generic provider failure under the Fortnox name callers pin. */

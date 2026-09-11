@@ -2,7 +2,9 @@ import {
   FORTNOX_API_BASE,
   FortnoxError,
   fortnoxOAuth2Config,
+  fortnoxScopeForPath,
   isFortnoxScopeError,
+  isFortnoxScopeRefusal,
 } from './fortnox.js'
 import {
   fortnoxConfigured,
@@ -77,6 +79,22 @@ import {
 /** Fortnox supplier invoices identify our feed rows. Max 50 chars per API. */
 export function externalInvoiceNumber(paymentId: string): string {
   return `HAVEN-${paymentId}`.slice(0, 50)
+}
+
+/**
+ * The pre-push scope refusal as a `PushResult` (#2865): a real `skipped`
+ * (nothing exists at Fortnox), the connection flip, and the scope the refused
+ * path needed so the reason can name it.
+ */
+function scopeRefusedBeforeCreate(err: FortnoxError): PushResult {
+  const scope = fortnoxScopeForPath(err.path)
+  return {
+    externalRef: null,
+    status: 'skipped',
+    reason: `scope refused before the invoice was created: ${err.message}`,
+    connectionStatus: 'scope_missing',
+    ...(scope ? { missingScopes: [scope] } : {}),
+  }
 }
 
 /** Keys that would make the payload ASSERTING — structurally banned. */
@@ -160,6 +178,7 @@ async function fortnoxGet<T>(accessToken: string, path: string, fetchImpl: typeo
       `Fortnox GET ${path} failed (HTTP ${res.status}${detail?.message ? `: ${detail.message}` : ''}${detail?.code ? ` [${detail.code}]` : ''}).`,
       res.status,
       detail?.code,
+      path,
     )
   }
   return (await res.json()) as T
@@ -198,6 +217,7 @@ async function fortnoxPost<T>(
       `Fortnox POST ${path} failed (HTTP ${res.status}${detail?.message ? `: ${detail.message}` : ''}${detail?.code ? ` [${detail.code}]` : ''}).`,
       res.status,
       detail?.code,
+      path,
     )
   }
   return (await res.json()) as T
@@ -233,6 +253,7 @@ async function fortnoxUploadPdf(
       `Fortnox inbox upload failed (HTTP ${res.status}${detail?.message ? `: ${detail.message}` : ''}${detail?.code ? ` [${detail.code}]` : ''}).`,
       res.status,
       detail?.code,
+      '/inbox',
     )
   }
   const body = (await res.json()) as { File?: { Id?: string } }
@@ -317,7 +338,19 @@ export class FortnoxConnector implements AccountingConnector {
       return { externalRef: null, status: 'skipped', reason: 'not_outbound' }
     }
 
-    const supplier = await this.findOrCreateSupplier(accessToken, tx)
+    // #2865 PRE-push: a scope refusal on anything up to and including the
+    // invoice POST leaves NOTHING to double-post (a supplier record is not an
+    // invoice; a retry finds it again), so the row may be `skipped` with the
+    // reason and the connection flipped to `scope_missing` — re-claimable by
+    // the sweep once the user re-consents. Contrast the attachment step
+    // below, where the invoice already exists.
+    let supplier: FortnoxSupplier
+    try {
+      supplier = await this.findOrCreateSupplier(accessToken, tx)
+    } catch (err) {
+      if (isFortnoxScopeRefusal(err)) return scopeRefusedBeforeCreate(err)
+      throw err
+    }
 
     const invoiceDate = tx.settledAt.slice(0, 10)
     const invoice: Record<string, unknown> = {
@@ -337,12 +370,21 @@ export class FortnoxConnector implements AccountingConnector {
     }
     assertNonAsserting(invoice)
 
-    const created = await fortnoxPost<{ SupplierInvoice?: { GivenNumber?: number } }>(
-      accessToken,
-      '/supplierinvoices',
-      { SupplierInvoice: invoice },
-      this.fetchImpl,
-    )
+    let created: { SupplierInvoice?: { GivenNumber?: number } }
+    try {
+      created = await fortnoxPost<{ SupplierInvoice?: { GivenNumber?: number } }>(
+        accessToken,
+        '/supplierinvoices',
+        { SupplierInvoice: invoice },
+        this.fetchImpl,
+      )
+    } catch (err) {
+      // MUTATION TARGET (scope-missing.db.test.ts "pre-push"): letting this
+      // throw records a `failed` row with no connection flip, and the sweep
+      // retries the refusal eight times.
+      if (isFortnoxScopeRefusal(err)) return scopeRefusedBeforeCreate(err)
+      throw err
+    }
     const givenNumber = created.SupplierInvoice?.GivenNumber
 
     // #498/#956: attach the underlag files — strictly best-effort. The invoice
@@ -356,6 +398,12 @@ export class FortnoxConnector implements AccountingConnector {
     // note, and only the connection's status changes so the dashboard can
     // ask for a re-consent. Never re-pushable: that would double-post.
     let connectionStatus: DegradedConnectionStatus | undefined
+    const missingScopes: string[] = []
+    const scopeLost = (err: unknown) => {
+      connectionStatus = 'scope_missing'
+      const scope = fortnoxScopeForPath((err as FortnoxError).path)
+      if (scope && !missingScopes.includes(scope)) missingScopes.push(scope)
+    }
     if (givenNumber == null) {
       notes.push('receipt not attached: Fortnox returned no invoice number')
     } else {
@@ -366,7 +414,7 @@ export class FortnoxConnector implements AccountingConnector {
           await this.attachFile(accessToken, givenNumber, underlag)
         } catch (err) {
           notes.push(`receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
-          if (isFortnoxScopeError(err)) connectionStatus = 'scope_missing'
+          if (isFortnoxScopeError(err)) scopeLost(err)
         }
       }
 
@@ -377,7 +425,7 @@ export class FortnoxConnector implements AccountingConnector {
           )
         } catch (err) {
           notes.push(`merchant receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
-          if (isFortnoxScopeError(err)) connectionStatus = 'scope_missing'
+          if (isFortnoxScopeError(err)) scopeLost(err)
         }
       }
     }
@@ -388,6 +436,7 @@ export class FortnoxConnector implements AccountingConnector {
       status: 'pushed',
       ...(note ? { note } : {}),
       ...(connectionStatus ? { connectionStatus } : {}),
+      ...(missingScopes.length > 0 ? { missingScopes } : {}),
     }
   }
 

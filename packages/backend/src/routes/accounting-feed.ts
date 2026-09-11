@@ -8,6 +8,7 @@ import { hasLiveConnector } from '../modules/accounting/index.js'
 import {
   PREVIOUS_COMPANY_REASON,
   getActiveConnectionSummary,
+  getDestinationSummary,
   verifyPushedPayment,
   reopenPushedPayment,
 } from '../modules/accounting/index.js'
@@ -46,18 +47,30 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
       entitlementMode,
     }
     if (!available) {
-      return { ...base, available: false, connected: false, syncs: [], counts: { pending: 0, failed: 0, exhausted: 0 } }
+      return { ...base, available: false, connected: false, missingScopes: [], syncs: [], counts: { pending: 0, failed: 0, exhausted: 0 } }
     }
     // #2864: the company the active destination points at, so the page can
     // say "Connected to <Company AB>". Null until a grant with the scope read it.
     // #2866: `counts` is over EVERY row, not the 100 the list shows — the
     // retry sweep's pending / retryable / given-up numbers.
-    const [active, syncs, counts] = await Promise.all([
+    // #2865: `missingScopes` comes from the DESTINATION row whatever its
+    // status — a `scope_missing` destination is not `connected`, and that is
+    // exactly when the UI must name the scopes a re-consent adds.
+    const [active, destination, syncs, counts] = await Promise.all([
       getActiveConnectionSummary(sub),
+      getDestinationSummary(sub),
       getAccountingFeedStatus(sub),
       getAccountingFeedCounts(sub),
     ])
-    return { ...base, available: true, connected: active !== null, companyName: active?.externalCompanyName ?? null, syncs, counts }
+    return {
+      ...base,
+      available: true,
+      connected: active !== null,
+      companyName: active?.externalCompanyName ?? null,
+      missingScopes: destination?.missingScopes ?? [],
+      syncs,
+      counts,
+    }
   })
 
   // POST /accounting/feed/sync — backfill + retry (gated)

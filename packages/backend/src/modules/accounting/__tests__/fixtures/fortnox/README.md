@@ -8,7 +8,7 @@ by method + path; the router adds the per-case state (booked, deleted).
 
 | file | request |
 |---|---|
-| `token.json` | `POST oauth-v1/token` |
+| `token.json` | `POST oauth-v1/token` — echoes the full `FORTNOX_SCOPE`; a narrower echo makes the callback record `scope_missing` (#2865), which `scope-missing.db.test.ts` drives with its own router |
 | `companyinformation.json` | `GET /3/companyinformation` |
 | `suppliers-search-empty.json` | `GET /3/suppliers?name=…` (no match) |
 | `supplier-created.json` | `POST /3/suppliers` |

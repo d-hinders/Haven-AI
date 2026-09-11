@@ -24,10 +24,17 @@ import type { ProviderCompanyInfo } from './provider.js'
 export type ProviderSecrets = Record<string, unknown>
 
 /**
- * A post-push finding about the GRANT rather than the push. The invoice is
- * delivered and the sync row stays `pushed` (with the note); what changes is
- * the connection's status, so the dashboard can ask for a re-consent. Never a
- * reason to re-push — that would double-post.
+ * A finding about the GRANT rather than the push. What changes is the
+ * connection's status, so the dashboard can ask for a re-consent; what
+ * happens to the sync row depends on WHEN the finding was made (#2865, the
+ * pre-/post-push rule):
+ *
+ *   - POST-push (the record exists; e.g. Fortnox's `[2000663]` on the
+ *     attachment step): the row stays `pushed` with the note — never
+ *     re-pushable, that would double-post.
+ *   - PRE-push (the create call itself was refused for scope; nothing exists
+ *     at the provider): the row is `skipped` with the reason, re-claimable
+ *     once the connection is `connected` again.
  */
 export type DegradedConnectionStatus = 'scope_missing' | 'needs_reauthorisation' | 'revoked_at_provider'
 
@@ -42,8 +49,18 @@ export interface PushResult {
    * state is observable; the push itself still counts as delivered.
    */
   note?: string
-  /** See `DegradedConnectionStatus`. Only meaningful with `status: 'pushed'`. */
+  /**
+   * See `DegradedConnectionStatus`. With `status: 'pushed'` it is a post-push
+   * finding (the row stays pushed); with `status: 'skipped'` a pre-push one
+   * (the create call was refused, nothing exists, the row is re-claimable).
+   */
   connectionStatus?: DegradedConnectionStatus
+  /**
+   * #2865: the scope(s) the refused call needed, when the connector can name
+   * them (Fortnox: by endpoint). Recorded in the connection's `status_reason`
+   * so the dashboard can say which scope a re-consent must add.
+   */
+  missingScopes?: string[]
 }
 
 /**
@@ -151,7 +168,7 @@ export function clearConnectors(): void {
 /**
  * In-memory connector for tests and the conformance suite. Records pushes;
  * skips unconnected users; idempotent per `(userId, paymentId)`. The knobs
- * (`attachmentOutcome`, `companyInfo`, `markBooked`, `deleteInvoice`) exist so
+ * (`attachmentOutcome`, `invoiceOutcome`, `companyInfo`, `markBooked`, `deleteInvoice`) exist so
  * the conformance suite can drive every contract case without HTTP.
  */
 export class InMemoryConnector implements AccountingConnector {
@@ -161,6 +178,8 @@ export class InMemoryConnector implements AccountingConnector {
   readonly revoked: ProviderSecrets[] = []
   /** What the attachment step does after a successful push. */
   attachmentOutcome: 'ok' | 'fail' | 'scope_missing' = 'ok'
+  /** #2865: what the create call itself does — `scope_missing` refuses it before anything exists. */
+  invoiceOutcome: 'ok' | 'scope_missing' = 'ok'
   companyInfo: ProviderCompanyInfo = { externalCompanyId: 'mem-1', name: 'Memory AB', baseCurrency: 'SEK' }
 
   private nextInvoice = 1
@@ -191,6 +210,17 @@ export class InMemoryConnector implements AccountingConnector {
     if (existing) {
       return { externalRef: `memory:invoice:${existing[0]}`, status: 'skipped', reason: 'duplicate' }
     }
+    if (this.invoiceOutcome === 'scope_missing') {
+      // PRE-push: refused before the record exists — nothing to double-post,
+      // so the row may be `skipped` and re-claimed after a re-consent.
+      return {
+        externalRef: null,
+        status: 'skipped',
+        reason: 'scope refused before the record was created: insufficient scope for invoices',
+        connectionStatus: 'scope_missing',
+        missingScopes: ['invoice'],
+      }
+    }
     const n = this.nextInvoice++
     this.invoices.set(n, {
       userId,
@@ -211,6 +241,7 @@ export class InMemoryConnector implements AccountingConnector {
         status: 'pushed',
         note: 'receipt attachment failed: insufficient scope for attachments',
         connectionStatus: 'scope_missing',
+        missingScopes: ['attachments'],
       }
     }
     return { externalRef: ref, status: 'pushed' }

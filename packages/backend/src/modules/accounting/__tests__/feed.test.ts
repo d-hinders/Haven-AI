@@ -84,6 +84,9 @@ describe('connector registry + in-memory adapter', () => {
       provider: 'fortnox',
       isConnected: async () => false,
       pushTransaction: async () => ({ externalRef: null, status: 'skipped' as const }),
+      verify: async () => ({ ok: false as const, error_code: 'not_connected' as const }),
+      getCompanyInfo: async () => ({ externalCompanyId: null, name: null, baseCurrency: null }),
+      revoke: async () => {},
     })
     expect(hasLiveConnector()).toBe(true)
   })

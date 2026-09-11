@@ -4,9 +4,12 @@ status: current
 covers:
   - packages/backend/src/modules/accounting/**
   - packages/backend/src/routes/accounting-feed.ts
+  - packages/backend/src/routes/accounting-connections.ts
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
+  - packages/backend/src/infra/repositories/accounting-connections.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
+  - packages/frontend/src/hooks/useAccounting.ts
 last-verified: "2026-09-11"
 ---
 
@@ -68,11 +71,13 @@ machine_payment_evidence row written (with book-time SEK amount when FX is ready
 feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settlement
   ├─ entitlement gate: hosted + flag + user entitlement ('accounting_feed',
   │    or every account when HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all — #2861)
-  ├─ claimSync(user, 'fortnox', payment) → accounting_feed_syncs row 'pending'
+  ├─ active destination: the accounting_connections row flagged is_active_destination
+  │    names the provider; nothing settled before its feed_from is fed (#2862)
+  ├─ claimSync(user, <provider>, payment) → accounting_feed_syncs row 'pending'
   │    (unique on (provider, payment_id, user_id) — the double-post guard)
   ├─ build AccountingEntry → ReportingTransaction (VAT/account fields STRIPPED)
-  ├─ FortnoxConnector.pushTransaction:
-  │    ├─ token refresh if needed (accounting_connections, secrets decrypted in-process)
+  ├─ <provider connector>.pushTransaction — Fortnox today:
+  │    ├─ token refresh if needed (generic oauth-flow; accounting_connections, secrets decrypted in-process)
   │    ├─ find-or-create supplier (name only, nothing asserted)
   │    ├─ POST /supplierinvoices  → UNATTESTED invoice,
   │    │     ExternalInvoiceNumber = HAVEN-<paymentId>, Total in SEK,
@@ -194,7 +199,7 @@ Two dashboard surfaces read the ledger, both read-only:
 - **`/transactions` (from #2870)** — a compact badge on each fed row, in the
   table and in the detail drawer: *In Fortnox* (`pushed`), *Feeding…*
   (`pending`), *Not fed* (`failed` / `skipped`, the `error` on hover). It
-  links to `/accounting`. The list endpoint joins `reporting_feed_syncs` by
+  links to `/accounting`. The list endpoint joins `accounting_feed_syncs` by
   `payment_id` in one query per page and emits an `accounting` object only
   when the account is entitled (`accountingFeedAvailable`), has a Fortnox
   connection, AND a sync row exists — so a row with no badge means "not
@@ -278,6 +283,59 @@ Common causes, from live experience:
   its receipt at the retry, seconds after the funding-confirmation push. The
   capture route late-attaches onto the existing invoice; a late-attach failure
   becomes a note on the row.
+
+## Routes (#2862)
+
+The connection surface is provider-generic: the provider is a path
+parameter, the descriptor list is `GET /accounting/providers`, and nothing is
+shaped after Fortnox except the dark legacy voucher push. The feed actions
+keep their feed-scoped home — they act on the ACTIVE destination, of which
+there is exactly one per user.
+
+| route | auth | what it does |
+|---|---|---|
+| `GET /accounting/providers` | session | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
+| `GET /accounting/connections` | session | the caller's connections — metadata only, never secrets |
+| `POST /accounting/connections/:provider/connect-url` | session | consent URL for a live OAuth2 provider; signed, purpose-scoped, provider-bound, **single-use** `state` (10 min) |
+| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error` |
+| `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409) |
+| `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it |
+| `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
+| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), recent syncs |
+| `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from` |
+| `GET /accounting/feed/verify/:paymentId` | session + entitlement | read-back through the active connection's connector |
+| `POST /accounting/feed/reopen/:paymentId` | session + entitlement | verification-gated reopen on the active connection's provider |
+| `POST /accounting/fortnox/push` | session | LEGACY asserting voucher push; 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
+
+**Operator step when this deploys** (the callback path moved): the Fortnox
+app's registered redirect URI and the backend's `FORTNOX_REDIRECT_URI` must
+both point at `<backend>/accounting/connections/fortnox/callback`; a consent
+that returns to the old `/accounting/fortnox/callback` 404s and the user sees
+no connection. Existing connections are unaffected — the change is the
+consent round-trip, not the stored grant.
+
+**Switching destination and `feed_from`.** Activating a second provider
+stamps `feed_from` in the same transaction as the active flag, and a FIRST
+connect that takes the flag because nothing else held it (disconnect A, then
+connect B) stamps it too — a connect that becomes the destination is an
+activation. A reconnect of an existing row keeps the floor it had, and a
+pre-#2862 Fortnox row migrated with no floor keeps its NULL (it fed
+everything). The backfill selection and the settlement hook both skip
+anything settled before the floor, so a switch never re-feeds history into
+the new ledger. On-call read:
+`SELECT provider, status, is_active_destination, feed_from FROM
+accounting_connections WHERE user_id = '<uuid>'`. A user who wants history in
+the new ledger takes the backfill (#2867), which passes an explicit earlier
+date.
+
+**`scope_missing`.** A pushed invoice whose attachment step failed with
+Fortnox's scope error (`[2000663]`) leaves the sync row `pushed` with the
+note and flips the CONNECTION to `scope_missing` — the feed then has no
+active destination until the user reconnects (Disconnect, then Connect on
+`/accounting`): a user with any `accounting_connections` row is row-backed,
+and without an active `connected` row the orchestrator feeds nothing — it
+never falls back to asking a connector whether it "has secrets". The invoice
+stands; nothing is re-pushed.
 
 ## Secrets at rest (#2860)
 

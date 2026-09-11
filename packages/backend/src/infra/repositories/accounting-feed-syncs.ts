@@ -93,7 +93,7 @@ export const LIST_SYNCS_FOR_USER_SQL = `SELECT * FROM accounting_feed_syncs
 // `user_id` — the sync ledger is keyed per user, so a payment id that
 // collides across tenants must never surface another user's row.
 export const LIST_SYNCS_FOR_PAYMENT_IDS_SQL = `SELECT provider, payment_id, status, external_ref, error
-     FROM reporting_feed_syncs
+     FROM accounting_feed_syncs
      WHERE user_id = $1 AND payment_id = ANY($2)`
 
 /**
@@ -238,20 +238,27 @@ export const LIST_UNPUSHED_PAYMENT_IDS_SQL = `SELECT COALESCE(mpe.payment_intent
       AND s.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
       AND s.status = 'pushed'
      WHERE mpe.user_id = $1 AND mpe.amount_sek IS NOT NULL AND s.id IS NULL
+       AND ($4::timestamptz IS NULL OR COALESCE(mpe.confirmed_at, mpe.created_at) >= $4::timestamptz)
      ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
      LIMIT $3`
 
-/** Settled, FX-ready payment ids for the user with no `pushed` sync row yet. */
+/**
+ * Settled, FX-ready payment ids for the user with no `pushed` sync row yet.
+ * `feedFrom` (#2862) is the active destination's floor: nothing settled
+ * before it is enumerated. Null = no floor (the pre-#2862 selection).
+ */
 export async function listUnpushedPaymentIds(
   userId: string,
   provider: string,
   limit: number,
+  feedFrom: Date | null = null,
   db: Executor = pool,
 ): Promise<string[]> {
   const result = await db.query<{ payment_id: string | null }>(LIST_UNPUSHED_PAYMENT_IDS_SQL, [
     userId,
     provider,
     limit,
+    feedFrom,
   ])
   return result.rows.map((r) => r.payment_id).filter((id): id is string => Boolean(id))
 }

@@ -148,6 +148,33 @@ export const DISCONNECT_ACCOUNTING_CONNECTION_SQL = `UPDATE accounting_connectio
          status_reason = $3, is_active_destination = false, updated_at = NOW()
      WHERE user_id = $1 AND provider = $2`
 
+/**
+ * #2862: the feed-from rule. Activating a destination stamps `feed_from` so
+ * the next sync feeds nothing settled before the switch — switching
+ * destination never re-feeds history into the new ledger. Runs as the third
+ * statement of `setActiveDestination`'s transaction; the clear-then-set pair
+ * above is untouched.
+ */
+export const SET_FEED_FROM_SQL = `UPDATE accounting_connections
+     SET feed_from = $3, updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2`
+
+/**
+ * #2862 (review on #2894): a connect that takes the active flag because no
+ * other destination held it is an activation too, so it carries the feed-from
+ * floor. Only a row with NO floor yet — a migrated pre-#2862 Fortnox row keeps
+ * its NULL (it fed everything) and a reconnect keeps whatever it had.
+ */
+export const STAMP_FEED_FROM_IF_UNSET_SQL = `UPDATE accounting_connections
+     SET feed_from = $3, updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2 AND is_active_destination AND feed_from IS NULL
+     RETURNING *`
+
+/** #2862: what the provider said about the company at connect time. */
+export const SET_COMPANY_INFO_SQL = `UPDATE accounting_connections
+     SET external_company_id = $3, external_company_name = $4, base_currency = $5, updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2`
+
 export const DELETE_ACCOUNTING_CONNECTION_SQL = `DELETE FROM accounting_connections
      WHERE user_id = $1 AND provider = $2`
 
@@ -239,11 +266,42 @@ export async function setStatus(
   await db.query(SET_ACCOUNTING_STATUS_SQL, [userId, provider, status, reason])
 }
 
-export async function setActiveDestination(userId: string, provider: string, db: Executor = pool): Promise<void> {
+/**
+ * Clear-then-set in one transaction (see the header). `feedFrom` (#2862) is
+ * stamped in the same transaction when given, so "this row is active" and
+ * "feed from here" can never be observed apart.
+ */
+export async function setActiveDestination(
+  userId: string,
+  provider: string,
+  opts: { feedFrom?: Date } = {},
+  db: Executor = pool,
+): Promise<void> {
   await withTransaction(db, async (tx) => {
     await tx.query(CLEAR_ACTIVE_DESTINATION_SQL, [userId])
     await tx.query(SET_ACTIVE_DESTINATION_SQL, [userId, provider])
+    if (opts.feedFrom) await tx.query(SET_FEED_FROM_SQL, [userId, provider, opts.feedFrom])
   })
+}
+
+/** See `STAMP_FEED_FROM_IF_UNSET_SQL`. Returns the row when it stamped, null when nothing qualified. */
+export async function stampFeedFromIfUnset(
+  userId: string,
+  provider: string,
+  at: Date,
+  db: Executor = pool,
+): Promise<AccountingConnectionRow | null> {
+  const result = await db.query<AccountingConnectionRow>(STAMP_FEED_FROM_IF_UNSET_SQL, [userId, provider, at])
+  return result.rows[0] ?? null
+}
+
+export async function setCompanyInfo(
+  userId: string,
+  provider: string,
+  info: { externalCompanyId: string | null; name: string | null; baseCurrency: string | null },
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(SET_COMPANY_INFO_SQL, [userId, provider, info.externalCompanyId, info.name, info.baseCurrency])
 }
 
 export async function disconnect(

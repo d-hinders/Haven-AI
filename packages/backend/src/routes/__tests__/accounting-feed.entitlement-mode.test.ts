@@ -30,8 +30,8 @@ const accountingMocks = vi.hoisted(() => ({
   getAccountingFeedStatus: vi.fn(),
   syncUser: vi.fn(),
   hasLiveConnector: vi.fn(),
-  getFortnoxConnection: vi.fn(),
-  verifyFortnoxInvoice: vi.fn(),
+  hasActiveConnection: vi.fn(),
+  verifyPushedPayment: vi.fn(),
   reopenMissingPushed: vi.fn(),
 }))
 vi.mock('../../modules/accounting/index.js', () => accountingMocks)
@@ -58,7 +58,7 @@ describe('accounting feed routes × real entitlement gate (#2861)', () => {
     accountingMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
     accountingMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     accountingMocks.hasLiveConnector.mockReset().mockReturnValue(true)
-    accountingMocks.getFortnoxConnection.mockReset().mockResolvedValue(null)
+    accountingMocks.hasActiveConnection.mockReset().mockResolvedValue(false)
   })
 
   const authed = (method: 'GET' | 'POST', url: string) =>

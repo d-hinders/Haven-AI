@@ -1,8 +1,17 @@
+import { buildAuthorizeUrl, exchangeCode, refreshAccessToken, type OAuth2ProviderConfig, type OAuth2Tokens } from './oauth-flow.js'
+import { ProviderError } from './provider.js'
+
 /**
  * Fortnox OAuth2 (epic #462 P2 #465; feed-side since #491).
  *
- * Pure helpers (authorize URL) plus thin token calls that take an injectable
- * `fetch` so they're testable without a live Fortnox app.
+ * Since #2862 this file is the Fortnox PARAMETERISATION of the generic
+ * `oauth-flow.ts`: the constants, the `OAuth2ProviderConfig` builder, and thin
+ * wrappers that keep the historical names (`buildFortnoxAuthorizeUrl`,
+ * `exchangeCodeForTokens`, `refreshTokens`) and the `FortnoxError` type for
+ * callers and tests. No behaviour change: the URL, the Basic-auth token post
+ * and the minute-early expiry are the generic flow's — the same requests
+ * Fortnox saw before (the authorize URL's query-parameter order changed;
+ * the parameters did not).
  *
  * #2859: the VOUCHER mapping and push moved to `legacy/fortnox-voucher.ts`.
  * They are the asserting half — `toFortnoxVoucher` calls `buildBookingLines`,
@@ -33,29 +42,45 @@ export interface FortnoxCredentials {
   redirectUri: string
 }
 
-export interface FortnoxTokens {
-  accessToken: string
-  refreshToken: string
-  tokenType: string
-  scope: string | null
-  /** Absolute expiry. */
-  expiresAt: Date
-}
+export type FortnoxTokens = OAuth2Tokens
 
-interface FortnoxTokenResponse {
-  access_token: string
-  refresh_token: string
-  token_type?: string
-  scope?: string
-  expires_in: number
-}
-
-export class FortnoxError extends Error {
-  status: number
-  constructor(message: string, status: number) {
-    super(message)
+export class FortnoxError extends ProviderError {
+  constructor(message: string, status: number, code?: number) {
+    super(message, status, 'fortnox', code)
     this.name = 'FortnoxError'
-    this.status = status
+  }
+}
+
+/**
+ * Fortnox's "Har inte behörighet för scope" — the grant lacks a scope the
+ * call needs. Found live 2026-07-16 on `supplierinvoicefileconnections`
+ * without `connectfile`. A post-push attachment failing with this code means
+ * the CONNECTION needs a re-consent, not that the push failed.
+ */
+export const FORTNOX_SCOPE_ERROR_CODE = 2000663
+
+export function isFortnoxScopeError(err: unknown): boolean {
+  return err instanceof ProviderError && err.code === FORTNOX_SCOPE_ERROR_CODE
+}
+
+/** Re-throw a generic provider failure under the Fortnox name callers pin. */
+function asFortnoxError(err: unknown): never {
+  if (err instanceof FortnoxError) throw err
+  if (err instanceof ProviderError) throw new FortnoxError(err.message, err.status)
+  throw err
+}
+
+/** The generic flow's view of Fortnox. */
+export function fortnoxOAuth2Config(creds: FortnoxCredentials): OAuth2ProviderConfig {
+  return {
+    providerId: 'fortnox',
+    authorizeUrl: FORTNOX_AUTHORIZE_URL,
+    tokenUrl: FORTNOX_TOKEN_URL,
+    clientId: creds.clientId,
+    clientSecret: creds.clientSecret,
+    redirectUri: creds.redirectUri,
+    scope: FORTNOX_SCOPE,
+    extraAuthorizeParams: { access_type: 'offline', account_type: 'service' },
   }
 }
 
@@ -64,80 +89,31 @@ export function buildFortnoxAuthorizeUrl(
   creds: Pick<FortnoxCredentials, 'clientId' | 'redirectUri'>,
   state: string,
 ): string {
-  const params = new URLSearchParams({
-    client_id: creds.clientId,
-    redirect_uri: creds.redirectUri,
-    scope: FORTNOX_SCOPE,
-    state,
-    access_type: 'offline',
-    response_type: 'code',
-    account_type: 'service',
-  })
-  return `${FORTNOX_AUTHORIZE_URL}?${params.toString()}`
-}
-
-function basicAuthHeader(creds: FortnoxCredentials): string {
-  return `Basic ${Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64')}`
-}
-
-function toTokens(data: FortnoxTokenResponse): FortnoxTokens {
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    tokenType: data.token_type ?? 'Bearer',
-    scope: data.scope ?? null,
-    // Refresh a minute early to avoid edge-of-expiry failures.
-    expiresAt: new Date(Date.now() + (data.expires_in - 60) * 1000),
-  }
-}
-
-async function postToken(
-  creds: FortnoxCredentials,
-  body: URLSearchParams,
-  fetchImpl: typeof fetch,
-): Promise<FortnoxTokens> {
-  let res: Response
-  try {
-    res = await fetchImpl(FORTNOX_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: basicAuthHeader(creds),
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      body: body.toString(),
-    })
-  } catch (err) {
-    throw new FortnoxError(`Could not reach Fortnox: ${err instanceof Error ? err.message : String(err)}`, 0)
-  }
-  if (!res.ok) {
-    throw new FortnoxError(`Fortnox token request failed (HTTP ${res.status}).`, res.status)
-  }
-  return toTokens((await res.json()) as FortnoxTokenResponse)
+  return buildAuthorizeUrl(fortnoxOAuth2Config({ ...creds, clientSecret: '' }), state)
 }
 
 /** Exchange an authorization code for tokens. */
-export function exchangeCodeForTokens(
+export async function exchangeCodeForTokens(
   creds: FortnoxCredentials,
   code: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<FortnoxTokens> {
-  return postToken(
-    creds,
-    new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: creds.redirectUri }),
-    fetchImpl,
-  )
+  try {
+    return await exchangeCode(fortnoxOAuth2Config(creds), code, fetchImpl)
+  } catch (err) {
+    return asFortnoxError(err)
+  }
 }
 
 /** Refresh an expired access token. */
-export function refreshTokens(
+export async function refreshTokens(
   creds: FortnoxCredentials,
   refreshToken: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<FortnoxTokens> {
-  return postToken(
-    creds,
-    new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
-    fetchImpl,
-  )
+  try {
+    return await refreshAccessToken(fortnoxOAuth2Config(creds), refreshToken, fetchImpl)
+  } catch (err) {
+    return asFortnoxError(err)
+  }
 }

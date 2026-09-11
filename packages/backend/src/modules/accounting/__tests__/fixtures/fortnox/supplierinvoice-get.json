@@ -1,0 +1,1 @@
+{ "SupplierInvoice": { "@url": "https://api.fortnox.se/3/supplierinvoices/777", "GivenNumber": 777, "Booked": false, "Cancelled": false, "Currency": "SEK", "SupplierNumber": "42", "Total": 10.42, "InvoiceDate": "2026-09-10", "DueDate": "2026-09-10", "ExternalInvoiceNumber": "HAVEN-pay-fixture", "VoucherNumber": null, "VoucherSeries": null, "VoucherYear": null } }

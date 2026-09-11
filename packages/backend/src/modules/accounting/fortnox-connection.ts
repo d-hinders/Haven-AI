@@ -1,32 +1,28 @@
-import {
-  disconnect,
-  getConnection,
-  upsertConnection,
-  updateSecrets,
-  type AccountingConnectionRow,
-} from '../../infra/repositories/accounting-connections.js'
-import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
+import { disconnect, type AccountingConnectionRow } from '../../infra/repositories/accounting-connections.js'
 import { config } from '../../config.js'
+import { fortnoxOAuth2Config, type FortnoxCredentials, type FortnoxTokens } from './fortnox.js'
 import {
-  type FortnoxCredentials,
-  type FortnoxTokens,
-  refreshTokens,
-} from './fortnox.js'
+  getValidOAuth2AccessToken,
+  readOAuth2Connection,
+  saveOAuth2Connection,
+  type OAuth2Secrets,
+} from './oauth-flow.js'
 
 /**
- * Token lifecycle for a user's Fortnox connection (P2 #465). Persistence lives
- * in `infra/repositories/accounting-connections.ts` since #2860 — one
+ * Token lifecycle for a user's Fortnox connection (P2 #465). Since #2862 the
+ * mechanism is the generic `oauth-flow.ts`, parameterised by
+ * `fortnoxOAuth2Config`; this file keeps the Fortnox-named entry points the
+ * connector, the sandbox script and the tests call. Persistence lives in
+ * `infra/repositories/accounting-connections.ts` (#2860) — one
  * provider-generic table, secrets encrypted at rest through `infra/secrets.ts`.
- * This module is the ONLY place the Fortnox secrets blob is decrypted; nothing
- * above it sees a ciphertext, nothing below it sees a token.
  *
  * ## The shape callers see is unchanged on purpose
  *
  * `FortnoxConnectionRow` keeps the pre-#2860 field names (`access_token`,
- * `refresh_token`, `token_type`, `scope`, `expires_at`) so the status route,
- * the connector and every existing test read exactly what they read before.
- * It is assembled from the generic row plus the decrypted secrets — the
- * plaintext columns no longer exist in the database.
+ * `refresh_token`, `token_type`, `scope`, `expires_at`) so the connector and
+ * every existing test read exactly what they read before. It is assembled
+ * from the generic row plus the decrypted secrets — the plaintext columns no
+ * longer exist in the database.
  *
  * ## Fail closed on write, open on read
  *
@@ -36,18 +32,14 @@ import {
  * migration 080) without a key, because refusing would turn "no key yet" into
  * "the feed is down". A version-0 row is re-encrypted by the next write that
  * touches it (a refresh, a reconnect) and by the boot-time job in
- * `secrets-migration.ts`.
+ * `secrets-migration.ts`. The refresh's key-check-BEFORE-provider-call order
+ * (haven-reviewer, #2887) is the generic flow's, not restated here.
  */
 
 export const FORTNOX_PROVIDER = 'fortnox'
 
-/** What the secrets blob carries for Fortnox. */
-export interface FortnoxSecrets {
-  accessToken: string
-  refreshToken: string
-  tokenType: string
-  scope: string | null
-}
+/** What the secrets blob carries for Fortnox — the generic OAuth2 shape. */
+export type FortnoxSecrets = OAuth2Secrets
 
 export interface FortnoxConnectionRow {
   user_id: string
@@ -71,9 +63,7 @@ export function fortnoxCredentials(): FortnoxCredentials {
   }
 }
 
-function toLegacyRow(row: AccountingConnectionRow): FortnoxConnectionRow | null {
-  if (!row.secrets_ciphertext || row.status === 'disconnected') return null
-  const secrets = decryptSecrets<FortnoxSecrets>(row.secrets_ciphertext, row.secrets_key_version)
+function toLegacyRow(row: AccountingConnectionRow, secrets: OAuth2Secrets): FortnoxConnectionRow {
   return {
     user_id: row.user_id,
     access_token: secrets.accessToken,
@@ -86,26 +76,12 @@ function toLegacyRow(row: AccountingConnectionRow): FortnoxConnectionRow | null 
 }
 
 export async function saveFortnoxConnection(userId: string, tokens: FortnoxTokens): Promise<void> {
-  const secrets: FortnoxSecrets = {
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    tokenType: tokens.tokenType,
-    scope: tokens.scope,
-  }
-  const { ciphertext, keyVersion } = encryptSecrets(secrets as unknown as Record<string, unknown>)
-  await upsertConnection(userId, {
-    provider: FORTNOX_PROVIDER,
-    authKind: 'oauth2',
-    secretsCiphertext: ciphertext,
-    secretsKeyVersion: keyVersion,
-    grantedScope: tokens.scope,
-    tokenExpiresAt: tokens.expiresAt,
-  })
+  await saveOAuth2Connection(FORTNOX_PROVIDER, userId, tokens)
 }
 
 export async function getFortnoxConnection(userId: string): Promise<FortnoxConnectionRow | null> {
-  const row = await getConnection(userId, FORTNOX_PROVIDER)
-  return row ? toLegacyRow(row) : null
+  const conn = await readOAuth2Connection(FORTNOX_PROVIDER, userId)
+  return conn ? toLegacyRow(conn.row, conn.secrets) : null
 }
 
 /** Disconnect keeps the row (owner decision: history stays); secrets are cleared. */
@@ -115,45 +91,13 @@ export async function deleteFortnoxConnection(userId: string): Promise<void> {
 
 /**
  * Return a usable access token for the user, refreshing (and persisting) it if
- * it has expired. Returns null if the user has not connected Fortnox.
- *
- * The refreshed token set is written through `updateSecrets`, which also
- * re-encrypts a version-0 row as a side effect — the first refresh after the
- * key is set is what moves a migrated row off plaintext. (#2863 adds the
- * per-connection lock; this slice keeps the pre-existing unlocked shape.)
+ * it has expired. Returns null if the user has not connected Fortnox. The
+ * generic flow refuses BEFORE the provider call when no secrets key is
+ * configured, so the stored single-use refresh token is never consumed.
  */
-export async function getValidFortnoxAccessToken(
+export function getValidFortnoxAccessToken(
   userId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string | null> {
-  const conn = await getFortnoxConnection(userId)
-  if (!conn) return null
-
-  if (new Date(conn.expires_at).getTime() > Date.now()) {
-    return conn.access_token
-  }
-
-  // ORDER MATTERS, and a first draft had it wrong (haven-reviewer, #2887).
-  // Fortnox refresh tokens are single-use: the call below CONSUMES the stored
-  // one and mints a new pair. If the key check came after it, a replica
-  // without HAVEN_SECRETS_KEY would burn the token at Fortnox, then throw
-  // before persisting the replacement — and the connection is dead until the
-  // user re-consents, which also fails closed. So the refusal happens here,
-  // before any provider call, with the stored token still valid.
-  if (!secretsKeyConfigured()) throw new SecretsKeyMissingError()
-
-  const refreshed = await refreshTokens(fortnoxCredentials(), conn.refresh_token, fetchImpl)
-  const secrets: FortnoxSecrets = {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    tokenType: refreshed.tokenType,
-    scope: refreshed.scope,
-  }
-  const { ciphertext, keyVersion } = encryptSecrets(secrets as unknown as Record<string, unknown>)
-  await updateSecrets(userId, FORTNOX_PROVIDER, {
-    secretsCiphertext: ciphertext,
-    secretsKeyVersion: keyVersion,
-    tokenExpiresAt: refreshed.expiresAt,
-  })
-  return refreshed.accessToken
+  return getValidOAuth2AccessToken(fortnoxOAuth2Config(fortnoxCredentials()), userId, fetchImpl)
 }

@@ -258,9 +258,10 @@ Isolation rules that are non-negotiable for a payments product:
 
 The dev backend also runs the **Fortnox bookkeeping integration**: `FORTNOX_*`
 vars (client id/secret + redirect to the dev backend's
-`/accounting/fortnox/callback`) are set on the dev Railway backend, using a
-**separate dev Fortnox app** — never the prod credentials. The feed was
-live-proven against dev on 2026-07-16.
+`/accounting/connections/fortnox/callback` — the provider-generic path since
+#2862; the Fortnox app's registered redirect URI must match it) are set on the
+dev Railway backend, using a **separate dev Fortnox app** — never the prod
+credentials. The feed was live-proven against dev on 2026-07-16.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

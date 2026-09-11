@@ -22,6 +22,17 @@ vi.mock('../feed-sync.js', () => ({
   markFailed: mocks.markFailed,
   listSyncs: mocks.listSyncs,
 }))
+// #2862: the orchestrator resolves the ACTIVE destination from the
+// connections table first. No row AT ALL here (`listConnections` → []) → it
+// falls back to the first registered connector that reports the user
+// connected (the in-memory one). A row-backed user never takes that path
+// (feed-from.db.test.ts, review on #2894).
+const connectionMocks = vi.hoisted(() => ({
+  getActiveConnection: vi.fn(async () => null),
+  listConnections: vi.fn(async () => []),
+  setStatus: vi.fn(async () => {}),
+}))
+vi.mock('../../../infra/repositories/accounting-connections.js', () => connectionMocks)
 
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import { registerConnector, clearConnectors, InMemoryConnector, type AccountingConnector } from '../connector.js'
@@ -37,6 +48,8 @@ describe('feed orchestrator (#499)', () => {
   beforeEach(() => {
     clearConnectors()
     for (const m of Object.values(mocks)) m.mockReset()
+    connectionMocks.getActiveConnection.mockReset().mockResolvedValue(null)
+    connectionMocks.setStatus.mockReset().mockResolvedValue(undefined)
     mocks.claimSync.mockResolvedValue({ owned: true, status: 'pending' })
     mocks.markPushed.mockResolvedValue(undefined)
     mocks.markFailed.mockResolvedValue(undefined)
@@ -70,7 +83,39 @@ describe('feed orchestrator (#499)', () => {
     const c = connectInMemory()
     await feedSettledPayment(USER, PID)
     expect(c.pushed).toHaveLength(1)
-    expect(mocks.markPushed).toHaveBeenCalledWith(USER, 'memory', PID, `mem:${USER}:${PID}`, null)
+    expect(mocks.markPushed).toHaveBeenCalledWith(USER, 'memory', PID, 'memory:invoice:1', null)
+    expect(connectionMocks.setStatus).not.toHaveBeenCalled()
+  })
+
+  it('#2862: uses the ACTIVE connection\'s provider and feeds nothing settled before its feed_from', async () => {
+    mocks.accountingFeedAvailable.mockResolvedValue(true)
+    const c = connectInMemory()
+    connectionMocks.getActiveConnection.mockResolvedValue({ provider: 'memory', feed_from: new Date('2026-07-01T00:00:00.000Z') } as never)
+    await feedSettledPayment(USER, PID) // entry settledAt 2026-06-20 — before the floor
+    expect(c.pushed).toHaveLength(0)
+    expect(mocks.claimSync).not.toHaveBeenCalled()
+
+    connectionMocks.getActiveConnection.mockResolvedValue({ provider: 'memory', feed_from: new Date('2026-06-01T00:00:00.000Z') } as never)
+    await feedSettledPayment(USER, PID)
+    expect(c.pushed).toHaveLength(1)
+  })
+
+  it('#2862: an active row whose connector is not registered feeds nowhere — no silent fallback to another provider', async () => {
+    mocks.accountingFeedAvailable.mockResolvedValue(true)
+    connectInMemory()
+    connectionMocks.getActiveConnection.mockResolvedValue({ provider: 'accounted', feed_from: null } as never)
+    await feedSettledPayment(USER, PID)
+    expect(mocks.claimSync).not.toHaveBeenCalled()
+  })
+
+  it('#2862: a post-push connectionStatus flips the connection, and the row is still marked pushed', async () => {
+    mocks.accountingFeedAvailable.mockResolvedValue(true)
+    const c = connectInMemory()
+    c.attachmentOutcome = 'scope_missing'
+    await feedSettledPayment(USER, PID)
+    expect(mocks.markPushed).toHaveBeenCalledWith(USER, 'memory', PID, 'memory:invoice:1', expect.stringMatching(/insufficient scope/))
+    expect(connectionMocks.setStatus).toHaveBeenCalledWith(USER, 'memory', 'scope_missing', expect.stringMatching(/insufficient scope/))
+    expect(mocks.markFailed).not.toHaveBeenCalled()
   })
 
   it('skips (no claim) when book-time SEK is missing', async () => {
@@ -96,6 +141,9 @@ describe('feed orchestrator (#499)', () => {
       provider: 'fortnox',
       isConnected: async () => true,
       pushTransaction: async () => { throw new Error('fortnox down') },
+      verify: async () => ({ ok: false, error_code: 'not_connected' }),
+      getCompanyInfo: async () => ({ externalCompanyId: null, name: null, baseCurrency: null }),
+      revoke: async () => {},
     }
     registerConnector(throwing)
     await expect(feedSettledPayment(USER, PID)).resolves.toBeUndefined()

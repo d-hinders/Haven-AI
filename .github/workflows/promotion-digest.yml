@@ -6,6 +6,19 @@ name: Pending promotion digest
 # issue listing the commits on dev that aren't in prod (main) yet.
 # See docs/contributing/autonomous-pr-loop.md.
 #
+# ## Why `push` to `dev` is load-bearing
+#
+# This digest counts what is on `dev` and not on `main`. It used to refresh only
+# on a push to `main` plus a Monday cron — so the count went stale in exactly the
+# condition it exists to report: promotion stalling. A stalled promotion means no
+# push to `main` by definition, leaving a week-old number that UNDERSTATES the
+# backlog and reads as reassuring. On 2026-09-11 it showed 28 while the real
+# figure was 50.
+#
+# A push to `dev` is the trigger that cannot go quiet while the problem is
+# growing, because the problem IS `dev` moving. `guard-freshness.yml` documents
+# the same principle for the same reason: a cron watching a cron dies with it.
+#
 # Since #2767 the digest also prints two figures over the trailing 7 days, each
 # with the command that reproduces it (scripts/ci/promotion-digest-metrics.mjs):
 # issues filed per issue closed (target < 0.3) and product PRs as a share of
@@ -14,10 +27,15 @@ name: Pending promotion digest
 
 on:
   push:
-    branches: [main]       # a promotion just landed — the digest is now stale in
-                           # the worst direction (claims commits pending that shipped)
+    branches: [main, dev]  # BOTH halves of the number move it, so both refresh it:
+                           # `main` because a promotion just landed and the digest
+                           # now over-claims, `dev` because every merge adds a
+                           # commit to the pending count. See the note above on why
+                           # the cron cannot be the mechanism.
   schedule:
-    - cron: '13 8 * * 1'   # Mondays 08:13 UTC — catches drift accumulating on dev
+    - cron: '13 8 * * *'   # 08:13 UTC daily — a floor for quiet days, and the only
+                           # trigger that refreshes the trailing-7-day figures,
+                           # which go stale with TIME rather than with pushes.
   workflow_dispatch:
 
 permissions:

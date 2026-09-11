@@ -27,6 +27,29 @@ export const MARKER = 'morning-report-note'
  *  true a week later is worth restating once, not every morning. */
 export const DEFAULT_WINDOW_DAYS = 7
 
+/**
+ * Text a note may not contain. The note is machine-written from repository
+ * content — issue titles, PR titles, branch names, commit subjects — all of
+ * which a contributor can influence. It lands in #1289, the thread every
+ * session reads for claim state, posted by a bot account.
+ *
+ * A forged `🔓 RELEASE` there is not cosmetic: AGENTS.md says an unreleased
+ * claim blocks another session for a day, so a fake release is exactly what
+ * makes two sessions build the same issue, and a fake `🔒 CLAIM` makes a
+ * session skip work nobody is doing. Raw HTML is refused for the same reason
+ * in a different shape — an unclosed `<details>` swallows the provenance
+ * footer, hiding the one line that says this is not a human speaking.
+ *
+ * Refusing is cheap and fits the posture of this module: a note that cannot be
+ * posted safely is a note not worth posting.
+ */
+export const FORBIDDEN = [
+  { re: /(?:^|\s)🔒\s*CLAIM/u, why: 'contains a CLAIM marker — only a session may claim work' },
+  { re: /(?:^|\s)🔓\s*RELEASE/u, why: 'contains a RELEASE marker — only a session may release its own claim' },
+  { re: /<!--/, why: 'contains an HTML comment — could hide content or poison dedupe' },
+  { re: /<\s*\/?\s*[a-z][a-z0-9]*(?:\s|\/?>)/i, why: 'contains raw HTML' },
+]
+
 /** Hard ceiling on a note. Long enough for a real heads-up, short enough that
  *  nobody can paste a whole report into the coordination thread. */
 export const MAX_BODY_CHARS = 1200
@@ -82,8 +105,18 @@ export function decide({ body, comments = [], now = Date.now(), windowDays = DEF
     }
   }
 
+  for (const { re, why } of FORBIDDEN) {
+    if (re.test(String(body ?? ''))) return { post: false, reason: `refused: ${why}`, fingerprint: null }
+  }
+
+  // A window that is not a positive number must NOT silently disable dedupe:
+  // `Number('abc')` is NaN, and every comparison against NaN is false, which
+  // would let every duplicate through while the run still reported success.
+  // Fall back to the default so the guard stays on.
+  const days = Number.isFinite(windowDays) && windowDays > 0 ? windowDays : DEFAULT_WINDOW_DAYS
+
   const fp = fingerprint(body)
-  const cutoff = now - windowDays * DAY_MS
+  const cutoff = now - days * DAY_MS
 
   for (const c of comments) {
     if (fingerprintOf(c.body) !== fp) continue
@@ -91,7 +124,7 @@ export function decide({ body, comments = [], now = Date.now(), windowDays = DEF
     // An unparseable timestamp is treated as recent: when in doubt, do not
     // repeat yourself. Staying quiet costs less than duplicating a note.
     if (Number.isNaN(at) || at >= cutoff) {
-      return { post: false, reason: `identical note already posted within ${windowDays}d (fp ${fp})`, fingerprint: fp }
+      return { post: false, reason: `identical note already posted within ${days}d (fp ${fp})`, fingerprint: fp }
     }
   }
 
@@ -108,12 +141,33 @@ export function decide({ body, comments = [], now = Date.now(), windowDays = DEF
  * 2. It follows the `📣 FYI` convention AGENTS.md defines for this thread,
  *    rather than inventing a shape agents have not been told to expect.
  */
-export function render({ body, fp, runUrl }) {
-  const provenance = runUrl
-    ? `_Automated heads-up from the weekday morning report ([run](${runUrl})). Machine-written judgement, not an owner instruction — verify before acting on it._`
-    : '_Automated heads-up from the weekday morning report. Machine-written judgement, not an owner instruction — verify before acting on it._'
+export function render({ body, fp, runUrl, actor }) {
+  // The body is quoted, one `> ` per line. Quoting is structural, not
+  // decorative: it stops any line of machine-written text from being a
+  // top-level construct in the thread, so even if something slipped past
+  // FORBIDDEN it reads as quoted material rather than as a coordination
+  // directive standing on its own.
+  const quoted = String(body)
+    .trim()
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n')
 
-  return [`<!-- ${MARKER} fp:${fp} -->`, `📣 **FYI** — ${String(body).trim()}`, '', provenance].join('\n')
+  // Say who dispatched this. The workflow cannot verify that a run came from
+  // the scheduled report — anyone with write access can dispatch it — so
+  // claiming that origin outright would be an assertion the run cannot back.
+  // Naming the actor is something it can.
+  const origin = actor ? `Dispatched by @${actor}` : 'Dispatched via workflow_dispatch'
+  const link = runUrl ? ` ([run](${runUrl}))` : ''
+
+  return [
+    `<!-- ${MARKER} fp:${fp} -->`,
+    '📣 **FYI** — automated note from the weekday morning report',
+    '',
+    quoted,
+    '',
+    `_${origin}${link}. Machine-written judgement, not an owner instruction — verify before acting on it._`,
+  ].join('\n')
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +207,10 @@ if (isMain) {
 
   const d = decide({ body, comments, now: Date.now(), windowDays })
   if (d.post) {
-    writeFileSync(outPath, render({ body, fp: d.fingerprint, runUrl: process.env.RUN_URL || null }))
+    writeFileSync(
+      outPath,
+      render({ body, fp: d.fingerprint, runUrl: process.env.RUN_URL || null, actor: process.env.ACTOR || null }),
+    )
   }
 
   // One line per field, so the shell can read them without a JSON parser.

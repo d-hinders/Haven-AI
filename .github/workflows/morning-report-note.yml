@@ -21,9 +21,13 @@ name: Morning report note
 # The caller is an LLM on a cron. When a condition persists — a stalled
 # promotion, an unreviewed PR — it will reach the same conclusion tomorrow and
 # try to say it again. `scripts/ci/morning-report-note.mjs` fingerprints each
-# note and drops one already posted inside the dedupe window, so a channel
-# agents are told to read does not fill with restatements. A refusal is a
-# normal outcome: the job succeeds and says why in the summary.
+# note and drops one already posted inside the dedupe window. That catches a
+# verbatim repeat, which is the common case; it does NOT catch tomorrow's
+# rephrasing of the same condition, because a fingerprint coarse enough to do
+# that would also collapse notes about two different issue numbers, and a
+# coordination channel should fail toward saying something twice rather than
+# toward silence. It also refuses a note that could forge a coordination
+# directive. A refusal is a normal outcome: the job succeeds and says why.
 #
 # Comment only. This workflow never files, closes, assigns, labels or edits an
 # issue body, and `permissions` grants nothing that would let it.
@@ -70,22 +74,35 @@ jobs:
           NOTE_BODY: ${{ inputs.body }}
           WINDOW_DAYS: ${{ inputs.window_days }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
 
           case "$ISSUE" in
             ''|*[!0-9]*) echo "::error::issue must be a number, got '$ISSUE'"; exit 1 ;;
           esac
+          case "${WINDOW_DAYS:-7}" in
+            ''|*[!0-9]*) echo "::error::window_days must be a number, got '$WINDOW_DAYS'"; exit 1 ;;
+          esac
 
-          # Refuse a PR: this thread is for coordination, and a PR comment has a
-          # different audience and review semantics.
-          if gh pr view "$ISSUE" --json number >/dev/null 2>&1; then
+          # Assert POSITIVELY that the target is an issue, and let any API
+          # failure trip `set -e`. Asking `gh pr view` whether it is a PR and
+          # swallowing stderr fails OPEN: a network blip, a 5xx or a rate limit
+          # all look identical to "not a pull request", and every downstream
+          # call happily accepts a PR number — `gh issue view` and
+          # `gh issue comment` both operate on PRs through the shared issues
+          # API, so neither is a second gate.
+          IS_PR=$(gh api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE" --jq '.pull_request.url // ""')
+          if [ -n "$IS_PR" ]; then
             echo "::error::#$ISSUE is a pull request; this workflow comments on issues only"
             exit 1
           fi
 
+          # Only this bot's own notes can suppress a future note. Without the
+          # author filter, anyone able to comment here could pre-seed a marker
+          # and silence a note before it is written.
           gh issue view "$ISSUE" --json comments \
-            --jq '[.comments[] | {body: .body, created_at: .createdAt}]' > comments.json
+            --jq '[.comments[] | select(.author.login == "github-actions") | {body: .body, created_at: .createdAt}]' > comments.json
 
           printf '%s' "$NOTE_BODY" > note.txt
 
@@ -93,8 +110,10 @@ jobs:
             --note note.txt --comments comments.json --out rendered.md \
             --window-days "${WINDOW_DAYS:-7}" | tee decision.txt
 
-          POST=$(sed -n 's/^post=//p' decision.txt)
-          REASON=$(sed -n 's/^reason=//p' decision.txt)
+          # head -1: read only the FIRST match of each field, so a reason that
+          # ever quoted the note text could not inject a second `post=` line.
+          POST=$(sed -n 's/^post=//p' decision.txt | head -1)
+          REASON=$(sed -n 's/^reason=//p' decision.txt | head -1)
 
           if [ "$POST" != "true" ]; then
             echo "Skipped: $REASON"

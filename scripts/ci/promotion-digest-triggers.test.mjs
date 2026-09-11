@@ -44,13 +44,16 @@ const workflow = readFileSync(WORKFLOW, 'utf8')
 const indentOf = (line) => (line.match(/^ */) || [''])[0].length
 
 /**
- * The top-level `on:` block as lines — from `^on:$` through the line before the
- * next top-level key. Returns null instead of silently reading nothing, so a
- * caller can assert loudly on a reshaped file.
+ * The top-level `on:` block as lines — from the `on:` key through the line
+ * before the next top-level key. Returns null instead of silently reading
+ * nothing, so a caller can assert loudly on a reshaped file.
+ *
+ * The key is matched quoted or bare: some YAML linters demand `"on":` because
+ * YAML 1.1 reads a bare `on` as boolean true.
  */
 function onBlock(text) {
   const lines = text.split('\n')
-  const start = lines.findIndex((l) => /^on:\s*$/.test(l))
+  const start = lines.findIndex((l) => /^["']?on["']?:\s*$/.test(l))
   if (start === -1) return null
   let end = lines.length
   for (let i = start + 1; i < lines.length; i++) {
@@ -64,14 +67,50 @@ function onBlock(text) {
   return lines.slice(start, end)
 }
 
-/** The `branches: [...]` list under `push:`, as an array of branch names. */
+/**
+ * Lines belonging to `key:` within `block` — the key's line excluded, its
+ * deeper-indented children included, stopping at the next sibling or shallower
+ * key. Scoping matters: reading the first `branches:` anywhere in the `on:`
+ * block would silently pick up a `pull_request:` trigger's list instead.
+ */
+function childLines(block, key) {
+  const i = block.findIndex((l) => new RegExp(`^\\s*${key}:\\s*$`).test(l))
+  if (i === -1) return null
+  const depth = indentOf(block[i])
+  const out = []
+  for (let j = i + 1; j < block.length; j++) {
+    if (block[j].trim() === '') continue
+    if (indentOf(block[j]) <= depth) break
+    out.push(block[j])
+  }
+  return out
+}
+
+/**
+ * The branch names under `push:`, accepting BOTH YAML sequence forms — the
+ * inline flow `branches: [main, dev]` and the block form with `- main` on its
+ * own line. Reading only one of them would red-light a correct workflow the
+ * first time anyone reformats it, and a guard that fails for the wrong reason
+ * is a guard that gets deleted rather than fixed.
+ */
 function pushBranches(block) {
-  const line = block.find((l) => /^\s*branches:\s*\[/.test(l))
-  if (!line) return null
-  const inner = line.slice(line.indexOf('[') + 1, line.indexOf(']'))
-  return inner
-    .split(',')
-    .map((s) => s.trim())
+  const push = childLines(block, 'push')
+  if (!push) return null
+
+  const inline = push.find((l) => /^\s*branches:\s*\[/.test(l))
+  if (inline) {
+    return inline
+      .slice(inline.indexOf('[') + 1, inline.indexOf(']'))
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+
+  const seq = childLines(push, 'branches')
+  if (!seq) return null
+  return seq
+    .filter((l) => /^\s*-\s*\S/.test(l))
+    .map((l) => l.replace(/^\s*-\s*/, '').replace(/#.*$/, '').trim())
     .filter(Boolean)
 }
 
@@ -107,6 +146,7 @@ describe('promotion-digest.yml triggers', () => {
 
   test('push still covers main — a landed promotion must clear the digest', () => {
     const branches = pushBranches(block)
+    assert.notEqual(branches, null, 'no branch list found under push:')
     // The complementary direction: after a promotion the issue over-claims,
     // listing commits that have already shipped.
     assert.ok(
@@ -119,8 +159,14 @@ describe('promotion-digest.yml triggers', () => {
     const crons = cronExpressions(block)
     assert.ok(crons.length > 0, 'no cron schedule found — the quiet-period floor is gone')
     // The filing-bar figures (#2767) are computed over a trailing window, so
-    // they go stale as time passes even when nothing is pushed. A weekly cron
-    // lets them drift up to seven days; day-of-month and month must stay `*`.
+    // they age even when nothing is pushed, and on a day with no pushes the
+    // cron is the only trigger that fires. Weekly let them drift a week stale.
+    //
+    // This pin is narrower in intent than the `dev` one above: the *regression*
+    // is the push trigger, and this is a cadence judgement. If you are here
+    // because you want a weekly floor again, that is a legitimate change —
+    // decide it on the trailing-window argument and edit this test with it,
+    // rather than working around the assertion.
     for (const expr of crons) {
       const fields = expr.trim().split(/\s+/)
       assert.equal(fields.length, 5, `cron '${expr}' is not a 5-field expression`)
@@ -140,12 +186,21 @@ describe('promotion-digest.yml triggers', () => {
 
   test('concurrency still collapses bursts — dev merges arrive in clusters', () => {
     // With `dev` in the trigger list this workflow fires on every merge, which
-    // on this repo can be 20+ times a day and often several within a minute.
+    // on this repo can be 20+ times a day and sometimes twice within a minute.
     // cancel-in-progress is what keeps that from queueing redundant upserts.
+    //
+    // Asserted as two independent matches rather than one regex spanning both
+    // lines: swapping the two mapping keys is valid YAML with identical
+    // semantics, and should not turn this red.
     assert.match(
       workflow,
-      /concurrency:\s*\n\s*group:\s*promotion-digest\s*\n\s*cancel-in-progress:\s*true/,
-      'the concurrency group must cancel in progress, or clustered dev merges queue redundant runs',
+      /concurrency:\s*\n(?:\s*\S+:.*\n)*?\s*group:\s*promotion-digest\b/,
+      'the concurrency group must be named promotion-digest',
+    )
+    assert.match(
+      workflow,
+      /concurrency:\s*\n(?:\s*\S+:.*\n)*?\s*cancel-in-progress:\s*true\b/,
+      'concurrency must cancel in progress, or clustered dev merges queue redundant runs',
     )
   })
 })

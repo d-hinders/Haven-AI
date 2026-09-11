@@ -33,9 +33,11 @@ on:
                            # commit to the pending count. See the note above on why
                            # the cron cannot be the mechanism.
   schedule:
-    - cron: '13 8 * * *'   # 08:13 UTC daily — a floor for quiet days, and the only
-                           # trigger that refreshes the trailing-7-day figures,
-                           # which go stale with TIME rather than with pushes.
+    - cron: '13 8 * * *'   # 08:13 UTC daily. Every trigger recomputes the
+                           # trailing-7-day figures; this one matters because on a
+                           # day with NO pushes it is the only one that fires, and
+                           # those figures age with wall-clock time rather than
+                           # with pushes. Weekly let them drift a week out of date.
   workflow_dispatch:
 
 permissions:
@@ -69,7 +71,14 @@ jobs:
           git fetch --quiet origin main dev
 
           count=$(git rev-list --count --first-parent origin/main..origin/dev)
-          list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev)
+          # Cap the list: GitHub rejects an issue body over 65,536 characters, and
+          # `set -euo pipefail` would turn that 422 into a failed step — the digest
+          # going silent exactly in the extreme case it exists to report. At ~25
+          # first-parent commits a day a long stall reaches that ceiling in weeks.
+          list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev | head -100)
+          if [ "$count" -gt 100 ]; then
+            list=$(printf '%s\n- _…and %s more — see the `main..dev` compare._' "$list" "$((count - 100))")
+          fi
           ts=$(date -u +%FT%TZ)
 
           # #2767: the two filing-bar figures, trailing 7 days, each with its

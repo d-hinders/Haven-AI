@@ -1,11 +1,11 @@
 /**
  * Per-Safe explorer-API aggregation + caching, extracted verbatim from
- * `routes/transactions.ts` (#992). Fans out to `lib/explorer-api.ts`
+ * `routes/transactions.ts` (#992). Fans out to `infra/explorer-api.ts`
  * (normal/internal/ERC-20 transfers), normalizes every source into
  * `Transaction`, sorts, dedupes, and caches the per-Safe result under
- * `buildTransactionCacheKey`. `lib/explorer-api.ts` and `lib/gnosisscan.ts`
- * stay in `lib/` per the #992 scope — this module only consumes their
- * public fetchers.
+ * `buildTransactionCacheKey`. `infra/explorer-api.ts` stays in `infra/` (the
+ * flat `lib/` was folded away by #998) — this module only consumes its public
+ * fetchers.
  *
  * #2849 (safe-retirement slice 3) removed the Safe Transaction Service leg:
  * it was fetched unconditionally for every account, but a Hybrid DeleGator
@@ -19,6 +19,9 @@ import {
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
+  type RawERC20Transfer,
+  type RawInternalTx,
+  type RawNormalTx,
 } from '../../infra/explorer-api.js'
 import { getChain } from '../../domain/chains.js'
 import { formatTokenValue } from '../../domain/tokens.js'
@@ -31,7 +34,18 @@ import type {
   Transaction,
 } from './types.js'
 
-const txCache = createCache<Transaction[]>(30_000)
+/**
+ * Cached per account. The truncation flag rides WITH the rows (#2882) rather
+ * than beside them: it is a property of the read that produced them, so a
+ * cache hit that returned only the rows would report a capped read as a
+ * complete one for the rest of the TTL.
+ */
+interface CachedRead {
+  transactions: Transaction[]
+  truncated: boolean
+}
+
+const txCache = createCache<CachedRead>(30_000)
 const txInflight = new Map<string, Promise<FetchSafeTransactionsResult>>()
 
 export async function fetchSafeTransactions({
@@ -51,7 +65,7 @@ export async function fetchSafeTransactions({
 
   const cached = txCache.get(cacheKey)
   if (cached !== undefined) {
-    return { transactions: cached, hadFailures: false }
+    return { transactions: cached.transactions, hadFailures: false, truncated: cached.truncated }
   }
 
   const inflight = txInflight.get(cacheKey)
@@ -62,21 +76,29 @@ export async function fetchSafeTransactions({
   const requestPromise = (async () => {
     const addrLower = safeAddress.toLowerCase()
     let hadFailures = false
-    const logFail = (kind: string) => (err: unknown) => {
-      hadFailures = true
-      log.warn({ err, chainId, safeId, safeAddress, kind }, 'Explorer API fetch failed')
-      return []
-    }
+    const logFail =
+      <T,>(kind: string) =>
+      (err: unknown) => {
+        hadFailures = true
+        log.warn({ err, chainId, safeId, safeAddress, kind }, 'Explorer API fetch failed')
+        // A failed leg is unknown, not complete: it must not contribute a
+        // `hasMore: true` the feed would report as truncation, nor mask one.
+        return { rows: [] as T[], hasMore: false }
+      }
 
-    const normalTxs = await fetchNormalTransactions(chainId, safeAddress).catch(
-      logFail('normal'),
+    const normal = await fetchNormalTransactions(chainId, safeAddress).catch(
+      logFail<RawNormalTx>('normal'),
     )
-    const internalTxs = await fetchInternalTransactions(chainId, safeAddress).catch(
-      logFail('internal'),
+    const internal = await fetchInternalTransactions(chainId, safeAddress).catch(
+      logFail<RawInternalTx>('internal'),
     )
-    const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(
-      logFail('erc20'),
+    const erc20 = await fetchERC20Transfers(chainId, safeAddress).catch(
+      logFail<RawERC20Transfer>('erc20'),
     )
+
+    const normalTxs = normal.rows
+    const internalTxs = internal.rows
+    const erc20Txs = erc20.rows
 
     const transactions: Transaction[] = []
 
@@ -151,11 +173,21 @@ export async function fetchSafeTransactions({
       return true
     })
 
-    txCache.set(cacheKey, deduped)
+    // Each leg reports for itself whether the provider has more beyond what
+    // it returned — Blockscout by its `next_page_params` cursor, the
+    // Etherscan-shaped legs by a full page, since they offer no cursor. Where
+    // the count IS the signal it errs toward "there may be more": a source
+    // holding exactly one window reports one caveat too many rather than
+    // claiming a completeness it cannot know. #2884 removes the remaining
+    // guess by paginating; this only stops the silence.
+    const truncated = normal.hasMore || internal.hasMore || erc20.hasMore
+
+    txCache.set(cacheKey, { transactions: deduped, truncated })
 
     return {
       transactions: deduped,
       hadFailures,
+      truncated,
     }
   })().finally(() => {
     txInflight.delete(cacheKey)

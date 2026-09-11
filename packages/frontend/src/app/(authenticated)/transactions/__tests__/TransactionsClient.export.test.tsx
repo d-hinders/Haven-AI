@@ -69,7 +69,9 @@ const TX = {
   safeName: 'Main',
 }
 
-const { feedState } = vi.hoisted(() => ({ feedState: { partialFailure: false } }))
+const { feedState } = vi.hoisted(() => ({
+  feedState: { partialFailure: false, truncated: false },
+}))
 
 vi.mock('@/hooks/useTransactionsFeed', () => ({
   useTransactionsFeed: () => ({
@@ -80,6 +82,7 @@ vi.mock('@/hooks/useTransactionsFeed', () => ({
     hasMore: false,
     error: null,
     partialFailure: feedState.partialFailure,
+    truncated: feedState.truncated,
     failedSafeIds: [],
     loadMore: vi.fn(),
     refresh: vi.fn(),
@@ -92,6 +95,7 @@ beforeEach(() => {
   mockGetText.mockReset()
   mockDownloadCsv.mockReset()
   feedState.partialFailure = false
+  feedState.truncated = false
 })
 
 function exportButton(): HTMLElement {
@@ -204,5 +208,32 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     fireEvent.click(screen.getByRole('button', { name: /^outgoing$/i }))
 
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('says so when the feed is capped at the explorer window', async () => {
+    // #2882: without this the page presents a capped list as the whole
+    // history, and the export inherits the same silent claim.
+    feedState.truncated = true
+    render(<TransactionsClient />)
+
+    expect(
+      await screen.findByText(/Counts and exports cover the transactions loaded here/i),
+    ).toBeInTheDocument()
+    // Hedged, not flat: an account holding exactly one window on an
+    // Etherscan-shaped leg would make a flat claim false.
+    expect(screen.getByText(/may\s+not be your full history/i)).toBeInTheDocument()
+    // The header's blanket claim must soften with it — it is the louder of
+    // the two, and the one a user reads first.
+    expect(screen.getByText('Recent activity across your accounts.')).toBeInTheDocument()
+    expect(screen.queryByText('All activity across your accounts.')).toBeNull()
+  })
+
+  it('says nothing when the feed is complete', () => {
+    render(<TransactionsClient />)
+
+    expect(
+      screen.queryByText(/Counts and exports cover the transactions loaded here/i),
+    ).toBeNull()
+    expect(screen.getByText('All activity across your accounts.')).toBeInTheDocument()
   })
 })

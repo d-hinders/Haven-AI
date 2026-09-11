@@ -129,6 +129,7 @@ export default function TransactionsClient() {
     error,
     partialFailure,
     failedSafeIds,
+    truncated,
     loadMore,
     refresh,
   } = useTransactionsFeed(filters, 25)
@@ -178,12 +179,18 @@ export default function TransactionsClient() {
   // line into "Transactions for {accountName}" so the view feels intentional.
   const subtitle = useMemo(
     () =>
-      buildTransactionScopeSubtitle(filters, {
-        accountNamesById: safeNamesById,
-        agentNamesById,
-        tokenSymbolsByKey,
-      }),
-    [filters, safeNamesById, agentNamesById, tokenSymbolsByKey],
+      buildTransactionScopeSubtitle(
+        filters,
+        {
+          accountNamesById: safeNamesById,
+          agentNamesById,
+          tokenSymbolsByKey,
+        },
+        // #2882: "All activity" is the page's loudest completeness claim, and
+        // it is the false one when the feed is capped at the explorer window.
+        truncated ? 'Recent activity across your accounts.' : undefined,
+      ),
+    [filters, safeNamesById, agentNamesById, tokenSymbolsByKey, truncated],
   )
 
   // Cheap summary stats — count by direction over what's currently loaded.
@@ -411,6 +418,25 @@ export default function TransactionsClient() {
             Showing <span className="v2-tabular">{visibleTransactions.length.toLocaleString('en-US')}</span> of <span className="v2-tabular">{total.toLocaleString('en-US')}</span>
           </span>
         )}
+        {/*
+          #2882: `total` counts what the explorers returned, not what the
+          account holds — each source is capped at a fixed window. This line
+          qualifies that count, so it lives inside the count row rather than
+          floating above the table.
+
+          Hedged on purpose. Blockscout answers by cursor, so there the cap is
+          certain; the Etherscan-shaped legs infer it from a full page, and an
+          account holding exactly one window would otherwise be told flatly
+          that older transactions exist when none do. "May not be" is true in
+          every state at no cost. It corrects the SCREEN; the downloaded CSV
+          carries no such note, which is recorded on the PR.
+        */}
+        {!loadingInitial && truncated && (
+          <div className="w-full text-xs text-[var(--v2-ink-3)]">
+            Counts and exports cover the transactions loaded here, which may
+            not be your full history.
+          </div>
+        )}
       </div>
 
       <Card hover={false}>
@@ -448,7 +474,11 @@ export default function TransactionsClient() {
               {loadingMore ? 'Loading…' : 'Load more'}
             </Button>
           ) : (
-            <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end</span>
+            <span className="text-xs text-[var(--v2-ink-3)]">
+              {truncated
+                ? 'End of what\u2019s loaded'
+                : 'You\u2019ve reached the end'}
+            </span>
           )}
         </div>
       )}

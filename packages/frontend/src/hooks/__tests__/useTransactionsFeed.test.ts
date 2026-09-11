@@ -42,6 +42,7 @@ function response(transactions: AggregatedTransaction[]): TransactionsFeedRespon
     hasMore: false,
     partialFailure: false,
     failedSafeIds: [],
+    truncated: false,
   }
 }
 

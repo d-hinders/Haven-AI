@@ -1146,7 +1146,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions') {
     // The aggregated feed (useTransactionsFeed).
-    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [] }
+    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [], truncated: false }
   }
   if (pathname === '/transactions/filters') {
     return {
@@ -2417,6 +2417,67 @@ export const SCENARIOS = {
       await shoot(card, 'card')
     },
   },
+  /**
+   * #2882: the transactions page when the feed is capped at the explorer
+   * window. Unreachable by a plain route capture — the default fixture
+   * reports `truncated: false`, which is the honest default but leaves the
+   * one state this feature adds with no rendered evidence at all.
+   *
+   * Two frames, because the flag conditions three strings and they are not
+   * all on screen at once. `hasMore` is derived from the request's `offset`
+   * so the scenario can walk from page one to the end: page one carries the
+   * count row and the caveat; after Load more, `hasMore` goes false and the
+   * end-of-list footer renders in its place. A fixture pinned to
+   * `hasMore: true` would make the footer unreachable and the second frame a
+   * 20-second hang.
+   */
+  'transactions-truncated': {
+    description:
+      'The /transactions list reporting a capped feed — the caveat, the count it qualifies, and the end-of-list footer (#2882)',
+    api(apiPath) {
+      if (apiPath === '/transactions' || apiPath.startsWith('/transactions?')) {
+        const offset = Number(new URLSearchParams(apiPath.split('?')[1] ?? '').get('offset') ?? '0')
+        return {
+          transactions: FIXTURE_TXS,
+          total: FIXTURE_TXS.length + 25,
+          offset,
+          limit: 25,
+          // Page one has more; the page after it is the end of what is
+          // loaded — which is the only state the footer string exists in.
+          hasMore: offset === 0,
+          partialFailure: false,
+          failedSafeIds: [],
+          truncated: true,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // Wait for the claim itself, not for the page: a capture that raced the
+      // feed would photograph the un-truncated branch and look like a pass.
+      await page
+        .getByText(/Counts and exports cover the transactions loaded here/i)
+        .first()
+        .waitFor({ timeout: 20_000 })
+      // Positive control: the count row the caveat qualifies really rendered.
+      await page.getByText(/Showing/).first().waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'list')
+
+      // `main` is a clipped scroll container, so the frame above holds only
+      // what is above the fold. The footer is both below it and in a state
+      // page one cannot reach, so walk to the end rather than scrolling.
+      await page.getByRole('button', { name: /Load more/i }).click()
+      const footer = page.getByText(/End of what.s loaded/i).first()
+      await footer.waitFor({ timeout: 20_000 })
+      await footer.scrollIntoViewIfNeeded()
+      await shoot(page.locator('main').first(), 'end-of-list')
+    },
+  },
+
   'account-backup-recovery': {
     description:
       'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',

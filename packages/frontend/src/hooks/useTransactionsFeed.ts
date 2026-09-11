@@ -19,6 +19,11 @@ interface UseTransactionsFeedReturn {
   error: string | null
   partialFailure: boolean
   failedSafeIds: string[]
+  /**
+   * The feed is capped at the explorer window per account (#2882), so these
+   * rows and `total` are a partial view of the history rather than all of it.
+   */
+  truncated: boolean
   loadMore: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -80,6 +85,7 @@ export function useTransactionsFeed(
   const [error, setError] = useState<string | null>(null)
   const [partialFailure, setPartialFailure] = useState(false)
   const [failedSafeIds, setFailedSafeIds] = useState<string[]>([])
+  const [truncated, setTruncated] = useState(false)
 
   const requestIdRef = useRef(0)
   const filtersRef = useRef(filters)
@@ -131,6 +137,7 @@ export function useTransactionsFeed(
         setHasMore(data.hasMore)
         setPartialFailure(data.partialFailure)
         setFailedSafeIds(data.failedSafeIds)
+        setTruncated(data.truncated)
         if (silent) setError(null)
       } catch (err) {
         if (requestId !== requestIdRef.current) return
@@ -147,6 +154,7 @@ export function useTransactionsFeed(
           setHasMore(false)
           setPartialFailure(false)
           setFailedSafeIds([])
+          setTruncated(false)
         }
       } finally {
         if (requestId !== requestIdRef.current) return
@@ -165,6 +173,7 @@ export function useTransactionsFeed(
     setHasMore(false)
     setPartialFailure(false)
     setFailedSafeIds([])
+    setTruncated(false)
     setLoadingInitial(true)
     setError(null)
     void fetchPage(0, false, false)
@@ -198,6 +207,7 @@ export function useTransactionsFeed(
     error,
     partialFailure,
     failedSafeIds,
+    truncated,
     loadMore,
     refresh,
   }

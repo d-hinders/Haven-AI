@@ -17,12 +17,15 @@ covers:
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
+  - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
+  - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
+  - packages/frontend/src/hooks/useTransactionsFeed.ts
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-09"
+last-verified: "2026-09-11"
 ---
 
 # Haven Screen Recipes
@@ -379,6 +382,17 @@ Money and risk clarity:
 - Use external links for details, but do not make hashes the primary labels.
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
+- **Never present a capped list as a complete one (#2882).** The feed reads a
+  fixed window per source per account, so `total` counts what was returned,
+  not what the account holds. When the response reports `truncated`, every
+  claim on the screen softens together — the page subtitle ("Recent activity"
+  rather than "All activity"), a caveat line inside the count row, and the
+  end-of-list string ("End of what's loaded" rather than "You've reached the
+  end"). Softening one and leaving the others is worse than softening none:
+  the louder claim is the one the reader believes. The same rule binds any
+  other surface fed by the same hook — the account detail page's transaction
+  count included. Hedge the wording ("may not be your full history"); the
+  detection is not exact on every provider, and the reason lives in the code.
 - Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
   one merchant-facing row such as `Agent payment by [agent name]`. Live
@@ -424,6 +438,12 @@ Structure:
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.
 - Technical disclosure is allowed here, but label it gently and keep it visually subordinate.
+- The transaction count on this page comes from the same capped feed as
+  Transaction History, so it softens with it (#2882) — see that section's
+  rule. A preview card earns the shortened form ("N recent transactions",
+  the count marked "loaded") rather than the full caveat sentence: a
+  disclaimer longer than the thing it qualifies is worse than the terse one,
+  and `View all` carries the reader to the surface that explains itself.
 
 ## Recover Agent-Wallet Funds
 

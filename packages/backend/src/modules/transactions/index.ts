@@ -9,8 +9,8 @@
  * `routes/transactions.ts` keeps request validation, auth wiring, and
  * response serialization; aggregation, enrichment, and caching live here.
  * Data access goes through `infra/repositories/transaction-history.ts`
- * (#985 convention). `lib/explorer-api.ts` / `lib/gnosisscan.ts` stay in
- * `lib/` for now (M5 foldering issue).
+ * (#985 convention). `infra/explorer-api.ts` / `infra/gnosisscan.ts` stay in
+ * `infra/` for now (M5 foldering issue).
  */
 
 export type {

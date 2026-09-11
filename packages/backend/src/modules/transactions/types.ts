@@ -103,6 +103,13 @@ export interface FetchSafeTransactionsParams {
 export interface FetchSafeTransactionsResult {
   transactions: Transaction[]
   hadFailures: boolean
+  /**
+   * At least one explorer leg came back at its window, so this account's
+   * history is cut off rather than complete (#2882). Independent of
+   * `hadFailures`: a read can be truncated without failing, and can fail
+   * without being truncated.
+   */
+  truncated: boolean
 }
 
 export interface ParsedTokenFilter {

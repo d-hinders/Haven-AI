@@ -7810,7 +7810,16 @@ export const openapiSpec = {
       },
       TransactionsResponse: {
         type: 'object',
-        required: ['transactions', 'total', 'offset', 'limit', 'hasMore', 'partialFailure', 'failedSafeIds'],
+        required: [
+          'transactions',
+          'total',
+          'offset',
+          'limit',
+          'hasMore',
+          'partialFailure',
+          'failedSafeIds',
+          'truncated',
+        ],
         properties: {
           transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' } },
           total: { type: 'integer' },
@@ -7819,6 +7828,13 @@ export const openapiSpec = {
           hasMore: { type: 'boolean' },
           partialFailure: { type: 'boolean' },
           failedSafeIds: { type: 'array', items: uuid },
+          truncated: {
+            type: 'boolean',
+            description:
+              'At least one account\'s history came back at the explorer window, so ' +
+              'these rows and `total` are a capped view rather than the full history. ' +
+              'Independent of `partialFailure`. Pagination past the window is #2884.',
+          },
         },
         additionalProperties: false,
       },

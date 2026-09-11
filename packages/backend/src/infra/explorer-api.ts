@@ -160,7 +160,7 @@ async function fetchFromV2<T>(
   chainId: number,
   resource: string,
   query: Record<string, string> = {},
-): Promise<T[]> {
+): Promise<{ items: T[]; hasNextPage: boolean }> {
   const chain = getChain(chainId)
   // explorerApiUrl ends in /api/v2. The caller owns the address, so the
   // caller passes `addresses/${addr}/${resource}`.
@@ -172,12 +172,50 @@ async function fetchFromV2<T>(
     throw new Error(`Blockscout v2 error (chain ${chainId}): ${response.status}`)
   }
   const data = (await response.json()) as V2Page<T>
-  return data.items ?? []
+  return {
+    items: data.items ?? [],
+    // The explorer's own answer, not an inference from how many rows it sent.
+    hasNextPage: data.next_page_params !== null && data.next_page_params !== undefined,
+  }
 }
 
 function isoToUnix(iso: string): string {
   const ms = Date.parse(iso)
   return Number.isNaN(ms) ? '0' : String(Math.floor(ms / 1000))
+}
+
+/**
+ * Rows one leg yields per account (#2882). What it means differs by provider,
+ * and the difference is why `ExplorerLeg.hasMore` exists:
+ *
+ * - On the **Etherscan-compatible v1 legs** it is genuinely requested — sent
+ *   as `offset` — so a full page is evidence the source had more.
+ * - On the **Blockscout v2 legs** (Base, the default chain) nothing is
+ *   requested. `fetchFromV2` sends no page-size parameter; the provider
+ *   returns its own page and the rows are capped here afterwards. A row count
+ *   there measures Blockscout's default, which Haven neither sets nor
+ *   asserts, so the cursor is read instead.
+ *
+ * Raising it, or paginating past it, is #2884.
+ */
+export const EXPLORER_PAGE_SIZE = 50
+
+/**
+ * One leg's rows plus whether the provider says more exist beyond them
+ * (#2882).
+ *
+ * `hasMore` is NOT `rows.length >= EXPLORER_PAGE_SIZE`, and the difference
+ * matters on the default chain. Blockscout v2 takes no page-size parameter —
+ * it returns its own page and we slice locally — so a count test there
+ * measures Blockscout's default rather than anything Haven asked for, and
+ * would start lying the day that default changed. Blockscout hands back
+ * `next_page_params` when there is another page, so that is what is read.
+ * The Etherscan-shaped v1 legs have no cursor, so the count is the only
+ * signal available and is used there.
+ */
+export interface ExplorerLeg<T> {
+  rows: T[]
+  hasMore: boolean
 }
 
 // ── Public fetchers (provider-aware) ──────────────────────────────
@@ -186,15 +224,15 @@ export async function fetchNormalTransactions(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
-): Promise<RawNormalTx[]> {
+  offset = EXPLORER_PAGE_SIZE,
+): Promise<ExplorerLeg<RawNormalTx>> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
-    const items = await fetchFromV2<V2Transaction>(
+    const { items, hasNextPage } = await fetchFromV2<V2Transaction>(
       chainId,
       `addresses/${address}/transactions`,
     )
-    return items.slice(0, offset).map((tx) => ({
+    const rows = items.slice(0, offset).map((tx) => ({
       blockNumber: String(tx.block_number),
       timeStamp: isoToUnix(tx.timestamp),
       hash: tx.hash,
@@ -206,8 +244,10 @@ export async function fetchNormalTransactions(
       isError: tx.status === 'error' ? '1' : '0',
       functionName: tx.method ?? '',
     }))
+    // Sliced locally, so a page longer than the window also means more.
+    return { rows, hasMore: hasNextPage || items.length > offset }
   }
-  return fetchFromV1<RawNormalTx>(chainId, {
+  const rows = await fetchFromV1<RawNormalTx>(chainId, {
     module: 'account',
     action: 'txlist',
     address,
@@ -217,21 +257,23 @@ export async function fetchNormalTransactions(
     offset: String(offset),
     sort: 'desc',
   })
+  return { rows, hasMore: rows.length >= offset }
 }
 
 export async function fetchInternalTransactions(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
-): Promise<RawInternalTx[]> {
+  offset = EXPLORER_PAGE_SIZE,
+): Promise<ExplorerLeg<RawInternalTx>> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
     // Base Blockscout's v2 internal-transactions endpoint is unreliable
     // (times out with 524). Internal txs on fresh Safes are rare and also
     // surface via the normal tx list, so skipping here is the pragmatic
-    // tradeoff to keep the overall request fast.
-    return []
+    // tradeoff to keep the overall request fast. Skipped, not truncated —
+    // this leg must not make the feed claim a capped read.
+    return { rows: [], hasMore: false }
   }
   type BlockscoutInternal = RawInternalTx & { transactionHash?: string }
   const raw = await fetchFromV1<BlockscoutInternal>(chainId, {
@@ -244,23 +286,26 @@ export async function fetchInternalTransactions(
     offset: String(offset),
     sort: 'desc',
   })
-  return raw.map((tx) => ({ ...tx, hash: tx.hash || tx.transactionHash || '' }))
+  return {
+    rows: raw.map((tx) => ({ ...tx, hash: tx.hash || tx.transactionHash || '' })),
+    hasMore: raw.length >= offset,
+  }
 }
 
 export async function fetchERC20Transfers(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
-): Promise<RawERC20Transfer[]> {
+  offset = EXPLORER_PAGE_SIZE,
+): Promise<ExplorerLeg<RawERC20Transfer>> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
-    const items = await fetchFromV2<V2TokenTransfer>(
+    const { items, hasNextPage } = await fetchFromV2<V2TokenTransfer>(
       chainId,
       `addresses/${address}/token-transfers`,
       { type: 'ERC-20' },
     )
-    return items.slice(0, offset).map((t) => ({
+    const rows = items.slice(0, offset).map((t) => ({
       blockNumber: String(t.block_number),
       timeStamp: isoToUnix(t.timestamp),
       hash: t.transaction_hash,
@@ -272,8 +317,9 @@ export async function fetchERC20Transfers(
       tokenSymbol: t.token.symbol ?? '',
       tokenDecimal: t.token.decimals ?? t.total?.decimals ?? '18',
     }))
+    return { rows, hasMore: hasNextPage || items.length > offset }
   }
-  return fetchFromV1<RawERC20Transfer>(chainId, {
+  const rows = await fetchFromV1<RawERC20Transfer>(chainId, {
     module: 'account',
     action: 'tokentx',
     address,
@@ -283,4 +329,5 @@ export async function fetchERC20Transfers(
     offset: String(offset),
     sort: 'desc',
   })
+  return { rows, hasMore: rows.length >= offset }
 }

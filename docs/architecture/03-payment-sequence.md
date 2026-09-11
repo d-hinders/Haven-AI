@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/payments.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/modules/mpp/**
@@ -28,7 +28,8 @@ reachable any more**; see the banner below and jump to the
 [delegation-rail branch](#delegation-rail-new-accounts) for the live flow.
 
 Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
-[packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts).
+[packages/backend/src/infra/chain/relayer-reads.ts](../../packages/backend/src/infra/chain/relayer-reads.ts)
+(the reads-only shared chain module — `rails/allowance-module.ts` before #2850 renamed it).
 
 > ⚠️ **THE SEQUENCE BELOW NO LONGER RUNS.** It is the legacy AllowanceModule
 > rail, retired under epic #1440 — sequence in the [decision log](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440).
@@ -148,7 +149,8 @@ sequenceDiagram
   applies the module's reset semantics, so out-of-band AllowanceModule transfers
   under the same delegate/token allowance are already reflected and reset
   decisions use chain time
-  ([packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts)).
+  ([packages/backend/src/infra/chain/relayer-reads.ts](../../packages/backend/src/infra/chain/relayer-reads.ts) —
+  `rails/allowance-module.ts` before #2850 renamed it).
 - **The delegate signature is independently re-verified by the
   AllowanceModule.** Even if the backend skipped its own `ecrecover` check,
   the on-chain module would reject a bad signature.

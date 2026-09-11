@@ -643,13 +643,15 @@ you need the reasoning. Never edit one without the other — CI will not let you
   both are registered in `index.ts` today. A parenthetical that reads as an
   exclusion is worse than an omission, because nobody re-checks it — #1892.);
 - `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
-  `domain/machine-payment-lifecycle.ts`, or `rails/allowance-module.ts`
-  (#1987 deleted the off-chain coverage-arithmetic module and the
-  allowance-nonce coordinator with the AllowanceModule rail, so both are gone
-  from this list — a glob naming a file that no longer exists guards nothing,
-  and the "no phantom globs" assertion in `scripts/ci/money-path.test.mjs`
-  fails CI on it. `rails/allowance-module.ts` STAYS: that file survives as
-  reads-only);
+  `domain/machine-payment-lifecycle.ts`, or
+  `infra/chain/relayer-reads.ts` (#1987 deleted the off-chain coverage-arithmetic
+  module and the allowance-nonce coordinator with the AllowanceModule rail, so
+  both are gone from this list — a glob naming a file that no longer exists
+  guards nothing, and the "no phantom globs" assertion in
+  `scripts/ci/money-path.test.mjs` fails CI on it. The reads-only survivor
+  STAYS on this list: it was rails/allowance-module.ts until #2850 renamed
+  that file to `infra/chain/relayer-reads.ts` — the AllowanceModule filename
+  was the last false claim the retired rail left behind);
 - `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,

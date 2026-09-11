@@ -25,8 +25,8 @@ vi.mock('../../accounting/index.js', async (importOriginal) => ({
   feedSettledPaymentBestEffort: (...args: unknown[]) => feedSettledPaymentBestEffort(...args),
 }))
 
-vi.mock('../../../rails/allowance-module.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../rails/allowance-module.js')>()),
+vi.mock('../../../infra/chain/relayer-reads.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../infra/chain/relayer-reads.js')>()),
   getProvider: () => ({ getTransactionReceipt, getBlock }),
 }))
 

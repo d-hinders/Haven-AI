@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers:
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/frontend/src/lib/allowance-math.ts
   - packages/frontend/src/lib/loop-harness/**
   - packages/backend/src/modules/mpp/**
@@ -29,7 +29,9 @@ Each row is a permanent harness that runs in CI as a regression/drift guard.
 ### ~~LP-1 · Backend allowance routing math~~ — WITHDRAWN (#2020)
 
 **WITHDRAWN (#2020, epic #1440).** The target — `computeEffectiveAllowance` in
-`packages/backend/src/rails/allowance-module.ts` — is deleted along with its
+the backend's shared chain-read module (`packages/backend/src/infra/chain/relayer-reads.ts`;
+named `packages/backend/src/rails/allowance-module.ts` until #2850 renamed it) — is
+deleted along with its
 last consumer: #1987 had kept it alive only because `GET
 /machine-payments/allowances` still read it (#1986's left-readable decision),
 and #2020 reversed that decision on a recorded owner call — the endpoint now

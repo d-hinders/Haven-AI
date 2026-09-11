@@ -48,7 +48,7 @@ vi.mock('../../modules/passport/index.js', () => ({
 const { mockGetTokenBalance } = vi.hoisted(() => ({
   mockGetTokenBalance: vi.fn(),
 }))
-vi.mock('../../rails/allowance-module.js', () => ({
+vi.mock('../../infra/chain/relayer-reads.js', () => ({
   getTokenBalance: (...a: unknown[]) => mockGetTokenBalance(...a),
 }))
 

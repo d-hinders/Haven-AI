@@ -19,6 +19,32 @@ import {
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 
+// The live funding-leg wire shape (#946): every sign_data the backend emits
+// carries 'eip712_userop' plus the account's typed data. Fixtures updated by
+// #2850, which retired the SDK's scheme-less bare-hash fallback — a sign_data
+// without signature_scheme is now rejected by the client.
+const userOpTypedData = {
+  domain: {
+    chainId: 8453,
+    name: 'HybridDeleGator',
+    version: '1',
+    verifyingContract: `0x${'dd'.repeat(20)}`,
+  },
+  types: {
+    PackedUserOperation: [
+      { name: 'sender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'entryPoint', type: 'address' },
+    ],
+  },
+  primaryType: 'PackedUserOperation',
+  message: {
+    sender: `0x${'dd'.repeat(20)}`,
+    nonce: '1',
+    entryPoint: `0x${'ee'.repeat(20)}`,
+  },
+}
+
 const accepted: X402PaymentOption = {
   scheme: 'exact',
   network: 'eip155:8453',
@@ -462,6 +488,8 @@ describe('x402 helpers', () => {
         resource_url: resourceUrl,
         sign_data: {
           hash: `0x${'11'.repeat(32)}`,
+          signature_scheme: 'eip712_userop',
+          typed_data: userOpTypedData,
           components: {
             safe: safeAddress,
             token: accepted.asset,
@@ -676,6 +704,8 @@ describe('x402 helpers', () => {
         resource_url: resourceUrl,
         sign_data: {
           hash: `0x${'11'.repeat(32)}`,
+          signature_scheme: 'eip712_userop',
+          typed_data: userOpTypedData,
           components: {
             safe: safeAddress,
             token: accepted.asset,
@@ -754,6 +784,8 @@ describe('x402 helpers', () => {
       resource_url: resourceUrl,
       sign_data: {
         hash: `0x${'11'.repeat(32)}`,
+        signature_scheme: 'eip712_userop',
+        typed_data: userOpTypedData,
         components: {
           safe: safeAddress,
           token: accepted.asset,
@@ -1815,7 +1847,7 @@ describe('merchant receipt capture (#956)', () => {
       safe_address: safeAddress,
       token: 'USDC', amount: '0.02', to: delegateAddress,
       resource_url: paymentRequired.resource.url,
-      sign_data: { hash: `0x${'11'.repeat(32)}`, components: { safe: safeAddress }, instructions: 'sign' },
+      sign_data: { hash: `0x${'11'.repeat(32)}`, signature_scheme: 'eip712_userop', typed_data: userOpTypedData, components: { safe: safeAddress }, instructions: 'sign' },
     }), { status: 201 }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       payment_id: 'pay_956', status: 'confirmed', tx_hash: txHash, chain_id: 8453,

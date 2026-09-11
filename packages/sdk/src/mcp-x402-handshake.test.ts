@@ -2,6 +2,32 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
 import type { X402PaymentOption, X402PaymentRequired } from './types.js'
 
+// The live funding-leg wire shape (#946): every sign_data the backend emits
+// carries 'eip712_userop' plus the account's typed data. Fixtures updated by
+// #2850, which retired the SDK's scheme-less bare-hash fallback — a sign_data
+// without signature_scheme is now rejected by the client.
+const userOpTypedData = {
+  domain: {
+    chainId: 8453,
+    name: 'HybridDeleGator',
+    version: '1',
+    verifyingContract: `0x${'dd'.repeat(20)}`,
+  },
+  types: {
+    PackedUserOperation: [
+      { name: 'sender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'entryPoint', type: 'address' },
+    ],
+  },
+  primaryType: 'PackedUserOperation',
+  message: {
+    sender: `0x${'dd'.repeat(20)}`,
+    nonce: '1',
+    entryPoint: `0x${'ee'.repeat(20)}`,
+  },
+}
+
 // ── Shared fixtures ───────────────────────────────────────────────
 
 const accepted: X402PaymentOption = {
@@ -69,6 +95,8 @@ function fundingPendingSignature(resourceUrl: string = mcpUrl): Response {
     resource_url: resourceUrl,
     sign_data: {
       hash: `0x${'11'.repeat(32)}`,
+      signature_scheme: 'eip712_userop',
+      typed_data: userOpTypedData,
       components: {
         safe: safeAddress,
         token: accepted.asset,

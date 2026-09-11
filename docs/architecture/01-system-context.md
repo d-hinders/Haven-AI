@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/agents.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/domain/chains.ts
   - packages/core/src/chains.ts
@@ -157,7 +157,7 @@ flowchart LR
   validated the user's complete signature package — and #2847 deleted that
   relayed execution route with the last live Safe-rail behaviour, so the
   relayer no longer submits anything on the legacy rail
-  ([allowance execution](../../packages/backend/src/rails/allowance-module.ts)).
+  ([shared chain reads](../../packages/backend/src/infra/chain/relayer-reads.ts)).
 - **Owner authority remains on-chain, and Haven no longer touches it at all.**
   Membership truth was always `getOwners()`; Haven stored only display metadata
   such as label and owner type, and it never signed an owner change. Since

@@ -82,9 +82,10 @@ export interface SignData {
 
   /**
    * Delegation rail: 'eip712_userop' (funding redemption) or
-   * 'eip712_delegation' (erc7710 settlement child). Absent = legacy
-   * AllowanceModule (raw ECDSA over `hash`). The session rail's
-   * 'eip191_userop' is retired (#834).
+   * 'eip712_delegation' (erc7710 settlement child). The backend spec makes it
+   * required; the legacy AllowanceModule reading — absent = raw ECDSA over
+   * `hash` — is retired (#2850), and the SDK client refuses an absent scheme.
+   * The session rail's 'eip191_userop' is retired (#834).
    *
    * When present, `hash` is NOT what gets signed — `typed_data` is (#1138).
    */

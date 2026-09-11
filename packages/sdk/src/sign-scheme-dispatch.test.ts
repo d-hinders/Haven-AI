@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { ethers } from 'ethers'
 import { HavenClient } from './client.js'
+import { signHash } from './signer.js'
 import { HavenSigningError } from './types.js'
 // #1452: a REAL buildSettlementDelegation payload, not a hand-written object.
 // Generated from packages/backend/src/modules/x402/x402-delegation.ts — see the
@@ -32,9 +33,14 @@ function signFor(
 }
 
 describe('sign_data.signature_scheme dispatch (#776)', () => {
-  it('legacy (scheme absent) -> raw ECDSA, recovers over the raw hash', async () => {
-    const sig = await signFor(client(), { hash: HASH })
-    expect(ethers.recoverAddress(HASH, sig).toLowerCase()).toBe(DELEGATE.address.toLowerCase())
+  // The legacy AllowanceModule rail — raw ECDSA over the bare hash when no
+  // scheme was present — is retired (#2850, epic #1440). Every live sign_data
+  // emitter sets `signature_scheme` and the backend spec makes it required, so
+  // an absent scheme is now a malformed payload: it is REJECTED, never signed
+  // on a guessed scheme.
+  it('scheme ABSENT is rejected — the legacy bare-hash rail is retired (#2850), never a guessed signature', async () => {
+    await expect(signFor(client(), { hash: HASH })).rejects.toThrow(/signature_scheme is required/)
+    await expect(signFor(client(), { hash: HASH })).rejects.toBeInstanceOf(HavenSigningError)
   })
 
   it("'eip191_userop' throws — the session rail is retired (#881), never a guessed signature", async () => {
@@ -105,16 +111,17 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
   })
 
   it("'eip712_delegation' does NOT produce the bare-hash signature", async () => {
-    // Belt and braces on the branch above: a fallthrough to signHash would
-    // still return a valid-looking 65-byte signature, so assert it is NOT the
-    // legacy one rather than only that it recovers somewhere.
-    const legacy = await signFor(client(), { hash: HASH })
+    // Belt and braces on the branch above: a fallthrough to the bare hash
+    // would still return a valid-looking 65-byte signature, so assert it is
+    // NOT the raw-ECDSA one (computed here with the live EIP-3009 signer)
+    // rather than only that it recovers somewhere.
+    const bare = signHash(DELEGATE_KEY, HASH)
     const delegated = await signFor(client(), {
       hash: HASH,
       signature_scheme: 'eip712_delegation',
       typed_data: SETTLEMENT_PAYLOAD,
     })
-    expect(delegated).not.toBe(legacy)
+    expect(delegated).not.toBe(bare)
   })
 
   it("'eip712_delegation' without typed_data throws — never signs the bare hash", async () => {

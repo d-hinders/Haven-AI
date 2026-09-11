@@ -14,7 +14,7 @@ covers:
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/rails/delegation-policy.ts
   - packages/backend/src/routes/agent-connection-setups.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/modules/agents/agent-connection-setup.ts
   - packages/backend/src/domain/chains.ts
   - packages/backend/src/infra/relayer.ts

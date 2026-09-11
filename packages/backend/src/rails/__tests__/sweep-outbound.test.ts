@@ -55,7 +55,7 @@ vi.mock('../../infra/relayer-spend-guard.js', () => ({
 let receiptOutcome: { status: number; gasUsed: bigint; gasPrice: bigint } | null = { status: 1, gasUsed: 90_000n, gasPrice: 7n }
 const waitForTransaction = vi.fn(async () => receiptOutcome)
 
-vi.mock('../allowance-module.js', () => ({
+vi.mock('../../infra/chain/relayer-reads.js', () => ({
   getRelayerWallet: () => ({ provider: { waitForTransaction } }),
 }))
 

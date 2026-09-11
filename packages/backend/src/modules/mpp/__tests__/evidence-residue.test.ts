@@ -12,7 +12,7 @@ const { mockQuery, mockGetTokenBalance } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
-vi.mock('../../../rails/allowance-module.js', () => ({
+vi.mock('../../../infra/chain/relayer-reads.js', () => ({
   getTokenBalance: (...a: unknown[]) => mockGetTokenBalance(...a),
 }))
 vi.mock('../../../infra/fiat-values.js', () => ({ getBookTimeSekValue: vi.fn() }))

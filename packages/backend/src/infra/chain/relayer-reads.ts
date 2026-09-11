@@ -15,10 +15,8 @@
  * one nonce view per chain) and `getTokenBalance` is a generic native/ERC-20
  * balance read. They are shared with machinery the owner decision in #834
  * keeps alive while any funding-leg rail lives: sweep, the delegate-balance
- * monitor, and the #946 EIP-3009 bridge. Deliberately NOT re-homed here: that
- * is a refactor of live shared infrastructure, not a deletion, and it does
- * not belong in a money-path deletion slice. It is residue for #1993 once the
- * remaining read consumers go with #1989/#1992.
+ * monitor, and the #946 EIP-3009 bridge. Those consumers are permanent —
+ * this is shared chain-read infrastructure, not residue awaiting deletion.
  *
  * **No AllowanceModule contract read survives (#2259).** `getTokenAllowance`
  * and `getTokensForDelegate` were the last two, backing
@@ -35,10 +33,14 @@
  * `contracts.allowanceModule` has been removed from the shared registry (#2260).
  *
  * All functions accept a chainId to select the correct RPC and contract addresses.
+ *
+ * #2850 renamed this file from its AllowanceModule-era name: no AllowanceModule
+ * contract is constructed anywhere in it, so the old filename was the last
+ * false claim the retired rail left behind.
  */
 
 import { ethers } from 'ethers'
-import { getRelayer, getProvider as getRelayerProvider } from '../infra/relayer.js'
+import { getRelayer, getProvider as getRelayerProvider } from '../../infra/relayer.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 

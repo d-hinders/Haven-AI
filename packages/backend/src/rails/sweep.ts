@@ -8,7 +8,7 @@ import {
   type SweepAuthorization,
   type SweepExpectedAuth,
 } from '@haven_ai/sdk'
-import { getRelayerWallet } from './allowance-module.js'
+import { getRelayerWallet } from '../infra/chain/relayer-reads.js'
 import { openOutboundRecord, submitRecorded } from '../infra/outbound-queue.js'
 
 /**

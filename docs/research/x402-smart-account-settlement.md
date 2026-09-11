@@ -4,7 +4,7 @@ status: research
 covers:
   - packages/sdk/src/x402.ts
   - packages/backend/src/routes/x402.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
 last-verified: "2026-08-31"
@@ -115,7 +115,8 @@ sequence below no longer runs; kept as the investigation's record) is
 3. Backend validates allowance / token / amount / network / policy and **funds
    the delegate EOA from the Safe via the AllowanceModule** for the exact amount
    ([`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts),
-   [`packages/backend/src/rails/allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts)).
+   [`packages/backend/src/infra/chain/relayer-reads.ts`](../../packages/backend/src/infra/chain/relayer-reads.ts) —
+   the shared chain reads; `rails/allowance-module.ts` before #2850 renamed it).
 4. SDK retries with `X-PAYMENT`; merchant/facilitator settles delegate → merchant.
 
 Two implementation details that exist *only because of the funding leg* and are

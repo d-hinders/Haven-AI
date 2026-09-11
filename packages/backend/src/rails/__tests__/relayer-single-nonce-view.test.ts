@@ -1,7 +1,7 @@
 /**
  * #1533 — ONE nonce view per chain for the relayer EOA.
  *
- * `rails/allowance-module.ts` and `infra/relayer.ts` each kept their own
+ * `infra/chain/relayer-reads.ts` and `infra/relayer.ts` each kept their own
  * per-chain `Map` of providers and wallets, built from the same key. Both
  * submissions went through the shared `withRelayerSendLock`, so they never
  * raced each other's broadcast — but ethers populates a transaction's nonce
@@ -27,14 +27,14 @@ beforeAll(() => {
 const CHAIN_ID = 84532
 
 describe('#1533 — single relayer nonce view', () => {
-  it('allowance-module and infra/relayer share ONE wallet instance per chain', async () => {
-    const { getRelayerWallet } = await import('../allowance-module.js')
+  it('relayer-reads and infra/relayer share ONE wallet instance per chain', async () => {
+    const { getRelayerWallet } = await import('../../infra/chain/relayer-reads.js')
     const { getRelayer } = await import('../../infra/relayer.js')
     expect(getRelayerWallet(CHAIN_ID)).toBe(getRelayer(CHAIN_ID))
   })
 
   it('and ONE provider instance, which is the one the wallet is bound to', async () => {
-    const { getProvider: fromAllowance } = await import('../allowance-module.js')
+    const { getProvider: fromAllowance } = await import('../../infra/chain/relayer-reads.js')
     const { getProvider: fromRelayer, getRelayer } = await import('../../infra/relayer.js')
     expect(fromAllowance(CHAIN_ID)).toBe(fromRelayer(CHAIN_ID))
     // The binding is the point: the nonce is read from wallet.provider.
@@ -42,7 +42,7 @@ describe('#1533 — single relayer nonce view', () => {
   })
 
   it('per-chain isolation survives the delegation (#640)', async () => {
-    const { getProvider } = await import('../allowance-module.js')
+    const { getProvider } = await import('../../infra/chain/relayer-reads.js')
     expect(getProvider(84532)).not.toBe(getProvider(8453))
   })
 })

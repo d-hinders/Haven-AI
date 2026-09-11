@@ -3,7 +3,7 @@
  *
  * ⚠️ **This file SURVIVED the Safe-rail retirement (#1989, epic #1440) on
  * purpose — do not delete it as "the safe-tx libs".** Same shape as the
- * backend's `rails/allowance-module.ts`, which #1987 likewise trimmed to its
+ * backend's `infra/chain/relayer-reads.ts`, which #1987 likewise trimmed to its
  * shared half rather than deleting: the file's execution half died with the
  * rail, its shared half has consumers that must live.
  *

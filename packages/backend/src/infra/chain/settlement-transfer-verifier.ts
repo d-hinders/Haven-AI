@@ -113,7 +113,7 @@
  * it to a retryable status.
  */
 import { ethers } from 'ethers'
-import { getProvider } from '../../rails/allowance-module.js'
+import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { getDelegationContracts } from '../../rails/delegation-contracts.js'
 import { delegationHashFromLog } from './redeemed-delegation-scanner.js'
 

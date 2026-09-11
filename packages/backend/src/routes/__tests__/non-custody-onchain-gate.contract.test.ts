@@ -75,7 +75,9 @@ import {
  * ⚠️ **#1987 / #2044 — what the not-called spies do and do NOT prove.**
  * #1986 proved "the delegation branch performs no off-chain coverage
  * arithmetic" with `not.toHaveBeenCalled()` spies on six names from
- * `rails/allowance-module.js`. #1987 then deleted the rail's execution half,
+ * the shared chain-read module (`infra/chain/relayer-reads.js`, called
+ * `rails/allowance-module.js` before #2850 renamed it). #1987 then deleted the
+ * rail's execution half,
  * and three of those six — `generateTransferHash`, `recoverSigner`,
  * `executeAllowanceTransfer` — stopped existing as exports of the real module.
  * `vi.mock(...)` replaces a module wholesale, so a factory naming a symbol the
@@ -88,7 +90,8 @@ import {
  *
  * ⚠️ **#1993 — the same defect REGREW, and this is the re-measurement.** #2044
  * left three spies, on the reasoning that all three were still live exports of
- * `rails/allowance-module.ts`. A later slice deleted two of them:
+ * that module (named `rails/allowance-module.ts` at the time, renamed to
+ * `infra/chain/relayer-reads.ts` by #2850). A later slice deleted two of them:
  * `computeEffectiveAllowance` and `getLatestBlockTimeSec` are no longer
  * exported by that module (the file's own header now describes it as
  * reads-only shared infrastructure — `getProvider`, `getRelayerWallet`,
@@ -107,8 +110,8 @@ import {
  *
  * **The one that remains is mutation-proven falsifiable** (#2044), and it is
  * worth being exact about the mechanism, because #2004's inventory read it too
- * pessimistically. `routes/payments.ts` imports nothing from
- * `rails/allowance-module.js` directly — but the module IS on the route's
+ * `routes/payments.ts` imports nothing from that shared chain-read module
+ * directly — but the module IS on the route's
  * transitive graph (`routes/payments.ts` → `modules/mpp/index.ts` →
  * `modules/mpp/allowances.ts`), so the `vi.mock` is live, and re-adding a call
  * on the payment path DOES trip the spy. Measured, per name:
@@ -202,7 +205,7 @@ function intentRow(overrides: Record<string, unknown> = {}) {
 /**
  * The retired rail's off-chain spend arithmetic — every "how much is left"
  * name that must never be reachable from the payment route again. Since #2259
- * NONE of them is a live export of `rails/allowance-module.ts`: that slice
+ * NONE of them is a live export of `infra/chain/relayer-reads.ts`: that slice
  * deleted the last one, `getTokenAllowance`, with the connect-approval route
  * that called it. The list is now entirely tombstones, which makes the
  * structural import-binding check below STRONGER than when one entry was
@@ -227,7 +230,8 @@ const BANNED_ARITHMETIC = [
  * `await import('…')`, a bare side-effect import, `export * from`.
  */
 const BANNED_MODULES = [
-  'rails/allowance-module',
+  'rails/allowance-module', // the reads-only shared reads module — pre-#2850 name, tombstone
+  'infra/chain/relayer-reads', // the same module since #2850 renamed it to what it is
   'domain/payment-coverage',
   'infra/repositories/allowance-nonce-watermarks',
 ] as const
@@ -237,7 +241,7 @@ const BANNED_MODULES = [
  * deep the relative prefix is, and to a URL query/hash suffix.
  *
  * The suffix strip is not decoration: Node's ESM loader treats
- * `import('../rails/allowance-module.js?bust=1')` as a real load of that module
+ * `import('../infra/chain/relayer-reads.js?bust=1')` as a real load of that module
  * (the standard cache-busting idiom), so a specifier that ends in a query would
  * otherwise re-import the arithmetic past a rule that only knew about `.js`.
  * Mutation-proven, not reasoned about (#2049).
@@ -260,7 +264,9 @@ const BANNED_MODULES = [
  * `require('…')`, `export { … } from`, `export * from`, side-effect `import '…'`,
  * and — not in the ticket, found while measuring — a perfectly ordinary named
  * clause written with DOUBLE quotes. Orthogonal to all eight, a specifier can
- * also carry a URL query suffix (`…/allowance-module.js?bust=1`), which Node's
+ * also carry a URL query suffix (historically `…/allowance-module.js?bust=1`,
+ * today `…/relayer-reads.js?bust=1` — the same module under its pre- and
+ * post-#2850 names), which Node's
  * ESM loader resolves to the same module. A regex grown to cover eight cases is
  * itself hard to falsify, and it stops matching silently when a ninth appears.
  *
@@ -376,8 +382,8 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
 
     // And the normalization the module rules share: extension-, prefix-, and
     // query/hash-agnostic, on the module list the real rules use.
-    expect(bannedRefsIn(['../rails/allowance-module.js?bust=1'], BANNED_MODULES)).toEqual([
-      '../rails/allowance-module.js?bust=1',
+    expect(bannedRefsIn(['../infra/chain/relayer-reads.js?bust=1'], BANNED_MODULES)).toEqual([
+      '../infra/chain/relayer-reads.js?bust=1',
     ])
     expect(bannedRefsIn(['../rails/allowance-module'], BANNED_MODULES)).toEqual(['../rails/allowance-module'])
     expect(bannedRefsIn(['./unrelated.js', '../modules/mpp/index.js'], BANNED_MODULES)).toEqual([])

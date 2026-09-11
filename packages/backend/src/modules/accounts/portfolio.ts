@@ -1,6 +1,6 @@
 import { ethers } from 'ethers'
 import { getChain } from '../../domain/chains.js'
-import { getProvider } from '../../rails/allowance-module.js'
+import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { fetchTokenPrices } from '../../infra/prices.js'
 import { createCache } from '../../platform/cache.js'

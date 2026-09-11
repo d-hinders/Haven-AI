@@ -32,7 +32,7 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 // Only the network seams of the delegation rail are mocked.
 vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
@@ -209,7 +209,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   // #1986 (epic #1440 slice 3): `intentRow()` is the legacy shape this case's
   // name describes — `execution_rail: null` — and that shape is now itself
   // retired, on the SAME seam as the session-rail tombstone below but with
-  // its own message. `rails/allowance-module.ts` and this case are scheduled
+  // its own message. `infra/chain/relayer-reads.ts` and this case are scheduled
   // for deletion in #1987.
   it('CHARACTERIZATION: legacy intents never touch the session rail', async () => {
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '0.01', eur: '0.01' })
@@ -379,7 +379,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
   // rail marking" shape this case's name calls "NON-delegation" — that shape
   // now resolves to `retired_allowance`, and the account gate refuses BEFORE
   // the token-config guard (`allowanceConfigured`) this case named ever
-  // runs. `rails/allowance-module.ts` and this case are scheduled for
+  // runs. `infra/chain/relayer-reads.ts` and this case are scheduled for
   // deletion in #1987.
   it('POST /payments still 403s a NON-delegation agent with no allowance row (guard preserved, #835)', async () => {
     // The #835 fix scopes the token-config guard OUT of the delegation rail —
@@ -404,7 +404,7 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
   // #1986: this case's name IS the retired rail — "the account is not
   // migrated" (no rail state) used to mean "fall through to legacy", and now
-  // fail-closes instead. `rails/allowance-module.ts` and this case are
+  // fail-closes instead. `infra/chain/relayer-reads.ts` and this case are
   // scheduled for deletion in #1987.
   it('POST /payments stays on the legacy flow when the account is not migrated', async () => {
 

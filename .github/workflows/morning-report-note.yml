@@ -1,0 +1,111 @@
+name: Morning report note
+
+# Posts a single heads-up from the weekday morning report onto an issue —
+# normally #1289, the standing agent coordination thread.
+#
+# ## Why a workflow instead of the routine commenting directly
+#
+# The report is written by a scheduled cloud routine, which has no write
+# credential of its own: its GITHUB_TOKEN is read-only, so any direct comment
+# would have to go through a connector acting as the OWNER'S account. Two
+# problems with that. Teammates cannot tell a machine's guess from Daniel
+# speaking, and autonomous sessions read this thread and act on what they find
+# — an owner instruction is exactly the wrong thing for a scheduled job to
+# impersonate. Routing through `workflow_dispatch` puts the comment under
+# `github-actions[bot]`, which is how every other automated comment in this
+# repository is attributed, and puts the logic in version control where it can
+# be reviewed.
+#
+# ## Why the note can be refused
+#
+# The caller is an LLM on a cron. When a condition persists — a stalled
+# promotion, an unreviewed PR — it will reach the same conclusion tomorrow and
+# try to say it again. `scripts/ci/morning-report-note.mjs` fingerprints each
+# note and drops one already posted inside the dedupe window, so a channel
+# agents are told to read does not fill with restatements. A refusal is a
+# normal outcome: the job succeeds and says why in the summary.
+#
+# Comment only. This workflow never files, closes, assigns, labels or edits an
+# issue body, and `permissions` grants nothing that would let it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'Issue number to comment on (default 1289, the agent coordination thread)'
+        required: false
+        default: '1289'
+      body:
+        description: 'The heads-up. One or two sentences. Empty means nothing worth saying — the job will skip.'
+        required: true
+      window_days:
+        description: 'Suppress an identical note posted within this many days'
+        required: false
+        default: '7'
+
+permissions:
+  contents: read
+  issues: write # comment only; nothing here creates, closes or relabels
+
+concurrency:
+  group: morning-report-note
+  cancel-in-progress: false # never drop a note mid-flight; they are cheap and rare
+
+jobs:
+  note:
+    name: Post coordination heads-up
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Decide and post
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+          NOTE_BODY: ${{ inputs.body }}
+          WINDOW_DAYS: ${{ inputs.window_days }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          case "$ISSUE" in
+            ''|*[!0-9]*) echo "::error::issue must be a number, got '$ISSUE'"; exit 1 ;;
+          esac
+
+          # Refuse a PR: this thread is for coordination, and a PR comment has a
+          # different audience and review semantics.
+          if gh pr view "$ISSUE" --json number >/dev/null 2>&1; then
+            echo "::error::#$ISSUE is a pull request; this workflow comments on issues only"
+            exit 1
+          fi
+
+          gh issue view "$ISSUE" --json comments \
+            --jq '[.comments[] | {body: .body, created_at: .createdAt}]' > comments.json
+
+          printf '%s' "$NOTE_BODY" > note.txt
+
+          node scripts/ci/morning-report-note.mjs \
+            --note note.txt --comments comments.json --out rendered.md \
+            --window-days "${WINDOW_DAYS:-7}" | tee decision.txt
+
+          POST=$(sed -n 's/^post=//p' decision.txt)
+          REASON=$(sed -n 's/^reason=//p' decision.txt)
+
+          if [ "$POST" != "true" ]; then
+            echo "Skipped: $REASON"
+            echo "### Morning report note — skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REASON" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh issue comment "$ISSUE" --body-file rendered.md
+
+          echo "### Morning report note — posted to #$ISSUE" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat rendered.md >> "$GITHUB_STEP_SUMMARY"

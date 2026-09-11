@@ -25,7 +25,6 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/lib/signer.ts
-  - packages/frontend/src/lib/safe-tx.ts
 last-verified: "2026-09-11"
 ---
 
@@ -172,9 +171,10 @@ flowchart LR
 - **User-authorized execution depends on signer type and threshold.** An EOA
   owner submits the Safe transaction through its connected wallet. A passkey
   signs locally and Haven relays the already-signed transaction. A Safe with a
-  threshold above one is proposed to the Safe Transaction Service for the
-  remaining signatures
-  ([Safe transaction execution](../../packages/frontend/src/lib/safe-tx.ts)).
+  threshold above one was proposed to the Safe Transaction Service for the
+  remaining signatures — that frontend signing plumbing (`lib/safe-tx.ts`) is
+  deleted since [#2848](https://github.com/d-hinders/Haven-AI/issues/2848)
+  (epic #1440).
   **Since [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) no
   dashboard screen composes an arbitrary Safe transfer** — the Send modal and
   its `useSendTransaction` hook are deleted with the Safe rail. The relayed

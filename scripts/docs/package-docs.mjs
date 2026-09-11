@@ -401,9 +401,6 @@ export const EXEMPT_PACKAGE_DOCS = {
     '`packages/sdk/src/agent-guidance.ts`, and a byte-equality test pins this file to it, so the '+
     'thing that catches drift is that test rather than a doc gate. Its audience is a model '+
     'mid-task, so front-matter would be tokens it pays for and cannot use.',
-  'packages/frontend/src/lib/loop-harness/README.md':
-    'Rationale note for a differential-testing harness. The harness IS its own proof — if the ' +
-    'invariant it describes stops holding, the harness fails, not the prose.',
   'packages/qa-agent/src/pilot/README.md':
     'Index of hand-run testnet proof scripts, each of which documents itself in its own header. ' +
     'Governed one level up: `packages/qa-agent/README.md` carries the QA harness contract.',

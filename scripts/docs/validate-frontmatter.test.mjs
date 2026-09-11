@@ -209,10 +209,11 @@ test("CLI: a valid tree exits 0 and says how much it checked", () => {
   assert.equal(status, 0)
   // The COUNTS are asserted, not just the ✓. A walker pointed at the wrong
   // root prints the same tick over zero files; `5 docs` is 4 root docs plus
-  // the one under `docs/`, and 17 is 9 governed + 8 exempt (#2862 added the
-  // accounting module README and its fixture index).
+  // the one under `docs/`, and 16 is 9 governed + 7 exempt (#2862 added the
+  // accounting module README and its fixture index; #2848 retired the
+  // loop-harness exempt row with the harness it documented).
   assert.match(out, /✓ Front-matter valid across 5 docs\./)
-  assert.match(out, /boundary declared for 17 file\(s\): 9 governed, 8 exempt/)
+  assert.match(out, /boundary declared for 16 file\(s\): 9 governed, 7 exempt/)
 })
 
 test("CLI: a doc missing `owner` exits 1 and names the key and the file", () => {

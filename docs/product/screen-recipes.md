@@ -427,13 +427,15 @@ Structure:
 2. Balance card.
 3. Agent access or budgets connected to this account.
 4. Scoped transaction history.
-5. Advanced details section for Haven wallet address, explorer link and
-   required approval threshold. Show modules only if a real advanced
-   module-management surface exists. (An approver list belonged here until
-   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the
-   Approvers surface. The delegation rail's `AccountSignersCard` is a different
-   concept — the account's signer set, not a Safe owner threshold — and is not
-   a substitute for it.)
+5. Advanced details section for Haven wallet address and explorer link. Show
+   modules only if a real advanced module-management surface exists. (A
+   required-approval-threshold element belonged here until
+   [#2848](https://github.com/d-hinders/Haven-AI/issues/2848) removed it: the
+   approvers surface it described was already deleted by
+   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989), and no live
+   screen renders a threshold. The delegation rail's `AccountSignersCard` is a
+   different concept — the account's signer set, not a Safe owner threshold —
+   and is not a substitute for it.)
 
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.

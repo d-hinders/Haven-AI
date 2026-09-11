@@ -3,18 +3,16 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/infra/chain/relayer-reads.ts
-  - packages/frontend/src/lib/allowance-math.ts
-  - packages/frontend/src/lib/loop-harness/**
   - packages/backend/src/modules/mpp/**
   - packages/backend/package.json
   - packages/frontend/package.json
   - .github/workflows/ci.yml
-last-verified: "2026-08-31"
+last-verified: "2026-09-11"
 ---
 
 # Loop Harness Index
 
-Last updated: 2026-08-31 (#2257)
+Last updated: 2026-09-11 (#2848)
 
 The portfolio of **oracle-grounded differential loops** in this repo — see
 [`loop-engineering.md`](./loop-engineering.md) for the concept and the template.
@@ -43,14 +41,20 @@ converged findings (F-1/F-2: routing keyed off relayer wall-clock instead of
 chain `block.timestamp`) remain a good story in git history; the frontend twin
 of the arithmetic lives on under LP-2.
 
-### LP-2 · Frontend allowance display math
+### ~~LP-2 · Frontend allowance display math~~ — WITHDRAWN (#2848)
 
-- **Target:** `computeEffectiveAllowance` in `packages/frontend/src/lib/allowance-math.ts` — retained for the historical `AllowanceBar` renderer and its display-math tests; it has no live Safe data consumer.
-- **Oracle:** reference model of the retired AllowanceModule reset/period-grid semantics (`packages/frontend/src/lib/loop-harness/reference-allowance-module.ts`). Same certification caveat as LP-1; this is not the live delegation authority path.
-- **Harness:** `packages/frontend/src/lib/loop-harness/`
-- **Run:** `npm --prefix packages/frontend test -- src/lib/loop-harness`
-- **Status:** ✅ Converged (green ratchet, 0 open findings).
-- **Findings:** F-1/F-2 — reset prediction keyed off the user's *device* clock (phantom reset / hidden reset near a boundary). F-3 — `nextResetTime` hardcoded `lastReset + 2*period`, wrong for multi-period-idle allowances (observed: reset shown ~2 days early). Both *resolved* (PR #383): explicit chain `nowSec` was threaded through the retired read path; next reset is computed on the period grid. The renderer remains test-only after #2258.
+**WITHDRAWN (#2848, epic #1440).** The target — `computeEffectiveAllowance`
+in `packages/frontend/src/lib/allowance-math.ts` — is deleted together with
+its reference model and harness (`packages/frontend/src/lib/loop-harness/`):
+the historical `AllowanceBar` renderer that read it had no live Safe data
+consumer and no render path, so the convergence finding below stood against a
+component nothing rendered. The loop's converged findings (F-1/F-2: reset
+prediction keyed off the device clock; F-3: `nextResetTime` hardcoded
+`lastReset + 2*period`, wrong for multi-period-idle allowances — both resolved
+in PR #383 by threading explicit chain `nowSec` and computing the next reset
+on the period grid) remain a good story in git history. With the display math
+retired there is no frontend allowance loop; the dashboard's budget rows
+render the delegation rail's signed terms and carry no reset arithmetic at all.
 
 ## Candidate next targets
 
@@ -66,11 +70,5 @@ work.
 
 ## Maintenance notes
 
-- LP-2 is now the only copy of the reset arithmetic (LP-1's backend twin was
-  deleted with its target, #2020), so the old collapse-into-one-oracle cleanup
-  is moot.
-- LP-2's reference model is not certified against the live deployed contract.
-  If a fork-conformance tier is ever added (anvil + fork), certify it there and
-  remove the "candidate finding" caveat from its README.
-- When you open or converge a loop, update this file and the harness `README.md`
-  findings log in the same change.
+- When you open or converge a loop, update this file and the harness
+  `README.md` findings log in the same change.

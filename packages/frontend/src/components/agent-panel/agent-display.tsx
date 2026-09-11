@@ -5,7 +5,7 @@ import { Icon, type IconSize } from '@/components/ui/Icon'
 import { type AgentAllowance } from '@/hooks/useAgents'
 import { formatAllowanceAmount, getTokenDecimals } from '@/lib/allowance-format'
 import { truncate } from '@/lib/format'
-import { getChainTokens } from '@/lib/safe-tx'
+import { getChainTokens } from '@/lib/chains'
 
 /** Display helpers shared across the agent-panel pieces. */
 
@@ -66,16 +66,15 @@ function tokenDecimalsForAllowance(allowance: AgentAllowance, chainId: number): 
  *
  * Nothing here can throw where the old `catch` was reachable. The remaining
  * throw is `tokenDecimals`' `getChainConfig` on an UNKNOWN chain id, and the
- * `catch` bought nothing real against it: `AllowanceBar` reaches the SAME
- * unguarded helper on the same `chainId` under the same unregistered-chain
- * precondition — more easily, in fact, since it does not need the symbol
- * lookup to miss first. Stated precisely, because the review pass corrected a
- * looser version of this sentence: the two are mutually exclusive branches in
- * `AgentCard` (`hasNetworkAllowances ? AllowanceBar : ConfiguredAllowanceRow`),
- * so this is parity of failure CLASS in a sibling branch, not a same-render
- * proof that the crash already happens beside this row. The practical exposure
- * is unchanged either way: `chainId` is app-controlled and bounded to the
- * supported set before it reaches either component, never wire-controlled.
+ * `catch` bought nothing real against it: `chainId` is app-controlled and
+ * bounded to the supported set before it reaches this component, never
+ * wire-controlled — so the unregistered-chain precondition behind that throw is
+ * not reachable from the wire. Stated precisely, because the review pass
+ * corrected a looser version of an earlier claim here: the paragraph used to
+ * lean on a sibling branch reaching the same unguarded helper through the
+ * retired network-allowance half of `AgentCard`; that half was deleted with its
+ * AllowanceModule mirror (#2848), so the parity argument is moot — the
+ * practical exposure is unchanged either way.
  * Hardening `tokenDecimals`/`tokenSymbol` into total functions is a real but
  * separate, pre-existing gap — deliberately not bundled into this fix.
  */
@@ -92,12 +91,15 @@ export function formatConfiguredAllowance(allowance: AgentAllowance, chainId: nu
  *
  * `nowMs` is REQUIRED, and that is the whole point (#1995). This helper used
  * to read `Date.now()` itself, which silently made the device clock the
- * reference for every caller. `AllowanceBar` decides whether an allowance has
- * reset from CHAIN time (`computeEffectiveAllowance(info, chainTimeSec)`) and
- * then rendered the countdown for that same decision through here — so one
- * sentence was computed against two clocks, and any device-clock skew could
- * make the two halves contradict each other outright (a live budget whose
- * countdown reads `now`).
+ * reference for every caller. Its then-sole consumer decided whether an
+ * allowance had reset from CHAIN time and then rendered the countdown for that
+ * same decision through here — so one sentence was computed against two
+ * clocks, and any device-clock skew could make the two halves contradict each
+ * other outright (a live budget whose countdown reads `now`). That consumer —
+ * the retired network-allowance renderer and the reset math it called — was
+ * deleted with the AllowanceModule mirror (#2848); the helper and this
+ * contract are kept for the remaining agent-panel display paths, and the
+ * history is in git.
  *
  * Making the reference time a parameter rather than an ambient read raises the
  * cost of the mistake without eliminating it, and the difference is worth being

@@ -174,3 +174,24 @@ export function getExplorerUrl(
 export function getTokensForChain(chainId: number): Record<string, FrontendTokenConfig> {
   return getChainConfig(chainId).tokens
 }
+
+/**
+ * Token config projected to address + decimals, keyed by display symbol —
+ * the shape token pickers and address→symbol/decimals lookups read.
+ *
+ * Moved here from `lib/safe-tx.ts` (#2848, epic #1440): it was that file's
+ * one shared export, a generic per-chain token list with nothing Safe about
+ * it, and the rest of the file was retired Safe signing plumbing deleted
+ * with the rail. Consumers: `DelegationSendModal`, `useAgentConnectionSetup`,
+ * and `agent-panel/agent-display` — the chain-aware `tokenSymbol`/
+ * `tokenDecimals` display helpers read it directly, and `tokenDecimals` is the
+ * address-scan fallback behind `formatConfiguredAllowance`'s decimals.
+ */
+export function getChainTokens(chainId: number): Record<string, { address: Address | null; decimals: number }> {
+  const tokens = getChainConfig(chainId).tokens
+  const result: Record<string, { address: Address | null; decimals: number }> = {}
+  for (const [key, cfg] of Object.entries(tokens)) {
+    result[key] = { address: cfg.address as Address | null, decimals: cfg.decimals }
+  }
+  return result
+}

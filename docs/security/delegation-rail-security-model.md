@@ -58,8 +58,9 @@ surface is not among the filtered queries: `LIST_BASIC_SAFES_FOR_USER_SQL` and
 `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` have no rail predicate, so it still spans
 every account and agent row);
 since #2847 the relayed owner-signed execution route is deleted with the last
-live Safe-rail behaviour, so nothing on the legacy rail answers with live
-behaviour at all. Neither was ever a policy rail. Read every
+live Safe-rail behaviour, and since #2848 the frontend Safe signing helpers
+(`lib/safe-tx.ts`) are gone too, so nothing on the legacy rail answers with
+live behaviour at all. Neither was ever a policy rail. Read every
 "vs the Safe/session stack" comparison below as a comparison against a
 **retired** baseline, not a live alternative.) The implementation issues are #831 (CI
 invariants) and #832 (exit tool); this doc is their contract.

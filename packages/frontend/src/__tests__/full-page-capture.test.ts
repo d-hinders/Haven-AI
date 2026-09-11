@@ -626,7 +626,7 @@ const AGENTS_PARTIAL: ContentProbe = {
  *
  * `AGENTS_BUDGET_PENDING` is the capture that was reported as 1856px in 1 of 4
  * otherwise identical runs: budget data has not answered, so all three
- * `AgentCard`s show `AllowanceBarSkeleton` instead of a budget. It is 40
+ * `AgentCard`s show their budget placeholder row instead of a budget. It is 40
  * CSS px shorter than `AGENTS_RESOLVED` (872 vs 912), which at
  * `deviceScaleFactor: 2` is exactly the 80 device px in the report.
  *

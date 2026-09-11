@@ -15,7 +15,6 @@ import {
   getStoredPasskeySigner,
   hybridPasskeyOnDevice,
   hybridPasskeyToSignWith,
-  isSafeCapableSigner,
   rememberPasskeyCredentialOnDevice,
   setStoredHybridSigners,
   useActiveSigner,
@@ -182,7 +181,6 @@ describe('useActiveSigner', () => {
       chainId: 84532,
       signers: HYBRID_SIGNERS,
     })
-    expect(isSafeCapableSigner(result.current)).toBe(false)
   })
 
   // ── #1969 (owner decision 2026-08-26): marker-less resolution ────────────

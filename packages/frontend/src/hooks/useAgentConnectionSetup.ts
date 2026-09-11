@@ -14,11 +14,10 @@ import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
 } from '@/hooks/useAgentConnectionSetupStatus'
-import { getChainConfig, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
+import { getChainConfig, getChainTokens, DEFAULT_CHAIN_ID, SUPPORTED_CHAIN_IDS } from '@/lib/chains'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { isIncompleteMoneyInput, validateMoneyInput } from '@/lib/money-input'
-import { getChainTokens } from '@/lib/safe-tx'
 
 // ── Flow types ─────────────────────────────────────────────────────
 

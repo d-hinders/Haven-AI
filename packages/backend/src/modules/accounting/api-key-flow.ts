@@ -11,8 +11,9 @@
  * storage are already there.
  */
 
-import { getConnection, setCompanyInfo, stampFeedFromIfUnset, upsertConnection, type AccountingConnectionRow } from '../../infra/repositories/accounting-connections.js'
+import { getConnection, stampFeedFromIfUnset, upsertConnection, type AccountingConnectionRow } from '../../infra/repositories/accounting-connections.js'
 import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
+import { applyCompanyInfo } from './company-info.js'
 import type { AccountingConnector } from './connector.js'
 import { ProviderError, assertSupportedBaseCurrency, type AccountingProvider, type ProviderCompanyInfo } from './provider.js'
 
@@ -78,6 +79,7 @@ export async function connectWithApiKey(input: {
   const row = (!existed && saved.is_active_destination
     ? await stampFeedFromIfUnset(input.userId, input.provider.id, new Date())
     : null) ?? saved
-  await setCompanyInfo(input.userId, input.provider.id, info)
-  return { ...row, external_company_id: info.externalCompanyId, external_company_name: info.name, base_currency: info.baseCurrency }
+  // #2864: company switch on reconnect / scope_missing on a refused company
+  // read — the same step the OAuth flow runs (`company-info.ts`).
+  return applyCompanyInfo({ provider: input.provider, userId: input.userId, existed, saved: row, info })
 }

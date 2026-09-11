@@ -47,7 +47,6 @@
 
 import {
   getConnection,
-  setCompanyInfo,
   setStatus,
   stampFeedFromIfUnset,
   updateSecrets,
@@ -56,6 +55,7 @@ import {
   type AccountingConnectionRow,
 } from '../../infra/repositories/accounting-connections.js'
 import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
+import { applyCompanyInfo } from './company-info.js'
 import type { AccountingConnector } from './connector.js'
 import {
   ProviderError,
@@ -304,8 +304,9 @@ export async function saveOAuth2Connection(
 /**
  * The callback's work, after the state has been verified and consumed:
  * exchange the code, ask the provider who the grant belongs to, refuse a
- * ledger that books in the wrong currency, and only then store. A refused
- * connect stores nothing — the user sees `error` and nothing landed.
+ * ledger that books in the wrong currency (#2864: "Haven currently feeds SEK
+ * ledgers only"), and only then store. A refused connect stores nothing — an
+ * existing row is left exactly as it was, and the user sees `error`.
  *
  * The company step runs only when the descriptor declares `companyInfo`;
  * the currency check runs regardless (a null currency passes), so the
@@ -326,10 +327,20 @@ export async function completeOAuth2Connect(input: {
   if (!secretsKeyConfigured()) throw new SecretsKeyMissingError()
 
   const tokens = await exchangeCode(input.cfg, input.code, fetchImpl)
+  const freshSecrets = tokensToSecrets(tokens) as unknown as Record<string, unknown>
   const info: ProviderCompanyInfo = input.provider.capabilities.companyInfo
-    ? await input.connector.getCompanyInfo(tokensToSecrets(tokens) as unknown as Record<string, unknown>)
+    ? await input.connector.getCompanyInfo(freshSecrets)
     : { externalCompanyId: null, name: null, baseCurrency: null }
-  assertSupportedBaseCurrency(info)
+  try {
+    assertSupportedBaseCurrency(info)
+  } catch (err) {
+    // #2864: the code is already exchanged, so a refused grant exists at the
+    // provider but will never be stored here. #2863's rule — a grant Haven
+    // drops is also revoked at the provider — applies; best-effort, the
+    // refusal is the answer either way.
+    if (input.provider.capabilities.revoke) await input.connector.revoke(freshSecrets).catch(() => {})
+    throw err
+  }
 
   const existed = await getConnection(input.userId, input.provider.id)
   const saved = await saveOAuth2Connection(input.provider.id, input.userId, tokens)
@@ -339,8 +350,10 @@ export async function completeOAuth2Connect(input: {
   const row = (!existed && saved.is_active_destination
     ? await stampFeedFromIfUnset(input.userId, input.provider.id, new Date())
     : null) ?? saved
-  await setCompanyInfo(input.userId, input.provider.id, info)
-  return { ...row, external_company_id: info.externalCompanyId, external_company_name: info.name, base_currency: info.baseCurrency }
+  // #2864: a reconnect to a DIFFERENT company is a company switch (feed_from
+  // = now, switch recorded); a scope refusal on the company read marks the
+  // row scope_missing. Both decisions are `company-info.ts`'s.
+  return applyCompanyInfo({ provider: input.provider, userId: input.userId, existed, saved: row, info })
 }
 
 /**

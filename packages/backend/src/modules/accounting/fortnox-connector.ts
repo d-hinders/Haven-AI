@@ -147,7 +147,21 @@ async function fortnoxGet<T>(accessToken: string, path: string, fetchImpl: typeo
   } catch (err) {
     throw new FortnoxError(`Could not reach Fortnox: ${err instanceof Error ? err.message : String(err)}`, 0)
   }
-  if (!res.ok) throw new FortnoxError(`Fortnox GET ${path} failed (HTTP ${res.status}).`, res.status)
+  if (!res.ok) {
+    // #2864: carry Fortnox's error code on a GET too — `/companyinformation`
+    // answers a grant without the scope with the same `[2000663]` the file
+    // connection POST does, and the connect flow must tell that refusal from
+    // an outage. Messages describe the request, never credentials.
+    const detail = await res
+      .json()
+      .then((b) => (b as { ErrorInformation?: { message?: string; code?: number } }).ErrorInformation)
+      .catch(() => undefined)
+    throw new FortnoxError(
+      `Fortnox GET ${path} failed (HTTP ${res.status}${detail?.message ? `: ${detail.message}` : ''}${detail?.code ? ` [${detail.code}]` : ''}).`,
+      res.status,
+      detail?.code,
+    )
+  }
   return (await res.json()) as T
 }
 
@@ -394,14 +408,19 @@ export class FortnoxConnector implements AccountingConnector {
   }
 
   /**
-   * Who the grant belongs to. `GET /companyinformation` needs the
-   * `companyinformation` scope, which the feed's grant does not carry
-   * (widening the scope means re-registering the integration's permissions in
-   * the developer portal, and is out of this slice) — so a scope refusal
-   * degrades to "unknown company" rather than blocking the connect. The base
-   * currency is reported as SEK regardless: a Fortnox company books in SEK
-   * (Fortnox's bookkeeping currency is fixed), which is why the generic
-   * flow's currency rule passes here by construction.
+   * Who the grant belongs to (#2864): `GET /companyinformation` →
+   * `DatabaseNumber` is the tenant id (`external_company_id`), `CompanyName`
+   * the display name. The base currency is SEK by construction — a Fortnox
+   * company books in SEK (Fortnox's bookkeeping currency is fixed) — which is
+   * why the generic flow's currency rule passes here.
+   *
+   * The call needs the `companyinformation` scope, in `FORTNOX_SCOPE` since
+   * #2864. A grant consented BEFORE that (no new authorization code, only
+   * refreshes) is refused for scope; that refusal — and ONLY that refusal:
+   * HTTP 403, or Fortnox's `[2000663]` "Har inte behörighet för scope" —
+   * degrades to an unknown company with `scopeMissing: true`, which the flow
+   * records as `scope_missing` on the connection. Anything else (network,
+   * 401, 429, 5xx) is thrown: an outage is not a missing scope.
    */
   async getCompanyInfo(secrets: ProviderSecrets): Promise<ProviderCompanyInfo> {
     const accessToken = String(secrets.accessToken ?? '')
@@ -416,8 +435,10 @@ export class FortnoxConnector implements AccountingConnector {
         baseCurrency: 'SEK',
       }
     } catch (err) {
+      // MUTATION TARGET (fortnox-connector.test.ts "getCompanyInfo"): widening
+      // this to every error turns a Fortnox outage into a scope_missing row.
       if (err instanceof FortnoxError && (err.status === 403 || isFortnoxScopeError(err))) {
-        return { externalCompanyId: null, name: null, baseCurrency: 'SEK' }
+        return { externalCompanyId: null, name: null, baseCurrency: 'SEK', scopeMissing: true }
       }
       throw err
     }

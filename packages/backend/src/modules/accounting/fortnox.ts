@@ -38,7 +38,14 @@ export const FORTNOX_API_BASE = 'https://api.fortnox.se/3'
 // Widening the scope requires existing connections to re-consent;
 // pre-widening connections degrade to note-only attachment
 // (see fortnox-connector.ts).
-export const FORTNOX_SCOPE = 'bookkeeping supplierinvoice supplier archive inbox connectfile'
+// #2864: `companyinformation` lets the connect flow read `GET
+// /3/companyinformation` — which company (DatabaseNumber, CompanyName) the
+// grant points at — so a reconnect to a different company is detected as a
+// company switch. Adding a scope does NOT invalidate existing grants: a
+// pre-#2864 connection keeps refreshing and pushing without it, and only a
+// fresh consent (a new authorization code) carries it. The integration's
+// registered permissions in the developer portal must include it (Företagsinformation).
+export const FORTNOX_SCOPE = 'bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation'
 
 export interface FortnoxCredentials {
   clientId: string

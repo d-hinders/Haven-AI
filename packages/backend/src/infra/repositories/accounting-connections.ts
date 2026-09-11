@@ -176,6 +176,29 @@ export const SET_COMPANY_INFO_SQL = `UPDATE accounting_connections
      WHERE user_id = $1 AND provider = $2`
 
 /**
+ * #2864: a reconnect that came back with a DIFFERENT `external_company_id`
+ * is a company switch. One row, one statement: the company fields are
+ * replaced, `feed_from` moves to the switch time (nothing settled before it
+ * is fed into the new company — the same rule as activate), `status_reason`
+ * names the switch for the dashboard, and the switch is appended to
+ * `settings.companySwitches` — the row's JSONB column, so no migration and
+ * no overloaded text column. That log is what attributes a `pushed` sync row
+ * to a company: `accounting_feed_syncs` has no company column, so a row is
+ * attributed by its `created_at` against the switch times (see
+ * `companySwitchLog` and `reopenPushedPayment` in the accounting module).
+ * `$6` is the switch entry as JSON text; the concatenation is append-only.
+ */
+export const RECORD_COMPANY_SWITCH_SQL = `UPDATE accounting_connections
+     SET external_company_id = $3, external_company_name = $4, base_currency = $5,
+         feed_from = ($6::jsonb ->> 'at')::timestamptz,
+         status_reason = $7,
+         settings = jsonb_set(settings, '{companySwitches}',
+                              COALESCE(settings -> 'companySwitches', '[]'::jsonb) || jsonb_build_array($6::jsonb)),
+         updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2
+     RETURNING ${COLUMNS}`
+
+/**
  * #2863: the per-connection refresh lock. A provider refresh token is
  * single-use (Fortnox rotates it on every refresh), so two workers refreshing
  * the same row at once — the settlement hook and a "Sync now" click — burn
@@ -316,6 +339,56 @@ export async function setCompanyInfo(
   db: Executor = pool,
 ): Promise<void> {
   await db.query(SET_COMPANY_INFO_SQL, [userId, provider, info.externalCompanyId, info.name, info.baseCurrency])
+}
+
+/** One entry of `settings.companySwitches` (#2864). `at` is the ISO switch time — the new `feed_from`. */
+export interface CompanySwitchEntry {
+  at: string
+  fromCompanyId: string
+  fromCompanyName: string | null
+  toCompanyId: string
+  toCompanyName: string | null
+}
+
+/** The append-only switch log on a row, oldest first; empty when the row never switched company. */
+export function companySwitchLog(row: Pick<AccountingConnectionRow, 'settings'>): CompanySwitchEntry[] {
+  const raw = (row.settings as { companySwitches?: unknown } | null)?.companySwitches
+  if (!Array.isArray(raw)) return []
+  return raw.filter(
+    (e): e is CompanySwitchEntry =>
+      typeof e === 'object' && e !== null && typeof (e as CompanySwitchEntry).at === 'string' && typeof (e as CompanySwitchEntry).toCompanyId === 'string',
+  )
+}
+
+/** See `RECORD_COMPANY_SWITCH_SQL`. Returns the row after the switch, or null when there is no row. */
+export async function recordCompanySwitch(
+  userId: string,
+  provider: string,
+  input: {
+    from: { externalCompanyId: string; name: string | null }
+    to: { externalCompanyId: string; name: string | null; baseCurrency: string | null }
+    at: Date
+    reason: string
+  },
+  db: Executor = pool,
+): Promise<AccountingConnectionRow | null> {
+  const entry: CompanySwitchEntry = {
+    at: input.at.toISOString(),
+    fromCompanyId: input.from.externalCompanyId,
+    fromCompanyName: input.from.name,
+    toCompanyId: input.to.externalCompanyId,
+    toCompanyName: input.to.name,
+  }
+  const r = await db.query<AccountingConnectionRow>(RECORD_COMPANY_SWITCH_SQL, [
+    userId,
+    provider,
+    input.to.externalCompanyId,
+    input.to.name,
+    input.to.baseCurrency,
+    JSON.stringify(entry),
+    input.reason,
+  ])
+  return r.rows[0] ?? null
 }
 
 export async function disconnect(

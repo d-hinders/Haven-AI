@@ -586,7 +586,7 @@ const accountingConnection = {
   type: 'object',
   required: [
     'provider', 'displayName', 'authKind', 'status', 'statusReason', 'isActiveDestination', 'feedFrom',
-    'grantedScope', 'tokenExpiresAt', 'externalCompanyName', 'baseCurrency', 'lastPushAt', 'lastError',
+    'grantedScope', 'tokenExpiresAt', 'externalCompanyId', 'externalCompanyName', 'baseCurrency', 'lastPushAt', 'lastError',
     'connectedAt', 'updatedAt',
   ],
   properties: {
@@ -596,15 +596,19 @@ const accountingConnection = {
     status: {
       type: 'string',
       enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
-      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent.',
+      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.',
     },
     statusReason: { type: ['string', 'null'] },
     isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
     feedFrom: { type: ['string', 'null'], format: 'date-time', description: 'Nothing settled before this is fed. Set to now by activate.' },
     grantedScope: { type: ['string', 'null'] },
     tokenExpiresAt: { type: ['string', 'null'], format: 'date-time', description: 'Access-token expiry (OAuth2 providers). Null for API-key providers.' },
-    externalCompanyName: { type: ['string', 'null'] },
-    baseCurrency: { type: ['string', 'null'], description: 'ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect.' },
+    externalCompanyId: {
+      type: ['string', 'null'],
+      description: "The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it.",
+    },
+    externalCompanyName: { type: ['string', 'null'], description: 'The company the connection points at, for "Connected to <Company AB>" (#2864).' },
+    baseCurrency: { type: ['string', 'null'], description: 'ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864).' },
     lastPushAt: { type: ['string', 'null'], format: 'date-time' },
     lastError: { type: ['string', 'null'] },
     connectedAt: { type: 'string', format: 'date-time' },
@@ -3042,6 +3046,10 @@ export const openapiSpec = {
                     },
                     available: { type: 'boolean', description: 'hosted AND flagEnabled AND entitled — the one field a caller needs to decide whether to render the feed.' },
                     connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
+                    companyName: {
+                      type: ['string', 'null'],
+                      description: 'The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, or when the grant could not read it (`scope_missing`). Absent when the feed is unavailable.',
+                    },
                     syncs: { type: 'array', items: feedSyncRow },
                     counts: {
                       type: 'object',
@@ -3153,7 +3161,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '404': { ...errorResponse, description: 'The accounting feed is not available for this caller.' },
           '409': {
-            description: 'Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us.',
+            description: 'Refused, nothing written — the invoice still exists, the row is not pushed, it moved under us, or (#2864, `previous_company`) the row was delivered into the company the connection pointed at BEFORE its latest company switch: its record lives in that company, "missing" in the current one is the correct verdict, and reopening would re-feed the previous company\'s history into the new one.',
             content: {
               'application/json': {
                 schema: {
@@ -3161,8 +3169,9 @@ export const openapiSpec = {
                   required: ['error', 'error_code'],
                   properties: {
                     error: { type: 'string' },
-                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref', 'invoice_exists'] },
+                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref', 'invoice_exists', 'previous_company'] },
                     invoice_number: { type: 'integer' },
+                    switched_at: { type: 'string', format: 'date-time', description: 'With `previous_company`: when the connection switched company.' },
                   },
                 },
               },
@@ -3267,7 +3276,7 @@ export const openapiSpec = {
         operationId: 'accountingOAuthCallback',
         summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
         description:
-          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key, a ledger in a non-SEK currency and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `connect=denied` because that is the user's own action, not a failure to hide.",
+          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a non-SEK currency is `connect=error&reason=unsupported_currency` (#2864: \"Haven currently feeds SEK ledgers only\" — nothing was stored; an existing connection is left as it was, and the user can pick another company).",
         security: [],
         parameters: [
           { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
@@ -3277,7 +3286,7 @@ export const openapiSpec = {
         ],
         responses: {
           '302': {
-            description: 'Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`.',
+            description: 'Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal.',
           },
         },
       },
@@ -3288,7 +3297,7 @@ export const openapiSpec = {
         operationId: 'connectAccountingApiKey',
         summary: 'Connect a live API-key provider: validate the key at the provider, then store it encrypted.',
         description:
-          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409). No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.',
+          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven currently feeds SEK ledgers only") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
@@ -3311,7 +3320,10 @@ export const openapiSpec = {
           '400': { ...errorResponse, description: 'Missing key, or the provider rejected it.' },
           '401': errorResponse,
           '404': { ...errorResponse, description: 'Unknown provider.' },
-          '409': providerRefusal,
+          '409': {
+            ...providerRefusal,
+            description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a non-SEK currency (`UNSUPPORTED_BASE_CURRENCY`, #2864 — nothing stored).',
+          },
           '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
         },
       },

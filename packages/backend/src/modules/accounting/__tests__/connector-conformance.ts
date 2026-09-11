@@ -25,22 +25,27 @@
  *      sync row `pushed` with its note and flips only the connection state —
  *      never re-pushable
  *   7. a provider reporting a non-SEK base currency is refused at connect by
- *      the generic flow (enforcement policy is #2864; this proves the flow
- *      calls it)
+ *      the generic flow with "Haven currently feeds SEK ledgers only", before
+ *      any secret is stored (#2864 owns the policy; this proves BOTH flows —
+ *      the OAuth2 runner and the API-key runner — reach the enforcement point)
+ *   8. a reconnect that reports a DIFFERENT company id is a company switch
+ *      (#2864): one row, company fields replaced, `feed_from` = now, the
+ *      switch recorded, the previous company's `pushed` rows untouched and
+ *      refused by the verification-gated reopen
  */
 import { randomBytes } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { getConnection, upsertConnection } from '../../../infra/repositories/accounting-connections.js'
+import { companySwitchLog, getConnection, listConnections, upsertConnection } from '../../../infra/repositories/accounting-connections.js'
 import { getSyncState } from '../../../infra/repositories/accounting-feed-syncs.js'
 import { SECRETS_KEY_ENV, encryptSecrets } from '../../../infra/secrets.js'
 import type { AccountingConnector, ProviderSecrets } from '../connector.js'
 import { clearConnectors, registerConnector } from '../connector.js'
-import { disconnectProvider } from '../connections.js'
+import { disconnectProvider, reopenPushedPayment } from '../connections.js'
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import type { FeedTransaction } from '../feed-transaction.js'
-import { UnsupportedBaseCurrencyError, type AccountingProvider, type ProviderCompanyInfo } from '../provider.js'
+import { UNSUPPORTED_BASE_CURRENCY_MESSAGE, UnsupportedBaseCurrencyError, type AccountingProvider, type ProviderCompanyInfo } from '../provider.js'
 import { clearTestProviders, registerTestProvider } from '../registry.js'
 
 export type AttachmentOutcome = 'ok' | 'fail' | 'scope_missing'
@@ -258,16 +263,95 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
       const userId = await seedUser()
       const c = await harness.setup({ userId, company: { baseCurrency: 'EUR' } })
       registerConnector(c.connector)
-      await expect(c.connect()).rejects.toBeInstanceOf(UnsupportedBaseCurrencyError)
+      // MUTATION TARGET (#2864): drop `assertSupportedBaseCurrency` from the
+      // flow and the connect resolves with a stored EUR row.
+      const err = await c.connect().then(() => null, (e: unknown) => e)
+      expect(err).toBeInstanceOf(UnsupportedBaseCurrencyError)
+      expect((err as Error).message).toContain(UNSUPPORTED_BASE_CURRENCY_MESSAGE)
+      expect((err as Error).message).toContain('EUR')
+      // Before any secret is stored: no row at all.
       expect(await connection(userId)).toBeNull()
+      expect(await listConnections(userId)).toEqual([])
+      // An OAuth2 grant was already obtained at the provider by the code
+      // exchange; it is revoked there when the descriptor can (#2863's rule).
+      expect(c.revokeCalls()).toBe(harness.provider.authKind === 'oauth2' && harness.provider.capabilities.revoke ? 1 : 0)
     })
 
-    it('7b. positive control: the same flow with a SEK ledger stores the connection', async () => {
+    it('7c. … and a RECONNECT that reports a non-SEK ledger leaves the existing row exactly as it was', async () => {
       const userId = await seedUser()
-      const c = await harness.setup({ userId, company: { baseCurrency: 'SEK' } })
+      const sek = await harness.setup({ userId, company: { baseCurrency: 'SEK' } })
+      registerConnector(sek.connector)
+      await sek.connect()
+      const before = (await connection(userId))!
+      clearConnectors()
+      const eur = await harness.setup({ userId, company: { baseCurrency: 'EUR' } })
+      registerConnector(eur.connector)
+      await expect(eur.connect()).rejects.toBeInstanceOf(UnsupportedBaseCurrencyError)
+      const after = (await connection(userId))!
+      expect(after).toEqual(before)
+      expect(after.base_currency).toBe('SEK')
+    })
+
+    it('7b. positive control: the same flow with a SEK ledger stores the connection with id, name and currency', async () => {
+      const userId = await seedUser()
+      const c = await harness.setup({ userId, company: { externalCompanyId: 'co-7b', name: 'Sju B AB', baseCurrency: 'SEK' } })
       registerConnector(c.connector)
       await expect(c.connect()).resolves.toBeUndefined()
-      expect(await connection(userId)).toMatchObject({ status: 'connected', base_currency: 'SEK', is_active_destination: true })
+      expect(await connection(userId)).toMatchObject({
+        status: 'connected', base_currency: 'SEK', is_active_destination: true,
+        external_company_id: 'co-7b', external_company_name: 'Sju B AB',
+      })
+    })
+
+    it('8. a reconnect reporting a DIFFERENT company id is a company switch: one row, fields replaced, feed_from = now, switch recorded, previous pushes untouched and not reopenable', async () => {
+      const userId = await seedUser()
+      const alpha = await harness.setup({ userId, company: { externalCompanyId: 'co-A', name: 'Alpha AB', baseCurrency: 'SEK' } })
+      registerConnector(alpha.connector)
+      await alpha.connect()
+      const first = (await connection(userId))!
+      expect(first).toMatchObject({ external_company_id: 'co-A', external_company_name: 'Alpha AB', is_active_destination: true })
+      expect(companySwitchLog(first)).toEqual([])
+
+      // Deliver one payment into Alpha; the feed-from floor is the first
+      // connect's stamp, so the case's fixed settledAt must not sit below it.
+      const pid = paymentId()
+      await db.query(`UPDATE accounting_connections SET feed_from = NULL WHERE user_id = $1`, [userId])
+      await feedSettledPayment(userId, pid)
+      const pushed = await syncRow(userId, pid)
+      expect(pushed?.status).toBe('pushed')
+      expect(alpha.createCalls()).toBe(1)
+
+      // Reconnect — same user, same provider — and the provider now reports Beta.
+      await new Promise((r) => setTimeout(r, 25))
+      clearConnectors()
+      const beta = await harness.setup({ userId, company: { externalCompanyId: 'co-B', name: 'Beta AB', baseCurrency: 'SEK' } })
+      registerConnector(beta.connector)
+      const before = Date.now()
+      await beta.connect()
+
+      const rows = await listConnections(userId)
+      expect(rows).toHaveLength(1)
+      const switched = rows[0]
+      expect(switched).toMatchObject({ id: first.id, external_company_id: 'co-B', external_company_name: 'Beta AB', base_currency: 'SEK', status: 'connected' })
+      // MUTATION TARGET (#2864): without the feed_from stamp on a switch the
+      // floor stays NULL and the next sync feeds Alpha's history into Beta.
+      expect(switched.feed_from).not.toBeNull()
+      expect(new Date(switched.feed_from!).getTime()).toBeGreaterThanOrEqual(before - 1000)
+      expect(switched.status_reason).toMatch(/company switched .*Alpha AB \(co-A\) → Beta AB \(co-B\)/)
+      expect(companySwitchLog(switched)).toMatchObject([{ fromCompanyId: 'co-A', fromCompanyName: 'Alpha AB', toCompanyId: 'co-B', toCompanyName: 'Beta AB' }])
+      expect(new Date(companySwitchLog(switched)[0].at).toISOString()).toBe(new Date(switched.feed_from!).toISOString())
+
+      // Alpha's pushed row keeps its external ref; re-feeding it creates nothing in Beta.
+      expect(await syncRow(userId, pid)).toMatchObject({ status: 'pushed', external_ref: pushed!.external_ref })
+      await feedSettledPayment(userId, pid)
+      expect(beta.createCalls()).toBe(0)
+      expect(await syncRow(userId, pid)).toMatchObject({ status: 'pushed', external_ref: pushed!.external_ref })
+
+      // The verification-gated reopen refuses the pre-switch row: it belongs
+      // to the previous company, and a reopen would re-feed it into Beta.
+      const refused = await reopenPushedPayment(userId, harness.provider.id, pid, 'reopened: invoice missing')
+      expect(refused).toMatchObject({ reopened: false, error_code: 'previous_company', company_name: 'Alpha AB' })
+      expect(await syncRow(userId, pid)).toMatchObject({ status: 'pushed' })
     })
   })
 }

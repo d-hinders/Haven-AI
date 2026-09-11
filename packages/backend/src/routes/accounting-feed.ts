@@ -5,7 +5,12 @@ import { requireAccountingFeed } from '../middleware/accountingFeed.js'
 import { accountingFeedAvailability } from '../modules/agents/index.js'
 import { getAccountingFeedStatus, getAccountingFeedCounts, syncUser } from '../modules/accounting/index.js'
 import { hasLiveConnector } from '../modules/accounting/index.js'
-import { hasActiveConnection, verifyPushedPayment, reopenMissingPushed } from '../modules/accounting/index.js'
+import {
+  PREVIOUS_COMPANY_REASON,
+  getActiveConnectionSummary,
+  verifyPushedPayment,
+  reopenPushedPayment,
+} from '../modules/accounting/index.js'
 
 /**
  * Reporting feed surface for the dashboard (epic #491, P2 #500).
@@ -43,14 +48,16 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
     if (!available) {
       return { ...base, available: false, connected: false, syncs: [], counts: { pending: 0, failed: 0, exhausted: 0 } }
     }
+    // #2864: the company the active destination points at, so the page can
+    // say "Connected to <Company AB>". Null until a grant with the scope read it.
     // #2866: `counts` is over EVERY row, not the 100 the list shows — the
     // retry sweep's pending / retryable / given-up numbers.
-    const [connected, syncs, counts] = await Promise.all([
-      hasActiveConnection(sub),
+    const [active, syncs, counts] = await Promise.all([
+      getActiveConnectionSummary(sub),
       getAccountingFeedStatus(sub),
       getAccountingFeedCounts(sub),
     ])
-    return { ...base, available: true, connected, syncs, counts }
+    return { ...base, available: true, connected: active !== null, companyName: active?.externalCompanyName ?? null, syncs, counts }
   })
 
   // POST /accounting/feed/sync — backfill + retry (gated)
@@ -97,7 +104,7 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
           invoice_number: result.verification.invoice_number,
         })
       }
-      const reopened = await reopenMissingPushed(
+      const reopened = await reopenPushedPayment(
         sub,
         result.provider,
         paymentId,
@@ -107,7 +114,20 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
           ? `reopened ${result.verification.checked_at}: ${result.provider} invoice ${result.verification.invoice_number} belongs to a different external invoice number (company-switch collision) — our record was never delivered under it`
           : `reopened ${result.verification.checked_at}: ${result.provider} invoice ${result.verification.invoice_number} no longer exists`,
       )
-      if (!reopened) {
+      if (!reopened.reopened && reopened.error_code === 'previous_company') {
+        // #2864: the row was delivered into the company the connection
+        // pointed at BEFORE its latest company switch. Missing in the current
+        // company is the correct verdict, and reopening would re-feed the
+        // previous company's history into the new one. Nothing written.
+        return reply.code(409).send({
+          error:
+            `This payment ${PREVIOUS_COMPANY_REASON}${reopened.company_name ? ` (${reopened.company_name})` : ''} — ` +
+            `the connection switched company at ${reopened.switched_at}. Its record lives in that company; nothing was changed.`,
+          error_code: 'previous_company',
+          switched_at: reopened.switched_at,
+        })
+      }
+      if (!reopened.reopened) {
         // The row moved between the verification and the flip (raced by a
         // concurrent reopen/sync) — report honestly rather than pretending.
         return reply.code(409).send({

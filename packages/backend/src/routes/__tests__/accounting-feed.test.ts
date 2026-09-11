@@ -48,8 +48,17 @@ const orchestratorMocks = vi.hoisted(() => ({
 }))
 const connectorMocks = vi.hoisted(() => ({ hasLiveConnector: vi.fn() }))
 // #2862: the feed routes act on the ACTIVE connection through the generic
-// service (`hasActiveConnection`, `verifyPushedPayment`), not on Fortnox.
-const fortnoxMocks = vi.hoisted(() => ({ hasActiveConnection: vi.fn(), verifyPushedPayment: vi.fn(), reopenMissingPushed: vi.fn() }))
+// service (`getActiveConnectionSummary`, `verifyPushedPayment`), not on
+// Fortnox. #2864: the reopen goes through the company-aware
+// `reopenPushedPayment`, and the status carries the active company's name.
+const fortnoxMocks = vi.hoisted(() => ({
+  getActiveConnectionSummary: vi.fn(),
+  verifyPushedPayment: vi.fn(),
+  reopenPushedPayment: vi.fn(),
+  PREVIOUS_COMPANY_REASON: 'belongs to the previous company',
+}))
+/** What `getActiveConnectionSummary` answers for a connected user — the summary's company half. */
+const ACTIVE = { provider: 'fortnox', externalCompanyId: '1234567', externalCompanyName: 'Haven Sandbox AB', baseCurrency: 'SEK', isActiveDestination: true, status: 'connected' }
 // feed-orchestrator.ts, connector.ts and fortnox-connection.ts all fold into
 // one public entry point post-#998 (modules/accounting/index.ts) — a single
 // mock factory merging all three, not three vi.mock calls to the same
@@ -87,9 +96,9 @@ describe('reporting routes', () => {
     orchestratorMocks.getAccountingFeedCounts.mockReset().mockResolvedValue({ pending: 0, failed: 0, exhausted: 0 })
     orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
-    fortnoxMocks.hasActiveConnection.mockReset().mockResolvedValue(false)
+    fortnoxMocks.getActiveConnectionSummary.mockReset().mockResolvedValue(null)
     fortnoxMocks.verifyPushedPayment.mockReset()
-    fortnoxMocks.reopenMissingPushed.mockReset()
+    fortnoxMocks.reopenPushedPayment.mockReset()
   })
 
   function authed(method: 'GET' | 'POST', url: string) {
@@ -114,7 +123,7 @@ describe('reporting routes', () => {
     it('mode all: a user with no entitlement row sees the feed as available, and the status says so', async () => {
       setAvailability(true, true, 'all')
       connectorMocks.hasLiveConnector.mockReturnValue(true)
-      fortnoxMocks.hasActiveConnection.mockResolvedValue(false)
+      fortnoxMocks.getActiveConnectionSummary.mockResolvedValue(null)
       orchestratorMocks.getAccountingFeedStatus.mockResolvedValue([])
       const res = await authed('GET', '/accounting/feed/status')
       expect(res.statusCode).toBe(200)
@@ -155,7 +164,7 @@ describe('reporting routes', () => {
       // (it's not gated), but the gated DATA path — the Fortnox connection and
       // sync status — is never touched for an unentitled account.
       expect(connectorMocks.hasLiveConnector).toHaveBeenCalled()
-      expect(fortnoxMocks.hasActiveConnection).not.toHaveBeenCalled()
+      expect(fortnoxMocks.getActiveConnectionSummary).not.toHaveBeenCalled()
       expect(orchestratorMocks.getAccountingFeedStatus).not.toHaveBeenCalled()
       expect(orchestratorMocks.getAccountingFeedCounts).not.toHaveBeenCalled()
     })
@@ -163,7 +172,7 @@ describe('reporting routes', () => {
     it('returns availability, connection state and syncs when entitled', async () => {
       setAvailability(true)
       connectorMocks.hasLiveConnector.mockReturnValue(true)
-      fortnoxMocks.hasActiveConnection.mockResolvedValue(true)
+      fortnoxMocks.getActiveConnectionSummary.mockResolvedValue(ACTIVE)
       // A whole FeedSyncRow, as listSyncs really returns one (#1446) — a
       // partial fixture describes a response the table cannot produce.
       const syncs = [{
@@ -194,6 +203,8 @@ describe('reporting routes', () => {
         entitlementMode: 'granted',
         available: true,
         connected: true,
+        // #2864: "Connected to Haven Sandbox AB" — the active connection's company.
+        companyName: 'Haven Sandbox AB',
         syncs,
         counts: { pending: 1, failed: 2, exhausted: 1 },
       })
@@ -204,12 +215,19 @@ describe('reporting routes', () => {
 
     it('reports connected:false when entitled but Fortnox is not connected', async () => {
       entitlementMocks.accountingFeedAvailable.mockResolvedValue(true)
-      fortnoxMocks.hasActiveConnection.mockResolvedValue(false)
+      fortnoxMocks.getActiveConnectionSummary.mockResolvedValue(null)
 
       const res = await authed('GET', '/accounting/feed/status')
 
       expect(res.statusCode).toBe(200)
-      expect(res.json()).toMatchObject({ available: true, connected: false })
+      expect(res.json()).toMatchObject({ available: true, connected: false, companyName: null })
+    })
+
+    it('#2864: companyName is null when the active grant could not read the company (a null name)', async () => {
+      fortnoxMocks.getActiveConnectionSummary.mockResolvedValue({ ...ACTIVE, externalCompanyId: null, externalCompanyName: null })
+      const res = await authed('GET', '/accounting/feed/status')
+      expect(res.json()).toMatchObject({ connected: true, companyName: null })
+      expectMatchesSpec('GET', '/accounting/feed/status', res.json())
     })
   })
 
@@ -264,16 +282,16 @@ describe('reporting routes', () => {
       const res = await authed('POST', '/accounting/feed/reopen/pay-1')
       expect(res.statusCode).toBe(404)
       expect(fortnoxMocks.verifyPushedPayment).not.toHaveBeenCalled()
-      expect(fortnoxMocks.reopenMissingPushed).not.toHaveBeenCalled()
+      expect(fortnoxMocks.reopenPushedPayment).not.toHaveBeenCalled()
     })
 
     it('reopens ONLY when the provider confirms the invoice is gone — on the ACTIVE connection\'s provider', async () => {
       fortnoxMocks.verifyPushedPayment.mockResolvedValue(GONE)
-      fortnoxMocks.reopenMissingPushed.mockResolvedValue(true)
+      fortnoxMocks.reopenPushedPayment.mockResolvedValue({ reopened: true })
       const res = await authed('POST', '/accounting/feed/reopen/pay-1')
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ reopened: true, payment_id: 'pay-1' })
-      expect(fortnoxMocks.reopenMissingPushed).toHaveBeenCalledWith(
+      expect(fortnoxMocks.reopenPushedPayment).toHaveBeenCalledWith(
         USER, 'fortnox', 'pay-1', expect.stringMatching(/no longer exists/),
       )
       expectMatchesSpec('POST', '/accounting/feed/reopen/{paymentId}', res.json())
@@ -285,10 +303,10 @@ describe('reporting routes', () => {
         provider: 'fortnox',
         verification: { ...GONE.verification, missing: 'foreign_invoice' as const },
       })
-      fortnoxMocks.reopenMissingPushed.mockResolvedValue(true)
+      fortnoxMocks.reopenPushedPayment.mockResolvedValue({ reopened: true })
       const res = await authed('POST', '/accounting/feed/reopen/pay-1')
       expect(res.statusCode).toBe(200)
-      const reason = String(fortnoxMocks.reopenMissingPushed.mock.calls[0][3])
+      const reason = String(fortnoxMocks.reopenPushedPayment.mock.calls[0][3])
       expect(reason).toMatch(/different external invoice number/)
       expect(reason).not.toMatch(/no longer exists/)
     })
@@ -305,7 +323,24 @@ describe('reporting routes', () => {
       const res = await authed('POST', '/accounting/feed/reopen/pay-1')
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'invoice_exists', invoice_number: 11 })
-      expect(fortnoxMocks.reopenMissingPushed).not.toHaveBeenCalled()
+      expect(fortnoxMocks.reopenPushedPayment).not.toHaveBeenCalled()
+    })
+
+    it('#2864: a pushed row from BEFORE the connection\'s company switch is refused as "belongs to the previous company" — 409, nothing written', async () => {
+      // The provider says the invoice is missing in the CURRENT company —
+      // correct, it was delivered into the previous one — and the
+      // company-aware reopen refuses instead of flipping pushed → failed.
+      fortnoxMocks.verifyPushedPayment.mockResolvedValue(GONE)
+      fortnoxMocks.reopenPushedPayment.mockResolvedValue({
+        reopened: false, error_code: 'previous_company', switched_at: '2026-09-11T10:00:00.000Z', company_name: 'Old Company AB',
+      })
+      const res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'previous_company', switched_at: '2026-09-11T10:00:00.000Z' })
+      expect(res.json().error).toContain('belongs to the previous company')
+      expect(res.json().error).toContain('Old Company AB')
+      expect(res.json()).not.toHaveProperty('reopened')
+      expectMatchesSpec('POST', '/accounting/feed/reopen/{paymentId}', res.json(), '409')
     })
 
     it('maps verification refusals and the raced row-state honestly', async () => {
@@ -316,7 +351,7 @@ describe('reporting routes', () => {
 
       // Verification says gone, but the row moved before the flip (raced).
       fortnoxMocks.verifyPushedPayment.mockResolvedValue(GONE)
-      fortnoxMocks.reopenMissingPushed.mockResolvedValue(false)
+      fortnoxMocks.reopenPushedPayment.mockResolvedValue({ reopened: false, error_code: 'not_pushed' })
       res = await authed('POST', '/accounting/feed/reopen/pay-1')
       expect(res.statusCode).toBe(409)
       expect(res.json().error_code).toBe('not_pushed')

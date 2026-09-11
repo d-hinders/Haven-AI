@@ -41,7 +41,7 @@ export function useAccountingFeed() {
       const res = await api.get<AccountingFeedStatus>('/accounting/feed/status')
       if (!isCancelled()) setStatus(res)
     } catch {
-      if (!isCancelled()) setError('We could not load reporting status. Try again in a moment.')
+      if (!isCancelled()) setError('We could not load accounting status. Try again in a moment.')
     } finally {
       if (!isCancelled()) setLoading(false)
     }

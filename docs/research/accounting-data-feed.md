@@ -164,7 +164,7 @@ MCP), because that's where Haven controls execution and can monetize. Gate =
 
 ```
 config.hosted (HAVEN_HOSTED=true on the managed deploy)
-  && config.reportingFeedEnabled (HAVEN_REPORTING_FEED_ENABLED — global kill-switch)
+  && config.accountingEnabled (HAVEN_REPORTING_FEED_ENABLED — global kill-switch)
   && hasEntitlement(userId, 'reporting_feed')
 ```
 

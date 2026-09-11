@@ -10,8 +10,14 @@
 //                booking lines, reconciliation), darkened behind
 //                `HAVEN_LEGACY_BOOKKEEPING_ENABLED`. NOT re-exported here.
 //
-// The split is the product invariant made structural: the feed never asserts
-// VAT, accounts or rows. `__tests__/legacy-import-guard.test.ts` enforces it.
+// `__tests__/legacy-import-guard.test.ts` enforces exactly one thing: no feed
+// file imports from `legacy/`. It does NOT enforce "the feed never asserts VAT,
+// accounts or rows" — `entry.ts` sits on this side of the line and its
+// `AccountingEntry` still carries `account` and `vatTreatment`, as it did
+// before the split. What keeps those out of a provider payload is unchanged
+// and lives elsewhere: `FeedTransaction` structurally omits `vatTreatment` and
+// demotes the account to `suggestedAccount`, and `assertNonAsserting()` bans
+// the asserting keys on the outgoing payload at runtime.
 export * from './entry.js'
 export * from './connector.js'
 export * from './feed-orchestrator.js'

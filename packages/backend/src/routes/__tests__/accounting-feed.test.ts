@@ -28,7 +28,7 @@ const entitlementMocks = vi.hoisted(() => ({ accountingFeedAvailable: vi.fn() })
 vi.mock('../../modules/agents/index.js', () => entitlementMocks)
 
 const orchestratorMocks = vi.hoisted(() => ({
-  getReportingStatus: vi.fn(),
+  getAccountingFeedStatus: vi.fn(),
   syncUser: vi.fn(),
 }))
 const connectorMocks = vi.hoisted(() => ({ hasLiveConnector: vi.fn() }))
@@ -66,7 +66,7 @@ describe('reporting routes', () => {
     configMock.hosted = true
     configMock.accountingEnabled = true
     entitlementMocks.accountingFeedAvailable.mockReset().mockResolvedValue(true)
-    orchestratorMocks.getReportingStatus.mockReset().mockResolvedValue([])
+    orchestratorMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
     orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
     fortnoxMocks.getFortnoxConnection.mockReset().mockResolvedValue(null)
@@ -114,7 +114,7 @@ describe('reporting routes', () => {
       // sync status — is never touched for an unentitled account.
       expect(connectorMocks.hasLiveConnector).toHaveBeenCalled()
       expect(fortnoxMocks.getFortnoxConnection).not.toHaveBeenCalled()
-      expect(orchestratorMocks.getReportingStatus).not.toHaveBeenCalled()
+      expect(orchestratorMocks.getAccountingFeedStatus).not.toHaveBeenCalled()
     })
 
     it('returns availability, connection state and syncs when entitled', async () => {
@@ -135,7 +135,7 @@ describe('reporting routes', () => {
         created_at: '2026-08-13T09:00:00.000Z',
         updated_at: '2026-08-13T09:00:05.000Z',
       }]
-      orchestratorMocks.getReportingStatus.mockResolvedValue(syncs)
+      orchestratorMocks.getAccountingFeedStatus.mockResolvedValue(syncs)
 
       const res = await authed('GET', '/accounting/feed/status')
 
@@ -148,7 +148,7 @@ describe('reporting routes', () => {
         connected: true,
         syncs,
       })
-      expect(orchestratorMocks.getReportingStatus).toHaveBeenCalledWith(USER)
+      expect(orchestratorMocks.getAccountingFeedStatus).toHaveBeenCalledWith(USER)
       expectMatchesSpec('GET', '/accounting/feed/status', res.json())
     })
 

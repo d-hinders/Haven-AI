@@ -22,11 +22,32 @@ import { fileURLToPath } from 'node:url'
  */
 const MODULE_DIR = fileURLToPath(new URL('../', import.meta.url))
 
-/** Feed source files: this directory, minus `legacy/` and minus tests. */
-function feedSourceFiles(): string[] {
-  return readdirSync(MODULE_DIR, { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith('.ts') && !e.name.endsWith('.test.ts'))
-    .map((e) => e.name)
+/**
+ * Feed source files: every non-test `.ts` under this module, RECURSIVELY,
+ * minus `legacy/` itself.
+ *
+ * The recursion is the correction that matters. A one-level `readdirSync`
+ * covered the ten files that exist today and would have been blind to the
+ * eleventh — a feed file added under, say, `connectors/`, importing
+ * `'../legacy/booking.js'`, passes a non-recursive scan and the floor below
+ * would not notice either, because the top-level count is unchanged. Found by
+ * mutation (haven-reviewer, #2881), not by reading.
+ *
+ * Paths are returned module-relative so a failure names something a reader can
+ * open.
+ */
+function feedSourceFiles(dir = MODULE_DIR, prefix = ''): string[] {
+  const out: string[] = []
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) {
+      if (e.name === 'legacy' || e.name === '__tests__') continue
+      out.push(...feedSourceFiles(`${dir}${e.name}/`, `${prefix}${e.name}/`))
+      continue
+    }
+    if (!e.isFile() || !e.name.endsWith('.ts') || e.name.endsWith('.test.ts')) continue
+    out.push(`${prefix}${e.name}`)
+  }
+  return out
 }
 
 describe('the accounting feed cannot import the asserting legacy code (#2859)', () => {
@@ -50,6 +71,11 @@ describe('the accounting feed cannot import the asserting legacy code (#2859)', 
     expect(hits, `${name} reaches into legacy/: ${hits.join(', ')}`).toEqual([])
   })
 
+  // NOT a third independent assertion: `index.ts` is already in
+  // `feedSourceFiles()` and the `it.each` regex above is strictly broader than
+  // this one. Kept because it names the specific failure — a re-export is how
+  // the barrel would leak legacy to every consumer at once — but a mutation
+  // that trips it trips the sweep too, and should be counted once.
   it('the module entry point does not re-export legacy either', () => {
     const index = readFileSync(`${MODULE_DIR}index.ts`, 'utf8')
     expect(index).not.toMatch(/export\s+\*\s+from\s+['"][^'"]*legacy/)

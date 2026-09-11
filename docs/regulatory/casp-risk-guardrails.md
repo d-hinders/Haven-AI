@@ -37,7 +37,7 @@ covers:
   - packages/backend/src/modules/accounting/**
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/backend/src/middleware/agentAuth.ts
-  - packages/backend/src/middleware/reportingFeed.ts
+  - packages/backend/src/middleware/accountingFeed.ts
   - packages/backend/src/db/migrations/**
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
@@ -567,7 +567,7 @@ Preferred pattern:
 **Current state (2026-07, epic #491):** the live Fortnox feed (#496/#498) follows
 the preferred pattern — each settled payment is pushed as an **unattested
 supplier invoice** carrying no account, no VAT, and no voucher rows
-(`assertNonAsserting()` in `modules/reporting/fortnox-connector.ts` makes the
+(`assertNonAsserting()` in `modules/accounting/fortnox-connector.ts` makes the
 non-asserting payload a runtime invariant), with the Haven-generated
 payment-evidence PDF attached as underlag. Nothing is booked until a human
 attests it in Fortnox. The earlier asserting voucher-push surface
@@ -1170,7 +1170,7 @@ it here re-opens the hole; it never said this list may contain nothing else.
 Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
 `signer/**`, `mcp-server/**`, `demo-merchant-mcp/**`, the whole of `sdk/**`
 (the money-path list names only `sdk/src/signer.ts`), `routes/passkeys.ts`,
-`routes/catalog.ts`, `routes/reporting.ts`, `routes/accounting.ts` and
+`routes/catalog.ts`, `routes/accounting-feed.ts`, `routes/accounting.ts` and
 `config.ts` — none of them on that list. Absence from it was never a bar, so no
 new judgement about the money-path list is required and none is made here.
 `routes/agents.ts` is a reasonable future candidate for that list, but it is a

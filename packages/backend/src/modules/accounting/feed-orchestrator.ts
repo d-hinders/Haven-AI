@@ -91,6 +91,6 @@ export async function syncUser(userId: string, opts: { limit?: number } = {}): P
 }
 
 /** Per-user sync status for the Reporting UI (#500). */
-export async function getReportingStatus(userId: string): Promise<FeedSyncRow[]> {
+export async function getAccountingFeedStatus(userId: string): Promise<FeedSyncRow[]> {
   return listSyncs(userId)
 }

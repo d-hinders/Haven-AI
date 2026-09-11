@@ -3097,7 +3097,7 @@ export const openapiSpec = {
         operationId: 'pushFortnoxVouchers',
         summary: 'Legacy asserting voucher push — GATED OFF by default.',
         description:
-          "The asserting counterpart to the reporting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
+          "The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
@@ -4984,7 +4984,7 @@ export const openapiSpec = {
         summary: "Report the merchant's own receipt for a settled payment.",
         description:
           "Captures the receipt document the merchant handed back in the paid response (invoice number, VAT breakdown — facts Haven's own payment evidence cannot assert). " +
-          'The reporting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. ' +
+          'The accounting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. ' +
           'Provide either `url` (https, fetched at feed time under strict guards) or `json` (the inline receipt document, max 64KB).',
         security: [{ AgentApiKey: [] }],
         parameters: [

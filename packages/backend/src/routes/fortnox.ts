@@ -7,6 +7,12 @@ import {
   exchangeCodeForTokens,
   FortnoxError,
 } from '../modules/accounting/index.js'
+// dep-lint-exempt: `legacy/index.ts` is deliberately NOT re-exported from the
+// accounting module's public entry point (#2859) — that is the whole point of
+// the split: the non-asserting feed must not be able to reach the asserting
+// #462 code, and `__tests__/legacy-import-guard.test.ts` fails if it does. A
+// deep import is therefore the ONLY way in, and these two dark legacy routes
+// (`HAVEN_LEGACY_BOOKKEEPING_ENABLED`) are the only sanctioned consumers.
 import { pushVoucher, toFortnoxVoucher } from '../modules/accounting/legacy/index.js'
 import {
   deleteFortnoxConnection,

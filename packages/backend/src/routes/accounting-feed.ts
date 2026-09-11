@@ -3,7 +3,7 @@ import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { requireAccountingFeed } from '../middleware/accountingFeed.js'
 import { accountingFeedAvailable } from '../modules/agents/index.js'
-import { getReportingStatus, syncUser } from '../modules/accounting/index.js'
+import { getAccountingFeedStatus, syncUser } from '../modules/accounting/index.js'
 import { hasLiveConnector } from '../modules/accounting/index.js'
 import { getFortnoxConnection, verifyFortnoxInvoice, reopenMissingPushed } from '../modules/accounting/index.js'
 
@@ -22,7 +22,7 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
     const { sub } = request.user as { sub: string }
     // `liveSyncReady` is true when the live Fortnox adapter (#496/#498) is
     // registered (i.e. Fortnox is configured) — false flags the UI that sync
-    // is a preview not delivering anywhere. See lib/reporting/connector.ts.
+    // is a preview not delivering anywhere. See modules/accounting/connector.ts.
     const base = {
       hosted: config.hosted,
       flagEnabled: config.accountingEnabled,
@@ -32,7 +32,7 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
     if (!available) {
       return { ...base, available: false, connected: false, syncs: [] }
     }
-    const [conn, syncs] = await Promise.all([getFortnoxConnection(sub), getReportingStatus(sub)])
+    const [conn, syncs] = await Promise.all([getFortnoxConnection(sub), getAccountingFeedStatus(sub)])
     return { ...base, available: true, connected: Boolean(conn), syncs }
   })
 

@@ -1,5 +1,5 @@
 import type { AccountingEntry } from '../entry.js'
-import { buildBookingLines } from './index.js'
+import { buildBookingLines } from './booking.js'
 import { FortnoxError, FORTNOX_API_BASE } from '../fortnox.js'
 
 /**

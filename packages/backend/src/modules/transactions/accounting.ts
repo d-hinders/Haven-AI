@@ -25,6 +25,7 @@ import {
   listSyncsForPaymentIds,
   type FeedSyncBadgeRow,
 } from '../../infra/repositories/accounting-feed-syncs.js'
+import type { FastifyBaseLogger } from 'fastify'
 import type { Transaction, TransactionAccounting } from './types.js'
 
 /** Wire shape from a ledger row — the projection, camel-cased. */
@@ -45,6 +46,7 @@ function toAccounting(row: FeedSyncBadgeRow): TransactionAccounting {
 export async function enrichTransactionsWithAccounting<T extends Transaction>(
   userId: string,
   transactions: T[],
+  log?: FastifyBaseLogger,
 ): Promise<T[]> {
   const paymentIds = Array.from(
     new Set(transactions.map((tx) => tx.paymentId).filter((id): id is string => Boolean(id))),
@@ -59,11 +61,13 @@ export async function enrichTransactionsWithAccounting<T extends Transaction>(
     if (!(await getFortnoxConnection(userId))) return transactions
 
     rows = await listSyncsForPaymentIds(userId, paymentIds)
-  } catch {
+  } catch (err) {
     // Fail-soft, the same trade `enrichTransactionsWithAgents` makes: a
     // ledger or entitlement read failing must not take the money history
     // down with it. The rows come back WITHOUT `accounting`, which the UI
     // renders as no badge — never as a false "In Fortnox" or "Not fed".
+    // Logged (review on #2893): a badge outage must be visible somewhere.
+    log?.warn({ err, userId, paymentIds: paymentIds.length }, 'accounting badge enrichment failed; rows served without accounting')
     return transactions
   }
   if (rows.length === 0) return transactions

@@ -235,7 +235,7 @@ export async function buildSafeTransactionsPage(
   const attributed = await enrichTransactionsWithAgents(userId, paginated)
   // #2870: after agent enrichment — that is what puts `paymentId` on raw
   // explorer rows — and over the PAGE only, so this is one ledger query.
-  const transactions = await enrichTransactionsWithAccounting(userId, attributed)
+  const transactions = await enrichTransactionsWithAccounting(userId, attributed, log)
 
   return { transactions, total }
 }

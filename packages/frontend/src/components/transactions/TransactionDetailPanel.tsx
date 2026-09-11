@@ -221,6 +221,11 @@ export default function TransactionDetailPanel({
       {tx.accounting ? (
         <Section title="Accounting">
           <DetailRow label="Feed" value={<AccountingBadge accounting={tx.accounting} />} />
+          {/* The failure reason as plain text: the badge's tooltip has no
+              tab stop inside the row and no hover on touch (review, #2893). */}
+          {(tx.accounting.status === 'failed' || tx.accounting.status === 'skipped') && tx.accounting.error ? (
+            <DetailRow label="Reason" value={tx.accounting.error} />
+          ) : null}
         </Section>
       ) : null}
 

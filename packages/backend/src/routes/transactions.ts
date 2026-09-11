@@ -171,7 +171,7 @@ export default async function transactionRoutes(
     const { page: paginated, hasMore } = paginateByOffset(filtered, offset, limit)
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
     // ledger query per response, and none for an unentitled account.
-    const transactions = await enrichTransactionsWithAccounting(sub, paginated)
+    const transactions = await enrichTransactionsWithAccounting(sub, paginated, request.log)
 
     return {
       transactions,

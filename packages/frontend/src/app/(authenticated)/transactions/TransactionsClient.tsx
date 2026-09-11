@@ -179,11 +179,17 @@ export default function TransactionsClient() {
   // line into "Transactions for {accountName}" so the view feels intentional.
   const subtitle = useMemo(
     () =>
-      buildTransactionScopeSubtitle(filters, {
-        accountNamesById: safeNamesById,
-        agentNamesById,
-        tokenSymbolsByKey,
-      }),
+      buildTransactionScopeSubtitle(
+        filters,
+        {
+          accountNamesById: safeNamesById,
+          agentNamesById,
+          tokenSymbolsByKey,
+        },
+        // #2882: "All activity" is the page's loudest completeness claim, and
+        // it is the false one when the feed is capped at the explorer window.
+        truncated ? 'Recent activity across your accounts.' : undefined,
+      ),
     [filters, safeNamesById, agentNamesById, tokenSymbolsByKey],
   )
 
@@ -412,21 +418,21 @@ export default function TransactionsClient() {
             Showing <span className="v2-tabular">{visibleTransactions.length.toLocaleString('en-US')}</span> of <span className="v2-tabular">{total.toLocaleString('en-US')}</span>
           </span>
         )}
+        {/*
+          #2882: `total` counts what the explorers returned, not what the
+          account holds — each source is capped at a fixed window. This line
+          qualifies that count, so it lives inside the count row rather than
+          floating above the table. It corrects the SCREEN; the downloaded CSV
+          carries no such note, which is recorded on the PR.
+        */}
+        {!loadingInitial && truncated && (
+          <div className="mt-1 w-full text-xs text-[var(--v2-ink-3)]">
+            Older transactions aren&apos;t included, so counts and exports cover
+            what&apos;s shown here, not your full history.
+          </div>
+        )}
       </div>
 
-      {/*
-        #2882: `total` is the count of what the explorers returned, not what
-        the account holds — each source is capped at a fixed window. Saying so
-        once, next to the count it qualifies, is the whole of this change; the
-        export reads the same feed, so the caveat covers the file too.
-      */}
-      {!loadingInitial && truncated && (
-        <div className="mb-4 text-xs text-[var(--v2-ink-3)]">
-          Showing the most recent activity per account. Older transactions are
-          not loaded yet, so counts and exports cover this window rather than
-          your full history.
-        </div>
-      )}
 
       <Card hover={false}>
         <TransactionsTable
@@ -463,7 +469,11 @@ export default function TransactionsClient() {
               {loadingMore ? 'Loading…' : 'Load more'}
             </Button>
           ) : (
-            <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end</span>
+            <span className="text-xs text-[var(--v2-ink-3)]">
+              {truncated
+                ? 'End of the activity loaded here'
+                : 'You\u2019ve reached the end'}
+            </span>
           )}
         </div>
       )}

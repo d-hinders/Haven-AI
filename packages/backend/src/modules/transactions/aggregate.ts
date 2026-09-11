@@ -16,10 +16,12 @@
  * `hadFailures: false`.
  */
 import {
-  EXPLORER_PAGE_SIZE,
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
+  type RawERC20Transfer,
+  type RawInternalTx,
+  type RawNormalTx,
 } from '../../infra/explorer-api.js'
 import { getChain } from '../../domain/chains.js'
 import { formatTokenValue } from '../../domain/tokens.js'
@@ -74,21 +76,29 @@ export async function fetchSafeTransactions({
   const requestPromise = (async () => {
     const addrLower = safeAddress.toLowerCase()
     let hadFailures = false
-    const logFail = (kind: string) => (err: unknown) => {
-      hadFailures = true
-      log.warn({ err, chainId, safeId, safeAddress, kind }, 'Explorer API fetch failed')
-      return []
-    }
+    const logFail =
+      <T,>(kind: string) =>
+      (err: unknown) => {
+        hadFailures = true
+        log.warn({ err, chainId, safeId, safeAddress, kind }, 'Explorer API fetch failed')
+        // A failed leg is unknown, not complete: it must not contribute a
+        // `hasMore: true` the feed would report as truncation, nor mask one.
+        return { rows: [] as T[], hasMore: false }
+      }
 
-    const normalTxs = await fetchNormalTransactions(chainId, safeAddress).catch(
-      logFail('normal'),
+    const normal = await fetchNormalTransactions(chainId, safeAddress).catch(
+      logFail<RawNormalTx>('normal'),
     )
-    const internalTxs = await fetchInternalTransactions(chainId, safeAddress).catch(
-      logFail('internal'),
+    const internal = await fetchInternalTransactions(chainId, safeAddress).catch(
+      logFail<RawInternalTx>('internal'),
     )
-    const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(
-      logFail('erc20'),
+    const erc20 = await fetchERC20Transfers(chainId, safeAddress).catch(
+      logFail<RawERC20Transfer>('erc20'),
     )
+
+    const normalTxs = normal.rows
+    const internalTxs = internal.rows
+    const erc20Txs = erc20.rows
 
     const transactions: Transaction[] = []
 
@@ -163,17 +173,14 @@ export async function fetchSafeTransactions({
       return true
     })
 
-    // A leg that came back holding exactly the window it asked for was cut
-    // off at that window rather than exhausted — there is no cursor in the
-    // response to say so, and at 50 rows the false-positive case (a Safe with
-    // exactly 50 native transfers and no more) reports one page too few
-    // rather than claiming completeness it does not have. Erring toward
-    // "there may be more" is the honest direction. #2884 removes the guess by
-    // paginating; this only stops the silence.
-    const truncated =
-      normalTxs.length >= EXPLORER_PAGE_SIZE ||
-      internalTxs.length >= EXPLORER_PAGE_SIZE ||
-      erc20Txs.length >= EXPLORER_PAGE_SIZE
+    // Each leg reports for itself whether the provider has more beyond what
+    // it returned — Blockscout by its `next_page_params` cursor, the
+    // Etherscan-shaped legs by a full page, since they offer no cursor. Where
+    // the count IS the signal it errs toward "there may be more": a source
+    // holding exactly one window reports one caveat too many rather than
+    // claiming a completeness it cannot know. #2884 removes the remaining
+    // guess by paginating; this only stops the silence.
+    const truncated = normal.hasMore || internal.hasMore || erc20.hasMore
 
     txCache.set(cacheKey, { transactions: deduped, truncated })
 

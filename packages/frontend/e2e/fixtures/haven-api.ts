@@ -393,6 +393,9 @@ export async function mockHavenApi(page: Page) {
         hasMore: false,
         partialFailure: false,
         failedSafeIds: [],
+        // Required since #2882. `false` is the honest default here: the
+        // fixture serves one transaction, well inside the explorer window.
+        truncated: false,
       })
       return
     }

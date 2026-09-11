@@ -1146,7 +1146,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions') {
     // The aggregated feed (useTransactionsFeed).
-    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [] }
+    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [], truncated: false }
   }
   if (pathname === '/transactions/filters') {
     return {
@@ -2338,6 +2338,52 @@ export const SCENARIOS = {
    * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` already
    * carries a recorded name, which is why it is not overridden here.
    */
+  /**
+   * #2882: the transactions page when the feed is capped at the explorer
+   * window. Unreachable by a plain route capture — the default fixture
+   * reports `truncated: false`, which is the honest default but means the
+   * one state this feature adds has no rendered evidence without a scenario.
+   *
+   * `hasMore: true` as well, deliberately: the truncation notice and the
+   * "End of the activity loaded here" wording both key off the same flag,
+   * and the count row is where the notice lives, so a capture with no
+   * "Showing X of Y" would miss its placement entirely.
+   */
+  'transactions-truncated': {
+    description:
+      'The /transactions list reporting a capped feed — the notice, and the count it qualifies (#2882)',
+    api(apiPath) {
+      if (apiPath.startsWith('/transactions?') || apiPath === '/transactions') {
+        return {
+          transactions: FIXTURE_TXS,
+          total: FIXTURE_TXS.length + 25,
+          offset: 0,
+          limit: 25,
+          hasMore: true,
+          partialFailure: false,
+          failedSafeIds: [],
+          truncated: true,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // Wait for the claim itself, not for the page: a capture that raced the
+      // feed would photograph the un-truncated branch and look like a pass.
+      await page
+        .getByText(/Older transactions aren.t included/i)
+        .first()
+        .waitFor({ timeout: 20_000 })
+      // Positive control: the count row it qualifies really did render.
+      await page.getByText(/Showing/).first().waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'list')
+    },
+  },
+
   'mcp-name-all-recorded': {
     description:
       'The /agents list with every agent reporting an MCP server name — the hoisted "not recorded" explanation must be ABSENT (#2043)',

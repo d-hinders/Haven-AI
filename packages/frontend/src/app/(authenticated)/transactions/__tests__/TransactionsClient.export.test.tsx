@@ -216,14 +216,18 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     feedState.truncated = true
     render(<TransactionsClient />)
 
-    expect(await screen.findByText(/Showing the most recent activity per account/i))
-      .toBeInTheDocument()
-    expect(screen.getByText(/rather than your full history/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Older transactions aren.t included/i)).toBeInTheDocument()
+    expect(screen.getByText(/not your full history/i)).toBeInTheDocument()
+    // The header's blanket claim must soften with it — it is the louder of
+    // the two, and the one a user reads first.
+    expect(screen.getByText('Recent activity across your accounts.')).toBeInTheDocument()
+    expect(screen.queryByText('All activity across your accounts.')).toBeNull()
   })
 
   it('says nothing when the feed is complete', () => {
     render(<TransactionsClient />)
 
-    expect(screen.queryByText(/Showing the most recent activity per account/i)).toBeNull()
+    expect(screen.queryByText(/Older transactions aren.t included/i)).toBeNull()
+    expect(screen.getByText('All activity across your accounts.')).toBeInTheDocument()
   })
 })

@@ -3,7 +3,8 @@ import { getActiveConnection, listConnections, setStatus } from '../../infra/rep
 import { accountingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from './entry.js'
 import { toFeedTransaction } from './feed-transaction.js'
-import { getConnector, listConnectors, type AccountingConnector } from './connector.js'
+import { getConnector, listConnectors, type AccountingConnector, type DegradedConnectionStatus } from './connector.js'
+import { isTokenDeadStatus } from './oauth-flow.js'
 import { claimSync, markPushed, markFailed, markSkipped, listSyncs, type FeedSyncRow } from './feed-sync.js'
 
 /**
@@ -14,11 +15,16 @@ import { claimSync, markPushed, markFailed, markSkipped, listSyncs, type FeedSyn
  * idempotent; settlement is never blocked or delayed by it.
  */
 
-interface ActiveDestination {
-  connector: AccountingConnector
-  /** Feed nothing settled before this (#2862 feed-from rule); null = no floor. */
-  feedFrom: Date | null
-}
+/** Feed nothing settled before this (#2862 feed-from rule); null = no floor. */
+type ActiveDestination =
+  | { kind: 'ready'; provider: string; connector: AccountingConnector; feedFrom: Date | null }
+  /**
+   * #2863: the active row's grant is dead (`needs_reauthorisation`,
+   * `revoked_at_provider`). Nothing is pushed and nothing is refreshed; each
+   * payment that would have been fed gets a `skipped` row naming the state,
+   * re-claimable once the user re-consents.
+   */
+  | { kind: 'degraded'; provider: string; status: DegradedConnectionStatus; reason: string | null; feedFrom: Date | null }
 
 /**
  * The user's active destination (#2862): the `accounting_connections` row
@@ -46,16 +52,32 @@ async function getActiveDestination(userId: string): Promise<ActiveDestination |
   if (active) {
     const connector = getConnector(active.provider)
     if (!connector || !(await connector.isConnected(userId))) return null
-    return { connector, feedFrom: active.feed_from ? new Date(active.feed_from) : null }
+    return { kind: 'ready', provider: active.provider, connector, feedFrom: active.feed_from ? new Date(active.feed_from) : null }
   }
   // MUTATION TARGET (feed-from.db.test.ts "a degraded active row feeds
   // nothing"): removing this guard re-opens the registry scan for row-backed
   // users.
-  if ((await listConnections(userId)).length > 0) return null
+  const rows = await listConnections(userId)
+  if (rows.length > 0) {
+    // #2863: an active row whose grant is dead is still THE destination —
+    // the sync is recorded as skipped with the state, not silently dropped.
+    // (`scope_missing` keeps #2862's shape: no destination, no rows.)
+    for (const r of rows) {
+      if (r.is_active_destination && isTokenDeadStatus(r.status)) {
+        return { kind: 'degraded', provider: r.provider, status: r.status, reason: r.status_reason, feedFrom: r.feed_from ? new Date(r.feed_from) : null }
+      }
+    }
+    return null
+  }
   for (const connector of listConnectors()) {
-    if (await connector.isConnected(userId)) return { connector, feedFrom: null }
+    if (await connector.isConnected(userId)) return { kind: 'ready', provider: connector.provider, connector, feedFrom: null }
   }
   return null
+}
+
+/** The `skipped` reason for a dead grant: the state first, so an on-call grep finds it. */
+export function degradedSkipReason(status: DegradedConnectionStatus, reason: string | null): string {
+  return `connection ${status}${reason ? `: ${reason}` : ''}`
 }
 
 /** Feed one settled payment. No-op unless the feed is available + a connector is connected. */
@@ -63,7 +85,7 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
   if (!(await accountingFeedAvailable(userId))) return
   const destination = await getActiveDestination(userId)
   if (!destination) return
-  const { connector, feedFrom } = destination
+  const { provider, feedFrom } = destination
 
   const entry = await buildAccountingEntryForPayment(userId, paymentId)
   if (!entry) return
@@ -76,8 +98,16 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
   // feed it later on the user's explicit choice.
   if (feedFrom && new Date(tx.settledAt).getTime() < feedFrom.getTime()) return
 
-  const claim = await claimSync(userId, connector.provider, paymentId)
+  const claim = await claimSync(userId, provider, paymentId)
   if (!claim.owned) return // already pushed or another caller owns it
+
+  // MUTATION TARGET (fortnox-connection.db.test.ts, "invalid_grant"): a dead
+  // grant is never pushed against — that would be the retried refresh.
+  if (destination.kind === 'degraded') {
+    await markSkipped(userId, provider, paymentId, degradedSkipReason(destination.status, destination.reason))
+    return
+  }
+  const { connector } = destination
 
   try {
     const result = await connector.pushTransaction(userId, tx)
@@ -128,7 +158,7 @@ export async function syncUser(userId: string, opts: { limit?: number } = {}): P
   // Selection SQL lives in infra/repositories/accounting-feed-syncs.ts (#999);
   // the feed-from floor (#2862) is applied there so history is never even
   // enumerated for a freshly activated destination.
-  const ids = await listUnpushedPaymentIds(userId, destination.connector.provider, opts.limit ?? 200, destination.feedFrom)
+  const ids = await listUnpushedPaymentIds(userId, destination.provider, opts.limit ?? 200, destination.feedFrom)
   for (const id of ids) await feedSettledPayment(userId, id)
   return { fed: ids.length }
 }

@@ -37,7 +37,7 @@ vi.mock('../receipt-underlag.js', async (importOriginal) => ({
 }))
 
 import { FortnoxConnector } from '../fortnox-connector.js'
-import { fortnoxOAuth2Config, FORTNOX_TOKEN_URL, FORTNOX_API_BASE } from '../fortnox.js'
+import { fortnoxOAuth2Config, FORTNOX_TOKEN_URL, FORTNOX_REVOKE_URL, FORTNOX_API_BASE } from '../fortnox.js'
 import { completeOAuth2Connect } from '../oauth-flow.js'
 import type { ProviderSecrets } from '../connector.js'
 import type { ProviderCompanyInfo } from '../provider.js'
@@ -56,12 +56,18 @@ mocks.buildAccountingEntryForPayment.mockImplementation(async (_userId: string, 
  * state) exactly as Fortnox echoes them.
  */
 function fortnoxRouter(attachment: AttachmentOutcome) {
-  const state = { createCalls: 0, createPayload: null as Record<string, unknown> | null, booked: false, deleted: false, externalInvoiceNumber: '' }
+  const state = { createCalls: 0, createPayload: null as Record<string, unknown> | null, booked: false, deleted: false, externalInvoiceNumber: '', revokeCalls: 0, revokeBodies: [] as string[] }
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
   const impl = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url)
     const method = (init?.method ?? 'GET').toUpperCase()
     if (u === FORTNOX_TOKEN_URL && method === 'POST') return json(fixture('token.json'))
+    // #2863: RFC 7009 revoke — Fortnox answers an empty 200 on success.
+    if (u === FORTNOX_REVOKE_URL && method === 'POST') {
+      state.revokeCalls += 1
+      state.revokeBodies.push(String(init?.body))
+      return new Response('', { status: 200 })
+    }
     if (!u.startsWith(FORTNOX_API_BASE)) return json(fixture('error-404.json'), 404)
     const path = u.slice(FORTNOX_API_BASE.length)
 
@@ -117,7 +123,7 @@ const harness: ConformanceHarness = {
       remove: () => { state.deleted = true },
       createCalls: () => state.createCalls,
       createPayload: () => state.createPayload,
-      revokeCalls: () => 0, // Fortnox declares revoke: false — the suite asserts it is never called
+      revokeCalls: () => state.revokeCalls,
       secrets,
       connect: async () => {
         await completeOAuth2Connect({

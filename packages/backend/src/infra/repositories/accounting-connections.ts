@@ -175,6 +175,20 @@ export const SET_COMPANY_INFO_SQL = `UPDATE accounting_connections
      SET external_company_id = $3, external_company_name = $4, base_currency = $5, updated_at = NOW()
      WHERE user_id = $1 AND provider = $2`
 
+/**
+ * #2863: the per-connection refresh lock. A provider refresh token is
+ * single-use (Fortnox rotates it on every refresh), so two workers refreshing
+ * the same row at once — the settlement hook and a "Sync now" click — burn
+ * each other's token and lock the connection out. `FOR UPDATE` on the row
+ * inside a transaction serialises them: the second waits, then re-reads a row
+ * the first has already rotated and uses that token without a provider call.
+ * The row itself is the lock (no key hashing, and every write to the row —
+ * `updateSecrets`, `setStatus` — queues behind it by construction); the
+ * transaction spans the provider call, which is the point.
+ */
+export const LOCK_ACCOUNTING_CONNECTION_SQL = `SELECT ${COLUMNS}
+     FROM accounting_connections WHERE user_id = $1 AND provider = $2 FOR UPDATE`
+
 export const DELETE_ACCOUNTING_CONNECTION_SQL = `DELETE FROM accounting_connections
      WHERE user_id = $1 AND provider = $2`
 
@@ -311,6 +325,28 @@ export async function disconnect(
   db: Executor = pool,
 ): Promise<void> {
   await db.query(DISCONNECT_ACCOUNTING_CONNECTION_SQL, [userId, provider, reason])
+}
+
+/**
+ * Run `fn` with the (user, provider) row locked for the duration (see
+ * `LOCK_ACCOUNTING_CONNECTION_SQL`). `fn` receives the row as it is AFTER the
+ * lock is granted — a concurrent writer's committed changes included — and
+ * the transaction executor, so its writes commit with the lock. `fn` gets
+ * null when there is no row; the lock then guards nothing and `fn` should
+ * simply answer. Through an executor that cannot hand out a connection (a
+ * test's query stub) the statement runs inline, unlocked — the real-DB tests
+ * are where the lock is proven.
+ */
+export async function withLockedConnection<T>(
+  userId: string,
+  provider: string,
+  fn: (row: AccountingConnectionRow | null, tx: Executor) => Promise<T>,
+  db: Executor = pool,
+): Promise<T> {
+  return withTransaction(db, async (tx) => {
+    const r = await tx.query<AccountingConnectionRow>(LOCK_ACCOUNTING_CONNECTION_SQL, [userId, provider])
+    return fn(r.rows[0] ?? null, tx)
+  })
 }
 
 export async function deleteConnection(userId: string, provider: string, db: Executor = pool): Promise<void> {

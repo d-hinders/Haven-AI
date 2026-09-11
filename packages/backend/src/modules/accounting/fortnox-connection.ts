@@ -33,7 +33,9 @@ import {
  * "the feed is down". A version-0 row is re-encrypted by the next write that
  * touches it (a refresh, a reconnect) and by the boot-time job in
  * `secrets-migration.ts`. The refresh's key-check-BEFORE-provider-call order
- * (haven-reviewer, #2887) is the generic flow's, not restated here.
+ * (haven-reviewer, #2887), the per-connection refresh lock and the
+ * `needs_reauthorisation` flip (#2863) are the generic flow's, not restated
+ * here.
  */
 
 export const FORTNOX_PROVIDER = 'fortnox'
@@ -84,7 +86,12 @@ export async function getFortnoxConnection(userId: string): Promise<FortnoxConne
   return conn ? toLegacyRow(conn.row, conn.secrets) : null
 }
 
-/** Disconnect keeps the row (owner decision: history stays); secrets are cleared. */
+/**
+ * Disconnect keeps the row (owner decision: history stays); secrets are
+ * cleared. LOCAL ONLY — no callers in the tree today; the product path is
+ * `disconnectProvider` in `connections.ts`, which revokes the grant at
+ * Fortnox first (#2863). Do not reach for this from a route.
+ */
 export async function deleteFortnoxConnection(userId: string): Promise<void> {
   await disconnect(userId, FORTNOX_PROVIDER, 'user disconnected')
 }

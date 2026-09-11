@@ -56,7 +56,28 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      generic flows refuse a non-SEK ledger at connect (`assertSupportedBaseCurrency`,
      policy owned by #2864). Report `null` if the provider cannot say.
    - `revoke(secrets)` is called on disconnect **only** when the descriptor
-     declares `capabilities.revoke`; implement it as a no-op otherwise.
+     declares `capabilities.revoke`; implement it as a no-op otherwise. The
+     generic disconnect calls it BEFORE the secrets are cleared and clears
+     them whether or not it succeeded (a failed revoke is reported by error
+     name, never a reason to keep a grant stored). An OAuth2 provider with an
+     RFC 7009 endpoint sets `revokeUrl` on its `OAuth2ProviderConfig` and
+     calls `revokeToken` from `oauth-flow.ts` (the Fortnox connector is the
+     example: `POST /oauth-v1/revoke`, `token_type_hint=refresh_token`).
+   - **Token lifecycle (#2863) is the generic flow's, not yours.** An
+     `oauth2` connector gets its access token through
+     `getValidOAuth2AccessToken` and inherits: the refresh under a
+     per-connection row lock (`withLockedConnection`, `SELECT … FOR UPDATE`
+     — two concurrent callers make one provider call, the rotated refresh
+     token is committed before the access token is returned); the flip to
+     `needs_reauthorisation` on a token-endpoint refusal that is a verdict on
+     the GRANT (`invalid_grant`, or a bare 400/403 — never `invalid_client`
+     and the other client-side RFC 6749 codes, never 401/408/429/5xx, which
+     leave the row untouched), after which the flow throws
+     `ConnectionNeedsReauthorisationError` without calling the provider and
+     the orchestrator records each sync as `skipped` with
+     `connection needs_reauthorisation: <provider error>`; and the
+     `secretsKeyConfigured()` check BEFORE the single-use refresh token is
+     consumed. Do not add a second refresh path in the connector.
 4. **Register the instance** at boot in `src/index.ts`, gated on the
    provider's credentials being configured (the Fortnox pattern), so a
    deployment without them lists the provider as `configured: false`.

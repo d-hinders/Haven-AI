@@ -135,6 +135,9 @@ function row(provider: string, over: Record<string, unknown> = {}) {
   }
 }
 
+/** What the stub connectors were asked to revoke (#2863: Fortnox declares the capability). */
+const revoked: Array<{ provider: string; secrets: Record<string, unknown> }> = []
+
 /** A stand-in for the live Fortnox adapter: registered, so Fortnox is "configured". */
 function stubConnector(provider: string): AccountingConnector {
   return {
@@ -143,7 +146,7 @@ function stubConnector(provider: string): AccountingConnector {
     pushTransaction: async () => ({ externalRef: null, status: 'skipped' }),
     verify: async () => ({ ok: false, error_code: 'not_connected' }),
     getCompanyInfo: async () => ({ externalCompanyId: null, name: null, baseCurrency: 'SEK' }),
-    revoke: async () => {},
+    revoke: async (secrets) => { revoked.push({ provider, secrets }) },
   }
 }
 
@@ -384,10 +387,16 @@ describe('accounting connection routes (#2862)', () => {
 
   describe('DELETE /accounting/connections/:provider', () => {
     it('disconnects (row kept, secrets cleared) and returns no token material', async () => {
+      revoked.length = 0
       rows.set(`${USER}::fortnox`, row('fortnox', { is_active_destination: true }))
       const res = await authed('DELETE', '/accounting/connections/fortnox')
       expect(res.statusCode).toBe(204)
-      expect(repo.disconnect).toHaveBeenCalledWith(USER, 'fortnox', 'user disconnected')
+      // #2863: Fortnox declares `revoke`, so the grant is revoked at the
+      // provider — with the refresh token still in hand — before the row is
+      // cleared. The real HTTP shape is the conformance suite's; here the
+      // dispatch and the order are what the route owns.
+      expect(revoked).toEqual([{ provider: 'fortnox', secrets: { accessToken: ACCESS_TOKEN, refreshToken: REFRESH_TOKEN } }])
+      expect(repo.disconnect).toHaveBeenCalledWith(USER, 'fortnox', 'user disconnected (grant revoked at provider)')
       expect(rows.get(`${USER}::fortnox`)).toMatchObject({ status: 'disconnected', secrets_ciphertext: null })
       expect(leaks(res.body)).toBe(false)
       expect(leaks(JSON.stringify(res.headers))).toBe(false)

@@ -187,13 +187,14 @@ describe('GET /transactions — truncation signal (#2882)', () => {
 
     const response = await get('?fresh=1')
 
-    // Envelope only, deliberately. Asserting the whole payload fails on a
-    // PRE-EXISTING drift this assertion surfaced: the spec's `Transaction`
-    // schema is `additionalProperties: false` and omits `chainId`, `safeId`,
-    // `safeAddress` and `safeName`, which this route has always returned.
-    // That is not #2882's to fix — whether those four belong in the public
-    // contract is a real decision — so it is filed as #2885 and the rows
-    // are emptied here rather than the guard dropped.
+    // Envelope only, deliberately. Asserting the whole payload trips a
+    // PRE-EXISTING validator bug this assertion surfaced (#2885): the spec's
+    // `Transaction` correctly declares `chainId`/`safeId`/`safeAddress`/
+    // `safeName` in an `allOf` branch, but `response-shape.ts` closes the
+    // `$ref`'d `TransactionBase` where it is ALSO registered standalone, so
+    // the composed schema rejects its own sibling's properties. The contract
+    // is right and the validator is wrong, which is not #2882's to fix — so
+    // the rows are emptied here rather than the envelope guard dropped.
     const body = response.json() as Record<string, unknown>
     expectMatchesSpec('GET', '/transactions', { ...body, transactions: [] })
   })

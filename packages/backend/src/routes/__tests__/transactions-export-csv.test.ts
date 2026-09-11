@@ -413,10 +413,12 @@ describe('GET /transactions/export.csv', () => {
   })
 
   it('exports every row the pipeline yields, well past one page of the list', async () => {
-    // The list route pages at 25; the export takes the lot. 50 is the most one
-    // source can yield today (`explorer-api.ts` fetches with `offset = 50`),
-    // which is also why EXPORT_ROW_CAP's refusal cannot be reached from here —
-    // `exceedsExportRowCap` is unit-tested in the module instead.
+    // The list route pages at 25; the export takes the lot. One
+    // `EXPLORER_PAGE_SIZE` window is the most a single source yields today —
+    // sliced locally on Blockscout, which takes no page-size parameter, and
+    // requested as `offset` on the Etherscan-shaped legs. That is why
+    // EXPORT_ROW_CAP's refusal is not reachable through this leg; it is
+    // reached through the unbounded x402 leg below.
     stubManyBaseTransactions(80)
     routeDbQueries({ user_safes: [BOTH_SAFES[0]] })
 

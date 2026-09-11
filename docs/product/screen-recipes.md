@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-09"
+last-verified: "2026-09-11"
 ---
 
 # Haven Screen Recipes
@@ -379,6 +379,18 @@ Money and risk clarity:
 - Use external links for details, but do not make hashes the primary labels.
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
+- **Never present a capped list as a complete one (#2882).** The feed reads a
+  fixed window per source per account, so `total` counts what was returned,
+  not what the account holds. When the response reports `truncated`, every
+  claim on the screen softens together — the page subtitle ("Recent activity"
+  rather than "All activity"), a caveat line inside the count row, and the
+  end-of-list string ("End of what's loaded" rather than "You've reached the
+  end"). Softening one and leaving the others is worse than softening none:
+  the louder claim is the one the reader believes. The same rule binds any
+  other surface fed by the same hook — the account detail page's transaction
+  count included. Hedge the wording ("may not be your full history"): one
+  provider answers by cursor and is certain, the other infers from a full
+  page and can be one window out.
 - Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
   one merchant-facing row such as `Agent payment by [agent name]`. Live

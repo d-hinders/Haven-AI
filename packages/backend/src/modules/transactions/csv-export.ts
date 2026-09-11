@@ -128,7 +128,7 @@ export function transactionsToCsv(
  *
  * It IS reachable. The explorer legs are bounded (one `EXPLORER_PAGE_SIZE`
  * window per source per account — `infra/explorer-api.ts` owns the number,
- * and #2884 is raising it), but the x402 leg is not: `FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL` carries no
+ * and #2884 paginates past it), but the x402 leg is not: `FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL` carries no
  * `LIMIT` and `mergeX402Transactions` appends every row it returns, so a user
  * with more than `EXPORT_ROW_CAP` confirmed x402 payment intents crosses this
  * on an unfiltered export. That is the case the route's 413 answers, and the

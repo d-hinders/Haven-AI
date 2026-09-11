@@ -3,7 +3,7 @@
  * `routes/transactions.ts` (#992). Fans out to `infra/explorer-api.ts`
  * (normal/internal/ERC-20 transfers), normalizes every source into
  * `Transaction`, sorts, dedupes, and caches the per-Safe result under
- * `buildTransactionCacheKey`. `infra/explorer-api.ts` and `infra/gnosisscan.ts`
+ * `buildTransactionCacheKey`. `infra/explorer-api.ts`
  * stay in `infra/` (the flat `lib/` was folded away by #998) — this module
  * only consumes their
  * public fetchers.

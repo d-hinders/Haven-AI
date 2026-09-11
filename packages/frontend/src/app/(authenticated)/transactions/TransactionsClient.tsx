@@ -24,6 +24,28 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 
+/**
+ * What to show the user when an export fails.
+ *
+ * The refusal that matters is the row cap: the backend's `details` carries the
+ * count, the limit and the way out ("narrow the filters"), and `message` is
+ * only the three-word summary — so `details` is read where the route sends
+ * one, via the `body` escape hatch `ApiRequestError` exists for. Every other
+ * status gets a written sentence rather than a passthrough: the remaining
+ * refusals on this route are validation strings for query parameters the UI
+ * builds itself, and a 500 would otherwise surface Fastify's
+ * "Internal Server Error" as product copy.
+ */
+function exportFailureMessage(err: unknown): string {
+  if (err instanceof ApiRequestError) {
+    const details = (err.body as { details?: unknown } | undefined)?.details
+    if (err.status === 413 && typeof details === 'string' && details.length > 0) {
+      return details
+    }
+  }
+  return 'The export could not be generated. Try again.'
+}
+
 function chainName(chainId: number): string {
   try {
     return getChainConfig(chainId).name
@@ -129,6 +151,9 @@ export default function TransactionsClient() {
   const showSummary = hasActiveFilters && visibleTransactions.length > 0
   const handleFilterChange = (nextFilters: TransactionFilterState) => {
     setFilters(nextFilters)
+    // The dominant failure tells the user to narrow the filters; leaving the
+    // banner up once they have makes it assert something no longer true.
+    setExportError(null)
 
     const params = new URLSearchParams()
     if (nextFilters.safeId) params.set('safeId', nextFilters.safeId)
@@ -163,11 +188,7 @@ export default function TransactionsClient() {
       const csv = await api.getText(`/transactions/export.csv?${params.toString()}`)
       downloadCsv(csv, buildCsvFilename(new Date()))
     } catch (err) {
-      setExportError(
-        err instanceof ApiRequestError
-          ? err.message
-          : 'The export could not be generated. Try again.',
-      )
+      setExportError(exportFailureMessage(err))
     } finally {
       setExporting(false)
     }
@@ -190,7 +211,12 @@ export default function TransactionsClient() {
     )
   }
 
-  const canExport = !loadingInitial && visibleTransactions.length > 0
+  // Gated on the server's filtered total, not on the rows the browser happens
+  // to hold: since #2871 the export covers the whole result set, so gating on
+  // `visibleTransactions` would disable the button whenever the loaded page
+  // held no row matching the in-memory direction/network filter while the
+  // server still had plenty.
+  const canExport = !loadingInitial && total > 0
 
   return (
     <div className="max-w-6xl">
@@ -202,6 +228,7 @@ export default function TransactionsClient() {
             variant="tertiary"
             onClick={handleExportCsv}
             disabled={!canExport || exporting}
+            aria-busy={exporting}
           >
             {exporting ? 'Preparing…' : 'Export CSV'}
           </Button>
@@ -209,7 +236,10 @@ export default function TransactionsClient() {
       />
 
       {exportError && (
-        <div className="mb-4 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]">
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]"
+        >
           {exportError}
         </div>
       )}
@@ -245,9 +275,10 @@ export default function TransactionsClient() {
             id="tx-network"
             aria-label="Filter transactions by network"
             value={scope === 'all' ? 'all' : String(scope)}
-            onChange={(e) =>
+            onChange={(e) => {
               setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))
-            }
+              setExportError(null)
+            }}
             className="max-w-[200px]"
           >
             <option value="all">All networks</option>
@@ -333,7 +364,7 @@ export default function TransactionsClient() {
               disabled={loadingMore}
               className="min-w-36"
             >
-              {loadingMore ? 'Loading...' : 'Load more'}
+              {loadingMore ? 'Loading…' : 'Load more'}
             </Button>
           ) : (
             <span className="text-xs text-[var(--v2-ink-3)]">You&apos;ve reached the end</span>

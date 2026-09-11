@@ -132,8 +132,10 @@ repository `infra/repositories/transaction-history.ts` now also projects
 book-time rate it used instead of an unexplained SEK figure. Both columns ride
 the existing `LEFT JOIN`, inside the same `pi.user_id = $N` +
 `us.id = ANY($N)` tenant scoping, and nothing writes: no signer, no authority
-and no spend path is implicated, and invariants 1–13 above are untouched. The
-export itself moves no money — it is a read of settled history.
+and no spend path is implicated, and invariants 1–13 above are untouched. This
+statement is about the repository projection, which is what this document's
+front-matter coupling reaches; the export route that consumes it is reviewed
+under #2871 and is not a contract surface here.
 
 **Relayer gas budgets (#717) — an availability control on the same signer:**
 every relayer-paid operation (deploys, execs, allowance transfers, sweeps)

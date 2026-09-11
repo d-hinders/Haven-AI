@@ -10,13 +10,13 @@ import { toCsv } from '../../domain/csv.js'
 import type { EnrichedTransaction } from './types.js'
 
 /**
- * Column order is the public contract of the export — do not reorder casually,
- * and append new columns at the end so existing indices stay stable.
- *
- * Carried over from the frontend helper this replaces, with #2871's columns
- * folded in: `payment_id`, `fx_rate` and `fx_source` are new, `date` is now
- * `settled_at` to say which timestamp it is, and `amount` is explicitly the
- * human-decimal value.
+ * Column order is the public contract of the export. #2871 **replaces** the
+ * v1 contract rather than extending it — `date` became `settled_at` to say
+ * which timestamp it is, `counterparty_*` moved ahead of `token_*`, and
+ * `amount_sek` / `fx_rate` / `fx_source` / `payment_id` were inserted mid-list
+ * — so an importer keyed on v1 column indices or header names has to be
+ * repointed once. From here on, append new columns at the END so existing
+ * indices stay stable.
  *
  * `fee_sek` is present and always empty: there is no fee ledger to read
  * (#386). It stays in the contract so a column does not appear later and
@@ -124,15 +124,15 @@ export function transactionsToCsv(
  * Row ceiling for one CSV export (#2871). The export runs the whole
  * aggregate-and-enrich pipeline in memory rather than streaming from the
  * database — there is no database to stream from, the feed is aggregated from
- * block explorers — so it is bounded.
+ * block explorers — so it is bounded here instead.
  *
- * It cannot fire today: `fetchNormalTransactions` and its siblings take
- * `offset = 50` (`infra/explorer-api.ts`), so the pipeline yields at most ~50
- * rows per source per account and the largest reachable export is orders of
- * magnitude below this. The guard ships anyway, because the ceiling is a
- * property of the export and not of today's explorer window: raise that window
- * and this is what stops one request materialising an unbounded result set.
- * `exceedsExportRowCap` is unit-tested directly for that reason.
+ * It IS reachable. The explorer legs are bounded (`infra/explorer-api.ts`
+ * fetches with `offset = 50`, so ~50 rows per source per account), but the
+ * x402 leg is not: `FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL` carries no
+ * `LIMIT` and `mergeX402Transactions` appends every row it returns, so a user
+ * with more than `EXPORT_ROW_CAP` confirmed x402 payment intents crosses this
+ * on an unfiltered export. That is the case the route's 413 answers, and the
+ * route test seeds it.
  */
 export const EXPORT_ROW_CAP = 10_000
 

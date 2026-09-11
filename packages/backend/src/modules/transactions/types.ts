@@ -1,7 +1,7 @@
 /**
  * Shared shapes for the transactions module (#992). `routes/transactions.ts`
  * imports these (and only these + the functions in `index.ts`) — see the
- * module-entry-point dependency-cruiser rule.
+ * `no-deep-cross-module-import` dependency-cruiser rule.
  */
 import type { FastifyBaseLogger } from 'fastify'
 import type { TransactionSafeRow } from '../../infra/repositories/transaction-history.js'

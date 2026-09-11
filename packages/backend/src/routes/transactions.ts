@@ -253,7 +253,11 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
     }
 
-    let safes = await listBasicSafesForUser(sub)
+    // Kept unfiltered for name resolution below: a transfer between two of
+    // the user's own accounts must still name the far side when the export is
+    // scoped to one of them, exactly as the dashboard table does.
+    const allSafes = await listBasicSafesForUser(sub)
+    let safes = allSafes
 
     if (request.query.safeId) {
       safes = safes.filter((safe) => safe.id === request.query.safeId)
@@ -298,7 +302,7 @@ export default async function transactionRoutes(
     const contacts = await listContactsForUser(sub)
     const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
     const safeNames = new Map(
-      safes.map((safe) => [accountNameKey(safe.safe_address, safe.chain_id), safe.name]),
+      allSafes.map((safe) => [accountNameKey(safe.safe_address, safe.chain_id), safe.name]),
     )
 
     const csv = transactionsToCsv(filtered, {

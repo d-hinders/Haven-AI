@@ -442,8 +442,10 @@ on-chain budget delegation = enforcement
 ```
 
 This restates the `AgentApiKey` security-scheme description, which is attached
-to every agent-authenticated operation — 26 of the document's 134, the rest
-being `DashboardJwt`, `SetupToken` or public. (The description itself is prose;
+to every agent-authenticated operation — 26 of the document's operations, the
+rest being `DashboardJwt`, `SetupToken` or public. (The denominator is left
+unstated deliberately: it moves with every route added, and was already wrong
+by four before #2871 touched it.) (The description itself is prose;
 the block above is a three-line paraphrase of its middle sentence.) #2105 moved
 the third clause off
 the retired primitive: it read `on-chain Safe allowance = enforcement`, naming

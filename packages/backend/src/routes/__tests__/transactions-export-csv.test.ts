@@ -24,6 +24,10 @@ const RECIPIENT = '0xBBBB0000000000000000000000000000000000B2'
 const IN_HASH = '0x1111111111111111111111111111111111111111111111111111111111111111'
 const OUT_HASH = '0x2222222222222222222222222222222222222222222222222222222222222222'
 
+// Real uuids: `safeId` is uuid-validated before it reaches the account list.
+const BASE_SAFE_ID = '11111111-1111-4111-8111-111111111111'
+const GNOSIS_SAFE_ID = '22222222-2222-4222-8222-222222222222'
+
 function jsonResponse(body: unknown) {
   return Promise.resolve({
     ok: true,
@@ -130,6 +134,88 @@ function stubManyBaseTransactions(count: number) {
   return fetchMock
 }
 
+/**
+ * `count` confirmed x402 payment intents for the Base account — the row-cap
+ * fixture. This leg, not the explorer one, is what makes EXPORT_ROW_CAP
+ * reachable: `FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL` carries no `LIMIT` and
+ * `mergeX402Transactions` appends every row.
+ */
+/**
+ * Two accounts on ONE chain — name resolution is keyed by address AND chain,
+ * so a cross-chain pair resolves to nothing on the dashboard too and would
+ * not exercise this. The first account pays the second.
+ */
+const SECOND_BASE_SAFE = '0xCCCC0000000000000000000000000000000000C3'
+const SECOND_BASE_SAFE_ID = '33333333-3333-4333-8333-333333333333'
+
+const TWO_BASE_SAFES = [
+  { id: BASE_SAFE_ID, safe_address: BASE_SAFE, chain_id: 8453, name: 'Base account' },
+  { id: SECOND_BASE_SAFE_ID, safe_address: SECOND_BASE_SAFE, chain_id: 8453, name: 'Savings' },
+]
+
+function stubTransferBetweenOwnAccounts() {
+  const fetchMock = vi.fn((input: string | URL) => {
+    const url = String(input)
+    // Only the first account has the outbound row; the second sees nothing,
+    // so the export scoped to the first holds exactly one record.
+    if (
+      url.includes('/addresses/') &&
+      url.includes('/transactions') &&
+      url.toLowerCase().includes(BASE_SAFE.toLowerCase())
+    ) {
+      return jsonResponse({
+        items: [
+          {
+            hash: OUT_HASH,
+            block_number: 45_725_827,
+            timestamp: '2026-05-08T11:49:59Z',
+            from: { hash: BASE_SAFE },
+            to: { hash: SECOND_BASE_SAFE },
+            value: '2000000000000000000',
+            gas_limit: '21000',
+            gas_used: '21000',
+            status: 'ok',
+            method: null,
+          },
+        ],
+        next_page_params: null,
+      })
+    }
+    return jsonResponse({ items: [], next_page_params: null })
+  })
+
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+function x402Rows(count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `pi-${i}`,
+    tx_hash: `0x${(i + 1).toString(16).padStart(64, '0')}`,
+    agent_id: 'agent-1',
+    agent_name: 'Buyer',
+    safe_id: BASE_SAFE_ID,
+    safe_address: BASE_SAFE,
+    safe_name: 'Base account',
+    chain_id: 8453,
+    token_symbol: 'USDC',
+    token_address: '0xusdc',
+    to_address: RECIPIENT,
+    amount_raw: '1000000',
+    amount_human: '1',
+    x402_merchant_address: null,
+    x402_resource_url: null,
+    payment_proof_status: 'payment_confirmed',
+    payment_reconciliation_event_type: null,
+    amount_sek: null,
+    fx_rate_sek: null,
+    fx_source: null,
+    settlement_scheme: 'erc7710',
+    confirmed_at: '2026-05-08T11:49:59.000Z',
+    created_at: '2026-05-08T11:49:59.000Z',
+  }))
+}
+
 interface DbRows {
   user_safes?: unknown[]
   contacts?: unknown[]
@@ -149,8 +235,8 @@ function routeDbQueries(rows: DbRows = {}) {
 }
 
 const BOTH_SAFES = [
-  { id: 'safe-base', safe_address: BASE_SAFE, chain_id: 8453, name: 'Base account' },
-  { id: 'safe-gnosis', safe_address: GNOSIS_SAFE, chain_id: 100, name: 'Gnosis account' },
+  { id: BASE_SAFE_ID, safe_address: BASE_SAFE, chain_id: 8453, name: 'Base account' },
+  { id: GNOSIS_SAFE_ID, safe_address: GNOSIS_SAFE, chain_id: 100, name: 'Gnosis account' },
 ]
 
 /** Parse an RFC 4180 body into header + records, honouring quotes. */
@@ -340,6 +426,50 @@ describe('GET /transactions/export.csv', () => {
     expect(response.statusCode).toBe(200)
     expect(records).toHaveLength(50)
     expect(response.headers['x-export-row-count']).toBe('50')
+  })
+
+  it('names the far side of a transfer between two of the user\'s own accounts', async () => {
+    // Scoped to one account, paying the user's OWN second account. The
+    // dashboard table resolves names from all of the user's accounts, so the
+    // export has to as well — resolving from the `safeId`-narrowed list would
+    // leave counterparty_name empty while the screen says "Savings".
+    stubTransferBetweenOwnAccounts()
+    routeDbQueries({ user_safes: TWO_BASE_SAFES })
+
+    const response = await get(`?fresh=1&safeId=${BASE_SAFE_ID}`)
+    const { header, records } = parseCsv(response.body.slice(1))
+
+    expect(records).toHaveLength(1)
+    expect(records[0][header.indexOf('counterparty_address')]).toBe(SECOND_BASE_SAFE)
+    expect(records[0][header.indexOf('counterparty_name')]).toBe('Savings')
+  })
+
+  it('refuses above the row cap with a structured error naming the count', async () => {
+    // One row over EXPORT_ROW_CAP, seeded through the unbounded x402 leg.
+    stubExplorers()
+    routeDbQueries({ user_safes: [BOTH_SAFES[0]], payment_intents: x402Rows(10_001) })
+
+    const response = await get('?fresh=1')
+
+    expect(response.statusCode).toBe(413)
+    expect(response.headers['content-type']).toContain('application/json')
+    expect(response.json()).toMatchObject({ error: 'Export too large', statusCode: 413 })
+    // The actionable half: the count, the limit and the way out.
+    expect(response.json().details).toContain('10002')
+    expect(response.json().details).toContain('10000')
+    expect(response.json().details).toContain('Narrow the filters')
+    // Nothing is emitted — a refusal, never a truncated file.
+    expect(response.body).not.toContain('settled_at')
+  })
+
+  it('exports at the row cap rather than refusing', async () => {
+    stubExplorers()
+    routeDbQueries({ user_safes: [BOTH_SAFES[0]], payment_intents: x402Rows(9_999) })
+
+    const response = await get('?fresh=1')
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['x-export-row-count']).toBe('10000')
   })
 
   it.each([

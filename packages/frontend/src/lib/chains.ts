@@ -1,9 +1,9 @@
 /**
  * Frontend chain configuration — client construction over the shared registry.
  *
- * The per-chain FACTS (identity, explorer/Safe URLs, contracts, passkey,
- * token data) live in `@haven_ai/core` (#986) — ONE definition shared with
- * the backend. This module adds what only the frontend owns: viem chain
+ * The per-chain FACTS (identity, explorer URLs, passkey, token data) live in
+ * `@haven_ai/core` (#986) — ONE definition shared with the backend. This
+ * module adds what only the frontend owns: viem chain
  * objects, the offered-chains policy (pickers), the build-time default
  * chain, and the frontend's token Record representation (keyed by display
  * symbol, in picker order).
@@ -32,13 +32,6 @@ export interface FrontendChainConfig {
   shortName: string
   viemChain: typeof gnosis | typeof base | typeof baseSepolia
   explorerUrl: string
-  safeTxServiceUrl: string
-  contracts: {
-    safeProxyFactory: Address
-    safeSingletonL2: Address
-    fallbackHandler: Address
-    multiSendCallOnly: Address
-  }
   passkey: {
     /** P-256 verifier the Safe passkey signer will call. */
     verifier: Address
@@ -74,8 +67,6 @@ function buildFrontendChain(chainId: number): FrontendChainConfig {
     shortName: core.shortName,
     viemChain: layer.viemChain,
     explorerUrl: core.explorerUrl,
-    safeTxServiceUrl: core.safeTxServiceUrl,
-    contracts: core.contracts as FrontendChainConfig['contracts'],
     passkey: { verifier: core.passkey.verifier as Address },
     tokens,
   }

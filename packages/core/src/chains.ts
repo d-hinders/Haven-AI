@@ -1,8 +1,11 @@
 /**
  * Shared chain + token registry (#986, epic #980 M1) — the single source of
  * truth for the per-chain FACTS that backend and frontend previously each
- * maintained a copy of: identity, explorer/Safe-service URLs, contract
- * addresses, passkey deployment, and token data.
+ * maintained a copy of: identity, explorer URLs, passkey deployment, and
+ * token data. The Safe Transaction Service URL and the Safe contract
+ * addresses left the registry with #2849 (safe-retirement slice 3) — the
+ * service leg in transaction history is gone and nothing read the
+ * `contracts{}` keys.
  *
  * What deliberately does NOT live here:
  * - RPC URLs, API keys, provider/relayer construction — environment wiring,
@@ -66,13 +69,6 @@ export interface CoreChainConfig {
   shortName: string
   nativeCurrency: { name: string; symbol: string; decimals: number }
   explorerUrl: string
-  safeTxServiceUrl: string
-  contracts: {
-    safeProxyFactory: string
-    safeSingletonL2: string
-    fallbackHandler: string
-    multiSendCallOnly: string
-  }
   passkey: {
     /** P-256 verifier the Safe passkey signer will call. */
     verifier: string
@@ -100,13 +96,6 @@ const GNOSIS: CoreChainConfig = {
   shortName: 'gnosis',
   nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 },
   explorerUrl: 'https://gnosisscan.io',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/gno',
-  contracts: {
-    safeProxyFactory: '0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2',
-    safeSingletonL2: '0x3E5c63644E683549055b9Be8653de26E0B4CD36E',
-    fallbackHandler: '0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
   passkey: {
     verifier: '0x445a0683e494ea0c5af3e83c5159fbe47cf9e765',
     // SafeWebAuthnSignerFactory live deployment used by the frontend parity checks in PR #40.
@@ -127,14 +116,6 @@ const BASE: CoreChainConfig = {
   shortName: 'base',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   explorerUrl: 'https://basescan.org',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/base',
-  contracts: {
-    // Base uses EIP-155 variant addresses for Safe v1.3.0
-    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
-    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
-    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
   passkey: {
     verifier: '0x0000000000000000000000000000000000000100',
     factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',
@@ -156,13 +137,6 @@ const BASE_SEPOLIA: CoreChainConfig = {
   shortName: 'base-sepolia',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   explorerUrl: 'https://sepolia.basescan.org',
-  safeTxServiceUrl: 'https://api.safe.global/tx-service/basesep',
-  contracts: {
-    safeProxyFactory: '0xC22834581EbC8527d974F8a1c97E1bEA4EF910BC',
-    safeSingletonL2: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA',
-    fallbackHandler: '0x017062a1dE2FE6b99BE3d9d37841FeD19F573804',
-    multiSendCallOnly: '0x40A2aCCbd92BCA938b02010E17A5b8929b49130D',
-  },
   passkey: {
     verifier: '0x0000000000000000000000000000000000000100',
     factoryAddress: '0x1d31F259eE307358a26dFb23EB365939E8641195',

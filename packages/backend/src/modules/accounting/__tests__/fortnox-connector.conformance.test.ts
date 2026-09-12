@@ -53,10 +53,12 @@ mocks.buildAccountingEntryForPayment.mockImplementation(async (_userId: string, 
  * A fetch that answers from the recorded fixtures and tracks the per-case
  * provider state. It patches the two identifiers that vary per case into
  * the recorded bodies (the external invoice number we sent, the booked
- * state) exactly as Fortnox echoes them.
+ * state) exactly as Fortnox echoes them. `refuseInvoice` (#2865) answers the
+ * invoice POST with the same `[2000663]` body the file connection uses —
+ * Fortnox's scope refusal is one error code whatever the endpoint.
  */
 function fortnoxRouter(attachment: AttachmentOutcome) {
-  const state = { createCalls: 0, createPayload: null as Record<string, unknown> | null, booked: false, deleted: false, externalInvoiceNumber: '', revokeCalls: 0, revokeBodies: [] as string[] }
+  const state = { createCalls: 0, createPayload: null as Record<string, unknown> | null, booked: false, deleted: false, externalInvoiceNumber: '', revokeCalls: 0, revokeBodies: [] as string[], refuseInvoice: false }
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
   const impl = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url)
@@ -75,6 +77,8 @@ function fortnoxRouter(attachment: AttachmentOutcome) {
     if (path.startsWith('/suppliers?name=')) return json(fixture('suppliers-search-empty.json'))
     if (path === '/suppliers' && method === 'POST') return json(fixture('supplier-created.json'))
     if (path === '/supplierinvoices' && method === 'POST') {
+      // #2865: a grant without `supplierinvoice` — refused, nothing created.
+      if (state.refuseInvoice) return json(fixture('fileconnection-scope-error.json'), 400)
       state.createCalls += 1
       const payload = (JSON.parse(String(init?.body)) as { SupplierInvoice: Record<string, unknown> }).SupplierInvoice
       state.createPayload = payload
@@ -124,6 +128,7 @@ const harness: ConformanceHarness = {
       createCalls: () => state.createCalls,
       createPayload: () => state.createPayload,
       revokeCalls: () => state.revokeCalls,
+      refuseInvoiceForScope: (on) => { state.refuseInvoice = on },
       secrets,
       connect: async () => {
         await completeOAuth2Connect({

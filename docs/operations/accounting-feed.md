@@ -10,7 +10,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/hooks/useAccounting.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-12"
 ---
 
 # Accounting feed (Fortnox) — operations runbook
@@ -258,11 +258,11 @@ Work the sync row's `status` on `/accounting` (or `accounting_feed_syncs`):
 
 | Status | Meaning | Action |
 | --- | --- | --- |
-| `pushed` | Delivered. `error` column may carry a non-fatal **note** (e.g. "receipt attachment failed") — invoice exists, attachment degraded | Use *Check in Fortnox* for live state; reconnect Fortnox if the note names a scope error, then re-capture attachments is NOT automatic — the invoice stands |
+| `pushed` | Delivered. `error` column may carry a non-fatal **note** (e.g. "receipt attachment failed") — invoice exists, attachment degraded | Use *Check in Fortnox* for live state; reconnect Fortnox if the note names a scope error (the connection is `scope_missing`, see [Scope-missing](#scope-missing-detection-and-re-consent-2865)) — the invoice stands and is NEVER re-pushed; re-capturing the attachment is not automatic |
 | `failed` | Fortnox push failed; `error` carries the Fortnox message verbatim | Nothing, at first: the [retry sweep](#background-retry-sweep-2866) re-feeds it with backoff (1 min doubling to 1 h, 8 attempts). Fix the named cause (often token/scope) if it keeps failing; **Sync now** retries immediately |
 | `failed` with `error` starting `exhausted:` | The sweep gave up — 8 attempts, the last reason follows the prefix | Fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | Claimed but in flight (or a crashed in-flight push) | Wait; the sweep releases a `pending` row older than 15 min (the claim IS the concurrency guard, so nothing shorter) and re-feeds it. Do not edit the row |
-| `skipped` | A connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped), or `connection needs_reauthorisation: …` (#2863) | Fix the named cause (usually: connect Fortnox); the sweep retries skipped rows like failed ones — but NOT while the connection is `needs_reauthorisation` / `scope_missing`, which hold the row until the user re-consents. **Sync now** also re-claims them |
+| `skipped` | A connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped), `connection needs_reauthorisation: …` (#2863), or `scope refused before the invoice was created: …` (#2865 — the invoice POST itself was refused for scope, nothing exists in Fortnox, the connection is `scope_missing`) | Fix the named cause (usually: connect Fortnox); the sweep retries skipped rows like failed ones — but NOT while the connection is `needs_reauthorisation` / `scope_missing`, which hold the row until the user re-consents. **Sync now** also re-claims them |
 | *(no row)* | The settle-time hook never ran (entitlement off, feature flag off) or the payment predates the feed | Check `GET /accounting/feed/status` base flags and `entitlementMode`/`entitled`; **Sync now** backfills once entitled |
 
 Common causes, from live experience:
@@ -272,10 +272,15 @@ Common causes, from live experience:
 - **Scope widened** (the `connectfile` lesson, 2026-07-16): connections
   consented before a scope was added still push invoices but fail file
   connections with Fortnox error `[2000663]` — the row is `pushed` with a
-  degradation note. Fix: **Disconnect, then Connect** on `/accounting` to
-  re-consent with the current scope set
-  (`bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation`).
-  There is no automatic re-consent flow today.
+  degradation note and, since #2862/#2865, the connection is `scope_missing`
+  with the missing scope named. Fix: **Connect** again on `/accounting` —
+  the re-consent path (#2865) re-runs the consent on the EXISTING connection
+  with the current scope set
+  (`bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation`)
+  and keeps its settings, floor and history; Disconnect first is no longer
+  needed (it would also revoke the grant and drop the active flag). The
+  scopes to name to the user are `missingScopes` on
+  `GET /accounting/connections` and `GET /accounting/feed/status`.
 - **Non-ASCII rejection** (Fortnox error `2000359`): Comments/Name reject
   middle dots, `://`, and the app's `…` ellipsis. The connector already
   sanitizes; a new occurrence means a new field slipped through — fix the
@@ -296,13 +301,13 @@ there is exactly one per user.
 | route | auth | what it does |
 |---|---|---|
 | `GET /accounting/providers` | session | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
-| `GET /accounting/connections` | session | the caller's connections — metadata only, never secrets |
-| `POST /accounting/connections/:provider/connect-url` | session | consent URL for a live OAuth2 provider; signed, purpose-scoped, provider-bound, **single-use** `state` (10 min) |
-| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error`, plus `&reason=unsupported_currency` on a non-SEK refusal (#2864) |
+| `GET /accounting/connections` | session | the caller's connections — metadata only, never secrets; each carries `missingScopes` (#2865) |
+| `POST /accounting/connections/:provider/connect-url` | session | consent URL for a live OAuth2 provider; signed, purpose-scoped, provider-bound, **single-use** `state` (10 min). Also the **re-consent** path (#2865): issued for an existing connection too, whatever its status |
+| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error`, plus `&reason=unsupported_currency` on a non-SEK refusal (#2864). On an existing connection it UPDATES the row (secrets, `granted_scope`, `status → connected`) and keeps `settings`, `feed_from`, the active flag and the sync history (#2865). A grant narrower than `requiredScopes` is stored but `scope_missing` (#2865) |
 | `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409); a non-SEK company is 409 `UNSUPPORTED_BASE_CURRENCY` before the key is stored (#2864) |
 | `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it (Fortnox does, #2863 — `POST /oauth-v1/revoke` with the refresh token; a failed revoke still disconnects locally) |
 | `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
-| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), recent syncs |
+| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), `missingScopes` of the destination row whatever its status (#2865), recent syncs |
 | `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from` |
 | `GET /accounting/feed/verify/:paymentId` | session + entitlement | read-back through the active connection's connector |
 | `POST /accounting/feed/reopen/:paymentId` | session + entitlement | verification-gated reopen on the active connection's provider; a row from before the connection's latest company switch is refused 409 `previous_company` (#2864) |
@@ -330,14 +335,92 @@ the new ledger takes the backfill (#2867), which passes an explicit earlier
 date.
 
 **`scope_missing`.** (For `needs_reauthorisation`, see *Token lifecycle*
-below.) A pushed invoice whose attachment step failed with
+below; for the four ways a row gets here and the way out, see
+[Scope-missing detection and re-consent](#scope-missing-detection-and-re-consent-2865).)
+A pushed invoice whose attachment step failed with
 Fortnox's scope error (`[2000663]`) leaves the sync row `pushed` with the
 note and flips the CONNECTION to `scope_missing` — the feed then has no
-active destination until the user reconnects (Disconnect, then Connect on
-`/accounting`): a user with any `accounting_connections` row is row-backed,
-and without an active `connected` row the orchestrator feeds nothing — it
-never falls back to asking a connector whether it "has secrets". The invoice
-stands; nothing is re-pushed.
+active destination until the user re-consents (Connect on `/accounting`): a
+user with any `accounting_connections` row is row-backed, and without an
+active `connected` row the orchestrator feeds nothing — it never falls back
+to asking a connector whether it "has secrets". The invoice stands; nothing
+is re-pushed.
+
+## Scope-missing detection and re-consent (#2865)
+
+**Why.** It has happened once: connections consented before `connectfile`
+joined the scope list pushed invoices fine and failed every file connection
+with `[2000663]`, degrading silently to a note. #2865 makes the shortfall
+visible at three points and gives the user a way out that loses nothing.
+
+**Detection.** A row becomes `scope_missing` with a `status_reason` of the
+shape `missing scopes: <a>, <b> — <detail>` (one parseable shape, so
+`missingScopes` on the API needs no column):
+
+| when | how it is found | sync row | connection |
+|---|---|---|---|
+| **at the callback** | the granted scope string (Fortnox echoes it in the token response) is compared with the descriptor's `requiredScopes` | — | stored (secrets, active flag if free), `scope_missing`, reason names the missing scopes (`missing scopes: connectfile, companyinformation — the Fortnox grant was consented without scopes the feed needs — reconnect to obtain them`). **Not a refusal**: the grant is kept |
+| **at connect, company read refused** (#2864) | `GET /companyinformation` answered 403 / `[2000663]` | — | `scope_missing`, `company info unavailable: …` (the callback comparison, which runs after it, overwrites this with the named list when the scope string is short too) |
+| **PRE-push** | the supplier lookup/create or the **invoice POST itself** answered `[2000663]` or a *bare* 403 (no Fortnox code — a 403 with another code such as a licence error `[2003295]` is a plain `failed`, not a scope problem) — **nothing exists in Fortnox** | `skipped`, `error = scope refused before the invoice was created: Fortnox POST /supplierinvoices failed (HTTP 400: … [2000663]).` — re-claimable | `scope_missing`, `missing scopes: supplierinvoice — …` |
+| **POST-push** | the invoice exists; the attachment step (inbox upload or file connection) answered `[2000663]` | **`pushed`** with the note (`receipt attachment failed: …`) — **never `skipped`, never re-pushed** | `scope_missing`, `missing scopes: connectfile — receipt attachment failed: …` |
+
+The pre-/post-push line is the review blocker of 2026-09-11: the ledger
+re-claims `failed`/`skipped` rows, and the retry sweep (#2866) feeds them
+after a reconnect — so a post-push scope error that marked its row `skipped`
+would push a **second** invoice for the same payment. Only a refusal on the
+create call itself, where nothing exists, may mark the row `skipped`. Both
+halves are pinned by the connector conformance suite (cases 6 and 6b) for
+every connector, and by `scope-missing.db.test.ts` for Fortnox end to end
+(exactly one supplier-invoice POST across push → degrade → reconnect →
+sweep). The scope a refusal names comes from the endpoint
+(`fortnoxScopeForPath`: `/supplierinvoices` → `supplierinvoice`, `/inbox` →
+`inbox`, `/supplierinvoicefileconnections` → `connectfile`, …) because
+Fortnox's `[2000663]` does not say which scope it lacked.
+
+**While `scope_missing`.** The connection is still the destination row but
+not an *active* one (`GET /accounting/feed/status` says `connected:false`
+and names `missingScopes`); the settlement hook feeds nothing (no sync row
+is written for new payments), `syncUser` feeds nothing, and the sweep's
+selection (`c.status = 'connected'`) leaves every `failed`/`skipped` row
+behind it alone. Nothing is retried against a grant that will refuse again.
+
+**Re-consent (the way out).** `POST /accounting/connections/fortnox/connect-url`
+on the existing connection issues a fresh state; the callback lands on the
+same row and `UPSERT_ACCOUNTING_CONNECTION_SQL`'s conflict path UPDATES it:
+secrets, `granted_scope`, `token_expires_at`, `status = connected`,
+`status_reason = NULL`, `last_error = NULL` — while `settings` (the user's
+configuration and the `companySwitches` log), `feed_from`, the active flag
+(kept if held; taken if nobody holds it) and every `accounting_feed_syncs`
+row are untouched. Then: a `pushed` row stays pushed (the invoice exists —
+nothing to do), a `skipped` row is due for the sweep after its backoff
+(1 min at `attempts = 1`) or immediately on **Sync now**, and new payments
+feed again. A reconnect that comes back with a DIFFERENT company is still a
+company switch (#2864) — the two rules compose. Disconnect first is NOT
+needed and is worse: it revokes the grant at Fortnox and drops the active
+flag.
+
+**`missingScopes` on the API.** `GET /accounting/connections` (every row)
+and `GET /accounting/feed/status` (the destination row, whatever its status)
+carry `missingScopes: string[]` — `granted_scope` compared with
+`requiredScopes`, plus the scopes the `status_reason` named while the row is
+`scope_missing`. Empty when nothing is missing. A **`connected`** row with a
+non-empty list is a grant that predates a scope widening and has not yet
+been asked for the missing scope — it will degrade at the first call that
+needs it; the UI (slice 10) can offer the re-consent before that happens.
+
+**On-call read.** `SELECT provider, status, status_reason, granted_scope,
+is_active_destination, feed_from FROM accounting_connections WHERE user_id =
+'<uuid>'` — `status_reason` names the scopes after `missing scopes:`. Then
+`SELECT payment_id, status, external_ref, error FROM accounting_feed_syncs
+WHERE user_id = '<uuid>' AND error ILIKE '%2000663%'`: a `pushed` row with an
+`external_ref` is a delivered invoice missing its attachment (leave it); a
+`skipped` row with `external_ref IS NULL` is a payment that will be fed by
+the sweep after the re-consent. Do not hand-edit `status` on the connection:
+the grant genuinely lacks the scope, and only a new consent adds it. If the
+same user is `scope_missing` again right after a re-consent, the Fortnox
+app's registered permissions in the developer portal are missing one of
+`FORTNOX_SCOPE`'s entries — the consent cannot grant what the app does not
+declare.
 
 ## Company info, SEK-only, company switch (#2864)
 
@@ -465,9 +548,10 @@ user_id = '<uuid>' AND status = 'skipped'`: while the grant is dead each
 sync records the payment as `skipped` with
 `connection needs_reauthorisation: …` (the state is the first thing in the
 reason, so a grep finds it). Nothing is pushed, nothing is refreshed. The
-fix is the user's: Disconnect, then Connect on `/accounting` — a re-consent
-replaces the secrets, sets the row back to `connected`, and the skipped rows
-are re-claimable (#1365), so the next sync — or the retry sweep's next tick
+fix is the user's: Connect again on `/accounting` — the re-consent path
+(#2865) replaces the secrets on the SAME row, sets it back to `connected`
+and keeps its settings, floor and history, and the skipped rows are
+re-claimable (#1365), so the next sync — or the retry sweep's next tick
 (#2866), which holds those rows back only while the connection is not
 `connected` — feeds them. There is no operator
 action that revives a dead grant; do not hand-edit `status` — the stored
@@ -567,9 +651,11 @@ predicate the sweep uses). **Sync now** still re-claims an exhausted row: the
 cap bounds the sweep, not the human.
 
 **State-skipped rows wait for the cause.** The selection joins the
-connection: a row `skipped` with `connection needs_reauthorisation: …`, or
-any row behind a `scope_missing` / `disconnected` connection, is not touched
-until the row is `connected` again (a re-consent flips it). FX-not-ready rows
+connection: a row `skipped` with `connection needs_reauthorisation: …` or
+`scope refused before the invoice was created: …` (#2865), or any row behind
+a `scope_missing` / `disconnected` connection, is not touched until the row
+is `connected` again (a re-consent flips it — and a `pushed` row is never
+selected, so a post-push scope error is never re-fed). FX-not-ready rows
 are selected normally — the orchestrator no-ops before claiming, so no
 attempt is consumed while the FX is missing.
 

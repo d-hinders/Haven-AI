@@ -41,6 +41,7 @@ const harness: ConformanceHarness = {
       createCalls: () => connector.pushed.length,
       createPayload: () => (connector.pushed.at(-1)?.tx as unknown as Record<string, unknown>) ?? null,
       revokeCalls: () => connector.revoked.length,
+      refuseInvoiceForScope: (on) => { connector.invoiceOutcome = on ? 'scope_missing' : 'ok' },
       secrets,
       connect: async () => {
         await connectWithApiKey({ provider: MEMORY, connector, userId, apiKey: secrets.apiKey })

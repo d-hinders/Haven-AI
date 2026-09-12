@@ -60,6 +60,8 @@ import type { AccountingConnector } from './connector.js'
 import {
   ProviderError,
   assertSupportedBaseCurrency,
+  compareGrantedScopes,
+  missingScopesReason,
   type AccountingProvider,
   type ProviderCompanyInfo,
 } from './provider.js'
@@ -312,6 +314,18 @@ export async function saveOAuth2Connection(
  * the currency check runs regardless (a null currency passes), so the
  * enforcement point is reached on every connect and the conformance suite can
  * prove that with a provider that reports a non-SEK ledger.
+ *
+ * ## The same call IS the re-consent path (#2865)
+ *
+ * `POST /accounting/connections/:provider/connect-url` on an existing
+ * connection issues a fresh state; the callback lands here with `existed`
+ * set, and `upsertConnection`'s conflict path UPDATES the row: secrets,
+ * `granted_scope`, expiry, `status → connected`, `status_reason` cleared —
+ * while `settings` (the user's configuration and the `companySwitches` log),
+ * `feed_from`, `is_active_destination` (kept if held) and every
+ * `accounting_feed_syncs` row are untouched. A `skipped` row behind the
+ * connection becomes claimable again the moment the row is `connected`
+ * (the retry sweep's predicate); a `pushed` row stays pushed.
  */
 export async function completeOAuth2Connect(input: {
   provider: AccountingProvider
@@ -355,7 +369,33 @@ export async function completeOAuth2Connect(input: {
   // #2864: a reconnect to a DIFFERENT company is a company switch (feed_from
   // = now, switch recorded); a scope refusal on the company read marks the
   // row scope_missing. Both decisions are `company-info.ts`'s.
-  return applyCompanyInfo({ provider: input.provider, userId: input.userId, existed, saved: row, info })
+  const applied = await applyCompanyInfo({ provider: input.provider, userId: input.userId, existed, saved: row, info })
+  // #2865: the granted scope string against the descriptor. A shortfall is
+  // NOT a refusal — the grant is stored (it may still push invoices, as the
+  // pre-`connectfile` grants did) — but the row is `scope_missing` with the
+  // missing scopes named, so the dashboard asks for a re-consent BEFORE the
+  // first push finds out. Runs last so its reason (which names the scopes)
+  // wins over the company read's when both apply.
+  // MUTATION TARGET (scope-missing.db.test.ts "narrower scope"): skipping
+  // this comparison stores a connected row that fails at push time.
+  return recordScopeShortfall(input.provider, input.userId, applied, tokens.scope)
+}
+
+/** See `completeOAuth2Connect`. Returns the row as it now is. */
+async function recordScopeShortfall(
+  provider: AccountingProvider,
+  userId: string,
+  row: AccountingConnectionRow,
+  grantedScope: string | null,
+): Promise<AccountingConnectionRow> {
+  const missing = compareGrantedScopes(grantedScope, provider.requiredScopes)
+  if (missing.length === 0) return row
+  const reason = missingScopesReason(
+    missing,
+    `the ${provider.displayName} grant was consented without ${missing.length === 1 ? 'a scope' : 'scopes'} the feed needs — reconnect to obtain ${missing.length === 1 ? 'it' : 'them'}`,
+  )
+  await setStatus(userId, provider.id, 'scope_missing', reason)
+  return { ...row, status: 'scope_missing', status_reason: reason }
 }
 
 /**

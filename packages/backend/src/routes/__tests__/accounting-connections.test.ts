@@ -231,8 +231,29 @@ describe('accounting connection routes (#2862)', () => {
         baseCurrency: 'SEK',
       })
       expect(connections[0]).not.toHaveProperty('secrets_ciphertext')
+      // #2865: a grant that carries only `bookkeeping` is short of the other
+      // six — named in the descriptor's order, even on a `connected` row.
+      expect(connections[0].missingScopes).toEqual(['supplierinvoice', 'supplier', 'archive', 'inbox', 'connectfile', 'companyinformation'])
       expect(leaks(res.body)).toBe(false)
       expect(leaks(JSON.stringify(res.headers))).toBe(false)
+      expectMatchesSpec('GET', '/accounting/connections', res.json())
+    })
+
+    it('#2865: missingScopes is empty for a full grant, and names what a push-time refusal recorded on a scope_missing row', async () => {
+      const full = 'bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation'
+      rows.set(`${USER}::fortnox`, row('fortnox', { granted_scope: full }))
+      let res = await authed('GET', '/accounting/connections')
+      expect(res.json().connections[0].missingScopes).toEqual([])
+
+      // The scope string looked complete, but Fortnox refused the file
+      // connection: the reason written at push time names the scope.
+      rows.set(`${USER}::fortnox`, row('fortnox', {
+        granted_scope: full,
+        status: 'scope_missing',
+        status_reason: 'missing scopes: connectfile — receipt attachment failed: Fortnox POST /supplierinvoicefileconnections failed (HTTP 400: Har inte behörighet för scope. [2000663]).',
+      }))
+      res = await authed('GET', '/accounting/connections')
+      expect(res.json().connections[0]).toMatchObject({ status: 'scope_missing', missingScopes: ['connectfile'] })
       expectMatchesSpec('GET', '/accounting/connections', res.json())
     })
 
@@ -254,6 +275,15 @@ describe('accounting connection routes (#2862)', () => {
       expect(claims.exp - claims.iat).toBe(600)
       expect(leaks(res.body)).toBe(false)
       expectMatchesSpec('POST', '/accounting/connections/{provider}/connect-url', res.json())
+    })
+
+    it('#2865 RE-CONSENT: an existing scope_missing connection gets a fresh consent URL — not a refusal', async () => {
+      rows.set(`${USER}::fortnox`, row('fortnox', { status: 'scope_missing', status_reason: 'missing scopes: connectfile — …', is_active_destination: true }))
+      const res = await authed('POST', '/accounting/connections/fortnox/connect-url')
+      expect(res.statusCode).toBe(200)
+      expect(res.json().url.startsWith('https://apps.fortnox.se/oauth-v1/auth?')).toBe(true)
+      // The row is untouched by issuing the URL — only the callback changes it.
+      expect(rows.get(`${USER}::fortnox`)).toMatchObject({ status: 'scope_missing', is_active_destination: true })
     })
 
     it('LIVE-ONLY GATE: a coming_soon provider is refused even with a connector registered', async () => {
@@ -294,6 +324,33 @@ describe('accounting connection routes (#2862)', () => {
       expect(flowMocks.completeOAuth2Connect.mock.calls[0][0]).toMatchObject({ userId: USER, code: 'auth-code', provider: { id: 'fortnox' } })
       expect(leaks(res.headers.location as string)).toBe(false)
       expect(leaks(res.body)).toBe(false)
+    })
+
+    it('#2865 RE-CONSENT: the callback on an EXISTING connection updates that row — one row, same id, connected, settings and feed_from kept', async () => {
+      const feedFrom = new Date('2026-09-01T12:00:00.000Z')
+      rows.set(`${USER}::fortnox`, row('fortnox', {
+        status: 'scope_missing', status_reason: 'missing scopes: connectfile — …', is_active_destination: true,
+        feed_from: feedFrom, settings: { autoFeed: false, companySwitches: [{ at: '2026-09-02T00:00:00.000Z', fromCompanyId: '1', toCompanyId: '2' }] },
+      }))
+      // The flow's real preservation is proven on the database
+      // (scope-missing.db.test.ts); here the ROUTE must reach the flow with
+      // the existing user + provider and hand back the updated row's summary.
+      flowMocks.completeOAuth2Connect.mockImplementation(async ({ userId, provider }) => {
+        const existing = rows.get(`${userId}::${provider.id}`)!
+        Object.assign(existing, { status: 'connected', status_reason: null, granted_scope: 'bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation' })
+        return existing
+      })
+      const state = await issueState()
+      const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=re-consent-code&state=${state}` })
+      expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=connected')
+      expect(flowMocks.completeOAuth2Connect.mock.calls[0][0]).toMatchObject({ userId: USER, provider: { id: 'fortnox' } })
+      expect(rows.size).toBe(1)
+      const list = await authed('GET', '/accounting/connections')
+      expect(list.json().connections).toHaveLength(1)
+      expect(list.json().connections[0]).toMatchObject({
+        status: 'connected', statusReason: null, missingScopes: [], isActiveDestination: true, feedFrom: feedFrom.toISOString(),
+      })
+      expect(rows.get(`${USER}::fortnox`)!.settings).toEqual({ autoFeed: false, companySwitches: [{ at: '2026-09-02T00:00:00.000Z', fromCompanyId: '1', toCompanyId: '2' }] })
     })
 
     it('SINGLE-USE: the same state replayed after a successful callback is refused before the code exchange', async () => {

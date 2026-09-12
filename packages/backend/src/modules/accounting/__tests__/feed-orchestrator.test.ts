@@ -7,6 +7,7 @@ const { mocks } = vi.hoisted(() => ({
     claimSync: vi.fn(),
     markPushed: vi.fn(),
     markFailed: vi.fn(),
+    markSkipped: vi.fn(),
     listSyncs: vi.fn(),
   },
 }))
@@ -20,6 +21,7 @@ vi.mock('../feed-sync.js', () => ({
   claimSync: mocks.claimSync,
   markPushed: mocks.markPushed,
   markFailed: mocks.markFailed,
+  markSkipped: mocks.markSkipped,
   listSyncs: mocks.listSyncs,
 }))
 // #2862: the orchestrator resolves the ACTIVE destination from the
@@ -116,6 +118,25 @@ describe('feed orchestrator (#499)', () => {
     expect(mocks.markPushed).toHaveBeenCalledWith(USER, 'memory', PID, 'memory:invoice:1', expect.stringMatching(/insufficient scope/))
     expect(connectionMocks.setStatus).toHaveBeenCalledWith(USER, 'memory', 'scope_missing', expect.stringMatching(/insufficient scope/))
     expect(mocks.markFailed).not.toHaveBeenCalled()
+  })
+
+  it('#2865: a PRE-push scope refusal (skipped + connectionStatus) records a skipped row AND flips the connection; a plain skip does not', async () => {
+    mocks.accountingFeedAvailable.mockResolvedValue(true)
+    const c = connectInMemory()
+    c.invoiceOutcome = 'scope_missing'
+    expect(await feedSettledPayment(USER, PID)).toEqual({ outcome: 'skipped', reason: expect.stringMatching(/scope refused before the record was created/) })
+    expect(mocks.markSkipped).toHaveBeenCalledWith(USER, 'memory', PID, expect.stringMatching(/scope refused/))
+    expect(connectionMocks.setStatus).toHaveBeenCalledWith(USER, 'memory', 'scope_missing', expect.stringMatching(/^missing scopes: invoice — scope refused/))
+    expect(mocks.markPushed).not.toHaveBeenCalled()
+    expect(c.pushed).toHaveLength(0)
+
+    // Positive control: a skip that is NOT about the grant leaves the connection alone.
+    connectionMocks.setStatus.mockClear()
+    mocks.markSkipped.mockClear()
+    c.invoiceOutcome = 'ok'
+    mocks.buildAccountingEntryForPayment.mockResolvedValue({ ...entry('10.00'), direction: 'in' })
+    await feedSettledPayment(USER, PID)
+    expect(connectionMocks.setStatus).not.toHaveBeenCalled()
   })
 
   it('skips (no claim) when book-time SEK is missing', async () => {

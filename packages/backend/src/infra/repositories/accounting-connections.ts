@@ -308,7 +308,10 @@ export async function setStatus(
   reason: string | null,
   db: Executor = pool,
 ): Promise<void> {
-  await db.query(SET_ACCOUNTING_STATUS_SQL, [userId, provider, status, reason])
+  // Bounded like the sync ledger's error column (review on #2900): a provider
+  // message must not grow the row without limit; the parseable prefix is at
+  // the front, so a slice never loses the scope list.
+  await db.query(SET_ACCOUNTING_STATUS_SQL, [userId, provider, status, reason === null ? null : reason.slice(0, 1000)])
 }
 
 /**

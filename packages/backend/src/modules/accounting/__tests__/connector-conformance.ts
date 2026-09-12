@@ -24,6 +24,11 @@
  *   6. a POST-PUSH insufficient-scope error on the attachment step leaves the
  *      sync row `pushed` with its note and flips only the connection state —
  *      never re-pushable
+ *   6b. (#2865) a PRE-push scope refusal — the create call itself refused,
+ *      nothing exists at the provider — records a `skipped` row with the
+ *      reason AND flips the connection; the same payment is not attempted
+ *      again while `scope_missing`, and is delivered exactly once after the
+ *      connection is `connected` again
  *   7. a provider reporting a non-SEK base currency is refused at connect by
  *      the generic flow with "Haven currently feeds SEK ledgers only", before
  *      any secret is stored (#2864 owns the policy; this proves BOTH flows —
@@ -37,12 +42,12 @@ import { randomBytes } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { companySwitchLog, getConnection, listConnections, upsertConnection } from '../../../infra/repositories/accounting-connections.js'
+import { companySwitchLog, getConnection, listConnections, setStatus, upsertConnection } from '../../../infra/repositories/accounting-connections.js'
 import { getSyncState } from '../../../infra/repositories/accounting-feed-syncs.js'
 import { SECRETS_KEY_ENV, encryptSecrets } from '../../../infra/secrets.js'
 import type { AccountingConnector, ProviderSecrets } from '../connector.js'
 import { clearConnectors, registerConnector } from '../connector.js'
-import { disconnectProvider, reopenPushedPayment } from '../connections.js'
+import { disconnectProvider, reopenPushedPayment, toConnectionSummary } from '../connections.js'
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import type { FeedTransaction } from '../feed-transaction.js'
 import { UNSUPPORTED_BASE_CURRENCY_MESSAGE, UnsupportedBaseCurrencyError, type AccountingProvider, type ProviderCompanyInfo } from '../provider.js'
@@ -61,6 +66,8 @@ export interface ConformanceCase {
   createPayload(): Record<string, unknown> | null
   /** Revoke calls the provider has seen. */
   revokeCalls(): number
+  /** #2865: make the provider refuse the CREATE call for scope (nothing created) — or stop doing so. */
+  refuseInvoiceForScope(on: boolean): void
   /** What the stored secrets decrypt to, for the disconnect case. */
   secrets: ProviderSecrets
   /**
@@ -248,7 +255,12 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
       expect(row?.status).toBe('pushed')
       expect(row?.external_ref).toEqual(expect.any(String))
       expect(row?.error).toMatch(/attachment failed/)
-      expect(await connection(c.userId)).toMatchObject({ status: 'scope_missing', is_active_destination: true })
+      const degraded = (await connection(c.userId))!
+      expect(degraded).toMatchObject({ status: 'scope_missing', is_active_destination: true })
+      // #2865: the reason names the scope(s) in the parseable shape the
+      // dashboard's `missingScopes` reads.
+      expect(degraded.status_reason).toMatch(/^missing scopes: [a-z]/)
+      expect(toConnectionSummary(degraded).missingScopes.length).toBeGreaterThan(0)
 
       // Never re-pushable: the pushed row is not re-claimable (this case
       // re-feeds the SAME payment). That a degraded row also yields no
@@ -257,6 +269,44 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
       await feedSettledPayment(c.userId, pid)
       expect(c.createCalls()).toBe(1)
       expect(await syncRow(c.userId, pid)).toMatchObject({ status: 'pushed', external_ref: row!.external_ref })
+
+      // #2865: and after the connection is `connected` again (a re-consent),
+      // the row is STILL not re-fed — it was never `skipped`.
+      await setStatus(c.userId, harness.provider.id, 'connected', null)
+      await feedSettledPayment(c.userId, pid)
+      expect(c.createCalls()).toBe(1)
+      expect(await syncRow(c.userId, pid)).toMatchObject({ status: 'pushed', external_ref: row!.external_ref })
+    })
+
+    it('6b. a PRE-push scope refusal (nothing created) records a skipped row, flips the connection, and is delivered exactly once after reconnect', async () => {
+      const c = await connectedCase()
+      c.refuseInvoiceForScope(true)
+      const pid = paymentId()
+      const outcome = await feedSettledPayment(c.userId, pid)
+      expect(outcome.outcome).toBe('skipped')
+      const row = await syncRow(c.userId, pid)
+      expect(row).toMatchObject({ status: 'skipped', external_ref: null, attempts: 1 })
+      expect(row?.error).toMatch(/scope/)
+      expect(c.createCalls()).toBe(0)
+      // MUTATION TARGET (#2865): without the flip on a skipped result the
+      // connection stays connected and every later payment repeats the refusal.
+      const degraded = (await connection(c.userId))!
+      expect(degraded).toMatchObject({ status: 'scope_missing', is_active_destination: true })
+      expect(degraded.status_reason).toMatch(/scope/)
+
+      // While scope_missing: no destination, the row is not touched.
+      expect(await feedSettledPayment(c.userId, pid)).toEqual({ outcome: 'not_fed' })
+      expect(await syncRow(c.userId, pid)).toMatchObject({ status: 'skipped', attempts: 1 })
+      expect(c.createCalls()).toBe(0)
+
+      // Re-consent (the scope is now granted): the skipped row is re-claimable
+      // and delivered exactly once.
+      c.refuseInvoiceForScope(false)
+      await setStatus(c.userId, harness.provider.id, 'connected', null)
+      expect(await feedSettledPayment(c.userId, pid)).toEqual({ outcome: 'pushed' })
+      expect(c.createCalls()).toBe(1)
+      expect(await syncRow(c.userId, pid)).toMatchObject({ status: 'pushed', attempts: 2, external_ref: expect.any(String) })
+      expect((await connection(c.userId))?.status).toBe('connected')
     })
 
     it('7. a provider reporting a non-SEK base currency is refused at connect by the generic flow, and nothing is stored', async () => {

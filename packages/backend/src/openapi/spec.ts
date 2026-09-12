@@ -586,7 +586,7 @@ const accountingConnection = {
   type: 'object',
   required: [
     'provider', 'displayName', 'authKind', 'status', 'statusReason', 'isActiveDestination', 'feedFrom',
-    'grantedScope', 'tokenExpiresAt', 'externalCompanyId', 'externalCompanyName', 'baseCurrency', 'lastPushAt', 'lastError',
+    'grantedScope', 'missingScopes', 'tokenExpiresAt', 'externalCompanyId', 'externalCompanyName', 'baseCurrency', 'lastPushAt', 'lastError',
     'connectedAt', 'updatedAt',
   ],
   properties: {
@@ -596,12 +596,18 @@ const accountingConnection = {
     status: {
       type: 'string',
       enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
-      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, or (#2864) by a connect whose company read was refused for scope.',
+      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
     },
     statusReason: { type: ['string', 'null'] },
     isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
     feedFrom: { type: ['string', 'null'], format: 'date-time', description: 'Nothing settled before this is fed. Set to now by activate.' },
     grantedScope: { type: ['string', 'null'] },
+    missingScopes: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        "#2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it.",
+    },
     tokenExpiresAt: { type: ['string', 'null'], format: 'date-time', description: 'Access-token expiry (OAuth2 providers). Null for API-key providers.' },
     externalCompanyId: {
       type: ['string', 'null'],
@@ -3029,7 +3035,7 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'syncs', 'counts'],
+                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'missingScopes', 'syncs', 'counts'],
                   properties: {
                     hosted: { type: 'boolean' },
                     flagEnabled: { type: 'boolean' },
@@ -3049,6 +3055,12 @@ export const openapiSpec = {
                     companyName: {
                       type: ['string', 'null'],
                       description: 'The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, or when the grant could not read it (`scope_missing`). Absent when the feed is unavailable.',
+                    },
+                    missingScopes: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description:
+                        '#2865: the scopes the DESTINATION connection lacks (the row flagged as destination, whatever its status — a `scope_missing` destination reports `connected:false` and names them here), so the UI can say which scope a reconnect adds. Empty when nothing is missing or there is no destination; always present.',
                     },
                     syncs: { type: 'array', items: feedSyncRow },
                     counts: {

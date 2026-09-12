@@ -311,8 +311,16 @@ export class BackfillRefusedError extends Error {
 export function parseBackfillSince(since: unknown, now: Date = new Date()): Date {
   const invalid = (message: string) => new BackfillRefusedError('SINCE_INVALID', message)
   if (typeof since !== 'string' || since.trim() === '') throw invalid('`since` must be an ISO date (for example 2026-01-01).')
-  const d = new Date(since)
-  if (Number.isNaN(d.getTime())) throw invalid('`since` must be an ISO date (for example 2026-01-01).')
+  // Strict ISO only (review on #2901): `new Date` would accept "Jan 5 2026",
+  // parse a TZ-less time as server-local and roll "2026-02-30" into March.
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2}))?$/.test(since.trim())) {
+    throw invalid('`since` must be an ISO date (for example 2026-01-01) or a date-time with a timezone.')
+  }
+  const d = new Date(since.trim())
+  // A date that rolls over ("2026-02-30" → March 2) is not the date the user typed.
+  const [y, m, day] = since.trim().slice(0, 10).split('-').map(Number)
+  const rolled = d.getUTCFullYear() !== y || d.getUTCMonth() + 1 !== m || d.getUTCDate() !== day
+  if (Number.isNaN(d.getTime()) || (!since.includes('T') && rolled)) throw invalid('`since` must be an ISO date (for example 2026-01-01).')
   if (d.getTime() < BACKFILL_FLOOR.getTime()) throw invalid(`\`since\` cannot be before ${BACKFILL_FLOOR.toISOString().slice(0, 10)}.`)
   if (d.getTime() > now.getTime()) throw invalid('`since` must be in the past.')
   return d

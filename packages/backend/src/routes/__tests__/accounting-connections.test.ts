@@ -621,7 +621,8 @@ describe('accounting connection routes (#2862)', () => {
 
     it('400s SINCE_INVALID for a missing, unparseable, future or pre-2020 `since` — before any read', async () => {
       active()
-      for (const payload of [{}, { since: 'yesterday' }, { since: 42 }, { since: '2999-01-01' }, { since: '2019-12-31' }]) {
+      // Strict ISO (review on #2901): free-form dates, TZ-less times and rolled-over days are refused too.
+      for (const payload of [{}, { since: 'yesterday' }, { since: 42 }, { since: '2999-01-01' }, { since: '2019-12-31' }, { since: 'Jan 5 2026' }, { since: '2026-01-01T00:00:00' }, { since: '2026-02-30' }, { since: '2025' }]) {
         const res = await authed('POST', '/accounting/connections/fortnox/backfill', payload)
         expect(res.statusCode, JSON.stringify(payload)).toBe(400)
         expect(res.json()).toMatchObject({ error_code: 'SINCE_INVALID' })

@@ -41,8 +41,7 @@ import {
   connectionSettings,
   getConnection,
   recordCompanySwitch,
-  upsertConnection,
-} from '../../../infra/repositories/accounting-connections.js'
+  upsertConnection, recordBackfill } from '../../../infra/repositories/accounting-connections.js'
 import { listDueRetrySyncs, listUnpushedPaymentIds } from '../../../infra/repositories/accounting-feed-syncs.js'
 import { SECRETS_KEY_ENV, encryptSecrets } from '../../../infra/secrets.js'
 import { InMemoryConnector, clearConnectors, registerConnector } from '../connector.js'
@@ -222,6 +221,30 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
         await expect(backfillConnection(userId, 'memory', bad)).rejects.toMatchObject({ code: 'SINCE_INVALID' })
       }
       expect(backfillChoice((await getConnection(userId, 'memory'))!)).toBeNull()
+
+      // The guard lives in the STATEMENT, not only in the caller (review on
+      // #2901): a direct recordBackfill on a non-active / non-connected row
+      // moves nothing. MUTATION TARGET: drop the is_active_destination /
+      // status predicate from RECORD_BACKFILL_SQL.
+      // Both rows get a floor LATER than `since`, so only the guard can refuse.
+      await db.query(`UPDATE accounting_connections SET feed_from = NOW() WHERE user_id = $1`, [userId])
+      expect(await recordBackfill(userId, 'fortnox', { since: new Date(daysAgo(3)), requestedAt: new Date() })).toBeNull() // not active
+      await db.query(`UPDATE accounting_connections SET status = 'scope_missing' WHERE user_id = $1 AND provider = 'memory'`, [userId])
+      expect(await recordBackfill(userId, 'memory', { since: new Date(daysAgo(3)), requestedAt: new Date() })).toBeNull() // active but not connected
+      for (const provider of ['fortnox', 'memory']) {
+        const row = (await getConnection(userId, provider))!
+        expect(row.feed_from!.getTime()).toBeGreaterThan(Date.now() - 60_000)
+        expect(backfillChoice(row)).toBeNull()
+      }
+    })
+
+    it("a malformed settings.auto_feed value (direct DB edit) never fails the sweep's due-rows query (review on #2901)", async () => {
+      const { userId } = await seedUser()
+      connector.connect(userId)
+      await seedConnection(userId, 'memory')
+      await db.query(`UPDATE accounting_connections SET settings = settings || '{"auto_feed":"maybe"}' WHERE user_id = $1`, [userId])
+      // MUTATION TARGET: a ::boolean cast throws "invalid input syntax" here and takes every user's tick down.
+      await expect(listDueRetrySyncs(new Date(), 200)).resolves.toBeInstanceOf(Array)
     })
   })
 

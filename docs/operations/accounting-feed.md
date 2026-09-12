@@ -309,7 +309,7 @@ there is exactly one per user.
 | `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
 | `POST /accounting/connections/:provider/backfill` | session | `{ since }`: the user's choice to include history — moves `feed_from` **earlier only** (a later date is 400 `SINCE_NOT_EARLIER`), records it under `settings.backfill`, runs one bounded sync; active `connected` destination only (#2867) |
 | `PATCH /accounting/connections/:provider/settings` | session | exactly `suggested_account` (Fortnox: four-digit BAS) and `auto_feed` (default true); any other key is 400 naming it; a JSONB merge — the company-switch log and the backfill record survive (#2867) |
-| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), recent syncs |
+| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), `missingScopes` of the destination row whatever its status (#2865), `counts` (#2866), recent syncs |
 | `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from`; a manual action — pushes for an `auto_feed = false` connection too (#2867) |
 | `GET /accounting/feed/verify/:paymentId` | session + entitlement | read-back through the active connection's connector |
 | `POST /accounting/feed/reopen/:paymentId` | session + entitlement | verification-gated reopen on the active connection's provider; a row from before the connection's latest company switch is refused 409 `previous_company` (#2864) |
@@ -645,7 +645,9 @@ a manual "Sync now" re-claimed or pushed in the meantime. Each due row goes thro
 settlement hook uses, so the dedup ledger, the feed-from floor, the FX gate
 and the degraded-destination skip all apply — and so does the user's
 `auto_feed` setting (#2867): the selection's JOIN also requires
-`COALESCE((c.settings ->> 'auto_feed')::boolean, true)`, so a manual-only
+`(c.settings -> 'auto_feed') IS DISTINCT FROM 'false'::jsonb` (a non-throwing
+comparison — a malformed value from a direct DB edit can never fail the whole
+tick), so a manual-only
 connection's rows are never enumerated (see *Backfill choice and
 per-connection settings* below).
 
@@ -700,7 +702,9 @@ re-feeds history unasked. The backfill is the ONE path that moves the floor
 **earlier**; nothing moves it later except those three.
 
 **Backfill.** `POST /accounting/connections/:provider/backfill { since }` —
-`since` is an ISO date (or date-time): it must parse, be in the past and not
+`since` is a strict ISO date (`YYYY-MM-DD`, or a date-time with a timezone —
+free-form dates, TZ-less times and rolled-over days such as `2026-02-30` are
+refused): it must be in the past and not
 precede 2020-01-01 (400 `SINCE_INVALID`), and it must be **earlier than the
 current `feed_from`** (400 `SINCE_NOT_EARLIER`; the floor is untouched, no
 sync runs). A row with `feed_from IS NULL` — a pre-#2862 Fortnox row that

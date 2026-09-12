@@ -332,7 +332,7 @@ export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT s.id, s.user_id, s.provider, s.p
      FROM accounting_feed_syncs s
      JOIN accounting_connections c ON c.user_id = s.user_id AND c.provider = s.provider
      WHERE c.status = 'connected' AND c.is_active_destination
-       AND COALESCE((c.settings ->> 'auto_feed')::boolean, true)
+       AND (c.settings -> 'auto_feed') IS DISTINCT FROM 'false'::jsonb
        AND s.attempts < $2::int
        AND (
          (s.status IN ('failed', 'skipped')

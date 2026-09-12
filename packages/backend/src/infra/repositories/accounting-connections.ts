@@ -222,9 +222,12 @@ export const MERGE_CONNECTION_SETTINGS_SQL = `UPDATE accounting_connections
 /**
  * #2867: the backfill choice. The ONE statement that ever moves `feed_from`
  * EARLIER — activate (#2862) and a company switch (#2864) only ever move it
- * forward. The guard is in the WHERE, not in the caller: a `since` at or
- * after the current floor updates zero rows (the caller then reads the row
- * to tell "no row" from "not earlier"), and a NULL floor — a pre-#2862 row
+ * forward. The guard is in the WHERE, not in the caller — including the
+ * active + connected predicate, so a concurrent activate/disconnect between
+ * the caller's read and this statement cannot move an inactive row's floor
+ * (review on #2901): a `since` at or after the current floor updates zero
+ * rows (the caller then reads the row to tell "no row" from "not earlier"
+ * from "not active"), and a NULL floor — a pre-#2862 row
  * that already feeds everything — has nothing earlier to move to and is
  * refused the same way. The choice is recorded under `settings.backfill`
  * (`{ since, requestedAt }`) through the same append-safe merge as the
@@ -239,7 +242,9 @@ export const RECORD_BACKFILL_SQL = `UPDATE accounting_connections
      SET feed_from = $3,
          settings = settings || jsonb_build_object('backfill', $4::jsonb),
          updated_at = NOW()
-     WHERE user_id = $1 AND provider = $2 AND feed_from IS NOT NULL AND feed_from > $3::timestamptz
+     WHERE user_id = $1 AND provider = $2
+       AND is_active_destination AND status = 'connected'
+       AND feed_from IS NOT NULL AND feed_from > $3::timestamptz
      RETURNING ${COLUMNS}`
 
 /**

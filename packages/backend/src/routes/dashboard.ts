@@ -5,7 +5,7 @@ import {
   hasFirstAgentPayment,
   insertPortfolioSnapshot,
   listDashboardAgents,
-  listDashboardSafes,
+  listDashboardAccounts,
   sumMonthlyPaymentSpend,
   type DashboardAllowanceRow,
   type MonthlySpendRow,
@@ -75,7 +75,7 @@ export default async function dashboardRoutes(
       agents,
       firstAgentPayment,
     ] = await Promise.all([
-      listDashboardSafes(sub),
+      listDashboardAccounts(sub),
       listDashboardAgents(sub),
       hasFirstAgentPayment(sub),
     ])

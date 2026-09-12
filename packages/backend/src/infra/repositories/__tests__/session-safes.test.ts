@@ -10,7 +10,7 @@
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
-import { listSessionSafesForUser } from '../user-safes.js'
+import { listSessionAccountsForUser } from '../smart-accounts.js'
 
 let n = 0
 
@@ -52,7 +52,7 @@ async function seedPasskey(userSafeId: string, keyId: string): Promise<void> {
   )
 }
 
-describeDb('listSessionSafesForUser signer-set projection (#1205)', () => {
+describeDb('listSessionAccountsForUser signer-set projection (#1205)', () => {
   // AWAITED in beforeAll (#1562 follow-up): a bare registration-time call
   // leaves the returned promise dangling and lets the first tests race the
   // worker's own migration DDL — the 42P01/40P01 CI flake. resetDb() now
@@ -69,7 +69,7 @@ describeDb('listSessionSafesForUser signer-set projection (#1205)', () => {
     await seedPasskey(hybridId, 'key-b')
     const legacyId = await seedSafe(userId, { ownerAddress: '0x' + 'ab'.repeat(20) })
 
-    const rows = await listSessionSafesForUser(userId)
+    const rows = await listSessionAccountsForUser(userId)
     const hybrid = rows.find((r) => r.id === hybridId)
     const legacy = rows.find((r) => r.id === legacyId)
 
@@ -86,6 +86,6 @@ describeDb('listSessionSafesForUser signer-set projection (#1205)', () => {
     const safeId = await seedSafe(owner, { accountType: 'delegator_hybrid' })
     await seedPasskey(safeId, 'key-a')
 
-    expect(await listSessionSafesForUser(other)).toEqual([])
+    expect(await listSessionAccountsForUser(other)).toEqual([])
   })
 })

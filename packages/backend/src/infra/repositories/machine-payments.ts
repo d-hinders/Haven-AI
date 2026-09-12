@@ -694,27 +694,27 @@ export interface NewPreparedSweep {
   nonce: string
 }
 
-export interface AgentSafeBindingRow {
+export interface AgentAccountBindingRow {
   safe_address: string | null
 }
 
 /** The same agent-row lock used by Safe unlink, so recovery cannot use stale binding data. */
-export const LOCK_AGENT_SAFE_BINDING_SQL = `SELECT us.safe_address
+export const LOCK_AGENT_ACCOUNT_BINDING_SQL = `SELECT us.safe_address
        FROM agents a
        LEFT JOIN user_safes us ON us.id = a.safe_id
        WHERE a.id = $1 AND a.user_id = $2
        FOR UPDATE OF a`
 
-async function lockAgentSafeBinding(
+async function lockAgentAccountBinding(
   agentId: string,
   userId: string,
   db: Executor,
-): Promise<AgentSafeBindingRow | null> {
-  const result = await db.query<AgentSafeBindingRow>(LOCK_AGENT_SAFE_BINDING_SQL, [agentId, userId])
+): Promise<AgentAccountBindingRow | null> {
+  const result = await db.query<AgentAccountBindingRow>(LOCK_AGENT_ACCOUNT_BINDING_SQL, [agentId, userId])
   return result.rows[0] ?? null
 }
 
-function matchesSafeAddress(current: string | null, expected: string): boolean {
+function matchesAccountAddress(current: string | null, expected: string): boolean {
   return Boolean(current && current.toLowerCase() === expected.toLowerCase())
 }
 
@@ -742,8 +742,8 @@ export async function insertPreparedSweepForBoundAgent(
   db: Executor = pool,
 ): Promise<boolean> {
   return withTransaction(db, async (tx) => {
-    const binding = await lockAgentSafeBinding(input.agentId, input.userId, tx)
-    if (!matchesSafeAddress(binding?.safe_address ?? null, input.toAddress)) return false
+    const binding = await lockAgentAccountBinding(input.agentId, input.userId, tx)
+    if (!matchesAccountAddress(binding?.safe_address ?? null, input.toAddress)) return false
     await tx.query(INSERT_PREPARED_SWEEP_SQL, [
       input.agentId,
       input.userId,
@@ -819,12 +819,12 @@ export async function claimPreparedSweepForBoundAgent(
   sweepId: string,
   agentId: string,
   userId: string,
-  safeAddress: string,
+  accountAddress: string,
   db: Executor = pool,
 ): Promise<BoundSweepClaim> {
   return withTransaction(db, async (tx) => {
-    const binding = await lockAgentSafeBinding(agentId, userId, tx)
-    if (!matchesSafeAddress(binding?.safe_address ?? null, safeAddress)) return 'not_bound'
+    const binding = await lockAgentAccountBinding(agentId, userId, tx)
+    if (!matchesAccountAddress(binding?.safe_address ?? null, accountAddress)) return 'not_bound'
     const result = await tx.query<{ id: string }>(CLAIM_PREPARED_SWEEP_SQL, [sweepId])
     return result.rows.length > 0 ? 'claimed' : 'already_claimed'
   })

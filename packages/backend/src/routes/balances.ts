@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { findSafeOwnership } from '../infra/repositories/transaction-history.js'
+import { findAccountOwnership } from '../infra/repositories/transaction-history.js'
 import { getChain, isSupportedChain } from '../domain/chains.js'
 import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
@@ -62,7 +62,7 @@ export default async function balanceRoutes(
 
       // Verify ownership and get chain_id (repository query, #999 — the same
       // ownership check the transaction-history route runs).
-      const ownedSafes = await findSafeOwnership(sub, safeAddress, requestedChainId)
+      const ownedSafes = await findAccountOwnership(sub, safeAddress, requestedChainId)
       if (ownedSafes.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }

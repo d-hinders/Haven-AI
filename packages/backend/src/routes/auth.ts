@@ -24,7 +24,7 @@ import {
   findUserProfileById,
   insertUser,
 } from '../infra/repositories/users.js'
-import { listSessionSafesForUser } from '../infra/repositories/user-safes.js'
+import { listSessionAccountsForUser } from '../infra/repositories/smart-accounts.js'
 import { sessionSafePayload } from '../modules/accounts/index.js'
 
 const SALT_ROUNDS = 10
@@ -197,7 +197,7 @@ export default async function authRoutes(
       { expiresIn: '7d' },
     )
 
-    const safes = (await listSessionSafesForUser(user.id)).map(sessionSafePayload)
+    const safes = (await listSessionAccountsForUser(user.id)).map(sessionSafePayload)
 
     return {
       token,
@@ -225,7 +225,7 @@ export default async function authRoutes(
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    const safes = (await listSessionSafesForUser(sub)).map(sessionSafePayload)
+    const safes = (await listSessionAccountsForUser(sub)).map(sessionSafePayload)
 
     return { ...profile, safes }
   })

@@ -3,8 +3,8 @@ import { authMiddleware } from '../middleware/auth.js'
 import { agentExistsForUser } from '../infra/repositories/agents.js'
 import {
   findMachinePaymentEvidenceDetail,
-  findSafeOwnership,
-  listBasicSafesForUser,
+  findAccountOwnership,
+  listBasicAccountsForUser,
 } from '../infra/repositories/transaction-history.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
 import { getChain, isSupportedChain } from '../domain/chains.js'
@@ -129,7 +129,7 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid tokenKey' })
     }
 
-    let safes = await listBasicSafesForUser(sub)
+    let safes = await listBasicAccountsForUser(sub)
 
     if (request.query.safeId) {
       safes = safes.filter((safe) => safe.id === request.query.safeId)
@@ -274,7 +274,7 @@ export default async function transactionRoutes(
     // Kept unfiltered for name resolution below: a transfer between two of
     // the user's own accounts must still name the far side when the export is
     // scoped to one of them, exactly as the dashboard table does.
-    const allSafes = await listBasicSafesForUser(sub)
+    const allSafes = await listBasicAccountsForUser(sub)
     let safes = allSafes
 
     if (request.query.safeId) {
@@ -389,7 +389,7 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
     }
 
-    const ownershipRows = await findSafeOwnership(sub, safeAddress, requestedChainId)
+    const ownershipRows = await findAccountOwnership(sub, safeAddress, requestedChainId)
     if (ownershipRows.length === 0) {
       return reply.code(403).send({ error: 'Not your Safe' })
     }

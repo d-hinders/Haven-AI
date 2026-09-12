@@ -136,9 +136,9 @@ function mockModules({ x402Rows = [], piRows = [], sweepRows = [] }: RepoMockOpt
     findConfirmedX402PaymentIntents: vi.fn().mockResolvedValue(x402Rows),
     findPaymentIntentAgentMatches: vi.fn().mockResolvedValue(piRows),
     findDelegateSweepAgentMatches: vi.fn().mockResolvedValue(sweepRows),
-    listBasicSafesForUser: vi.fn(),
+    listBasicAccountsForUser: vi.fn(),
     listAgentsForTransactionFilters: vi.fn(),
-    findSafeOwnership: vi.fn(),
+    findAccountOwnership: vi.fn(),
     findMachinePaymentEvidenceDetail: vi.fn(),
   }))
   vi.doMock('../aggregate.js', () => ({

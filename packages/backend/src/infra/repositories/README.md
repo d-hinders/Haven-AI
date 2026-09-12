@@ -103,7 +103,7 @@ stay free of any database import.
 ## Status
 
 Epic #980 M3's three tracks have landed: `#985` (the convention +
-agent-connection-setups), `#988` (agents, user-safes) and `#995` (payments,
+agent-connection-setups), `#988` (agents, smart-accounts) and `#995` (payments,
 x402, machine-payments — `payment-intents.ts`, `approval-requests.ts`,
 `x402-authorizations.ts`, `machine-payments.ts`, `account-entitlements.ts`).
 The money path's data access now lives here and is PREPARE-checked by
@@ -118,13 +118,13 @@ The remaining inline SQL elsewhere sits behind explicit, printed
 statements), `routes/dashboard.ts` (9) and `routes/agent-activity.ts` (14) —
 and emptied them, adding `users.ts`, `owner-aliases.ts` (itself deleted by
 #2847 with the `/user/owners` directory that was its only caller),
-`agent-activity.ts` and extending `user-safes.ts`, `agents.ts` and
+`agent-activity.ts` and extending `smart-accounts.ts`, `agents.ts` and
 `agent-tool-invocations.ts`. The gauge fell 108 → 75 and the waiver list 16 →
 13. Two placement lessons worth carrying forward:
 
 - **A route-shaped projection gets its own file.** The dashboard's Safe and
   agent lists are not the canonical shape of those aggregates, so they went to
-  `dashboard.ts` rather than widening `user-safes.ts` / `agents.ts` for every
+  `dashboard.ts` rather than widening `smart-accounts.ts` / `agents.ts` for every
   other caller.
 - **But a query whose aggregate already has a home goes there.** The activity
   surfaces' `agent_tool_invocations` reads joined the insert that already

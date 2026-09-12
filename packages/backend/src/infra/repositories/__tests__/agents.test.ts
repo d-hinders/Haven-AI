@@ -5,10 +5,10 @@ import {
   FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
   FIND_AGENT_ID_FOR_USER_SQL,
   FIND_AGENT_ID_STATUS_FOR_USER_SQL,
-  FIND_DEFAULT_USER_SAFE_ID_SQL,
+  FIND_DEFAULT_USER_ACCOUNT_ID_SQL,
   FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
-  FIND_USER_SAFE_ID_FOR_USER_SQL,
+  FIND_USER_ACCOUNT_ID_FOR_USER_SQL,
   HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
   UPDATE_AGENT_PROFILE_SQL,
@@ -18,10 +18,10 @@ import {
   unarchiveAgent,
   findAgentForUserAllStatuses,
   findAgentIdStatusForUser,
-  findDefaultUserSafeId,
+  findDefaultUserAccountId,
   findDelegateAgentForUser,
   findNonRevokedAgentIdByDelegate,
-  findUserSafeIdForUser,
+  findUserAccountIdForUser,
   listAgentsForUserAllStatuses,
   loadOwnedDelegationAgent,
   insertPendingDelegationForOwnedNonRevokedAgent,
@@ -167,8 +167,8 @@ describe('tenant scoping is required and effective — cross-tenant access retur
       LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
       FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
       FIND_DELEGATE_AGENT_FOR_USER_SQL,
-      FIND_USER_SAFE_ID_FOR_USER_SQL,
-      FIND_DEFAULT_USER_SAFE_ID_SQL,
+      FIND_USER_ACCOUNT_ID_FOR_USER_SQL,
+      FIND_DEFAULT_USER_ACCOUNT_ID_SQL,
       FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
       FIND_AGENT_ID_FOR_USER_SQL,
       FIND_AGENT_ID_STATUS_FOR_USER_SQL,
@@ -196,16 +196,16 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     expect(await findDelegateAgentForUser('agent-1', OWNER, db)).not.toBeNull()
   })
 
-  it('findUserSafeIdForUser: another tenant cannot claim the safe', async () => {
+  it('findUserAccountIdForUser: another tenant cannot claim the safe', async () => {
     const db = tenantExecutor({ id: 'safe-1' })
-    expect(await findUserSafeIdForUser('safe-1', ATTACKER, db)).toBeNull()
-    expect(await findUserSafeIdForUser('safe-1', OWNER, db)).toBe('safe-1')
+    expect(await findUserAccountIdForUser('safe-1', ATTACKER, db)).toBeNull()
+    expect(await findUserAccountIdForUser('safe-1', OWNER, db)).toBe('safe-1')
   })
 
-  it('findDefaultUserSafeId: scoped to the caller', async () => {
+  it('findDefaultUserAccountId: scoped to the caller', async () => {
     const db = tenantExecutor({ id: 'safe-1' })
-    expect(await findDefaultUserSafeId(ATTACKER, db)).toBeNull()
-    expect(await findDefaultUserSafeId(OWNER, db)).toBe('safe-1')
+    expect(await findDefaultUserAccountId(ATTACKER, db)).toBeNull()
+    expect(await findDefaultUserAccountId(OWNER, db)).toBe('safe-1')
   })
 
   it('findNonRevokedAgentIdByDelegate: the duplicate check is per-tenant', async () => {

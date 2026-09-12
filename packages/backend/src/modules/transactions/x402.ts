@@ -9,7 +9,7 @@ import {
   findConfirmedX402PaymentIntents,
 } from '../../infra/repositories/transaction-history.js'
 import { parseIsoTimestamp, paymentAgentIdentityKey } from './ordering.js'
-import type { EnrichedTransaction, UserSafeRow } from './types.js'
+import type { EnrichedTransaction, SmartAccountRow } from './types.js'
 
 function x402FundingIdentityKey(tx: EnrichedTransaction): string {
   return paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId)
@@ -17,7 +17,7 @@ function x402FundingIdentityKey(tx: EnrichedTransaction): string {
 
 export async function fetchConfirmedX402Transactions(
   userId: string,
-  safes: UserSafeRow[],
+  safes: SmartAccountRow[],
 ): Promise<EnrichedTransaction[]> {
   if (safes.length === 0) return []
 
@@ -83,7 +83,7 @@ export async function fetchConfirmedX402Transactions(
 
 export async function mergeX402Transactions(
   userId: string,
-  safes: UserSafeRow[],
+  safes: SmartAccountRow[],
   transactions: EnrichedTransaction[],
 ): Promise<EnrichedTransaction[]> {
   const x402Transactions = await fetchConfirmedX402Transactions(userId, safes)

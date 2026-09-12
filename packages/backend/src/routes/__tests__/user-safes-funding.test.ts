@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 // at the repository seam and balances at the chain-client seam (getChainClient),
 // so the suite pins the ROUTE contract — auth, the owner_cli allow-list opt-in,
 // the 404 scoping, and the funding payload shape — with no SQL and no chain
-// state. Same boundary the sibling user-safes-list/delete/characterization route
+// state. Same boundary the sibling smart-accounts-list/delete/characterization route
 // tests mock at; a new file cannot join the shrink-only positional-mock baseline,
 // so the documented file-level exemption applies.
 

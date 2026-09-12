@@ -87,7 +87,7 @@ export interface AllowanceRow {
   reset_period_min: number
 }
 
-export interface UserSafeRow {
+export interface SmartAccountRow {
   id: string
   safe_address: string
   name: string
@@ -155,12 +155,12 @@ export const FIND_SETUP_BY_AGENT_API_KEY_SQL = `SELECT s.id, s.user_id, s.agent_
      WHERE s.id = $1 AND a.api_key_hash = $2 AND a.status IN ($3, $4, $5)
      LIMIT 1`
 
-export const FIND_USER_SAFE_BY_ID_SQL = `SELECT id, safe_address, name, chain_id, account_type
+export const FIND_USER_ACCOUNT_BY_ID_SQL = `SELECT id, safe_address, name, chain_id, account_type
        FROM user_safes
        WHERE id = $1 AND user_id = $2
        LIMIT 1`
 
-export const FIND_DEFAULT_USER_SAFE_SQL = `SELECT id, safe_address, name, chain_id, account_type
+export const FIND_DEFAULT_USER_ACCOUNT_SQL = `SELECT id, safe_address, name, chain_id, account_type
      FROM user_safes
      WHERE user_id = $1 AND is_default = true
      LIMIT 1`
@@ -244,16 +244,16 @@ export async function lockSetupForUser(
   return result.rows[0] ?? null
 }
 
-export async function findUserSafe(
+export async function findAccountForSetup(
   userId: string,
-  safeId: string | undefined,
+  accountId: string | undefined,
   db: Executor = pool,
-): Promise<UserSafeRow | null> {
-  if (safeId) {
-    const result = await db.query<UserSafeRow>(FIND_USER_SAFE_BY_ID_SQL, [safeId, userId])
+): Promise<SmartAccountRow | null> {
+  if (accountId) {
+    const result = await db.query<SmartAccountRow>(FIND_USER_ACCOUNT_BY_ID_SQL, [accountId, userId])
     return result.rows[0] ?? null
   }
-  const result = await db.query<UserSafeRow>(FIND_DEFAULT_USER_SAFE_SQL, [userId])
+  const result = await db.query<SmartAccountRow>(FIND_DEFAULT_USER_ACCOUNT_SQL, [userId])
   return result.rows[0] ?? null
 }
 

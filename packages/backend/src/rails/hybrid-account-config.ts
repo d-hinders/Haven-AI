@@ -7,7 +7,7 @@
  * deploy (#860) and revoke paths rebuild it from here so a pure-passkey
  * account — which has no owner_address — can still be deployed and operated.
  */
-import { findHybridOwnerSafeRow } from '../infra/repositories/user-safes.js'
+import { findHybridOwnerAccountRow } from '../infra/repositories/smart-accounts.js'
 import { listAccountPasskeys } from '../infra/repositories/hybrid-signers.js'
 import type { Address } from 'viem'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
@@ -29,9 +29,9 @@ export async function loadHybridOwnerConfig(
   chainId: number,
 ): Promise<{ config: HybridOwnerConfig; userSafeId: string; singleSignerWaiverAt: string | null } | null> {
   // The queries live in the repositories (#999): the account row bind is
-  // chain-scoped — see FIND_HYBRID_OWNER_SAFE_ROW_SQL's note on the #908
+  // chain-scoped — see FIND_HYBRID_OWNER_ACCOUNT_ROW_SQL's note on the #908
   // testnet/mainnet signer-set hazard.
-  const safe = await findHybridOwnerSafeRow(userId, safeAddress, chainId)
+  const safe = await findHybridOwnerAccountRow(userId, safeAddress, chainId)
   if (!safe) return null
 
   const passkeyRows = await listAccountPasskeys(safe.id)

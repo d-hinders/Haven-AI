@@ -19,12 +19,12 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
-  listSafesForUser,
-  listSafesWithAccountTypeForUser,
-  listSessionSafesForUser,
-} from '../user-safes.js'
+  listAccountsForUser,
+  listAccountsWithTypeForUser,
+  listSessionAccountsForUser,
+} from '../smart-accounts.js'
 import { findAgentForUserAllStatuses, listAgentsForUserAllStatuses } from '../agents.js'
-import { listDashboardAgents, listDashboardSafes } from '../dashboard.js'
+import { listDashboardAgents, listDashboardAccounts } from '../dashboard.js'
 
 let n = 0
 
@@ -68,11 +68,11 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     await seedSafe(userId, 'delegator_hybrid')
     await seedSafe(userId, 'safe')
 
-    expect((await listSafesForUser(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
-    expect((await listSafesWithAccountTypeForUser(userId)).map((s) => s.name)).toEqual([
+    expect((await listAccountsForUser(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
+    expect((await listAccountsWithTypeForUser(userId)).map((s) => s.name)).toEqual([
       'acct-delegator_hybrid',
     ])
-    expect((await listSessionSafesForUser(userId)).map((s) => s.name)).toEqual([
+    expect((await listSessionAccountsForUser(userId)).map((s) => s.name)).toEqual([
       'acct-delegator_hybrid',
     ])
   })
@@ -83,7 +83,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     const userId = await seedUser()
     await seedSafe(userId, 'safe')
 
-    expect(await listSessionSafesForUser(userId)).toEqual([])
+    expect(await listSessionAccountsForUser(userId)).toEqual([])
   })
 
   it('the agent list drops an agent bound to a legacy account and keeps a delegation one', async () => {
@@ -130,7 +130,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     await seedAgent(userId, hybrid, 'delegation agent')
     await seedAgent(userId, legacy, 'legacy agent')
 
-    expect((await listDashboardSafes(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
+    expect((await listDashboardAccounts(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
     expect((await listDashboardAgents(userId)).map((a) => a.name)).toEqual(['delegation agent'])
   })
 
@@ -153,8 +153,8 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     const other = await seedUser()
     await seedSafe(owner, 'delegator_hybrid')
 
-    expect(await listSessionSafesForUser(other)).toEqual([])
-    expect(await listSafesForUser(other)).toEqual([])
-    expect(await listSafesWithAccountTypeForUser(other)).toEqual([])
+    expect(await listSessionAccountsForUser(other)).toEqual([])
+    expect(await listAccountsForUser(other)).toEqual([])
+    expect(await listAccountsWithTypeForUser(other)).toEqual([])
   })
 })

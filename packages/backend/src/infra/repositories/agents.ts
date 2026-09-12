@@ -63,7 +63,7 @@ export interface AgentAllowanceRow {
   reset_period_min: number
 }
 
-export interface SafeInfoRow {
+export interface AccountInfoRow {
   safe_address: string | null
   safe_name: string | null
   safe_chain_id: number | null
@@ -326,9 +326,9 @@ export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.c
 
 export const FIND_AGENT_DELEGATE_ADDRESS_SQL = `SELECT delegate_address FROM agents WHERE id = $1`
 
-export const FIND_USER_SAFE_ID_FOR_USER_SQL = 'SELECT id FROM user_safes WHERE id = $1 AND user_id = $2'
+export const FIND_USER_ACCOUNT_ID_FOR_USER_SQL = 'SELECT id FROM user_safes WHERE id = $1 AND user_id = $2'
 
-export const FIND_DEFAULT_USER_SAFE_ID_SQL = 'SELECT id FROM user_safes WHERE user_id = $1 AND is_default = true LIMIT 1'
+export const FIND_DEFAULT_USER_ACCOUNT_ID_SQL = 'SELECT id FROM user_safes WHERE user_id = $1 AND is_default = true LIMIT 1'
 
 export const FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL = 'SELECT id FROM agents WHERE user_id = $1 AND delegate_address = $2 AND status != $3'
 
@@ -415,20 +415,20 @@ export async function findAgentDelegateAddress(
 }
 
 /** `userId` is REQUIRED — validates the Safe belongs to the caller. */
-export async function findUserSafeIdForUser(
-  safeId: string,
+export async function findUserAccountIdForUser(
+  accountId: string,
   userId: string,
   db: Executor = pool,
 ): Promise<string | null> {
-  const result = await db.query<{ id: string }>(FIND_USER_SAFE_ID_FOR_USER_SQL, [safeId, userId])
+  const result = await db.query<{ id: string }>(FIND_USER_ACCOUNT_ID_FOR_USER_SQL, [accountId, userId])
   return result.rows[0]?.id ?? null
 }
 
-export async function findDefaultUserSafeId(
+export async function findDefaultUserAccountId(
   userId: string,
   db: Executor = pool,
 ): Promise<string | null> {
-  const result = await db.query<{ id: string }>(FIND_DEFAULT_USER_SAFE_ID_SQL, [userId])
+  const result = await db.query<{ id: string }>(FIND_DEFAULT_USER_ACCOUNT_ID_SQL, [userId])
   return result.rows[0]?.id ?? null
 }
 
@@ -478,7 +478,7 @@ export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, des
                    -- here is the honest answer, not a placeholder.
                    NULL::text AS mcp_server_name`
 
-export const FIND_SAFE_INFO_SQL = `SELECT safe_address, name AS safe_name, chain_id AS safe_chain_id
+export const FIND_ACCOUNT_INFO_SQL = `SELECT safe_address, name AS safe_name, chain_id AS safe_chain_id
              FROM user_safes WHERE id = $1`
 
 export interface NewAgent {
@@ -510,7 +510,7 @@ export interface CreatedAgent {
     // field-by-field and drop the column with neither tsc nor a test noticing.
     | 'mcp_server_name'
   >
-  safeInfo: SafeInfoRow
+  safeInfo: AccountInfoRow
 }
 
 /**
@@ -538,7 +538,7 @@ export async function createAgent(
     ])
     const agent = agentResult.rows[0]
     const safeInfoResult = input.safeId
-      ? await tx.query<SafeInfoRow>(FIND_SAFE_INFO_SQL, [input.safeId])
+      ? await tx.query<AccountInfoRow>(FIND_ACCOUNT_INFO_SQL, [input.safeId])
       : null
     const safeInfo = safeInfoResult?.rows[0] ?? {
       safe_address: null,
@@ -830,7 +830,7 @@ export async function touchAgentLastSeenRow(agentId: string, db: Executor = pool
 }
 
 // NOTE: the execution-rail resolution and delegate-monitor reads deliberately
-// live elsewhere (`user-safes.ts`, `delegate-monitoring.ts`): a guard test
+// live elsewhere (`smart-accounts.ts`, `delegate-monitoring.ts`): a guard test
 // pins every `user_safes` JOIN in THIS file to select `account_type`, because
 // every query here feeds an agent API payload the dashboard branches on
 // (#1069/#1071). Those two reads return no payload, so they don't belong

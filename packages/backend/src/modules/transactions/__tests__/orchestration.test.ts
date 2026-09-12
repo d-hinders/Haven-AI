@@ -91,7 +91,7 @@ describe('paginateByOffset (module internals, no HTTP)', () => {
   })
 })
 
-describe('aggregateSafeTransactions (module internals, no HTTP)', () => {
+describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.resetModules()

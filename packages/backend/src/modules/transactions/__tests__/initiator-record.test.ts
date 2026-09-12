@@ -5,7 +5,7 @@
  * is agent-attributed by construction, while the SAME on-chain transfer also
  * shows up as a raw explorer / Safe-service transfer with no agent linkage.
  * The multi-Safe `mergeSortDedupeAndEnrich` and the per-Safe
- * `buildSafeTransactionsPage` are the two pipelines that must collapse the
+ * `buildAccountTransactionsPage` are the two pipelines that must collapse the
  * twin into exactly ONE row — the attributed x402 one.
  *
  * These tests mock the repository boundary (the pipeline's collaborator)

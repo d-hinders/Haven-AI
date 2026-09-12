@@ -35,7 +35,7 @@ covers:
   - packages/frontend/src/hooks/useSafeOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-12"
+last-verified: "2026-09-13"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -778,6 +778,21 @@ informed transitions while the account's on-chain last-signer guard remains the
 hard backstop.
 
 ## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
+
+> **Re-verified #2910 (naming epic #2906, phase 2b):** this diff touched six
+> files in this document's `covers:` list — `routes/auth.ts`,
+> `routes/agents.ts`, `routes/user-safes.ts`, `infra/repositories/agents.ts`,
+> `rails/hybrid-account-config.ts`, `modules/accounts/mainnet-gate.ts` — by
+> identifier rename only: locals and parameters `safeId`/`safeAddress` →
+> `accountId`/`accountAddress`, the object-literal fields `NewAgent.safeId` →
+> `accountId` and `CreatedAgent.safeInfo` → `accountInfo`, and
+> `sessionSafePayload` → `sessionAccountPayload`. Every SQL literal in the
+> touched repository files is byte-identical (64 literals, 0 differences), no
+> route path, wire key, tenant-scoping clause, signing path or authority
+> check changed, and the `RelayerOperation` union lost only its dead
+> `'safe_deploy'` member (historical `relayer_gas_events` rows still read —
+> pinned by test). Every claim in this document that names one of these
+> files still holds under the new identifiers; nothing else re-read.
 
 > **Re-verified #2907 (naming epic #2906, phase 0):** the funding-leg
 > `sign_data.components` object (`delegation-authorize.ts`, `replay.ts`) gains

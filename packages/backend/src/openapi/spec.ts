@@ -756,7 +756,7 @@ const sessionAccountAliasProperties = {
 } as const
 
 /**
- * A Safe as the session payloads carry it. sessionSafePayload STRIPS
+ * A Safe as the session payloads carry it. sessionAccountPayload STRIPS
  * owner_address and passkey_count — the raw signer inputs — and replaces them
  * with the two derived answers the UI actually needs. DEPRECATED name —
  * identical wire object to `sessionAccount` (#2907).

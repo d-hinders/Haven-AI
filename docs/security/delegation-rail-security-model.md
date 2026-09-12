@@ -714,7 +714,7 @@ moment the user has nothing at risk and no context for what a backup protects.
   Since #1205 the predicate has its production call site: the session safes
   payload (`/auth/me`, login) carries the computed answer
   (`needs_backup_recommendation`) plus `value_bearing_chain`, mapped by
-  `sessionSafePayload` in the same module — so the dashboard's banner branches
+  `sessionAccountPayload` (`sessionSafePayload` before #2910) in the same module — so the dashboard's banner branches
   on the server's classification instead of re-deriving chain semantics
   client-side.
 - **The waiver column survives as history, not as an unblock.**
@@ -786,7 +786,8 @@ hard backstop.
 > identifier rename only: locals and parameters `safeId`/`safeAddress` →
 > `accountId`/`accountAddress`, the object-literal fields `NewAgent.safeId` →
 > `accountId` and `CreatedAgent.safeInfo` → `accountInfo`, and
-> `sessionSafePayload` → `sessionAccountPayload`. Every SQL literal in the
+> `sessionSafePayload` → `sessionAccountPayload` (the §6 sentence naming it
+> updated). Every SQL literal in the
 > touched repository files is byte-identical (64 literals, 0 differences), no
 > route path, wire key, tenant-scoping clause, signing path or authority
 > check changed, and the `RelayerOperation` union lost only its dead

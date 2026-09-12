@@ -104,7 +104,14 @@ export interface SignData {
 
   /** Breakdown of values that were hashed — useful for debugging */
   components: {
+    /** @deprecated #2908 — same value as `payer_account`; the server drops it at #2914. */
     safe: string
+    /**
+     * #2907 — the account-vocabulary twin of `safe`: the PAYER account
+     * (the user's smart account). Not to be confused with `account`, which on
+     * the funding shapes holds the DELEGATE account address.
+     */
+    payer_account?: string
     token: string
     to: string
     amount: string
@@ -577,6 +584,15 @@ export interface HavenAgent {
   id: string
   name: string
   status: string
+  /**
+   * The agent's Haven account (smart account) address — #2908, the
+   * account-vocabulary name. Same value as {@link HavenAgent.safeAddress}.
+   */
+  accountAddress: string
+  /**
+   * @deprecated #2908 — same value as {@link HavenAgent.accountAddress}.
+   * Removed in the release after the one carrying #2908 (#2914).
+   */
   safeAddress: string
   delegateAddress: string
   chainId: number
@@ -620,6 +636,12 @@ export interface HavenAllowance {
 
 export interface HavenAllowanceSummary {
   agentId: string
+  /** #2908 — the account-vocabulary name; same value as `safeAddress`. */
+  accountAddress: string
+  /**
+   * @deprecated #2908 — same value as {@link HavenAllowanceSummary.accountAddress}.
+   * Removed in the release after the one carrying #2908 (#2914).
+   */
   safeAddress: string
   delegateAddress: string
   chainId: number
@@ -918,9 +940,14 @@ export const AgentPaymentNextAction = {
    */
   PaymentWindowExpired: 'payment_window_expired',
   /**
-   * Stop and tell the user that the originating Safe needs to be funded or
+   * Stop and tell the user that the originating account needs to be funded or
    * the agent's per-token allowance needs to be raised before the payment
    * can succeed. A user approval will not fix this state on its own.
+   *
+   * #2908: the wire twin `fund_account_or_raise_allowance`
+   * ({@link AgentPaymentNextActionAccountAlias}) means the same thing; the
+   * server keeps emitting THIS value until #2914. Compare via
+   * {@link canonicalAgentPaymentNextAction}.
    */
   FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
   /**
@@ -932,6 +959,57 @@ export const AgentPaymentNextAction = {
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
+
+/**
+ * #2908 (naming epic #2906): the account-vocabulary twin of
+ * {@link AgentPaymentNextAction.FundSafeOrRaiseAllowance}. The server ACCEPTS
+ * and DOCUMENTS this value from #2907 but keeps EMITTING the old one through
+ * the compatibility window; the emitted value flips at #2914.
+ *
+ * Deliberately declared beside `AgentPaymentNextAction` rather than inside
+ * it: the backend keeps a hand-mirror of that const, parity-pinned key-for-key
+ * and value-for-value (`agent-payment-taxonomy.parity.test.ts`), and the
+ * served `x-enumDescriptions` are the SDK's strings verbatim. Both consts
+ * move together at #2914; until then this alias is how a client handles both
+ * wire values without forking the taxonomy.
+ */
+export const AgentPaymentNextActionAccountAlias = {
+  /** Account-vocabulary twin of `fund_safe_or_raise_allowance`; same meaning. */
+  FundAccountOrRaiseAllowance: 'fund_account_or_raise_allowance',
+} as const
+
+export type AgentPaymentNextActionAccountAlias =
+  (typeof AgentPaymentNextActionAccountAlias)[keyof typeof AgentPaymentNextActionAccountAlias]
+
+/** Every `next_action` value a server may put on the wire during the #2908 window. */
+export type AgentPaymentNextActionWire = AgentPaymentNextAction | AgentPaymentNextActionAccountAlias
+
+/**
+ * Collapse the #2908 account-vocabulary alias onto its canonical taxonomy
+ * value, and pass every other value through untouched.
+ *
+ * This is the one seam a `switch` over `AgentPaymentNextAction` needs: a
+ * case on `FundSafeOrRaiseAllowance` matches a server that emits either
+ * spelling, and no case falls through because the alias arrived. Unknown
+ * strings are returned as-is (the SDK never invents a value), so the return
+ * type is exactly the input type widened by the canonical value.
+ */
+export function canonicalAgentPaymentNextAction<T extends string | null | undefined>(
+  value: T,
+): Exclude<T, AgentPaymentNextActionAccountAlias> | typeof AgentPaymentNextAction.FundSafeOrRaiseAllowance {
+  if (value === AgentPaymentNextActionAccountAlias.FundAccountOrRaiseAllowance) {
+    return AgentPaymentNextAction.FundSafeOrRaiseAllowance
+  }
+  return value as Exclude<T, AgentPaymentNextActionAccountAlias>
+}
+
+/** True for EITHER spelling of the fund-or-raise-allowance next action (#2908). */
+export function isFundAccountOrRaiseAllowance(value: string | null | undefined): boolean {
+  return (
+    value === AgentPaymentNextAction.FundSafeOrRaiseAllowance ||
+    value === AgentPaymentNextActionAccountAlias.FundAccountOrRaiseAllowance
+  )
+}
 
 export const AgentPaymentFailureCode = {
   /** A merchant-authoritative x402 price exceeds the caller's pre-funding max_amount cap. */
@@ -1133,7 +1211,15 @@ export interface AgentPaymentWarning {
  * (payment_required) are named in `reason` and taken from the SAME response.
  */
 export interface AgentNextStep {
-  next_action: AgentPaymentNextAction
+  /**
+   * From `AgentPaymentNextAction`, widened by the #2908 account-vocabulary
+   * alias for the compatibility window: the hosted server keeps emitting
+   * `fund_safe_or_raise_allowance` until #2914, but a client compiled against
+   * this type must not reject `fund_account_or_raise_allowance` when the flip
+   * lands. Compare through {@link canonicalAgentPaymentNextAction} or
+   * {@link isFundAccountOrRaiseAllowance}, never by one literal.
+   */
+  next_action: AgentPaymentNextActionWire
   /**
    * Claude-family namespaced tool name for the next call
    * (`mcp__<server>__<tool>`), when one exists.
@@ -1346,7 +1432,10 @@ export interface RawX402AuthorizeResponse {
   requested?: string
   tx_hash?: string
   chain_id?: number
+  /** @deprecated #2908 — same value as `account_address`; the server drops it at #2914. */
   safe_address?: string
+  /** #2908 — the account-vocabulary twin of `safe_address` (P0 #2907 does not emit it on this shape yet; read first, never required). */
+  account_address?: string
   payer?: string
   token?: string
   amount?: string
@@ -1424,7 +1513,10 @@ export interface RawCreateResponse {
     /** 'eip712_userop' = delegation rail; absent = legacy AllowanceModule (raw ECDSA). The session rail's 'eip191_userop' is retired (#834). */
     signature_scheme?: 'eip712_userop'
     components: {
+      /** @deprecated #2908 — same value as `payer_account`; the server drops it at #2914. */
       safe: string
+      /** #2907 twin of `safe` — the payer account, NOT the delegate `account`. */
+      payer_account?: string
       token: string
       to: string
       amount: string
@@ -1522,7 +1614,10 @@ export interface RawHavenAgent {
   id: string
   name: string
   status: string
-  safe_address: string
+  /** @deprecated #2908 — same value as `account_address`; the server drops it at #2914. */
+  safe_address?: string
+  /** #2908 — the account-vocabulary twin; read first. */
+  account_address?: string
   delegate_address: string
   chain_id: number
   execution_rail: string
@@ -1552,7 +1647,10 @@ export interface RawHavenAllowance {
 /** @internal */
 export interface RawHavenAllowanceSummary {
   agent_id: string
-  safe_address: string
+  /** @deprecated #2908 — same value as `account_address`; the server drops it at #2914. */
+  safe_address?: string
+  /** #2908 — the account-vocabulary twin; read first. */
+  account_address?: string
   delegate_address: string
   chain_id: number
   allowances: RawHavenAllowance[]

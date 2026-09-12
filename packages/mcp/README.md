@@ -36,12 +36,17 @@ Create a private JSON file from the values in the Haven agent handoff:
   "api_key": "sk_agent_...",
   "delegate_key": "0x...",
   "agent_id": "agent-id",
-  "safe_address": "0xYourHavenWallet",
+  "account_address": "0xYourHavenWallet",
   "api_url": "https://havenbackend.example"
 }
 ```
 
 `delegate_key` is required. Without it the MCP server cannot sign locally.
+`account_address` is the name the connector writes since #2908; a file that
+still says `safe_address` (or `safeAddress`) is read the same way, permanently.
+The same holds for the environment: `HAVEN_ACCOUNT_ADDRESS` is read first, and
+the older `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` are accepted for one
+release (#2914 removes them).
 
 The Haven connector may also write split credentials:
 

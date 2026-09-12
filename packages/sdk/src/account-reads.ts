@@ -15,6 +15,7 @@ import type {
 } from './types.js'
 import { AgentPaymentWarningCode } from './types.js'
 import { HavenApiTransport } from './haven-api-transport.js'
+import { accountAddressTwins, readAccountAddress } from './account-naming.js'
 import { mapPaymentReceipt } from './payment-mappers.js'
 import { resolveTokenFromAddress } from './x402.js'
 
@@ -103,7 +104,10 @@ export class AccountReads {
     const raw = await this.transport.get<RawHavenAllowanceSummary>('/machine-payments/allowances')
     return {
       agentId: raw.agent_id,
-      safeAddress: raw.safe_address,
+      // #2908: one mapper, both names, same value — `readAccountAddress`
+      // prefers the server's `account_address` twin and falls back to
+      // `safe_address` for a pre-#2907 server.
+      ...accountAddressTwins(readAccountAddress(raw) ?? ''),
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       allowances: raw.allowances.map((allowance) => ({
@@ -202,7 +206,10 @@ export class AccountReads {
       id: raw.id,
       name: raw.name,
       status: raw.status,
-      safeAddress: raw.safe_address,
+      // #2908: both camelCase names off whichever snake_case name the server
+      // sent (new first). The hosted MCP's `haven_get_agent` spreads this
+      // object, so this is also the hosted output's dual-emit point.
+      ...accountAddressTwins(readAccountAddress(raw) ?? ''),
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',

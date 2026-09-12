@@ -176,7 +176,28 @@ describe('shared Haven tool descriptions', () => {
       const desc = composeDescription(toolDescriptions[key])
       expect(desc).toContain('phase=insufficient_funds')
       expect(desc).toContain('nextAction=fund_safe_or_raise_allowance')
+      // #2908 (naming epic #2906): the account-vocabulary twin is DOCUMENTED
+      // beside the old literal, and the old literal stays — the server keeps
+      // emitting it until #2914, so an agent reading this prose must be told
+      // both spellings mean the same thing. Extended, not replaced.
+      expect(desc).toContain('nextAction=fund_safe_or_raise_allowance (or fund_account_or_raise_allowance)')
     }
+  })
+
+  it('names accountAddress first and keeps safeAddress as a deprecated alias on haven_get_agent (#2908)', () => {
+    // The exact #1598 treatment (`readiness` → `spend_authority_readiness`):
+    // the new name listed as the identity field, the old one named as a
+    // deprecated same-value alias, neither dropped during the window.
+    const desc = composeDescription(toolDescriptions.getAgent)
+    expect(desc).toContain('accountAddress')
+    expect(desc).toContain('accountAddress (safeAddress: deprecated alias, same value)')
+    expect(desc.indexOf('accountAddress')).toBeLessThan(desc.indexOf('safeAddress'))
+  })
+
+  it('describes the sweep destination as the originating account, not a Safe (#2908)', () => {
+    const desc = composeDescription(toolDescriptions.sweep_delegate)
+    expect(desc).toContain('originating account')
+    expect(desc).not.toMatch(/\bSafe\b/)
   })
 
   it('guides agents from a quote success into the matching pay tool', () => {

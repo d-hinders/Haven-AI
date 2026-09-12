@@ -343,7 +343,7 @@ describe('read commands', () => {
     const safes = [
       { id: 's1', safe_address: '0x1111111111111111111111111111111111111111', chain_id: 8453, name: 'Main', is_default: true },
     ]
-    const mk = () => fakeApi({ 'GET /user/safes': { safes } })
+    const mk = () => fakeApi({ 'GET /user/accounts': { safes } })
 
     const human = harness({ makeApi: mk })
     await run(['wallets', 'list'], human.deps)
@@ -373,10 +373,10 @@ describe('read commands', () => {
         calls,
         get: async <T,>(path: string) => {
           calls.push(`GET ${path}`)
-          if (path === '/user/safes') {
+          if (path === '/user/accounts') {
             return { safes: [{ id: 's1', safe_address: FUNDING.account_address, chain_id: 8453, name: 'Main', is_default: true }] } as T
           }
-          if (path === '/user/safes/s1/funding') {
+          if (path === '/user/accounts/s1/funding') {
             const state = states[Math.min(i, states.length - 1)]
             i += 1
             return { ...FUNDING, ...state } as T
@@ -419,7 +419,7 @@ describe('read commands', () => {
       expect(await run(['wallets', 'funding', '--safe', 'nope', '--json'], empty.deps)).toBe(2)
 
       const none = harness({
-        makeApi: () => fakeApi({ 'GET /user/safes': { safes: [] } }),
+        makeApi: () => fakeApi({ 'GET /user/accounts': { safes: [] } }),
       })
       const code = await run(['wallets', 'funding', '--json'], none.deps)
       expect(code).not.toBe(0)
@@ -539,14 +539,34 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
-  it('resolves activity --safe by address to a safeId filter', async () => {
+  it.each([
+    ['old-only server shape', { safe_address: '0xABC' }],
+    ['new-only server shape', { account_address: '0xABC' }],
+    ['both', { account_address: '0xABC', safe_address: '0xold' }],
+  ])('reads the wallet address from either name — %s (#2908)', async (_label, twins) => {
     const api = fakeApi({
-      'GET /user/safes': { safes: [{ id: 's1', safe_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
+      'GET /user/accounts': { safes: [{ id: 's1', ...twins, chain_id: 100, name: 'Main', is_default: true }] },
+      'GET /balances/0xABC': { balances: [] },
+    })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['wallets', 'balances'], deps)).toBe(0)
+    expect(api.calls).toContain('GET /balances/0xABC?chain_id=100')
+    expect(out.join('\n')).toContain('0xABC')
+    // And `--safe <address>` matches through the same read.
+    expect(await run(['wallets', 'balances', '--safe', '0xabc'], deps)).toBe(0)
+  })
+
+  it('resolves activity --safe by address to an accountId filter (both keys for the #2908 window)', async () => {
+    const api = fakeApi({
+      'GET /user/accounts': { safes: [{ id: 's1', safe_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
       'GET /transactions': { transactions: [] },
     })
     const { deps } = harness({ makeApi: () => api })
     expect(await run(['activity', 'list', '--safe', '0xabc'], deps)).toBe(0)
     const txCall = api.calls.find((c) => c.startsWith('GET /transactions'))
+    expect(txCall).toContain('accountId=s1')
+    // The old key rides along: an unknown query key is silently ignored, so a
+    // pre-#2907 server would otherwise answer with EVERY row.
     expect(txCall).toContain('safeId=s1')
   })
 
@@ -559,7 +579,7 @@ describe('read commands', () => {
   })
 
   it('errors when activity --safe matches no wallet', async () => {
-    const api = fakeApi({ 'GET /user/safes': { safes: [] } })
+    const api = fakeApi({ 'GET /user/accounts': { safes: [] } })
     const { deps, err } = harness({ makeApi: () => api })
     // A --safe that matches nothing is a bad argument: usage (2).
     expect(await run(['activity', 'list', '--safe', 'nope'], deps)).toBe(2)
@@ -639,10 +659,10 @@ describe('management commands (backend-only)', () => {
   })
 
   it('renames a wallet via PUT', async () => {
-    const api = fakeApi({ 'PUT /user/safes/s1': {} })
+    const api = fakeApi({ 'PUT /user/accounts/s1': {} })
     const { deps } = harness({ makeApi: () => api })
     expect(await run(['wallets', 'rename', 's1', 'Operating'], deps)).toBe(0)
-    expect(api.calls).toContain('PUT /user/safes/s1')
+    expect(api.calls).toContain('PUT /user/accounts/s1')
   })
 
   it('adds and removes contacts', async () => {
@@ -991,7 +1011,7 @@ describe('agents connect (#2527)', () => {
   // how the omission below went unnoticed until review. Mocking the real URL
   // makes the parameter load-bearing in the test as well as in production.
   const ROUTES = {
-    'GET /user/safes': SAFES,
+    'GET /user/accounts': SAFES,
     'GET /balances/0xsafe?chain_id=84532': BALANCES,
     'POST /agent-connection-setups': SETUP,
   }
@@ -1017,6 +1037,15 @@ describe('agents connect (#2527)', () => {
     expect(api.calls).toContain('GET /balances/0xsafe?chain_id=84532')
   })
 
+  it('sends account_id AND safe_id, same value, so the request works against a server with either (#2908)', async () => {
+    const { api, bodies } = recordingApi(ROUTES)
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run([...CONNECT_ARGV, '--json'], deps)).toBe(0)
+    const body = bodies[0].body as { account_id: string; safe_id: string }
+    expect(body.account_id).toBe('s1')
+    expect(body.safe_id).toBe('s1')
+  })
+
   it('asks for balances on the WALLET\'s chain, which is not optional', async () => {
     // The same account address is provisioned on every supported chain, so the
     // address usually owns more than one row and `GET /balances/:address`
@@ -1024,7 +1053,7 @@ describe('agents connect (#2527)', () => {
     // have broken this command for the ordinary multi-chain account while
     // `wallets balances`, which has always passed it, kept working.
     const { api } = recordingApi({
-      'GET /user/safes': SAFES,
+      'GET /user/accounts': SAFES,
       // Only the chain-qualified URL is served. A request without it falls
       // through to the fake's 404, standing in for the backend's 400.
       'GET /balances/0xsafe?chain_id=84532': BALANCES,

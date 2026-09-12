@@ -34,9 +34,12 @@ export type { Executor }
 // ── Evidence base upsert (lib/machine-payment-evidence.ts) ───────────────────
 
 /**
- * FX columns COALESCE so book-time values freeze at settlement — the SEK
- * capture (migration 026) and the ledger-currency rate map (`fx_rates`,
- * migration 082) alike.
+ * The SEK FX columns COALESCE so book-time values freeze at settlement
+ * (migration 026). The ledger-currency rate map (`fx_rates`, migration 082) is
+ * frozen differently and deliberately so — see the CASE below: it is written
+ * only by the write that first sets `fx_at`, because a COALESCE would let a
+ * later write FILL a null map while the timestamp beside it still said
+ * settlement.
  *
  * #2118: this was parameterised so the intent- and approval-anchored writes
  * could not drift. Only the intent-anchored write survives.
@@ -125,8 +128,9 @@ export interface EvidenceBaseInput {
   fxAt: string | null
   /**
    * Book-time token→currency rates for the supported ledger currencies (#2877),
-   * serialised JSON. Frozen by the same COALESCE as the SEK columns: a later
-   * write never overwrites a captured map.
+   * serialised JSON. Frozen WITH the capture, not per-column: written only by
+   * the write that first sets `fx_at`, so a later write neither overwrites a
+   * captured map nor adds one to a row that captured without it.
    */
   fxRates: string | null
 }

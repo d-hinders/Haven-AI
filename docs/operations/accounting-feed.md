@@ -489,9 +489,12 @@ settlement: a feed-time rate wearing a book-time label.
 
 So: **a row that already carries a capture but no map keeps no map, for good.**
 Its book-time rates are not knowable, and a non-SEK connection reads such a
-payment as not-ready rather than being fed a rate from the wrong day. Every row
-settled before migration 082 is in exactly that state — SEK ledgers are
-unaffected, since they read the `amount_sek` column as they always have.
+payment as not-ready rather than being fed a rate from the wrong day. Every
+pre-082 row that captured a book-time SEK value is in exactly that state. A row
+whose settlement-time price read failed outright is not: its `fx_at` is NULL
+too, so a later write gives it both halves at once, consistently. SEK ledgers
+are unaffected either way, reading the `amount_sek` column as they always
+have.
 
 **Figures are fixed-scale.** A computed ledger amount is emitted at four
 decimals — `amount_sek`'s own scale since migration 026 — so a computed figure

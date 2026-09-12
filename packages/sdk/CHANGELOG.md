@@ -13,6 +13,7 @@ added, the old name is kept with the same value and a `@deprecated` JSDoc.
 
 | Old (deprecated, removed at #2914) | New | Where |
 |---|---|---|
+| `PaymentReceipt.payment.safe` | `PaymentReceipt.payment.account` (optional for the window) | `getReceipt()`/`verifyPaymentReceipt()` input — additive; verification reads only `authorization` |
 | `HavenAgent.safeAddress` | `HavenAgent.accountAddress` | `getAgent()`, `getAgentSummary()` (also the hosted `haven_get_agent` output) |
 | `HavenAllowanceSummary.safeAddress` | `HavenAllowanceSummary.accountAddress` | `getAllowances()` (also the hosted `haven_get_allowances` output) |
 | `RawHavenAgent.safe_address` (now optional) | `RawHavenAgent.account_address` | `@internal` wire shape |

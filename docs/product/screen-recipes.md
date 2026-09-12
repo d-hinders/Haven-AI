@@ -15,6 +15,7 @@ covers:
   - packages/frontend/src/components/transactions/TransactionsTable.tsx
   - packages/frontend/src/components/ui/Input.tsx
   - packages/frontend/src/components/ui/PageHeader.tsx
+  - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx

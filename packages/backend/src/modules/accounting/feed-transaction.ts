@@ -1,3 +1,4 @@
+import { DEFAULT_LEDGER_CURRENCY, type LedgerCurrency } from '../../domain/ledger-currency.js'
 import type { AccountingEntry } from './entry.js'
 
 /**
@@ -11,6 +12,13 @@ import type { AccountingEntry } from './entry.js'
  *
  * Book-time SEK / FX is reused verbatim from the entry (frozen at settlement,
  * #467) — never recomputed.
+ *
+ * Since #2877 the amount a connector actually pushes is `amountLedger` in
+ * `ledgerCurrency` — the destination's own booking currency, converted with
+ * the rate frozen at settlement. For a SEK ledger that is the same number
+ * `amountSek` has always carried, from the same captured rate; `amountSek`
+ * stays on the shape because the SEK columns are what every pre-#2877 row and
+ * the receipt underlag hold.
  */
 export interface FeedTransaction {
   paymentId: string
@@ -21,6 +29,19 @@ export interface FeedTransaction {
   token: string
   amountAtomic: string
   amountSek: string | null
+  /** The destination ledger's booking currency (#2877). */
+  ledgerCurrency: LedgerCurrency
+  /**
+   * The amount in `ledgerCurrency`, from the rate frozen at settlement. Null
+   * when no rate for that currency was captured — the row is then not ready to
+   * feed and stays backfillable, exactly as a null `amountSek` behaves.
+   */
+  amountLedger: string | null
+  /**
+   * The token→`ledgerCurrency` rate used for `amountLedger`. For a SEK ledger
+   * this is `fxRate` — same captured value, same provenance.
+   */
+  fxRateLedger: string | null
   fxRate: string | null
   fxSource: string | null
   fxAt: string | null
@@ -44,6 +65,33 @@ function toIso(value: string | null): string | null {
 }
 
 /**
+ * The amount to push, in the destination's booking currency (#2877).
+ *
+ * SEK is answered from the SEK columns rather than from the rate map, on
+ * purpose: those columns are the value every row settled before migration 082
+ * carries, and re-deriving a SEK amount from a newer map would change what a
+ * SEK ledger is fed for reasons that have nothing to do with this change.
+ *
+ * Every other currency multiplies the token amount by the rate frozen at
+ * settlement. No rate for that currency means null — not a fallback to SEK,
+ * which would push Swedish kronor into a Danish ledger as though they were
+ * Danish, and not a recomputed spot rate, which would silently be a rate from
+ * feed time wearing a book-time label.
+ *
+ * The arithmetic is float, and deliberately kept to the same precision the SEK
+ * path has always used: the amount is a source-document figure an accountant
+ * confirms, not a posted balance.
+ */
+function ledgerAmount(entry: AccountingEntry, currency: LedgerCurrency): { amount: string | null; rate: string | null } {
+  if (currency === DEFAULT_LEDGER_CURRENCY) return { amount: entry.amountSek, rate: entry.fxRate }
+  const rate = entry.fxRates?.[currency]
+  if (rate == null) return { amount: null, rate: null }
+  const tokenAmount = Number(entry.amountHuman ?? NaN)
+  if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) return { amount: null, rate: null }
+  return { amount: String(tokenAmount * rate), rate: String(rate) }
+}
+
+/**
  * Reduce a canonical entry to the non-asserting feed shape.
  *
  * `suggestedAccount` (#2867): the entry's per-merchant override wins; the
@@ -54,8 +102,10 @@ function toIso(value: string | null): string | null {
  */
 export function toFeedTransaction(
   entry: AccountingEntry,
-  opts: { connectionSuggestedAccount?: string | null } = {},
+  opts: { connectionSuggestedAccount?: string | null; ledgerCurrency?: LedgerCurrency } = {},
 ): FeedTransaction {
+  const ledgerCurrency = opts.ledgerCurrency ?? DEFAULT_LEDGER_CURRENCY
+  const ledger = ledgerAmount(entry, ledgerCurrency)
   return {
     paymentId: entry.paymentId,
     // The type says ISO string, but the entry builder hands through pg's
@@ -71,6 +121,9 @@ export function toFeedTransaction(
     token: entry.token,
     amountAtomic: entry.amountAtomic,
     amountSek: entry.amountSek,
+    ledgerCurrency,
+    amountLedger: ledger.amount,
+    fxRateLedger: ledger.rate,
     fxRate: entry.fxRate,
     fxSource: entry.fxSource,
     fxAt: toIso(entry.fxAt),

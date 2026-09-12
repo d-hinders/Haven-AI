@@ -72,12 +72,17 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      (a record at that number that is not ours).
    - `getCompanyInfo(secrets)` reports the company behind the grant —
      `externalCompanyId` (the provider's tenant id; Fortnox: `DatabaseNumber`),
-     `name`, and the ledger's `baseCurrency`. The generic flows refuse a
-     non-SEK ledger at connect BEFORE any secret is stored
+     `name`, and the ledger's `baseCurrency` — which is also the currency the
+     feed pushes in (#2877). The generic flows refuse a ledger outside
+     `SUPPORTED_LEDGER_CURRENCIES` (`domain/ledger-currency.ts`: SEK, EUR,
+     USD, DKK, NOK, GBP) at connect BEFORE any secret is stored
      (`assertSupportedBaseCurrency`, owner decision 2026-09-11, enforced by
-     #2864 for every provider: "Haven currently feeds SEK ledgers only"; an
-     existing row is left as it was). Report `null` if the provider cannot
-     say. A connector that TRIED and was refused for a missing scope reports
+     #2864 for every provider, widened by #2877: "Haven feeds SEK, EUR, USD,
+     DKK, NOK and GBP ledgers"; an existing row is left as it was). Report
+     `null` if the provider cannot say — such a connection books in SEK.
+     Your `pushTransaction` puts `tx.amountLedger` on the record in
+     `tx.ledgerCurrency`; both come from the rate frozen at settlement, and a
+     null `amountLedger` is a `skipped` row, never a SEK substitute. A connector that TRIED and was refused for a missing scope reports
      `scopeMissing: true` — the flow stores the connection and marks it
      `scope_missing` so the dashboard asks for a re-consent; a network error
      or a 5xx is thrown, never reported as a missing scope (the Fortnox
@@ -143,8 +148,9 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    idempotent re-push, the non-asserting guard, attachment degradation, verify
    verdicts, revoke-on-disconnect, post-push scope loss (row stays pushed),
    pre-push scope refusal (row skipped, delivered once after reconnect —
-   your harness supplies the `refuseInvoiceForScope` knob), non-SEK refusal
-   (before any secret is stored, on connect and on reconnect), company switch
+   your harness supplies the `refuseInvoiceForScope` knob), unsupported-currency
+   refusal with a supported non-SEK connect as its control (before any secret
+   is stored, on connect and on reconnect), company switch
    on reconnect — and runs the real orchestrator and flows; your harness supplies HTTP fixtures
    under `__tests__/fixtures/<provider>/` (see the Fortnox runner — its
    fixtures are hand-authored in the shapes the #494 spike recorded, not raw

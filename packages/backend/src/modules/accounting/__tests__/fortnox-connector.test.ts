@@ -48,6 +48,9 @@ const TX = {
   token: 'USDC',
   amountAtomic: '1000',
   amountSek: '10.42',
+  ledgerCurrency: 'SEK' as const,
+  amountLedger: '10.42',
+  fxRateLedger: '10.42',
   fxRate: '10.42',
   fxSource: 'riksbank',
   fxAt: '2026-07-15T09:30:00.000Z',
@@ -176,12 +179,33 @@ describe('FortnoxConnector (#496)', () => {
     expect(res).toEqual({ externalRef: null, status: 'skipped', reason: 'not_connected' })
   })
 
-  it('skips without book-time SEK (source documents need an amount)', async () => {
+  it('skips without a book-time amount in the ledger currency (source documents need an amount)', async () => {
     const res = await new FortnoxConnector(fetchStub({}).impl).pushTransaction('u1', {
       ...TX,
       amountSek: null,
+      amountLedger: null,
+      fxRateLedger: null,
     })
-    expect(res).toEqual({ externalRef: null, status: 'skipped', reason: 'no_sek_amount' })
+    expect(res).toEqual({ externalRef: null, status: 'skipped', reason: 'no_ledger_amount' })
+  })
+
+  it('#2877: pushes the destination ledger currency and its book-time amount, not SEK', async () => {
+    const stub = fetchStub({
+      '/suppliers?name=': () => ({ body: { Suppliers: [{ SupplierNumber: '1', Name: 'NordShield VPN' }] } }),
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 42 } } }),
+    })
+    const res = await new FortnoxConnector(stub.impl).pushTransaction('u1', {
+      ...TX,
+      ledgerCurrency: 'DKK',
+      amountLedger: '6.87',
+      fxRateLedger: '6.87',
+    })
+    expect(res.status).toBe('pushed')
+    const created = stub.calls.find((c) => c.url.endsWith('/supplierinvoices') && c.init?.method === 'POST')
+    const invoice = (JSON.parse(String(created?.init?.body)) as { SupplierInvoice: Record<string, unknown> }).SupplierInvoice
+    // MUTATION TARGET: hard-code `Currency: 'SEK'` / `Total: tx.amountSek`
+    // again and a Danish ledger is fed kroner-labelled Swedish kronor.
+    expect(invoice).toMatchObject({ Currency: 'DKK', Total: 6.87 })
   })
 
   it('skips inbound payments (not supplier purchases)', async () => {

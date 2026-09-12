@@ -25,7 +25,7 @@ import {
   upsertEvidenceBase,
 } from '../../infra/repositories/machine-payments.js'
 import { findAgentDelegateAddress } from '../../infra/repositories/agents.js'
-import { getBookTimeSekValue } from '../../infra/fiat-values.js'
+import { getBookTimeLedgerRates, getBookTimeSekValue } from '../../infra/fiat-values.js'
 import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
@@ -265,11 +265,19 @@ export async function recordMachinePaymentEvidenceBase(
   // Book-time FX (migration 026): captured here, at settlement, and never
   // overwritten (the COALESCE in the repository's upsert). A pricing outage
   // yields null, which is backfillable — it must not block settlement.
+  //
+  // #2877 adds the ledger-currency rate map (migration 082) in the SAME
+  // capture: one settled payment can be fed to connections booking in
+  // different currencies, so every supported currency's rate is frozen here
+  // rather than recomputed when a feed asks for it. Both reads hit the same
+  // cached price fetch, and both fail the same way — nulls, backfillable.
   const sek = await getBookTimeSekValue(intent.token_symbol, intent.amount_human)
+  const ledger = await getBookTimeLedgerRates(intent.token_symbol)
   const amountSek = sek ? sek.amountSek : null
   const fxRateSek = sek ? sek.fxRate : null
-  const fxSource = sek ? sek.fxSource : null
-  const fxAt = sek ? new Date().toISOString() : null
+  const fxSource = sek ? sek.fxSource : ledger ? ledger.fxSource : null
+  const fxAt = sek || ledger ? new Date().toISOString() : null
+  const fxRates = ledger ? JSON.stringify(ledger.rates) : null
 
   await upsertEvidenceBase({
     paymentIntentId,
@@ -295,6 +303,7 @@ export async function recordMachinePaymentEvidenceBase(
     fxRateSek,
     fxSource,
     fxAt,
+    fxRates,
   })
 
   // Record the (currently zero) platform fee for this payment so the fee ledger

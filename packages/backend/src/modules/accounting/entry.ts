@@ -1,5 +1,6 @@
 // dep-lint-exempt: both statements assemble their WHERE/LIMIT at runtime around the shared ENTRY_SOURCE_SQL join fragment, so there is no fixed statement for db-schema-smoke to PREPARE; extraction needs the fragment redesigned first (beyond #999's ~100-line budget)
 import pool from '../../db.js'
+import { isSupportedLedgerCurrency, type LedgerCurrency } from '../../domain/ledger-currency.js'
 import { vatTreatmentForCountry } from '../../domain/vat.js'
 
 /**
@@ -14,6 +15,27 @@ import { vatTreatmentForCountry } from '../../domain/vat.js'
  * rounding in records an accountant will file.
  */
 export type VatTreatment = 'none' | 'reverse_charge' | 'standard'
+
+/** Book-time token→currency rates, one entry per currency quoted at settlement. */
+export type LedgerRates = Partial<Record<LedgerCurrency, number>>
+
+/**
+ * Read `fx_rates` defensively: it is JSONB written by an older or newer build,
+ * so anything that is not a positive finite rate for a currency this build
+ * supports is dropped rather than trusted. A stored currency Haven no longer
+ * supports therefore disappears instead of reaching a payload.
+ */
+export function normalizeLedgerRates(value: unknown): LedgerRates | null {
+  if (value == null || typeof value !== 'object') return null
+  const out: LedgerRates = {}
+  for (const [currency, rate] of Object.entries(value as Record<string, unknown>)) {
+    if (!isSupportedLedgerCurrency(currency)) continue
+    const numeric = typeof rate === 'string' ? Number(rate) : rate
+    if (typeof numeric !== 'number' || !Number.isFinite(numeric) || numeric <= 0) continue
+    out[currency.toUpperCase() as LedgerCurrency] = numeric
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
 
 export interface AccountingEntry {
   paymentId: string
@@ -30,11 +52,25 @@ export interface AccountingEntry {
   }
   token: string
   amountAtomic: string
+  /**
+   * The token amount in human decimals (`machine_payment_evidence.amount_human`).
+   * Carried since #2877 because a non-SEK ledger amount is this figure times
+   * the rate frozen at settlement; the SEK amount is a stored column and needs
+   * no such multiplication.
+   */
+  amountHuman: string | null
   /** Book-time SEK value + provenance; null when no rate was captured. */
   amountSek: string | null
   fxRate: string | null
   fxSource: string | null
   fxAt: string | null
+  /**
+   * Book-time token→currency rates for every supported ledger currency that
+   * had a usable quote at settlement (#2877). Frozen with the row; the feed
+   * reads the destination's currency out of it and never recomputes. Null on
+   * rows settled before migration 082, and on a settlement-time price outage.
+   */
+  fxRates: LedgerRates | null
   /** Haven fee in SEK. Null until the fee ledger (#386) lands. */
   feeSek: string | null
   /** Merchant category from the catalog; feeds the BAS account map. */
@@ -59,10 +95,13 @@ export interface AccountingEntrySourceRow {
   merchant_address: string | null
   token_symbol: string
   amount_raw: string
+  amount_human: string | null
   amount_sek: string | null
   fx_rate_sek: string | null
   fx_source: string | null
   fx_at: string | null
+  /** `machine_payment_evidence.fx_rates` (migration 082); pg hands back parsed JSONB. */
+  fx_rates: LedgerRates | null
   resource_url: string | null
   confirmed_at: string | null
   created_at: string
@@ -98,10 +137,12 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     counterparty: { address: row.merchant_address, name: null, country: row.country ?? null },
     token: row.token_symbol,
     amountAtomic: row.amount_raw,
+    amountHuman: row.amount_human,
     amountSek: row.amount_sek,
     fxRate: row.fx_rate_sek,
     fxSource: row.fx_source,
     fxAt: row.fx_at,
+    fxRates: normalizeLedgerRates(row.fx_rates),
     feeSek: row.fee_sek ?? null,
     category: row.category ?? null,
     account: row.override_account ?? null,
@@ -118,8 +159,8 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
 /** Shared column + join body for the canonical entry source. */
 const ENTRY_SOURCE_SQL = `
   mpe.id, mpe.payment_intent_id, mpe.approval_request_id, mpe.tx_hash, mpe.chain_id,
-  mpe.merchant_address, mpe.token_symbol, mpe.amount_raw,
-  mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at,
+  mpe.merchant_address, mpe.token_symbol, mpe.amount_raw, mpe.amount_human,
+  mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
   mpe.resource_url, mpe.confirmed_at, mpe.created_at,
   mc.category AS category,
   mc.country AS country,

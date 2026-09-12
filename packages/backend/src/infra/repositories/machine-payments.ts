@@ -34,7 +34,9 @@ export type { Executor }
 // ── Evidence base upsert (lib/machine-payment-evidence.ts) ───────────────────
 
 /**
- * FX columns COALESCE so book-time values freeze at settlement.
+ * FX columns COALESCE so book-time values freeze at settlement — the SEK
+ * capture (migration 026) and the ledger-currency rate map (`fx_rates`,
+ * migration 082) alike.
  *
  * #2118: this was parameterised so the intent- and approval-anchored writes
  * could not drift. Only the intent-anchored write survives.
@@ -45,13 +47,13 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
       chain_id, resource_url, merchant_address, payer_address, settlement_address,
       token_symbol, token_address, amount_raw, amount_human, challenge_id,
       idempotency_key, challenge_payload, confirmed_at,
-      amount_sek, fx_rate_sek, fx_source, fx_at
+      amount_sek, fx_rate_sek, fx_source, fx_at, fx_rates
     ) VALUES (
       $1, $2, $3, $4, $5, 'payment_confirmed', LOWER($6::TEXT),
       $7, $8, LOWER($9::TEXT), LOWER($10::TEXT), LOWER($11::TEXT),
       $12, LOWER($13::TEXT), $14, $15, $16,
       $17, $18, $19,
-      $20, $21, $22, $23
+      $20, $21, $22, $23, $24::JSONB
     )
     ${conflictClause}
     DO UPDATE SET
@@ -74,6 +76,7 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
       fx_rate_sek = COALESCE(machine_payment_evidence.fx_rate_sek, EXCLUDED.fx_rate_sek),
       fx_source = COALESCE(machine_payment_evidence.fx_source, EXCLUDED.fx_source),
       fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at),
+      fx_rates = COALESCE(machine_payment_evidence.fx_rates, EXCLUDED.fx_rates),
       updated_at = NOW()`
 }
 
@@ -110,6 +113,12 @@ export interface EvidenceBaseInput {
   fxRateSek: number | string | null
   fxSource: string | null
   fxAt: string | null
+  /**
+   * Book-time token→currency rates for the supported ledger currencies (#2877),
+   * serialised JSON. Frozen by the same COALESCE as the SEK columns: a later
+   * write never overwrites a captured map.
+   */
+  fxRates: string | null
 }
 
 export async function upsertEvidenceBase(
@@ -140,6 +149,7 @@ export async function upsertEvidenceBase(
     input.fxRateSek,
     input.fxSource,
     input.fxAt,
+    input.fxRates,
   ])
 }
 

@@ -14,6 +14,8 @@ function row(over: Partial<AccountingEntrySourceRow> = {}): AccountingEntrySourc
     merchant_address: '0xmerchant',
     token_symbol: 'USDC',
     amount_raw: '12500000',
+    amount_human: '0.1',
+    fx_rates: { SEK: 10 },
     amount_sek: '132.5000',
     fx_rate_sek: '10.600000000000',
     fx_source: 'coingecko_spot',

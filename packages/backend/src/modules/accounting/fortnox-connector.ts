@@ -327,9 +327,11 @@ export class FortnoxConnector implements AccountingConnector {
     underlag: ReceiptUnderlag | null = null,
   ): Promise<PushResult> {
     // The orchestrator gates on FX-ready, but the connector re-checks: a feed
-    // row without a book-time SEK amount cannot be a usable source document.
-    if (tx.amountSek == null) {
-      return { externalRef: null, status: 'skipped', reason: 'no_sek_amount' }
+    // row without a book-time amount in the destination's booking currency
+    // cannot be a usable source document (#2877 — until then this could only
+    // ever be the SEK amount, and the reason read `no_sek_amount`).
+    if (tx.amountLedger == null) {
+      return { externalRef: null, status: 'skipped', reason: 'no_ledger_amount' }
     }
     // Inbound payments are not supplier purchases — out of scope for the
     // supplier-invoice mechanism (they'd be customer invoices / other income).
@@ -358,8 +360,11 @@ export class FortnoxConnector implements AccountingConnector {
       // Already settled on-chain — nothing is due. DueDate = InvoiceDate keeps
       // the AP aging clean until the accountant reconciles the payment leg.
       DueDate: invoiceDate,
-      Total: Number(tx.amountSek),
-      Currency: 'SEK',
+      // #2877: the destination's own booking currency and the amount in it,
+      // from the rate frozen at settlement. A SEK company gets exactly what it
+      // got before — the same captured SEK amount under the same key.
+      Total: Number(tx.amountLedger),
+      Currency: tx.ledgerCurrency,
       ExternalInvoiceNumber: externalInvoiceNumber(tx.paymentId),
       Comments: feedDescription(tx),
       // Suggestion only, surfaced in the comment — NEVER as an account row.

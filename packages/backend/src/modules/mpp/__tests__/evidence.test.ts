@@ -9,11 +9,13 @@ import {
 const {
   mockQuery,
   mockGetBookTimeSekValue,
+  mockGetBookTimeLedgerRates,
   mockRecordSettledFee,
   mockFeedSettledPaymentBestEffort,
 } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockGetBookTimeSekValue: vi.fn(),
+  mockGetBookTimeLedgerRates: vi.fn(),
   mockRecordSettledFee: vi.fn(),
   mockFeedSettledPaymentBestEffort: vi.fn(),
 }))
@@ -26,6 +28,7 @@ vi.mock('../../../db.js', () => ({
 
 vi.mock('../../../infra/fiat-values.js', () => ({
   getBookTimeSekValue: (...args: unknown[]) => mockGetBookTimeSekValue(...args),
+  getBookTimeLedgerRates: (...args: unknown[]) => mockGetBookTimeLedgerRates(...args),
 }))
 
 vi.mock('../../fee/index.js', () => ({
@@ -94,6 +97,10 @@ beforeEach(() => {
     fxRate: 10.6,
     fxSource: 'coingecko_spot',
   })
+  mockGetBookTimeLedgerRates.mockResolvedValue({
+    rates: { SEK: 10.6, EUR: 0.92, DKK: 6.87 },
+    fxSource: 'coingecko_spot',
+  })
   mockRecordSettledFee.mockResolvedValue(undefined)
 })
 
@@ -118,6 +125,12 @@ describe('recordMachinePaymentEvidenceBase', () => {
     )
     expect(sql).toContain(
       'fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at)',
+    )
+    // #2877: the ledger-currency rate map freezes by the same mechanism as
+    // the four SEK columns above. MUTATION TARGET: drop the COALESCE and a
+    // re-settlement overwrites a book-time rate with a feed-time one.
+    expect(sql).toContain(
+      'fx_rates = COALESCE(machine_payment_evidence.fx_rates, EXCLUDED.fx_rates)',
     )
 
     const excludedColumns = [
@@ -160,11 +173,16 @@ describe('recordMachinePaymentEvidenceBase', () => {
 
   it('writes evidence with null SEK fields when book-time pricing is unavailable', async () => {
     mockGetBookTimeSekValue.mockResolvedValueOnce(null)
+    // #2877: the two captures fail together — one price fetch, one outage.
+    // Plain `mockResolvedValue`, not `…Once`: `beforeEach` re-applies the
+    // default for every test, so there is no positional chain to keep in
+    // step here (and the db-mock ratchet counts those chains).
+    mockGetBookTimeLedgerRates.mockResolvedValue(null)
 
     await recordMachinePaymentEvidenceBase(payment())
 
     const { params } = evidenceInsert()
-    expect(params.slice(19, 23)).toEqual([null, null, null, null])
+    expect(params.slice(19, 24)).toEqual([null, null, null, null, null])
     expect(mockRecordSettledFee).toHaveBeenCalledOnce()
     expect(mockFeedSettledPaymentBestEffort).toHaveBeenCalledOnce()
   })
@@ -196,6 +214,7 @@ describe('recordMachinePaymentEvidenceBase', () => {
     }
 
     expect(mockGetBookTimeSekValue).not.toHaveBeenCalled()
+    expect(mockGetBookTimeLedgerRates).not.toHaveBeenCalled()
     expect(mockQuery).not.toHaveBeenCalled()
     expect(mockRecordSettledFee).not.toHaveBeenCalled()
     expect(mockFeedSettledPaymentBestEffort).not.toHaveBeenCalled()

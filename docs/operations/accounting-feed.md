@@ -65,7 +65,8 @@ proved the mechanism live on 2026-07-16).
 Purchase settles on-chain
   │  (x402 funding confirmation, erc7710 settlement observed, or MPP receipt)
   ▼
-machine_payment_evidence row written (with book-time SEK amount when FX is ready)
+machine_payment_evidence row written (with book-time SEK amount + the
+  │  ledger-currency rate map, when FX is ready — #2877)
   │
   ▼
 feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settlement
@@ -80,7 +81,8 @@ feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settle
   │    ├─ token refresh if needed (generic oauth-flow; accounting_connections, secrets decrypted in-process)
   │    ├─ find-or-create supplier (name only, nothing asserted)
   │    ├─ POST /supplierinvoices  → UNATTESTED invoice,
-  │    │     ExternalInvoiceNumber = HAVEN-<paymentId>, Total in SEK,
+  │    │     ExternalInvoiceNumber = HAVEN-<paymentId>, Total + Currency in
+  │    │     the connected company's own booking currency (#2877),
   │    │     DueDate = InvoiceDate (already settled), no VAT/account rows
   │    ├─ POST /inbox + /supplierinvoicefileconnections
   │    │     → Haven payment-evidence PDF attached (#498)
@@ -262,7 +264,7 @@ Work the sync row's `status` on `/accounting` (or `accounting_feed_syncs`):
 | `failed` | Fortnox push failed; `error` carries the Fortnox message verbatim | Nothing, at first: the [retry sweep](#background-retry-sweep-2866) re-feeds it with backoff (1 min doubling to 1 h, 8 attempts). Fix the named cause (often token/scope) if it keeps failing; **Sync now** retries immediately |
 | `failed` with `error` starting `exhausted:` | The sweep gave up — 8 attempts, the last reason follows the prefix | Fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | Claimed but in flight (or a crashed in-flight push) | Wait; the sweep releases a `pending` row older than 15 min (the claim IS the concurrency guard, so nothing shorter) and re-feeds it. Do not edit the row |
-| `skipped` | A connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped), `connection needs_reauthorisation: …` (#2863), or `scope refused before the invoice was created: …` (#2865 — the invoice POST itself was refused for scope, nothing exists in Fortnox, the connection is `scope_missing`) | Fix the named cause (usually: connect Fortnox); the sweep retries skipped rows like failed ones — but NOT while the connection is `needs_reauthorisation` / `scope_missing`, which hold the row until the user re-consents. **Sync now** also re-claims them |
+| `skipped` | A connector-level skip (`not_connected`, `no_ledger_amount` — `no_sek_amount` on rows recorded before #2877, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped), `connection needs_reauthorisation: …` (#2863), or `scope refused before the invoice was created: …` (#2865 — the invoice POST itself was refused for scope, nothing exists in Fortnox, the connection is `scope_missing`) | Fix the named cause (usually: connect Fortnox); the sweep retries skipped rows like failed ones — but NOT while the connection is `needs_reauthorisation` / `scope_missing`, which hold the row until the user re-consents. **Sync now** also re-claims them |
 | *(no row)* | The settle-time hook never ran (entitlement off, feature flag off) or the payment predates the feed | Check `GET /accounting/feed/status` base flags and `entitlementMode`/`entitled`; **Sync now** backfills once entitled |
 
 Common causes, from live experience:
@@ -303,8 +305,8 @@ there is exactly one per user.
 | `GET /accounting/providers` | session | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
 | `GET /accounting/connections` | session | the caller's connections — metadata only, never secrets; each carries `missingScopes` (#2865) |
 | `POST /accounting/connections/:provider/connect-url` | session | consent URL for a live OAuth2 provider; signed, purpose-scoped, provider-bound, **single-use** `state` (10 min). Also the **re-consent** path (#2865): issued for an existing connection too, whatever its status |
-| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error`, plus `&reason=unsupported_currency` on a non-SEK refusal (#2864). On an existing connection it UPDATES the row (secrets, `granted_scope`, `status → connected`) and keeps `settings`, `feed_from`, the active flag and the sync history (#2865). A grant narrower than `requiredScopes` is stored but `scope_missing` (#2865) |
-| `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409); a non-SEK company is 409 `UNSUPPORTED_BASE_CURRENCY` before the key is stored (#2864) |
+| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error`, plus `&reason=unsupported_currency` when the company books in a currency outside the supported list (#2864, widened by #2877). On an existing connection it UPDATES the row (secrets, `granted_scope`, `status → connected`) and keeps `settings`, `feed_from`, the active flag and the sync history (#2865). A grant narrower than `requiredScopes` is stored but `scope_missing` (#2865) |
+| `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409); a company booking outside the supported currency list is 409 `UNSUPPORTED_BASE_CURRENCY` before the key is stored (#2864, #2877) |
 | `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it (Fortnox does, #2863 — `POST /oauth-v1/revoke` with the refresh token; a failed revoke still disconnects locally) |
 | `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
 | `POST /accounting/connections/:provider/backfill` | session | `{ since }`: the user's choice to include history — moves `feed_from` **earlier only** (a later date is 400 `SINCE_NOT_EARLIER`), records it under `settings.backfill`, runs one bounded sync; active `connected` destination only (#2867) |
@@ -424,7 +426,7 @@ app's registered permissions in the developer portal are missing one of
 `FORTNOX_SCOPE`'s entries — the consent cannot grant what the app does not
 declare.
 
-## Company info, SEK-only, company switch (#2864)
+## Company info, ledger currency, company switch (#2864, #2877)
 
 **What connect records.** The generic flows ask the connector who the grant
 belongs to BEFORE anything is stored (`getCompanyInfo`) and write
@@ -436,8 +438,13 @@ company books in SEK). `GET /accounting/connections` carries all three as
 `GET /accounting/feed/status` carries the active destination's name as
 `companyName`, so the page can say *Connected to Haven Sandbox AB*.
 
-**SEK only.** A company whose base currency is not SEK is refused with
-*"Haven currently feeds SEK ledgers only"* — nothing is stored, and on a
+**Which ledger currencies feed (#2877).** `SEK`, `EUR`, `USD`, `DKK`, `NOK`
+and `GBP` — the list is `SUPPORTED_LEDGER_CURRENCIES` in
+`packages/backend/src/domain/ledger-currency.ts`, and it lives there because
+`infra/prices.ts` quotes exactly those currencies against the token. One list
+is what keeps "accepted at connect" and "a rate the feed can use" the same
+set. A company whose base currency is outside it is refused with *"Haven feeds
+SEK, EUR, USD, DKK, NOK and GBP ledgers"* — nothing is stored, and on a
 reconnect the existing row is left exactly as it was. The API-key route
 answers 409 `UNSUPPORTED_BASE_CURRENCY`; the OAuth callback redirects with
 `connect=error&reason=unsupported_currency` — and because the code was
@@ -445,7 +452,35 @@ already exchanged, the refused grant is revoked at the provider best-effort
 (Fortnox declares `revoke`), so a grant Haven does not store does not linger
 there either. The rule is one function
 (`assertSupportedBaseCurrency`, `provider.ts`); a provider that cannot say
-(`baseCurrency: null`) passes. Multi-currency is a follow-on placeholder.
+(`baseCurrency: null`) passes and the connection books in SEK, the default.
+
+**What the feed pushes, and when the rate was taken.** The record carries the
+amount in the connection's `base_currency`, converted with the rate captured
+**at settlement** and frozen there — never a rate looked up when the push
+happens. The capture is `getBookTimeLedgerRates` (`infra/fiat-values.ts`),
+written to `machine_payment_evidence.fx_rates` (JSONB, migration 082) in the
+same call that captures the SEK value, and frozen by the same `COALESCE` in
+the evidence upsert that freezes `amount_sek`: a re-settlement never re-prices
+a payment. `fx_source` and `fx_at` keep their meaning — where the rate came
+from and when it was taken — for every currency in the map.
+
+- **The SEK path is unchanged.** A SEK ledger is fed from the `amount_sek`
+  column, exactly as before #2877; the rate map is not consulted for it, and
+  no historical row was backfilled or rewritten.
+- **No rate for that currency is *not ready*, never a fallback.** A
+  settlement-time pricing outage for the destination's currency leaves the
+  payment unfed and unclaimed, so the retry sweep and the backfill can deliver
+  it once a rate exists. Feeding SEK into a non-SEK ledger would be a wrong
+  number wearing the right label, so it is deliberately not done.
+- **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment
+  into a USD-booking company carries the rate the source actually quoted
+  (≈ 1.0) with its provenance. Haven asserts no parity between a stablecoin
+  and the currency it is named after — the rate is factual provenance on an
+  unattested source document, and the accountant confirms it like any other
+  figure on that document.
+- **A company switch does not re-price history.** Records already pushed keep
+  the currency they were pushed in; the new connection feeds what settles
+  after its `feed_from`, which is what the switch stamps anyway.
 
 **The `companyinformation` scope.** In `FORTNOX_SCOPE` since #2864. Adding a
 scope does not invalidate existing grants: a connection consented before

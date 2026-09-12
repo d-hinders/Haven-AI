@@ -31,6 +31,9 @@ const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
     getBookTimeSekValue: vi.fn().mockResolvedValue(null),
+    // #2877: captured in the same settlement call as the SEK value; an
+    // unmocked call throws and 500s the settle/evidence routes.
+    getBookTimeLedgerRates: vi.fn().mockResolvedValue(null),
   },
   reportingMocks: {
     lateAttachMerchantReceipt: vi.fn().mockResolvedValue(undefined),

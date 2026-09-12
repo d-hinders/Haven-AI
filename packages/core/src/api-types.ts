@@ -1098,7 +1098,7 @@ export type paths = {
         };
         /**
          * PUBLIC OAuth callback — authenticated by the signed state, not by a session.
-         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a non-SEK currency is `connect=error&reason=unsupported_currency` (#2864: "Haven currently feeds SEK ledgers only" — nothing was stored; an existing connection is left as it was, and the user can pick another company).
+         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" — nothing was stored; an existing connection is left as it was, and the user can pick another company).
          */
         get: operations["accountingOAuthCallback"];
         put?: never;
@@ -1120,7 +1120,7 @@ export type paths = {
         put?: never;
         /**
          * Connect a live API-key provider: validate the key at the provider, then store it encrypted.
-         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven currently feeds SEK ledgers only") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.
+         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.
          */
         post: operations["connectAccountingApiKey"];
         delete?: never;
@@ -8675,7 +8675,7 @@ export interface operations {
                             externalCompanyId: string | null;
                             /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
                             externalCompanyName: string | null;
-                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
                             baseCurrency: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;
@@ -8875,7 +8875,7 @@ export interface operations {
                             externalCompanyId: string | null;
                             /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
                             externalCompanyName: string | null;
-                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
                             baseCurrency: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;
@@ -8939,7 +8939,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a non-SEK currency (`UNSUPPORTED_BASE_CURRENCY`, #2864 — nothing stored). */
+            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9052,7 +9052,7 @@ export interface operations {
                             externalCompanyId: string | null;
                             /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
                             externalCompanyName: string | null;
-                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
                             baseCurrency: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;
@@ -9280,7 +9280,7 @@ export interface operations {
                             externalCompanyId: string | null;
                             /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
                             externalCompanyName: string | null;
-                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
                             baseCurrency: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;

@@ -228,7 +228,10 @@ export class InMemoryConnector implements AccountingConnector {
       booked: false,
       deleted: false,
       date: tx.settledAt.slice(0, 10),
-      total: tx.amountSek == null ? null : Number(tx.amountSek),
+      // #2877: the reference connector books what it was sent, in the
+      // destination's own currency — the same figure a real provider puts on
+      // the record. For a SEK ledger this is the value it always was.
+      total: tx.amountLedger == null ? null : Number(tx.amountLedger),
     })
     this.pushed.push({ userId, tx })
     const ref = `memory:invoice:${n}`

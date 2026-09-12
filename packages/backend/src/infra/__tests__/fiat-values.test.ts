@@ -9,7 +9,7 @@ afterEach(() => vi.clearAllMocks())
 
 describe('getBookTimeSekValue', () => {
   it('returns SEK value, rate, and source', async () => {
-    mockedGetTokenPrice.mockResolvedValue({ usd: 1, eur: 0.9, sek: 10.6 })
+    mockedGetTokenPrice.mockResolvedValue({ usd: 1, eur: 0.9, sek: 10.6, dkk: 6.87, nok: 10.9, gbp: 0.79 })
     const v = await getBookTimeSekValue('USDC', '12.5')
     expect(v).toEqual({ amountSek: 132.5, fxRate: 10.6, fxSource: FX_SOURCE_SPOT })
   })
@@ -20,7 +20,7 @@ describe('getBookTimeSekValue', () => {
   })
 
   it('returns null (not a bogus zero) when no SEK rate is available', async () => {
-    mockedGetTokenPrice.mockResolvedValue({ usd: 1, eur: 0.9, sek: 0 })
+    mockedGetTokenPrice.mockResolvedValue({ usd: 1, eur: 0.9, sek: 0, dkk: 6.87, nok: 10.9, gbp: 0.79 })
     expect(await getBookTimeSekValue('USDC', '12.5')).toBeNull()
   })
 

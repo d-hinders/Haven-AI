@@ -66,7 +66,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-09-08"
+last-verified: "2026-09-12"
 ---
 
 # Haven — Architecture Overview
@@ -104,8 +104,8 @@ with no funding leg and no approval queue. Deep dive:
 
 | Package | One-liner |
 |---|---|
-| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, reporting (incl. the live Fortnox feed adapter, `modules/reporting/`), and [OpenAPI](05-agent-api-openapi.md). The retired rail’s approval queue was deleted outright by #2055 — routes deregistered, `approval_requests` dropped. |
-| `@haven/frontend` | Next.js dashboard: onboarding, wallets, delegation agent rules, activity, custody/recovery, catalog, and guarded reporting; legacy Safe accounts are not rendered at all since #2413 — the account and agent list queries filter to `account_type = 'delegator_hybrid'`, so their rows persist in the database but reach no account, agent or dashboard screen. No approvals surface: `ApprovalQueue`, the `/approvals` route, the sidebar entry and its count badge were deleted by #1989/#2055. |
+| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, the provider-generic accounting module (`modules/accounting/` — connections, the non-asserting feed, the retry sweep, Fortnox as the live connector; epic #2858, [runbook](../operations/accounting-feed.md)), and [OpenAPI](05-agent-api-openapi.md). The retired rail’s approval queue was deleted outright by #2055 — routes deregistered, `approval_requests` dropped. |
+| `@haven/frontend` | Next.js dashboard: onboarding, wallets, delegation agent rules, activity, custody/recovery, catalog, and the guarded accounting feed (`/accounting`; connections managed from a Settings card as of #2868, PR #2903); legacy Safe accounts are not rendered at all since #2413 — the account and agent list queries filter to `account_type = 'delegator_hybrid'`, so their rows persist in the database but reach no account, agent or dashboard screen. No approvals surface: `ApprovalQueue`, the `/approvals` route, the sidebar entry and its count badge were deleted by #1989/#2055. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
 | `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven to approve a delegation agent's budget. |
 | `@haven_ai/mcp-server` | Hosted MCP — authenticates the agent API key, constructs unsigned payloads, and relays signed requests; never receives the delegate private signing key. |
@@ -164,7 +164,7 @@ payment. Current contracts:
   on-chain anchor is eventually consistent. See
   [agent passport schema](11-agent-passport-schema.md).
 - **PostgreSQL** — users, wallets, agents, allowances, payments,
-  receipts, catalog/reporting state, and audit records.
+  receipts, catalog and accounting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)
   is the dev/QA testnet; **Gnosis Chain** (100) remains supported for existing
   configured Safe flows. Standard merchant x402 is exact-scheme USDC on Base

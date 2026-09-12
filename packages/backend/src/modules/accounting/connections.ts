@@ -42,11 +42,11 @@ import {
   mergeSettings,
   recordBackfill,
   setActiveDestination,
-  setStatus,
   type AccountingConnectionRow,
   type ConnectionSettings,
   type ConnectionStatus,
 } from '../../infra/repositories/accounting-connections.js'
+import { flagConnectionStatus } from './ops-signals.js'
 import { decryptSecrets } from '../../infra/secrets.js'
 import { connectWithApiKey } from './api-key-flow.js'
 import { companySwitchLog } from './company-info.js'
@@ -284,7 +284,7 @@ export async function degradeConnection(
   status: ConnectionStatus,
   reason: string | null,
 ): Promise<void> {
-  await setStatus(userId, providerId, status, reason)
+  await flagConnectionStatus(userId, providerId, status, reason)
 }
 
 // ── Backfill (#2867) ─────────────────────────────────────────────────────────

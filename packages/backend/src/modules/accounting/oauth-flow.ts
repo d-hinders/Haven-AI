@@ -47,13 +47,13 @@
 
 import {
   getConnection,
-  setStatus,
   stampFeedFromIfUnset,
   updateSecrets,
   upsertConnection,
   withLockedConnection,
   type AccountingConnectionRow,
 } from '../../infra/repositories/accounting-connections.js'
+import { flagConnectionStatus } from './ops-signals.js'
 import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
 import { applyCompanyInfo } from './company-info.js'
 import type { AccountingConnector } from './connector.js'
@@ -394,7 +394,7 @@ async function recordScopeShortfall(
     missing,
     `the ${provider.displayName} grant was consented without ${missing.length === 1 ? 'a scope' : 'scopes'} the feed needs — reconnect to obtain ${missing.length === 1 ? 'it' : 'them'}`,
   )
-  await setStatus(userId, provider.id, 'scope_missing', reason)
+  await flagConnectionStatus(userId, provider.id, 'scope_missing', reason)
   return { ...row, status: 'scope_missing', status_reason: reason }
 }
 
@@ -511,7 +511,7 @@ export async function getValidOAuth2AccessToken(
       // without this flip the dead grant is retried on every sync.
       if (!isGrantRefusal(err)) throw err
       const reason = `refresh refused: ${err.message}`
-      await setStatus(userId, cfg.providerId, 'needs_reauthorisation', reason, tx)
+      await flagConnectionStatus(userId, cfg.providerId, 'needs_reauthorisation', reason, tx)
       return { kind: 'dead', status: 'needs_reauthorisation', reason }
     }
     const { ciphertext, keyVersion } = encryptSecrets(tokensToSecrets(refreshed) as unknown as Record<string, unknown>)

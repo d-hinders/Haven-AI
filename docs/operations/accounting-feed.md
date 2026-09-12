@@ -5,664 +5,290 @@ covers:
   - packages/backend/src/modules/accounting/**
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting-connections.ts
+  - packages/backend/src/routes/health.ts
+  - packages/backend/src/middleware/accountingFeed.ts
+  - packages/backend/src/infra/secrets.ts
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
   - packages/backend/src/infra/repositories/accounting-connections.ts
+  - packages/backend/src/db/migrations/080_accounting_connections.ts
+  - packages/backend/src/db/migrations/081_drop_fortnox_connections_retired.ts
+  - packages/backend/src/config.ts
+  - packages/backend/src/index.ts
+  - packages/backend/src/modules/agents/entitlements.ts
+  - packages/backend/src/modules/transactions/accounting.ts
+  - packages/backend/src/modules/x402/settlement-sweeper.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
   - packages/frontend/src/app/(authenticated)/settings/SettingsClient.tsx
+  - packages/frontend/src/hooks/useAccountingFeed.ts
+  - packages/frontend/src/hooks/useAccounting.ts
   - packages/frontend/src/components/accounting/ConnectionsCard.tsx
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-  - packages/frontend/src/hooks/useAccountingFeed.ts
-  - packages/frontend/src/hooks/useAccounting.ts
 last-verified: "2026-09-12"
 ---
 
-# Accounting feed (Fortnox) — operations runbook
+# Accounting feed — operations runbook
 
-How an agent purchase becomes a source document in the user's Fortnox, how to
-verify it landed, and what to do when it didn't. The feed is **non-asserting**
-by principle (epic #491): Haven creates *unattested supplier invoices* — the
-accountant codes, books, and files. Haven never posts voucher rows, BAS
-accounts, or VAT.
+How a settled agent payment becomes an unbooked source document in the user's
+accounting platform, how to tell that it did, and what to do when it did not.
+The feed is **provider-generic** (epic #2858): the connection model, routes,
+retry sweep, secrets and states below hold for every provider; Fortnox is the
+one live connector today and has its own section at the end. The feed is
+**non-asserting** by principle (#491): Haven delivers the payment and its
+evidence as an unbooked object, and the accountant codes, books and files.
+Haven never posts voucher rows, accounts or VAT, never blocks a settlement, and
+never moves money through it.
 
-> **Renamed by #2859 (epic #2858).** The module, routes, page and this runbook
-> moved from "reporting" to **Accounting**: the feed routes are
-> `/accounting/feed/*`, the page is `/accounting` (`/reporting` redirects), and
-> the kill-switch is `HAVEN_ACCOUNTING_ENABLED` — the old
-> `HAVEN_REPORTING_FEED_ENABLED` is still honoured with a boot warning, and the
-> new name wins whenever it is set, including when set to `false`.
->
-> Two names #2859 left behind — the `reporting_feed_syncs` table and the
-> `reporting_feed` entitlement string — were renamed by #2860's migration to
-> `accounting_feed_syncs` and `accounting_feed`. That same migration replaced
-> `fortnox_connections` with the provider-generic `accounting_connections`
-> (secrets encrypted at rest; see *Secrets at rest* below) and left the old
-> table as `fortnox_connections_retired` for #2872 to drop after the product
-> verification.
+The product description — what a user sees and does — is
+[`docs/product/accounting-connections.md`](../product/accounting-connections.md).
+Adding a provider is
+[`packages/backend/src/modules/accounting/README.md`](../../packages/backend/src/modules/accounting/README.md).
+Design history: `docs/research/accounting-data-feed.md` and
+`docs/research/fortnox-non-asserting-feed.md` (the #494 spike that proved the
+mechanism live on 2026-07-16). The owner decisions of 2026-09-11 are in the
+[decision log](../archive/decision-log.md).
 
-## Who is entitled (#2861)
+## Configuration
 
-`HAVEN_ACCOUNTING_ENTITLEMENT_MODE` decides how an account passes the
-entitlement gate — the hosted and `HAVEN_ACCOUNTING_ENABLED` checks still come
-first and are unchanged:
+| Variable | Meaning | dev | prod |
+|---|---|---|---|
+| `HAVEN_HOSTED` | The feed is a hosted add-on; nothing below matters on a self-host | `true` | `true` |
+| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval (the connection routes stay reachable behind the session — a connection can be made, nothing is fed). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so prod is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | unset — AND `HAVEN_REPORTING_FEED_ENABLED` unset or `false` (Coming soon) |
+| `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | unset |
+| `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | unset until #2876 (zero rows) |
+| `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` | Retry-sweep cadence (#2866). Default 300 000 (5 min); floor 10 000; unset, empty, 0 or NaN take the default | default | default |
+| `HAVEN_OPS_TOKEN` | Gates `GET /health/ops`, where the two accounting counters live (#2872). Unset → the route is 404 | set | set |
+| `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | unset |
 
-| Mode | Who passes | Where |
-|------|------------|-------|
-| `granted` (default, also when unset) | accounts holding an `account_entitlements` row for the feed | prod — nobody is entitled until a paid tier grants rows |
-| `all` | every account on the deployment; no row is read or written | dev, so the team uses the feed without hand-written SQL grants |
-
-Any other value refuses the boot with a message naming both modes: a
-misspelled `all` on dev must never silently mean `granted`. `GET
-/accounting/feed/status` reports `entitlementMode` and `entitled` next to
-`available`, so on-call can read from one response whether an account is
-entitled by mode or by row. The pre-#2861 recipe of inserting an
-`account_entitlements` row by hand on dev is retired; nothing on prod changes
-because prod never sets the variable.
-
-Design references: `docs/research/accounting-data-feed.md` (architecture),
-`docs/research/fortnox-non-asserting-feed.md` (the #494 sandbox spike that
-proved the mechanism live on 2026-07-16).
+Availability for one account is `hosted && enabled && entitled`;
+`GET /accounting/feed/status` reports `hosted`, `flagEnabled`, `entitled`,
+`entitlementMode`, `liveSyncReady` (a live connector is registered) and
+`available`, so on-call reads from one response why an account has no feed.
+The pre-#2861 recipe of granting entitlement by hand is retired; the table
+stays for paid tiers later.
 
 ## The flow, end to end
 
 ```
-Purchase settles on-chain
-  │  (x402 funding confirmation, erc7710 settlement observed, or MPP receipt)
+Purchase settles on-chain (x402 funding confirmation, erc7710 settlement, MPP receipt)
+  │
   ▼
-machine_payment_evidence row written (with book-time SEK amount when FX is ready)
+machine_payment_evidence row written (with the book-time SEK amount when FX is ready)
   │
   ▼
 feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settlement
-  ├─ entitlement gate: hosted + flag + user entitlement ('accounting_feed',
-  │    or every account when HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all — #2861)
-  ├─ active destination: the accounting_connections row flagged is_active_destination
-  │    names the provider; nothing settled before its feed_from is fed (#2862)
-  ├─ claimSync(user, <provider>, payment) → accounting_feed_syncs row 'pending'
-  │    (unique on (provider, payment_id, user_id) — the double-post guard)
-  ├─ build AccountingEntry → ReportingTransaction (VAT/account fields STRIPPED)
-  ├─ <provider connector>.pushTransaction — Fortnox today:
-  │    ├─ token refresh if needed (generic oauth-flow; accounting_connections, secrets decrypted in-process)
-  │    ├─ find-or-create supplier (name only, nothing asserted)
-  │    ├─ POST /supplierinvoices  → UNATTESTED invoice,
-  │    │     ExternalInvoiceNumber = HAVEN-<paymentId>, Total in SEK,
-  │    │     DueDate = InvoiceDate (already settled), no VAT/account rows
-  │    ├─ POST /inbox + /supplierinvoicefileconnections
-  │    │     → Haven payment-evidence PDF attached (#498)
-  │    └─ merchant's own receipt attached too when captured (#956;
-  │          arrives late on x402 → lateAttachMerchantReceipt)
-  └─ markPushed(external_ref = 'fortnox:supplierinvoice:<GivenNumber>')
-       or markSkipped(reason) / markFailed(error) — both retryable via "Sync now" (#1365)
+  ├─ availability: hosted + flag + entitlement (mode `all` or a row)
+  ├─ active destination: the accounting_connections row flagged
+  │    is_active_destination, in status `connected`, names the provider
+  │    (a dead-grant row — needs_reauthorisation — is still THE destination:
+  │    each payment is recorded `skipped` naming the state; a scope_missing
+  │    or disconnected row is no destination: nothing is recorded)
+  ├─ auto_feed = false on that row → stop here (manual only, #2867)
+  ├─ feed-from floor: nothing settled before feed_from is fed (#2862)
+  ├─ FX not ready (no SEK amount) → stop here, no claim, retried later
+  ├─ claimSync(user, provider, payment) → accounting_feed_syncs row `pending`
+  │    (UNIQUE (provider, payment_id, user_id) — the double-post guard)
+  ├─ build the non-asserting FeedTransaction (account demoted to a hint,
+  │    VAT structurally absent; the connection's suggested_account rides as
+  │    the hint when no per-merchant override exists)
+  ├─ <connector>.pushTransaction — Fortnox today: token refresh under the row
+  │    lock if needed, find-or-create supplier by name, POST an UNATTESTED
+  │    supplier invoice (ExternalInvoiceNumber = HAVEN-<paymentId>), attach
+  │    the payment-evidence PDF, attach the merchant receipt when captured
+  └─ markPushed(external_ref)  |  markSkipped(reason)  |  markFailed(error)
+       └─ a push-time finding about the GRANT (scope) also flips the
+          connection's status and emits accounting.connection.needs_attention
 ```
 
-**Every settlement scheme enters at the same door (#2092).** The feed has never
-had a rail or scheme filter and still does not — what it needs is a `confirmed`
-intent with a `tx_hash`, which is what produces the `machine_payment_evidence`
-row above. On EIP-3009 Haven submits the funding transaction and learns that
-hash itself; on **erc7710 direct settlement** the merchant redeems the
-delegation chain and Haven submits nothing, so the intent used to sit at
-`submitted` forever and those purchases reached neither Fortnox nor the
-dashboard. `POST /machine-payments/evidence` now completes such an intent from
-the merchant's reported settlement hash after verifying it on-chain — see
-[`04-x402-payment-sequence.md` § Completing an erc7710 settlement](../architecture/04-x402-payment-sequence.md).
-**A settlement nobody reported still reaches the feed (#2117).** A merchant that
-returns no `PAYMENT-RESPONSE` transaction leaves Haven no hash to verify, and
-such a payment used to stay `submitted` and never reach the feed at all —
-neither by auto-feed nor by "Sync now", since the backfill enumerates
-`machine_payment_evidence`. A leader-gated sweep now finds those settlements
-on-chain and completes them through the same door, so they arrive with book-time
-FX, a fee-ledger row and an auto-feed call exactly like every other rail.
+Three things feed a payment: the settlement hook above, **Sync now**
+(`POST /accounting/feed/sync`, manual, bounded to 200 payments per press,
+resumable through the ledger) and the background retry sweep. All three go
+through the same `feedSettledPayment`, so the ledger, the floor, the FX gate
+and the degraded-destination rules apply identically.
 
-**Residual gaps, and why they are left open on purpose.** The sweep attributes a
-settlement only when the pinned DelegationManager's own log names that payment's
-settlement child. It will not fall back to "a transfer of the right shape in the
-right window", because on an accounting feed a confidently misattributed row is
-worse than a missing one — the missing row surfaces at reconciliation and the
-wrong one does not. So three cases still produce no feed row, all of them
-fail-closed and all of them logged as warnings once the payment's settlement
-window has closed:
-
-1. a facilitator route that emits no decodable manager log;
-2. two look-alike payments authorized before #2094, which share one settlement
-   child and so cannot be told apart at all;
-3. a settlement older than the sweep's 24-hour recovery horizon — i.e. an RPC
-   outage lasting more than a day.
-
-If a settled payment is missing from Fortnox, that warning line is where to
-look; see
-[`04-x402-payment-sequence.md` § Completing a settlement nobody reported](../architecture/04-x402-payment-sequence.md).
-
-**None of the three is a dead end, and the warning now says so (#2214).** The
-line reads `Settled erc7710 payment is past its settlement window and the sweep
-cannot attribute it`, at `warn`, carrying `paymentId`, `agentId`, `chainId`,
-`reason` (`no_manager_log` or `ambiguous_redemption`) and a **`remedy`** field.
-**Operator fix:** have the agent re-report the merchant's settlement transaction
-hash to `POST /machine-payments/evidence` using its own credential. That path
-runs the same on-chain verifier without the sweep's `requireDelegationBound`
-constraint, so it does not need the manager log the scan could not find (cause
-1), and it is not bounded by the 24-hour recovery horizon (cause 3). Cause 2 is
-the one where a human decision is genuinely required first — two indistinguishable
-payments, and Haven will not pick. The remedy is in the log because a warning
-that names no action is a warning people learn to scroll past.
-
-**A fourth cause, and the one that used to be silent (#2213).** Completing a
-payment is two writes — the intent flips `submitted → confirmed`, then the
-`machine_payment_evidence` row is written — and only the first is guaranteed. A
-confirm whose evidence write fails leaves a payment that is settled, has a hash,
-and has no feed row: it is out of the sweep's candidate query for good, and
-"Sync now" cannot see it either, because the backfill enumerates evidence rows.
-Until #2213 nothing automated reached it again — and the tick logged it as a
-completion, so nobody had a reason to look. (An agent re-posting the same hash to
-`POST /machine-payments/evidence` would in fact still have completed it; the gap
-was that nothing prompts a second report, and on the plain-HTTP flow the agent
-has no hash to re-post.)
-
-Two log lines now distinguish it, and a recovery pass retries it every tick:
-
-- `Settlement sweep confirmed an erc7710 payment but no evidence row landed` —
-  `warn`, carries `paymentId` and a `reason`. The tick's counters separate
-  `confirmed` (the state transition) from `evidencePushed` (the completion) and
-  `evidenceFailed`.
-- `Settled erc7710 payment is confirmed with no evidence row and the row could
-  not be written` — `warn`, emitted by the recovery pass on each attempt it
-  cannot satisfy.
-
-Almost every cause is transient (a database blip, a lost connection) and the
-next tick closes it — `evidenceRecovered` counts those. The one that is not is
-`reason: "missing_resource_url"`: `machine_payment_evidence.resource_url` is NOT
-NULL, so a settled x402 intent whose `payment_resource_url` and
-`x402_resource_url` are both null can never be booked. **Operator fix:** set the
-intent's resource URL to the merchant resource the payment paid for; the next
-recovery attempt that is not suppressed then writes the row and fires the feed.
-That is within one 2-minute tick only if the row has failed once — the recovery
-pass backs a repeatedly-failing payment off exponentially, to a ceiling of one
-hour (`SCAN_BACKOFF_MAX_MS`), so a payment that has been stuck for a while may
-wait up to an hour after the fix. Restarting the leader clears the in-memory
-backoff if that wait is not acceptable. After 24 hours the payment leaves the
-recovery horizon and needs a manual evidence write.
-
-**No longer a gap (#2094):** two of a user's own look-alike erc7710 payments —
-same merchant, token, amount and authorize second — used to be *individually*
-unattributable, so a reported settlement was refused for BOTH and neither
-reached the feed. The settlement child is now salted per intent, so each
-settlement transaction carries a `RedeemedDelegation` log naming exactly one
-payment, and each reaches the feed on its own evidence. The refusal is kept for
-the cases where attribution genuinely remains impossible (see
+**A settled payment that never reached the feed at all** is a settlement-side
+question, not an accounting one — the feed needs a `machine_payment_evidence`
+row, and that row is written when an intent reaches `confirmed`. The erc7710
+paths that can leave a settled payment without one, the leader-gated sweep
+that completes them and its 24-hour recovery horizon are documented where
+that code is:
 [`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md)
-§ *Completing an erc7710 settlement*).
+§ *Completing an erc7710 settlement* and § *Completing a settlement nobody
+reported*. If `/accounting` has **no row** for a payment the user can see on
+Transactions, start there; if it has a row, stay here.
 
-What the accountant sees in Fortnox: an unbooked supplier invoice with the
-payment-evidence PDF(s) attached, `Booked: false`, no voucher — until they
-attest it. Booking assigns `VoucherSeries`/`VoucherNumber`/`VoucherYear`.
+**Settlement-side reasons and fixes** (`settlement-sweeper.ts`, verified at
+this head). Three `warn` lines can name such a payment; only the first carries
+a `remedy` field, the other two carry a `reason`:
+
+| line | `reason` | what it means | fix |
+|---|---|---|---|
+| `Settled erc7710 payment is past its settlement window and the sweep cannot attribute it` (`paymentId`, `agentId`, `chainId`, `delegationHash`, `reason`, `remedy`) | `no_manager_log` | the route that settled it emitted no decodable DelegationManager log, so the sweep will not attribute by shape | the `remedy` says it: have the agent re-report the merchant's settlement transaction hash to `POST /machine-payments/evidence` with its own credential — that path runs the same verifier without `requireDelegationBound` and is not horizon-bound |
+| same line | `ambiguous_redemption` | two different transactions redeemed the same settlement child (look-alike payments authorized before #2094) — a fact Haven will not resolve by choosing | a human decides which payment the settlement belongs to first; then the same re-report |
+| `Settlement sweep confirmed an erc7710 payment but no evidence row landed` (`paymentId`, `agentId`, `txHash`, `chainId`, `outcome`, `reason`) | `missing_resource_url`, `intent_not_found`, `write_threw` | the intent flipped `submitted → confirmed` but the `machine_payment_evidence` write failed; the tick counts it as `evidenceFailed`, not `evidencePushed` | nothing, at first: the recovery pass re-derives the hole from state (confirmed erc7710 intent, no evidence row) and retries it every tick — `evidenceRecovered` counts the ones that close |
+| `Settled erc7710 payment is confirmed with no evidence row and the row could not be written` (same fields, from the recovery pass, every attempt it cannot satisfy) | `missing_resource_url` | the one non-transient cause: `machine_payment_evidence.resource_url` is NOT NULL and the intent's `payment_resource_url` and `x402_resource_url` are both null, so the row can never be written | set the intent's resource URL to the merchant resource the payment paid for. The recovery pass backs a repeatedly failing payment off exponentially from the 2-minute tick to a ceiling of **1 h** (`SCAN_BACKOFF_MAX_MS`), so a long-stuck payment may wait up to an hour after the fix; the backoff is in-memory, so **restarting the leader clears it**. After **24 h** (`SWEEP_RECOVERY_HORIZON_SECONDS`) the payment leaves the recovery horizon and needs a manual evidence write — the same `POST /machine-payments/evidence` re-report |
+| same line | `intent_not_found`, `write_threw` | transient (a database blip, a lost connection) | the next tick closes it; if it repeats, read `err` on the neighbouring `Settlement sweep evidence recovery failed` line |
 
 ## Where it shows
 
-Two dashboard surfaces read the ledger, both read-only (the connection
-itself is managed on a third — Settings, next section):
+- **Settings → Accounting** (#2868, PR #2903): one row per provider from
+  `GET /accounting/providers`, the connection's state as a chip, and the ONE
+  action that resolves it — *Connect* (no row / `disconnected`), *Settings* +
+  *Disconnect* (`connected`), *Reconnect* + *Disconnect* (the three
+  needs-attention states). The inline settings form is `PATCH …/settings`;
+  the backfill dialog on the OAuth return is `POST …/backfill`; Disconnect
+  confirms first. The `/accounting` page no longer carries connect
+  controls; it points at Settings.
+- **`/accounting`** — every sync row, **Sync now**, **Check in Fortnox** and
+  the re-open action; the callback redirect lands here
+  (`?provider=<id>&connect=connected|denied|error[&reason=unsupported_currency]`).
+  #2869 reworks the page, adds the sidebar badge for a connection needing
+  attention and the prod *Coming soon* state — not merged; not described here.
+- **Where the user manages it (#2868, PR #2903)** — the *Accounting*
+  card on `/settings` (`SettingsClient.tsx` →
+  `components/accounting/ConnectionsCard.tsx`, with `ConnectionRow`,
+  `ConnectionSettings` and `BackfillDialog`): one row per provider with
+  Connect / Reconnect / Disconnect, the per-connection settings and the
+  backfill choice on connect. The product doc describes the states as the
+  user sees them; those four component files are covered here once #2903
+  merges (they do not exist on this branch, so they are not in `covers:` yet).
+- **`/transactions`** (#2870) — a badge per fed row: *In Fortnox* (`pushed`),
+  *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`, the `error` on
+  hover), linking to `/accounting`. Emitted only when the account is
+  entitled, has an ACTIVE destination in `connected` (`hasActiveConnection`
+  — a destination in `needs_reauthorisation` / `scope_missing` hides every
+  badge on the page, including *In Fortnox* on rows already delivered) AND a
+  sync row exists — no badge means "not entitled / not connected / connection
+  degraded / before `feed_from`", never "failed".
 
-- **`/accounting`** — every sync row, with **Check in Fortnox** and the
-  re-open action (the section below).
-- **`/transactions` (from #2870)** — a compact badge on each fed row, in the
-  table and in the detail drawer: *In Fortnox* (`pushed`), *Feeding…*
-  (`pending`), *Not fed* (`failed` / `skipped`, the `error` on hover). It
-  links to `/accounting`. The list endpoint joins `accounting_feed_syncs` by
-  `payment_id` in one query per page and emits an `accounting` object only
-  when the account is entitled (`accountingFeedAvailable`), has a Fortnox
-  connection, AND a sync row exists — so a row with no badge means "not
-  entitled / not connected / never fed" (rows before `feed_from`), never
-  "failed". No *Booked* state: the ledger stores no verify result, and the
-  list makes no live Fortnox call.
+## Routes
 
-## Where the user manages it (#2868)
+Session-authenticated unless noted. `sync`, `verify` and `reopen` 404 when
+the feed is unavailable for the caller (`middleware/accountingFeed.ts` — 404,
+not 403, so an unentitled account learns nothing); `status` answers
+`available: false` instead; the connection routes are session-only and do not
+consult the flag.
 
-The connection lives in **Settings → Accounting**
-(`packages/frontend/src/components/accounting/ConnectionsCard.tsx`, mounted
-by `SettingsClient.tsx`; owner decision 2026-09-11): every provider from
-`GET /accounting/providers` as a row — Fortnox live, Accounted / Light /
-Igdrasil listed as *Coming soon* with a disabled Connect — and the actions
-**Connect / Reconnect / Disconnect / Settings**. The row's state is the
-connection's `status`:
+| route | what it does |
+|---|---|
+| `GET /accounting/providers` | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
+| `GET /accounting/connections` | the caller's connections — metadata only, never secrets: `status`, `statusReason`, `missingScopes`, `externalCompanyId` / `externalCompanyName`, `baseCurrency`, `feedFrom`, `isActiveDestination`, `settings: { suggestedAccount, autoFeed }`, `lastPushAt` |
+| `POST /accounting/connections/:provider/connect-url` | consent URL for a live OAuth2 provider: signed, purpose-scoped, provider-bound, single-use `state` (10 min). Also the **re-consent** path — issued for an existing row whatever its status |
+| `GET /accounting/connections/:provider/callback` | public, authenticated by the `state` (its `jti` is consumed before the code exchange). Reads the company (`getCompanyInfo`), refuses a non-SEK ledger before storing anything, UPSERTs the row: on an existing row it replaces secrets, `granted_scope`, `status → connected`, and keeps `settings`, `feed_from`, the active flag and the sync history. A grant narrower than `requiredScopes` is stored as `scope_missing`. Redirects to `/accounting?provider=…&connect=…` |
+| `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (no live `api_key` provider today → 409); non-SEK → 409 `UNSUPPORTED_BASE_CURRENCY` |
+| `DELETE /accounting/connections/:provider` | disconnect: revoke at the provider first when the descriptor declares `revoke` (Fortnox does), then secrets cleared, row kept as `disconnected`, active flag dropped; a failed revoke still disconnects locally (one `warn` line, error NAME only: `accounting provider revoke failed on disconnect`) |
+| `POST /accounting/connections/:provider/activate` | make it the destination; stamps **`feed_from = now`** in the same transaction |
+| `POST /accounting/connections/:provider/backfill` | `{ since }`: moves `feed_from` **earlier only** (400 `SINCE_INVALID` / `SINCE_NOT_EARLIER`, 409 `NOT_ACTIVE`), records `settings.backfill`, runs one bounded sync; answers `{ feedFrom, fed }` |
+| `PATCH /accounting/connections/:provider/settings` | exactly `suggested_account` and `auto_feed`; anything else 400 `INVALID_SETTING` naming `key`; a SQL-side JSONB merge |
+| `GET /accounting/feed/status` | availability flags, `connected` (= an active `connected` destination exists), `companyName`, `missingScopes` (of the destination row whatever its status), `counts { pending, failed, exhausted }` over ALL the user's rows, `syncs` (recent rows) |
+| `POST /accounting/feed/sync` | Sync now: backfill + retry for the active destination, honouring `feed_from`; manual, so it pushes for an `auto_feed = false` connection too |
+| `GET /accounting/feed/verify/:paymentId` | live read-back through the active connection's connector: `registered` / `booked` (+ voucher) / `cancelled` / `missing` |
+| `POST /accounting/feed/reopen/:paymentId` | verification-gated reopen: flips `pushed → failed` ONLY when the provider confirms the record is gone; 409 otherwise, 409 `previous_company` for a row pushed under a previous company |
+| `POST /accounting/fortnox/push` | LEGACY asserting voucher push (`accounting/legacy/`); 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
 
-| `status` | chip | action |
-|---|---|---|
-| no row / `disconnected` | Not connected | Connect |
-| `connected` | Connected · "Connected to \<company\> · Last fed \<date\>" | Settings (inline: suggested account, auto-feed) + Disconnect |
-| `needs_reauthorisation` | Sign-in expired | Reconnect + Disconnect |
-| `scope_missing` | Needs more access · names `missingScopes` (unnamed sentence when the array is empty) | Reconnect + Disconnect |
-| `revoked_at_provider` | Access revoked | Reconnect + Disconnect |
+## Connection states
 
-Reconnect is the same `connect-url` + callback as Connect (#2865). Disconnect
-confirms first and says that what was fed stays in the ledger and the feed
-history stays in Haven. **Settings** is `PATCH …/settings`; a 400
-`INVALID_SETTING` lands inline next to the field, naming the key
-(`ConnectionSettings.tsx`). The OAuth callback still redirects to
-`/accounting?provider=…&connect=…`; the feed page forwards that query to
-`/settings` unchanged, where a `connected` return on a row that has never
-pushed (`lastPushAt IS NULL`) opens the **backfill choice**
-(`BackfillDialog.tsx`: *Feed from now*, the default and no request, or
-*Include payments since \<date\>*, which POSTs `{ since: "YYYY-MM-DD" }` and
-shows `SINCE_INVALID` / `SINCE_NOT_EARLIER` / `NOT_ACTIVE` inline); `denied`
-and `error` become a sentence beside the card, `reason=unsupported_currency`
-its own ("Haven currently feeds SEK ledgers only"). A re-consent on a row
-with history gets no dialog — its floor stands. The `/accounting` page keeps
-the sync rows, **Sync now**, **Check in Fortnox** and the re-open, and points
-at Settings for the connection. There is no mobile-specific layout (owner
-decision): the same card works in a phone browser.
+`accounting_connections.status`, one row per (user, provider), at most one row
+per user flagged `is_active_destination` (a partial unique index, not a
+convention). `status_reason` says why, bounded to 1000 chars; for
+`scope_missing` it has the parseable shape `missing scopes: <a>, <b> — <detail>`,
+which is what `missingScopes` on the API reads.
 
-## Verifying that a payment landed in Fortnox
-
-Three layers, in order of convenience:
-
-1. **Dashboard (from #1362):** `/accounting` lists every sync row. A `pushed`
-   row shows its **Fortnox invoice number**; the **Check in Fortnox** button
-   performs a live read-back against Fortnox's own records and reports one of:
-   - *Registered — awaiting booking*: the invoice exists, `Booked: false`.
-     This is the expected steady state until the accountant acts.
-   - *Booked, voucher `<series><number> <year>`*: a human has accounted for
-     it. This is "redovisad".
-   - *Cancelled*: registered but struck in Fortnox.
-   - *Not found*: the invoice was deleted in Fortnox. Use the
-     **Re-open for sync** action next to the verdict (#1365): the server
-     re-runs the read-back itself and flips the row back to retryable ONLY
-     when Fortnox confirms the invoice is gone — an invoice that still exists
-     refuses with nothing written (mutation-tested), so the double-post guard
-     holds. Then press **Sync now** to push it again. Never hand-edit the row
-     (see the schema section).
-   The read-back cross-checks `ExternalInvoiceNumber == HAVEN-<paymentId>`,
-   so a number collision after e.g. a Fortnox company switch reads as *Not
-   found*, never as a false "registered".
-
-2. **Fortnox's own UI** (production app or the developer-portal sandbox
-   company): *Meny → Leverantörsfakturor*. Filter or search for the
-   supplier (agent merchants appear by name, or as `Merchant 0x1234-abcd`),
-   or match the invoice number shown in the Haven dashboard. Open the invoice:
-   the *Externt fakturanummer* field carries `HAVEN-<paymentId>` — that string
-   is the join key between the two systems. Attachments show the Haven
-   payment-evidence PDF (and the merchant receipt when captured).
-
-   **First-visit gotcha (live-hit 2026-08-13):** a company that has never
-   opened the supplier-invoice module in the UI gets Fortnox's one-time
-   onboarding wizard ("Kom igång med leverantörsfakturor") instead of the
-   invoice list. The invoices ARE there — API pushes and the Haven read-back
-   are unaffected — but the list stays hidden until the wizard is clicked
-   through. Every step is skippable (*Hoppa över*); no bank details or
-   registration certificate are needed just to view invoices. Expect real
-   customers to hit this on their first verification walk too.
-
-3. **API, for on-call:** `GET /accounting/feed/status` (user-scoped)
-   returns every sync row with `status`, `external_ref`, `error`, `attempts`.
-   `GET /accounting/feed/verify/:paymentId` returns the live read-back
-   (`registered` / `booked` / `voucher` / `cancelled`). Both are read-only.
-
-## Troubleshooting: "my payment didn't sync"
-
-Work the sync row's `status` on `/accounting` (or `accounting_feed_syncs`):
-
-| Status | Meaning | Action |
-| --- | --- | --- |
-| `pushed` | Delivered. `error` column may carry a non-fatal **note** (e.g. "receipt attachment failed") — invoice exists, attachment degraded | Use *Check in Fortnox* for live state; reconnect Fortnox if the note names a scope error (the connection is `scope_missing`, see [Scope-missing](#scope-missing-detection-and-re-consent-2865)) — the invoice stands and is NEVER re-pushed; re-capturing the attachment is not automatic |
-| `failed` | Fortnox push failed; `error` carries the Fortnox message verbatim | Nothing, at first: the [retry sweep](#background-retry-sweep-2866) re-feeds it with backoff (1 min doubling to 1 h, 8 attempts). Fix the named cause (often token/scope) if it keeps failing; **Sync now** retries immediately |
-| `failed` with `error` starting `exhausted:` | The sweep gave up — 8 attempts, the last reason follows the prefix | Fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
-| `pending` | Claimed but in flight (or a crashed in-flight push) | Wait; the sweep releases a `pending` row older than 15 min (the claim IS the concurrency guard, so nothing shorter) and re-feeds it. Do not edit the row |
-| `skipped` | A connector-level skip (`not_connected`, `no_sek_amount`, `not_outbound`) with the reason preserved in `error` (#1365 — previously mis-recorded as `pushed` with the reason dropped), `connection needs_reauthorisation: …` (#2863), or `scope refused before the invoice was created: …` (#2865 — the invoice POST itself was refused for scope, nothing exists in Fortnox, the connection is `scope_missing`) | Fix the named cause (usually: connect Fortnox); the sweep retries skipped rows like failed ones — but NOT while the connection is `needs_reauthorisation` / `scope_missing`, which hold the row until the user re-consents. **Sync now** also re-claims them |
-| *(no row)* | The settle-time hook never ran (entitlement off, feature flag off) or the payment predates the feed | Check `GET /accounting/feed/status` base flags and `entitlementMode`/`entitled`; **Sync now** backfills once entitled |
-
-Common causes, from live experience:
-
-- **Token expired / not connected**: pushes skip with `not_connected`. The
-  dashboard shows *Not connected* — reconnect from Settings → Accounting.
-- **Scope widened** (the `connectfile` lesson, 2026-07-16): connections
-  consented before a scope was added still push invoices but fail file
-  connections with Fortnox error `[2000663]` — the row is `pushed` with a
-  degradation note and, since #2862/#2865, the connection is `scope_missing`
-  with the missing scope named. Fix: **Connect** again on `/accounting` —
-  the re-consent path (#2865) re-runs the consent on the EXISTING connection
-  with the current scope set
-  (`bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation`)
-  and keeps its settings, floor and history; Disconnect first is no longer
-  needed (it would also revoke the grant and drop the active flag). The
-  scopes to name to the user are `missingScopes` on
-  `GET /accounting/connections` and `GET /accounting/feed/status`.
-- **Non-ASCII rejection** (Fortnox error `2000359`): Comments/Name reject
-  middle dots, `://`, and the app's `…` ellipsis. The connector already
-  sanitizes; a new occurrence means a new field slipped through — fix the
-  connector, not the data.
-- **x402 receipt arrives after push**: expected (#956) — the merchant hands
-  its receipt at the retry, seconds after the funding-confirmation push. The
-  capture route late-attaches onto the existing invoice; a late-attach failure
-  becomes a note on the row.
-
-## Routes (#2862)
-
-The connection surface is provider-generic: the provider is a path
-parameter, the descriptor list is `GET /accounting/providers`, and nothing is
-shaped after Fortnox except the dark legacy voucher push. The feed actions
-keep their feed-scoped home — they act on the ACTIVE destination, of which
-there is exactly one per user.
-
-| route | auth | what it does |
-|---|---|---|
-| `GET /accounting/providers` | session | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
-| `GET /accounting/connections` | session | the caller's connections — metadata only, never secrets; each carries `missingScopes` (#2865) |
-| `POST /accounting/connections/:provider/connect-url` | session | consent URL for a live OAuth2 provider; signed, purpose-scoped, provider-bound, **single-use** `state` (10 min). Also the **re-consent** path (#2865): issued for an existing connection too, whatever its status |
-| `GET /accounting/connections/:provider/callback` | the `state` | public OAuth callback; consumes the state's `jti` before the code exchange; always redirects to `/accounting?provider=<id>&connect=connected\|denied\|error`, plus `&reason=unsupported_currency` on a non-SEK refusal (#2864). On an existing connection it UPDATES the row (secrets, `granted_scope`, `status → connected`) and keeps `settings`, `feed_from`, the active flag and the sync history (#2865). A grant narrower than `requiredScopes` is stored but `scope_missing` (#2865) |
-| `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409); a non-SEK company is 409 `UNSUPPORTED_BASE_CURRENCY` before the key is stored (#2864) |
-| `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it (Fortnox does, #2863 — `POST /oauth-v1/revoke` with the refresh token; a failed revoke still disconnects locally) |
-| `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
-| `POST /accounting/connections/:provider/backfill` | session | `{ since }`: the user's choice to include history — moves `feed_from` **earlier only** (a later date is 400 `SINCE_NOT_EARLIER`), records it under `settings.backfill`, runs one bounded sync; active `connected` destination only (#2867) |
-| `PATCH /accounting/connections/:provider/settings` | session | exactly `suggested_account` (Fortnox: four-digit BAS) and `auto_feed` (default true); any other key is 400 naming it; a JSONB merge — the company-switch log and the backfill record survive (#2867) |
-| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), `missingScopes` of the destination row whatever its status (#2865), `counts` (#2866), recent syncs |
-| `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from`; a manual action — pushes for an `auto_feed = false` connection too (#2867) |
-| `GET /accounting/feed/verify/:paymentId` | session + entitlement | read-back through the active connection's connector |
-| `POST /accounting/feed/reopen/:paymentId` | session + entitlement | verification-gated reopen on the active connection's provider; a row from before the connection's latest company switch is refused 409 `previous_company` (#2864) |
-| `POST /accounting/fortnox/push` | session | LEGACY asserting voucher push; 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
-
-**Operator step when this deploys** (the callback path moved): the Fortnox
-app's registered redirect URI and the backend's `FORTNOX_REDIRECT_URI` must
-both point at `<backend>/accounting/connections/fortnox/callback`; a consent
-that returns to the old `/accounting/fortnox/callback` 404s and the user sees
-no connection. Existing connections are unaffected — the change is the
-consent round-trip, not the stored grant.
-
-**Switching destination and `feed_from`.** Activating a second provider
-stamps `feed_from` in the same transaction as the active flag, and a FIRST
-connect that takes the flag because nothing else held it (disconnect A, then
-connect B) stamps it too — a connect that becomes the destination is an
-activation. A reconnect of an existing row keeps the floor it had, and a
-pre-#2862 Fortnox row migrated with no floor keeps its NULL (it fed
-everything). The backfill selection and the settlement hook both skip
-anything settled before the floor, so a switch never re-feeds history into
-the new ledger. On-call read:
-`SELECT provider, status, is_active_destination, feed_from FROM
-accounting_connections WHERE user_id = '<uuid>'`. A user who wants history in
-the new ledger takes the backfill (#2867, below), which passes an explicit
-earlier date.
-
-**`scope_missing`.** (For `needs_reauthorisation`, see *Token lifecycle*
-below; for the four ways a row gets here and the way out, see
-[Scope-missing detection and re-consent](#scope-missing-detection-and-re-consent-2865).)
-A pushed invoice whose attachment step failed with
-Fortnox's scope error (`[2000663]`) leaves the sync row `pushed` with the
-note and flips the CONNECTION to `scope_missing` — the feed then has no
-active destination until the user re-consents (Connect on `/accounting`): a
-user with any `accounting_connections` row is row-backed, and without an
-active `connected` row the orchestrator feeds nothing — it never falls back
-to asking a connector whether it "has secrets". The invoice stands; nothing
-is re-pushed.
-
-## Scope-missing detection and re-consent (#2865)
-
-**Why.** It has happened once: connections consented before `connectfile`
-joined the scope list pushed invoices fine and failed every file connection
-with `[2000663]`, degrading silently to a note. #2865 makes the shortfall
-visible at three points and gives the user a way out that loses nothing.
-
-**Detection.** A row becomes `scope_missing` with a `status_reason` of the
-shape `missing scopes: <a>, <b> — <detail>` (one parseable shape, so
-`missingScopes` on the API needs no column):
-
-| when | how it is found | sync row | connection |
+| status | how a row gets here | what the feed does meanwhile | the way out |
 |---|---|---|---|
-| **at the callback** | the granted scope string (Fortnox echoes it in the token response) is compared with the descriptor's `requiredScopes` | — | stored (secrets, active flag if free), `scope_missing`, reason names the missing scopes (`missing scopes: connectfile, companyinformation — the Fortnox grant was consented without scopes the feed needs — reconnect to obtain them`). **Not a refusal**: the grant is kept |
-| **at connect, company read refused** (#2864) | `GET /companyinformation` answered 403 / `[2000663]` | — | `scope_missing`, `company info unavailable: …` (the callback comparison, which runs after it, overwrites this with the named list when the scope string is short too) |
-| **PRE-push** | the supplier lookup/create or the **invoice POST itself** answered `[2000663]` or a *bare* 403 (no Fortnox code — a 403 with another code such as a licence error `[2003295]` is a plain `failed`, not a scope problem) — **nothing exists in Fortnox** | `skipped`, `error = scope refused before the invoice was created: Fortnox POST /supplierinvoices failed (HTTP 400: … [2000663]).` — re-claimable | `scope_missing`, `missing scopes: supplierinvoice — …` |
-| **POST-push** | the invoice exists; the attachment step (inbox upload or file connection) answered `[2000663]` | **`pushed`** with the note (`receipt attachment failed: …`) — **never `skipped`, never re-pushed** | `scope_missing`, `missing scopes: connectfile — receipt attachment failed: …` |
+| `connected` | connect / reconnect callback; a validated API key | feeds | — |
+| `needs_reauthorisation` | the token endpoint refused the refresh with a verdict on the GRANT: `invalid_grant`; a 400/403 with no readable code; or a 400/403 carrying any code that is NOT one of the client-side ones (`isGrantRefusal`, `oauth-flow.ts`). NOT on 401 / `invalid_client` and the other client-side codes — those are Haven's credentials — and not on 429 / 408 / 5xx / network, which leave the row untouched with the refresh token unconsumed | still the destination; every payment is recorded `skipped` with `connection needs_reauthorisation: <reason>`; nothing is refreshed, nothing pushed; the sweep leaves its rows alone | the user's **Reconnect** (the same connect-url + callback on the same row); then the skipped rows are re-claimed by the sweep or Sync now |
+| `scope_missing` | (1) at the callback, the echoed scope string is short of `requiredScopes`; (2) at connect, the company read was refused for scope; (3) PRE-push, the create call itself was refused for scope — the sync row is `skipped` (`scope refused before the invoice was created: …`), nothing exists at the provider; (4) POST-push, the attachment step was refused — the sync row stays **`pushed`** with the note, never re-pushed | no destination: no new rows, `syncUser` feeds nothing, the sweep's `c.status = 'connected'` leaves its rows alone | **Reconnect**; the callback UPDATEs the row and keeps settings, floor, flag and history. If it comes straight back `scope_missing`: the provider app registration lacks that scope (Fortnox: the developer-portal permissions must include every entry of `FORTNOX_SCOPE`) |
+| `revoked_at_provider` | reserved for a provider that reports a revocation to Haven (Fortnox has a consent-revoked webhook; Haven does not receive it). **No code path sets it today**; a revocation inside Fortnox surfaces as `needs_reauthorisation` at the next refresh | as `needs_reauthorisation` | Reconnect |
+| `disconnected` | the user's Disconnect; secrets NULL, `secrets_key_version = 0`, flag dropped, `status_reason = user disconnected [(grant revoked at provider)]` | nothing; history kept | **Connect** (the same row is reused; settings survive) |
 
-The pre-/post-push line is the review blocker of 2026-09-11: the ledger
-re-claims `failed`/`skipped` rows, and the retry sweep (#2866) feeds them
-after a reconnect — so a post-push scope error that marked its row `skipped`
-would push a **second** invoice for the same payment. Only a refusal on the
-create call itself, where nothing exists, may mark the row `skipped`. Both
-halves are pinned by the connector conformance suite (cases 6 and 6b) for
-every connector, and by `scope-missing.db.test.ts` for Fortnox end to end
-(exactly one supplier-invoice POST across push → degrade → reconnect →
-sweep). The scope a refusal names comes from the endpoint
-(`fortnoxScopeForPath`: `/supplierinvoices` → `supplierinvoice`, `/inbox` →
-`inbox`, `/supplierinvoicefileconnections` → `connectfile`, …) because
-Fortnox's `[2000663]` does not say which scope it lacked.
+A `connected` row with a non-empty `missingScopes` is a grant that predates a
+scope widening and has not been asked for the new scope yet — it degrades at
+the first call that needs it. The three middle states emit
+`accounting.connection.needs_attention` when entered (below).
 
-**While `scope_missing`.** The connection is still the destination row but
-not an *active* one (`GET /accounting/feed/status` says `connected:false`
-and names `missingScopes`); the settlement hook feeds nothing (no sync row
-is written for new payments), `syncUser` feeds nothing, and the sweep's
-selection (`c.status = 'connected'`) leaves every `failed`/`skipped` row
-behind it alone. Nothing is retried against a grant that will refuse again.
+**On-call read, per user:**
 
-**Re-consent (the way out).** `POST /accounting/connections/fortnox/connect-url`
-on the existing connection issues a fresh state; the callback lands on the
-same row and `UPSERT_ACCOUNTING_CONNECTION_SQL`'s conflict path UPDATES it:
-secrets, `granted_scope`, `token_expires_at`, `status = connected`,
-`status_reason = NULL`, `last_error = NULL` — while `settings` (the user's
-configuration and the `companySwitches` log), `feed_from`, the active flag
-(kept if held; taken if nobody holds it) and every `accounting_feed_syncs`
-row are untouched. Then: a `pushed` row stays pushed (the invoice exists —
-nothing to do), a `skipped` row is due for the sweep after its backoff
-(1 min at `attempts = 1`) or immediately on **Sync now**, and new payments
-feed again. A reconnect that comes back with a DIFFERENT company is still a
-company switch (#2864) — the two rules compose. Disconnect first is NOT
-needed and is worse: it revokes the grant at Fortnox and drops the active
-flag.
+```sql
+SELECT provider, status, status_reason, is_active_destination, feed_from,
+       granted_scope, external_company_id, external_company_name,
+       secrets_key_version, token_expires_at, settings
+  FROM accounting_connections WHERE user_id = '<uuid>';
+```
 
-**`missingScopes` on the API.** `GET /accounting/connections` (every row)
-and `GET /accounting/feed/status` (the destination row, whatever its status)
-carry `missingScopes: string[]` — `granted_scope` compared with
-`requiredScopes`, plus the scopes the `status_reason` named while the row is
-`scope_missing`. Empty when nothing is missing. A **`connected`** row with a
-non-empty list is a grant that predates a scope widening and has not yet
-been asked for the missing scope — it will degrade at the first call that
-needs it; the UI (slice 10) can offer the re-consent before that happens.
+Do not hand-edit `status`: a dead grant is dead at the provider whatever the
+row says, and a scope the grant lacks is added only by a new consent. The only
+operator-side causes of a state are a wrong app registration and rotated
+client credentials (Fortnox section).
 
-**On-call read.** `SELECT provider, status, status_reason, granted_scope,
-is_active_destination, feed_from FROM accounting_connections WHERE user_id =
-'<uuid>'` — `status_reason` names the scopes after `missing scopes:`. Then
-`SELECT payment_id, status, external_ref, error FROM accounting_feed_syncs
-WHERE user_id = '<uuid>' AND error ILIKE '%2000663%'`: a `pushed` row with an
-`external_ref` is a delivered invoice missing its attachment (leave it); a
-`skipped` row with `external_ref IS NULL` is a payment that will be fed by
-the sweep after the re-consent. Do not hand-edit `status` on the connection:
-the grant genuinely lacks the scope, and only a new consent adds it. If the
-same user is `scope_missing` again right after a re-consent, the Fortnox
-app's registered permissions in the developer portal are missing one of
-`FORTNOX_SCOPE`'s entries — the consent cannot grant what the app does not
-declare.
+## Sync statuses
 
-## Company info, SEK-only, company switch (#2864)
+`accounting_feed_syncs`, one row per (user, provider, payment):
+`pending → pushed | failed | skipped`. `failed` and `skipped` are re-claimable
+(#1365); `pushed` is FINAL with one sanctioned exception, the verification-gated
+reopen. `error` carries the failure, the skip reason, the non-fatal note on a
+pushed row (#498), or the `exhausted:` prefix once the sweep has given up.
+`attempts` increments per claim.
 
-**What connect records.** The generic flows ask the connector who the grant
-belongs to BEFORE anything is stored (`getCompanyInfo`) and write
-`external_company_id`, `external_company_name` and `base_currency` on the
-row. Fortnox: `GET /3/companyinformation` — `DatabaseNumber` is the id,
-`CompanyName` the name, and the currency is `SEK` by construction (a Fortnox
-company books in SEK). `GET /accounting/connections` carries all three as
-`externalCompanyId` / `externalCompanyName` / `baseCurrency`, and
-`GET /accounting/feed/status` carries the active destination's name as
-`companyName`, so the page can say *Connected to Haven Sandbox AB*.
-
-**SEK only.** A company whose base currency is not SEK is refused with
-*"Haven currently feeds SEK ledgers only"* — nothing is stored, and on a
-reconnect the existing row is left exactly as it was. The API-key route
-answers 409 `UNSUPPORTED_BASE_CURRENCY`; the OAuth callback redirects with
-`connect=error&reason=unsupported_currency` — and because the code was
-already exchanged, the refused grant is revoked at the provider best-effort
-(Fortnox declares `revoke`), so a grant Haven does not store does not linger
-there either. The rule is one function
-(`assertSupportedBaseCurrency`, `provider.ts`); a provider that cannot say
-(`baseCurrency: null`) passes. Multi-currency is a follow-on placeholder.
-
-**The `companyinformation` scope.** In `FORTNOX_SCOPE` since #2864. Adding a
-scope does not invalidate existing grants: a connection consented before
-this keeps refreshing and pushing without it. Only a fresh consent (a new
-authorization code) carries the scope, and only the connect flow reads the
-company — so a pre-#2864 connection is untouched until the user reconnects.
-When a connect DOES try and Fortnox refuses for scope (HTTP 403, or
-`[2000663]`), the connection is stored and marked `scope_missing` with
-`status_reason = company info unavailable: …reconnect to obtain it`; the
-feed has no destination until the re-consent, like any `scope_missing`. A
-network error or a 5xx on that read is NOT a missing scope: the connect
-fails, nothing is stored. Operator step after merge: the integration's
-registered permissions in the Fortnox developer portal must include
-*Företagsinformation* (`companyinformation`), and the dev sandbox connection
-must be reconnected from the dev dashboard (Disconnect, then Connect) to
-obtain the scope — until then its `external_company_id` stays NULL.
-
-**Company switch.** A reconnect whose `external_company_id` differs from the
-stored one (Fortnox: a different `DatabaseNumber`) is a company switch.
-One row is kept; the company fields are replaced; `feed_from` is set to the
-switch time — nothing settled before it is fed into the new company, the
-same rule as activate; `status_reason` names both companies (`company
-switched <iso>: Alpha AB (111) → Beta AB (222) — …`); the switch is appended
-to `settings.companySwitches` (`{at, fromCompanyId, fromCompanyName,
-toCompanyId, toCompanyName}`, oldest first, append-only) and one structured
-log line `{"event":"accounting_company_switch",…}` is written. Existing
-`pushed` sync rows are untouched: their invoices live in the previous
-company, so *Check in Fortnox* through the new company reports them
-`missing` — which is correct. A reconnect to the SAME company is not a
-switch: the floor and the log are untouched. A user who wants the previous
-company's history in the new one takes the backfill (#2867). On-call read:
-`SELECT external_company_id, external_company_name, feed_from, status_reason,
-settings -> 'companySwitches' FROM accounting_connections WHERE user_id = '<uuid>'`.
-
-**Reopen after a switch.** The verification-gated reopen (#1365) is
-company-aware: `POST /accounting/feed/reopen/:paymentId` on a `pushed` row
-that was pushed under a company OTHER than the current one answers 409
-`previous_company` (*"belongs to the previous company"*, with `switched_at`
-and the name of the company it was pushed under) and writes
-nothing — otherwise a switch would flip every pre-switch row `pushed →
-failed` and re-feed all of it into the new company. A post-switch row the new
-company genuinely lost still reopens.
-
-**How a pushed row is attributed to a company, and the limits.**
-`accounting_feed_syncs` has no company column and this slice adds no
-migration, so attribution is by TIME: the sync row's `created_at` against the
-switch times in `settings.companySwitches` (the connection's JSONB column —
-never an overloaded text column). The whole log is walked (`companyIdAt`):
-the row belongs to the `toCompanyId` of the last switch at or before its
-`created_at`, else to the company the first later switch moved away from —
-so a round trip Alpha → Beta → Alpha attributes an Alpha-era row to Alpha,
-and it is reopenable again once Alpha is current. A scope-refused read never
-erases a known id (`COALESCE` in `SET_COMPANY_INFO_SQL`), so a blind
-reconnect followed by a reconnect to another company is still detected as a
-switch. Two limits: (1) the switch time is the application clock at the
-callback and `created_at` is the database clock at the claim — a push in
-flight during the callback itself (sub-second) could be attributed to the
-new company; (2) a row whose stored id is NULL (a pre-#2864 grant that could
-not read the company) gaining an id on reconnect is NOT a switch — there is
-nothing to compare — so its floor is kept and no log entry is written; if
-that grant in fact pointed at another company, its earlier pushed rows are
-reopenable. The dev-sandbox reconnect in the operator step above is what
-closes that window for the one live connection.
-
-## Token lifecycle (#2863)
-
-Fortnox access tokens live one hour; refresh tokens are **single-use and
-rotate on every refresh** (45-day life). Two things follow, both in the
-generic `oauth-flow.ts` so every OAuth2 provider inherits them:
-
-- **One refresh at a time per connection.** The refresh runs under a row
-  lock (`SELECT … FOR UPDATE` on the `accounting_connections` row, inside a
-  transaction that spans the provider call). A second caller — the
-  settlement hook racing a "Sync now" click — waits, re-reads the row the
-  first caller already rotated, and uses that token with no provider call.
-  The rotated pair is committed before either caller sees the new access
-  token, so a crash between "Fortnox rotated" and "we stored it" cannot leave
-  a dead token in the row for a caller that already proceeded.
-- **A refused refresh is not retried.** `invalid_grant` (or a 400/403 with
-  no readable error code) means the grant is dead (expired after 45 idle
-  days, revoked in Fortnox, or burned by a refresh Haven never got to
-  store). The row flips to **`needs_reauthorisation`**
-  with `status_reason = refresh refused: fortnox token request failed
-  (HTTP 400): invalid_grant` (the provider's error code only — never token
-  material), the connection stays the active destination, and every later
-  token request is refused BEFORE any provider call. Everything else leaves
-  the row `connected` with the refresh token unconsumed, and the next sync
-  simply tries again: a 429 (Fortnox's rate limit: 25 calls / 5 s, no
-  `Retry-After`), a 408, a 5xx, a network failure or the 15 s timeout — and
-  a **401 `invalid_client`** (or `invalid_request`, `unauthorized_client`,
-  `unsupported_grant_type`, `invalid_scope`), which is about HAVEN's client
-  credentials, not the user's grant. **On-call read for a burst of 401s
-  in the log:** `FORTNOX_CLIENT_ID`/`FORTNOX_CLIENT_SECRET` on the backend
-  no longer match the Fortnox app (rotated secret, wrong environment). Fix
-  the variables; nothing was flipped, so no user has to reconnect.
-
-**On-call read for `needs_reauthorisation`.**
-`SELECT provider, status, status_reason, is_active_destination,
-token_expires_at FROM accounting_connections WHERE user_id = '<uuid>'` —
-and `SELECT payment_id, status, error FROM accounting_feed_syncs WHERE
-user_id = '<uuid>' AND status = 'skipped'`: while the grant is dead each
-sync records the payment as `skipped` with
-`connection needs_reauthorisation: …` (the state is the first thing in the
-reason, so a grep finds it). Nothing is pushed, nothing is refreshed. The
-fix is the user's: Connect again on `/accounting` — the re-consent path
-(#2865) replaces the secrets on the SAME row, sets it back to `connected`
-and keeps its settings, floor and history, and the skipped rows are
-re-claimable (#1365), so the next sync — or the retry sweep's next tick
-(#2866), which holds those rows back only while the connection is not
-`connected` — feeds them. There is no operator
-action that revives a dead grant; do not hand-edit `status` — the stored
-refresh token is dead at Fortnox regardless of what the row says.
-
-**Disconnect revokes at Fortnox.** `DELETE /accounting/connections/fortnox`
-posts the refresh token to `POST /oauth-v1/revoke`
-(`token_type_hint=refresh_token`, Basic client auth) BEFORE clearing the
-stored secrets, so a grant Haven no longer holds is one Fortnox no longer
-honours either. A failed revoke (Fortnox down, token already dead) still
-clears locally — `status_reason` is `user disconnected` instead of
-`user disconnected (grant revoked at provider)`, the route still answers
-204, and the backend logs one warning line carrying the failure's error
-NAME only (`accounting provider revoke failed on disconnect`). The user can
-always also remove the integration inside Fortnox.
-
-## Secrets at rest (#2860)
-
-Provider credentials — today the user's Fortnox OAuth token pair — live in
-`accounting_connections.secrets_ciphertext` as an AES-256-GCM blob, with the
-key in `HAVEN_SECRETS_KEY` (32 bytes, base64; `openssl rand -base64 32`) and
-**never** in the database. `secrets_key_version` says how a row is stored:
-
-| version | meaning | needs the key to read? |
+| status | meaning | action |
 |---|---|---|
-| `0` | plaintext JSON — a row migration 080 copied as-is | no |
-| `1` | encrypted under the current key | yes |
+| `pushed` | delivered; `external_ref` names the record (`fortnox:supplierinvoice:<GivenNumber>`). `error` may carry a **note** (e.g. `receipt attachment failed: …`) — the record exists, the attachment degraded | *Check in Fortnox* for live state. A scope note means the connection is `scope_missing` — the user reconnects; the record is NEVER re-pushed and the attachment is not re-captured automatically |
+| `failed` | the push failed; `error` is the provider message verbatim | nothing at first — the sweep retries with backoff (1 min doubling to 1 h, 8 attempts). Persisting: fix the named cause; **Sync now** retries immediately |
+| `failed`, `error` starts `exhausted:` | the sweep gave up at attempt 8; the last reason follows the prefix; `accounting.sync.exhausted` was logged | fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
+| `pending` | claimed and in flight, or a crashed in-flight push | wait; the sweep releases a `pending` older than 15 min to `failed` (attempts untouched) and re-feeds it. Do not edit the row |
+| `skipped` | a connector skip with the reason preserved (`not_connected`, `no_sek_amount`, `not_outbound`), `connection needs_reauthorisation: …`, or `scope refused before the invoice was created: …` | fix the named cause (usually: the user reconnects); the sweep retries skipped rows like failed ones — but NOT while the connection is not `connected`. Sync now also re-claims them |
+| *(no row)* | the hook never ran (feed off, not entitled, no destination, `auto_feed = false`), the payment predates `feed_from`, FX was not ready, or the payment never produced an evidence row (settlement-side, above) | read `GET /accounting/feed/status`; **Sync now** or the backfill feeds it once the cause is gone |
 
-- **Rows are encrypted at boot, not by the migration.** The migration reads no
-  environment (it runs on every replica, prod included, and in CI). On the
-  first boot that has the key, `reencryptPlaintextSecretsAtBoot` rewrites
-  every version-0 row; it is idempotent, per-row on a bad blob, and a
-  compare-and-swap on the version so it can never overwrite a token a serving
-  replica rotated in the meantime. Without the key it logs one line and
-  touches nothing.
-- **Set the key on dev BEFORE this deploys, or right after — but before the
-  next token expiry.** Without a key a NEW connection is refused, and a token
-  refresh is refused *before* the provider is called, so the stored refresh
-  token is never consumed. That refusal is deliberate: the alternative was
-  storing a fresh OAuth grant in plaintext. Fortnox access tokens live one
-  hour, so a dev backend without the key will start refusing refreshes within
-  an hour of the first settlement after deploy. Prod holds zero rows and gets
-  its key in #2876.
-- **On-call check:** `SELECT provider, status, secrets_key_version FROM
-  accounting_connections WHERE user_id = '<uuid>'`. A `0` after the key has
-  been set for more than one boot means the re-encrypt job logged a failure
-  for that row — search the boot log for `could not re-encrypt secrets for
-  connection=`.
-- A rollback of 080 (`down()`) restores `fortnox_connections_retired`, whose
-  tokens are whatever they were AT migration time; every refresh since has
-  rotated them. Rollback is a schema operation, not a credential restore.
+**On-call read, per user:**
 
-## Background retry sweep (#2866)
+```sql
+SELECT payment_id, status, attempts, external_ref, error, updated_at
+  FROM accounting_feed_syncs WHERE user_id = '<uuid>' ORDER BY updated_at DESC;
+```
 
-Failed pushes are retried by three paths: the next settlement (fire-and-forget),
-**Sync now**, and — since #2866 — a background sweep on the same in-process
-interval pattern as the delegate monitor (`startRetrySweep` in
-`modules/accounting/retry-sweep.ts`, registered in `src/index.ts`, `unref()`ed,
-leader-locked on `LEADER_LOCK_KEYS.accountingRetrySweep`). **Cadence:**
-`HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`, default 5 min; the first tick runs
-at boot. **Inert** when `HAVEN_ACCOUNTING_ENABLED` is off — no interval is
-registered and nothing is queried.
+Never hand-edit `status`: flipping `pushed` back re-posts the record.
+
+## Feed-from, backfill and settings
+
+**The rule (binds every connector).** `feed_from = now` when a row is
+connected and takes the active flag, when it is activated, and at a company
+switch. The backfill is the ONE path that moves it earlier; nothing moves it
+later except those three. A reconnect keeps the floor it had; a pre-#2862 row
+migrated with no floor keeps its NULL (it fed everything). The selection
+(`LIST_UNPUSHED_PAYMENT_IDS_SQL`) and the hook both skip anything settled
+before the floor, so a switch never re-feeds history into a new ledger.
+
+**Backfill.** `since` is a strict ISO date (`YYYY-MM-DD`, or a date-time with
+a timezone), in the past, not before 2020-01-01, and earlier than the current
+floor; the "earlier only" check is the UPDATE's own WHERE clause
+(`RECORD_BACKFILL_SQL`), so two concurrent backfills cannot leap-frog. Only the
+active `connected` destination can be backfilled. One `syncUser` runs, bounded
+to 200 payments; more history takes further Sync now presses.
+
+**Settings.** `suggested_account` (Fortnox: `^[1-8]\d{3}$`; other providers
+1–32 chars; `null` clears) rides the feed transaction's `suggestedAccount` and
+the Fortnox connector surfaces it ONLY as `YourReference: "suggested account
+6540"`; `assertNonAsserting()` still bans `Account` on the payload.
+`auto_feed = false` closes the two automatic paths (the hook returns before
+the entry is built; the sweep's JOIN excludes the connection) and leaves the
+two manual ones (Sync now, backfill). A "nothing syncs" report where
+`settings ->> 'auto_feed' = 'false'` is the answer, not a fault. Supplier
+strategy is fixed at one supplier per merchant (owner decision).
+
+## Background retry sweep
+
+`startRetrySweep` (`modules/accounting/retry-sweep.ts`, registered in
+`src/index.ts`, `unref()`ed, leader-locked on
+`LEADER_LOCK_KEYS.accountingRetrySweep`). Cadence
+`HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`; the first tick runs at boot; a
+tick still running when the next fires is skipped in-process. **Inert** when
+the feed is off.
 
 Each tick selects, in ONE query (`LIST_DUE_RETRY_SYNCS_SQL`, batch 200), the
-`failed` / `skipped` / stale-`pending` rows whose connection is `connected`
-and the active destination, and whose backoff has elapsed. Backoff is derived
-from the columns the ledger already has — no schema change:
+`failed` / `skipped` / stale-`pending` rows whose connection is `connected`,
+the active destination and not `auto_feed = false`, and whose backoff has
+elapsed — derived from `attempts` and `updated_at`, no schema change:
 
 | `attempts` | waits after the last touch | cumulative |
 |---|---|---|
@@ -675,166 +301,239 @@ from the columns the ledger already has — no schema change:
 | 7 | 60 min (cap) | ~2 h |
 | 8 | **exhausted** — never selected again | |
 
-`backoff(n) = min(1 min · 2^(n−1), 1 h)`; the row is due when
-`updated_at + backoff(attempts) <= now`. A `pending` row is due once it is
-older than 15 min (`STALE_PENDING_CLAIM_MS`): the sweep flips it to `failed`
-without touching `attempts` (`releaseStalePending`) and the normal re-claim
-takes it. That release is safe only because a live push cannot be that old:
-every Fortnox API call carries an abort timeout (15 s per JSON request, 60 s
-for the inbox upload) and a push is at most six sequential requests. The
-sweep's own terminal write (`exhausted:`) is guarded — it never touches a row
-a manual "Sync now" re-claimed or pushed in the meantime. Each due row goes through the same `feedSettledPayment` the
-settlement hook uses, so the dedup ledger, the feed-from floor, the FX gate
-and the degraded-destination skip all apply — and so does the user's
-`auto_feed` setting (#2867): the selection's JOIN also requires
-`(c.settings -> 'auto_feed') IS DISTINCT FROM 'false'::jsonb` (a non-throwing
-comparison — a malformed value from a direct DB edit can never fail the whole
-tick), so a manual-only
-connection's rows are never enumerated (see *Backfill choice and
-per-connection settings* below).
+`backoff(n) = min(1 min · 2^(n−1), 1 h)`; due when
+`updated_at + backoff(attempts) <= now`. A `pending` row is due once older
+than 15 min (`STALE_PENDING_CLAIM_MS`) — safe only because a live push cannot
+be that old: every Fortnox call has an abort timeout (15 s per JSON request,
+60 s for the inbox upload) and a push is at most a handful of sequential
+requests. The attempt that reaches 8 leaves the row `failed` with
+`error = exhausted: <last reason>` — a guarded write that never touches a row
+a manual Sync now re-claimed or pushed in the meantime.
 
-**Terminal reason.** The attempt that reaches 8 leaves the row `failed` with
-`error = exhausted: <last reason>` — the string the dashboard keys on.
-`GET /accounting/feed/status` carries `counts: { pending, failed, exhausted }`
-over ALL the user's rows (`exhausted` = `failed` at the cap, the same
-predicate the sweep uses). **Sync now** still re-claims an exhausted row: the
-cap bounds the sweep, not the human.
+**Rate limits.** One connection at a time; within a connection a fixed floor
+of 25 requests / 5 s (Fortnox's documented limit, budgeted at 8 requests per
+push → three pushes per window). A provider 429 (`ProviderError.status`) defers
+the REST of that connection to the next tick — the row that hit it is a real
+failure, the others get no claim and no `attempts + 1`. A `Retry-After` is
+honoured as a courtesy when a provider sends one (Fortnox sends none), clamped
+to the 1 h cap.
 
-**State-skipped rows wait for the cause.** The selection joins the
-connection: a row `skipped` with `connection needs_reauthorisation: …` or
-`scope refused before the invoice was created: …` (#2865), or any row behind
-a `scope_missing` / `disconnected` connection, is not touched until the row
-is `connected` again (a re-consent flips it — and a `pushed` row is never
-selected, so a post-push scope error is never re-fed). FX-not-ready rows
-are selected normally — the orchestrator no-ops before claiming, so no
-attempt is consumed while the FX is missing.
+## Ops signals: log events, counters, alert thresholds
 
-**Rate limits.** Fortnox allows 25 requests / 5 s per client-id + tenant and
-answers 429 **without** `Retry-After`. The sweep processes **one connection at
-a time**, and within a connection paces pushes under a fixed floor of 25 / 5 s
-(`RequestPacer`, budgeting 8 requests per push — supplier lookup/create,
-invoice, attachment upload + connect, merchant receipts — so three pushes per
-window). On a 429 the whole connection is deferred to the next tick: the row
-that hit it is recorded as failed (its attempt was real), every remaining row
-of that connection is left untouched — no claim, no `attempts + 1`. A
-`Retry-After` is honoured as a courtesy when a provider sends one, never
-depended on, and clamped to the 1 h backoff cap so a bogus header cannot
-park a connection until the next restart. `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`
-has a 10 s floor (a negative value would otherwise spin the interval).
+Four structured events (#2872), every line carrying `event`, so one grep —
+`"event":"accounting.` — finds all of them. All of them reach the app logger:
+the sweep writes through the logger it is given at boot; the connection event
+goes through `setOpsEventSink`, which `index.ts` points at the same logger
+(default `console`, for a flow run without the app).
 
-**On-call read.** One structured line per tick, `Accounting retry sweep`
-(`info` when anything was considered, `debug` when idle):
-`considered` / `pushed` / `failed` / `deferred` / `exhausted` / `skipped` /
-`connections` / `rateLimited`. A tick with `rateLimited > 0` on every run
-means another integration is spending the tenant's Fortnox budget — the
-sweep's own pacing cannot cause a 429. `exhausted > 0` is a row to look at:
-`SELECT payment_id, attempts, error FROM accounting_feed_syncs WHERE user_id =
-'<uuid>' AND status = 'failed' AND attempts >= 8` — the reason after
-`exhausted:` is the last Fortnox message. `Accounting retry sweep failed` is
-the leader-election or query layer, not a push. A tick that is still running
-when the next fires is skipped in-process (no overlap on one replica; the
-leader lock covers replicas).
+| event | level | when | fields |
+|---|---|---|---|
+| `accounting.sweep.run` | `info` when `considered > 0`, else `debug` | once per sweep tick | `considered`, `pushed`, `failed`, `deferred`, `exhausted`, `skipped`, `connections`, `rateLimited` |
+| `accounting.sync.exhausted` | `warn` | the sweep wrote a row's terminal reason (only when the guarded write took) | `userId`, `provider`, `paymentId`, `attempts` (8), `reason` (the last provider message) |
+| `accounting.connection.needs_attention` | `warn` | a connection was written `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — every write site goes through `flagConnectionStatus` (`ops-signals.ts`) | `userId`, `provider`, `status`, `reasonPrefix` (the head of the row's `status_reason` before its ` — ` separator — `missing scopes: a, b`, or `refresh refused: <OAuth error code>` — capped at 120 characters), `missingScopes` (the parsed list; empty unless the prefix names scopes). The line never carries the connector's free-text detail: on the `scope_missing` paths the row's full `status_reason` embeds the provider's message and the refused request path (a supplier-lookup refusal includes the recipient's name), so read that from the row, not the log. Never token material |
+| `accounting.sweep.failed` | `warn`, always logged | the sweep's tick threw outside a run — leader election or the query layer, not a push (`Accounting retry sweep failed`) | `err` |
 
-## Backfill choice and per-connection settings (#2867)
+`accounting_company_switch` (`info`, JSON on `console`) is the #2864
+company-switch line.
 
-**The rule these serve.** Every connection gets `feed_from = now` at connect
-(when it takes the active flag) and at activate (#2862), and again at a
-company switch (#2864) — so a second provider connected months later never
-re-feeds history unasked. The backfill is the ONE path that moves the floor
-**earlier**; nothing moves it later except those three.
+**Counters** on `GET /health/ops` (`X-Haven-Ops-Token`; 404 when
+`HAVEN_OPS_TOKEN` is unset, 401 on a wrong token — the accounting queries run
+only after the token passes), under `accounting`:
 
-**Backfill.** `POST /accounting/connections/:provider/backfill { since }` —
-`since` is a strict ISO date (`YYYY-MM-DD`, or a date-time with a timezone —
-free-form dates, TZ-less times and rolled-over days such as `2026-02-30` are
-refused): it must be in the past and not
-precede 2020-01-01 (400 `SINCE_INVALID`), and it must be **earlier than the
-current `feed_from`** (400 `SINCE_NOT_EARLIER`; the floor is untouched, no
-sync runs). A row with `feed_from IS NULL` — a pre-#2862 Fortnox row that
-already feeds everything — is refused the same way: there is nothing earlier
-to include. Only the active `connected` destination can be backfilled (409
-`NOT_ACTIVE`): the sync feeds the active destination, and activating a
-connection later re-stamps its floor to now anyway. On success the statement
-(`RECORD_BACKFILL_SQL`) moves `feed_from` and records
-`settings.backfill = { since, requestedAt }` in ONE guarded UPDATE (the
-"earlier only" check is its WHERE clause, so two concurrent backfills cannot
-leap-frog), then one `syncUser` runs — **bounded to 200 payments** and
-resumable through the claim ledger, so a larger history takes further
-**Sync now** presses; the answer is `{ feedFrom, fed }`. A second backfill
-with an even earlier date moves the floor again; one with a later date than
-the NEW floor is refused against that floor. **Not implemented in this
-slice:** a `since` on the connect-url request (the "include payments since
-<date>" choice at connect) — the OAuth `state` and the callback handler are
-#2865's surface; the dashboard (slice 10) connects first and calls the
-backfill route second, which is the same two writes in the same order.
-
-**Settings.** `PATCH /accounting/connections/:provider/settings` takes
-exactly two keys, each optional; an unknown key (including the camelCase
-spellings) or a wrong type is a 400 `INVALID_SETTING` whose `key` names it,
-and nothing in that patch is applied:
-
-| key | stored as | rule |
+| field | query | meaning |
 |---|---|---|
-| `suggested_account` | `settings.suggested_account` | Fortnox: a four-digit BAS account, `^[1-8]\d{3}$` (trimmed); other providers: 1–32 characters; `null` clears |
-| `auto_feed` | `settings.auto_feed` | boolean; absent = `true` |
+| `exhaustedSyncs` | `COUNT(*) FROM accounting_feed_syncs WHERE status = 'failed' AND attempts >= 8` (`COUNT_EXHAUSTED_SYNCS_SQL`) | rows the sweep has given up on, deployment-wide — the same predicate as the per-user `counts.exhausted`, never the reason prefix |
+| `connectionsNeedingAttention` | `COUNT(*) FROM accounting_connections WHERE status IN ('needs_reauthorisation', 'scope_missing', 'revoked_at_provider')` (`COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL`) | connections only a re-consent resolves; `disconnected` is the user's choice and is not counted |
 
-The write is a SQL-side JSONB merge (`MERGE_CONNECTION_SETTINGS_SQL`,
-`settings || patch`) — never read-modify-write — so the #2864
-`companySwitches` log and the `backfill` record above survive every PATCH.
-`GET /accounting/connections` reads them back with defaults applied as
-`settings: { suggestedAccount, autoFeed }`; the raw column is never on the
-wire. Any row can carry settings — a `disconnected` row keeps them for its
-reconnect (the upsert preserves `settings`).
+Both are read live, one aggregate each, no per-user data on the wire. When
+the queries throw, both fields are `null` and `unavailable: true` is added —
+the route answers 200 with the in-memory fields intact rather than 500ing
+the whole payload (review on #2905).
 
-**`suggested_account` is a hint, not an account.** It rides the feed
-transaction's existing `suggestedAccount` field (a per-merchant override from
-the legacy account map, when one exists, wins over the connection default)
-and the Fortnox connector surfaces it ONLY as `YourReference: "suggested
-account 6540"` on the unattested supplier invoice — the same non-asserting
-hint field it has carried since #496. `assertNonAsserting()` still bans
-`Account` on the payload, and the connector test carries the mutation: put
-the hint under `Account` and the push throws before any request. The
-accountant still codes.
+**Alert thresholds** (dev today; the numbers are the first honest ones, not
+tuned ones — a handful of connections exist):
 
-**`auto_feed = false` means "manual only".** The three automatic paths and
-the two manual ones:
-
-| path | trigger | `auto_feed = false` |
+| signal | threshold | meaning / first action |
 |---|---|---|
-| settlement hook (`feedSettledPaymentBestEffort`) | a payment settles | **no-op** — returns before the entry is built, no claim row, the payment stays unclaimed |
-| background retry sweep (#2866) | interval | **not enumerated** — the selection's JOIN excludes the connection; its `failed`/`skipped` rows wait, exactly like a state-skipped row |
-| `POST /accounting/feed/sync` (Sync now) | the user | pushes (`manual: true`) |
-| `POST /accounting/connections/:provider/backfill` | the user | pushes (it runs `syncUser`) |
+| `accounting.sync.exhausted` | any occurrence | a payment nobody will re-feed without a human. Read the `reason`: a token/scope reason means the connection has since flipped (check the row); a Fortnox validation code (e.g. `2000359`) means a payload field slipped past the sanitiser — fix the connector, not the data; then the user presses Sync now |
+| `exhaustedSyncs` | `> 0` for more than one sweep interval after the cause is fixed | the fix did not take, or nobody pressed Sync now |
+| `accounting.connection.needs_attention` | one occurrence is expected product behaviour (the user reconnects); alert when **the same user flips again within 10 minutes of a reconnect** | the re-consent cannot grant what the app registration does not declare, or the client credentials are wrong — an operator problem |
+| `connectionsNeedingAttention` | `>= 3` at once, or `>= 50 %` of `SELECT count(*) FROM accounting_connections WHERE status <> 'disconnected'` | several grants died together: a rotated `FORTNOX_CLIENT_SECRET` shows as 401s in the log and flips nobody, so this shape points at a scope change in the app registration or a provider-side revocation |
+| `accounting.sweep.run` with `rateLimited > 0` | three consecutive ticks | another integration is spending the tenant's Fortnox budget — the sweep's own pacing cannot cause a 429 |
+| `accounting.sweep.run` absent | > 2 × the interval on the leader — **only meaningful with the logger at `debug`**, since an idle tick logs at that level; at `info` the line appears only when a row was due | the sweep is not running: the flag is off, or the leader lock is held elsewhere; `accounting.sweep.failed` (`warn`, always logged) says which |
+| `accounting.sweep.failed` | two consecutive ticks | the tick cannot even start: the leader lock's advisory query fails, or `listDueRetrySyncs` throws — a database problem on the leader, not a provider one; read `err` |
+| `accounting.unavailable: true` on `/health/ops` | any | the two aggregate counters threw (the route logs `health/ops accounting counters unavailable` at `warn` with the error's class); the relayer and passport fields still answer, so the database, not the process, is the first thing to check |
+| `[accounting] could not re-encrypt secrets for connection=` at boot | any | a version-0 row the boot job could not encrypt; see *Secrets at rest* |
 
-The sweep follows the hook, not the button, on purpose: a user who asked
-that nothing be pushed without them pressing Sync now would otherwise see
-the sweep retry a failed manual push five minutes later. The consequence is
-that a manual push which FAILS on a manual-only connection is retried only
-by the next Sync now. On-call read for a "nothing syncs" report:
-`SELECT provider, is_active_destination, feed_from, settings FROM
-accounting_connections WHERE user_id = '<uuid>'` — `"auto_feed": false` in
-`settings` is the answer, not a fault. **Supplier strategy is not a setting:**
-one supplier per merchant, fixed (owner decision 2026-09-11).
+## Secrets at rest, and the key
 
-## Schema for on-call: `accounting_feed_syncs`
+Provider credentials — the Fortnox OAuth token pair today — live in
+`accounting_connections.secrets_ciphertext` as an AES-256-GCM blob
+(`iv || tag || ciphertext`), keyed by `HAVEN_SECRETS_KEY`, never in the
+database (`infra/secrets.ts` is the only file that reads the variable).
+`secrets_key_version` says how a row is stored: `0` plaintext JSON (a row
+migration 080 copied as-is, or a disconnected row), `1` encrypted under the
+current key.
 
-One row per (user, provider, payment). `status`:
-`pending → pushed | failed | skipped` (failed AND skipped are re-claimable,
-#1365; pushed is FINAL with ONE sanctioned exception — the verification-gated
-reopen flips `pushed → failed` only after Fortnox itself confirms the invoice
-no longer exists, so re-pushing cannot double-post). `external_ref` =
-`fortnox:supplierinvoice:<GivenNumber>`. `error` doubles as the non-fatal
-degradation note on pushed rows (#498 contract) and carries the `exhausted:`
-prefix once the retry sweep has given up (#2866). `attempts` increments per
-claim; the sweep stops at 8, backoff is derived from `attempts` and
-`updated_at`. Never hand-edit status: flipping `pushed` back re-posts the
-invoice.
+- **Rows are encrypted at boot, not by a migration.** On the first boot that
+  has the key, `reencryptPlaintextSecretsAtBoot` rewrites every version-0 row
+  — idempotent, per-row on a bad blob, and a compare-and-swap on the version
+  so it never overwrites a token a serving replica rotated meanwhile. Without
+  the key it logs one line and touches nothing. A refresh also re-encrypts a
+  version-0 row as a side effect.
+- **Without the key** a new connection is refused (`SecretsKeyMissingError`)
+  and a refresh is refused *before* the provider is called, so the single-use
+  refresh token is never consumed. Fortnox access tokens live one hour, so a
+  dev backend without the key starts refusing refreshes within an hour of the
+  first settlement after deploy.
+- **On-call check:** `SELECT provider, status, secrets_key_version FROM
+  accounting_connections WHERE user_id = '<uuid>'`. A `0` on a `connected`
+  row after the key has been set for more than one boot means the boot job
+  logged `could not re-encrypt secrets for connection=<id>` for it.
+
+**Key rotation — what exists and what does not.** There is **no rotation
+path** today: `CURRENT_KEY_VERSION` is `1`, the reader knows exactly one
+version, and there is no second key slot to read old rows with while writing
+new ones — the "re-encrypt job that reads with the old version and writes
+with the new" that `infra/secrets.ts` describes is a design note, not code.
+Consequently:
+
+- **Do not change `HAVEN_SECRETS_KEY` on a deployment with version-1 rows.**
+  Every one of them becomes unreadable: a refresh fails on the auth tag
+  (`failed` rows whose reason is Node's `Unsupported state or unable to
+  authenticate data`, the connection stays `connected`), and the user's own
+  **Disconnect** fails too, because the revoke step decrypts first. Nothing
+  flips a state, so the counters above stay quiet — the `failed` rows and the
+  sweep's `failed` counter are the only signal.
+- **If the key was lost or must be replaced anyway** (compromise): set the new
+  key, then reset every version-1 row by hand so users can reconnect — the
+  same shape `DISCONNECT_ACCOUNTING_CONNECTION_SQL` writes, with a reason
+  that says why:
+
+  ```sql
+  UPDATE accounting_connections
+     SET secrets_ciphertext = NULL, secrets_key_version = 0, status = 'disconnected',
+         status_reason = 'secrets key replaced by operator — reconnect', is_active_destination = false,
+         updated_at = NOW()
+   WHERE secrets_key_version = 1;
+  ```
+
+  Every affected user then sees *Not connected* and connects again; the grants
+  at Fortnox are NOT revoked by this (Haven no longer holds the tokens to
+  revoke with), so the user should also remove the old integration inside
+  Fortnox, or let it expire after 45 idle days. History and settings survive
+  (the row is kept). A real rotation path — a key-version table with a read
+  fallback — is the follow-on to file when prod gets its key (#2876).
+
+## Schema for on-call
+
+Two tables; the SQL constants live in `infra/repositories/` and are
+registered in the schema smoke (`npm run db:schema-smoke -w packages/backend`).
+
+- **`accounting_connections`** (migration 080): `user_id`, `provider`,
+  `auth_kind` (`oauth2` | `api_key`), `secrets_ciphertext`,
+  `secrets_key_version`, `external_company_id`, `external_company_name`,
+  `base_currency`, `status` (CHECKed to the five states),
+  `status_reason`, `granted_scope`, `token_expires_at`,
+  `is_active_destination` (partial unique per user), `feed_from`, `settings`
+  JSONB (`suggested_account`, `auto_feed`, `backfill { since, requestedAt }`,
+  `companySwitches[]` — append-only, oldest first), `last_push_at`,
+  `last_error`. UNIQUE (`user_id`, `provider`).
+- **`accounting_feed_syncs`**: `user_id`, `provider`, `payment_id`,
+  `status`, `attempts`, `external_ref`, `error`, `created_at`, `updated_at`.
+  UNIQUE (`provider`, `payment_id`, `user_id`). No company column: a pushed
+  row is attributed to a company by TIME against `settings.companySwitches`
+  (`companyIdAt`), which is what makes the reopen refuse `previous_company`.
+
+**Migration history.** The Fortnox-only connection table from 027 was copied
+into `accounting_connections` by 080 (#2860) and renamed, not dropped, to
+`fortnox_connections_retired` so a rolling deploy with overlap could not lose
+a committed write; 081 (#2872) drops the retired table after the epic's
+product verification — schema-only, no row read, `down()` recreates it empty
+in 027's shape because 080's own `down()` renames it back. The
+`reporting_feed_syncs` → `accounting_feed_syncs` rename and the
+`reporting_feed` → `accounting_feed` entitlement rewrite also rode 080.
 
 ## Boundaries (what this feed will never do)
 
-- **Never asserts**: no voucher rows, no BAS account, no VAT — structurally
-  banned (`assertNonAsserting`, test-locked). The `suggestedAccount` rides as
-  free text in `YourReference` only.
-- **Never books**: the read-back verification (#1362) is the only read, and it
-  is strictly read-only — Haven cannot book, cancel, or modify the invoice.
-- **Never blocks money**: the settle-time hook is fire-and-forget; a Fortnox
-  outage delays reporting, never settlement.
+- **Never asserts**: no voucher rows, no account, no VAT — structurally
+  banned (`assertNonAsserting`, test-locked); the suggested account rides as
+  free text in a hint field only.
+- **Never books**: the read-back is the only read, strictly read-only.
+- **Never blocks money**: the hook is fire-and-forget; a provider outage delays
+  the feed, never settlement.
+- **Never holds keys or moves funds**: the connection is the provider's own
+  grant, encrypted, revocable from either side.
+
+## Provider notes: Fortnox
+
+**App registration.** Scopes (`FORTNOX_SCOPE`):
+`bookkeeping supplierinvoice supplier archive inbox connectfile companyinformation`.
+The developer-portal permissions must include every one — including
+*Företagsinformation* — or every consent comes back `scope_missing`. The
+connecting Fortnox user must be a system administrator with an integration
+licence (epic: unverified against a live customer; keep out of external copy).
+Redirect URI: `<backend>/accounting/connections/fortnox/callback`.
+
+**What connect records.** `GET /3/companyinformation` — `DatabaseNumber` is
+`external_company_id`, `CompanyName` the name, currency `SEK` by construction.
+A refused read (403 / `[2000663]`) stores the connection as `scope_missing`
+(`company info unavailable: …`); a network error or 5xx stores nothing. A
+reconnect to a different `DatabaseNumber` is a company switch: one row kept,
+company fields replaced, `feed_from = now`, `status_reason` names both
+companies, `settings.companySwitches` appended, one
+`accounting_company_switch` log line. Pre-switch `pushed` rows stay; *Check in
+Fortnox* reports them `missing` through the new company (correct), and the
+reopen refuses them `previous_company`.
+
+**Token lifecycle.** Access tokens live one hour; refresh tokens are
+single-use and rotate on every refresh (45-day life). The refresh runs under a
+`SELECT … FOR UPDATE` on the row, inside a transaction spanning the provider
+call, so two concurrent callers make one provider call and the rotated pair is
+committed before either sees the new access token. A refused refresh is a
+`needs_reauthorisation` flip (states above), and a burst of **401
+`invalid_client`** in the log is Haven's `FORTNOX_CLIENT_ID` /
+`FORTNOX_CLIENT_SECRET` no longer matching the app — fix the variables; no
+user is flipped, no one reconnects.
+
+**Disconnect revokes.** `POST /oauth-v1/revoke` (`token_type_hint=refresh_token`,
+Basic client auth) before the secrets are cleared; a failed revoke still
+clears locally. The user can always also remove the integration inside Fortnox.
+
+**Error codes seen live.** `[2000663]` scope — mapped to the scope the endpoint
+needed (`fortnoxScopeForPath`, five entries: `/supplierinvoicefileconnections`
+→ `connectfile`, `/supplierinvoices` → `supplierinvoice`, `/suppliers` →
+`supplier`, `/inbox` → `inbox`, `/companyinformation` →
+`companyinformation`; any other path → no scope named) because
+Fortnox does not say which; a bare 403 counts as scope, a 403 with another code
+(a licence error such as `[2003295]`) is a plain `failed`. `[2000359]`
+non-ASCII in Comments/Name (middle dots, `://`, `…`) — the connector sanitises;
+a new occurrence is a new field that slipped through. Rate limit: 25 requests /
+5 s per client-id + tenant, HTTP 429 with no `Retry-After`.
+
+**What the accountant sees.** *Meny → Leverantörsfakturor*: an unbooked
+supplier invoice per payment, `ExternalInvoiceNumber = HAVEN-<paymentId>`
+(the join key), `DueDate = InvoiceDate`, Total in SEK, `Booked: false`, no
+voucher until attested; the Haven payment-evidence PDF and, when captured, the
+merchant's receipt as attachments. **First-visit gotcha (2026-08-13):** a
+company that has never opened the module in the UI gets Fortnox's one-time
+onboarding wizard instead of the list — every step is skippable; the invoices
+are there and the API is unaffected. An x402 merchant receipt that arrives
+after the push is late-attached onto the existing invoice; a late-attach
+failure becomes a note on the row.
+
+**Verifying delivery.** (1) `/accounting` → **Check in Fortnox**: *Registered —
+awaiting booking* (the steady state until the accountant acts), *Booked,
+voucher `<series><number> <year>`*, *Cancelled*, or *Not found* — then
+**Re-open for sync** re-runs the read-back server-side and flips the row only
+when Fortnox confirms the invoice is gone, and **Sync now** pushes again. The
+read-back cross-checks `ExternalInvoiceNumber`, so a number collision after a
+company switch reads as *Not found*, never as a false "registered".
+(2) Fortnox's own UI, above. (3) `GET /accounting/feed/status` and
+`GET /accounting/feed/verify/:paymentId` for on-call.
+
+**Product verification on dev** (the epic's checklist, run by the owner): a
+fresh dev user connects Fortnox from Settings, chooses a backfill option, an
+agent purchase settles and appears in the Fortnox sandbox as an unattested
+supplier invoice with both attachments, *Check in Fortnox* reports registered,
+Disconnect revokes.

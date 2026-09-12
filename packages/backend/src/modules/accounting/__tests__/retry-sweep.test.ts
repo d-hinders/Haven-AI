@@ -68,7 +68,7 @@ describe('accounting retry sweep (#2866)', () => {
     for (const m of Object.values(repo)) m.mockReset()
     repo.listDueRetrySyncs.mockResolvedValue([])
     repo.releaseStalePending.mockResolvedValue(true)
-    repo.markExhausted.mockResolvedValue(undefined)
+    repo.markExhausted.mockResolvedValue(true)
   })
 
   afterEach(() => {
@@ -142,7 +142,10 @@ describe('accounting retry sweep (#2866)', () => {
 
       leader.mockImplementation(async () => { throw new Error('lock down') })
       await vi.advanceTimersByTimeAsync(1_000)
-      expect(log.lines.some((l) => l.level === 'warn' && l.msg === 'Accounting retry sweep failed')).toBe(true)
+      // #2905: the failure line carries `event` like its siblings, so one grep finds it.
+      const failed = log.lines.filter((l) => l.level === 'warn' && l.msg === 'Accounting retry sweep failed')
+      expect(failed).toHaveLength(1)
+      expect(failed[0].obj).toMatchObject({ event: 'accounting.sweep.failed', err: expect.any(Error) })
       clearInterval(timer!)
     })
   })
@@ -305,14 +308,14 @@ describe('accounting retry sweep (#2866)', () => {
     })
   })
 
-  describe('the log line', () => {
-    it('emits exactly one structured line per run, at info when something was considered and debug when idle', async () => {
+  describe('the log events (#2872)', () => {
+    it('emits exactly one accounting.sweep.run line per run, at info when something was considered and debug when idle', async () => {
       const log = logger()
       await runRetrySweep({ now, sleep, log })
       expect(log.lines).toHaveLength(1)
-      expect(log.lines[0]).toMatchObject({ level: 'debug', msg: 'Accounting retry sweep', obj: { considered: 0 } })
+      expect(log.lines[0]).toMatchObject({ level: 'debug', msg: 'accounting.sweep.run', obj: { event: 'accounting.sweep.run', considered: 0 } })
 
-      repo.listDueRetrySyncs.mockResolvedValue([due('u1', 'a'), due('u1', 'b', 7)])
+      repo.listDueRetrySyncs.mockResolvedValue([due('u1', 'a'), due('u1', 'b', 3)])
       const feed = vi.fn(async (_u: string, paymentId: string) =>
         paymentId === 'a' ? { outcome: 'pushed' as const } : { outcome: 'failed' as const, reason: 'x' },
       )
@@ -321,9 +324,44 @@ describe('accounting retry sweep (#2866)', () => {
       expect(log.lines).toHaveLength(1)
       expect(log.lines[0]).toMatchObject({
         level: 'info',
-        msg: 'Accounting retry sweep',
-        obj: { considered: 2, pushed: 1, exhausted: 1, deferred: 0, failed: 0, skipped: 0, connections: 1, rateLimited: 0 },
+        msg: 'accounting.sweep.run',
+        obj: { event: 'accounting.sweep.run', considered: 2, pushed: 1, exhausted: 0, deferred: 0, failed: 1, skipped: 0, connections: 1, rateLimited: 0 },
       })
+    })
+
+    it('emits one accounting.sync.exhausted line at warn per row that took the terminal reason, before the run line — and none for a row the guard left alone', async () => {
+      const log = logger()
+      repo.listDueRetrySyncs.mockResolvedValue([due('u1', 'gone', 7), due('u1', 'raced', 7), due('u2', 'fine', 1)])
+      // `raced` was re-claimed by a manual sync between the selection and the
+      // terminal write: markExhausted reports that nothing was written.
+      repo.markExhausted.mockImplementation(async (_u: string, _p: string, paymentId: string) => paymentId !== 'raced')
+      const feed = vi.fn(async (_u: string, paymentId: string) =>
+        paymentId === 'fine'
+          ? { outcome: 'pushed' as const }
+          : { outcome: 'failed' as const, reason: 'fortnox request failed (HTTP 500)' },
+      )
+      const result = await runRetrySweep({ now, sleep, log, feed })
+      expect(result).toMatchObject({ exhausted: 2, pushed: 1 })
+      const exhausted = log.lines.filter((l) => l.msg === 'accounting.sync.exhausted')
+      expect(exhausted).toEqual([
+        {
+          level: 'warn',
+          msg: 'accounting.sync.exhausted',
+          obj: {
+            event: 'accounting.sync.exhausted',
+            userId: 'u1',
+            provider: 'fortnox',
+            paymentId: 'gone',
+            attempts: 8,
+            reason: 'fortnox request failed (HTTP 500)',
+          },
+        },
+      ])
+      // The run line is still exactly one, and last.
+      expect(log.lines.filter((l) => l.msg === 'accounting.sweep.run')).toHaveLength(1)
+      expect(log.lines[log.lines.length - 1].msg).toBe('accounting.sweep.run')
+      // No token material can ride the line: the shape is the five fields above and nothing else.
+      expect(Object.keys(exhausted[0].obj).sort()).toEqual(['attempts', 'event', 'paymentId', 'provider', 'reason', 'userId'])
     })
   })
 })

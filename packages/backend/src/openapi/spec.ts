@@ -6372,7 +6372,7 @@ export const openapiSpec = {
       },
       HealthOpsResponse: {
         type: 'object',
-        required: ['relayer', 'passport', 'trustProxy'],
+        required: ['relayer', 'passport', 'trustProxy', 'accounting'],
         properties: {
           relayer: {
             type: 'array',
@@ -6441,6 +6441,27 @@ export const openapiSpec = {
             properties: {
               hops: { type: 'integer' },
               authRateLimitArmed: { type: 'boolean' },
+            },
+            additionalProperties: false,
+          },
+          accounting: {
+            type: 'object',
+            description:
+              'Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate ' +
+              'queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
+              'attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: ' +
+              'connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the ' +
+              "user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. " +
+              'The counters are the one database read on this payload: when the queries throw, both ' +
+              'are `null` and `unavailable` is `true` while the in-memory siblings still answer.',
+            required: ['exhaustedSyncs', 'connectionsNeedingAttention'],
+            properties: {
+              exhaustedSyncs: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+              connectionsNeedingAttention: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+              unavailable: {
+                type: 'boolean',
+                description: 'Present and `true` only when the counters could not be read; the two integers are then `null`.',
+              },
             },
             additionalProperties: false,
           },

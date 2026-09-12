@@ -280,6 +280,24 @@ export const REENCRYPT_PLAINTEXT_SECRETS_SQL = `UPDATE accounting_connections
      SET secrets_ciphertext = $3, secrets_key_version = $4, updated_at = NOW()
      WHERE user_id = $1 AND provider = $2 AND secrets_key_version = 0`
 
+/**
+ * The connection states only the user can resolve (a re-consent), as one
+ * list: what the `accounting.connection.needs_attention` event fires on and
+ * what the `/health/ops` counter counts (#2872). `disconnected` is the user's
+ * own choice and is not attention; `connected` is fine.
+ */
+export const NEEDS_ATTENTION_STATUSES = ['needs_reauthorisation', 'scope_missing', 'revoked_at_provider'] as const satisfies readonly ConnectionStatus[]
+
+/**
+ * The `/health/ops` counter (#2872): every connection on the deployment in a
+ * state only a re-consent resolves. One cheap aggregate over a small table,
+ * no per-user data on the wire — a number for on-call, keyed on the SAME
+ * list the event fires on.
+ */
+export const COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL = `SELECT COUNT(*)::int AS n
+     FROM accounting_connections
+     WHERE status = ANY($1::text[])`
+
 export async function getConnection(
   userId: string,
   provider: string,
@@ -577,4 +595,10 @@ export async function reencryptIfStillPlaintext(
 export async function listPlaintextConnections(db: Executor = pool): Promise<AccountingConnectionRow[]> {
   const r = await db.query<AccountingConnectionRow>(LIST_PLAINTEXT_CONNECTIONS_SQL)
   return r.rows
+}
+
+/** See COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL. */
+export async function countConnectionsNeedingAttention(db: Executor = pool): Promise<number> {
+  const r = await db.query<{ n: number }>(COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL, [[...NEEDS_ATTENTION_STATUSES]])
+  return r.rows[0]?.n ?? 0
 }

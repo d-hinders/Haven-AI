@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/lib/__tests__/served-docs.test.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-09"
+last-verified: "2026-09-12"
 ---
 
 # Documentation-quality system
@@ -137,7 +137,7 @@ backend vitest job, so a PR touching no backend surface never runs it.
 | `covers:` gaps — a doc naming a file its `covers:` cannot reach ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679)) | `scripts/docs/covers-gaps.mjs` | **Blocking** (shrink-only baseline of gap FILES; `--accept-new` is the explicit override) |
 | `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843)) | `scripts/docs/chain-integrity.mjs` | **Retired** by [#2681](https://github.com/d-hinders/Haven-AI/issues/2681) |
 | Archive integrity | `retire-verified-chains.mjs verify()`, driven by the docs unit tests | **Blocking** (a hash mismatch fails the required job) |
-| Doc/config drift | `packages/backend/src/openapi/spec.test.ts`, `packages/backend/src/docs-drift/*.test.ts`, which pins `.env.example` in **both** directions | **Blocking** (vitest) |
+| Doc/config drift | `packages/backend/src/openapi/spec.test.ts`, `packages/backend/src/docs-drift/*.test.ts`, which pins `.env.example` in **both** directions — every variable the backend reads is listed, every listed key is read somewhere; the values and comments beside a key are prose the test does not check | **Blocking** (vitest) |
 | Queue-framing census ([#2107](https://github.com/d-hinders/Haven-AI/issues/2107)) | `scripts/ci/queue-framing-census.test.mjs`, in `ci_config_checks` | **Blocking** (zero-tolerance: a guarded file either has no hit or cannot join the list) |
 | Coupling gate — contract docs ([#644](https://github.com/d-hinders/Haven-AI/issues/644)) | `scripts/docs/coupling-gate.mjs --strict`, `.github/workflows/docs-coupling.yml` | **Blocking** for `contract: true` docs |
 | Coupling gate — advisory comment | `scripts/docs/coupling-gate.mjs` | Advisory (always exits 0) |

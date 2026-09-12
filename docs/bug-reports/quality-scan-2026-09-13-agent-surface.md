@@ -8,7 +8,14 @@ covers:
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/catalog/lifecycle.ts
-  - packages/backend/src/testing/mock-factory-exports.ts
+  - packages/backend/src/testing/__tests__/mock-factory-exports.guard.test.ts
+  - packages/backend/src/modules/x402/settlement-sweeper.ts
+  - packages/backend/src/rails/execution-rail.ts
+  - packages/backend/src/routes/__tests__/retired-rail-routing.guard.test.ts
+  - packages/mcp-server/src/description-size.test.ts
+  - docs/operations/agent-qa.md
+  - docs/operations/demo-agent-purchase-runbook.md
+  - packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts
   - packages/sdk/src/x402.ts
   - packages/signer/src/sign-context.ts
   - packages/signer/src/tools.ts
@@ -26,7 +33,11 @@ for what would make them smoother to use; propose improvements and features;
 do not rely on local testing alone. This report is the scan's output under the
 [`quality-scan`](../../.agents/skills/quality-scan/SKILL.md) bar; the ledger
 entry is in [`docs/quality/scan-ledger.md`](../quality/scan-ledger.md). Nothing
-is filed — every finding waits for the owner's disposition.
+is filed — every finding waits for the owner's disposition. **Deliberate
+deviation from the skill:** the mandate asked for bugs and proposals as well
+as structural findings, so this report carries three findings (the skill says
+top 1–2), a defect table (§ 3) and proposals (§ 5) that the skill would
+otherwise leave out; the ledger entry keeps the skill's shape.
 
 ## Method
 
@@ -79,7 +90,11 @@ is filed — every finding waits for the owner's disposition.
   merchant's `payer` was the delegate EOA instead. The signer's context adds
   `payerDelegate`, and P0 (#2907) just shipped `components.payer_account` as a
   twin of `components.safe` precisely because `components.account` already
-  meant the delegate.
+  meant the delegate. Tally of wire shapes naming a payer:
+  `git grep -c -i "payer_address\|payerAddress\|payer_account\|payer:\|payerDelegate"`
+  → `openapi/spec.ts` 7, `sdk/src/types.ts` 10, `demo-merchant-mcp/src/x402.ts` 4,
+  `signer/src/core.ts` 6 — 27 sites, resolving at runtime to three distinct
+  addresses for one payment.
 - **Cost, demonstrated:** the naming-epic review (#2906) spent a round on
   exactly this collision; the invoice a Swedish bookkeeper receives names a
   buyer address that appears nowhere in Haven's receipts; an agent
@@ -111,10 +126,13 @@ is filed — every finding waits for the owner's disposition.
   `buildSettledPayment(…, ZERO_TX_HASH)` on the skip-settle hook, and `:628`
   on `AuthorizationAlreadyUsedError`).
 - **Cost, demonstrated:** the runbook has to say "**NEVER `storage_50gb`**"
-  (`docs/operations/demo-agent-purchase-runbook.md:67`) because the dev
-  catalog lists the fixture as an ordinary product; a demo or a cold agent
-  that picks the cheapest tier gets a "Paid" invoice for nothing, and Haven's
-  own status never resolves. `settlement-sweeper.ts:655/707/783` already
+  (`docs/operations/demo-agent-purchase-runbook.md:66`) because the dev
+  catalog lists the fixture as an ordinary product; on dev a demo or a cold
+  agent that picks the cheapest tier gets a "Paid" invoice for nothing, and
+  Haven's own status never resolves (the fixture is chain-gated to Base
+  Sepolia — `packages/demo-merchant-mcp/src/x402.ts:77`, PR #1277 — so this
+  cannot happen off testnet; the `AuthorizationAlreadyUsedError` zero-hash path
+  at `:628` is not gated). `settlement-sweeper.ts:655/707/783` already
   carries three log lines for the "settled but no evidence" hole.
 - **Changes how contributors work:** one definition of *settled* — "an
   on-chain transfer Haven verified" — enforced at the hosted tool, with a
@@ -164,17 +182,18 @@ is filed — every finding waits for the owner's disposition.
 
 | id | what | evidence | severity |
 |---|---|---|---|
-| B1 | `haven_discover_tools verified=verified` hides the operator's own demo merchant; operator entries are never probed to `verified_payable` | live `[]`; `packages/backend/src/modules/catalog/lifecycle.ts:16` probes `ownership_verified` rows only | medium (demo/cold-agent UX) |
+| B1 | `haven_discover_tools verified=verified` hides the operator's own demo merchant; operator entries are never probed to `verified_payable` | live `[]`; `packages/backend/src/modules/catalog/lifecycle.ts:223-232` builds probe candidates from `ownership_verified` rows and verified rows due for re-check only — an operator row never reaches the probe | medium (demo/cold-agent UX) |
 | B2 | catalog prepare creates a new intent per call with `idempotencyKey: null` | live; `catalog-purchase.ts:294,696` | medium (double-pay if an agent signs twice) |
 | B3 | `PRICE_EXCEEDS_MAX` has no `next_action`/`next_tool`; message reads "1500 exceeds max_amount_human 0.0001 USDC (= 100 atomic) (USDC, atomic units)" | live | low |
 | B4 | signer success (`haven_sign`) carries no `next_*` fields | live; `signer/src/tools.ts:194-199` | low |
 | B5 | hosted settle accepts a zero settlement hash as `settled: true`, `next_action: none` | live `941c667e`; `paid-mcp-completion.ts` erc7710 branch | high (part of F2) |
-| B6 | the dev catalog lists the skip-settle fixture as a normal product | live; `agent-qa.md:151`, runbook `:67` | medium |
+| B6 | the dev catalog lists the skip-settle fixture as a normal product | live; `agent-qa.md:151`, runbook `:66`; dev-only by the chain gate (`x402.ts:77`) | medium |
 | B7 | demo merchant `/mcp` never consults settlement readiness; only `/healthz` does (`http.ts:98`) — an out-of-gas merchant answers 402s with no reason | code read | medium (demo reliability) |
 | B8 | invoice counter seeded from `Date.now()/1000` collides after a restart when more invoices were issued than seconds elapsed (`invoice.ts:27-33`) | code read | low |
 | B9 | signer `fetchX402SignContext` has no timeout/abort signal (`sign-context.ts:72-92`) — a hung `/sign-context` hangs the agent | code read | low-medium |
-| B10 | `mock-factory-exports.guard` covers `vi.mock(` only; 3 backend test files use `vi.doMock(` (`git grep -l "vi.doMock(" -- 'packages/backend/src/**/*.test.ts'` → 3) — the defect class it caught on #2935 has an unguarded neighbour | code read; reviewer on PR #2935 | low |
+| B10 | `packages/backend/src/testing/__tests__/mock-factory-exports.guard.test.ts` covers `vi.mock(` only; 3 backend test files use `vi.doMock(` (`git grep -l "vi.doMock(" -- 'packages/backend/src/**/*.test.ts'` → 3) — the defect class it caught on #2935 has an unguarded neighbour | code read; reviewer on PR #2935 | low |
 | B11 | on an EIP-3009 receipt `txHash` (Haven funding tx) ≠ `protocolReceiptPayload.transaction` (merchant settlement tx) with no field naming which is which | 2026-08-13 receipt `dcc28fad` | low |
+| B13 | the retired-rail routing guard's `PAYMENT_ENTRY_POINTS` allowlist limit is undocumented and its comment says "five" for four entries (`retired-rail-routing.guard.test.ts:161-166, :266`) | code read | low |
 | B12 | `haven_quote_catalog_purchase` reports `accepted_scheme: "standard"` while `prepare` then settles erc7710 — the quote hides the scheme the agent will be asked to sign | live | low |
 
 ## 4. Safe-retirement — where it stands (read-only check, 2026-09-13)
@@ -185,7 +204,9 @@ is filed — every finding waits for the owner's disposition.
   `routes/__tests__/retired-rail-routing.guard.test.ts` pins four
   `PAYMENT_ENTRY_POINTS` (`payments`, `x402`, `machine-payments`,
   `agent-delegations`) — a fifth agent-spend route added tomorrow is outside
-  the net until someone adds it (documented limit, not a defect).
+  the net until someone adds it; this limit is **not** among the nine the
+  guard documents (its comment at `:266` also says "five pinned entry
+  points" against a four-element array) — a small `new-task` (B13).
 - Remaining: #2851 (drop `self_sign_agents`, `self_sign_payment_intents`,
   `owner_aliases`; waits on the operator census on #1440) and the naming P3
   #2911 (rename `user_safes` → `smart_accounts` + columns, quiesced deploy).
@@ -193,8 +214,11 @@ is filed — every finding waits for the owner's disposition.
   migrations and say which"; **recommendation: #2851 first**, so #2911 never
   renames a relation that is about to be dropped.
 - No fail-open path found; the explorer's "no bug candidates" matched my
-  spot-checks (`git grep "process.env.SAFE" -- packages/backend/src` → 0;
-  `execution_rail` resolved by one query only).
+  spot-checks (`git grep "process.env.SAFE" -- packages/backend/src` → 0; the
+  rail *decision* has one resolver — `ExecutionRailDecision` is exactly
+  `delegation` plus two `retired_*` arms, pinned by
+  `packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts`; the
+  column itself is read by 8 repository files, which is not the claim).
 
 ## 5. Proposals (features and improvements), ranked by evidence
 
@@ -252,7 +276,7 @@ is filed — every finding waits for the owner's disposition.
 
 1. F1–F3: epic each (via `new-task`'s Epics section), or fold F1 into the
    naming epic's P5 and F2/F3 into one "agent response contract" epic?
-2. B1–B12: file as `new-task`s now, or bundle B1/B6 (catalog) and B7/B8
+2. B1–B13: file as `new-task`s now, or bundle B1/B6 (catalog) and B7/B8
    (demo merchant) into two PRs?
 3. Proposals 4, 7, 8, 9: which (if any) to take into the backlog as
    features.

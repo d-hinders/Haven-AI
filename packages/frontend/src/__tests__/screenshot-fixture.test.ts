@@ -773,6 +773,62 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       }
     })
 
+    describe('settings-accounting (#2868)', () => {
+      const settings = scenarioWithApi('settings-accounting') as StagedScenarioShape
+      afterEach(() => settings.stage('connected'))
+      const rowOf = () =>
+        (settings.api('/accounting/connections', 'GET') as { connections: Record<string, unknown>[] }).connections[0]
+
+      it('serves every one of the five connection states, each under its own stage, plus the first-connect return', () => {
+        const seen: Record<string, unknown> = {}
+        for (const stage of Object.keys(settings.stages)) {
+          settings.stage(stage)
+          seen[stage] = rowOf().status
+        }
+        expect(seen).toEqual({
+          connected: 'connected',
+          'needs-reauthorisation': 'needs_reauthorisation',
+          'scope-missing': 'scope_missing',
+          revoked: 'revoked_at_provider',
+          disconnected: 'disconnected',
+          'first-connect': 'connected',
+        })
+      })
+
+      it('the scope-missing stage NAMES the missing scopes, derived against requiredScopes (#2865)', () => {
+        settings.stage('scope-missing')
+        const row = rowOf() as { grantedScope: string; missingScopes: string[] }
+        const required = (fixtureFor('/accounting/providers') as { providers: { id: string; requiredScopes: string[] }[] })
+          .providers.find((p) => p.id === 'fortnox')!.requiredScopes
+        const granted = row.grantedScope.split(' ')
+        expect(row.missingScopes).toEqual(required.filter((scope) => !granted.includes(scope)))
+        expect(row.missingScopes.length).toBeGreaterThan(0)
+      })
+
+      it('the first-connect stage is connected, the destination, and has never pushed — what opens the backfill choice', () => {
+        settings.stage('first-connect')
+        expect(rowOf()).toMatchObject({ status: 'connected', isActiveDestination: true, lastPushAt: null })
+      })
+
+      it('a disconnected row keeps its settings for the reconnect and drops the active flag (#2862/#2867)', () => {
+        settings.stage('disconnected')
+        expect(rowOf()).toMatchObject({ isActiveDestination: false, grantedScope: null, tokenExpiresAt: null })
+        expect((rowOf() as { settings: unknown }).settings).toEqual({ suggestedAccount: '6540', autoFeed: true })
+      })
+
+      it('answers only the connections route in every stage', () => {
+        for (const stage of Object.keys(settings.stages)) {
+          settings.stage(stage)
+          expect(settings.api('/accounting/providers', 'GET'), stage).toBeUndefined()
+          expect(settings.api('/auth/me', 'GET'), stage).toBeUndefined()
+        }
+      })
+
+      it('refuses an unknown stage', () => {
+        expect(() => settings.stage('connected-with-company')).toThrow(/unknown stage/)
+      })
+    })
+
     it('refuses an unknown stage instead of serving the previous one (#1725)', () => {
       // A typo'd stage name that silently left the fixture where it was would
       // shoot the wrong state under the right filename — the exact

@@ -19,6 +19,11 @@ export const en = {
     /** Accessible name for the badge link — the label, then where it goes. */
     openAccounting: (label: string) => `${label}. Open accounting.`,
   },
+  /** The `/accounting` feed page's pointer to where the connection lives (#2868). */
+  accountingPage: {
+    manageInSettings: 'Manage your accounting connection in Settings.',
+    openSettings: 'Open Settings',
+  },
   settings: {
     title: 'Settings',
     subtitle: 'Manage preferences, account access, notifications, and data controls.',
@@ -72,6 +77,111 @@ export const en = {
       sessionsDetail: 'Review signed-in devices and revoke sessions.',
       exitPathLabel: 'Your exit path',
       exitPathDetail: 'Inspect and revoke your agent budgets directly on-chain — without Haven. Opens the independent exit page.',
+    },
+
+    /**
+     * The Accounting connections card (#2868, epic #2858). Copy follows the
+     * accounting guardrail: a payment APPEARS in the ledger with its payment
+     * evidence attached and the accountant books it — Haven never books,
+     * codes or asserts anything.
+     */
+    accounting: {
+      title: 'Accounting',
+      description:
+        'Connect the accounting tool your company uses. Settled agent payments appear there with payment evidence attached; your accountant books them.',
+      loadError: 'We could not load accounting connections. Try again in a moment.',
+      /** One line per coming-soon provider — listed, never endorsed. */
+      comingSoonDescription: {
+        accounted: 'Swedish online accounting. Not connectable yet.',
+        light: 'Accounting for small companies. Not connectable yet.',
+        igdrasil: 'Bookkeeping and invoicing. Not connectable yet.',
+        generic: 'Not connectable yet.',
+      },
+      notConfigured: 'Not available on this deployment yet.',
+      status: {
+        connected: 'Connected',
+        needs_reauthorisation: 'Sign-in expired',
+        scope_missing: 'Needs more access',
+        revoked_at_provider: 'Access revoked',
+        disconnected: 'Not connected',
+      },
+      detail: {
+        connectedTo: (company: string) => `Connected to ${company}`,
+        connectedNoCompany: 'Connected',
+        lastPush: (date: string) => `Last fed ${date}`,
+        nothingFedYet: 'Nothing fed yet',
+        needsReauthorisation: (provider: string) =>
+          `Your ${provider} sign-in has expired. Reconnect to keep feeding payments.`,
+        scopeMissing: (provider: string, scopes: string) =>
+          `${provider} needs more access than it granted (${scopes}). Reconnect to grant it.`,
+        scopeMissingUnnamed: (provider: string) =>
+          `${provider} needs more access than it granted. Reconnect to grant it.`,
+        revoked: (provider: string) => `Access was revoked in ${provider}. Reconnect to resume feeding.`,
+        disconnected: (provider: string) =>
+          `Nothing is fed to ${provider}. What was fed earlier stays in Haven.`,
+      },
+      actions: {
+        connect: 'Connect',
+        reconnect: 'Reconnect',
+        disconnect: 'Disconnect',
+        settings: 'Settings',
+        hideSettings: 'Hide settings',
+        working: 'Working…',
+      },
+      connectError: (provider: string) => `We could not start the ${provider} connection. Try again in a moment.`,
+      disconnect: {
+        title: (provider: string) => `Disconnect ${provider}?`,
+        body: (provider: string) =>
+          `Haven stops feeding payments to ${provider}. What was already fed stays in ${provider}, and the feed history stays in Haven. You can reconnect at any time.`,
+        confirm: 'Disconnect',
+        cancel: 'Keep connected',
+        error: 'We could not disconnect. Try again in a moment.',
+      },
+      settings: {
+        title: 'Feed settings',
+        suggestedAccountLabel: 'Suggested account',
+        suggestedAccountHelp:
+          'A hint carried on each fed document, such as 6540. It only suggests — it never books, and your accountant still chooses the account.',
+        suggestedAccountPlaceholder: 'e.g. 6540',
+        autoFeedLabel: 'Feed settled payments automatically',
+        autoFeedHelp:
+          'Off means manual only: payments are fed when you press Sync now on the Accounting page.',
+        save: 'Save',
+        saving: 'Saving…',
+        saved: 'Saved.',
+        invalidSuggestedAccount: 'Enter a four-digit account between 1000 and 8999, or leave it empty.',
+        invalidSetting: (key: string) => `${key} was not accepted. Check the value and try again.`,
+        error: 'We could not save these settings. Try again in a moment.',
+      },
+      backfill: {
+        title: 'Include earlier payments?',
+        intro: (provider: string) =>
+          `${provider} is connected. From now on, settled agent payments appear there with payment evidence attached; your accountant books them.`,
+        fromNow: 'Feed from now',
+        fromNowHelp: 'Only payments settled from now on are fed.',
+        since: 'Include payments since',
+        sinceHelp:
+          'Earlier payments are fed too, up to 200 at a time — press Sync now on the Accounting page for the rest.',
+        sinceLabel: 'Date (YYYY-MM-DD)',
+        confirm: 'Continue',
+        working: 'Feeding…',
+        done: (n: number) => `${n} earlier payment${n === 1 ? '' : 's'} fed.`,
+        close: 'Done',
+        errors: {
+          SINCE_INVALID: 'Enter a past date as YYYY-MM-DD, not before 2020-01-01.',
+          SINCE_NOT_EARLIER: 'That date is not earlier than what is already being fed.',
+          NOT_ACTIVE: 'This connection is not where payments are fed, so no history can be included.',
+          generic: 'We could not include earlier payments. Try again in a moment.',
+        },
+      },
+      /** What the OAuth callback redirect says on return (`?provider=…&connect=…`). */
+      outcome: {
+        connected: (provider: string) => `${provider} is connected.`,
+        denied: (provider: string) => `You declined the ${provider} consent. Nothing was connected.`,
+        unsupportedCurrency:
+          'Haven currently feeds SEK ledgers only. Choose a company that books in SEK and try again.',
+        error: (provider: string) => `We could not connect ${provider}. Try again in a moment.`,
+      },
     },
 
     data: {

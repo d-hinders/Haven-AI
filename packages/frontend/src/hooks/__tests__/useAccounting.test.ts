@@ -4,26 +4,34 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 /**
  * #2862: the accounting hooks point at the provider-generic routes
  * (`/accounting/providers`, `/accounting/connections/*`) — the
- * `/accounting/fortnox/*` router is gone. `useFortnox` keeps its surface for
- * the page (slice 10 redesigns it) but derives its status from the generic
- * listings. Headless equivalent of the browser check: the exact URLs called.
+ * `/accounting/fortnox/*` router is gone. #2868 removed `useFortnox` with the
+ * feed page's connect card (Settings owns the connection now) and added the
+ * settings PATCH and the backfill POST (#2867). Headless equivalent of the
+ * browser check: the exact URLs, methods and bodies called.
  */
 
-const { mockApiGet, mockApiPost, mockApiDelete } = vi.hoisted(() => ({
+const { mockApiGet, mockApiPost, mockApiPatch, mockApiDelete } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),
   mockApiPost: vi.fn(),
+  mockApiPatch: vi.fn(),
   mockApiDelete: vi.fn(),
 }))
 
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: (...args: unknown[]) => mockApiGet(...args),
-    post: (...args: unknown[]) => mockApiPost(...args),
-    delete: (...args: unknown[]) => mockApiDelete(...args),
-  },
-}))
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
+  return {
+    ApiRequestError: actual.ApiRequestError,
+    api: {
+      get: (...args: unknown[]) => mockApiGet(...args),
+      post: (...args: unknown[]) => mockApiPost(...args),
+      patch: (...args: unknown[]) => mockApiPatch(...args),
+      delete: (...args: unknown[]) => mockApiDelete(...args),
+    },
+  }
+})
 
-import { useAccountingConnections, useAccountingProviders, useFortnox } from '@/hooks/useAccounting'
+import { ApiRequestError } from '@/lib/api'
+import { accountingRefusal, useAccountingConnections, useAccountingProviders } from '@/hooks/useAccounting'
 
 const PROVIDERS = {
   providers: [
@@ -33,7 +41,7 @@ const PROVIDERS = {
 }
 const CONNECTED = {
   connections: [
-    { provider: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2', status: 'connected', statusReason: null, isActiveDestination: true, feedFrom: null, grantedScope: 'bookkeeping', tokenExpiresAt: '2099-01-01T00:00:00.000Z', externalCompanyName: 'Ada AB', baseCurrency: 'SEK', lastPushAt: null, lastError: null, connectedAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' },
+    { provider: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2', status: 'connected', statusReason: null, isActiveDestination: true, feedFrom: null, grantedScope: 'bookkeeping', missingScopes: [], tokenExpiresAt: '2099-01-01T00:00:00.000Z', externalCompanyId: '1', externalCompanyName: 'Ada AB', baseCurrency: 'SEK', lastPushAt: null, lastError: null, connectedAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', settings: { suggestedAccount: null, autoFeed: true } },
   ],
 }
 
@@ -83,27 +91,63 @@ describe('accounting hooks on the generic routes (#2862)', () => {
     expect(mockApiPost).toHaveBeenCalledWith('/accounting/connections/fortnox/activate')
   })
 
-  it('useFortnox derives configured/connected from the generic listings and disconnects on the generic route', async () => {
+  it('updateSettings PATCHes …/settings with the snake_case body and swaps the returned row in place', async () => {
     mockApiGet.mockImplementation(routeGet)
-    mockApiDelete.mockResolvedValue(undefined)
-    const { result } = renderHook(() => useFortnox())
+    const merged = { ...CONNECTED.connections[0], settings: { suggestedAccount: '6540', autoFeed: false } }
+    mockApiPatch.mockResolvedValue({ connection: merged })
+    const { result } = renderHook(() => useAccountingConnections())
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.status).toEqual({ configured: true, connected: true, scope: 'bookkeeping', expiresAt: '2099-01-01T00:00:00.000Z' })
-    // Nothing Fortnox-shaped is called any more.
-    for (const call of mockApiGet.mock.calls) expect(String(call[0])).not.toMatch(/accounting\/fortnox/)
 
-    await act(() => result.current.disconnect())
-    expect(mockApiDelete).toHaveBeenCalledWith('/accounting/connections/fortnox')
+    await act(() => result.current.updateSettings('fortnox', { suggested_account: '6540', auto_feed: false }))
+    expect(mockApiPatch).toHaveBeenCalledWith('/accounting/connections/fortnox/settings', {
+      suggested_account: '6540',
+      auto_feed: false,
+    })
+    // No re-list: the PATCH answer IS the row.
+    expect(mockApiGet.mock.calls.filter((c) => c[0] === '/accounting/connections')).toHaveLength(1)
+    expect(result.current.connections[0].settings).toEqual({ suggestedAccount: '6540', autoFeed: false })
   })
 
-  it('useFortnox reports not connected when the connection row is disconnected', async () => {
-    mockApiGet.mockImplementation((url: string) =>
-      url === '/accounting/connections'
-        ? Promise.resolve({ connections: [{ ...CONNECTED.connections[0], status: 'disconnected', isActiveDestination: false }] })
-        : routeGet(url),
+  it('a refused PATCH leaves the list untouched and rejects with the ApiRequestError', async () => {
+    mockApiGet.mockImplementation(routeGet)
+    mockApiPatch.mockRejectedValue(
+      new ApiRequestError('suggested_account must be a four-digit BAS account', 400, {
+        error: 'suggested_account must be a four-digit BAS account',
+        error_code: 'INVALID_SETTING',
+        key: 'suggested_account',
+      }),
     )
-    const { result } = renderHook(() => useFortnox())
+    const { result } = renderHook(() => useAccountingConnections())
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.status).toMatchObject({ configured: true, connected: false, scope: null, expiresAt: null })
+    await expect(act(() => result.current.updateSettings('fortnox', { suggested_account: '12' }))).rejects.toBeInstanceOf(ApiRequestError)
+    expect(result.current.connections[0].settings).toEqual({ suggestedAccount: null, autoFeed: true })
+  })
+
+  it('backfill POSTs …/backfill with `since` exactly as given, then re-lists', async () => {
+    mockApiGet.mockImplementation(routeGet)
+    mockApiPost.mockResolvedValue({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3 })
+    const { result } = renderHook(() => useAccountingConnections())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let answer: unknown
+    await act(async () => {
+      answer = await result.current.backfill('fortnox', '2026-01-01')
+    })
+    expect(mockApiPost).toHaveBeenCalledWith('/accounting/connections/fortnox/backfill', { since: '2026-01-01' })
+    expect(answer).toEqual({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3 })
+    expect(mockApiGet).toHaveBeenCalledWith('/accounting/connections')
+    expect(mockApiGet.mock.calls.filter((c) => c[0] === '/accounting/connections')).toHaveLength(2)
+  })
+
+  it('accountingRefusal narrows the structured body and degrades to code:null on anything else', () => {
+    expect(
+      accountingRefusal(new ApiRequestError('no', 400, { error: 'no', error_code: 'SINCE_NOT_EARLIER' })),
+    ).toEqual({ code: 'SINCE_NOT_EARLIER', key: null, message: 'no' })
+    expect(
+      accountingRefusal(new ApiRequestError('bad', 400, { error: 'bad', error_code: 'INVALID_SETTING', key: 'auto_feed' })),
+    ).toEqual({ code: 'INVALID_SETTING', key: 'auto_feed', message: 'bad' })
+    expect(accountingRefusal(new ApiRequestError('plain', 500, { error: 'plain' }))).toEqual({ code: null, key: null, message: 'plain' })
+    expect(accountingRefusal(new Error('network'))).toEqual({ code: null, key: null, message: 'network' })
+    expect(accountingRefusal('nope')).toEqual({ code: null, key: null, message: '' })
   })
 })

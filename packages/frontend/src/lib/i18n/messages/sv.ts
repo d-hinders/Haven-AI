@@ -14,6 +14,10 @@ export const sv: Messages = {
     notFed: 'Inte matad',
     openAccounting: (label: string) => `${label}. Öppna bokföring.`,
   },
+  accountingPage: {
+    manageInSettings: 'Hantera din bokföringskoppling under Inställningar.',
+    openSettings: 'Öppna Inställningar',
+  },
   settings: {
     title: 'Inställningar',
     subtitle: 'Hantera inställningar, kontoåtkomst, notiser och datakontroller.',
@@ -67,6 +71,103 @@ export const sv: Messages = {
       sessionsDetail: 'Granska inloggade enheter och återkalla sessioner.',
       exitPathLabel: 'Din exit-väg',
       exitPathDetail: 'Inspektera och återkalla dina agentbudgetar direkt på kedjan — utan Haven. Öppnar den fristående exit-sidan.',
+    },
+
+    accounting: {
+      title: 'Bokföring',
+      description:
+        'Anslut bokföringsprogrammet ditt företag använder. Avklarade agentbetalningar dyker upp där med betalningsunderlag bifogat; din redovisningskonsult bokför dem.',
+      loadError: 'Vi kunde inte läsa in bokföringskopplingar. Försök igen om en stund.',
+      comingSoonDescription: {
+        accounted: 'Svensk bokföring online. Går inte att ansluta ännu.',
+        light: 'Bokföring för små företag. Går inte att ansluta ännu.',
+        igdrasil: 'Bokföring och fakturering. Går inte att ansluta ännu.',
+        generic: 'Går inte att ansluta ännu.',
+      },
+      notConfigured: 'Inte tillgängligt i den här installationen ännu.',
+      status: {
+        connected: 'Ansluten',
+        needs_reauthorisation: 'Inloggning utgången',
+        scope_missing: 'Behöver mer åtkomst',
+        revoked_at_provider: 'Åtkomst återkallad',
+        disconnected: 'Inte ansluten',
+      },
+      detail: {
+        connectedTo: (company: string) => `Ansluten till ${company}`,
+        connectedNoCompany: 'Ansluten',
+        lastPush: (date: string) => `Senast matad ${date}`,
+        nothingFedYet: 'Inget matat ännu',
+        needsReauthorisation: (provider: string) =>
+          `Din inloggning i ${provider} har gått ut. Återanslut för att fortsätta mata betalningar.`,
+        scopeMissing: (provider: string, scopes: string) =>
+          `${provider} behöver mer åtkomst än vad som beviljades (${scopes}). Återanslut för att ge den.`,
+        scopeMissingUnnamed: (provider: string) =>
+          `${provider} behöver mer åtkomst än vad som beviljades. Återanslut för att ge den.`,
+        revoked: (provider: string) => `Åtkomsten återkallades i ${provider}. Återanslut för att mata igen.`,
+        disconnected: (provider: string) =>
+          `Inget matas till ${provider}. Det som matats tidigare finns kvar i Haven.`,
+      },
+      actions: {
+        connect: 'Anslut',
+        reconnect: 'Återanslut',
+        disconnect: 'Koppla från',
+        settings: 'Inställningar',
+        hideSettings: 'Dölj inställningar',
+        working: 'Arbetar…',
+      },
+      connectError: (provider: string) => `Vi kunde inte starta anslutningen till ${provider}. Försök igen om en stund.`,
+      disconnect: {
+        title: (provider: string) => `Koppla från ${provider}?`,
+        body: (provider: string) =>
+          `Haven slutar mata betalningar till ${provider}. Det som redan matats finns kvar i ${provider}, och matningshistoriken finns kvar i Haven. Du kan återansluta när som helst.`,
+        confirm: 'Koppla från',
+        cancel: 'Behåll anslutningen',
+        error: 'Vi kunde inte koppla från. Försök igen om en stund.',
+      },
+      settings: {
+        title: 'Matningsinställningar',
+        suggestedAccountLabel: 'Föreslaget konto',
+        suggestedAccountHelp:
+          'En ledtråd som följer med varje matat underlag, till exempel 6540. Den föreslår bara — den bokför aldrig, och din redovisningskonsult väljer fortfarande konto.',
+        suggestedAccountPlaceholder: 't.ex. 6540',
+        autoFeedLabel: 'Mata avklarade betalningar automatiskt',
+        autoFeedHelp:
+          'Av betyder endast manuellt: betalningar matas när du trycker på Synka nu på bokföringssidan.',
+        save: 'Spara',
+        saving: 'Sparar…',
+        saved: 'Sparat.',
+        invalidSuggestedAccount: 'Ange ett fyrsiffrigt konto mellan 1000 och 8999, eller lämna tomt.',
+        invalidSetting: (key: string) => `${key} godtogs inte. Kontrollera värdet och försök igen.`,
+        error: 'Vi kunde inte spara inställningarna. Försök igen om en stund.',
+      },
+      backfill: {
+        title: 'Ta med tidigare betalningar?',
+        intro: (provider: string) =>
+          `${provider} är anslutet. Från och med nu dyker avklarade agentbetalningar upp där med betalningsunderlag bifogat; din redovisningskonsult bokför dem.`,
+        fromNow: 'Mata från och med nu',
+        fromNowHelp: 'Bara betalningar som avklaras från och med nu matas.',
+        since: 'Ta med betalningar sedan',
+        sinceHelp:
+          'Tidigare betalningar matas också, upp till 200 åt gången — tryck på Synka nu på bokföringssidan för resten.',
+        sinceLabel: 'Datum (ÅÅÅÅ-MM-DD)',
+        confirm: 'Fortsätt',
+        working: 'Matar…',
+        done: (n: number) => `${n} tidigare betalning${n === 1 ? '' : 'ar'} matade.`,
+        close: 'Klart',
+        errors: {
+          SINCE_INVALID: 'Ange ett datum bakåt i tiden som ÅÅÅÅ-MM-DD, inte före 2020-01-01.',
+          SINCE_NOT_EARLIER: 'Datumet är inte tidigare än det som redan matas.',
+          NOT_ACTIVE: 'Den här kopplingen är inte dit betalningar matas, så ingen historik kan tas med.',
+          generic: 'Vi kunde inte ta med tidigare betalningar. Försök igen om en stund.',
+        },
+      },
+      outcome: {
+        connected: (provider: string) => `${provider} är anslutet.`,
+        denied: (provider: string) => `Du avböjde samtycket för ${provider}. Inget anslöts.`,
+        unsupportedCurrency:
+          'Haven matar för närvarande bara SEK-bokföring. Välj ett företag som bokför i SEK och försök igen.',
+        error: (provider: string) => `Vi kunde inte ansluta ${provider}. Försök igen om en stund.`,
+      },
     },
 
     data: {

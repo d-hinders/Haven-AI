@@ -147,3 +147,23 @@ describe('Button accessible name (#2203)', () => {
     expect(screen.getByRole('button', { name: 'Recover funds' })).toBeTruthy()
   })
 })
+
+describe('Button disclosure pair (#2903)', () => {
+  it('carries aria-expanded and aria-controls on the button branch', () => {
+    render(
+      <Button aria-expanded={false} aria-controls="feed-settings">
+        Settings
+      </Button>,
+    )
+    const button = screen.getByRole('button', { name: 'Settings' })
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(button.getAttribute('aria-controls')).toBe('feed-settings')
+  })
+
+  it('emits neither when the caller passes neither', () => {
+    render(<Button>Save</Button>)
+    const button = screen.getByRole('button', { name: 'Save' })
+    expect(button.hasAttribute('aria-expanded')).toBe(false)
+    expect(button.hasAttribute('aria-controls')).toBe(false)
+  })
+})

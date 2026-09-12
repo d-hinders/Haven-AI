@@ -8,6 +8,11 @@ covers:
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
   - packages/backend/src/infra/repositories/accounting-connections.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
+  - packages/frontend/src/app/(authenticated)/settings/SettingsClient.tsx
+  - packages/frontend/src/components/accounting/ConnectionsCard.tsx
+  - packages/frontend/src/components/accounting/ConnectionRow.tsx
+  - packages/frontend/src/components/accounting/ConnectionSettings.tsx
+  - packages/frontend/src/components/accounting/BackfillDialog.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/hooks/useAccounting.ts
 last-verified: "2026-09-12"
@@ -192,7 +197,8 @@ attest it. Booking assigns `VoucherSeries`/`VoucherNumber`/`VoucherYear`.
 
 ## Where it shows
 
-Two dashboard surfaces read the ledger, both read-only:
+Two dashboard surfaces read the ledger, both read-only (the connection
+itself is managed on a third — Settings, next section):
 
 - **`/accounting`** — every sync row, with **Check in Fortnox** and the
   re-open action (the section below).
@@ -206,6 +212,42 @@ Two dashboard surfaces read the ledger, both read-only:
   entitled / not connected / never fed" (rows before `feed_from`), never
   "failed". No *Booked* state: the ledger stores no verify result, and the
   list makes no live Fortnox call.
+
+## Where the user manages it (#2868)
+
+The connection lives in **Settings → Accounting**
+(`packages/frontend/src/components/accounting/ConnectionsCard.tsx`, mounted
+by `SettingsClient.tsx`; owner decision 2026-09-11): every provider from
+`GET /accounting/providers` as a row — Fortnox live, Accounted / Light /
+Igdrasil listed as *Coming soon* with a disabled Connect — and the actions
+**Connect / Reconnect / Disconnect / Settings**. The row's state is the
+connection's `status`:
+
+| `status` | chip | action |
+|---|---|---|
+| no row / `disconnected` | Not connected | Connect |
+| `connected` | Connected · "Connected to \<company\> · Last fed \<date\>" | Settings (inline: suggested account, auto-feed) + Disconnect |
+| `needs_reauthorisation` | Sign-in expired | Reconnect + Disconnect |
+| `scope_missing` | Needs more access · names `missingScopes` (unnamed sentence when the array is empty) | Reconnect + Disconnect |
+| `revoked_at_provider` | Access revoked | Reconnect + Disconnect |
+
+Reconnect is the same `connect-url` + callback as Connect (#2865). Disconnect
+confirms first and says that what was fed stays in the ledger and the feed
+history stays in Haven. **Settings** is `PATCH …/settings`; a 400
+`INVALID_SETTING` lands inline next to the field, naming the key
+(`ConnectionSettings.tsx`). The OAuth callback still redirects to
+`/accounting?provider=…&connect=…`; the feed page forwards that query to
+`/settings` unchanged, where a `connected` return on a row that has never
+pushed (`lastPushAt IS NULL`) opens the **backfill choice**
+(`BackfillDialog.tsx`: *Feed from now*, the default and no request, or
+*Include payments since \<date\>*, which POSTs `{ since: "YYYY-MM-DD" }` and
+shows `SINCE_INVALID` / `SINCE_NOT_EARLIER` / `NOT_ACTIVE` inline); `denied`
+and `error` become a sentence beside the card, `reason=unsupported_currency`
+its own ("Haven currently feeds SEK ledgers only"). A re-consent on a row
+with history gets no dialog — its floor stands. The `/accounting` page keeps
+the sync rows, **Sync now**, **Check in Fortnox** and the re-open, and points
+at Settings for the connection. There is no mobile-specific layout (owner
+decision): the same card works in a phone browser.
 
 ## Verifying that a payment landed in Fortnox
 
@@ -268,7 +310,7 @@ Work the sync row's `status` on `/accounting` (or `accounting_feed_syncs`):
 Common causes, from live experience:
 
 - **Token expired / not connected**: pushes skip with `not_connected`. The
-  dashboard shows *Not connected* — reconnect via the Connect button.
+  dashboard shows *Not connected* — reconnect from Settings → Accounting.
 - **Scope widened** (the `connectfile` lesson, 2026-07-16): connections
   consented before a scope was added still push invoices but fail file
   connections with Fortnox error `[2000663]` — the row is `pushed` with a

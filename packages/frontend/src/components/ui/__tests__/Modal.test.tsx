@@ -20,6 +20,21 @@ function ModalHarness() {
 }
 
 describe('Modal', () => {
+  it('puts `panelTestId` on the panel, not on the fixed-inset role="dialog" wrapper (#2903)', () => {
+    render(
+      <Modal open onClose={() => {}} title="Example modal" panelTestId="example-panel">
+        <p>Body</p>
+      </Modal>,
+    )
+    const panel = screen.getByTestId('example-panel')
+    const wrapper = screen.getByRole('dialog')
+    expect(panel).not.toBe(wrapper)
+    expect(wrapper).toContainElement(panel)
+    expect(wrapper).toHaveClass('fixed', 'inset-0')
+    expect(panel).not.toHaveClass('fixed')
+    expect(panel).toHaveTextContent('Example modal')
+  })
+
   it('traps focus, closes with Escape, and returns focus to its opener', async () => {
     render(<ModalHarness />)
 

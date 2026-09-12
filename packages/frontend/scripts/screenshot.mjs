@@ -1125,6 +1125,91 @@ const FIXTURE_CONTACTS = [
  * (already stripped of the `/api` prefix), or null to fall through to the
  * generic empty shape. Pure — unit-testable without a browser.
  */
+/**
+ * Accounting connections (#2868; backend #2862–#2867). The registry lists
+ * Fortnox live and three coming-soon providers exactly as
+ * `GET /accounting/providers` does; the connection row is the CONNECTED state
+ * with a company, a push and a suggested account — the row the Settings card
+ * renders by default. The other four states are stages of the
+ * `settings-accounting` scenario below, spread off this row, so the shape is
+ * declared once. `fixture-shape-parity` holds this and the e2e fixture's
+ * `accountingConnection` to the same keys.
+ */
+export const FIXTURE_ACCOUNTING_PROVIDERS = [
+  {
+    id: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2',
+    capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
+    availability: 'live', requiredScopes: ['bookkeeping', 'companyinformation', 'archive'], configured: true,
+  },
+  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+    id: displayName.toLowerCase(), displayName, authKind: 'oauth2',
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: false },
+    availability: 'coming_soon', requiredScopes: [], configured: false,
+  })),
+]
+export const FIXTURE_ACCOUNTING_CONNECTION = {
+  provider: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2',
+  status: 'connected', statusReason: null, isActiveDestination: true,
+  feedFrom: '2026-06-01T08:00:00.000Z',
+  grantedScope: 'bookkeeping companyinformation archive', missingScopes: [],
+  tokenExpiresAt: '2026-06-02T08:00:00.000Z',
+  externalCompanyId: '1234567', externalCompanyName: 'Ada Lovelace AB', baseCurrency: 'SEK',
+  // Absolute, so the rendered "Last fed 10 Jun 2026" is capture-stable.
+  lastPushAt: '2026-06-10T14:30:00.000Z', lastError: null,
+  connectedAt: '2026-06-01T08:00:00.000Z', updatedAt: '2026-06-10T14:30:00.000Z',
+  settings: { suggestedAccount: '6540', autoFeed: true },
+}
+
+/**
+ * `GET /accounting/feed/status` (#2903 review). `/accounting` returns null
+ * from its render unless `hosted && flagEnabled`, so before this key the
+ * harness had no evidence of the feed page at all — under
+ * `SCREENSHOT_FIXTURE` it rendered nothing, and nothing looks like a capture
+ * of an empty page. Ready and entitled, connected to the same company as the
+ * connection row, one pushed row (with the invoice number the page extracts
+ * from `external_ref`) and one retryable failure so both chips and the
+ * Check-in-Fortnox action render. Keys mirror the e2e `accountingFeedStatus`;
+ * `fixture-shape-parity` holds them together.
+ */
+export const FIXTURE_ACCOUNTING_FEED_SYNC = {
+  id: '9d1f4c0a-6b2e-4f3a-9c8d-1e2f3a4b5c6d',
+  user_id: '11111111-1111-4111-8111-111111111111',
+  provider: 'fortnox',
+  payment_id: 'pay_01HZX8KQ4M2N3P5R7T9V1W3Y5A',
+  external_ref: 'fortnox:supplierinvoice:1042',
+  status: 'pushed',
+  error: null,
+  attempts: 1,
+  created_at: '2026-06-10T14:30:00.000Z',
+  updated_at: '2026-06-10T14:30:00.000Z',
+}
+export const FIXTURE_ACCOUNTING_FEED_STATUS = {
+  hosted: true,
+  flagEnabled: true,
+  liveSyncReady: true,
+  entitled: true,
+  entitlementMode: 'all',
+  available: true,
+  connected: true,
+  companyName: FIXTURE_ACCOUNTING_CONNECTION.externalCompanyName,
+  missingScopes: [],
+  syncs: [
+    FIXTURE_ACCOUNTING_FEED_SYNC,
+    {
+      ...FIXTURE_ACCOUNTING_FEED_SYNC,
+      id: '2a7c9e1b-3d5f-4a6c-8e0b-2f4d6a8c0e1f',
+      payment_id: 'pay_01HZX8M0R6S8U0W2Y4A6C8E0G2',
+      external_ref: null,
+      status: 'failed',
+      error: 'Fortnox answered 503 — will retry',
+      attempts: 2,
+      created_at: '2026-06-11T11:00:00.000Z',
+      updated_at: '2026-06-11T11:05:00.000Z',
+    },
+  ],
+  counts: { pending: 0, failed: 1, exhausted: 0 },
+}
+
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
@@ -1138,6 +1223,9 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   // endpoint" this fixture used to claim stopped being true with the table
   // drop. Unkeyed paths fall through to FIXTURE_EMPTY_FALLBACK (#1993).
   if (pathname === '/contacts') return { contacts: FIXTURE_CONTACTS }
+  if (pathname === '/accounting/providers') return { providers: FIXTURE_ACCOUNTING_PROVIDERS }
+  if (pathname === '/accounting/connections') return { connections: [FIXTURE_ACCOUNTING_CONNECTION] }
+  if (pathname === '/accounting/feed/status') return FIXTURE_ACCOUNTING_FEED_STATUS
   if (pathname === '/agent-activity/feed') {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
   }
@@ -1278,6 +1366,11 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // reads, which is why it looked covered. Found by haven-design-reviewer on
   // #2295 while trying to capture the surface that issue changes.
   entries: [],
+  // #2868: `useAccountingProviders` / `useAccountingConnections` do
+  // `setProviders(res.providers)` / `setConnections(res.connections)`; under
+  // `SCREENSHOT_FIXTURE=empty` the Settings page reads these, and a missing
+  // key is the #1075 `.map` crash one key over.
+  providers: [], connections: [],
 }
 
 function slug(route) {
@@ -2261,7 +2354,215 @@ function connectorRepairHintScenarios() {
   }
 }
 
+/**
+ * Settings → Accounting connection states (#2868). One scenario per surface,
+ * per the registry's convention; the five states are stages, each a spread
+ * off the shared CONNECTED row so only the fields that make the state differ
+ * are stated. `null` is "no row at all" — the very first visit, which the
+ * card renders as disconnected.
+ *
+ * Every value here is one the backend can produce (#2120):
+ *   needs-reauthorisation  `statusReason` as `token lifecycle` (#2863) writes it
+ *                          when the refresh is refused; `isActiveDestination`
+ *                          stays true — the row is still the destination, it
+ *                          just cannot push.
+ *   scope-missing          `missingScopes` derived against `requiredScopes`
+ *                          (#2865): the grant carries `bookkeeping` only.
+ *   revoked                #2863: the provider answered that the grant is gone.
+ *   disconnected           the row DELETE keeps (#2862): secrets cleared,
+ *                          settings kept for the reconnect, the flag dropped.
+ */
+const SETTINGS_ACCOUNTING_STAGES = {
+  connected: FIXTURE_ACCOUNTING_CONNECTION,
+  'needs-reauthorisation': {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'needs_reauthorisation',
+    statusReason: 'refresh token refused by Fortnox',
+    tokenExpiresAt: '2026-06-02T08:00:00.000Z',
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  'scope-missing': {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'scope_missing',
+    statusReason: 'granted scope is missing companyinformation, archive',
+    grantedScope: 'bookkeeping',
+    missingScopes: ['companyinformation', 'archive'],
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  revoked: {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'revoked_at_provider',
+    statusReason: 'Fortnox reports the grant as revoked',
+    isActiveDestination: false,
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  disconnected: {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'disconnected',
+    statusReason: 'disconnected by user',
+    isActiveDestination: false,
+    grantedScope: null,
+    tokenExpiresAt: null,
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  // The OAuth return on a FIRST connect: connected, the destination, nothing
+  // pushed yet. `?provider=fortnox&connect=connected` on top of this row is
+  // what opens the backfill choice.
+  'first-connect': {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    lastPushAt: null,
+    feedFrom: '2026-06-12T03:00:00.000Z',
+    connectedAt: '2026-06-12T03:00:00.000Z',
+    updatedAt: '2026-06-12T03:00:00.000Z',
+    settings: { suggestedAccount: null, autoFeed: true },
+  },
+}
+let settingsAccountingStage = 'connected'
+function setSettingsAccountingStage(next) {
+  if (!(next in SETTINGS_ACCOUNTING_STAGES)) {
+    throw new Error(
+      `settings-accounting: unknown stage "${next}" — expected one of ` +
+        Object.keys(SETTINGS_ACCOUNTING_STAGES).join(', '),
+    )
+  }
+  settingsAccountingStage = next
+}
+
 export const SCENARIOS = {
+  'settings-accounting': {
+    description:
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868)',
+    stages: SETTINGS_ACCOUNTING_STAGES,
+    /** Exposed so the fixture-contract test can pin each stage. */
+    stage: setSettingsAccountingStage,
+    api(apiPath) {
+      if (apiPath === '/accounting/connections') {
+        return { connections: [SETTINGS_ACCOUNTING_STAGES[settingsAccountingStage]] }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // Module state, reset per viewport — see account-backup-recovery.
+      setSettingsAccountingStage('connected')
+
+      const heading = page.getByRole('heading', { name: 'Accounting', exact: true })
+      // The section root that owns the heading (`SettingsSection` renders
+      // `<section>`; the heading is its `Card.Header` h2). Rows are
+      // `SettingsRow`s, which stack their actions under the text below `sm`
+      // — the mobile capture shows that stacking, not a mobile layout.
+      const card = page.locator('section', { has: heading })
+      const fortnoxActions = card.getByTestId('connection-actions-fortnox')
+
+      const settle = async (navigate) => {
+        await navigate()
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+        await heading.waitFor({ timeout: 15_000 })
+        // The rows, not the heading: the card shows a skeleton until BOTH
+        // listings answer, and the heading renders over the skeleton too.
+        await fortnoxActions.waitFor({ timeout: 15_000 })
+      }
+      const openStage = async (stage, query = '') => {
+        setSettingsAccountingStage(stage)
+        await settle(() => page.goto(`${BASE_URL}/settings${query}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
+      }
+
+      await settle(() => page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle', timeout: 30_000 }))
+
+      // Each stage waits on its own distinguishing copy AND its action, and
+      // refuses the neighbouring states' actions — a stage that quietly
+      // rendered the previous one would otherwise file under the wrong name.
+      const expectState = async (stage, chip, action, refused) => {
+        await card.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
+        await fortnoxActions.getByRole('button', { name: action, exact: true }).waitFor({ timeout: 15_000 })
+        for (const name of refused) {
+          await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
+        }
+        // The coming-soon rows are part of every state.
+        await card.getByTestId('connection-row-igdrasil').getByText('Coming soon').waitFor({ timeout: 15_000 })
+        await card.scrollIntoViewIfNeeded()
+        await shoot(card, stage)
+      }
+
+      // ── connected ─────────────────────────────────────────────────────────
+      await card.getByText(/Connected to Ada Lovelace AB/).waitFor({ timeout: 15_000 })
+      await expectState('connected', 'Connected', 'Settings', ['Connect', 'Reconnect'])
+
+      // ── the inline feed settings, open ────────────────────────────────────
+      await fortnoxActions.getByRole('button', { name: 'Settings', exact: true }).click()
+      const form = card.getByTestId('connection-settings-fortnox')
+      await form.waitFor({ timeout: 15_000 })
+      await form.getByText(/It only suggests — it never books/).waitFor({ timeout: 15_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'settings-open')
+
+      // ── needs_reauthorisation ─────────────────────────────────────────────
+      await openStage('needs-reauthorisation')
+      await card.getByText(/Your Fortnox sign-in has expired/).waitFor({ timeout: 15_000 })
+      await expectState('needs-reauthorisation', 'Sign-in expired', 'Reconnect', ['Connect', 'Settings'])
+
+      // ── scope_missing ─────────────────────────────────────────────────────
+      await openStage('scope-missing')
+      // Human labels, not the raw identifiers (#2903 review).
+      await card.getByText(/\(company information, archive\)/).waitFor({ timeout: 15_000 })
+      await expectState('scope-missing', 'Needs more access', 'Reconnect', ['Connect', 'Settings'])
+
+      // ── revoked_at_provider ───────────────────────────────────────────────
+      await openStage('revoked')
+      await card.getByText(/Access was revoked in Fortnox/).waitFor({ timeout: 15_000 })
+      await expectState('revoked', 'Access revoked', 'Reconnect', ['Connect', 'Settings'])
+
+      // ── disconnected ──────────────────────────────────────────────────────
+      await openStage('disconnected')
+      await card.getByText(/What was fed earlier stays in Haven/).waitFor({ timeout: 15_000 })
+      await expectState('disconnected', 'Not connected', 'Connect', ['Reconnect', 'Settings', 'Disconnect'])
+
+      // ── the backfill choice on a first connect ────────────────────────────
+      await openStage('first-connect', '?provider=fortnox&connect=connected')
+      // The PANEL, not `role="dialog"`: in `ui/Modal` that role sits on the
+      // `fixed inset-0` wrapper, so a clip of it is the whole page (#2903).
+      const dialog = page.getByTestId('backfill-dialog')
+      await dialog.getByRole('heading', { name: 'Include earlier payments?' }).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('radio', { name: /Feed from now/ }).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('button', { name: 'Not now', exact: true }).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'backfill-dialog')
+    },
+  },
+
+  /**
+   * The `/accounting` feed page after #2868 (#2903 review): the connection
+   * row that now only points at Settings, the Synced transactions list with
+   * a pushed row (invoice number + Check in Fortnox) and a failed one.
+   * Needs the feed-status fixture above — without `hosted && flagEnabled`
+   * the page renders null, which is exactly why there was no evidence.
+   */
+  'accounting-feed': {
+    description:
+      'The /accounting feed page — connection pointer to Settings, synced transactions with a pushed and a failed row (#2868, #2903)',
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.evaluate(() => document.fonts.ready)
+      await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const main = page.locator('main').first()
+      // Each claim the capture is evidence of, waited on: the pointer to
+      // Settings (Connect / Disconnect must be ABSENT), both sync chips, and
+      // the invoice number the page extracts from `external_ref`.
+      await main.getByRole('link', { name: 'Open Settings', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Manage your accounting connection in Settings.').waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · Connect')
+      await refuseIfPresent(main.getByRole('button', { name: 'Disconnect', exact: true }), 'accounting-feed · Disconnect')
+      await main.getByRole('heading', { name: 'Synced transactions' }).waitFor({ timeout: 15_000 })
+      await main.getByText('Fortnox invoice 1042', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByRole('button', { name: 'Check in Fortnox', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Synced', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Failed', { exact: true }).waitFor({ timeout: 15_000 })
+      await shoot(main, 'feed')
+    },
+  },
+
   /**
    * #2526: the /device approval screen's REVIEWING state — the one that shows
    * attacker-chosen text and the two decision buttons.

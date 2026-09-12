@@ -187,6 +187,106 @@ export const dashboardOverview = {
   transactions: [dashboardTransaction],
 }
 
+/**
+ * Accounting connections (#2868, backend #2862–#2867). `GET
+ * /accounting/providers` lists Fortnox live and the three coming-soon
+ * providers; the connection row is exported so a spec can seed any of the
+ * five states with a spread (`{ ...accountingConnection, status: '…' }`).
+ * The screenshot harness carries the same shapes — `fixture-shape-parity`
+ * holds the two together.
+ */
+export const accountingProvider = {
+  id: 'fortnox',
+  displayName: 'Fortnox',
+  authKind: 'oauth2',
+  capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
+  availability: 'live',
+  requiredScopes: ['bookkeeping', 'companyinformation', 'archive'],
+  configured: true,
+}
+
+export const accountingProviders = [
+  accountingProvider,
+  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+    ...accountingProvider,
+    id: displayName.toLowerCase(),
+    displayName,
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: false },
+    availability: 'coming_soon',
+    requiredScopes: [],
+    configured: false,
+  })),
+]
+
+export const accountingConnection = {
+  provider: 'fortnox',
+  displayName: 'Fortnox',
+  authKind: 'oauth2',
+  status: 'connected',
+  statusReason: null,
+  isActiveDestination: true,
+  feedFrom: '2026-05-01T10:00:00.000Z',
+  grantedScope: 'bookkeeping companyinformation archive',
+  missingScopes: [] as string[],
+  tokenExpiresAt: '2026-05-01T11:00:00.000Z',
+  externalCompanyId: '1234567',
+  externalCompanyName: 'Ada Lovelace AB',
+  baseCurrency: 'SEK',
+  lastPushAt: '2026-05-02T09:15:00.000Z',
+  lastError: null,
+  connectedAt: '2026-05-01T10:00:00.000Z',
+  updatedAt: '2026-05-02T09:15:00.000Z',
+  settings: { suggestedAccount: '6540', autoFeed: true },
+}
+
+/**
+ * `GET /accounting/feed/status` (#2903 review): the `/accounting` feed page
+ * renders NOTHING unless `hosted && flagEnabled`, so a harness without this
+ * answer has no evidence of that page at all. Ready, entitled, connected to
+ * the company above, with one pushed row and one retryable failure so both
+ * chips render. The screenshot harness carries the same shape —
+ * `fixture-shape-parity` holds the two together.
+ */
+export const accountingFeedSync = {
+  id: '9d1f4c0a-6b2e-4f3a-9c8d-1e2f3a4b5c6d',
+  user_id: '11111111-1111-4111-8111-111111111111',
+  provider: 'fortnox',
+  payment_id: 'pay_01HZX8KQ4M2N3P5R7T9V1W3Y5A',
+  external_ref: 'fortnox:supplierinvoice:1042',
+  status: 'pushed',
+  error: null as string | null,
+  attempts: 1,
+  created_at: '2026-05-02T09:15:00.000Z',
+  updated_at: '2026-05-02T09:15:00.000Z',
+}
+
+export const accountingFeedStatus = {
+  hosted: true,
+  flagEnabled: true,
+  liveSyncReady: true,
+  entitled: true,
+  entitlementMode: 'all',
+  available: true,
+  connected: true,
+  companyName: accountingConnection.externalCompanyName as string | null,
+  missingScopes: [] as string[],
+  syncs: [
+    accountingFeedSync,
+    {
+      ...accountingFeedSync,
+      id: '2a7c9e1b-3d5f-4a6c-8e0b-2f4d6a8c0e1f',
+      payment_id: 'pay_01HZX8M0R6S8U0W2Y4A6C8E0G2',
+      external_ref: null,
+      status: 'failed',
+      error: 'Fortnox answered 503 — will retry',
+      attempts: 2,
+      created_at: '2026-05-03T11:00:00.000Z',
+      updated_at: '2026-05-03T11:05:00.000Z',
+    },
+  ],
+  counts: { pending: 0, failed: 1, exhausted: 0 },
+}
+
 type JsonValue = Record<string, unknown> | unknown[]
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {
@@ -520,6 +620,21 @@ export async function mockHavenApi(page: Page) {
     // No `/approvals` handler: #1989 deleted the route and #2055 deregistered
     // the backend endpoint. A mock for a dead endpoint intercepts nothing and
     // reads as coverage of a flow that cannot happen (#1993).
+
+    if (method === 'GET' && path === '/accounting/providers') {
+      await fulfillJson(route, { providers: accountingProviders })
+      return
+    }
+
+    if (method === 'GET' && path === '/accounting/connections') {
+      await fulfillJson(route, { connections: [accountingConnection] })
+      return
+    }
+
+    if (method === 'GET' && path === '/accounting/feed/status') {
+      await fulfillJson(route, accountingFeedStatus)
+      return
+    }
 
     if (method === 'GET' && path === '/user/owners') {
       await fulfillJson(route, {

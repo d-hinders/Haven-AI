@@ -1,0 +1,24 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "GET /agents/{id}",
+  "request": {
+    "method": "GET",
+    "url": "/agents/4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34"
+  },
+  "status": 200,
+  "body": {
+    "id": "4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34",
+    "name": "Research Agent",
+    "description": null,
+    "delegate_address": "0x1111111111111111111111111111111111111111",
+    "safe_id": "b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16",
+    "safe_address": "0x2222222222222222222222222222222222222222",
+    "safe_name": "Main wallet",
+    "safe_chain_id": 8453,
+    "api_key_prefix": "sk_agent_abc",
+    "status": "active",
+    "created_at": "2026-05-25T12:00:00.000Z",
+    "mcp_last_seen_at": null,
+    "allowances": []
+  }
+}

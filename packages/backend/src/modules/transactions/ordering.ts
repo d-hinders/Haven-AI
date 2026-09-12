@@ -39,10 +39,10 @@ export function enrichedTransactionIdentityKey(tx: EnrichedTransaction): string 
 
 export function paymentAgentIdentityKey(
   txHash: string,
-  safeId: string,
+  accountId: string,
   chainId: number,
 ): string {
-  return `${txHash.toLowerCase()}:${safeId}:${chainId}`
+  return `${txHash.toLowerCase()}:${accountId}:${chainId}`
 }
 
 /** `Date.parse` an ISO timestamp to epoch seconds; `0` on a bad string. */

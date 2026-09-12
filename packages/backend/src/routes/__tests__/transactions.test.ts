@@ -9,7 +9,7 @@ import {
   type EnrichedTransaction,
   buildTransactionCacheKey,
   enrichTransactionsWithAgents,
-  fetchSafeTransactions,
+  fetchAccountTransactions,
   mergeX402Transactions,
 } from '../../modules/transactions/index.js'
 import pool from '../../db.js'

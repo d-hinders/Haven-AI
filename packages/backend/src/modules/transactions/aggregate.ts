@@ -29,8 +29,8 @@ import { createCache } from '../../platform/cache.js'
 import { buildTransactionCacheKey } from './cache-key.js'
 import { compareTransactions, transactionDedupKey } from './ordering.js'
 import type {
-  FetchSafeTransactionsParams,
-  FetchSafeTransactionsResult,
+  FetchAccountTransactionsParams,
+  FetchAccountTransactionsResult,
   Transaction,
 } from './types.js'
 
@@ -46,18 +46,18 @@ interface CachedRead {
 }
 
 const txCache = createCache<CachedRead>(30_000)
-const txInflight = new Map<string, Promise<FetchSafeTransactionsResult>>()
+const txInflight = new Map<string, Promise<FetchAccountTransactionsResult>>()
 
-export async function fetchSafeTransactions({
-  safeId,
-  safeAddress,
+export async function fetchAccountTransactions({
+  accountId,
+  accountAddress,
   chainId,
   log,
   fresh = false,
-}: FetchSafeTransactionsParams): Promise<FetchSafeTransactionsResult> {
+}: FetchAccountTransactionsParams): Promise<FetchAccountTransactionsResult> {
   const chain = getChain(chainId)
   const nativeToken = Object.values(chain.tokens).find((token) => token.address === null)!
-  const cacheKey = buildTransactionCacheKey(chainId, safeAddress)
+  const cacheKey = buildTransactionCacheKey(chainId, accountAddress)
 
   if (fresh) {
     txCache.delete(cacheKey)
@@ -74,25 +74,25 @@ export async function fetchSafeTransactions({
   }
 
   const requestPromise = (async () => {
-    const addrLower = safeAddress.toLowerCase()
+    const addrLower = accountAddress.toLowerCase()
     let hadFailures = false
     const logFail =
       <T,>(kind: string) =>
       (err: unknown) => {
         hadFailures = true
-        log.warn({ err, chainId, safeId, safeAddress, kind }, 'Explorer API fetch failed')
+        log.warn({ err, chainId, accountId, accountAddress, kind }, 'Explorer API fetch failed')
         // A failed leg is unknown, not complete: it must not contribute a
         // `hasMore: true` the feed would report as truncation, nor mask one.
         return { rows: [] as T[], hasMore: false }
       }
 
-    const normal = await fetchNormalTransactions(chainId, safeAddress).catch(
+    const normal = await fetchNormalTransactions(chainId, accountAddress).catch(
       logFail<RawNormalTx>('normal'),
     )
-    const internal = await fetchInternalTransactions(chainId, safeAddress).catch(
+    const internal = await fetchInternalTransactions(chainId, accountAddress).catch(
       logFail<RawInternalTx>('internal'),
     )
-    const erc20 = await fetchERC20Transfers(chainId, safeAddress).catch(
+    const erc20 = await fetchERC20Transfers(chainId, accountAddress).catch(
       logFail<RawERC20Transfer>('erc20'),
     )
 

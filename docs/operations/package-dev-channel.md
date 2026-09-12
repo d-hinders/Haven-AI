@@ -135,7 +135,12 @@ package names. Re-verified 2026-09-12 against #2909 (naming epic #2906 phase
 `UserSafeRow` import to `SmartAccountRow` and its `findUserSafe` call to
 `findAccountForSetup` — identifiers only, no change to `CONNECTOR_PACKAGE`,
 `CLI_PACKAGE`, `config.connectorChannel`, or the `/discovery` response shape
-this section describes:
+this section describes. Re-verified again 2026-09-12 against #2910 (phase
+2b): that PR renames `routes/agent-connection-setups.ts`'s local
+`resolveUserSafe` helper to `resolveAccountForSetup` and the `safeId` field
+it constructs on the `NewSetup`/`insertPendingAgent` inputs to `accountId` —
+again identifiers only, nowhere near `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
+`config.connectorChannel`, or `/discovery`:
 
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'

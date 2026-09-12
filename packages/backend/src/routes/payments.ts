@@ -443,7 +443,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       delegationIntent = await insertDelegationIntent({
         agentId: agent.id,
         userId: agent.user_id,
-        safeAddress: agent.safe_address,
+        accountAddress: agent.safe_address,
         chainId: agent.chain_id,
         tokenSymbol: tokenConfig.symbol,
         tokenAddress,

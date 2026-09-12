@@ -65,10 +65,10 @@ async function seedPasskey(seed: {
 }
 
 /** The Safe binding is set by the deploy path, not at enrolment. */
-async function bindDirect(credentialId: string, safeAddress: string): Promise<void> {
+async function bindDirect(credentialId: string, accountAddress: string): Promise<void> {
   await db.query('UPDATE user_passkeys SET safe_address = $2 WHERE credential_id = $1', [
     credentialId,
-    safeAddress,
+    accountAddress,
   ])
 }
 

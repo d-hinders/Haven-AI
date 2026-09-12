@@ -44,11 +44,11 @@ export default async function balanceRoutes(
   app.get<{ Params: { safeAddress: string }; Querystring: { chain_id?: string } }>(
     '/:safeAddress',
     async (request, reply) => {
-      const { safeAddress } = request.params
+      const { safeAddress: accountAddress } = request.params
       const requestedChainId = parseChainId(request.query.chain_id)
       const { sub } = request.user as { sub: string }
 
-      if (!ETH_ADDRESS_RE.test(safeAddress)) {
+      if (!ETH_ADDRESS_RE.test(accountAddress)) {
         return reply.code(400).send({ error: 'Invalid address' })
       }
 
@@ -62,7 +62,7 @@ export default async function balanceRoutes(
 
       // Verify ownership and get chain_id (repository query, #999 — the same
       // ownership check the transaction-history route runs).
-      const ownedSafes = await findAccountOwnership(sub, safeAddress, requestedChainId)
+      const ownedSafes = await findAccountOwnership(sub, accountAddress, requestedChainId)
       if (ownedSafes.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
@@ -73,7 +73,7 @@ export default async function balanceRoutes(
       const chainId = requestedChainId ?? ownedSafes[0].chain_id
       const chain = getChain(chainId)
 
-      const cacheKey = `bal:${chainId}:${safeAddress.toLowerCase()}`
+      const cacheKey = `bal:${chainId}:${accountAddress.toLowerCase()}`
       const result = await balanceCache.getOrFetch(cacheKey, async () => {
         const chainClient = getChainClient(BALANCE_READ_IMPL)
         const tokens = Object.values(chain.tokens)
@@ -83,8 +83,8 @@ export default async function balanceRoutes(
         const balances: BalanceItem[] = []
 
         const results = await Promise.allSettled([
-          chainClient.getNativeBalance(chainId, safeAddress),
-          ...erc20Tokens.map((token) => chainClient.getTokenBalance(chainId, token.address!, safeAddress)),
+          chainClient.getNativeBalance(chainId, accountAddress),
+          ...erc20Tokens.map((token) => chainClient.getTokenBalance(chainId, token.address!, accountAddress)),
         ])
 
         const nativeResult = results[0]
@@ -118,7 +118,7 @@ export default async function balanceRoutes(
       // Emit safe_funded once when the Safe first receives any tokens.
       // Fire-and-forget; ON CONFLICT DO NOTHING in the insert deduplicates.
       if (result.balances.some((b) => BigInt(b.balance) > 0n)) {
-        emitFunnelEvent(sub, 'safe_funded', { safe_address: safeAddress, chain_id: chainId })
+        emitFunnelEvent(sub, 'safe_funded', { safe_address: accountAddress, chain_id: chainId })
       }
 
       return result

@@ -25,7 +25,7 @@ import {
   insertUser,
 } from '../infra/repositories/users.js'
 import { listSessionAccountsForUser } from '../infra/repositories/smart-accounts.js'
-import { sessionSafePayload } from '../modules/accounts/index.js'
+import { sessionAccountPayload } from '../modules/accounts/index.js'
 import { withAccountAddressAlias, withAccountsEnvelopeAlias, withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
 
 const SALT_ROUNDS = 10
@@ -198,7 +198,7 @@ export default async function authRoutes(
       { expiresIn: '7d' },
     )
 
-    const safes = (await listSessionAccountsForUser(user.id)).map(sessionSafePayload).map(withAccountAddressAlias)
+    const safes = (await listSessionAccountsForUser(user.id)).map(sessionAccountPayload).map(withAccountAddressAlias)
 
     return {
       token,
@@ -226,7 +226,7 @@ export default async function authRoutes(
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    const safes = (await listSessionAccountsForUser(sub)).map(sessionSafePayload).map(withAccountAddressAlias)
+    const safes = (await listSessionAccountsForUser(sub)).map(sessionAccountPayload).map(withAccountAddressAlias)
 
     return withAccountsEnvelopeAlias(withSessionAccountAddressAlias({ ...profile, safes }))
   })

@@ -214,7 +214,7 @@ describe('machine payment sweep routes', () => {
 
       expect(res.statusCode).toBe(201)
       expect(sweepMocks.buildSweepAuthorization).toHaveBeenCalledWith(
-        expect.objectContaining({ safeAddress: TREASURY_HYBRID, chainId: 84532 }),
+        expect.objectContaining({ accountAddress: TREASURY_HYBRID, chainId: 84532 }),
       )
     })
 

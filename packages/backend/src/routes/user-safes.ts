@@ -24,7 +24,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────
 
-interface RenameSafeBody {
+interface RenameAccountBody {
   name: string
 }
 
@@ -59,18 +59,18 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   app.post('/', retiredSafeInflowHandler('import'))
 
   // PUT /user/safes/:safeId — rename a Safe
-  app.put<{ Params: { safeId: string }; Body: RenameSafeBody }>(
+  app.put<{ Params: { safeId: string }; Body: RenameAccountBody }>(
     '/:safeId',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const { safeId } = request.params
+      const { safeId: accountId } = request.params
       const { name } = request.body
 
       if (!name || typeof name !== 'string' || name.trim().length === 0) {
         return reply.code(400).send({ error: 'Name is required' })
       }
 
-      const renamed = await renameAccountForUser(name.trim(), safeId, sub)
+      const renamed = await renameAccountForUser(name.trim(), accountId, sub)
 
       if (!renamed) {
         return reply.code(404).send({ error: 'Safe not found' })
@@ -85,15 +85,15 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
     '/:safeId/default',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const { safeId } = request.params
+      const { safeId: accountId } = request.params
 
       // Verify the Safe belongs to the user
-      const owned = await findOwnedAccountAddress(safeId, sub)
+      const owned = await findOwnedAccountAddress(accountId, sub)
       if (!owned) {
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      await setDefaultAccountForUser(safeId, owned.safe_address, sub)
+      await setDefaultAccountForUser(accountId, owned.safe_address, sub)
 
       return { success: true }
     },
@@ -104,15 +104,15 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
     '/:safeId',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const { safeId } = request.params
+      const { safeId: accountId } = request.params
 
       // Check the Safe exists and belongs to user
-      const owned = await findOwnedAccountDefaultFlag(safeId, sub)
+      const owned = await findOwnedAccountDefaultFlag(accountId, sub)
       if (!owned) {
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      const deleted = await deleteAccountForUser(safeId, sub, owned.is_default)
+      const deleted = await deleteAccountForUser(accountId, sub, owned.is_default)
       if (!deleted) {
         return reply.code(409).send({
           error: 'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation or recovery is in progress',
@@ -156,18 +156,18 @@ app.get<{ Params: { safeId: string } }>(
   '/:safeId/funding',
   async (request, reply): Promise<FundingResponse> => {
     const { sub } = request.user as { sub: string }
-    const { safeId } = request.params
+    const { safeId: accountId } = request.params
 
     // Format first: a malformed id cannot name a row, so answering 400 rather
     // than 404 keeps the two cases apart for a caller debugging a typo.
-    if (!UUID_RE.test(safeId)) {
+    if (!UUID_RE.test(accountId)) {
       return reply.code(400).send({ error: 'Invalid Safe id' }) as never
     }
 
     // ONE tenant-scoped read: ownership, the Safe address and its chain, with
     // the delegation-rail scope the account lists apply (#2413) — funding
     // instructions are for the account an agent spends from.
-    const owned = await findOwnedAccountForFunding(safeId, sub)
+    const owned = await findOwnedAccountForFunding(accountId, sub)
     if (!owned) {
       return reply.code(404).send({ error: 'Safe not found' }) as never
     }

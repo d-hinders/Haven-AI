@@ -52,11 +52,11 @@ async function seedSafe(
   return safe.rows[0].id
 }
 
-async function seedAgent(userId: string, safeId: string, delegate: string): Promise<string> {
+async function seedAgent(userId: string, accountId: string, delegate: string): Promise<string> {
   const agent = await db.query<{ id: string }>(
     `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
      VALUES ($1, 'a', null, $2, 'h', 'sk_agent_tst', $3) RETURNING id`,
-    [userId, delegate, safeId],
+    [userId, delegate, accountId],
   )
   return agent.rows[0].id
 }
@@ -201,7 +201,7 @@ describeDb('agent reads survive the agent_allowances drop (#2020)', () => {
       delegateAddress: '0x' + '3'.repeat(40),
       apiKeyHash: 'h2',
       apiKeyPrefix: 'sk_agent_ts2',
-      safeId: hybridSafeId,
+      accountId: hybridSafeId,
     })
     expect(created.agent.name).toBe('post-drop agent')
   })

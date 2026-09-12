@@ -25,13 +25,13 @@ export interface StoredPasskey {
  */
 export async function loadHybridOwnerConfig(
   userId: string,
-  safeAddress: string,
+  accountAddress: string,
   chainId: number,
 ): Promise<{ config: HybridOwnerConfig; userSafeId: string; singleSignerWaiverAt: string | null } | null> {
   // The queries live in the repositories (#999): the account row bind is
   // chain-scoped — see FIND_HYBRID_OWNER_ACCOUNT_ROW_SQL's note on the #908
   // testnet/mainnet signer-set hazard.
-  const safe = await findHybridOwnerAccountRow(userId, safeAddress, chainId)
+  const safe = await findHybridOwnerAccountRow(userId, accountAddress, chainId)
   if (!safe) return null
 
   const passkeyRows = await listAccountPasskeys(safe.id)

@@ -183,7 +183,7 @@ describe('auth SQL characterization (pre-#1180)', () => {
       expect(paramsSent()[1]).toEqual(['u1'])
       expect(sqlSent()[1]).toMatch(/WHERE (?:us\.)?user_id = \$1/)
       expect(sqlSent()[1]).toMatch(/ORDER BY (?:us\.)?created_at ASC/)
-      // #1205: raw signer-set inputs are consumed by sessionSafePayload; the
+      // #1205: raw signer-set inputs are consumed by sessionAccountPayload; the
       // payload carries the computed answer instead.
       expect(res.json().user.safes).toEqual([
         {

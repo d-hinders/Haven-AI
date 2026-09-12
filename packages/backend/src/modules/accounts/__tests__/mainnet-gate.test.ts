@@ -9,7 +9,7 @@
  * recovery. What moved is where the user is told.
  */
 import { describe, expect, it } from 'vitest'
-import { isValueBearingChain, needsBackupSignerRecommendation, sessionSafePayload } from '../mainnet-gate.js'
+import { isValueBearingChain, needsBackupSignerRecommendation, sessionAccountPayload } from '../mainnet-gate.js'
 
 describe('isValueBearingChain (#908)', () => {
   it('classifies known testnets as NOT value-bearing', () => {
@@ -60,7 +60,7 @@ describe('needsBackupSignerRecommendation (#1153, was the #908 gate)', () => {
   })
 })
 
-describe('sessionSafePayload (#1205 — the production call site)', () => {
+describe('sessionAccountPayload (#1205 — the production call site)', () => {
   const base = {
     id: 's1',
     safe_address: '0x' + 'aa'.repeat(20),
@@ -74,36 +74,36 @@ describe('sessionSafePayload (#1205 — the production call site)', () => {
   }
 
   it('recommends a backup for a single-signer delegation account on mainnet', () => {
-    const payload = sessionSafePayload(base)
+    const payload = sessionAccountPayload(base)
     expect(payload.needs_backup_recommendation).toBe(true)
     expect(payload.value_bearing_chain).toBe(true)
   })
 
   it('stays quiet once a second signer exists (passkey + EOA owner counts)', () => {
     expect(
-      sessionSafePayload({ ...base, owner_address: '0x' + 'bb'.repeat(20) })
+      sessionAccountPayload({ ...base, owner_address: '0x' + 'bb'.repeat(20) })
         .needs_backup_recommendation,
     ).toBe(false)
-    expect(sessionSafePayload({ ...base, passkey_count: 2 }).needs_backup_recommendation).toBe(
+    expect(sessionAccountPayload({ ...base, passkey_count: 2 }).needs_backup_recommendation).toBe(
       false,
     )
   })
 
   it('is always false on a testnet — a dev account has nothing to lose', () => {
-    const payload = sessionSafePayload({ ...base, chain_id: 84532 })
+    const payload = sessionAccountPayload({ ...base, chain_id: 84532 })
     expect(payload.needs_backup_recommendation).toBe(false)
     expect(payload.value_bearing_chain).toBe(false)
   })
 
   it('is null for non-delegation accounts, whose signer truth is on-chain', () => {
-    const payload = sessionSafePayload({ ...base, account_type: 'safe' })
+    const payload = sessionAccountPayload({ ...base, account_type: 'safe' })
     expect(payload.needs_backup_recommendation).toBeNull()
     // ...but chain classification is still served, from the same single home.
     expect(payload.value_bearing_chain).toBe(true)
   })
 
   it('never leaks the raw signer-set inputs into the payload', () => {
-    const payload = sessionSafePayload(base) as Record<string, unknown>
+    const payload = sessionAccountPayload(base) as Record<string, unknown>
     expect('owner_address' in payload).toBe(false)
     expect('passkey_count' in payload).toBe(false)
   })

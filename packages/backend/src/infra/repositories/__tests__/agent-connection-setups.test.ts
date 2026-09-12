@@ -28,7 +28,7 @@ import {
 let seq = 0
 const ADDR = (n: string) => `0x${n.repeat(40).slice(0, 40)}`
 
-async function seedUserAndSafe(): Promise<{ userId: string; safeId: string }> {
+async function seedUserAndSafe(): Promise<{ userId: string; accountId: string }> {
   const user = await db.query<{ id: string }>(
     `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
     [`acs-${++seq}-${Date.now()}@test.example`],
@@ -38,14 +38,14 @@ async function seedUserAndSafe(): Promise<{ userId: string; safeId: string }> {
      VALUES ($1, $2, 'Main account', 84532) RETURNING id`,
     [user.rows[0].id, ADDR(String(seq % 10))],
   )
-  return { userId: user.rows[0].id, safeId: safe.rows[0].id }
+  return { userId: user.rows[0].id, accountId: safe.rows[0].id }
 }
 
-function newSetup(userId: string, safeId: string, overrides: Partial<NewSetup> = {}): NewSetup {
+function newSetup(userId: string, accountId: string, overrides: Partial<NewSetup> = {}): NewSetup {
   return {
     id: randomUUID(),
     userId,
-    safeId,
+    accountId,
     name: 'Connect setup',
     description: null,
     runtime: null,
@@ -80,8 +80,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   // ── The one-unit write ─────────────────────────────────────────────────
 
   it('insertSetupWithAllowances commits setup + allowances together', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     // Distinct token addresses — (setup_id, token_address) is unique.
     await insertSetupWithAllowances(setup, [
       USDC_ALLOWANCE,
@@ -96,8 +96,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   })
 
   it('persists the discovery source at insert and returns it on every wide read (#2302)', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const tagged = newSetup(userId, safeId, { source: '402-page' })
+    const { userId, accountId } = await seedUserAndSafe()
+    const tagged = newSetup(userId, accountId, { source: '402-page' })
     await insertSetupWithAllowances(tagged, [USDC_ALLOWANCE])
     const taggedRow = await findSetupForUser(tagged.id, userId)
     expect(taggedRow!.source).toBe('402-page')
@@ -107,14 +107,14 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     expect(byToken!.source).toBe('402-page')
 
     // Absent source is the normal (organic) case and stores as NULL.
-    const untagged = newSetup(userId, safeId)
+    const untagged = newSetup(userId, accountId)
     await insertSetupWithAllowances(untagged, [USDC_ALLOWANCE])
     expect((await findSetupForUser(untagged.id, userId))!.source).toBeNull()
   })
 
   it('a failing allowance write rolls back the SETUP row too — no half-approved agent', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
 
     await expect(
       insertSetupWithAllowances(setup, [
@@ -130,20 +130,20 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   })
 
   it('the setup token hash is unique — a duplicate insert violates, not overwrites', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const first = newSetup(userId, safeId, { setupTokenHash: 'hash-dup' })
+    const { userId, accountId } = await seedUserAndSafe()
+    const first = newSetup(userId, accountId, { setupTokenHash: 'hash-dup' })
     await insertSetupWithAllowances(first, [])
 
     await expect(
-      insertSetupWithAllowances(newSetup(userId, safeId, { setupTokenHash: 'hash-dup' }), []),
+      insertSetupWithAllowances(newSetup(userId, accountId, { setupTokenHash: 'hash-dup' }), []),
     ).rejects.toMatchObject({ code: '23505' })
   })
 
   // ── FOR UPDATE OF s: the serialisation the epic names ──────────────────
 
   it('lockSetupByTokenHash SERIALISES two concurrent transactions — the second sees the first commit', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [])
     const events: string[] = []
 
@@ -182,8 +182,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   // ── Register consumes the token ────────────────────────────────────────
 
   it('markSetupRegistered links the agent, consumes the token, and stamps install state', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [USDC_ALLOWANCE])
     const agent = await db.query<{ id: string }>(
       `INSERT INTO agents (user_id, name, status) VALUES ($1, 'pending', 'pending_approval') RETURNING id`,
@@ -227,8 +227,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
    * required is precisely the mistake that survives a mock and fails here.
    */
   it('markSetupRegistered persists run_mode (#2528)', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [])
     const agent = await db.query<{ id: string }>(
       `INSERT INTO agents (user_id, name, status) VALUES ($1, 'pending', 'pending_approval') RETURNING id`,
@@ -270,8 +270,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
    * disturb `runtime` beside it.
    */
   it('markSetupRegistered leaves run_mode NULL when the connector does not send it (#2528)', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [])
     const agent = await db.query<{ id: string }>(
       `INSERT INTO agents (user_id, name, status) VALUES ($1, 'pending', 'pending_approval') RETURNING id`,
@@ -305,8 +305,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   })
 
   it('mergeInstallStatus MERGES jsonb keys — later steps never erase earlier ones', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [])
 
     await mergeInstallStatus(setup.id, { downloaded: true }, null, null)
@@ -321,8 +321,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   // ── Cancel: the guarded state machine ──────────────────────────────────
 
   it('cancelSetup cancels only cancellable states, and revokePendingAgent only a pending agent', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [])
     const agent = await db.query<{ id: string }>(
       `INSERT INTO agents (user_id, name, status, api_key_hash, api_key_prefix)
@@ -349,8 +349,8 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   })
 
   it('cancelSetup refuses once an approval transaction exists — money may be moving', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
-    const setup = newSetup(userId, safeId)
+    const { userId, accountId } = await seedUserAndSafe()
+    const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [])
     await db.query(
       `UPDATE agent_connection_setups SET status = 'awaiting_wallet_approval', safe_tx_hash = '0xsafe' WHERE id = $1`,
@@ -362,7 +362,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
 
     // …and the wrong user can never cancel someone else's setup.
     const stranger = await seedUserAndSafe()
-    const own = newSetup(stranger.userId, stranger.safeId)
+    const own = newSetup(stranger.userId, stranger.accountId)
     await insertSetupWithAllowances(own, [])
     expect(await inTransaction(async (tx) => cancelSetup(own.id, userId, tx))).toBe(false)
   })
@@ -400,7 +400,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
   // distinction NULL has to carry.
 
   it('stores the reported MCP server name for a NAMED pair', async () => {
-    const { userId, safeId } = await seedUserAndSafe()
+    const { userId, accountId } = await seedUserAndSafe()
     const agentId = await inTransaction((tx) =>
       insertPendingAgent(
         {
@@ -410,7 +410,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
           delegateAddress: ADDR('2a'),
           apiKeyHash: 'b'.repeat(64),
           apiKeyPrefix: 'sk_agent_abc',
-          safeId,
+          accountId,
           mcpServerName: 'haven-research',
         },
         tx,
@@ -429,13 +429,13 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     // from an agent an older connector registered, and the dashboard would
     // have to guess — wrongly, for every agent wired with --name before
     // #1878.
-    const { userId, safeId } = await seedUserAndSafe()
+    const { userId, accountId } = await seedUserAndSafe()
     const base = {
       userId,
       description: null,
       apiKeyHash: 'c'.repeat(64),
       apiKeyPrefix: 'sk_agent_def',
-      safeId,
+      accountId,
     }
     const bareId = await inTransaction((tx) =>
       insertPendingAgent(
@@ -460,7 +460,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     // #1694's decision is "editable display name, immutable wiring slug".
     // The rename UPDATE must not disturb this column, and the row it returns
     // must still carry it — otherwise the card blanks out after a rename.
-    const { userId, safeId } = await seedUserAndSafe()
+    const { userId, accountId } = await seedUserAndSafe()
     const agentId = await inTransaction((tx) =>
       insertPendingAgent(
         {
@@ -470,7 +470,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
           delegateAddress: ADDR('5d'),
           apiKeyHash: 'd'.repeat(64),
           apiKeyPrefix: 'sk_agent_ghi',
-          safeId,
+          accountId,
           mcpServerName: 'haven-work',
         },
         tx,

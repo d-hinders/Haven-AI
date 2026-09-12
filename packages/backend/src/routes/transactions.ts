@@ -9,8 +9,8 @@ import {
 import { listContactsForUser } from '../infra/repositories/contacts.js'
 import { getChain, isSupportedChain } from '../domain/chains.js'
 import {
-  aggregateSafeTransactions,
-  buildSafeTransactionsPage,
+  aggregateAccountTransactions,
+  buildAccountTransactionsPage,
   EXPORT_ROW_CAP,
   buildTransactionCsvFilename,
   enrichTransactionsWithAccounting,
@@ -168,7 +168,7 @@ export default async function transactionRoutes(
       }
     }
 
-    const { merged, failedSafeIds, truncated } = await aggregateSafeTransactions(
+    const { merged, failedSafeIds, truncated } = await aggregateAccountTransactions(
       safes,
       request.log,
       fresh,
@@ -307,7 +307,7 @@ export default async function transactionRoutes(
 
     let filtered: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>> = []
     if (safes.length > 0) {
-      const { merged } = await aggregateSafeTransactions(safes, request.log, fresh)
+      const { merged } = await aggregateAccountTransactions(safes, request.log, fresh)
       const enriched = await mergeSortDedupeAndEnrich(sub, safes, merged)
       filtered = filterEnrichedTransactions(enriched, {
         agentId: request.query.agentId,
@@ -422,13 +422,13 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'chain_id required' })
     }
 
-    const safeId = ownershipRows[0].id
+    const accountId = ownershipRows[0].id
     const chainId = requestedChainId ?? ownershipRows[0].chain_id
 
-    const { transactions: enriched, total } = await buildSafeTransactionsPage({
+    const { transactions: enriched, total } = await buildAccountTransactionsPage({
       userId: sub,
-      safeId,
-      safeAddress: address,
+      accountId,
+      accountAddress: address,
       chainId,
       log: request.log,
       fresh,

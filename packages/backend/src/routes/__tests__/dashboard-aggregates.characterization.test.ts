@@ -26,14 +26,14 @@ import fastifyJwt from '@fastify/jwt'
 
 const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  portfolioMocks: { fetchPortfolioForSafe: vi.fn() },
+  portfolioMocks: { fetchPortfolioForAccount: vi.fn() },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
     enrichedTransactionIdentityKey: vi.fn((tx: { hash: string }) => tx.hash),
     enrichTransactionsWithAgents: vi.fn(
       async (_userId: string, transactions: unknown[]) => transactions,
     ),
-    fetchSafeTransactions: vi.fn(),
+    fetchAccountTransactions: vi.fn(),
     mergeX402Transactions: vi.fn(),
   },
   fiatMocks: { getFiatValuesForTokenAmount: vi.fn() },
@@ -133,13 +133,13 @@ describe('dashboard aggregates (characterization, #1167)', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    portfolioMocks.fetchPortfolioForSafe.mockReset()
-    transactionMocks.fetchSafeTransactions.mockReset()
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
+    transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
     fiatMocks.getFiatValuesForTokenAmount.mockReset()
 
-    portfolioMocks.fetchPortfolioForSafe.mockResolvedValue({ totalUsd: 100, totalEur: 92 })
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [] })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 100, totalEur: 92 })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0, eur: 0 })
   })

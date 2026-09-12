@@ -91,7 +91,7 @@ describe('paginateByOffset (module internals, no HTTP)', () => {
   })
 })
 
-describe('aggregateSafeTransactions (module internals, no HTTP)', () => {
+describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.resetModules()
@@ -104,14 +104,14 @@ describe('aggregateSafeTransactions (module internals, no HTTP)', () => {
     // the mock rather than the cached real module.
     vi.resetModules()
     vi.doMock('../aggregate.js', () => ({
-      fetchSafeTransactions: vi.fn(async ({ safeId }: { safeId: string }) => {
-        if (safeId === 'safe-fail') {
+      fetchAccountTransactions: vi.fn(async ({ accountId }: { accountId: string }) => {
+        if (accountId === 'safe-fail') {
           return { transactions: [], hadFailures: true }
         }
         return {
           transactions: [
             {
-              hash: `0x${safeId}`,
+              hash: `0x${accountId}`,
               type: 'native',
               from: '0xfrom',
               to: '0xto',
@@ -130,10 +130,10 @@ describe('aggregateSafeTransactions (module internals, no HTTP)', () => {
       }),
     }))
 
-    const { aggregateSafeTransactions } = await import('../orchestration.js')
+    const { aggregateAccountTransactions } = await import('../orchestration.js')
     const log = { warn: vi.fn() } as unknown as import('fastify').FastifyBaseLogger
 
-    const result = await aggregateSafeTransactions(
+    const result = await aggregateAccountTransactions(
       [
         { id: 'safe-ok', safe_address: '0xok', chain_id: 8453, name: 'OK' },
         { id: 'safe-fail', safe_address: '0xfail', chain_id: 100, name: 'Fail' },
@@ -156,16 +156,16 @@ describe('aggregateSafeTransactions (module internals, no HTTP)', () => {
   it('a thrown fetch error is caught, logged, and counted as a failed Safe — not propagated', async () => {
     vi.resetModules()
     vi.doMock('../aggregate.js', () => ({
-      fetchSafeTransactions: vi.fn(async () => {
+      fetchAccountTransactions: vi.fn(async () => {
         throw new Error('explorer API down')
       }),
     }))
 
-    const { aggregateSafeTransactions } = await import('../orchestration.js')
+    const { aggregateAccountTransactions } = await import('../orchestration.js')
     const warn = vi.fn()
     const log = { warn } as unknown as import('fastify').FastifyBaseLogger
 
-    const result = await aggregateSafeTransactions(
+    const result = await aggregateAccountTransactions(
       [{ id: 'safe-1', safe_address: '0xa', chain_id: 8453, name: 'A' }],
       log,
       false,
@@ -174,7 +174,7 @@ describe('aggregateSafeTransactions (module internals, no HTTP)', () => {
     expect(result.merged).toEqual([])
     expect(result.failedSafeIds).toEqual(['safe-1'])
     expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({ safeId: 'safe-1' }),
+      expect.objectContaining({ accountId: 'safe-1' }),
       'Safe transaction aggregation failed',
     )
   })

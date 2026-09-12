@@ -281,6 +281,8 @@ export const en = {
         denied: (provider: string) => `You declined the ${provider} consent. Nothing was connected.`,
         unsupportedCurrency:
           'Haven feeds ledgers that book in SEK, EUR, USD, DKK, NOK or GBP. Choose a company that books in one of those and try again.',
+        featureOff: (provider: string) =>
+          `Accounting connections are switched off on this deployment, so the ${provider} sign-in was not kept. Nothing was connected.`,
         error: (provider: string) => `We could not connect ${provider}. Try again in a moment.`,
       },
     },

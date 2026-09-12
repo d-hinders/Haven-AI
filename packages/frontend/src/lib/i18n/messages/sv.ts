@@ -214,6 +214,8 @@ export const sv: Messages = {
         denied: (provider: string) => `Du avböjde samtycket för ${provider}. Inget anslöts.`,
         unsupportedCurrency:
           'Haven matar bokföring i SEK, EUR, USD, DKK, NOK eller GBP. Välj ett företag som bokför i någon av dessa och försök igen.',
+        featureOff: (provider: string) =>
+          `Bokföringskopplingar är avstängda i den här driftmiljön, så inloggningen mot ${provider} behölls inte. Inget anslöts.`,
         error: (provider: string) => `Vi kunde inte ansluta ${provider}. Försök igen om en stund.`,
       },
     },

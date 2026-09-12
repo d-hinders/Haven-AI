@@ -29,6 +29,10 @@ const { configMock } = vi.hoisted(() => ({
     fortnoxClientSecret: 'csecret',
     fortnoxRedirectUri: 'https://api.test/accounting/connections/fortnox/callback',
     legacyBookkeepingEnabled: false,
+    // #2918: on by default so every existing test above exercises the
+    // feature ON. The gate describe block below flips these two.
+    hosted: true,
+    accountingEnabled: true,
   },
 }))
 vi.mock('../../config.js', () => ({ config: configMock }))
@@ -109,6 +113,21 @@ const { stateStore } = vi.hoisted(() => {
   }
 })
 vi.mock('../../infra/repositories/rate-limit-counters.js', () => ({ incrementRateLimit: stateStore.incrementRateLimit }))
+
+// #2918: the entitlement repository — mocked so a connect can be proven to
+// never consult it (the #2861 decision: entitlement gates the FEED, not
+// connecting). A plain always-throwing `vi.fn` (not the positional
+// once-chained resolver the db-mock ratchet counts) that would fail any
+// assertion the moment it runs.
+const entitlementRepo = vi.hoisted(() => ({
+  hasEntitlementRow: vi.fn(async () => {
+    throw new Error('hasEntitlementRow must not be consulted by a connection route (#2861)')
+  }),
+}))
+vi.mock('../../infra/repositories/account-entitlements.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/repositories/account-entitlements.js')>()),
+  hasEntitlementRow: entitlementRepo.hasEntitlementRow,
+}))
 
 const flowMocks = vi.hoisted(() => ({ completeOAuth2Connect: vi.fn(), connectWithApiKey: vi.fn() }))
 vi.mock('../../modules/accounting/oauth-flow.js', async (importOriginal) => ({
@@ -211,6 +230,9 @@ describe('accounting connection routes (#2862)', () => {
     })
     flowMocks.connectWithApiKey.mockReset()
     orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
+    entitlementRepo.hasEntitlementRow.mockClear()
+    configMock.hosted = true
+    configMock.accountingEnabled = true
   })
 
   const authed = (method: 'GET' | 'POST' | 'DELETE' | 'PATCH', url: string, payload?: unknown) =>
@@ -732,6 +754,118 @@ describe('accounting connection routes (#2862)', () => {
 
     it('requires authentication', async () => {
       expect((await app.inject({ method: 'PATCH', url: '/accounting/connections/fortnox/settings', payload: { auto_feed: false } })).statusCode).toBe(401)
+    })
+  })
+
+  /**
+   * #2918: the connection routes carried `authMiddleware` only — a signed-in
+   * user on a deployment that is not hosted, or is hosted with the flag off,
+   * could still start an OAuth consent, store a grant and set a destination.
+   * `requireAccountingFeature` (middleware/accountingFeed.ts) closes that:
+   * `config.hosted && config.accountingEnabled`, same 404 body shape as
+   * `requireAccountingFeed`, and — the #2861 decision this issue explicitly
+   * preserves — NOT the account entitlement, which stays the feed's gate.
+   *
+   * `/accounting/providers` is deliberately absent from `GATED_ROUTES`: it
+   * stays session-only so the Coming soon page (#2869) can still list
+   * platforms with the flag off.
+   *
+   * MUTATION-TESTED: removing `requireAccountingFeature` from any route
+   * below turns its 404 assertion into a 200/201/204, and removing the
+   * off-path `consumeOAuthState` call (or moving the feature check ahead of
+   * it) turns the replay assertion in the last block green when it should
+   * be red.
+   */
+  describe('feature gate: hosted && accountingEnabled (#2918)', () => {
+    const GATED_ROUTES: Array<{ name: string; method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; url: string; payload?: unknown }> = [
+      { name: 'GET /accounting/connections', method: 'GET', url: '/accounting/connections' },
+      { name: 'POST connect-url', method: 'POST', url: '/accounting/connections/fortnox/connect-url' },
+      { name: 'POST api-key', method: 'POST', url: '/accounting/connections/fortnox/api-key', payload: { apiKey: API_KEY } },
+      { name: 'DELETE connection', method: 'DELETE', url: '/accounting/connections/fortnox' },
+      { name: 'POST activate', method: 'POST', url: '/accounting/connections/fortnox/activate' },
+      { name: 'POST backfill', method: 'POST', url: '/accounting/connections/fortnox/backfill', payload: { since: '2026-01-01' } },
+      { name: 'PATCH settings', method: 'PATCH', url: '/accounting/connections/fortnox/settings', payload: { auto_feed: false } },
+    ]
+
+    const CASES: Array<[string, () => void]> = [
+      ['hosted:false', () => { configMock.hosted = false }],
+      ['hosted:true, accountingEnabled:false', () => { configMock.accountingEnabled = false }],
+    ]
+
+    for (const [label, flipOff] of CASES) {
+      describe(label, () => {
+        beforeEach(() => {
+          // A real connection exists, so a route that "worked" would have
+          // something to act on — the 404 has to come from the gate, not
+          // from an incidental NOT_FOUND on empty state.
+          rows.set(`${USER}::fortnox`, row('fortnox', { is_active_destination: true }))
+          flipOff()
+        })
+
+        for (const { name, method, url, payload } of GATED_ROUTES) {
+          it(`${name} answers 404 with the shared body and calls nothing downstream`, async () => {
+            const res = await authed(method, url, payload)
+            expect(res.statusCode).toBe(404)
+            expect(res.json()).toEqual({ error: 'Not found' })
+            expect(leaks(res.body)).toBe(false)
+            // Nothing downstream ran: neither the OAuth/API-key flows, the
+            // orchestrator, nor a single repository write.
+            expect(flowMocks.completeOAuth2Connect).not.toHaveBeenCalled()
+            expect(flowMocks.connectWithApiKey).not.toHaveBeenCalled()
+            expect(orchestratorMocks.syncUser).not.toHaveBeenCalled()
+            expect(repo.setActiveDestination).not.toHaveBeenCalled()
+            expect(repo.disconnect).not.toHaveBeenCalled()
+            expect(repo.recordBackfill).not.toHaveBeenCalled()
+            expect(repo.mergeSettings).not.toHaveBeenCalled()
+          })
+        }
+
+        it('GET /accounting/providers still answers 200 — the Coming soon page reads it (#2869)', async () => {
+          const res = await authed('GET', '/accounting/providers')
+          expect(res.statusCode).toBe(200)
+          expect(res.json().providers.length).toBeGreaterThan(0)
+        })
+      })
+    }
+
+    describe('GET .../callback mid-flight (never a bare 404)', () => {
+      async function issueState(provider = 'fortnox'): Promise<string> {
+        const res = await authed('POST', `/accounting/connections/${provider}/connect-url`)
+        return new URL(res.json().url).searchParams.get('state')!
+      }
+
+      it('a consent already in flight when the flag is flipped off lands on the redirect with reason=feature_off, and the state is consumed', async () => {
+        const state = await issueState()
+        configMock.accountingEnabled = false
+        const off = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
+        expect(off.statusCode).toBe(302)
+        expect(off.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=feature_off')
+        expect(flowMocks.completeOAuth2Connect).not.toHaveBeenCalled()
+        expect(leaks(off.headers.location as string)).toBe(false)
+
+        // The flag comes back on before the replay — the state must still
+        // be dead: it was consumed on the off-path, not skipped.
+        configMock.accountingEnabled = true
+        const replay = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
+        expect(replay.statusCode).toBe(302)
+        expect(replay.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error')
+        expect(flowMocks.completeOAuth2Connect).not.toHaveBeenCalled()
+      })
+
+      it('self-hosted (hosted:false) mid-flight behaves the same way', async () => {
+        const state = await issueState()
+        configMock.hosted = false
+        const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
+        expect(res.statusCode).toBe(302)
+        expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=feature_off')
+        expect(flowMocks.completeOAuth2Connect).not.toHaveBeenCalled()
+      })
+    })
+
+    it('#2861 preserved: connecting needs no entitlement row — the entitlement repository is never consulted', async () => {
+      const res = await authed('POST', '/accounting/connections/fortnox/connect-url')
+      expect(res.statusCode).toBe(200)
+      expect(entitlementRepo.hasEntitlementRow).not.toHaveBeenCalled()
     })
   })
 })

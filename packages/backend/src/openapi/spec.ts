@@ -840,6 +840,21 @@ const errorResponse = {
 } as const
 
 /**
+ * #2918: the accounting connection routes gate on `config.hosted &&
+ * config.accountingEnabled` — NOT the account entitlement, which stays the
+ * feed's gate (#2861). Same 404 body shape as `requireAccountingFeed`
+ * (`{ error: 'Not found' }`), so a deployment with the feature off does not
+ * advertise it by answering differently. `/accounting/providers` is exempt
+ * (it stays session-only so the Coming soon page, #2869, can still list
+ * platforms), and the OAuth callback never answers this — it redirects with
+ * `reason=feature_off` instead, documented on that route's 302.
+ */
+const accountingFeatureGate404 = {
+  ...errorResponse,
+  description: 'The deployment is not hosted, or the accounting feature flag is off.',
+} as const
+
+/**
  * The signing handoff on the 201 of `POST /payments` — and, through
  * `X402SignablePayment`, on the x402 authorize 200/201.
  *
@@ -3297,6 +3312,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
+          '404': accountingFeatureGate404,
         },
       },
     },
@@ -3319,7 +3335,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'Unknown provider.' },
+          '404': { ...errorResponse, description: 'Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
           '409': providerRefusal,
           '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
         },
@@ -3331,7 +3347,7 @@ export const openapiSpec = {
         operationId: 'accountingOAuthCallback',
         summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
         description:
-          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: \"Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers\" — nothing was stored; an existing connection is left as it was, and the user can pick another company).",
+          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: \"Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers\" — nothing was stored; an existing connection is left as it was, and the user can pick another company). #2918: this route is NEVER the bare 404 the other connection routes answer when the feature is off — a consent can be mid-flight when the flag is flipped, so the off-path still redirects, named `connect=error&reason=feature_off`, and the `state`'s `jti` is consumed either way (a state cannot be banked while the flag is off and replayed after it comes back on).",
         security: [],
         parameters: [
           { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
@@ -3341,7 +3357,7 @@ export const openapiSpec = {
         ],
         responses: {
           '302': {
-            description: 'Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal.',
+            description: 'Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal, or `&reason=feature_off` (#2918) when the deployment is not hosted or the flag is off.',
           },
         },
       },
@@ -3374,7 +3390,7 @@ export const openapiSpec = {
           },
           '400': { ...errorResponse, description: 'Missing key, or the provider rejected it.' },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'Unknown provider.' },
+          '404': { ...errorResponse, description: 'Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
           '409': {
             ...providerRefusal,
             description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored).',
@@ -3395,6 +3411,7 @@ export const openapiSpec = {
         responses: {
           '204': { description: 'Disconnected (or was never connected).' },
           '401': errorResponse,
+          '404': accountingFeatureGate404,
         },
       },
     },
@@ -3417,7 +3434,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'No connection for this provider.' },
+          '404': { ...errorResponse, description: 'No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
           '409': { ...errorResponse, description: 'The connection is not in the `connected` state.' },
         },
       },
@@ -3461,7 +3478,7 @@ export const openapiSpec = {
           },
           '400': { ...errorResponse, description: '`SINCE_INVALID` (not a date, in the future, before 2020-01-01) or `SINCE_NOT_EARLIER` (not earlier than the current feed-from, or the connection has no floor).' },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'No connection for this provider.' },
+          '404': { ...errorResponse, description: 'No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
           '409': { ...errorResponse, description: 'The connection is not the active `connected` destination (`NOT_ACTIVE`).' },
         },
       },
@@ -3516,7 +3533,7 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'No connection for this provider.' },
+          '404': { ...errorResponse, description: 'No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
         },
       },
     },

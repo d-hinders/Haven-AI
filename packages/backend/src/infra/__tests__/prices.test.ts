@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SUPPORTED_LEDGER_CURRENCIES } from '../../domain/ledger-currency.js'
 
 /**
  * Guards the cache-poisoning fix: a 200 response carrying no usable price (empty
@@ -96,5 +97,27 @@ describe('fetchTokenPrices cache poisoning guard', () => {
     expect(price.sek).toBe(10.5)
     // Two real network attempts: the degraded one was never cached.
     expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * #2877: the quoted currencies ARE the ledger currencies the accounting feed
+   * may book in. Nothing else pins them together — a currency accepted at
+   * connect but never quoted would produce a connection that can never be fed,
+   * and the failure would show up as a payment silently stuck at not-ready.
+   */
+  it('asks CoinGecko for exactly the supported ledger currencies', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(GOOD))
+    const { fetchTokenPrices } = await freshPrices()
+
+    await fetchTokenPrices()
+
+    const url = String(fetchSpy.mock.calls[0][0])
+    const quoted = new URL(url).searchParams.get('vs_currencies')!.split(',')
+    // MUTATION TARGET: hard-code `vs_currencies=usd,eur,sek` again and this
+    // goes red — which is the state in which a DKK ledger connects and then
+    // never feeds.
+    expect([...quoted].sort()).toEqual(
+      SUPPORTED_LEDGER_CURRENCIES.map((c) => c.toLowerCase()).sort(),
+    )
   })
 })

@@ -75,9 +75,11 @@ export async function fetchTokenPrices(): Promise<PriceMap> {
           price[currency] = p?.[currency] ?? 0
         }
         prices[symbol] = price
-        // Unchanged meaning: a token counts as usable when ANY quoted currency
-        // came back positive. Widening the currency list widens this too — a
-        // token quoted only in DKK is still a token we have a rate for.
+        // The same rule over a wider list: a token counts as usable when ANY
+        // quoted currency came back positive. The list is wider than usd/eur/sek
+        // now, so the rule's extension really does grow — a token quoted only in
+        // DKK now counts, where before the response would have been treated as
+        // unusable and not cached.
         if (VS_CURRENCIES.some((currency) => price[currency] > 0)) {
           usable += 1
         }

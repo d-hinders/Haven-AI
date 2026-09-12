@@ -25,7 +25,7 @@ import {
   upsertEvidenceBase,
 } from '../../infra/repositories/machine-payments.js'
 import { findAgentDelegateAddress } from '../../infra/repositories/agents.js'
-import { getBookTimeLedgerRates, getBookTimeSekValue } from '../../infra/fiat-values.js'
+import { getBookTimeCapture } from '../../infra/fiat-values.js'
 import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
@@ -266,18 +266,24 @@ export async function recordMachinePaymentEvidenceBase(
   // overwritten (the COALESCE in the repository's upsert). A pricing outage
   // yields null, which is backfillable — it must not block settlement.
   //
-  // #2877 adds the ledger-currency rate map (migration 082) in the SAME
+  // #2877 adds the ledger-currency rate map (migration 082) to the SAME
   // capture: one settled payment can be fed to connections booking in
   // different currencies, so every supported currency's rate is frozen here
-  // rather than recomputed when a feed asks for it. Both reads hit the same
-  // cached price fetch, and both fail the same way — nulls, backfillable.
-  const sek = await getBookTimeSekValue(intent.token_symbol, intent.amount_human)
-  const ledger = await getBookTimeLedgerRates(intent.token_symbol)
-  const amountSek = sek ? sek.amountSek : null
-  const fxRateSek = sek ? sek.fxRate : null
-  const fxSource = sek ? sek.fxSource : ledger ? ledger.fxSource : null
-  const fxAt = sek || ledger ? new Date().toISOString() : null
-  const fxRates = ledger ? JSON.stringify(ledger.rates) : null
+  // rather than recomputed when a feed asks for it. ONE price read produces
+  // both halves — see `getBookTimeCapture` for why that is not just tidier —
+  // and `fx_at` timestamps the pair.
+  //
+  // This function also runs from the proof-attach path, hours or weeks after
+  // settlement. That is why the map is written under the SAME condition that
+  // first set `fx_at` (the CASE in the upsert), not under its own COALESCE:
+  // a row that already has a capture must never gain a map taken later, which
+  // would be a feed-time rate sitting next to a settlement timestamp.
+  const capture = await getBookTimeCapture(intent.token_symbol, intent.amount_human)
+  const amountSek = capture?.sek ? capture.sek.amountSek : null
+  const fxRateSek = capture?.sek ? capture.sek.fxRate : null
+  const fxSource = capture ? capture.fxSource : null
+  const fxAt = capture ? new Date().toISOString() : null
+  const fxRates = capture && Object.keys(capture.rates).length > 0 ? JSON.stringify(capture.rates) : null
 
   await upsertEvidenceBase({
     paymentIntentId,

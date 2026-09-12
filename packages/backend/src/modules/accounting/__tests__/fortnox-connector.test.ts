@@ -142,7 +142,7 @@ describe('FortnoxConnector (#496)', () => {
       counterparty: TX.counterparty,
       resourceUrl: TX.resourceUrl,
       account: null,
-    } as never)
+    } as never, { ledgerCurrency: 'SEK' })
     // fxAt is the same pg passthrough — normalized at the boundary too, so the
     // #498 underlag renders ISO timestamps, not JS Date strings.
     expect(tx.fxAt).toBe('2026-07-16T09:24:00.000Z')

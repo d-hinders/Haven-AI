@@ -81,8 +81,9 @@ async function seedUser(): Promise<{ userId: string; agentId: string }> {
 async function seedSettled(
   userId: string,
   agentId: string,
-  opts: { fxRates: Record<string, number> | null },
+  opts: { fxRates: Record<string, number> | null; amountHuman?: string },
 ): Promise<string> {
+  const amountHuman = opts.amountHuman ?? '1.0'
   const id = randomUUID()
   const txHash = `0x${String(++seq).padStart(64, 'a')}`.slice(0, 66)
   await db.query(
@@ -110,7 +111,7 @@ async function seedSettled(
     tokenSymbol: 'USDC',
     tokenAddress: TOKEN,
     amountRaw: '1000000',
-    amountHuman: '1.0',
+    amountHuman,
     challengeId: null,
     idempotencyKey: null,
     challengePayload: null,
@@ -186,8 +187,10 @@ describeDb('multi-currency ledgers (#2877)', () => {
     // `toFeedTransaction` call and a Danish ledger is fed Swedish kronor
     // labelled DKK.
     expect(tx.ledgerCurrency).toBe('DKK')
-    expect(tx.amountLedger).toBe('6.87')
-    expect(tx.fxRateLedger).toBe('6.87')
+    // Fixed at the SEK column's own scale, so a computed amount is the same
+    // shape as a stored one (migration 026: NUMERIC(38,4)).
+    expect(tx.amountLedger).toBe('6.8700')
+    expect(tx.fxRateLedger).toBe('6.8700')
     // The SEK capture rides along untouched — it is what the receipt underlag
     // and every pre-#2877 row carry.
     expect(Number(tx.amountSek)).toBe(10.42)
@@ -211,7 +214,7 @@ describeDb('multi-currency ledgers (#2877)', () => {
     expect(stored.rows[0].fx_rates).toEqual({ SEK: 10.42, DKK: 6.87 })
 
     expect(await feedSettledPayment(userId, paymentId)).toEqual({ outcome: 'pushed' })
-    expect(connector.pushed[0].tx.amountLedger).toBe('6.87')
+    expect(connector.pushed[0].tx.amountLedger).toBe('6.8700')
   })
 
   it('no rate for the destination currency is NOT READY, not a SEK fallback: nothing pushed, no claim row, still backfillable', async () => {
@@ -228,6 +231,61 @@ describeDb('multi-currency ledgers (#2877)', () => {
     // No claim row: the retry sweep and the backfill can still take it once a
     // rate exists, exactly as a null amount_sek behaves on the SEK path.
     expect(await getSyncState(userId, 'memory', paymentId)).toBeNull()
+  })
+
+  it('a LATER evidence write can never add a rate map to a row that already captured: no feed-time rate under a settlement timestamp', async () => {
+    const { userId, agentId } = await seedUser()
+    const connector = await connectBooking(userId, 'DKK')
+    // The shape every row settled before migration 082 is in, and the shape the
+    // proof-attach path can produce: a capture exists (fx_at, amount_sek) but
+    // the map does not. Found by review on #2877 — the per-column COALESCE let
+    // a write weeks later fill fx_rates while fx_at kept its settlement value.
+    const paymentId = await seedSettled(userId, agentId, { fxRates: null })
+    await db.query(`UPDATE machine_payment_evidence SET fx_rates = NULL WHERE payment_intent_id = $1`, [paymentId])
+
+    // A re-write long after settlement, carrying today's rates.
+    await seedSettledAgain(userId, agentId, paymentId, { SEK: 20.84, DKK: 9.99 })
+
+    // MUTATION TARGET: restore `fx_rates = COALESCE(…, EXCLUDED.fx_rates)` in
+    // evidenceBaseUpsertSql and the row gains a map taken weeks after the
+    // fx_at it sits next to — a feed-time rate wearing a book-time label.
+    const stored = await db.query<{ fx_rates: unknown; fx_at: Date }>(
+      `SELECT fx_rates, fx_at FROM machine_payment_evidence WHERE payment_intent_id = $1`,
+      [paymentId],
+    )
+    expect(stored.rows[0].fx_rates).toBeNull()
+    // …and the honest consequence: that row is not feedable to a non-SEK
+    // ledger at all, because its book-time rates are not knowable.
+    expect(await feedSettledPayment(userId, paymentId)).toEqual({ outcome: 'not_fed' })
+    expect(connector.pushed).toHaveLength(0)
+  })
+
+  it('a zero-amount payment feeds to a non-SEK ledger, exactly as it does to a SEK one', async () => {
+    const { userId, agentId } = await seedUser()
+    const connector = await connectBooking(userId, 'DKK')
+    const paymentId = await seedSettled(userId, agentId, { fxRates: { SEK: 10.42, DKK: 6.87 }, amountHuman: '0' })
+
+    // MUTATION TARGET: restore `tokenAmount <= 0` in `ledgerAmount` and this
+    // payment is not-ready forever — no claim row, re-evaluated by every sweep,
+    // and no rate can ever make it ready.
+    expect(await feedSettledPayment(userId, paymentId)).toEqual({ outcome: 'pushed' })
+    expect(connector.pushed[0].tx.amountLedger).toBe('0.0000')
+  })
+
+  it('a computed ledger amount is fixed-scale, never a raw float or exponent notation', async () => {
+    const { userId, agentId } = await seedUser()
+    const connector = await connectBooking(userId, 'EUR')
+    // 1.1 × 10.42 = 11.462000000000002 in float; 0.000001 × 0.92 = 9.2e-7.
+    const paymentId = await seedSettled(userId, agentId, { fxRates: { EUR: 10.42 }, amountHuman: '1.1' })
+
+    expect(await feedSettledPayment(userId, paymentId)).toEqual({ outcome: 'pushed' })
+    const amount = connector.pushed[0].tx.amountLedger!
+    // MUTATION TARGET: return `String(tokenAmount * rate)` from `ledgerAmount`
+    // and this reads '11.462000000000002' — 15 junk decimals on a supplier
+    // invoice, and exponent notation for a sub-microunit x402 payment.
+    expect(amount).toBe('11.4620')
+    expect(amount).not.toMatch(/e/i)
+    expect(amount.split('.')[1]).toHaveLength(4)
   })
 
   it('a connection whose provider could not name a currency books in the default (SEK)', async () => {

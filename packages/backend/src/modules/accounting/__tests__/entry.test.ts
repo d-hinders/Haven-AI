@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  normalizeLedgerRates,
   toAccountingEntry,
   type AccountingEntrySourceRow,
 } from '../entry.js'
@@ -90,5 +91,51 @@ describe('toAccountingEntry', () => {
   it('carries a per-merchant account override when present, else null', () => {
     expect(toAccountingEntry(row()).account).toBeNull()
     expect(toAccountingEntry(row({ override_account: '6550' })).account).toBe('6550')
+  })
+})
+
+/**
+ * `normalizeLedgerRates` is the only thing standing between `fx_rates` — JSONB
+ * written by some build, not necessarily this one — and a figure on a supplier
+ * invoice. Its defensive branches had no test: the review on #2877 found that
+ * the whole body could be replaced with `return value as LedgerRates` and the
+ * suite stayed green, which made "fails safe" an unproven claim.
+ */
+describe('normalizeLedgerRates (#2877)', () => {
+  it('keeps supported currencies with a usable positive rate, and coerces a string rate', () => {
+    expect(normalizeLedgerRates({ SEK: 10.42, DKK: '6.87' })).toEqual({ SEK: 10.42, DKK: 6.87 })
+  })
+
+  it('uppercases a lowercase currency key rather than dropping it', () => {
+    expect(normalizeLedgerRates({ dkk: 6.87 })).toEqual({ DKK: 6.87 })
+  })
+
+  it('drops a currency this build does not support — a stored rate never outlives the list', () => {
+    expect(normalizeLedgerRates({ SEK: 10.42, JPY: 150 })).toEqual({ SEK: 10.42 })
+  })
+
+  it.each([
+    ['zero', { SEK: 0 }],
+    ['negative', { SEK: -10.42 }],
+    ['NaN', { SEK: Number.NaN }],
+    ['Infinity', { SEK: Number.POSITIVE_INFINITY }],
+    ['unparseable string', { SEK: 'about ten' }],
+    ['null rate', { SEK: null }],
+  ])('drops a %s rate — a bad number never reaches an invoice', (_label, input) => {
+    expect(normalizeLedgerRates(input)).toBeNull()
+  })
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', '{"SEK":10}'],
+    ['a number', 10],
+    ['an empty object', {}],
+  ])('returns null for %s, so the caller reads not-ready rather than throwing', (_label, input) => {
+    expect(normalizeLedgerRates(input)).toBeNull()
+  })
+
+  it('a partially bad map keeps its good half', () => {
+    expect(normalizeLedgerRates({ SEK: 10.42, EUR: -1, DKK: 6.87 })).toEqual({ SEK: 10.42, DKK: 6.87 })
   })
 })

@@ -87,9 +87,32 @@ function ledgerAmount(entry: AccountingEntry, currency: LedgerCurrency): { amoun
   const rate = entry.fxRates?.[currency]
   if (rate == null) return { amount: null, rate: null }
   const tokenAmount = Number(entry.amountHuman ?? NaN)
-  if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) return { amount: null, rate: null }
-  return { amount: String(tokenAmount * rate), rate: String(rate) }
+  // A zero amount is fed, not withheld: `amount_sek` stores 0.0000 for one and
+  // the SEK path pushes it, so withholding it here would make a zero-value
+  // payment feed to a Swedish ledger and hang forever — unclaimed, unfeedable,
+  // re-evaluated by every sweep — for a Danish one. Negative and unparseable
+  // stay not-ready; neither is a state a settled payment reaches.
+  if (!Number.isFinite(tokenAmount) || tokenAmount < 0) return { amount: null, rate: null }
+  return { amount: toLedgerScale(tokenAmount * rate), rate: toLedgerScale(rate) }
 }
+
+/**
+ * A money figure at the scale the SEK column has always used.
+ *
+ * `amount_sek` is `NUMERIC(38,4)` (migration 026), so every SEK figure the
+ * feed has ever pushed came back from Postgres fixed at four decimals. A
+ * computed currency has no column to round it, and raw float stringification
+ * puts `11.462000000000002` — or, under 1e-6, `9.2e-7` — straight onto a
+ * supplier invoice: 15 junk decimals a provider may reject, and exponent
+ * notation no accounting system reads as a number. Fixing the scale here is
+ * what makes a computed amount indistinguishable in shape from a stored one.
+ */
+function toLedgerScale(value: number): string {
+  return value.toFixed(LEDGER_SCALE)
+}
+
+/** Decimals on a fed money figure — `amount_sek`'s own scale (migration 026). */
+const LEDGER_SCALE = 4
 
 /**
  * Reduce a canonical entry to the non-asserting feed shape.
@@ -102,9 +125,9 @@ function ledgerAmount(entry: AccountingEntry, currency: LedgerCurrency): { amoun
  */
 export function toFeedTransaction(
   entry: AccountingEntry,
-  opts: { connectionSuggestedAccount?: string | null; ledgerCurrency?: LedgerCurrency } = {},
+  opts: { connectionSuggestedAccount?: string | null; ledgerCurrency: LedgerCurrency },
 ): FeedTransaction {
-  const ledgerCurrency = opts.ledgerCurrency ?? DEFAULT_LEDGER_CURRENCY
+  const { ledgerCurrency } = opts
   const ledger = ledgerAmount(entry, ledgerCurrency)
   return {
     paymentId: entry.paymentId,

@@ -43,10 +43,11 @@ export interface AccountingProvider {
 
 /**
  * What the connector reports about the company behind a grant. The base
- * currency is what the generic connect flow refuses on when it is not SEK —
- * the feed's amounts are book-time SEK (#467) and a non-SEK ledger would book
- * them as the wrong currency. `#2864` owns the enforcement policy; the flow
- * here calls the check, and the conformance suite proves it is called.
+ * currency is what the generic connect flow refuses on when it is outside
+ * `SUPPORTED_LEDGER_CURRENCIES` — and, since #2877, the currency the feed
+ * pushes in: the amount is that currency's, from the rate frozen at
+ * settlement (#467 captures it). `#2864` owns the enforcement policy; the
+ * flow here calls the check, and the conformance suite proves it is called.
  */
 export interface ProviderCompanyInfo {
   externalCompanyId: string | null

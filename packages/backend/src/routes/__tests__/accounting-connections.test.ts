@@ -451,7 +451,7 @@ describe('accounting connection routes (#2862)', () => {
       expect(leaks(res.headers.location as string)).toBe(false)
     })
 
-    it('#2864: a non-SEK ledger is the one named refusal — connect=error&reason=unsupported_currency, nothing stored', async () => {
+    it('#2864/#2877: an UNSUPPORTED ledger currency is the one named refusal — connect=error&reason=unsupported_currency, nothing stored', async () => {
       const state = await issueState()
       flowMocks.completeOAuth2Connect.mockRejectedValueOnce(new UnsupportedBaseCurrencyError('JPY'))
       const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })

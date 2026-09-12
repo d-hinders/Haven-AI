@@ -7,6 +7,11 @@ covers:
   - packages/backend/src/routes/accounting-connections.ts
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
   - packages/backend/src/infra/repositories/accounting-connections.ts
+  - packages/backend/src/domain/ledger-currency.ts
+  - packages/backend/src/infra/prices.ts
+  - packages/backend/src/infra/fiat-values.ts
+  - packages/backend/src/infra/repositories/machine-payments.ts
+  - packages/backend/src/db/migrations/082_evidence_ledger_fx_rates.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/hooks/useAccounting.ts
@@ -454,23 +459,62 @@ there either. The rule is one function
 (`assertSupportedBaseCurrency`, `provider.ts`); a provider that cannot say
 (`baseCurrency: null`) passes and the connection books in SEK, the default.
 
+**Which connections are non-SEK today: none.** The only `live` provider is
+Fortnox, and `FortnoxConnector.getCompanyInfo` reports `SEK` by construction —
+a Fortnox company books in kronor. The machinery below ships ahead of its first
+user: the first non-SEK connection arrives with the first connector for a
+provider that books in something else (Accounted, Light and Igdrasil are listed
+`coming_soon`). Until then this section describes a path exercised by the
+conformance suite and the real-database tests, not by production traffic.
+
 **What the feed pushes, and when the rate was taken.** The record carries the
 amount in the connection's `base_currency`, converted with the rate captured
 **at settlement** and frozen there — never a rate looked up when the push
-happens. The capture is `getBookTimeLedgerRates` (`infra/fiat-values.ts`),
-written to `machine_payment_evidence.fx_rates` (JSONB, migration 082) in the
-same call that captures the SEK value, and frozen by the same `COALESCE` in
-the evidence upsert that freezes `amount_sek`: a re-settlement never re-prices
-a payment. `fx_source` and `fx_at` keep their meaning — where the rate came
-from and when it was taken — for every currency in the map.
+happens. The capture is `getBookTimeCapture` (`infra/fiat-values.ts`): ONE
+price read produces the SEK value and the rate for every supported currency,
+written to `machine_payment_evidence.fx_rates` (JSONB, migration 082) beside
+the SEK columns. `fx_source` and `fx_at` keep their meaning — where the rate
+came from and when it was taken — for every currency in the map.
+
+**How the freeze actually works, and the one case it refuses.** The SEK
+columns each `COALESCE`, so a later write fills a gap and never overwrites.
+The map is frozen *with the timestamp* instead: it is written only by the write
+that first sets `fx_at`. The difference matters because
+`recordMachinePaymentEvidenceBase` also runs from the proof-attach path, hours
+or weeks after settlement, and re-reads prices when it does. Under a plain
+`COALESCE` a row whose map was NULL — every row settled before migration 082,
+and any row whose settlement-time price read failed for the map alone — would
+have gained a map taken on the day of the attach while `fx_at` still said
+settlement: a feed-time rate wearing a book-time label.
+
+So: **a row that already carries a capture but no map keeps no map, for good.**
+Its book-time rates are not knowable, and a non-SEK connection reads such a
+payment as not-ready rather than being fed a rate from the wrong day. Every row
+settled before migration 082 is in exactly that state — SEK ledgers are
+unaffected, since they read the `amount_sek` column as they always have.
+
+**Figures are fixed-scale.** A computed ledger amount is emitted at four
+decimals — `amount_sek`'s own scale since migration 026 — so a computed figure
+has the same shape as a stored one. Raw float stringification would put
+`11.462000000000002` on a supplier invoice, and exponent notation (`9.2e-7`)
+for a sub-microunit x402 payment; neither is something an accounting system
+should be asked to read.
 
 - **The SEK path is unchanged.** A SEK ledger is fed from the `amount_sek`
   column, exactly as before #2877; the rate map is not consulted for it, and
   no historical row was backfilled or rewritten.
+- **The attached underlag states the figure on the record it backs.** For a
+  non-SEK ledger the PDF's `Book value` line is the invoiced amount and
+  currency, with the SEK capture kept below it as `Haven SEK ref` — one
+  document, two clearly-labelled figures, rather than an invoice in kroner
+  attached to a receipt that says kronor.
 - **No rate for that currency is *not ready*, never a fallback.** A
-  settlement-time pricing outage for the destination's currency leaves the
-  payment unfed and unclaimed, so the retry sweep and the backfill can deliver
-  it once a rate exists. Feeding SEK into a non-SEK ledger would be a wrong
+  settlement-time pricing outage for the destination's currency — or a token
+  amount that is absent or negative — leaves the payment unfed and unclaimed,
+  so the retry sweep and the backfill can deliver it once a rate exists. A
+  **zero** amount is fed, not withheld: the SEK path pushes a zero, and
+  withholding it here would leave such a payment re-evaluated by every sweep
+  forever, since no rate can ever make it ready. Feeding SEK into a non-SEK ledger would be a wrong
   number wearing the right label, so it is deliberately not done.
 - **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment
   into a USD-booking company carries the rate the source actually quoted

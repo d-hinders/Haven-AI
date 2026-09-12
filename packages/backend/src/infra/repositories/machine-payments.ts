@@ -76,7 +76,17 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
       fx_rate_sek = COALESCE(machine_payment_evidence.fx_rate_sek, EXCLUDED.fx_rate_sek),
       fx_source = COALESCE(machine_payment_evidence.fx_source, EXCLUDED.fx_source),
       fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at),
-      fx_rates = COALESCE(machine_payment_evidence.fx_rates, EXCLUDED.fx_rates),
+      -- #2877: the map is frozen WITH the capture, not independently. Written
+      -- only by the write that first sets fx_at, so a row that already carries
+      -- a book-time capture can never gain a LATER map — which would be a
+      -- feed-time rate sitting beside a settlement timestamp. A row settled
+      -- before migration 082 therefore keeps fx_rates NULL for good: its
+      -- book-time rates are not knowable, and a non-SEK ledger correctly reads
+      -- it as not-ready rather than being fed a rate from the wrong day.
+      fx_rates = CASE
+        WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.fx_rates
+        ELSE machine_payment_evidence.fx_rates
+      END,
       updated_at = NOW()`
 }
 

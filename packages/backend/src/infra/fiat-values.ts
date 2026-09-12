@@ -49,6 +49,12 @@ export interface BookTimeLedgerRates {
   fxSource: string
 }
 
+/** One settlement-time capture: the SEK value and every ledger rate, one read. */
+export interface BookTimeCapture extends BookTimeLedgerRates {
+  /** Null when the SEK half was not usable (bad amount, or no SEK quote). */
+  sek: BookTimeSekValue | null
+}
+
 /**
  * The book-time SEK value of a settled token amount — captured once at
  * settlement and then frozen (see migration 026). Returns `null` when no usable
@@ -72,29 +78,41 @@ export async function getBookTimeSekValue(
 }
 
 /**
- * Book-time rates for EVERY supported ledger currency, captured in the same
- * call as the SEK value and frozen beside it (#2877).
+ * The whole book-time capture for a settled payment: the SEK value and the
+ * rate for every supported ledger currency, from ONE price read (#2877).
  *
- * A map rather than one rate, because one settled payment can be fed to
- * connections that book in different currencies, and "capture once, never
- * recompute" has to survive that: the rate the feed uses is the one quoted at
- * settlement, whichever ledger asks for it later. Returns `null` on the same
- * terms as `getBookTimeSekValue` — no usable quote means nulls the caller
- * persists, never a bogus zero, and never a blocked settlement.
+ * One read, not two, because the two halves are persisted as one frozen
+ * record: `fx_at` timestamps the capture and the map is the capture. Two
+ * separate `getTokenPrice` awaits can straddle the 60 s cache boundary, so
+ * one could succeed against a price the other never saw — and the row would
+ * then carry a timestamp from one fetch and rates from another. Taking both
+ * from the same `price` object makes that unrepresentable.
+ *
+ * Returns `null` only when NOTHING was usable — the same "nulls, and never a
+ * bogus zero, and never a blocked settlement" contract the SEK capture has
+ * had since migration 026.
  */
-export async function getBookTimeLedgerRates(tokenSymbol: string): Promise<BookTimeLedgerRates | null> {
+export async function getBookTimeCapture(
+  tokenSymbol: string,
+  amountHuman: string,
+): Promise<BookTimeCapture | null> {
+  const amount = Number(amountHuman)
+  let price: Awaited<ReturnType<typeof getTokenPrice>>
   try {
-    const price = await getTokenPrice(tokenSymbol)
-    const rates: Partial<Record<LedgerCurrency, number>> = {}
-    for (const currency of SUPPORTED_LEDGER_CURRENCIES) {
-      const rate = price[currency.toLowerCase() as Lowercase<LedgerCurrency>]
-      if (Number.isFinite(rate) && rate > 0) rates[currency] = rate
-    }
-    // A price response with no positive quote in ANY supported currency is the
-    // same event as a pricing outage: nulls, backfillable.
-    if (Object.keys(rates).length === 0) return null
-    return { rates, fxSource: FX_SOURCE_SPOT }
+    price = await getTokenPrice(tokenSymbol)
   } catch {
     return null
   }
+
+  const rates: Partial<Record<LedgerCurrency, number>> = {}
+  for (const currency of SUPPORTED_LEDGER_CURRENCIES) {
+    const rate = price[currency.toLowerCase() as Lowercase<LedgerCurrency>]
+    if (Number.isFinite(rate) && rate > 0) rates[currency] = rate
+  }
+
+  const sekUsable = Number.isFinite(amount) && amount > 0 && Number.isFinite(price.sek) && price.sek > 0
+  const sek = sekUsable ? { amountSek: amount * price.sek, fxRate: price.sek, fxSource: FX_SOURCE_SPOT } : null
+
+  if (!sek && Object.keys(rates).length === 0) return null
+  return { sek, rates, fxSource: FX_SOURCE_SPOT }
 }

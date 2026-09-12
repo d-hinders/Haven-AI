@@ -306,14 +306,17 @@ export async function saveOAuth2Connection(
 /**
  * The callback's work, after the state has been verified and consumed:
  * exchange the code, ask the provider who the grant belongs to, refuse a
- * ledger that books in the wrong currency (#2864: "Haven currently feeds SEK
- * ledgers only"), and only then store. A refused connect stores nothing — an
+ * ledger that books in a currency Haven does not feed (#2864, widened to the
+ * supported list by #2877 — the sentence the user sees is
+ * `UNSUPPORTED_BASE_CURRENCY_MESSAGE`, quoted in one place only so it cannot
+ * go stale here), and only then store. A refused connect stores nothing — an
  * existing row is left exactly as it was, and the user sees `error`.
  *
  * The company step runs only when the descriptor declares `companyInfo`;
  * the currency check runs regardless (a null currency passes), so the
  * enforcement point is reached on every connect and the conformance suite can
- * prove that with a provider that reports a non-SEK ledger.
+ * prove that with a provider that reports an unsupported ledger currency —
+ * with a supported non-SEK one (case 7d) as its positive control.
  *
  * ## The same call IS the re-consent path (#2865)
  *

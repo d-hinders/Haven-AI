@@ -19,6 +19,9 @@ const DATA = {
   fxRate: '10.42',
   fxSource: 'riksbank',
   fxAt: '2026-07-15T09:30:00.000Z',
+  amountLedger: '10.42',
+  ledgerCurrency: 'SEK',
+  fxRateLedger: '10.42',
   merchantName: 'NordShield VPN',
   merchantAddress: '0x' + 'ab'.repeat(20),
   resourceUrl: 'https://merchant.example/vpn',
@@ -167,5 +170,34 @@ describe('fetchMerchantReceiptDocument (#956 SSRF guards)', () => {
       okResponse({ 'content-type': 'application/pdf', 'content-length': String(6 * 1024 * 1024) }),
     ) as unknown as typeof fetch
     await expect(fetchMerchantReceiptDocument('https://m.example/r.pdf', bigImpl)).rejects.toThrow(/5MB cap/)
+  })
+})
+
+/**
+ * #2877: the underlag is attached to the record it backs, so it must state
+ * that record's figure. A DKK invoice with a receipt reading "Book value
+ * 10.4200 SEK" is two unrelated numbers for one payment, in two currencies,
+ * with nothing relating them — found by review before it shipped.
+ */
+describe('underlag currency (#2877)', () => {
+  it('a non-SEK ledger gets the invoiced figure as Book value, with the SEK capture kept as a labelled reference', () => {
+    const pdf = underlagFromData({
+      ...DATA,
+      amountSek: '10.4200',
+      fxRate: '10.4200',
+      amountLedger: '6.8700',
+      ledgerCurrency: 'DKK',
+      fxRateLedger: '6.8700',
+    }).pdf.toString('latin1')
+    // MUTATION TARGET: render `data.amountSek` + 'SEK' on the Book value line
+    // again and a Danish invoice is backed by a receipt quoting kronor.
+    expect(pdf).toContain('Book value     6.8700 DKK')
+    expect(pdf).toContain('Haven SEK ref  10.4200 SEK')
+  })
+
+  it('a SEK ledger renders exactly one book-value line, unchanged', () => {
+    const pdf = underlagFromData(DATA).pdf.toString('latin1')
+    expect(pdf).toContain('Book value     10.42 SEK')
+    expect(pdf).not.toContain('Haven SEK ref')
   })
 })

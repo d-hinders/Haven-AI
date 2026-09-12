@@ -172,6 +172,8 @@ export function ConnectionsCard() {
     if (outcome.connect === 'connected') return { tone: 'ok' as const, text: copy.outcome.connected(name) }
     if (outcome.connect === 'denied') return { tone: 'error' as const, text: copy.outcome.denied(name) }
     if (outcome.reason === 'unsupported_currency') return { tone: 'error' as const, text: copy.outcome.unsupportedCurrency }
+    // #2918: the backend consumed the state and kept nothing — "try again" would be the wrong advice.
+    if (outcome.reason === 'feature_off') return { tone: 'error' as const, text: copy.outcome.featureOff(name) }
     return { tone: 'error' as const, text: copy.outcome.error(name) }
   })()
 

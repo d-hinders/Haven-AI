@@ -260,6 +260,15 @@ describe('ConnectionsCard', () => {
       )
     })
 
+    it('connect=error&reason=feature_off says the feature is off — not "try again" (#2918)', async () => {
+      searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=error&reason=feature_off')
+      serve([])
+      renderCard()
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('switched off on this deployment')
+      expect(alert).not.toHaveTextContent('Try again')
+    })
+
     it('connect=error without a reason is the generic sentence', async () => {
       searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=error')
       serve([])
@@ -275,11 +284,29 @@ describe('ConnectionsCard', () => {
   })
 
   /**
-   * The card in the feed's OFF states (#2869). The connection routes are NOT
-   * behind the feed flag, so without the feed-status read this card would
-   * offer a working Connect on a deployment whose feed is switched off.
+   * The card in the feed's OFF states (#2869). Since #2918 the connection
+   * routes answer 404 when the feature is off, so `serveOff` mirrors the real
+   * server: the feed status says off AND the list read fails — the card must
+   * render the off state, never the load error.
    */
+  function serveOff(status: ReturnType<typeof feedStatus>) {
+    mockApi.get.mockImplementation((url: string) => {
+      if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
+      if (url === '/accounting/feed/status') return Promise.resolve(status)
+      if (url === '/accounting/connections') return Promise.reject(Object.assign(new Error('Not found'), { status: 404 }))
+      return Promise.reject(new Error(`unexpected GET ${url}`))
+    })
+  }
+
   describe('the feed is off (#2869)', () => {
+    it('the gated connections read (404 since #2918) is absorbed by the off state — no load error', async () => {
+      serveOff(feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
+      renderCard()
+      expect(await screen.findByTestId('accounting-coming-soon')).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByText(en.settings.accounting.loadError)).toBeNull()
+    })
+
     it('hosted with the flag off: providers listed as Coming soon, with no action at all', async () => {
       serve([], feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
       renderCard()

@@ -13,6 +13,7 @@ import {
 import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { getChain } from '../domain/chains.js'
+import { withAccountAddressAlias } from '../openapi/wire-aliases.js'
 import {
   formatTokenAmount,
   getFaucetUrl,
@@ -32,11 +33,14 @@ interface RenameSafeBody {
 export default async function userSafesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /user/safes — list all Safes for the authenticated user
+  // GET /user/safes (and its #2907 twin GET /user/accounts) — list all
+  // linked accounts for the authenticated user. Dual-emits account_address
+  // alongside safe_address on every item (equality-tested,
+  // `openapi/wire-aliases.test.ts`).
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const safes = await listAccountsForUser(sub)
+    const safes = (await listAccountsForUser(sub)).map(withAccountAddressAlias)
 
     return { safes }
   })
@@ -71,7 +75,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      return renamed
+      return withAccountAddressAlias(renamed)
     },
   )
 

@@ -24,6 +24,7 @@ import {
 } from '../modules/transactions/index.js'
 import { CSV_BOM } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
+import { withFailedAccountIdsAlias, withTransactionAccountAlias } from '../openapi/wire-aliases.js'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -96,6 +97,7 @@ export default async function transactionRoutes(
   app.get<{
     Querystring: {
       safeId?: string
+      accountId?: string
       agentId?: string
       tokenKey?: string
       offset?: string
@@ -112,7 +114,14 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid pagination params' })
     }
 
-    if (request.query.safeId && !UUID_RE.test(request.query.safeId)) {
+    // #2907: `accountId` is the account-vocabulary twin of `safeId`; both are
+    // accepted and filter identically. An unknown query key is silently
+    // ignored by Fastify, so a missing alias here would have returned ALL
+    // transactions with no error — the failure mode `wire-aliases.test.ts`'s
+    // sibling filter test guards against.
+    const accountFilterId = request.query.accountId ?? request.query.safeId
+
+    if (accountFilterId && !UUID_RE.test(accountFilterId)) {
       return reply.code(400).send({ error: 'Invalid safeId' })
     }
 
@@ -131,8 +140,8 @@ export default async function transactionRoutes(
 
     let safes = await listBasicAccountsForUser(sub)
 
-    if (request.query.safeId) {
-      safes = safes.filter((safe) => safe.id === request.query.safeId)
+    if (accountFilterId) {
+      safes = safes.filter((safe) => safe.id === accountFilterId)
       if (safes.length === 0) {
         return reply.code(400).send({ error: 'Invalid safeId' })
       }
@@ -154,6 +163,7 @@ export default async function transactionRoutes(
         hasMore: false,
         partialFailure: false,
         failedSafeIds: [],
+        failedAccountIds: [],
         truncated: false,
       }
     }
@@ -171,9 +181,10 @@ export default async function transactionRoutes(
     const { page: paginated, hasMore } = paginateByOffset(filtered, offset, limit)
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
     // ledger query per response, and none for an unentitled account.
-    const transactions = await enrichTransactionsWithAccounting(sub, paginated, request.log)
+    const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
+    const transactions = enrichedPage.map(withTransactionAccountAlias)
 
-    return {
+    return withFailedAccountIdsAlias({
       transactions,
       total: filtered.length,
       offset,
@@ -184,7 +195,7 @@ export default async function transactionRoutes(
       // #2882: the rows above are capped at the explorer window per account,
       // so `total` is the truncated count, not the account's history.
       truncated,
-    }
+    })
   })
 
   app.get<{ Params: { paymentId: string } }>(
@@ -231,6 +242,7 @@ export default async function transactionRoutes(
   app.get<{
     Querystring: {
       safeId?: string
+      accountId?: string
       agentId?: string
       tokenKey?: string
       direction?: string
@@ -240,8 +252,10 @@ export default async function transactionRoutes(
   }>('/export.csv', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const fresh = parseFreshFlag(request.query.fresh)
+    // #2907: `accountId` twins `safeId`; both accepted, both filter.
+    const accountFilterId = request.query.accountId ?? request.query.safeId
 
-    if (request.query.safeId && !UUID_RE.test(request.query.safeId)) {
+    if (accountFilterId && !UUID_RE.test(accountFilterId)) {
       return reply.code(400).send({ error: 'Invalid safeId' })
     }
 
@@ -277,8 +291,8 @@ export default async function transactionRoutes(
     const allSafes = await listBasicAccountsForUser(sub)
     let safes = allSafes
 
-    if (request.query.safeId) {
-      safes = safes.filter((safe) => safe.id === request.query.safeId)
+    if (accountFilterId) {
+      safes = safes.filter((safe) => safe.id === accountFilterId)
       if (safes.length === 0) {
         return reply.code(400).send({ error: 'Invalid safeId' })
       }
@@ -362,11 +376,19 @@ export default async function transactionRoutes(
     }
   })
 
+  // #2907: `/:safeAddress` and its documented `{accountAddress}` twin
+  // (`openapi/spec.ts`) are the SAME Fastify route — a single dynamic path
+  // segment has no wire-visible name, so `GET /transactions/0xabc...` is
+  // already both paths at once; find-my-way also refuses two parametric
+  // routes with different param names at one position (`FST_ERR_..._NAME`),
+  // so registering a second one here would fail at boot. Unlike the
+  // multi-segment `/user/safes/...` twins, there is nothing to register
+  // twice.
   app.get<{
     Params: { safeAddress: string }
     Querystring: { page?: string; limit?: string; fresh?: string; chain_id?: string }
   }>('/:safeAddress', async (request, reply) => {
-    const { safeAddress } = request.params
+    const { safeAddress: address } = request.params
     const { sub } = request.user as { sub: string }
     const page = parsePositiveInt(request.query.page, 1, 1, Number.MAX_SAFE_INTEGER)
     const limit = parsePositiveInt(request.query.limit, 25, 1, 100)
@@ -377,7 +399,7 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid pagination params' })
     }
 
-    if (!ETH_ADDRESS_RE.test(safeAddress)) {
+    if (!ETH_ADDRESS_RE.test(address)) {
       return reply.code(400).send({ error: 'Invalid address' })
     }
 
@@ -389,7 +411,7 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
     }
 
-    const ownershipRows = await findAccountOwnership(sub, safeAddress, requestedChainId)
+    const ownershipRows = await findAccountOwnership(sub, address, requestedChainId)
     if (ownershipRows.length === 0) {
       return reply.code(403).send({ error: 'Not your Safe' })
     }
@@ -403,7 +425,7 @@ export default async function transactionRoutes(
     const { transactions: enriched, total } = await buildSafeTransactionsPage({
       userId: sub,
       safeId,
-      safeAddress,
+      safeAddress: address,
       chainId,
       log: request.log,
       fresh,

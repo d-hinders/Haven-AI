@@ -18,6 +18,7 @@ import {
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import { config } from '../config.js'
+import { withAgentAccountAlias } from '../openapi/wire-aliases.js'
 import {
   agentExistsForUser,
   createAgent,
@@ -91,7 +92,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
 
     const agents = agentRows.map((agent) => ({
-      ...agent,
+      ...withAgentAccountAlias(agent),
       allowances:
         agent.account_type === 'delegator_hybrid'
           ? (derivedByAgent.get(agent.id) ?? [])
@@ -115,12 +116,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (agent.account_type === 'delegator_hybrid') {
       // Live budget = the active delegations, not an onboarding mirror (#1090).
       const derived = await deriveDelegationAllowances([id])
-      return { ...agent, allowances: derived.get(id) ?? [] }
+      return { ...withAgentAccountAlias(agent), allowances: derived.get(id) ?? [] }
     }
 
     // Legacy rail retired (#1440/#2020): no allowance config to show.
     return {
-      ...agent,
+      ...withAgentAccountAlias(agent),
       allowances: [],
     }
   })
@@ -269,8 +270,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       return reply.code(201).send({
-        ...agent,
-        ...safeInfo,
+        ...withAgentAccountAlias({ ...agent, ...safeInfo }),
         api_key: apiKey,
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.
@@ -315,7 +315,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
           : []
 
       return {
-        ...updated,
+        ...withAgentAccountAlias(updated),
         allowances,
       }
     },

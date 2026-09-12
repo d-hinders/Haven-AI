@@ -51,6 +51,11 @@ describe('GET /user/safes — list invariants', () => {
     expect(mockPoolQuery).not.toHaveBeenCalled()
   })
 
+  // #2907 AC #1 (characterization): `rows` below is the exact pre-#2907
+  // row shape (`LIST_SAFES_FOR_USER_SQL`'s columns), and the assertion below
+  // is byte-for-byte on those OLD-named fields plus the additive twin — an
+  // old client parsing only `id`/`safe_address`/`chain_id`/`name`/
+  // `is_default`/`created_at` sees exactly what it saw before.
   it('returns the caller-scoped Safes under a { safes } envelope', async () => {
     const rows = [
       // A real row: user_safes.id is a UUID and safe_address is a full
@@ -74,7 +79,11 @@ describe('GET /user/safes — list invariants', () => {
     })
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ safes: rows })
+    // #2907: the route dual-emits `account_address` alongside `safe_address`
+    // (same value) — the account-vocabulary twin, additive for one release.
+    expect(res.json()).toEqual({
+      safes: rows.map((row) => ({ ...row, account_address: row.safe_address })),
+    })
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockPoolQuery.mock.calls[0]
     expect(params).toEqual([USER])

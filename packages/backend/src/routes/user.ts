@@ -89,6 +89,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
   // left open. Kept as a 410 rather than removed, per #834/#1328.
   app.put('/safe', retiredSafeInflowHandler('import'))
 
+  // PUT /user/account — #2907 twin of PUT /user/safe. Same handler, same 410
+  // tombstone; `updateUserAccount` in `openapi/spec.ts`.
+  app.put('/account', retiredSafeInflowHandler('import'))
+
   // GET /user/preferences
   app.get('/preferences', async (request) => {
     const { sub } = request.user as { sub: string }

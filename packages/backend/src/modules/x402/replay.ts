@@ -176,6 +176,10 @@ export async function rebuildDelegationSignContext(
         typed_data: userOpTypedData(state, accountAddress as `0x${string}`, intentChainId),
         components: {
           safe: agent.safe_address,
+          // #2907: same-value twin of the deprecated `safe`, not of
+          // `account` (a different address on this shape — see the sibling
+          // comment in `delegation-authorize.ts`).
+          payer_account: agent.safe_address,
           account: accountAddress,
           token: existing.token_address,
           to: existing.to_address,

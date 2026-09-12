@@ -282,6 +282,12 @@ pushes a zero); negative or unparseable stays not-ready.
 migration 026, so a computed amount has the same shape as a stored one and no
 float tail or exponent notation reaches a supplier invoice.
 
+**What the accountant sees on the attachment.** The underlag PDF states the
+figure on the record it backs: `Book value` in the invoiced currency, with the
+SEK capture kept below it as `Haven SEK ref` when they differ. One document,
+two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
+kronor.
+
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its
 provenance. Haven asserts no parity between a stablecoin and the currency it is
@@ -549,7 +555,9 @@ company fields replaced, `feed_from = now`, `status_reason` names both
 companies, `settings.companySwitches` appended, one
 `accounting_company_switch` log line. Pre-switch `pushed` rows stay; *Check in
 Fortnox* reports them `missing` through the new company (correct), and the
-reopen refuses them `previous_company`.
+reopen refuses them `previous_company`. A switch does not re-price history
+either (#2877): a record already pushed keeps the currency it was pushed in,
+and the new connection feeds what settles after its `feed_from`.
 
 **Token lifecycle.** Access tokens live one hour; refresh tokens are
 single-use and rotate on every refresh (45-day life). The refresh runs under a

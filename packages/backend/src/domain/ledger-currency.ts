@@ -11,6 +11,16 @@
  * value, so widening it is a one-line change here plus a rate that actually
  * arrives; refusing the rest AT CONNECT is what keeps the failure a clear
  * answer to the user instead of a row that never feeds.
+ *
+ * **Widening it is NOT only a one-line change, though — two copies live in the
+ * frontend and nothing couples them to this list.** The user-facing refusal is
+ * built from `ledgerCurrencyList()` on the backend, but the dashboard renders
+ * its own sentence from i18n: `accounting.outcome.unsupportedCurrency` in
+ * `packages/frontend/src/lib/i18n/messages/en.ts` and `sv.ts`, both of which
+ * spell the currencies out. That pair has already drifted from this list once,
+ * within a week of it being written (#2903 shipped "SEK ledgers only" copy
+ * while #2877 was in review). Update them in the same change, or the dashboard
+ * will tell users something the backend does not do.
  */
 
 /** Supported ledger currencies, ISO-4217. SEK first: it is the default. */

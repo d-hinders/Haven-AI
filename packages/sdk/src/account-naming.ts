@@ -46,8 +46,18 @@ export function readAccountId(raw: {
  * hosted MCP outputs that spread them). Same value under both keys; the
  * `safeAddress` key is the deprecated one and goes at #2914.
  */
-export function accountAddressTwins(address: string): { accountAddress: string; safeAddress: string } {
-  return { accountAddress: address, safeAddress: address }
+export function accountAddressTwins(
+  address: string | undefined,
+): { accountAddress: string; safeAddress: string } {
+  // A server that sends NEITHER name is off-contract (both `safe_address`
+  // and `account_address` are required on the wire); the field is then
+  // `undefined` at runtime — exactly what the pre-#2908 `safeAddress:
+  // raw.safe_address` read produced — and never a fabricated `''`, which
+  // would read as a present-but-blank address downstream (the hosted MCP
+  // outputs spread this object; the sweep uses it as a destination). The
+  // declared type stays `string` because that is the contract; the cast is
+  // the one place the off-contract case is allowed through unchanged.
+  return { accountAddress: address, safeAddress: address } as { accountAddress: string; safeAddress: string }
 }
 
 /**

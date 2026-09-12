@@ -56,6 +56,16 @@ describe('readAccountAddress / readAccountId — new name first, old name kept',
     expect(readAccountAddress({})).toBeUndefined()
     expect(readAccountAddress({ safe_address: null, account_address: null })).toBeUndefined()
   })
+  it('accountAddressTwins with NEITHER name present yields undefined under both keys, never a blank string', () => {
+    // Off-contract server (no `safe_address`, no `account_address`): the
+    // pre-#2908 read produced `undefined`; a fabricated '' would be a
+    // present-but-blank address for the hosted MCP output and the sweep.
+    const out = accountAddressTwins(undefined)
+    expect(out.accountAddress).toBeUndefined()
+    expect(out.safeAddress).toBeUndefined()
+    expect(out.accountAddress).not.toBe('')
+  })
+
   it('accountAddressTwins puts one value under both keys', () => {
     expect(accountAddressTwins(PAYER)).toEqual({ accountAddress: PAYER, safeAddress: PAYER })
   })

@@ -107,7 +107,7 @@ export class AccountReads {
       // #2908: one mapper, both names, same value — `readAccountAddress`
       // prefers the server's `account_address` twin and falls back to
       // `safe_address` for a pre-#2907 server.
-      ...accountAddressTwins(readAccountAddress(raw) ?? ''),
+      ...accountAddressTwins(readAccountAddress(raw)),
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       allowances: raw.allowances.map((allowance) => ({
@@ -209,7 +209,7 @@ export class AccountReads {
       // #2908: both camelCase names off whichever snake_case name the server
       // sent (new first). The hosted MCP's `haven_get_agent` spreads this
       // object, so this is also the hosted output's dual-emit point.
-      ...accountAddressTwins(readAccountAddress(raw) ?? ''),
+      ...accountAddressTwins(readAccountAddress(raw)),
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',

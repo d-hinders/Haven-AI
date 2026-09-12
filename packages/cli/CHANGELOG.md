@@ -9,6 +9,13 @@ Release headers are written by the release bump (`npm run release:bump`), never 
 - Calls the account-vocabulary paths: `GET /user/accounts`,
   `GET /user/accounts/:id/funding`, `PUT /user/accounts/:id`
   (`/balances/{address}` is a single dynamic segment and needs no twin).
+  **Release-ordering constraint:** the CLI does NOT fall back to `/user/safes*`
+  on a 404 — a backend carrying #2907 (PR #2930, the `/user/accounts*` twin)
+  must be LIVE on the environment the CLI targets before the release carrying
+  this CLI is promoted to `latest`; otherwise `wallets list|balances|funding|
+  rename`, `activity --safe`, `agents connect` and wallet resolution in
+  `send`/`pay` 404 at once. (The query key and the request body are dual-sent
+  and have no such constraint.)
 - `activity list` / `activity export` send `?accountId=` AND `?safeId=` (same
   value; `accountId` wins on the server; the old key keeps a pre-#2907 server
   filtering, because an unknown query key is silently ignored).

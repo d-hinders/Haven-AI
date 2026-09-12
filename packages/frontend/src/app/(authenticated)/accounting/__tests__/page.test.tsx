@@ -3,8 +3,8 @@
  * Settings for the connection; the OAuth callback still lands here
  * (`routes/accounting-connections.ts` redirects to `/accounting?…`), so the
  * outcome query is forwarded to `/settings` verbatim — including
- * `reason=unsupported_currency`, which Settings turns into "Haven currently
- * feeds SEK ledgers only".
+ * `reason=unsupported_currency`, which Settings turns into a sentence naming
+ * the supported ledger currencies (#2877).
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

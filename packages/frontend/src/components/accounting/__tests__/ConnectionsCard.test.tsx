@@ -247,11 +247,13 @@ describe('ConnectionsCard', () => {
       expect(screen.queryByRole('dialog')).toBeNull()
     })
 
-    it('connect=error&reason=unsupported_currency says Haven currently feeds SEK ledgers only', async () => {
+    it('connect=error&reason=unsupported_currency names the supported ledger currencies (#2877)', async () => {
       searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=error&reason=unsupported_currency')
       serve([])
       renderCard()
-      expect(await screen.findByRole('alert')).toHaveTextContent('Haven currently feeds SEK ledgers only')
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Haven feeds ledgers that book in SEK, EUR, USD, DKK, NOK or GBP',
+      )
     })
 
     it('connect=error without a reason is the generic sentence', async () => {

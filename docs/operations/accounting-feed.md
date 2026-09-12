@@ -250,7 +250,7 @@ pushed (`lastPushAt IS NULL`) opens the **backfill choice**
 *Include payments since \<date\>*, which POSTs `{ since: "YYYY-MM-DD" }` and
 shows `SINCE_INVALID` / `SINCE_NOT_EARLIER` / `NOT_ACTIVE` inline); `denied`
 and `error` become a sentence beside the card, `reason=unsupported_currency`
-its own ("Haven currently feeds SEK ledgers only"). A re-consent on a row
+its own, naming the supported ledger currencies (#2877). A re-consent on a row
 with history gets no dialog — its floor stands. The `/accounting` page keeps
 the sync rows, **Sync now**, **Check in Fortnox** and the re-open, and points
 at Settings for the connection. There is no mobile-specific layout (owner

@@ -42,7 +42,7 @@ export const DEFAULT_LOCALE: Locale = 'en'
  *
  * **It reaches exactly two call sites** — `ConnectionRow.formatConnectionDate`
  * and `FeedSummary.relativeTime`, the two that used to branch on `'sv'`. The
- * rest of the app's 15 other `Intl`/`toLocale*` calls format with a hard-coded
+ * rest of the app's ~15 other `Intl`/`toLocale*` call sites format with a hard-coded
  * `'en-US'`, with the *device* locale (`undefined`), bare, or — in the three
  * `Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', …)` sites on the
  * dashboard and account detail — driven by the CURRENCY preference, which is

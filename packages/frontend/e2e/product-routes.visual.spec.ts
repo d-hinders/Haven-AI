@@ -20,9 +20,13 @@
  *
  *   route           chars  console errors  wall-clock text  verdict
  *   /settings       1,407  0               none            deferred (see below)
- *                   ^ measured before #2926; the Settings language row was
- *                     removed there, so /settings now reads ~90 characters
- *                     lower. The verdict below is unchanged.
+ *                   ^ measured before #2926, which removed the Settings
+ *                     language row. That row's copy is ~70 characters
+ *                     ("Language", its detail sentence, "English",
+ *                     "Svenska") — counted from the removed strings, NOT
+ *                     re-measured through this harness. The verdict below
+ *                     turns on the ordering, not the figure, and is
+ *                     unchanged.
  *   /dashboard        810  0               "3mo ago"       ADDED, clock frozen
  *   /agents           549  1 (chain RPC)   none            rejected
  *   /transactions     320  0               "3mo ago"       ADDED, clock frozen

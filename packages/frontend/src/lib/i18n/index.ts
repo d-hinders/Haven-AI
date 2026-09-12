@@ -42,9 +42,12 @@ export const DEFAULT_LOCALE: Locale = 'en'
  *
  * **It reaches exactly two call sites** — `ConnectionRow.formatConnectionDate`
  * and `FeedSummary.relativeTime`, the two that used to branch on `'sv'`. The
- * rest of the app's ~15 `Intl`/`toLocale*` calls format with a hard-coded
- * `'en-US'`, with the *device* locale (`undefined`), or bare, and none of them
- * consults this map. That is pre-existing drift, not something a second locale
+ * rest of the app's 15 other `Intl`/`toLocale*` calls format with a hard-coded
+ * `'en-US'`, with the *device* locale (`undefined`), bare, or — in the three
+ * `Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', …)` sites on the
+ * dashboard and account detail — driven by the CURRENCY preference, which is
+ * the one place the app already varies an `Intl` tag on something that is not
+ * the UI locale. None of them consults this map. That is pre-existing drift, not something a second locale
  * would inherit cleanly: re-adding a language means auditing those too.
  */
 export const INTL_LOCALE: Record<Locale, string> = { en: 'en-GB' }

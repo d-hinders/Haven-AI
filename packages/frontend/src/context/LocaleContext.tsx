@@ -14,7 +14,8 @@ const LocaleContext = createContext<LocaleContextValue | null>(null)
 /**
  * Holds the active UI language.
  *
- * Haven ships one language (#2926), so there is nothing to resolve: every
+ * The Haven dashboard ships one language (#2926) — see `lib/i18n/index.ts`
+ * for the scope of that claim — so there is nothing to resolve: every
  * render — server and client — is `DEFAULT_LOCALE`, which is also why there is
  * no hydration seam left to guard. The provider stays because the catalog and
  * `useT()` stay: a second locale changes what this holds, not who reads it.

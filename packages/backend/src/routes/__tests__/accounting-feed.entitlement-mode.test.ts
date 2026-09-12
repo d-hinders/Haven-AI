@@ -62,7 +62,7 @@ describe('accounting feed routes × real entitlement gate (#2861)', () => {
     accountingMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
     accountingMocks.getDestinationSummary.mockReset().mockResolvedValue(null)
     accountingMocks.getAccountingFeedCounts.mockReset().mockResolvedValue({ pending: 0, failed: 0, exhausted: 0 })
-    accountingMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
+    accountingMocks.syncUser.mockReset().mockResolvedValue({ fed: 0, total: 0 })
     accountingMocks.hasLiveConnector.mockReset().mockReturnValue(true)
     accountingMocks.getActiveConnectionSummary.mockReset().mockResolvedValue(null)
   })

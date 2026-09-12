@@ -266,7 +266,13 @@ export const en = {
         /** The footer's way out — the same no-op as "Feed from now". */
         notNow: 'Not now',
         working: 'Feeding…',
-        done: (n: number) => `${n} earlier payment${n === 1 ? '' : 's'} fed.`,
+        /**
+         * #2915: `fed` is what the sync actually pushed, `total` what it
+         * enumerated — the sentence never claims a payment that did not land.
+         */
+        done: (fed: number, total: number) => `${fed} of ${total} earlier payment${total === 1 ? '' : 's'} fed.`,
+        /** Under `done` when some enumerated payments were not pushed. */
+        partial: 'Some of the earlier payments were not fed. Press Sync now on the Accounting page to try them again.',
         close: 'Done',
         errors: {
           SINCE_INVALID: 'Enter a past date as YYYY-MM-DD, not before 2020-01-01.',

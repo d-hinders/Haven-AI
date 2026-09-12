@@ -347,7 +347,10 @@ describeDb('multi-currency ledgers (#2877)', () => {
     // delayed, never fed, because this statement is the only path by which a
     // payment with no sync row reaches a connector.
     expect(await listUnpushedPaymentIds(userId, 'memory', 50, null)).toContain(paymentId)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    // #2915: `fed` counts pushes and the one enumerated payment IS pushed —
+    // from its EUR rate map, so the #2877 net-new semantics stay proven —
+    // while `total` names the enumeration the selector must keep covering.
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     expect(connector.pushed[0].tx.ledgerCurrency).toBe('EUR')
     expect(connector.pushed[0].tx.amountLedger).toBe('0.9200')
     // The SEK half stays missing and is not invented.

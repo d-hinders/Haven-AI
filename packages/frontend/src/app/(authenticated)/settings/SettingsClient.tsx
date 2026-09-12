@@ -1,7 +1,6 @@
 'use client'
 
 import { ArrowRight } from 'lucide-react'
-import { Card } from '@/components/ui/Card'
 import { Icon } from '@/components/ui/Icon'
 import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
@@ -10,58 +9,9 @@ import { useLocale, useT } from '@/context/LocaleContext'
 import type { Locale } from '@/lib/i18n'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { SettingsSection as Section, SettingsRow as SettingRow } from './SettingsSection'
+import { ConnectionsCard } from '@/components/accounting/ConnectionsCard'
 
-
-function Section({
-  title,
-  description,
-  children,
-  className = '',
-}: {
-  title: string
-  description?: string
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <section className={`rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card ${className}`}>
-      <Card.Header padding="spacious" className="rounded-t-[10px]">
-        <h2 className="text-[13px] font-semibold uppercase tracking-widest text-[var(--v2-ink)]">{title}</h2>
-        {description ? (
-          <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{description}</p>
-        ) : null}
-      </Card.Header>
-      <div className="divide-y divide-[var(--v2-border)]">{children}</div>
-    </section>
-  )
-}
-
-function SettingRow({
-  label,
-  value,
-  detail,
-  action,
-}: {
-  label: string
-  value?: ReactNode
-  detail?: ReactNode
-  action?: ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-[var(--v2-ink)]">{label}</p>
-        {detail ? (
-          <div className="mt-1 text-sm text-[var(--v2-ink-3)]">{detail}</div>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        {value ? <div className="text-sm text-[var(--v2-ink-2)]">{value}</div> : null}
-        {action}
-      </div>
-    </div>
-  )
-}
 
 /**
  * Inline segmented control — the canonical Settings toggle (used for currency
@@ -235,6 +185,13 @@ export default function SettingsClient() {
             action={<StatusPill>{t.common.comingSoon}</StatusPill>}
           />
         </Section>
+
+        {/*
+          Accounting connections live HERE (owner decision 2026-09-11, #2868):
+          the feed page keeps the sync rows, Settings owns Connect / Reconnect /
+          Disconnect, the feed settings and the backfill choice.
+        */}
+        <ConnectionsCard />
 
         {/*
           The Approvers section is DELETED (#1989, epic #1440). It hosted

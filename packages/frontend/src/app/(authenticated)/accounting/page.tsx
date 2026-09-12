@@ -1,18 +1,50 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   useAccountingFeed,
   type AccountingSyncStatus,
   type AccountingVerification,
 } from '@/hooks/useAccountingFeed'
-import { useFortnox } from '@/hooks/useAccounting'
+import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { CONNECT_OUTCOME_PARAMS, readConnectOutcome } from '@/components/accounting/ConnectionsCard'
 import { truncate } from '@/lib/format'
+
+/** Where the connection is managed (#2868): Settings owns Connect / Reconnect / Disconnect. */
+const ACCOUNTING_SETTINGS_HREF = '/settings'
+
+/**
+ * The OAuth callback still redirects here (`routes/accounting-connections.ts`
+ * builds `${frontendUrl}/accounting?provider=…&connect=…`), but the
+ * connection surface moved to Settings (#2868). Forward the outcome query
+ * verbatim so the Settings card reads it — `connected` opens the backfill
+ * choice there, `denied`/`error` (and `reason=unsupported_currency`) become
+ * its sentence. Rendered inside `Suspense` because `useSearchParams` needs
+ * a boundary on a prerendered page.
+ */
+function ConnectOutcomeForwarder() {
+  const router = useRouter()
+  const routerRef = useRef(router)
+  routerRef.current = router
+  const query = useSearchParams()?.toString() ?? ''
+  useEffect(() => {
+    const params = new URLSearchParams(query)
+    if (!readConnectOutcome(params)) return
+    const forwarded = new URLSearchParams()
+    for (const key of CONNECT_OUTCOME_PARAMS) {
+      const value = params.get(key)
+      if (value) forwarded.set(key, value)
+    }
+    routerRef.current.replace(`${ACCOUNTING_SETTINGS_HREF}?${forwarded.toString()}`)
+  }, [query])
+  return null
+}
 
 const STATUS: Record<AccountingSyncStatus, { label: string; cls: string }> = {
   pushed: { label: 'Synced', cls: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]' },
@@ -63,9 +95,9 @@ function verificationSummary(v: AccountingVerification): { text: string; tone: '
 }
 
 export default function AccountingPage() {
+  const t = useT()
   const { status, loading, error, sync, verify, reopen } = useAccountingFeed()
-  const { connect, disconnect } = useFortnox()
-  const [busy, setBusy] = useState<'sync' | 'connect' | 'disconnect' | null>(null)
+  const [busy, setBusy] = useState<'sync' | null>(null)
   const [verifying, setVerifying] = useState<string | null>(null)
   const [verifications, setVerifications] = useState<Record<string, AccountingVerification | { error: string }>>({})
 
@@ -87,7 +119,7 @@ export default function AccountingPage() {
     }
   }
 
-  const run = async (kind: 'sync' | 'connect' | 'disconnect', fn: () => Promise<void>) => {
+  const run = async (kind: 'sync', fn: () => Promise<void>) => {
     setBusy(kind)
     try { await fn() } finally { setBusy(null) }
   }
@@ -115,9 +147,16 @@ export default function AccountingPage() {
     }
   }
 
+  const forwarder = (
+    <Suspense fallback={null}>
+      <ConnectOutcomeForwarder />
+    </Suspense>
+  )
+
   if (loading) {
     return (
       <div className="max-w-3xl">
+        {forwarder}
         <PageHeader title="Accounting" subtitle="Sync your agent spend into your accounting tool." />
         <Skeleton variant="text" className="h-5 w-64" />
       </div>
@@ -125,10 +164,11 @@ export default function AccountingPage() {
   }
 
   // Self-hosted (or feature not live): the hosted-only add-on is hidden entirely.
-  if (!status || !status.hosted || !status.flagEnabled) return null
+  if (!status || !status.hosted || !status.flagEnabled) return forwarder
 
   return (
     <div className="max-w-3xl">
+      {forwarder}
       <PageHeader
         title="Accounting"
         subtitle="Your agent spend appears in your accounting tool as draft transactions — your accountant codes and confirms them."
@@ -157,28 +197,25 @@ export default function AccountingPage() {
             </div>
           )}
 
-          <Card className="p-5" hover={false}>
+          {/*
+            The Connect / Disconnect controls moved to Settings → Accounting
+            (#2868). This row only says where they went; the feed below keeps
+            working off the active destination.
+          */}
+          <Card className="p-0" hover={false}>
             <Row
+              className="px-5"
               title="Fortnox"
-              subtitle={status.connected ? 'Connected' : 'Not connected'}
+              subtitle={status.connected ? t.settings.accounting.status.connected : t.settings.accounting.status.disconnected}
               leadingTone={status.connected ? 'success' : 'neutral'}
               leading={<span className="text-sm">FN</span>}
               trailing={
-                status.connected ? (
-                  <Button variant="ghost" onClick={() => run('disconnect', disconnect)} disabled={busy !== null}>
-                    Disconnect
-                  </Button>
-                ) : (
-                  <Button onClick={() => run('connect', connect)} disabled={busy !== null}>Connect</Button>
-                )
+                <Button variant="ghost" href={ACCOUNTING_SETTINGS_HREF}>
+                  {t.accountingPage.openSettings}
+                </Button>
               }
             />
-            {!status.connected && (
-              <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-                Haven provides data tooling, not accounting or tax advice. Transactions are fed as drafts —
-                you and your accountant remain responsible for coding, correctness, and filing.
-              </p>
-            )}
+            <p className="px-5 pb-4 text-xs text-[var(--v2-ink-3)]">{t.accountingPage.manageInSettings}</p>
           </Card>
 
           <Card className="p-0" hover={false}>

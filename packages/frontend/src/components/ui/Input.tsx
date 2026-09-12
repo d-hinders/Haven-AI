@@ -62,6 +62,8 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   rightAction?: ReactNode
   invalid?: boolean
   helperText?: ReactNode
+  /** An id for the helper paragraph, so a caller can point `aria-describedby` at it. */
+  helperTextId?: string
 }
 
 export function Input({
@@ -70,6 +72,7 @@ export function Input({
   rightAction,
   invalid = false,
   helperText,
+  helperTextId,
   ...props
 }: InputProps) {
   // `focus-visible:`, not `focus:` (#1746). A text field is the one control
@@ -91,6 +94,9 @@ export function Input({
       )}
       <input
         className={`w-full rounded-md border bg-[var(--v2-bg)] px-3 py-2 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-[var(--v2-surface)] disabled:text-[var(--v2-ink-3)] ${borderClass} ${leftIcon ? 'pl-9' : ''} ${rightAction ? 'pr-24' : ''} ${className}`}
+        // The red border is only half of "invalid": assistive tech reads this
+        // attribute, not the colour. An explicit `aria-invalid` in `props` wins.
+        aria-invalid={invalid || undefined}
         {...props}
       />
       {rightAction && (
@@ -106,7 +112,7 @@ export function Input({
   return (
     <div className="space-y-1.5">
       {inputEl}
-      <p className={`text-xs ${invalid ? 'text-[var(--v2-danger)]' : 'text-[var(--v2-ink-3)]'}`}>
+      <p id={helperTextId} className={`text-xs ${invalid ? 'text-[var(--v2-danger)]' : 'text-[var(--v2-ink-3)]'}`}>
         {helperText}
       </p>
     </div>

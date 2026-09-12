@@ -124,6 +124,14 @@ type ButtonProps = {
    * the `button` branch only.
    */
   'aria-busy'?: boolean
+  /**
+   * The disclosure pair (#2903 review): a button that shows or hides an
+   * inline region says whether it is open and which element it controls —
+   * the Settings / Hide settings toggle on the accounting rows is the first
+   * caller. `button` branch only; an anchor is not a disclosure.
+   */
+  'aria-expanded'?: boolean
+  'aria-controls'?: string
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
   variant?: Variant
@@ -141,6 +149,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   form,
   'aria-label': ariaLabel,
   'aria-busy': ariaBusy,
+  'aria-expanded': ariaExpanded,
+  'aria-controls': ariaControls,
   disabled,
   onClick,
   variant = 'primary',
@@ -162,7 +172,18 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
   if (!href) {
     return (
-      <button ref={ref} type={type} form={form} aria-label={ariaLabel} aria-busy={ariaBusy} disabled={disabled} onClick={onClick} className={classes}>
+      <button
+        ref={ref}
+        type={type}
+        form={form}
+        aria-label={ariaLabel}
+        aria-busy={ariaBusy}
+        aria-expanded={ariaExpanded}
+        aria-controls={ariaControls}
+        disabled={disabled}
+        onClick={onClick}
+        className={classes}
+      >
         {content}
       </button>
     )

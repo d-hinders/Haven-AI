@@ -6,7 +6,8 @@
  * #2906). `components.account` must stay untouched.
  *
  * Static-source assertions rather than full request-level integration tests:
- * the two emitting routes (`delegation-authorize.ts`, `replay.ts`) sit deep
+ * the three emitting sites (`delegation-authorize.ts`, `replay.ts`, and the
+ * POST /payments idempotent replay in `routes/payments.ts`) sit deep
  * in x402 orchestration with heavy existing fixture machinery; asserting the
  * literal expression pins the intended equality without duplicating that
  * setup, and the mutation check below proves the assertion is not vacuous.
@@ -38,6 +39,21 @@ describe('#2907 — payer_account twins safe, not account', () => {
     for (const block of componentsBlocks) {
       expect(block).toMatch(/payer_account:\s*agent\.safe_address/)
       expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.safe_address/)
+    }
+  })
+  it('routes/payments.ts (POST /payments idempotent replay): payer_account and safe are the same expression', async () => {
+    // The legacy replay body sits behind the retired-rail 410 gate at the
+    // route level (see routes/__tests__/payments.test.ts "POST /payments
+    // idempotency"), so it cannot be reached by a request in the test
+    // harness — the source assertion is the instrument here, the same one the
+    // two x402 emitters get. A wrong value (e.g. the delegate address) fails.
+    const source = await readSource('../routes/payments.ts')
+    const componentsBlocks = source.match(/components:\s*\{[^}]*safe:\s*agent\.safe_address[^}]*\}/gs) ?? []
+    expect(componentsBlocks.length).toBeGreaterThan(0)
+    for (const block of componentsBlocks) {
+      expect(block).toMatch(/payer_account:\s*agent\.safe_address/)
+      expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.safe_address/)
+      expect(block).not.toMatch(/payer_account:\s*agent\.delegate_address/)
     }
   })
 })

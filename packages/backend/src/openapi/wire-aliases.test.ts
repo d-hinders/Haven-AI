@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  withAccountsEnvelopeAlias,
   withAccountAddressAlias,
   withActivityPaymentAccountAlias,
   withAgentAccountAlias,
@@ -88,6 +89,14 @@ describe('#2907 wire-alias mappers — old === new, old untouched', () => {
     expect(out.account_id).toBeNull()
     expect(out.account_address).toBeNull()
     expect(out.account_name).toBeNull()
+  })
+
+  it('withAccountsEnvelopeAlias — accounts is the same array as safes, safes untouched', () => {
+    const safes = [{ id: 's1' }, { id: 's2' }]
+    const out = withAccountsEnvelopeAlias({ safes, total: 2 })
+    expect(out.accounts).toBe(out.safes)
+    expect(out.safes).toBe(safes)
+    expect(out.total).toBe(2)
   })
 
   it('withSessionAccountAddressAlias', () => {

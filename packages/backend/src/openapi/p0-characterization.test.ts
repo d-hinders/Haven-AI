@@ -69,6 +69,14 @@ const FIXTURES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '__
 // pairs that do not exist. The subset check is what a mutation on this list
 // can actually prove: removing an entry here fails the mutation-proof test
 // below; the registry itself can only grow.
+// NOTE (review, #2907): the `safe`/`account` pair is scoped to
+// `PaymentReceipt.payment`, where the two are same-value twins. On the x402
+// delegation-authorize funding shape `components.account` is the DELEGATE
+// address and `components.safe`/`payer_account` the payer — deliberately
+// different values. `collectTwinMismatches` asserts equality on ANY object
+// carrying both keys, so an x402 fixture cannot be added to this set without
+// first scoping the pair by path. That is the reason the x402 twin sites are
+// characterized by route-level assertions (x402-delegation.test.ts) instead.
 export const TWIN_KEY_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['safe_id', 'account_id'],
   ['safe_address', 'account_address'],

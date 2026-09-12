@@ -49,7 +49,7 @@
  * signed, even if account state changes in between.
  */
 
-import { findExecutionRailForAgent } from '../infra/repositories/user-safes.js'
+import { findExecutionRailForAgent } from '../infra/repositories/smart-accounts.js'
 import { getChain } from '../domain/chains.js'
 
 export interface ExecutionRailState {

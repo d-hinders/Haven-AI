@@ -20,7 +20,7 @@ export type {
   ParsedTokenFilter,
   Transaction,
   TransactionAccounting,
-  UserSafeRow,
+  SmartAccountRow,
 } from './types.js'
 
 export { buildTransactionCacheKey } from './cache-key.js'

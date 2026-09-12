@@ -6,7 +6,7 @@
  * `scripts/db-schema-smoke.ts` can PREPARE every statement against the real
  * schema. Convention: `README.md` in this directory.
  *
- * Why its own file rather than spread across `user-safes.ts` / `agents.ts`:
+ * Why its own file rather than spread across `smart-accounts.ts` / `agents.ts`:
  * these are dashboard PROJECTIONS, not the canonical shape of those
  * aggregates. The Safe list here drops `created_at` and the agent list is a
  * preview join carrying `safe_name`/`safe_chain_id` — folding them into the
@@ -37,7 +37,7 @@ export type { Executor }
 
 // ── Row shapes ───────────────────────────────────────────────────────────────
 
-export interface DashboardSafeRow {
+export interface DashboardAccountRow {
   id: string
   safe_address: string
   chain_id: number
@@ -83,7 +83,7 @@ export interface MonthlySpendRow {
 // agents in "Connected agents" LINKING to /agents/:id — a link that 404s,
 // because the list AgentDetailClient reads from is filtered. An inconsistent
 // funnel is worse than an unfiltered one.
-export const LIST_DASHBOARD_SAFES_SQL = `SELECT id, safe_address, chain_id, name, is_default
+export const LIST_DASHBOARD_ACCOUNTS_SQL = `SELECT id, safe_address, chain_id, name, is_default
          FROM user_safes
          WHERE user_id = $1 AND account_type = 'delegator_hybrid'
          ORDER BY created_at ASC`
@@ -103,11 +103,11 @@ export const LIST_DASHBOARD_AGENTS_SQL = `SELECT a.id, a.name, a.status, a.safe_
            a.created_at DESC`
 
 /** `userId` is REQUIRED — tenant scope for the account list. */
-export async function listDashboardSafes(
+export async function listDashboardAccounts(
   userId: string,
   db: Executor = pool,
-): Promise<DashboardSafeRow[]> {
-  const result = await db.query<DashboardSafeRow>(LIST_DASHBOARD_SAFES_SQL, [userId])
+): Promise<DashboardAccountRow[]> {
+  const result = await db.query<DashboardAccountRow>(LIST_DASHBOARD_ACCOUNTS_SQL, [userId])
   return result.rows
 }
 

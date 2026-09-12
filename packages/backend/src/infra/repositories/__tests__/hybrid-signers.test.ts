@@ -13,7 +13,7 @@ import { addAccountPasskey, listAccountPasskeys, passkeyEnrollmentDates } from '
 
 let seq = 0
 
-async function seedUserSafe(): Promise<string> {
+async function seedSmartAccount(): Promise<string> {
   const user = await db.query<{ id: string }>(
     `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
     [`hs${++seq}-${Date.now()}@test.example`],
@@ -44,16 +44,16 @@ describeDb('hybrid_account_passkeys reads (#1679)', () => {
   })
 
   it('listAccountPasskeys returns created_at, ordered by enrollment time', async () => {
-    const safeId = await seedUserSafe()
-    await addAccountPasskey(safeId, { keyId: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' })
+    const accountId = await seedSmartAccount()
+    await addAccountPasskey(accountId, { keyId: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' })
     // Backdate the second row so ordering is proven by created_at, not insert order.
     await db.query(
       `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y, created_at)
        VALUES ($1, $2, '0x3', '0x4', NOW() - INTERVAL '1 day')`,
-      [safeId, '0x' + '22'.repeat(32)],
+      [accountId, '0x' + '22'.repeat(32)],
     )
 
-    const rows = await listAccountPasskeys(safeId)
+    const rows = await listAccountPasskeys(accountId)
     expect(rows.map((r) => r.key_id)).toEqual(['0x' + '22'.repeat(32), '0x' + '11'.repeat(32)])
     for (const row of rows) {
       expect(row.created_at).toBeTruthy()
@@ -62,11 +62,11 @@ describeDb('hybrid_account_passkeys reads (#1679)', () => {
   })
 
   it('passkeyEnrollmentDates maps real driver rows to lowercase key → ISO string', async () => {
-    const safeId = await seedUserSafe()
+    const accountId = await seedSmartAccount()
     // Mixed-case key_id: the map must be joinable case-insensitively.
-    await addAccountPasskey(safeId, { keyId: '0x' + 'AB'.repeat(32), x: '0x1', y: '0x2' })
+    await addAccountPasskey(accountId, { keyId: '0x' + 'AB'.repeat(32), x: '0x1', y: '0x2' })
 
-    const rows = await listAccountPasskeys(safeId)
+    const rows = await listAccountPasskeys(accountId)
     const dates = passkeyEnrollmentDates(rows)
     const iso = dates.get(('0x' + 'AB'.repeat(32)).toLowerCase())
     expect(iso).toBeTruthy()

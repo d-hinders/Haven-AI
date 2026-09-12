@@ -21,8 +21,8 @@ const PG_INVALID_TEXT_REPRESENTATION = '22P02'
  * someone remembered to audit, while every uuid path param in the app (15
  * routes across 9 files at the time of writing, and every future one) flows
  * through THIS handler when Postgres rejects the cast — PROVIDED the route
- * lets errors propagate. A route-local catch-all (user-safes deploy has one)
- * bypasses this entirely, so the claim holds for the default error path, not
+ * lets errors propagate. A route-local catch-all (the account-deploy route has
+ * one) bypasses this entirely, so the claim holds for the default error path, not
  * as a law of nature.
  *
  * 400, not the issue's suggested 404, for a reason worth keeping: this

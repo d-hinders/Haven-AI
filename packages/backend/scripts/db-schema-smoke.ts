@@ -38,8 +38,8 @@ import {
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
-  HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
-} from '../src/infra/repositories/user-safes.js'
+  HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL,
+} from '../src/infra/repositories/smart-accounts.js'
 import {
   CLAIM_NEXT_OUTBOUND_TX_SQL,
   CLAIM_ORPHANED_OUTBOUND_TX_SQL,
@@ -91,7 +91,7 @@ import {
   MARK_SYNC_PUSHED_SQL,
 } from '../src/infra/repositories/accounting-feed-syncs.js'
 import {
-  FIND_PASSKEY_FOR_SAFE_SQL,
+  FIND_PASSKEY_FOR_ACCOUNT_SQL,
   INSERT_USER_PASSKEY_SQL,
   LIST_USER_PASSKEYS_SQL,
 } from '../src/infra/repositories/user-passkeys.js'
@@ -115,14 +115,14 @@ import {
 import {
   CANCEL_SETUP_SQL,
   FIND_ACTIVE_AGENT_BY_DELEGATE_SQL,
-  FIND_DEFAULT_USER_SAFE_SQL,
+  FIND_DEFAULT_USER_ACCOUNT_SQL,
   ACTIVATE_AGENT_SQL,
   FIND_AGENT_STATUS_SQL,
   FIND_SETUP_BY_AGENT_API_KEY_SQL,
   FIND_SETUP_BY_ID_AND_TOKEN_HASH_SQL,
   FIND_SETUP_BY_TOKEN_HASH_SQL,
   FIND_SETUP_FOR_USER_SQL,
-  FIND_USER_SAFE_BY_ID_SQL,
+  FIND_USER_ACCOUNT_BY_ID_SQL,
   INSERT_AGENT_SQL,
   INSERT_SETUP_ALLOWANCE_SQL,
   INSERT_SETUP_SQL,
@@ -143,11 +143,11 @@ import {
   FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
   FIND_AGENT_ID_FOR_USER_SQL,
   FIND_AGENT_ID_STATUS_FOR_USER_SQL,
-  FIND_DEFAULT_USER_SAFE_ID_SQL,
+  FIND_DEFAULT_USER_ACCOUNT_ID_SQL,
   FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
-  FIND_SAFE_INFO_SQL,
-  FIND_USER_SAFE_ID_FOR_USER_SQL,
+  FIND_ACCOUNT_INFO_SQL,
+  FIND_USER_ACCOUNT_ID_FOR_USER_SQL,
   INSERT_AGENT_WITH_KEY_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
   PAUSE_AGENT_SQL,
@@ -219,7 +219,7 @@ import {
   GET_MERCHANT_RECEIPT_SQL,
   INSERT_MERCHANT_RECEIPT_SQL,
   INSERT_PREPARED_SWEEP_SQL,
-  LOCK_AGENT_SAFE_BINDING_SQL,
+  LOCK_AGENT_ACCOUNT_BINDING_SQL,
   INSERT_RESIDUE_EVENT_SQL,
   LIST_EVIDENCE_RECEIPTS_SQL,
   MARK_SWEEP_FAILED_SQL,
@@ -237,38 +237,38 @@ import {
   REVOKE_ENTITLEMENT_SQL,
 } from '../src/infra/repositories/account-entitlements.js'
 import {
-  CLEAR_DEFAULT_SAFES_FOR_USER_SQL,
-  CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL,
-  DELETE_USER_SAFE_SQL,
-  FIND_OLDEST_SAFE_FOR_USER_SQL,
-  FIND_OWNED_SAFE_ADDRESS_SQL,
-  FIND_OWNED_SAFE_DEFAULT_FLAG_SQL,
-  HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL,
-  HAS_OPEN_SWEEPS_FOR_SAFE_SQL,
-  LOCK_AGENTS_FOR_SAFE_SQL,
-  LIST_SAFES_FOR_USER_SQL,
-  LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL,
-  ORPHAN_AGENTS_FOR_SAFE_SQL,
-  ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL,
-  PROMOTE_SAFE_TO_DEFAULT_SQL,
-  RENAME_SAFE_FOR_USER_SQL,
-  SET_LEGACY_USER_SAFE_ADDRESS_SQL,
-  SET_SAFE_DEFAULT_SQL,
-  FIND_HYBRID_OWNER_SAFE_ROW_SQL,
-  FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL,
-  FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL,
+  CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL,
+  CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL,
+  DELETE_USER_ACCOUNT_SQL,
+  FIND_OLDEST_ACCOUNT_FOR_USER_SQL,
+  FIND_OWNED_ACCOUNT_ADDRESS_SQL,
+  FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL,
+  HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL,
+  HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL,
+  LOCK_AGENTS_FOR_ACCOUNT_SQL,
+  LIST_ACCOUNTS_FOR_USER_SQL,
+  LIST_ACCOUNTS_WITH_TYPE_FOR_USER_SQL,
+  ORPHAN_AGENTS_FOR_ACCOUNT_SQL,
+  ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL,
+  PROMOTE_ACCOUNT_TO_DEFAULT_SQL,
+  RENAME_ACCOUNT_FOR_USER_SQL,
+  SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL,
+  SET_ACCOUNT_DEFAULT_SQL,
+  FIND_HYBRID_OWNER_ACCOUNT_ROW_SQL,
+  FIND_OWNED_ACCOUNT_WITH_TYPE_ANY_CHAIN_SQL,
+  FIND_OWNED_ACCOUNT_WITH_TYPE_FOR_CHAIN_SQL,
   FIND_EXECUTION_RAIL_FOR_AGENT_SQL,
-  LIST_SESSION_SAFES_FOR_USER_SQL,
-} from '../src/infra/repositories/user-safes.js'
+  LIST_SESSION_ACCOUNTS_FOR_USER_SQL,
+} from '../src/infra/repositories/smart-accounts.js'
 import {
   FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL,
   FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL,
   FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL,
   FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL,
-  FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL,
-  FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL,
+  FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL,
+  FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL,
   LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL,
-  LIST_BASIC_SAFES_FOR_USER_SQL,
+  LIST_BASIC_ACCOUNTS_FOR_USER_SQL,
 } from '../src/infra/repositories/transaction-history.js'
 import {
   COUNT_PENDING_CATALOG_SUBMISSIONS_SQL,
@@ -301,7 +301,7 @@ import {
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
   LIST_DASHBOARD_AGENTS_SQL,
-  LIST_DASHBOARD_SAFES_SQL,
+  LIST_DASHBOARD_ACCOUNTS_SQL,
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
@@ -338,8 +338,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'setup: find agent status during cancel', sql: FIND_AGENT_STATUS_SQL },
   { name: 'setup: activate agent on approval', sql: ACTIVATE_AGENT_SQL },
   { name: 'setup: find by agent API key (install status)', sql: FIND_SETUP_BY_AGENT_API_KEY_SQL },
-  { name: 'setup: find user safe by id', sql: FIND_USER_SAFE_BY_ID_SQL },
-  { name: 'setup: find default user safe', sql: FIND_DEFAULT_USER_SAFE_SQL },
+  { name: 'setup: find user safe by id', sql: FIND_USER_ACCOUNT_BY_ID_SQL },
+  { name: 'setup: find default user safe', sql: FIND_DEFAULT_USER_ACCOUNT_SQL },
   { name: 'setup: list allowances', sql: LIST_SETUP_ALLOWANCES_SQL },
   { name: 'setup: list active delegations for budget approval', sql: LIST_ACTIVE_DELEGATIONS_SQL },
   { name: 'setup: find active agent by delegate', sql: FIND_ACTIVE_AGENT_BY_DELEGATE_SQL },
@@ -358,13 +358,13 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: list for user, ALL statuses (#1069)', sql: LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: find for user, ALL statuses (#1069)', sql: FIND_AGENT_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: delegate-balance read (status-agnostic, #1403)', sql: FIND_DELEGATE_AGENT_FOR_USER_SQL },
-  { name: 'agents: safe ownership check on create', sql: FIND_USER_SAFE_ID_FOR_USER_SQL },
-  { name: 'agents: default safe fallback on create', sql: FIND_DEFAULT_USER_SAFE_ID_SQL },
+  { name: 'agents: safe ownership check on create', sql: FIND_USER_ACCOUNT_ID_FOR_USER_SQL },
+  { name: 'agents: default safe fallback on create', sql: FIND_DEFAULT_USER_ACCOUNT_ID_SQL },
   { name: 'agents: duplicate-delegate pre-check', sql: FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL },
   { name: 'agents: existence check (tenant-scoped)', sql: FIND_AGENT_ID_FOR_USER_SQL },
   { name: 'agents: id+status gate (tenant-scoped)', sql: FIND_AGENT_ID_STATUS_FOR_USER_SQL },
   { name: 'agents: insert with API key', sql: INSERT_AGENT_WITH_KEY_SQL },
-  { name: 'agents: safe info inside create tx', sql: FIND_SAFE_INFO_SQL },
+  { name: 'agents: safe info inside create tx', sql: FIND_ACCOUNT_INFO_SQL },
   { name: 'agents: profile update (CTE, tenant-scoped)', sql: UPDATE_AGENT_PROFILE_SQL },
   { name: 'agents: archive revoked agent (#1401)', sql: ARCHIVE_AGENT_SQL },
   { name: 'agents: live-delegation guard for archive (#1436)', sql: AGENT_HAS_LIVE_DELEGATIONS_SQL },
@@ -373,28 +373,28 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: rotate API key', sql: ROTATE_AGENT_API_KEY_SQL },
   { name: 'agents: pause', sql: PAUSE_AGENT_SQL },
   { name: 'agents: resume', sql: RESUME_AGENT_SQL },
-  // User-safes aggregate (#988). IMPORTED from the repository — verbatim from
-  // routes/user-safes.ts. Nine statements left with #1988 (epic #1440): the
+  // Smart-account aggregate (#988). IMPORTED from the repository — verbatim from
+  // the account routes module. Nine statements left with #1988 (epic #1440): the
   // four approver-metadata ones, the three import-path writes/reads, and the
   // two lookups only the deleted handlers used. What remains is the surviving
   // CRUD surface — list, rename, re-default, unlink — plus the owner directory.
-  { name: 'user-safes: list for user', sql: LIST_SAFES_FOR_USER_SQL },
-  { name: 'user-safes: ownership check (id+address)', sql: FIND_OWNED_SAFE_ADDRESS_SQL },
-  { name: 'user-safes: ownership check (id+is_default)', sql: FIND_OWNED_SAFE_DEFAULT_FLAG_SQL },
-  { name: 'user-safes: legacy users.safe_address mirror', sql: SET_LEGACY_USER_SAFE_ADDRESS_SQL },
-  { name: 'user-safes: legacy users.safe_address clear', sql: CLEAR_LEGACY_USER_SAFE_ADDRESS_SQL },
-  { name: 'user-safes: rename (tenant-scoped)', sql: RENAME_SAFE_FOR_USER_SQL },
-  { name: 'user-safes: clear defaults in set-default tx', sql: CLEAR_DEFAULT_SAFES_FOR_USER_SQL },
-  { name: 'user-safes: set default in set-default tx', sql: SET_SAFE_DEFAULT_SQL },
-  { name: 'user-safes: lock bound agents before unlink', sql: LOCK_AGENTS_FOR_SAFE_SQL },
-  { name: 'user-safes: live delegation guard before unlink', sql: HAS_LIVE_DELEGATIONS_FOR_SAFE_SQL },
-  { name: 'user-safes: open recovery guard before unlink', sql: HAS_OPEN_SWEEPS_FOR_SAFE_SQL },
-  { name: 'user-safes: orphan agents in delete tx', sql: ORPHAN_AGENTS_FOR_SAFE_SQL },
-  { name: 'user-safes: orphan self-sign agents in delete tx (RESTRICT FK)', sql: ORPHAN_SELF_SIGN_AGENTS_FOR_SAFE_SQL },
-  { name: 'user-safes: delete row', sql: DELETE_USER_SAFE_SQL },
-  { name: 'user-safes: oldest remaining safe for promotion', sql: FIND_OLDEST_SAFE_FOR_USER_SQL },
-  { name: 'user-safes: promote safe to default in delete tx', sql: PROMOTE_SAFE_TO_DEFAULT_SQL },
-  { name: 'user-safes: owner-directory list (account_type)', sql: LIST_SAFES_WITH_ACCOUNT_TYPE_FOR_USER_SQL },
+  { name: 'smart-accounts: list for user', sql: LIST_ACCOUNTS_FOR_USER_SQL },
+  { name: 'smart-accounts: ownership check (id+address)', sql: FIND_OWNED_ACCOUNT_ADDRESS_SQL },
+  { name: 'smart-accounts: ownership check (id+is_default)', sql: FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL },
+  { name: 'smart-accounts: legacy users.safe_address mirror', sql: SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
+  { name: 'smart-accounts: legacy users.safe_address clear', sql: CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
+  { name: 'smart-accounts: rename (tenant-scoped)', sql: RENAME_ACCOUNT_FOR_USER_SQL },
+  { name: 'smart-accounts: clear defaults in set-default tx', sql: CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL },
+  { name: 'smart-accounts: set default in set-default tx', sql: SET_ACCOUNT_DEFAULT_SQL },
+  { name: 'smart-accounts: lock bound agents before unlink', sql: LOCK_AGENTS_FOR_ACCOUNT_SQL },
+  { name: 'smart-accounts: live delegation guard before unlink', sql: HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL },
+  { name: 'smart-accounts: open recovery guard before unlink', sql: HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL },
+  { name: 'smart-accounts: orphan agents in delete tx', sql: ORPHAN_AGENTS_FOR_ACCOUNT_SQL },
+  { name: 'smart-accounts: orphan self-sign agents in delete tx (RESTRICT FK)', sql: ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL },
+  { name: 'smart-accounts: delete row', sql: DELETE_USER_ACCOUNT_SQL },
+  { name: 'smart-accounts: oldest remaining safe for promotion', sql: FIND_OLDEST_ACCOUNT_FOR_USER_SQL },
+  { name: 'smart-accounts: promote safe to default in delete tx', sql: PROMOTE_ACCOUNT_TO_DEFAULT_SQL },
+  { name: 'smart-accounts: owner-directory list (account_type)', sql: LIST_ACCOUNTS_WITH_TYPE_FOR_USER_SQL },
   // Users aggregate (#1167). IMPORTED from the repository — verbatim from
   // routes/user.ts.
   { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
@@ -408,7 +408,7 @@ const QUERIES: SmokeQuery[] = [
   { name: 'auth: signup insert', sql: INSERT_USER_SQL },
   { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
   { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
-  { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_SAFES_FOR_USER_SQL },
+  { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_ACCOUNTS_FOR_USER_SQL },
   { name: 'outbound: enqueue a tx', sql: ENQUEUE_OUTBOUND_TX_SQL },
   { name: 'outbound: claim next per chain', sql: CLAIM_NEXT_OUTBOUND_TX_SQL },
   { name: 'outbound: mark broadcast', sql: MARK_OUTBOUND_TX_BROADCAST_SQL },
@@ -423,7 +423,7 @@ const QUERIES: SmokeQuery[] = [
   // smoke list no longer carries those three statements.
   // Dashboard overview aggregate (#1167). IMPORTED — verbatim from
   // routes/dashboard.ts.
-  { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
+  { name: 'dashboard: account list', sql: LIST_DASHBOARD_ACCOUNTS_SQL },
   { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
@@ -451,7 +451,7 @@ const QUERIES: SmokeQuery[] = [
     name: 'auth: agent lookup by API key (chain_id fallback, #990)',
     sql: AGENT_BY_API_KEY_SQL,
   },
-  { name: 'delegate-sweeps: lock agent binding before prepare/submit', sql: LOCK_AGENT_SAFE_BINDING_SQL },
+  { name: 'delegate-sweeps: lock agent binding before prepare/submit', sql: LOCK_AGENT_ACCOUNT_BINDING_SQL },
   {
     // IMPORTED since #999 — the pasted copy had drifted (it still selected
     // `a.session_permission_id`, which the real query dropped), which is
@@ -512,7 +512,7 @@ const QUERIES: SmokeQuery[] = [
   },
   {
     name: 'hybrid accounts: owner config round-trip — account row (#885/#908, imported)',
-    sql: FIND_HYBRID_OWNER_SAFE_ROW_SQL,
+    sql: FIND_HYBRID_OWNER_ACCOUNT_ROW_SQL,
   },
   {
     name: 'delegations: grant insert with lifecycle status (#828)',
@@ -571,7 +571,7 @@ const QUERIES: SmokeQuery[] = [
   },
   {
     name: 'safes: refuse unlink during in-flight re-key',
-    sql: HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
+    sql: HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL,
   },
   // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
   // Fortnox connection, accounting-feed dedup ledger, user passkeys, safe
@@ -614,9 +614,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'accounting connections: /health/ops needs-attention counter (#2872)', sql: COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL },
   { name: 'passkeys: enrollment insert', sql: INSERT_USER_PASSKEY_SQL },
   { name: 'passkeys: per-user listing', sql: LIST_USER_PASSKEYS_SQL },
-  { name: 'passkeys: safe-exec ownership read', sql: FIND_PASSKEY_FOR_SAFE_SQL },
-  { name: 'safes: details ownership check (any chain)', sql: FIND_OWNED_SAFE_WITH_TYPE_ANY_CHAIN_SQL },
-  { name: 'safes: details ownership check (for chain)', sql: FIND_OWNED_SAFE_WITH_TYPE_FOR_CHAIN_SQL },
+  { name: 'passkeys: safe-exec ownership read', sql: FIND_PASSKEY_FOR_ACCOUNT_SQL },
+  { name: 'safes: details ownership check (any chain)', sql: FIND_OWNED_ACCOUNT_WITH_TYPE_ANY_CHAIN_SQL },
+  { name: 'safes: details ownership check (for chain)', sql: FIND_OWNED_ACCOUNT_WITH_TYPE_FOR_CHAIN_SQL },
   { name: 'reporting: receipt underlag source join (#498)', sql: LOAD_RECEIPT_UNDERLAG_SOURCE_SQL },
   { name: 'contacts: per-user listing', sql: LIST_CONTACTS_FOR_USER_SQL },
   { name: 'contacts: insert (23505 → 409 in the route)', sql: INSERT_CONTACT_SQL },
@@ -781,10 +781,10 @@ const QUERIES: SmokeQuery[] = [
   // money-path tables (payment_intents, delegate_sweeps,
   // machine_payment_evidence) even though the route itself is read-only.
   // `approval_requests` left this list with the table itself (#2055).
-  { name: 'tx-history: basic safes list driving aggregation', sql: LIST_BASIC_SAFES_FOR_USER_SQL },
+  { name: 'tx-history: basic safes list driving aggregation', sql: LIST_BASIC_ACCOUNTS_FOR_USER_SQL },
   { name: 'tx-history: agent picklist for /filters', sql: LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL },
-  { name: 'tx-history: Safe ownership, any chain', sql: FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL },
-  { name: 'tx-history: Safe ownership, pinned chain', sql: FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL },
+  { name: 'tx-history: Safe ownership, any chain', sql: FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL },
+  { name: 'tx-history: Safe ownership, pinned chain', sql: FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL },
   { name: 'tx-history: payment_intents agent attribution', sql: FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL },
   { name: 'tx-history: delegate_sweeps agent attribution', sql: FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL },
   { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },

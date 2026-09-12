@@ -116,7 +116,12 @@ handout uses, so the two cannot disagree. Since
 `cli_package`, derived from the same `config.connectorChannel` at the same
 import (`CLI_PACKAGE`, beside `CONNECTOR_PACKAGE` in
 `agent-connection-setups.ts`), so one read names the channel under both
-package names:
+package names. Re-verified 2026-09-12 against #2909 (naming epic #2906 phase
+2a): that PR renames `infra/repositories/agent-connection-setups.ts`'s
+`UserSafeRow` import to `SmartAccountRow` and its `findUserSafe` call to
+`findAccountForSetup` — identifiers only, no change to `CONNECTOR_PACKAGE`,
+`CLI_PACKAGE`, `config.connectorChannel`, or the `/discovery` response shape
+this section describes:
 
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'

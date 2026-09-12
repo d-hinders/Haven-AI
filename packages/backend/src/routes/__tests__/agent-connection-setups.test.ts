@@ -203,7 +203,7 @@ function mockWalletApprovalPersist(setup: SetupFixture = CONNECTED_SETUP) {
 //
 // Scope: this dispatcher answers `mockQuery` — the plain (non-transactional)
 // `db.query()` calls the repository issues with its default `pool` executor
-// (findUserSafe, findSetupByTokenHash, listSetupAllowances, …). Everything
+// (findAccountForSetup, findSetupByTokenHash, listSetupAllowances, …). Everything
 // inside a repository transaction (register, cancel, and applyApprovalState's
 // lock+write) runs on `mockClientQuery` via `mockConnect`, which this suite
 // already answers with its own SQL-text `mockImplementation` per test — that
@@ -221,7 +221,7 @@ function primeDb(...routes: DbRoute[]) {
   })
 }
 
-/** findUserSafe (POST / — explicit safe_id or the default-wallet fallback). */
+/** findAccountForSetup (POST / — explicit safe_id or the default-wallet fallback). */
 const safeLookup = (row: Record<string, unknown> = SAFE): DbRoute => [
   /FROM user_safes/,
   () => ({ rows: [row] }),

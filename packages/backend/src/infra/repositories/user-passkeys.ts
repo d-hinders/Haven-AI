@@ -21,7 +21,7 @@
  * backup signers, the only recovery this rail has. So `(user_id, chain_id)`
  * identifies a SET, never a row; resolve a single passkey by credential id
  * (`findUserPasskeyByCredential`) or by its Safe binding
- * (`findPasskeyForSafe`), and treat `safe_address` as a fast-path hint that
+ * (`findPasskeyForAccount`), and treat `safe_address` as a fast-path hint that
  * only the Safe's on-chain owner list can confirm.
  */
 
@@ -49,7 +49,7 @@ export const LIST_USER_PASSKEYS_SQL = `SELECT id, credential_id, signer_address,
        WHERE user_id = $1
        ORDER BY created_at ASC`
 
-export const FIND_PASSKEY_FOR_SAFE_SQL = `SELECT credential_id, public_key_x, public_key_y, signer_address, safe_address
+export const FIND_PASSKEY_FOR_ACCOUNT_SQL = `SELECT credential_id, public_key_x, public_key_y, signer_address, safe_address
        FROM user_passkeys
        WHERE user_id = $1
          AND LOWER(safe_address) = LOWER($2)
@@ -74,13 +74,13 @@ export const LIST_PASSKEY_SIGNERS_FOR_CHAIN_SQL = `SELECT credential_id, public_
  * membership record. Overwriting it would move the hint off the Safe it was
  * first bound to and slow that one down to the on-chain check for no gain.
  */
-export const BIND_PASSKEY_TO_SAFE_SQL = `UPDATE user_passkeys
+export const BIND_PASSKEY_TO_ACCOUNT_SQL = `UPDATE user_passkeys
        SET safe_address = $3
        WHERE user_id = $1
          AND credential_id = $2
          AND safe_address IS NULL`
 
-export interface StoredPasskeySafeRow {
+export interface StoredPasskeyAccountRow {
   credential_id: string
   public_key_x: Buffer
   public_key_y: Buffer
@@ -130,15 +130,15 @@ export async function listUserPasskeys(
  * passkey-Safe exec path runs before building any transaction. `userId` is
  * REQUIRED.
  */
-export async function findPasskeyForSafe(
+export async function findPasskeyForAccount(
   userId: string,
-  safeAddress: string,
+  accountAddress: string,
   chainId: number,
   db: Executor = pool,
-): Promise<StoredPasskeySafeRow | null> {
-  const result = await db.query<StoredPasskeySafeRow>(FIND_PASSKEY_FOR_SAFE_SQL, [
+): Promise<StoredPasskeyAccountRow | null> {
+  const result = await db.query<StoredPasskeyAccountRow>(FIND_PASSKEY_FOR_ACCOUNT_SQL, [
     userId,
-    safeAddress,
+    accountAddress,
     chainId,
   ])
   return result.rows[0] ?? null
@@ -155,8 +155,8 @@ export async function findUserPasskeyByCredential(
   chainId: number,
   credentialId: string,
   db: Executor = pool,
-): Promise<StoredPasskeySafeRow | null> {
-  const result = await db.query<StoredPasskeySafeRow>(FIND_PASSKEY_BY_CREDENTIAL_SQL, [
+): Promise<StoredPasskeyAccountRow | null> {
+  const result = await db.query<StoredPasskeyAccountRow>(FIND_PASSKEY_BY_CREDENTIAL_SQL, [
     userId,
     chainId,
     credentialId,
@@ -169,8 +169,8 @@ export async function listPasskeySignersForChain(
   userId: string,
   chainId: number,
   db: Executor = pool,
-): Promise<StoredPasskeySafeRow[]> {
-  const result = await db.query<StoredPasskeySafeRow>(LIST_PASSKEY_SIGNERS_FOR_CHAIN_SQL, [
+): Promise<StoredPasskeyAccountRow[]> {
+  const result = await db.query<StoredPasskeyAccountRow>(LIST_PASSKEY_SIGNERS_FOR_CHAIN_SQL, [
     userId,
     chainId,
   ])
@@ -179,21 +179,21 @@ export async function listPasskeySignersForChain(
 
 /**
  * Bind an as-yet-unbound passkey to a Safe. No-op when the row is already
- * bound (see `BIND_PASSKEY_TO_SAFE_SQL`). Returns whether a row was claimed.
+ * bound (see `BIND_PASSKEY_TO_ACCOUNT_SQL`). Returns whether a row was claimed.
  */
-export async function bindPasskeyToSafe(
+export async function bindPasskeyToAccount(
   userId: string,
   credentialId: string,
-  safeAddress: string,
+  accountAddress: string,
   db: Executor = pool,
 ): Promise<boolean> {
-  const result = await db.query(BIND_PASSKEY_TO_SAFE_SQL, [userId, credentialId, safeAddress])
+  const result = await db.query(BIND_PASSKEY_TO_ACCOUNT_SQL, [userId, credentialId, accountAddress])
   return (result.rowCount ?? 0) > 0
 }
 
 // `bindPasskeySignerToSafe` — bind by signer ADDRESS rather than credential id,
 // the form the approver routes had — is deleted with them (#1988). Nothing
-// else called it. `bindPasskeyToSafe` above stays: the owner-signed execution
+// else called it. `bindPasskeyToAccount` above stays: the owner-signed execution
 // route used to claim an unbound backup passkey on the fast path once it had
 // verified the signer against the Safe's live on-chain owner list, until
 // #2847 deleted that route; the helper has no route caller since, and goes

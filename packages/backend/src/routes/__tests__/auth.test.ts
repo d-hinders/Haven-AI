@@ -384,11 +384,11 @@ describe('safes payload carries the rail (#1069)', () => {
     // scan matching NOTHING — a guard that silently policed an empty set. It
     // follows the SQL instead, and now asserts the constant directly rather
     // than a regex over a file's text.
-    const { LIST_SESSION_SAFES_FOR_USER_SQL } = await import(
-      '../../infra/repositories/user-safes.js'
+    const { LIST_SESSION_ACCOUNTS_FOR_USER_SQL } = await import(
+      '../../infra/repositories/smart-accounts.js'
     )
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('account_type')
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toMatch(/FROM user_safes/)
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toContain('account_type')
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toMatch(/FROM user_safes/)
   })
 
   it('both session endpoints use that one statement — neither can drift alone', async () => {
@@ -398,19 +398,19 @@ describe('safes payload carries the rail (#1069)', () => {
     //
     // COUNTING, not `toContain` — the promotion-batch review proved the old
     // form was satisfied by the IMPORT LINE alone. Switching only /auth/me to
-    // `listSafesForUser` (which omits account_type) reintroduced #1069 with
+    // `listAccountsForUser` (which omits account_type) reintroduced #1069 with
     // the whole suite green: login still mentioned the right function, so the
     // grep passed. Both endpoints must CALL it.
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
     expect(src).not.toMatch(/FROM user_safes/)
 
-    const calls = src.match(/listSessionSafesForUser\(/g) ?? []
+    const calls = src.match(/listSessionAccountsForUser\(/g) ?? []
     expect(calls.length, 'both /auth/login and /auth/me must call it').toBe(2)
 
     // And no sibling projection may be reached from here: every other
     // user_safes list omits account_type, which is the field #1069 is about.
-    expect(src).not.toMatch(/listSafesForUser\(|listSafesWithAccountTypeForUser\(/)
+    expect(src).not.toMatch(/listAccountsForUser\(|listAccountsWithTypeForUser\(/)
   })
 
   it('the session SELECT carries the signer-set inputs and both endpoints map them through the predicate (#1205)', async () => {
@@ -418,12 +418,12 @@ describe('safes payload carries the rail (#1069)', () => {
     // ANSWER computed by sessionSafePayload — chain classification stays in
     // exactly one place (modules/accounts/mainnet-gate.ts). Same #1069-class
     // guard shape: assert the statement, then count the mapping call sites.
-    const { LIST_SESSION_SAFES_FOR_USER_SQL } = await import(
-      '../../infra/repositories/user-safes.js'
+    const { LIST_SESSION_ACCOUNTS_FOR_USER_SQL } = await import(
+      '../../infra/repositories/smart-accounts.js'
     )
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('owner_address')
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('passkey_count')
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toMatch(/hybrid_account_passkeys/)
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toContain('owner_address')
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toContain('passkey_count')
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toMatch(/hybrid_account_passkeys/)
 
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')

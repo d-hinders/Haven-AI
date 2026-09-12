@@ -7,7 +7,7 @@
  * lookup behind `/transactions/payment-intents/:paymentId/evidence`.
  *
  * This is NOT the `user_safes` or `agents` aggregate owner — those already
- * have their own repositories (`user-safes.ts` #988, `agents.ts` #988) with
+ * have their own repositories (`smart-accounts.ts` #988, `agents.ts` #988) with
  * a wider column set for their own routes. `transactions.ts` (the route)
  * only ever needed a 4-column safe projection and a 3-column agent
  * projection, so this file keeps that projection rather than pulling in the
@@ -25,7 +25,7 @@
  *   chain — that double join is what stops a same-hash collision on another
  *   chain or another tenant's Safe from attributing an agent to the wrong
  *   transaction. Do not simplify it to a plain `tx_hash` match.
- * - `findSafeOwnership` has two SQL shapes (with/without `chain_id`) because
+ * - `findAccountOwnership` has two SQL shapes (with/without `chain_id`) because
  *   the route decides, based on how many rows come back, whether a
  *   `chain_id` disambiguator was required — collapsing them changes that
  *   behavior.
@@ -41,7 +41,7 @@ export type { Executor }
 
 // ── Row shapes ───────────────────────────────────────────────────────────────
 
-export interface TransactionSafeRow {
+export interface TransactionAccountRow {
   id: string
   safe_address: string
   chain_id: number
@@ -54,7 +54,7 @@ export interface TransactionFilterAgentRow {
   status: string
 }
 
-export interface SafeOwnershipRow {
+export interface AccountOwnershipRow {
   id: string
   chain_id: number
 }
@@ -146,17 +146,17 @@ export interface MachinePaymentEvidenceDetailRow {
 
 // ── Safe / agent lists that drive aggregation ───────────────────────────────
 
-export const LIST_BASIC_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name
+export const LIST_BASIC_ACCOUNTS_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name
        FROM user_safes
        WHERE user_id = $1
        ORDER BY created_at ASC`
 
 /** `userId` is REQUIRED — the Safe set aggregation runs over is per-tenant. */
-export async function listBasicSafesForUser(
+export async function listBasicAccountsForUser(
   userId: string,
   db: Executor = pool,
-): Promise<TransactionSafeRow[]> {
-  const result = await db.query<TransactionSafeRow>(LIST_BASIC_SAFES_FOR_USER_SQL, [userId])
+): Promise<TransactionAccountRow[]> {
+  const result = await db.query<TransactionAccountRow>(LIST_BASIC_ACCOUNTS_FOR_USER_SQL, [userId])
   return result.rows
 }
 
@@ -185,10 +185,10 @@ export async function listAgentsForTransactionFilters(
 
 // ── Safe ownership (GET /:safeAddress) ──────────────────────────────────────
 
-export const FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL =
+export const FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL =
   'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)'
 
-export const FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL =
+export const FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL =
   'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3'
 
 /**
@@ -197,18 +197,18 @@ export const FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL =
  * chain the address is owned on (the route then decides whether that's
  * ambiguous); the two SQL shapes are preserved separately per the header note.
  */
-export async function findSafeOwnership(
+export async function findAccountOwnership(
   userId: string,
-  safeAddress: string,
+  accountAddress: string,
   chainId: number | null,
   db: Executor = pool,
-): Promise<SafeOwnershipRow[]> {
+): Promise<AccountOwnershipRow[]> {
   const result =
     chainId === null
-      ? await db.query<SafeOwnershipRow>(FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL, [userId, safeAddress])
-      : await db.query<SafeOwnershipRow>(FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL, [
+      ? await db.query<AccountOwnershipRow>(FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL, [userId, accountAddress])
+      : await db.query<AccountOwnershipRow>(FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL, [
           userId,
-          safeAddress,
+          accountAddress,
           chainId,
         ])
   return result.rows

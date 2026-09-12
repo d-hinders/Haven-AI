@@ -5,7 +5,7 @@ import * as setups from '../infra/repositories/agent-connection-setups.js'
 import type {
   AllowanceRow,
   SetupRow,
-  UserSafeRow,
+  SmartAccountRow,
 } from '../infra/repositories/agent-connection-setups.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { config } from '../config.js'
@@ -860,8 +860,8 @@ const LOCAL_MCP_RUNTIMES = new Set([
   'codex-desktop',
 ])
 
-async function resolveUserSafe(userId: string, safeId?: string): Promise<UserSafeRow | null> {
-  return setups.findUserSafe(userId, safeId)
+async function resolveUserSafe(userId: string, safeId?: string): Promise<SmartAccountRow | null> {
+  return setups.findAccountForSetup(userId, safeId)
 }
 
 async function loadSetupByToken(setupToken: string | undefined): Promise<SetupRow | null> {

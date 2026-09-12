@@ -4,7 +4,7 @@
  * `no-deep-cross-module-import` dependency-cruiser rule.
  */
 import type { FastifyBaseLogger } from 'fastify'
-import type { TransactionSafeRow } from '../../infra/repositories/transaction-history.js'
+import type { TransactionAccountRow } from '../../infra/repositories/transaction-history.js'
 
 export interface Transaction {
   hash: string
@@ -109,7 +109,7 @@ export interface EnrichedTransaction extends Transaction {
 }
 
 /** Re-exported so route/module callers share one name for the Safe projection. */
-export type UserSafeRow = TransactionSafeRow
+export type SmartAccountRow = TransactionAccountRow
 
 export interface FetchSafeTransactionsParams {
   safeId: string

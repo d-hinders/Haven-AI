@@ -8,7 +8,7 @@
 import type { FastifyBaseLogger } from 'fastify'
 import {
   listAgentsForTransactionFilters,
-  listBasicSafesForUser,
+  listBasicAccountsForUser,
   type TransactionFilterAgentRow,
 } from '../../infra/repositories/transaction-history.js'
 import { getChain } from '../../domain/chains.js'
@@ -17,7 +17,7 @@ import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './o
 import { enrichTransactionsWithAgents } from './enrichment.js'
 import { enrichTransactionsWithAccounting } from './accounting.js'
 import { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
-import type { EnrichedTransaction, ParsedTokenFilter, Transaction, UserSafeRow } from './types.js'
+import type { EnrichedTransaction, ParsedTokenFilter, Transaction, SmartAccountRow } from './types.js'
 
 // ── GET / (paginated, filterable feed across every owned Safe) ─────────────
 
@@ -43,7 +43,7 @@ export interface AggregateSafeTransactionsResult {
 
 /** Fans `fetchSafeTransactions` out across every Safe, tagging each transaction with its Safe. */
 export async function aggregateSafeTransactions(
-  safes: UserSafeRow[],
+  safes: SmartAccountRow[],
   log: FastifyBaseLogger,
   fresh: boolean,
 ): Promise<AggregateSafeTransactionsResult> {
@@ -93,7 +93,7 @@ export async function aggregateSafeTransactions(
 /** x402-merge, sort, dedupe, and agent-enrich the full merged feed (pre-filter, pre-paginate). */
 export async function mergeSortDedupeAndEnrich(
   userId: string,
-  safes: UserSafeRow[],
+  safes: SmartAccountRow[],
   merged: EnrichedTransaction[],
 ): Promise<EnrichedTransaction[]> {
   const mergedWithX402 = await mergeX402Transactions(userId, safes, merged)
@@ -208,7 +208,7 @@ export async function buildSafeTransactionsPage(
     fresh,
   })
 
-  const userSafe: UserSafeRow = {
+  const userSafe: SmartAccountRow = {
     id: safeId,
     safe_address: safeAddress,
     chain_id: chainId,
@@ -251,7 +251,7 @@ export interface TransactionFilterTokenOption {
 }
 
 export interface TransactionFilterResult {
-  safes: UserSafeRow[]
+  safes: SmartAccountRow[]
   agents: TransactionFilterAgentRow[]
   tokens: TransactionFilterTokenOption[]
 }
@@ -262,7 +262,7 @@ export async function resolveTransactionFilters(
   fresh: boolean,
 ): Promise<TransactionFilterResult> {
   const [safes, agents] = await Promise.all([
-    listBasicSafesForUser(userId),
+    listBasicAccountsForUser(userId),
     listAgentsForTransactionFilters(userId),
   ])
 

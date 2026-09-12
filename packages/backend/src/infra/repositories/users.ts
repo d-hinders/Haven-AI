@@ -14,7 +14,7 @@
  *   row here, and there must never be one: `id` is the tenant.
  * - `users.safe_address` is the LEGACY mirror of the default Safe. This module
  *   only carries the direct `PUT /user/safe` write; the mirror is otherwise
- *   maintained alongside the default-Safe pointer in `user-safes.ts`, and the
+ *   maintained alongside the default-Safe pointer in `smart-accounts.ts`, and the
  *   two must not drift apart.
  *
  * **The SQL here is verbatim from the route.** Anything that looked improvable
@@ -80,10 +80,10 @@ export const UPDATE_USER_WALLET_ADDRESS_SQL = `UPDATE users SET wallet_address =
        WHERE id = $2
        RETURNING id, name, email, wallet_address, safe_address`
 
-// `UPDATE_USER_SAFE_ADDRESS_SQL` and `updateUserSafeAddress` are DELETED
+// The old direct-address-update SQL constant and its writer function are DELETED
 // (#1988). `PUT /user/safe` was their only caller and it is a 410 tombstone.
 // The legacy `users.safe_address` mirror is still written — by re-default and
-// unlink — through `SET_LEGACY_USER_SAFE_ADDRESS_SQL` in `user-safes.ts`,
+// unlink — through `SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL` in `smart-accounts.ts`,
 // which issues the identical UPDATE and is still exercised by the schema smoke.
 
 /** `userId` is REQUIRED — it is the row scope of the UPDATE. */

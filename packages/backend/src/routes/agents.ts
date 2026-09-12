@@ -26,10 +26,10 @@ import {
   unarchiveAgent,
   findAgentForUserAllStatuses,
   findAgentIdStatusForUser,
-  findDefaultUserSafeId,
+  findDefaultUserAccountId,
   findDelegateAgentForUser,
   findNonRevokedAgentIdByDelegate,
-  findUserSafeIdForUser,
+  findUserAccountIdForUser,
   listAgentsForUserAllStatuses,
   pauseAgent,
   resumeAgent,
@@ -197,13 +197,13 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     // Validate safe_id belongs to the user (if provided)
     let resolvedSafeId: string | null = null
     if (safe_id) {
-      const ownedSafeId = await findUserSafeIdForUser(safe_id, sub)
+      const ownedSafeId = await findUserAccountIdForUser(safe_id, sub)
       if (!ownedSafeId) {
         return reply.code(400).send({ error: 'Invalid Safe — not found or not yours' })
       }
       resolvedSafeId = safe_id
     } else {
-      resolvedSafeId = await findDefaultUserSafeId(sub)
+      resolvedSafeId = await findDefaultUserAccountId(sub)
     }
 
     const existingAgentId = await findNonRevokedAgentIdByDelegate(sub, delegate_address.toLowerCase())

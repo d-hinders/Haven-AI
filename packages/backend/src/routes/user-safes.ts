@@ -2,14 +2,14 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
 import {
-  deleteSafeForUser,
-  findOwnedSafeAddress,
-  findOwnedSafeDefaultFlag,
-  findOwnedSafeForFunding,
-  listSafesForUser,
-  renameSafeForUser,
-  setDefaultSafeForUser,
-} from '../infra/repositories/user-safes.js'
+  deleteAccountForUser,
+  findOwnedAccountAddress,
+  findOwnedAccountDefaultFlag,
+  findOwnedAccountForFunding,
+  listAccountsForUser,
+  renameAccountForUser,
+  setDefaultAccountForUser,
+} from '../infra/repositories/smart-accounts.js'
 import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { getChain } from '../domain/chains.js'
@@ -36,7 +36,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const safes = await listSafesForUser(sub)
+    const safes = await listAccountsForUser(sub)
 
     return { safes }
   })
@@ -65,7 +65,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
         return reply.code(400).send({ error: 'Name is required' })
       }
 
-      const renamed = await renameSafeForUser(name.trim(), safeId, sub)
+      const renamed = await renameAccountForUser(name.trim(), safeId, sub)
 
       if (!renamed) {
         return reply.code(404).send({ error: 'Safe not found' })
@@ -83,12 +83,12 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       const { safeId } = request.params
 
       // Verify the Safe belongs to the user
-      const owned = await findOwnedSafeAddress(safeId, sub)
+      const owned = await findOwnedAccountAddress(safeId, sub)
       if (!owned) {
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      await setDefaultSafeForUser(safeId, owned.safe_address, sub)
+      await setDefaultAccountForUser(safeId, owned.safe_address, sub)
 
       return { success: true }
     },
@@ -102,12 +102,12 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       const { safeId } = request.params
 
       // Check the Safe exists and belongs to user
-      const owned = await findOwnedSafeDefaultFlag(safeId, sub)
+      const owned = await findOwnedAccountDefaultFlag(safeId, sub)
       if (!owned) {
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      const deleted = await deleteSafeForUser(safeId, sub, owned.is_default)
+      const deleted = await deleteAccountForUser(safeId, sub, owned.is_default)
       if (!deleted) {
         return reply.code(409).send({
           error: 'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation or recovery is in progress',
@@ -162,7 +162,7 @@ app.get<{ Params: { safeId: string } }>(
     // ONE tenant-scoped read: ownership, the Safe address and its chain, with
     // the delegation-rail scope the account lists apply (#2413) — funding
     // instructions are for the account an agent spends from.
-    const owned = await findOwnedSafeForFunding(safeId, sub)
+    const owned = await findOwnedAccountForFunding(safeId, sub)
     if (!owned) {
       return reply.code(404).send({ error: 'Safe not found' }) as never
     }

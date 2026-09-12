@@ -17,7 +17,7 @@ covers:
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
-  - packages/backend/src/infra/repositories/user-safes.ts
+  - packages/backend/src/infra/repositories/smart-accounts.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts

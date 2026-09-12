@@ -12,6 +12,7 @@ import {
 import { LEADER_LOCK_KEYS, runIfLeader } from '../../platform/leader-lock.js'
 import { feedSettledPayment, type FeedOutcome } from './feed-orchestrator.js'
 import { ProviderError } from './provider.js'
+import { ACCOUNTING_EVENT } from './ops-signals.js'
 
 /**
  * Background retry sweep for the accounting feed (#2866, epic #2858).
@@ -57,8 +58,13 @@ import { ProviderError } from './provider.js'
  *   query. Leader-locked like its siblings so a multi-replica deployment
  *   runs one sweep per tick; a tick that is still running when the next one
  *   fires is skipped in-process.
- * - **One structured log line per run** (`Accounting retry sweep`), carrying
- *   the counters below.
+ * - **Structured log events (#2872).** One line per run,
+ *   `accounting.sweep.run`, carrying the counters below (`info` when anything
+ *   was considered, `debug` when idle); and one `accounting.sync.exhausted`
+ *   line at `warn` for every row that takes the terminal reason — the
+ *   signal on-call alerts on (thresholds in
+ *   `docs/operations/accounting-feed.md`). Both carry `event` so a single
+ *   grep finds them alongside `accounting.connection.needs_attention`.
  */
 
 /** Terminal reason prefix on a row the sweep gave up on. */
@@ -270,8 +276,26 @@ export async function runRetrySweep(deps: RetrySweepDeps = {}): Promise<RetrySwe
         // Guarded: only a row that is still failed/skipped at the cap takes
         // the terminal reason. A manual sync that re-claimed (pending) or
         // pushed it in between is left alone (review on #2899).
-        await markExhausted(row.user_id, row.provider, row.payment_id, `${EXHAUSTED_PREFIX} ${reason}`, deps.db)
+        const written = await markExhausted(row.user_id, row.provider, row.payment_id, `${EXHAUSTED_PREFIX} ${reason}`, deps.db)
         result.exhausted += 1
+        // MUTATION TARGET (retry-sweep.test.ts "accounting.sync.exhausted"):
+        // the terminal reason is what on-call alerts on; a row given up on
+        // silently is a payment nobody re-feeds. Only a row that actually
+        // took the reason is announced (the guard above may have found it
+        // re-claimed or pushed in the meantime).
+        if (written) {
+          log.warn(
+            {
+              event: ACCOUNTING_EVENT.syncExhausted,
+              userId: row.user_id,
+              provider: row.provider,
+              paymentId: row.payment_id,
+              attempts: attemptsNow,
+              reason,
+            },
+            ACCOUNTING_EVENT.syncExhausted,
+          )
+        }
       } else if (outcome.outcome === 'failed') {
         result.failed += 1
       } else {
@@ -280,8 +304,9 @@ export async function runRetrySweep(deps: RetrySweepDeps = {}): Promise<RetrySwe
     }
   }
 
-  if (result.considered > 0) log.info({ ...result }, 'Accounting retry sweep')
-  else log.debug({ ...result }, 'Accounting retry sweep')
+  const line = { event: ACCOUNTING_EVENT.sweepRun, ...result }
+  if (result.considered > 0) log.info(line, ACCOUNTING_EVENT.sweepRun)
+  else log.debug(line, ACCOUNTING_EVENT.sweepRun)
   return result
 }
 

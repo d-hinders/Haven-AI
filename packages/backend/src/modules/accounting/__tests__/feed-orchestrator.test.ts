@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 const { mocks } = vi.hoisted(() => ({
   mocks: {
@@ -43,6 +43,7 @@ vi.mock('../../../infra/repositories/accounting-connections.js', async (importOr
 
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import { registerConnector, clearConnectors, InMemoryConnector, type AccountingConnector } from '../connector.js'
+import { setOpsEventSink, type OpsEvent, type OpsEventLevel } from '../ops-signals.js'
 
 const USER = 'u1'
 const PID = 'pi1'
@@ -52,7 +53,18 @@ function entry(amountSek: string | null = '132.50') {
 }
 
 describe('feed orchestrator (#499)', () => {
+  /** #2872: every ops event the run emitted, in order. */
+  const events: Array<{ level: OpsEventLevel; event: OpsEvent }> = []
+  /** How many status writes had happened when each event fired — the write must come first. */
+  const setStatusCallsAtEmit: number[] = []
+
   beforeEach(() => {
+    events.length = 0
+    setStatusCallsAtEmit.length = 0
+    setOpsEventSink((level, event) => {
+      events.push({ level, event })
+      setStatusCallsAtEmit.push(connectionMocks.setStatus.mock.calls.length)
+    })
     clearConnectors()
     for (const m of Object.values(mocks)) m.mockReset()
     connectionMocks.getActiveConnection.mockReset().mockResolvedValue(null)
@@ -61,6 +73,10 @@ describe('feed orchestrator (#499)', () => {
     mocks.markPushed.mockResolvedValue(undefined)
     mocks.markFailed.mockResolvedValue(undefined)
     mocks.buildAccountingEntryForPayment.mockResolvedValue(entry())
+  })
+
+  afterEach(() => {
+    setOpsEventSink(null)
   })
 
   function connectInMemory(): InMemoryConnector {
@@ -123,6 +139,20 @@ describe('feed orchestrator (#499)', () => {
     expect(mocks.markPushed).toHaveBeenCalledWith(USER, 'memory', PID, 'memory:invoice:1', expect.stringMatching(/insufficient scope/))
     expect(connectionMocks.setStatus).toHaveBeenCalledWith(USER, 'memory', 'scope_missing', expect.stringMatching(/insufficient scope/))
     expect(mocks.markFailed).not.toHaveBeenCalled()
+    // #2872: the flip is announced as the needs_attention event, AFTER the write.
+    expect(events).toEqual([
+      {
+        level: 'warn',
+        event: {
+          event: 'accounting.connection.needs_attention',
+          userId: USER,
+          provider: 'memory',
+          status: 'scope_missing',
+          reason: expect.stringMatching(/insufficient scope/),
+        },
+      },
+    ])
+    expect(setStatusCallsAtEmit).toEqual([1])
   })
 
   it('#2865: a PRE-push scope refusal (skipped + connectionStatus) records a skipped row AND flips the connection; a plain skip does not', async () => {
@@ -134,14 +164,21 @@ describe('feed orchestrator (#499)', () => {
     expect(connectionMocks.setStatus).toHaveBeenCalledWith(USER, 'memory', 'scope_missing', expect.stringMatching(/^missing scopes: invoice — scope refused/))
     expect(mocks.markPushed).not.toHaveBeenCalled()
     expect(c.pushed).toHaveLength(0)
+    // #2872: MUTATION TARGET (ops-signals.ts flagConnectionStatus) — drop the
+    // emit and this is the assertion that fails.
+    expect(events.map((e) => [e.level, e.event.event, e.event.status])).toEqual([
+      ['warn', 'accounting.connection.needs_attention', 'scope_missing'],
+    ])
 
-    // Positive control: a skip that is NOT about the grant leaves the connection alone.
+    // Positive control: a skip that is NOT about the grant leaves the connection alone — and says nothing.
     connectionMocks.setStatus.mockClear()
     mocks.markSkipped.mockClear()
+    events.length = 0
     c.invoiceOutcome = 'ok'
     mocks.buildAccountingEntryForPayment.mockResolvedValue({ ...entry('10.00'), direction: 'in' })
     await feedSettledPayment(USER, PID)
     expect(connectionMocks.setStatus).not.toHaveBeenCalled()
+    expect(events).toEqual([])
   })
 
   it('skips (no claim) when book-time SEK is missing', async () => {

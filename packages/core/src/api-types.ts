@@ -2708,6 +2708,11 @@ export type components = {
                 hops: number;
                 authRateLimitArmed: boolean;
             };
+            /** @description Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. */
+            accounting: {
+                exhaustedSyncs: number;
+                connectionsNeedingAttention: number;
+            };
         };
         SuccessResponse: {
             success: boolean;

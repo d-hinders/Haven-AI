@@ -27,6 +27,7 @@ describe('GET /health', () => {
       getPassportStatus: () => ({ configured: true }) as never,
       trustProxyHops: 1,
       opsToken: 'operator-secret',
+      getAccountingCounters: async () => ({ exhaustedSyncs: 0, connectionsNeedingAttention: 0 }),
       ...overrides,
     })
     return app
@@ -73,7 +74,7 @@ describe('GET /health/ops', () => {
     app = undefined
   })
 
-  function buildOpsApp(opsToken: string): FastifyInstance {
+  function buildOpsApp(opsToken: string, overrides: Partial<HealthRouteOptions> = {}): FastifyInstance {
     app = Fastify({ logger: false })
     registerHealthRoutes(app, {
       checkDatabase: vi.fn().mockResolvedValue(undefined),
@@ -81,6 +82,8 @@ describe('GET /health/ops', () => {
       getPassportStatus: () => ({ configured: true }) as never,
       trustProxyHops: 1,
       opsToken,
+      getAccountingCounters: async () => ({ exhaustedSyncs: 0, connectionsNeedingAttention: 0 }),
+      ...overrides,
     })
     return app
   }
@@ -109,7 +112,23 @@ describe('GET /health/ops', () => {
       relayer: [],
       passport: { configured: true },
       trustProxy: { hops: 1, authRateLimitArmed: true },
+      accounting: { exhaustedSyncs: 0, connectionsNeedingAttention: 0 },
     })
+  })
+
+  it('carries the two accounting counters (#2872) verbatim from the module, and nothing else about accounting', async () => {
+    const getAccountingCounters = vi.fn(async () => ({ exhaustedSyncs: 3, connectionsNeedingAttention: 2 }))
+    const app = buildOpsApp('operator-secret', { getAccountingCounters })
+    const res = await app.inject({ method: 'GET', url: '/health/ops', headers: { 'x-haven-ops-token': 'operator-secret' } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().accounting).toEqual({ exhaustedSyncs: 3, connectionsNeedingAttention: 2 })
+    expect(getAccountingCounters).toHaveBeenCalledTimes(1)
+    // A refused token never reaches the database.
+    getAccountingCounters.mockClear()
+    await app.inject({ method: 'GET', url: '/health/ops', headers: { 'x-haven-ops-token': 'wrong' } })
+    expect(getAccountingCounters).not.toHaveBeenCalled()
+    // No user, payment or provider identifiers on the wire — counts only.
+    expect(JSON.stringify(res.json())).not.toMatch(/user_id|userId|payment_id|paymentId|fortnox/)
   })
 
   it('uses constant-time token comparison', async () => {

@@ -386,6 +386,17 @@ export interface FeedSyncCounts {
   exhausted: number
 }
 
+/**
+ * The `/health/ops` counter (#2872): every sync row on the deployment the
+ * retry sweep has given up on — `failed` at the attempt cap, the SAME
+ * predicate `COUNT_SYNCS_FOR_USER_SQL` and the sweep's selection use, never
+ * the `exhausted:` reason prefix. One aggregate, no tenant filter, no row
+ * data: a number for on-call.
+ */
+export const COUNT_EXHAUSTED_SYNCS_SQL = `SELECT COUNT(*)::int AS n
+     FROM accounting_feed_syncs
+     WHERE status = 'failed' AND attempts >= $1::int`
+
 export async function listDueRetrySyncs(
   now: Date,
   limit: number,
@@ -429,4 +440,10 @@ export async function countSyncsForUser(userId: string, db: Executor = pool): Pr
   const result = await db.query<FeedSyncCounts>(COUNT_SYNCS_FOR_USER_SQL, [userId, RETRY_MAX_ATTEMPTS])
   const row = result.rows[0]
   return { pending: row?.pending ?? 0, failed: row?.failed ?? 0, exhausted: row?.exhausted ?? 0 }
+}
+
+/** See COUNT_EXHAUSTED_SYNCS_SQL. */
+export async function countExhaustedSyncs(db: Executor = pool): Promise<number> {
+  const result = await db.query<{ n: number }>(COUNT_EXHAUSTED_SYNCS_SQL, [RETRY_MAX_ATTEMPTS])
+  return result.rows[0]?.n ?? 0
 }

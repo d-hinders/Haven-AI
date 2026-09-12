@@ -35,9 +35,9 @@ import {
   companySwitchLog,
   recordCompanySwitch,
   setCompanyInfo,
-  setStatus,
   type AccountingConnectionRow,
 } from '../../infra/repositories/accounting-connections.js'
+import { flagConnectionStatus } from './ops-signals.js'
 import type { AccountingProvider, ProviderCompanyInfo } from './provider.js'
 
 export { companySwitchLog }
@@ -120,7 +120,7 @@ export async function applyCompanyInfo(input: {
 
   if (info.scopeMissing) {
     const reason = companyScopeMissingReason(provider)
-    await setStatus(userId, provider.id, 'scope_missing', reason)
+    await flagConnectionStatus(userId, provider.id, 'scope_missing', reason)
     row = { ...row, status: 'scope_missing', status_reason: reason }
   }
   return row

@@ -57,6 +57,7 @@ import {
 } from '../src/infra/repositories/payment-fees.js'
 import {
   CLEAR_ACTIVE_DESTINATION_SQL,
+  COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL,
   DELETE_ACCOUNTING_CONNECTION_SQL,
   DISCONNECT_ACCOUNTING_CONNECTION_SQL,
   GET_ACCOUNTING_CONNECTION_SQL,
@@ -78,6 +79,7 @@ import {
 import {
   CLAIM_SYNC_INSERT_SQL,
   CLAIM_SYNC_RECLAIM_FAILED_SQL,
+  COUNT_EXHAUSTED_SYNCS_SQL,
   COUNT_SYNCS_FOR_USER_SQL,
   GET_SYNC_STATE_SQL,
   LIST_DUE_RETRY_SYNCS_SQL,
@@ -608,6 +610,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'accounting feed: release stale pending claim (#2866)', sql: RELEASE_STALE_PENDING_SQL },
   { name: 'accounting feed: guarded terminal exhausted write (#2866)', sql: MARK_SYNC_EXHAUSTED_SQL },
   { name: 'accounting feed: sync counts (#2866)', sql: COUNT_SYNCS_FOR_USER_SQL },
+  { name: 'accounting feed: /health/ops exhausted counter (#2872)', sql: COUNT_EXHAUSTED_SYNCS_SQL },
+  { name: 'accounting connections: /health/ops needs-attention counter (#2872)', sql: COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL },
   { name: 'passkeys: enrollment insert', sql: INSERT_USER_PASSKEY_SQL },
   { name: 'passkeys: per-user listing', sql: LIST_USER_PASSKEYS_SQL },
   { name: 'passkeys: safe-exec ownership read', sql: FIND_PASSKEY_FOR_SAFE_SQL },

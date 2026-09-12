@@ -125,6 +125,14 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      the sweep's selection); a connector never sees the setting. The
      backfill route moves `feed_from` earlier and runs the same `syncUser`;
      nothing in a connector is backfill-aware.
+   - **A degraded state is written through `flagConnectionStatus`
+     (`ops-signals.ts`, #2872), never the repository's `setStatus`.** The
+     generic flows and the orchestrator already do; a connector normally
+     never writes a status at all (it reports `connectionStatus` on its
+     result). The wrapper is what emits `accounting.connection.needs_attention`
+     for `needs_reauthorisation` / `scope_missing` / `revoked_at_provider`,
+     and the `/health/ops` counter counts the same three states — a write
+     that bypasses it is a state on-call cannot see.
    - **Retries are the sweep's, not yours (#2866).** A thrown error or a
      `failed` result lands in the ledger and `retry-sweep.ts` re-feeds the
      row with backoff (1 min doubling to 1 h, 8 attempts, then
@@ -153,9 +161,11 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    flow maps to `InvalidApiKeyError`; anything else surfaces as a 500. It must
    pass before the descriptor goes `live`.
 6. **Docs.** The route table in `docs/operations/accounting-feed.md` does not
-   change (the routes are generic); add the provider's operator steps
-   (credentials, redirect URI) to that runbook, and a CASP shard if the
-   change touches a covered path (`docs/regulatory/casp-changelog/README.md`).
+   change (the routes are generic); add the provider's own section to that
+   runbook (credentials, redirect URI, error codes, what the accountant
+   sees — the Fortnox section is the shape), the user-facing states to
+   `docs/product/accounting-connections.md`, and a CASP shard if the change
+   touches a covered path (`docs/regulatory/casp-changelog/README.md`).
 
 ## OAuth `state`, and why the callback consumes it
 

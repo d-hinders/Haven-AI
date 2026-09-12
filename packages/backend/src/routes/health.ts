@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { matchesOpsToken } from '../middleware/ops-token.js'
+import type { AccountingOpsCounters } from '../modules/accounting/index.js'
 
 type RelayerStatus = ReturnType<typeof import('../infra/relayer-balance-monitor.js')['getRelayerBalanceStatus']>
 type PassportStatus = ReturnType<typeof import('../modules/passport/index.js')['passportReadiness']>
@@ -10,6 +11,12 @@ export interface HealthRouteOptions {
   getPassportStatus: () => PassportStatus
   trustProxyHops: number
   opsToken: string
+  /**
+   * The accounting feed's two on-call numbers (#2872): exhausted sync rows
+   * and connections needing a re-consent. Two aggregate queries, no per-user
+   * data. Behind the same operator token as everything else here.
+   */
+  getAccountingCounters: () => Promise<AccountingOpsCounters>
 }
 
 /** Register the public liveness probe and the separately authenticated operator diagnostics. */
@@ -50,6 +57,7 @@ export function registerHealthRoutes(app: FastifyInstance, options: HealthRouteO
         hops: options.trustProxyHops,
         authRateLimitArmed: options.trustProxyHops > 0,
       },
+      accounting: await options.getAccountingCounters(),
     }
   })
 }

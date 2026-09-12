@@ -96,7 +96,7 @@ describe('reporting routes', () => {
     setAvailability(true)
     orchestratorMocks.getAccountingFeedStatus.mockReset().mockResolvedValue([])
     orchestratorMocks.getAccountingFeedCounts.mockReset().mockResolvedValue({ pending: 0, failed: 0, exhausted: 0 })
-    orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
+    orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0, total: 0 })
     connectorMocks.hasLiveConnector.mockReset().mockReturnValue(false)
     fortnoxMocks.getActiveConnectionSummary.mockReset().mockResolvedValue(null)
     fortnoxMocks.getDestinationSummary.mockReset().mockResolvedValue(null)
@@ -387,14 +387,15 @@ describe('reporting routes', () => {
 
     it('delegates a single request to exactly one syncUser call and returns its result', async () => {
       entitlementMocks.accountingFeedAvailable.mockResolvedValue(true)
-      // The real syncUser returns { fed: number } (count of payments fed to the
-      // connector); the route is a transparent passthrough of that shape.
-      orchestratorMocks.syncUser.mockResolvedValue({ fed: 3 })
+      // The real syncUser returns { fed, total } (#2915): `fed` is the count
+      // of payments actually pushed to the connector, `total` the count
+      // enumerated; the route is a transparent passthrough of that shape.
+      orchestratorMocks.syncUser.mockResolvedValue({ fed: 3, total: 3 })
 
       const res = await authed('POST', '/accounting/feed/sync')
 
       expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ fed: 3 })
+      expect(res.json()).toEqual({ fed: 3, total: 3 })
       // One POST → exactly one orchestrator invocation for the caller. The
       // "never double-post" guarantee on repeat syncs lives in syncUser and is
       // covered by the lib-level dedup tests; here we pin that the route adds no

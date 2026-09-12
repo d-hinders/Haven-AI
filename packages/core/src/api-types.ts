@@ -980,7 +980,7 @@ export type paths = {
         put?: never;
         /**
          * Backfill and retry the feed for the caller.
-         * @description Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.
+         * @description Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. `fed` counts the payments this call actually pushed (#2915) — a candidate whose FX was not ready, that was skipped, or that failed is not counted even though it was enumerated; `total` is how many were enumerated. 0 fed is a normal answer, not a failure.
          */
         post: operations["syncAccountingFeed"];
         delete?: never;
@@ -8371,14 +8371,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Rows fed. */
+            /** @description Payments pushed, and how many candidates the call enumerated. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
+                        /** @description Payments this call pushed (at most 200). */
                         fed: number;
+                        /** @description Payments this call enumerated as candidates — the ones not in `fed` were skipped, failed, or were not feedable (no book-time SEK, below the floor). */
+                        total: number;
                     };
                 };
             };
@@ -9147,7 +9150,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The new floor and how many payments this call fed (0 is normal when the history is already pushed or empty). */
+            /** @description The new floor, how many payments this call pushed, and how many it enumerated (0 fed is normal when the history is already pushed or empty). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9159,8 +9162,10 @@ export interface operations {
                          * @description The connection's feed-from after the move — `since`, normalised.
                          */
                         feedFrom: string;
-                        /** @description Payments fed by this call (at most 200). */
+                        /** @description Payments this call pushed (at most 200). */
                         fed: number;
+                        /** @description Payments this call enumerated — the ones not in `fed` were skipped, failed, or were not feedable (no book-time SEK, below the floor). */
+                        total: number;
                     };
                 };
             };

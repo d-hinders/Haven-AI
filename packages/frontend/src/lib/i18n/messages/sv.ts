@@ -164,7 +164,8 @@ export const sv: Messages = {
         confirm: 'Fortsätt',
         notNow: 'Inte nu',
         working: 'Matar…',
-        done: (n: number) => `${n} tidigare betalning${n === 1 ? '' : 'ar'} matade.`,
+        done: (fed: number, total: number) => `${fed} av ${total} tidigare betalning${total === 1 ? '' : 'ar'} matade.`,
+        partial: 'Några av de tidigare betalningarna matades inte. Tryck på Synka nu på bokföringssidan för att försöka igen.',
         close: 'Klart',
         errors: {
           SINCE_INVALID: 'Ange ett datum bakåt i tiden som ÅÅÅÅ-MM-DD, inte före 2020-01-01.',

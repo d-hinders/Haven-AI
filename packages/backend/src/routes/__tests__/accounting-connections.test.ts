@@ -88,7 +88,7 @@ vi.mock('../../infra/repositories/accounting-connections.js', async (importOrigi
 
 // #2867: the backfill's one bounded sync — the orchestrator is proven on the
 // real database; here only "it was triggered, once, after the move" matters.
-const orchestratorMocks = vi.hoisted(() => ({ syncUser: vi.fn(async () => ({ fed: 0 })) }))
+const orchestratorMocks = vi.hoisted(() => ({ syncUser: vi.fn(async () => ({ fed: 0, total: 0 })) }))
 vi.mock('../../modules/accounting/feed-orchestrator.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../modules/accounting/feed-orchestrator.js')>()),
   syncUser: orchestratorMocks.syncUser,
@@ -210,7 +210,7 @@ describe('accounting connection routes (#2862)', () => {
       return r
     })
     flowMocks.connectWithApiKey.mockReset()
-    orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0 })
+    orchestratorMocks.syncUser.mockReset().mockResolvedValue({ fed: 0, total: 0 })
   })
 
   const authed = (method: 'GET' | 'POST' | 'DELETE' | 'PATCH', url: string, payload?: unknown) =>
@@ -574,13 +574,13 @@ describe('accounting connection routes (#2862)', () => {
     const FLOOR = new Date('2026-06-01T00:00:00.000Z')
     const active = () => rows.set(`${USER}::fortnox`, row('fortnox', { is_active_destination: true, feed_from: FLOOR, settings: { companySwitches: [{ at: '2026-05-01T00:00:00.000Z', fromCompanyId: '1', fromCompanyName: 'Old AB', toCompanyId: '1234567', toCompanyName: 'Ada AB' }] } }))
 
-    it('moves feed_from EARLIER to `since`, records the choice, runs ONE sync and answers { feedFrom, fed }', async () => {
+    it('moves feed_from EARLIER to `since`, records the choice, runs ONE sync and answers { feedFrom, fed, total }', async () => {
       active()
-      orchestratorMocks.syncUser.mockResolvedValue({ fed: 3 })
+      orchestratorMocks.syncUser.mockResolvedValue({ fed: 3, total: 4 })
       const before = Date.now()
       const res = await authed('POST', '/accounting/connections/fortnox/backfill', { since: '2026-01-01' })
       expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3 })
+      expect(res.json()).toEqual({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3, total: 4 })
       expectMatchesSpec('POST', '/accounting/connections/{provider}/backfill', res.json())
       // The move happened BEFORE the sync, on this user only.
       expect(repo.recordBackfill).toHaveBeenCalledOnce()

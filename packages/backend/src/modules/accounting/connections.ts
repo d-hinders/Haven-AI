@@ -344,7 +344,7 @@ export async function backfillConnection(
   userId: string,
   providerId: string,
   sinceInput: unknown,
-): Promise<{ feedFrom: string; fed: number }> {
+): Promise<{ feedFrom: string; fed: number; total: number }> {
   const now = new Date()
   const since = parseBackfillSince(sinceInput, now)
   const name = getProvider(providerId)?.displayName ?? providerId
@@ -364,8 +364,11 @@ export async function backfillConnection(
         : 'This connection already feeds all history; there is nothing earlier to include.',
     )
   }
-  const { fed } = await syncUser(userId)
-  return { feedFrom: new Date(moved.feed_from!).toISOString(), fed }
+  // #2915: pass both numbers through — `fed` is what the sync actually
+  // pushed, `total` what it enumerated — so the dialog can tell the two
+  // apart instead of calling enumerated candidates "fed".
+  const { fed, total } = await syncUser(userId)
+  return { feedFrom: new Date(moved.feed_from!).toISOString(), fed, total }
 }
 
 // ── Settings (#2867) ─────────────────────────────────────────────────────────

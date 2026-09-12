@@ -211,7 +211,9 @@ describeDb('Fortnox token lifecycle: lock, needs_reauthorisation, revoke (#2863)
     expect(calls.refresh).toBe(1)
 
     // The next sync: no refresh, no push, one skipped row that names the state.
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    // #2915: a skipped row was never pushed, so `fed` is 0 (enumerated: 1) —
+    // the dialog no longer says "1 earlier payment fed" for it.
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 1 })
     expect(calls.refresh).toBe(1)
     expect(calls.other).toEqual([])
     const syncs = await db.query<{ payment_id: string; status: string; error: string | null }>(

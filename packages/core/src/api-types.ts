@@ -958,7 +958,7 @@ export type paths = {
         };
         /**
          * Whether the accounting feed is available, connected, and live — plus recent syncs.
-         * @description Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.
+         * @description Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error. #2869: it answers 200 in every off state — `hosted:false` is "not available on self-hosted", `hosted:true, enabled:false` is "Coming soon" (visible in production by owner decision), and `enabled:true, entitled:false` is the add-on state; the gated actions 404 in all three.
          */
         get: operations["getAccountingFeedStatus"];
         put?: never;
@@ -8296,7 +8296,11 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description This deployment is the hosted Haven (`HAVEN_HOSTED`). False on a self-hosted box, where the feed is not available and never "coming soon" (#2869). */
                         hosted: boolean;
+                        /** @description #2869: the `HAVEN_ACCOUNTING_ENABLED` flag. `hosted && !enabled` is the "Coming soon" state the dashboard shows in production. */
+                        enabled: boolean;
+                        /** @description The same boolean as `enabled`, kept for callers that read the older name. */
                         flagEnabled: boolean;
                         /** @description A real provider adapter is registered. */
                         liveSyncReady: boolean;
@@ -8311,8 +8315,19 @@ export interface operations {
                         available: boolean;
                         /** @description The caller has a live provider connection. */
                         connected: boolean;
-                        /** @description The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, or when the grant could not read it (`scope_missing`). Absent when the feed is unavailable. */
-                        companyName?: string | null;
+                        /** @description The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, when the grant could not read it (`scope_missing`), or when the feed is unavailable. */
+                        companyName: string | null;
+                        /** @description #2869: the connection flagged as the feed destination WHATEVER its status — the page summary line ("Feeding Fortnox · Company AB · last push …") and the sidebar attention badge read it. A `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` destination is the attention state. Metadata only, never secrets. Null when there is no destination row or the feed is unavailable. */
+                        destination: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            companyName: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                        } | null;
                         /** @description #2865: the scopes the DESTINATION connection lacks (the row flagged as destination, whatever its status — a `scope_missing` destination reports `connected:false` and names them here), so the UI can say which scope a reconnect adds. Empty when nothing is missing or there is no destination; always present. */
                         missingScopes: string[];
                         syncs: {

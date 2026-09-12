@@ -6,10 +6,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockUseAuth = vi.fn()
 const mockUsePathname = vi.fn()
 const mockPush = vi.fn()
+/** #2869: the Accounting entry's markers come from `GET /accounting/feed/status`. */
+const mockAccountingFeed = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }))
+
+vi.mock('@/hooks/useAccountingFeed', async () => {
+  const actual = await vi.importActual<typeof import('@/hooks/useAccountingFeed')>('@/hooks/useAccountingFeed')
+  return { ...actual, useAccountingFeed: () => mockAccountingFeed() }
+})
 
 
 vi.mock('next/navigation', () => ({
@@ -22,12 +29,46 @@ vi.mock('@/components/ui/Tooltip', () => ({
 }))
 
 import Sidebar from '@/components/sidebar/Sidebar'
+import { LocaleProvider } from '@/context/LocaleContext'
+import { en } from '@/lib/i18n/messages/en'
+import type { AccountingFeedStatus } from '@/hooks/useAccountingFeed'
+
+/** The ready, connected, quiet feed — the state that must show NO marker. */
+function feedStatus(overrides: Partial<AccountingFeedStatus> = {}): AccountingFeedStatus {
+  return {
+    hosted: true,
+    enabled: true,
+    flagEnabled: true,
+    liveSyncReady: true,
+    entitled: true,
+    entitlementMode: 'all',
+    available: true,
+    connected: true,
+    companyName: 'Ada Lovelace AB',
+    destination: {
+      provider: 'fortnox',
+      displayName: 'Fortnox',
+      status: 'connected',
+      companyName: 'Ada Lovelace AB',
+      lastPushAt: '2026-09-12T09:58:00.000Z',
+    },
+    missingScopes: [],
+    syncs: [],
+    counts: { pending: 0, failed: 0, exhausted: 0 },
+    ...overrides,
+  }
+}
+
+function feed(status: AccountingFeedStatus | null) {
+  return { status, loading: false, error: null, refetch: vi.fn(), sync: vi.fn(), verify: vi.fn(), reopen: vi.fn() }
+}
 
 describe('Sidebar', () => {
   beforeEach(() => {
     mockUseAuth.mockReset()
     mockUsePathname.mockReset()
     mockPush.mockReset()
+    mockAccountingFeed.mockReset().mockReturnValue(feed(feedStatus()))
 
     mockUsePathname.mockReturnValue('/dashboard')
     mockUseAuth.mockReturnValue({
@@ -41,7 +82,7 @@ describe('Sidebar', () => {
   })
 
   it('renders three labeled clusters with the core money loop first (#858)', () => {
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
     const labels = ['Money', 'Agent tools', 'Admin'].map((l) => screen.getByText(l))
     expect(labels).toHaveLength(3)
     // Core loop order and routes unchanged (scoped to the nav — the logo also links to /dashboard):
@@ -91,7 +132,7 @@ describe('Sidebar', () => {
       },
       logout: vi.fn(),
     })
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
     expect(screen.queryByRole('link', { name: /Approvals/ })).toBeNull()
     // Scoped like the assertion above (#2731). This one was the more dangerous
     // of the two: it is a NEGATIVE assertion, so pointing it at the tab bar
@@ -105,8 +146,90 @@ describe('Sidebar', () => {
     expect(hrefs).not.toContain('/approvals')
   })
 
+  /**
+   * The Accounting entry's three feed states (#2869).
+   *
+   * The badge is an ATTENTION marker, not a count: it appears when the feed
+   * destination needs a reconnect (`needs_reauthorisation`, `scope_missing`,
+   * `revoked_at_provider`) or when the retry sweep has given up on a row
+   * (`counts.exhausted > 0`), and it is absent otherwise. Each case asserts
+   * the entry is still there, so an assertion cannot pass because the whole
+   * item vanished.
+   */
+  describe('Accounting entry, by feed state (#2869)', () => {
+    const accountingLink = () =>
+      document.querySelector('nav[aria-label="All sections"] a[href="/accounting"]') as HTMLElement | null
+    const attentionDot = () => screen.queryByTestId('nav-attention-accounting')
+
+    it('quiet feed: the entry renders with NO badge and NO attention dot', () => {
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).not.toBeNull()
+      expect(attentionDot()).toBeNull()
+      expect(accountingLink()!.textContent).not.toContain(en.accountingPage.nav.comingSoon)
+    })
+
+    it.each([
+      ['needs_reauthorisation' as const],
+      ['scope_missing' as const],
+      ['revoked_at_provider' as const],
+    ])('destination %s: the attention dot appears', (status) => {
+      mockAccountingFeed.mockReturnValue(
+        feed(feedStatus({ destination: { provider: 'fortnox', displayName: 'Fortnox', status, companyName: null, lastPushAt: null } })),
+      )
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).not.toBeNull()
+      expect(attentionDot()).not.toBeNull()
+      expect(attentionDot()!.textContent).toContain(en.accountingPage.nav.attention)
+    })
+
+    it('an exhausted sync raises the dot even on a healthy connection (#2866)', () => {
+      mockAccountingFeed.mockReturnValue(feed(feedStatus({ counts: { pending: 0, failed: 3, exhausted: 1 } })))
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(attentionDot()).not.toBeNull()
+    })
+
+    it('retryable failures alone do NOT raise it — the sweep owns those', () => {
+      mockAccountingFeed.mockReturnValue(feed(feedStatus({ counts: { pending: 2, failed: 5, exhausted: 0 } })))
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(attentionDot()).toBeNull()
+    })
+
+    it('hosted with the flag off: the entry stays, carrying a Coming soon marker and no dot', () => {
+      mockAccountingFeed.mockReturnValue(
+        feed(feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null })),
+      )
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).not.toBeNull()
+      expect(accountingLink()!.textContent).toContain(en.accountingPage.nav.comingSoon)
+      // The abbreviated pill carries the full phrase as its title.
+      expect(accountingLink()!.querySelector(`[title="${en.common.comingSoon}"]`)).not.toBeNull()
+      expect(attentionDot()).toBeNull()
+    })
+
+    it('self-hosted: the entry is hidden, and never marked Coming soon', () => {
+      mockAccountingFeed.mockReturnValue(
+        feed(feedStatus({ hosted: false, enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null })),
+      )
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).toBeNull()
+      // Positive control: the rest of the Admin cluster is untouched.
+      expect(document.querySelector('nav[aria-label="All sections"] a[href="/custody"]')).not.toBeNull()
+      const navText = document.querySelector('nav[aria-label="All sections"]')!.textContent ?? ''
+      expect(navText).not.toContain(en.common.comingSoon)
+      expect(navText).not.toContain(en.accountingPage.nav.comingSoon)
+    })
+
+    it('before the status answers: the entry renders plain, with no marker it has not earned', () => {
+      mockAccountingFeed.mockReturnValue({ ...feed(null), loading: true })
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).not.toBeNull()
+      expect(attentionDot()).toBeNull()
+      expect(accountingLink()!.textContent).not.toContain(en.accountingPage.nav.comingSoon)
+    })
+  })
+
   it('opens profile from the bottom-left identity area', () => {
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
 
     const profileLink = screen.getByRole('link', { name: 'Open profile for Ada Lovelace' })
     expect(profileLink).toHaveAttribute('href', '/profile')
@@ -123,7 +246,7 @@ describe('Sidebar', () => {
       },
       logout,
     })
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
 
     await user.click(screen.getByRole('button', { name: 'User menu' }))
 
@@ -226,6 +349,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
       user: { name: 'Ada Lovelace', email: 'ada@example.com', safes: [] },
       logout: vi.fn(),
     })
+    mockAccountingFeed.mockReset().mockReturnValue(feed(feedStatus()))
     width = 1280
     installMatchMedia()
   })
@@ -233,7 +357,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
   it('collapses when the viewport narrows past the breakpoint', () => {
     width = 1280
     Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
 
     // Mounted at desktop width: on screen, which is correct — at `lg` the
     // drawer is `static` and `collapsed` does not hide it.
@@ -253,7 +377,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // before it navigates and therefore only ever exercises this path.
     width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
     expect(offScreen()).toBe(true)
   })
 
@@ -270,7 +394,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // covers the page from first paint.
     Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
     width = 390
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
     expect(offScreen()).toBe(true)
   })
 
@@ -290,7 +414,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // width without ever crossing.
     width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
     expect(offScreen()).toBe(true)
 
     act(() => {
@@ -305,7 +429,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // `lg:translate-x-0` pins the drawer open there.
     width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<Sidebar />)
+    render(<LocaleProvider><Sidebar /></LocaleProvider>)
     expect(offScreen()).toBe(true)
 
     crossTo(false)

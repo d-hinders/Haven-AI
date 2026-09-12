@@ -7,7 +7,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
-import { COMING_SOON, connection, provider } from './fixtures'
+import { COMING_SOON, connection, feedStatus, provider } from './fixtures'
+import { en } from '@/lib/i18n/messages/en'
 
 const { mockApi, mockReplace, searchParamsRef } = vi.hoisted(() => ({
   mockApi: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -29,10 +30,13 @@ import { ConnectionsCard, readConnectOutcome } from '@/components/accounting/Con
 
 const PROVIDERS = [provider(), ...COMING_SOON]
 
-function serve(connections: ReturnType<typeof connection>[]) {
+function serve(connections: ReturnType<typeof connection>[], status = feedStatus()) {
   mockApi.get.mockImplementation((url: string) => {
     if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
     if (url === '/accounting/connections') return Promise.resolve({ connections })
+    // #2869: the card reads the feed status too — it renders its providers in
+    // the matching off state instead of offering Connect.
+    if (url === '/accounting/feed/status') return Promise.resolve(status)
     return Promise.reject(new Error(`unexpected GET ${url}`))
   })
 }
@@ -266,5 +270,33 @@ describe('ConnectionsCard', () => {
     mockApi.get.mockRejectedValue(new Error('down'))
     renderCard()
     expect(await screen.findByRole('alert')).toHaveTextContent('We could not load accounting connections.')
+  })
+
+  /**
+   * The card in the feed's OFF states (#2869). The connection routes are NOT
+   * behind the feed flag, so without the feed-status read this card would
+   * offer a working Connect on a deployment whose feed is switched off.
+   */
+  describe('the feed is off (#2869)', () => {
+    it('hosted with the flag off: providers listed as Coming soon, with no action at all', async () => {
+      serve([], feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
+      renderCard()
+      expect(await screen.findByTestId('accounting-coming-soon')).toBeInTheDocument()
+      expect(screen.getByText(en.accountingPage.comingSoon.notYet)).toBeInTheDocument()
+      expect(screen.getByTestId('connection-row-fortnox')).toBeInTheDocument()
+      for (const name of [/^connect$/i, /reconnect/i, /disconnect/i, /^settings$/i]) {
+        expect(screen.queryByRole('button', { name })).toBeNull()
+      }
+    })
+
+    it('self-hosted: the not-available copy, no providers, and never the coming-soon string', async () => {
+      serve([], feedStatus({ hosted: false, enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
+      renderCard()
+      expect(await screen.findByTestId('accounting-self-hosted')).toBeInTheDocument()
+      expect(screen.getByText(en.accountingPage.selfHosted.title)).toBeInTheDocument()
+      expect(screen.queryByTestId('connection-row-fortnox')).toBeNull()
+      expect(document.body.textContent).not.toContain(en.common.comingSoon)
+      expect(screen.queryByRole('button', { name: /^connect$/i })).toBeNull()
+    })
   })
 })

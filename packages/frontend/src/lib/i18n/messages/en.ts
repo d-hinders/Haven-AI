@@ -19,10 +19,71 @@ export const en = {
     /** Accessible name for the badge link — the label, then where it goes. */
     openAccounting: (label: string) => `${label}. Open accounting.`,
   },
-  /** The `/accounting` feed page's pointer to where the connection lives (#2868). */
+  /** The `/accounting` feed page (#2868 pointer to Settings; #2869 rework). */
   accountingPage: {
+    title: 'Accounting',
+    subtitle:
+      'Your agent spend appears in your accounting tool as draft transactions — your accountant codes and confirms them.',
     manageInSettings: 'Manage your accounting connection in Settings.',
     openSettings: 'Open Settings',
+    /**
+     * The connection summary line at the top of the feed (#2869): one line
+     * that says where payments are going, or what needs the user's hand.
+     * The attention sentences are the Settings card's own
+     * (`settings.accounting.detail`), so the two surfaces never disagree.
+     */
+    summary: {
+      feeding: (provider: string) => `Feeding ${provider}`,
+      /** `when` is a relative time, e.g. "2 minutes ago". */
+      lastPush: (when: string) => `last push ${when}`,
+      nothingPushedYet: 'nothing pushed yet',
+      notConnected: 'Not connected',
+      notConnectedDetail: 'Connect your accounting tool in Settings to start feeding settled payments.',
+      fixInSettings: 'Fix in Settings',
+    },
+    /** The retry-state counts next to the list (#2866), over every row. */
+    counts: {
+      pending: 'In flight',
+      failed: 'Will retry',
+      exhausted: 'Stopped retrying',
+      exhaustedHelp: 'Retried 8 times without success. Sync now tries again.',
+    },
+    /**
+     * `hosted && !enabled` — the hosted Haven with the feed switched off
+     * (owner decision 2026-09-11: visible in production as Coming soon).
+     * Explains what the feed will do and which platforms are listed;
+     * offers no connect or sync action, because none exists yet.
+     */
+    comingSoon: {
+      title: 'Accounting feed',
+      body:
+        'Settled agent payments will appear in your accounting tool as drafts with the payment evidence attached. Your accountant codes and books them; Haven asserts nothing.',
+      platformsTitle: 'Platforms being lined up',
+      platformsBody: 'Listed, not endorsed. Which ones go live is a separate decision.',
+      notYet: 'Nothing can be connected yet.',
+    },
+    /**
+     * `!hosted` — a self-hosted box. The feed is part of the hosted service,
+     * so it is NOT available here, and this copy must never read as
+     * "coming soon": nothing is scheduled for a self-hosted deployment.
+     */
+    selfHosted: {
+      title: 'Not available on self-hosted',
+      body:
+        'The accounting feed is part of the hosted Haven service and is not available on a self-hosted deployment. Nothing is fed from this installation.',
+    },
+    /** The Admin → Accounting nav item's markers (#2869). */
+    nav: {
+      /** Screen-reader text for the attention dot. */
+      attention: 'needs attention',
+      /**
+       * The marker on the nav entry while the feed is off. Short on purpose:
+       * the 240px rail cannot hold "Accounting" and "Coming soon" side by
+       * side at 13px (the first #2869 capture truncated the label to
+       * "Accoun…"); the full phrase is the pill's `title`.
+       */
+      comingSoon: 'Soon',
+    },
   },
   settings: {
     title: 'Settings',

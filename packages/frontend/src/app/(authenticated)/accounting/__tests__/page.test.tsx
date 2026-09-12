@@ -20,13 +20,28 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: mockReplace }),
   useSearchParams: () => searchParamsRef.current,
 }))
-vi.mock('@/hooks/useAccountingFeed', () => ({ useAccountingFeed: () => mockFeed() }))
+vi.mock('@/hooks/useAccountingFeed', async () => {
+  const actual = await vi.importActual<typeof import('@/hooks/useAccountingFeed')>('@/hooks/useAccountingFeed')
+  return { ...actual, useAccountingFeed: () => mockFeed() }
+})
+// `ComingSoon` lists the registry's providers; the page tests only care that
+// the state renders, so the provider listing is stubbed to a fixed answer.
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
+  return {
+    ...actual,
+    api: { ...actual.api, get: vi.fn().mockResolvedValue({ providers: [{ id: 'fortnox', displayName: 'Fortnox' }] }) },
+  }
+})
 
 import AccountingPage from '@/app/(authenticated)/accounting/page'
+import { en } from '@/lib/i18n/messages/en'
+import { feedStatus } from '@/components/accounting/__tests__/fixtures'
+import type { AccountingFeedStatus } from '@/hooks/useAccountingFeed'
 
 function feed(overrides: Record<string, unknown> = {}) {
   return {
-    status: { hosted: true, flagEnabled: true, liveSyncReady: true, available: true, connected: true, syncs: [] },
+    status: feedStatus(),
     loading: false,
     error: null,
     refetch: vi.fn(),
@@ -36,6 +51,17 @@ function feed(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
+
+/** The page in one feed state. */
+function withStatus(overrides: Partial<AccountingFeedStatus>) {
+  mockFeed.mockReturnValue(feed({ status: feedStatus(overrides) }))
+}
+
+const OFF_COMING_SOON: Partial<AccountingFeedStatus> = {
+  enabled: false, flagEnabled: false, available: false, entitled: false, connected: false,
+  companyName: null, destination: null, liveSyncReady: false,
+}
+const OFF_SELF_HOSTED: Partial<AccountingFeedStatus> = { ...OFF_COMING_SOON, hosted: false }
 
 function renderPage() {
   return render(
@@ -81,7 +107,7 @@ describe('/accounting after the connection moved to Settings (#2868)', () => {
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/settings?provider=fortnox&connect=connected'))
     unmount()
     mockReplace.mockReset()
-    mockFeed.mockReturnValue(feed({ status: { hosted: false, flagEnabled: false, liveSyncReady: false, available: false, connected: false, syncs: [] } }))
+    withStatus(OFF_SELF_HOSTED)
     renderPage()
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/settings?provider=fortnox&connect=connected'))
   })
@@ -89,5 +115,99 @@ describe('/accounting after the connection moved to Settings (#2868)', () => {
   it('does not touch the URL without an outcome', () => {
     renderPage()
     expect(mockReplace).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The two OFF states, on the page (#2869). The owner decision is that they
+ * read differently: `hosted && !enabled` is Coming soon, `!hosted` says the
+ * feed is not available on a self-hosted box and must never suggest it is
+ * on the way. Neither reaches a connect or a sync control.
+ */
+describe('/accounting off states (#2869)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+    mockFeed.mockReturnValue(feed())
+  })
+
+  /** Asserted by ROLE: a disabled control is still reachable and still wrong here. */
+  function expectNoFeedControls() {
+    for (const name of [/sync now/i, /^connect$/i, /reconnect/i, /check in fortnox/i, /re-open/i]) {
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    }
+  }
+
+  it('hosted with the flag off: the explanatory Coming soon state, no connect or sync control', async () => {
+    withStatus(OFF_COMING_SOON)
+    renderPage()
+    expect(await screen.findByTestId('accounting-coming-soon')).toBeInTheDocument()
+    expect(screen.getByText(en.accountingPage.comingSoon.title)).toBeInTheDocument()
+    expect(screen.getByText(en.accountingPage.comingSoon.body)).toBeInTheDocument()
+    expectNoFeedControls()
+    // The add-on upsell it replaced is gone.
+    expect(screen.queryByText(/Available as an add-on/)).toBeNull()
+    expect(screen.queryByTestId('accounting-self-hosted')).toBeNull()
+  })
+
+  it('self-hosted: the not-available copy renders and NEVER the coming-soon string', () => {
+    withStatus(OFF_SELF_HOSTED)
+    renderPage()
+    expect(screen.getByTestId('accounting-self-hosted')).toBeInTheDocument()
+    expect(screen.getByText(en.accountingPage.selfHosted.title)).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain(en.common.comingSoon)
+    expect(document.body.textContent).not.toContain(en.accountingPage.comingSoon.title)
+    expect(screen.queryByTestId('accounting-coming-soon')).toBeNull()
+    expectNoFeedControls()
+  })
+
+  it('self-hosted wins over a set flag — hosted is the outer question', () => {
+    withStatus({ ...OFF_SELF_HOSTED, enabled: true, flagEnabled: true })
+    renderPage()
+    expect(screen.getByTestId('accounting-self-hosted')).toBeInTheDocument()
+    expect(screen.queryByTestId('accounting-coming-soon')).toBeNull()
+  })
+
+  it('flag on but not entitled: the add-on card, not either off state', () => {
+    withStatus({ available: false, entitled: false, connected: false, destination: null, companyName: null })
+    renderPage()
+    expect(screen.getByText(/Available as an add-on/)).toBeInTheDocument()
+    expect(screen.queryByTestId('accounting-coming-soon')).toBeNull()
+    expect(screen.queryByTestId('accounting-self-hosted')).toBeNull()
+  })
+})
+
+/** The flag-on page: the summary line, the feed and the retry counts (#2869). */
+describe('/accounting with the feed on (#2869)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+    mockFeed.mockReturnValue(feed())
+  })
+
+  it('shows the connection summary line above the feed', () => {
+    renderPage()
+    const summary = screen.getByTestId('feed-summary')
+    expect(summary).toHaveAttribute('data-status', 'connected')
+    expect(summary.textContent).toContain('Feeding Fortnox')
+    expect(screen.getByRole('button', { name: 'Sync now' })).toBeInTheDocument()
+  })
+
+  it('the summary carries the attention state and its way to Settings', () => {
+    withStatus({
+      connected: false,
+      destination: { provider: 'fortnox', displayName: 'Fortnox', status: 'needs_reauthorisation', companyName: null, lastPushAt: null },
+    })
+    renderPage()
+    expect(screen.getByTestId('feed-summary')).toHaveAttribute('data-status', 'needs_reauthorisation')
+    expect(screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })).toHaveAttribute('href', '/settings')
+  })
+
+  it('renders the retry counts from the status (#2866)', () => {
+    withStatus({ counts: { pending: 2, failed: 3, exhausted: 1 } })
+    renderPage()
+    expect(screen.getByTestId('feed-count-pending')).toHaveTextContent('2')
+    expect(screen.getByTestId('feed-count-failed')).toHaveTextContent('3')
+    expect(screen.getByTestId('feed-count-exhausted')).toHaveTextContent('1')
   })
 })

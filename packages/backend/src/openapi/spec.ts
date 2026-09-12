@@ -3052,7 +3052,7 @@ export const openapiSpec = {
         operationId: 'getAccountingFeedStatus',
         summary: 'Whether the accounting feed is available, connected, and live — plus recent syncs.',
         description:
-          'Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.',
+          'Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error. #2869: it answers 200 in every off state — `hosted:false` is "not available on self-hosted", `hosted:true, enabled:false` is "Coming soon" (visible in production by owner decision), and `enabled:true, entitled:false` is the add-on state; the gated actions 404 in all three.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -3061,10 +3061,11 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'missingScopes', 'syncs', 'counts'],
+                  required: ['hosted', 'enabled', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'companyName', 'destination', 'missingScopes', 'syncs', 'counts'],
                   properties: {
-                    hosted: { type: 'boolean' },
-                    flagEnabled: { type: 'boolean' },
+                    hosted: { type: 'boolean', description: 'This deployment is the hosted Haven (`HAVEN_HOSTED`). False on a self-hosted box, where the feed is not available and never "coming soon" (#2869).' },
+                    enabled: { type: 'boolean', description: '#2869: the `HAVEN_ACCOUNTING_ENABLED` flag. `hosted && !enabled` is the "Coming soon" state the dashboard shows in production.' },
+                    flagEnabled: { type: 'boolean', description: 'The same boolean as `enabled`, kept for callers that read the older name.' },
                     liveSyncReady: { type: 'boolean', description: 'A real provider adapter is registered.' },
                     entitled: {
                       type: 'boolean',
@@ -3080,7 +3081,23 @@ export const openapiSpec = {
                     connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
                     companyName: {
                       type: ['string', 'null'],
-                      description: 'The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, or when the grant could not read it (`scope_missing`). Absent when the feed is unavailable.',
+                      description: 'The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, when the grant could not read it (`scope_missing`), or when the feed is unavailable.',
+                    },
+                    destination: {
+                      type: ['object', 'null'],
+                      required: ['provider', 'displayName', 'status', 'companyName', 'lastPushAt'],
+                      description:
+                        '#2869: the connection flagged as the feed destination WHATEVER its status — the page summary line ("Feeding Fortnox · Company AB · last push …") and the sidebar attention badge read it. A `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` destination is the attention state. Metadata only, never secrets. Null when there is no destination row or the feed is unavailable.',
+                      properties: {
+                        provider: { type: 'string', examples: ['fortnox'] },
+                        displayName: { type: 'string' },
+                        status: {
+                          type: 'string',
+                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
+                        },
+                        companyName: { type: ['string', 'null'] },
+                        lastPushAt: { type: ['string', 'null'], format: 'date-time' },
+                      },
                     },
                     missingScopes: {
                       type: 'array',

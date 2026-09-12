@@ -18,6 +18,9 @@ covers:
   - packages/backend/src/modules/transactions/accounting.ts
   - packages/backend/src/modules/x402/settlement-sweeper.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
+  - packages/frontend/src/components/sidebar/Sidebar.tsx
+  - packages/frontend/src/components/accounting/ComingSoon.tsx
+  - packages/frontend/src/components/accounting/FeedSummary.tsx
   - packages/frontend/src/app/(authenticated)/settings/SettingsClient.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/hooks/useAccounting.ts
@@ -62,9 +65,11 @@ mechanism live on 2026-07-16). The owner decisions of 2026-09-11 are in the
 | `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | unset |
 
 Availability for one account is `hosted && enabled && entitled`;
-`GET /accounting/feed/status` reports `hosted`, `flagEnabled`, `entitled`,
+`GET /accounting/feed/status` reports `hosted`, `enabled` (and `flagEnabled`,
+the deprecated older name for the same boolean), `entitled`,
 `entitlementMode`, `liveSyncReady` (a live connector is registered) and
-`available`, so on-call reads from one response why an account has no feed.
+`available`, so on-call reads from one response why an account has no feed —
+and it answers 200 with that full shape in both off states (#2869).
 The pre-#2861 recipe of granting entitlement by hand is retired; the table
 stays for paid tiers later.
 
@@ -140,19 +145,33 @@ a `remedy` field, the other two carry a `reason`:
   the backfill dialog on the OAuth return is `POST …/backfill`; Disconnect
   confirms first. The `/accounting` page no longer carries connect
   controls; it points at Settings.
-- **`/accounting`** — every sync row, **Sync now**, **Check in Fortnox** and
-  the re-open action; the callback redirect lands here
+- **`/accounting`** (#2869) — a connection **summary line** at the top
+  ("Feeding Fortnox · Company AB · last push 2 minutes ago", or the attention
+  state — `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` —
+  with its sentence and a *Fix in Settings* action), then every sync row with
+  **Check in Fortnox**, the re-open action, **Sync now** and the retry counts
+  `pending` / `failed` / `exhausted` (#2866; the row is hidden while every
+  count is zero and there are no syncs). Nothing here connects or
+  disconnects; that moved to Settings (#2868). The callback redirect lands
+  here
   (`?provider=<id>&connect=connected|denied|error[&reason=unsupported_currency]`).
-  #2869 reworks the page, adds the sidebar badge for a connection needing
-  attention and the prod *Coming soon* state — not merged; not described here.
+- **The sidebar's Accounting entry** (#2869) — a small attention dot when the
+  destination needs a reconnect (`needs_reauthorisation`, `scope_missing`,
+  `revoked_at_provider`) or when `counts.exhausted > 0`. Not a count: it says
+  "look", the page says what. A retryable `failed` row raises nothing — the
+  background sweep owns those. The entry renders only once
+  `GET /accounting/feed/status` has answered (no flash of an entry that a
+  self-hosted answer then removes); a failed status read renders the plain
+  entry with no marker.
 - **Where the user manages it (#2868, PR #2903)** — the *Accounting*
   card on `/settings` (`SettingsClient.tsx` →
   `components/accounting/ConnectionsCard.tsx`, with `ConnectionRow`,
   `ConnectionSettings` and `BackfillDialog`): one row per provider with
   Connect / Reconnect / Disconnect, the per-connection settings and the
   backfill choice on connect. The product doc describes the states as the
-  user sees them; those four component files are covered here once #2903
-  merges (they do not exist on this branch, so they are not in `covers:` yet).
+  user sees them. A failed `GET /accounting/feed/status` read renders the
+  card with the connection list (or its load error) and **no controls** —
+  the card fails closed until #2918 gates the connection routes server-side.
 - **`/transactions`** (#2870) — a badge per fed row: *In Fortnox* (`pushed`),
   *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`, the `error` on
   hover), linking to `/accounting`. Emitted only when the account is
@@ -161,6 +180,33 @@ a `remedy` field, the other two carry a `reason`:
   badge on the page, including *In Fortnox* on rows already delivered) AND a
   sync row exists — no badge means "not entitled / not connected / connection
   degraded / before `feed_from`", never "failed".
+
+### The two OFF states, and what each surface shows (#2869)
+
+Owner decision 2026-09-11: the feed is **visible in production while switched
+off**, and the two off states read differently — exposure (flipping
+`HAVEN_ACCOUNTING_ENABLED`) remains a separate manual decision.
+
+| `hosted` | `enabled` | `/accounting` | sidebar entry | Settings → Accounting card |
+|---|---|---|---|---|
+| true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868) |
+| true | **false** | **Coming soon**: what the feed will do, the platforms being lined up, and "Nothing can be connected yet." No connect or sync control is reachable | rendered, with a muted **Soon** pill (accessible name and, below `lg`, visible text: *Coming soon*) | every provider listed as *Coming soon* with **no action at all** — not even a disabled Connect |
+| **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** |
+
+In both off states the page header and the Settings card carry a neutral
+one-liner ("Feeding agent spend to your accounting tool." / "Your company's
+accounting tool.") — the non-asserting product subtitle ("…your accountant
+codes and confirms them") is shown only when the feed is on, so nothing
+above "Nothing can be connected yet" asserts that something happens.
+
+`hosted` is the outer question: a self-hosted box with the flag set is still
+self-hosted, which is what `accountingFeedAvailability` already does. The
+frontend reads all of this from one endpoint —
+`GET /accounting/feed/status`'s `hosted` / `enabled` — through
+`accountingFeedOffState` in `hooks/useAccountingFeed.ts`, so the three
+surfaces cannot disagree. The status route answers **200 in every off
+state** (it sits OUTSIDE `requireAccountingFeed`); sync / verify / reopen
+stay 404.
 
 ## Routes
 
@@ -181,7 +227,7 @@ consult the flag.
 | `POST /accounting/connections/:provider/activate` | make it the destination; stamps **`feed_from = now`** in the same transaction |
 | `POST /accounting/connections/:provider/backfill` | `{ since }`: moves `feed_from` **earlier only** (400 `SINCE_INVALID` / `SINCE_NOT_EARLIER`, 409 `NOT_ACTIVE`), records `settings.backfill`, runs one bounded sync; answers `{ feedFrom, fed }` |
 | `PATCH /accounting/connections/:provider/settings` | exactly `suggested_account` and `auto_feed`; anything else 400 `INVALID_SETTING` naming `key`; a SQL-side JSONB merge |
-| `GET /accounting/feed/status` | availability flags, `connected` (= an active `connected` destination exists), `companyName`, `missingScopes` (of the destination row whatever its status), `counts { pending, failed, exhausted }` over ALL the user's rows, `syncs` (recent rows) |
+| `GET /accounting/feed/status` | **200 in every state, including both OFF states** (#2869), always the complete shape: `hosted`, `enabled` (`flagEnabled` is the same value, deprecated in the spec, removed one release after #2869), `entitled`, `entitlementMode`, `liveSyncReady`, `available`, `connected` (= an active `connected` destination exists), `companyName`, `destination` — the destination row's `{ provider, displayName, status, companyName, lastPushAt }` whatever its status, or `null`; the page summary and the sidebar marker read it — `missingScopes` (of that row), `counts { pending, failed, exhausted }` over ALL the user's rows, `syncs` (recent rows) |
 | `POST /accounting/feed/sync` | Sync now: backfill + retry for the active destination, honouring `feed_from`; manual, so it pushes for an `auto_feed = false` connection too |
 | `GET /accounting/feed/verify/:paymentId` | live read-back through the active connection's connector: `registered` / `booked` (+ voucher) / `cancelled` / `missing` |
 | `POST /accounting/feed/reopen/:paymentId` | verification-gated reopen: flips `pushed → failed` ONLY when the provider confirms the record is gone; 409 otherwise, 409 `previous_company` for a row pushed under a previous company |

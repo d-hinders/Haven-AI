@@ -60,7 +60,7 @@ const fortnoxMocks = vi.hoisted(() => ({
   PREVIOUS_COMPANY_REASON: 'belongs to the previous company',
 }))
 /** What `getActiveConnectionSummary` answers for a connected user — the summary's company half. */
-const ACTIVE = { provider: 'fortnox', externalCompanyId: '1234567', externalCompanyName: 'Haven Sandbox AB', baseCurrency: 'SEK', isActiveDestination: true, status: 'connected', missingScopes: [] as string[] }
+const ACTIVE = { provider: 'fortnox', displayName: 'Fortnox', externalCompanyId: '1234567', externalCompanyName: 'Haven Sandbox AB', baseCurrency: 'SEK', isActiveDestination: true, status: 'connected', missingScopes: [] as string[], lastPushAt: '2026-08-13T09:00:05.000Z' as string | null }
 // feed-orchestrator.ts, connector.ts and fortnox-connection.ts all fold into
 // one public entry point post-#998 (modules/accounting/index.ts) — a single
 // mock factory merging all three, not three vi.mock calls to the same
@@ -143,6 +143,23 @@ describe('reporting routes', () => {
   })
 
   describe('GET /status', () => {
+    /** The complete off-state payload (#2869): every key the spec requires, no gated data. */
+    const OFF = (hosted: boolean, enabled: boolean) => ({
+      hosted,
+      enabled,
+      flagEnabled: enabled,
+      liveSyncReady: false,
+      entitled: false,
+      entitlementMode: 'granted',
+      available: false,
+      connected: false,
+      companyName: null,
+      destination: null,
+      missingScopes: [],
+      syncs: [],
+      counts: { pending: 0, failed: 0, exhausted: 0 },
+    })
+
     it('reports base flags without the gated data path when the feed is unavailable', async () => {
       setAvailability(false)
       configMock.accountingEnabled = false
@@ -151,18 +168,7 @@ describe('reporting routes', () => {
       const res = await authed('GET', '/accounting/feed/status')
 
       expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({
-        hosted: true,
-        flagEnabled: false,
-        liveSyncReady: false,
-        entitled: false,
-        entitlementMode: 'granted',
-        available: false,
-        connected: false,
-        missingScopes: [],
-        syncs: [],
-        counts: { pending: 0, failed: 0, exhausted: 0 },
-      })
+      expect(res.json()).toEqual(OFF(true, false))
       expectMatchesSpec('GET', '/accounting/feed/status', res.json())
       // The synchronous connector-registry read for the base flags still runs
       // (it's not gated), but the gated DATA path — the Fortnox connection and
@@ -172,6 +178,32 @@ describe('reporting routes', () => {
       expect(fortnoxMocks.getDestinationSummary).not.toHaveBeenCalled()
       expect(orchestratorMocks.getAccountingFeedStatus).not.toHaveBeenCalled()
       expect(orchestratorMocks.getAccountingFeedCounts).not.toHaveBeenCalled()
+    })
+
+    // #2869: the two OFF states the dashboard renders differently — "Coming
+    // soon" (hosted, flag off) and "not available on self-hosted" (not
+    // hosted) — are BOTH a 200 with the full shape, `enabled` saying which,
+    // while every gated action stays 404. MUTATION-TESTED: gating `/status`
+    // with `requireAccountingFeed` turns both cases red at the status code.
+    it.each([
+      ['hosted=true, enabled=false (Coming soon)', true, false],
+      ['hosted=false (self-hosted, never coming soon)', false, false],
+      ['hosted=false with the flag on (still off — hosted wins)', false, true],
+    ])('answers 200 with the complete off shape for %s, and the actions 404', async (_label, hosted, enabled) => {
+      configMock.hosted = hosted
+      configMock.accountingEnabled = enabled
+      setAvailability(false)
+
+      const status = await authed('GET', '/accounting/feed/status')
+      expect(status.statusCode).toBe(200)
+      expect(status.json()).toEqual(OFF(hosted, enabled))
+      expectMatchesSpec('GET', '/accounting/feed/status', status.json())
+
+      expect((await authed('POST', '/accounting/feed/sync')).statusCode).toBe(404)
+      expect((await authed('GET', '/accounting/feed/verify/pay-1')).statusCode).toBe(404)
+      expect((await authed('POST', '/accounting/feed/reopen/pay-1')).statusCode).toBe(404)
+      expect(orchestratorMocks.syncUser).not.toHaveBeenCalled()
+      expect(fortnoxMocks.verifyPushedPayment).not.toHaveBeenCalled()
     })
 
     it('returns availability, connection state and syncs when entitled', async () => {
@@ -203,6 +235,7 @@ describe('reporting routes', () => {
       expect(res.statusCode).toBe(200)
       expect(res.json()).toEqual({
         hosted: true,
+        enabled: true,
         flagEnabled: true,
         liveSyncReady: true,
         entitled: true,
@@ -211,6 +244,15 @@ describe('reporting routes', () => {
         connected: true,
         // #2864: "Connected to Haven Sandbox AB" — the active connection's company.
         companyName: 'Haven Sandbox AB',
+        // #2869: the destination row's summary — what the page's summary
+        // line and the sidebar badge read.
+        destination: {
+          provider: 'fortnox',
+          displayName: 'Fortnox',
+          status: 'connected',
+          companyName: 'Haven Sandbox AB',
+          lastPushAt: '2026-08-13T09:00:05.000Z',
+        },
         missingScopes: [],
         syncs,
         counts: { pending: 1, failed: 2, exhausted: 1 },
@@ -244,6 +286,22 @@ describe('reporting routes', () => {
       fortnoxMocks.getDestinationSummary.mockResolvedValue({ ...ACTIVE, status: 'scope_missing', missingScopes: ['connectfile', 'companyinformation'] })
       const res = await authed('GET', '/accounting/feed/status')
       expect(res.json()).toMatchObject({ connected: false, companyName: null, missingScopes: ['connectfile', 'companyinformation'] })
+      // #2869: the attention state reaches the dashboard through `destination.status`.
+      expect(res.json().destination).toEqual({
+        provider: 'fortnox',
+        displayName: 'Fortnox',
+        status: 'scope_missing',
+        companyName: 'Haven Sandbox AB',
+        lastPushAt: '2026-08-13T09:00:05.000Z',
+      })
+      expectMatchesSpec('GET', '/accounting/feed/status', res.json())
+    })
+
+    it('#2869: entitled with no destination row at all — destination is null, not an empty object', async () => {
+      fortnoxMocks.getActiveConnectionSummary.mockResolvedValue(null)
+      fortnoxMocks.getDestinationSummary.mockResolvedValue(null)
+      const res = await authed('GET', '/accounting/feed/status')
+      expect(res.json()).toMatchObject({ available: true, connected: false, destination: null })
       expectMatchesSpec('GET', '/accounting/feed/status', res.json())
     })
   })

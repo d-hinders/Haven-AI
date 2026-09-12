@@ -53,6 +53,9 @@ import {
   type AccountingConnection,
   type AccountingProvider,
 } from '@/hooks/useAccounting'
+import { accountingFeedOffState, useAccountingFeed } from '@/hooks/useAccountingFeed'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
 import { BackfillDialog } from './BackfillDialog'
 import { ConnectionRow } from './ConnectionRow'
 import { ConnectionSettings } from './ConnectionSettings'
@@ -85,6 +88,11 @@ export function ConnectionsCard() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { providers, loading: providersLoading, error: providersError } = useAccountingProviders()
+  // #2869: the card renders its providers in the feed's OFF state too. The
+  // connection routes are not behind the feed flag, so without this read the
+  // card would offer Connect on a deployment whose feed is switched off.
+  const { status: feedStatus, loading: feedLoading } = useAccountingFeed()
+  const feedOff = accountingFeedOffState(feedStatus)
   const {
     connections,
     loading: connectionsLoading,
@@ -108,7 +116,7 @@ export function ConnectionsCard() {
   // First load only: a refetch (after Disconnect, a backfill) keeps the rows
   // rendered — `refreshing` marks the region busy instead of collapsing it
   // to a skeleton.
-  const loading = providersLoading || connectionsLoading
+  const loading = providersLoading || connectionsLoading || feedLoading
   const byProvider = useMemo(() => new Map(connections.map((c) => [c.provider, c])), [connections])
 
   // Read the callback's outcome ONCE per query string, then strip it from the
@@ -185,6 +193,29 @@ export function ConnectionsCard() {
         <div className="space-y-3 px-6 py-4" role="status" aria-busy="true" aria-label={copy.title}>
           <Skeleton variant="text" className="h-5 w-48" />
           <Skeleton variant="text" className="h-4 w-full max-w-md" />
+        </div>
+      ) : feedOff === 'self_hosted' ? (
+        // Not available on self-hosted — never "coming soon" (#2869). No
+        // providers listed: nothing is scheduled for this deployment.
+        <div className="px-6 py-4" data-testid="accounting-self-hosted">
+          <p className="text-sm font-medium text-[var(--v2-ink)]">{t.accountingPage.selfHosted.title}</p>
+          <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{t.accountingPage.selfHosted.body}</p>
+        </div>
+      ) : feedOff === 'coming_soon' ? (
+        // Hosted, flag off: every provider listed as Coming soon, with NO
+        // action — not even a disabled Connect, which would suggest a
+        // control exists (#2869).
+        <div className="divide-y divide-[var(--v2-border)]" data-testid="accounting-coming-soon">
+          <p className="px-6 py-3 text-sm text-[var(--v2-ink-3)]">{t.accountingPage.comingSoon.notYet}</p>
+          {(providersError ? [] : providers).map((provider) => (
+            <SettingsRow
+              key={provider.id}
+              data-testid={`connection-row-${provider.id}`}
+              label={provider.displayName}
+              detail={copy.comingSoonDescription[provider.id]}
+              value={<StatusBadge tone="neutral">{t.common.comingSoon}</StatusBadge>}
+            />
+          ))}
         </div>
       ) : listError ? (
         <div className="px-6 py-4">

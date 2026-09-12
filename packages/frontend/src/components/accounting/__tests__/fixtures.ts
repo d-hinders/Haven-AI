@@ -4,6 +4,7 @@
  * time rather than rendering `undefined` somewhere a test does not look.
  */
 import type { AccountingConnection, AccountingProvider } from '@/hooks/useAccounting'
+import type { AccountingFeedStatus } from '@/hooks/useAccountingFeed'
 
 export function provider(overrides: Partial<AccountingProvider> = {}): AccountingProvider {
   return {
@@ -47,3 +48,58 @@ export function connection(overrides: Partial<AccountingConnection> = {}): Accou
     ...overrides,
   }
 }
+
+/**
+ * `GET /accounting/feed/status` (#2869) — the one answer the feed page, the
+ * sidebar markers and this card's off state all read. Generated wire type,
+ * so a renamed field fails here rather than rendering `undefined`.
+ */
+export function feedStatus(overrides: Partial<AccountingFeedStatus> = {}): AccountingFeedStatus {
+  return {
+    hosted: true,
+    enabled: true,
+    flagEnabled: true,
+    liveSyncReady: true,
+    entitled: true,
+    entitlementMode: 'all',
+    available: true,
+    connected: true,
+    companyName: 'Ada Lovelace AB',
+    destination: {
+      provider: 'fortnox',
+      displayName: 'Fortnox',
+      status: 'connected',
+      companyName: 'Ada Lovelace AB',
+      lastPushAt: '2026-09-12T09:58:00.000Z',
+    },
+    missingScopes: [],
+    syncs: [],
+    counts: { pending: 0, failed: 0, exhausted: 0 },
+    ...overrides,
+  }
+}
+
+/** The `hosted && !enabled` off state — Coming soon. */
+export const FEED_COMING_SOON = feedStatus({
+  enabled: false,
+  flagEnabled: false,
+  entitled: false,
+  available: false,
+  connected: false,
+  companyName: null,
+  destination: null,
+  liveSyncReady: false,
+})
+
+/** The `!hosted` off state — not available on self-hosted, never coming soon. */
+export const FEED_SELF_HOSTED = feedStatus({
+  hosted: false,
+  enabled: false,
+  flagEnabled: false,
+  entitled: false,
+  available: false,
+  connected: false,
+  companyName: null,
+  destination: null,
+  liveSyncReady: false,
+})

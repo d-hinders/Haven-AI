@@ -76,10 +76,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     // `AccountingPage` returns null unless `hosted && flagEnabled`, and hides
     // the feed unless `available`; every row needs the fields the page reads.
     const status = fx('/accounting/feed/status') as {
-      hosted: boolean; flagEnabled: boolean; available: boolean; connected: boolean; liveSyncReady: boolean
+      hosted: boolean; enabled: boolean; flagEnabled: boolean; available: boolean; connected: boolean; liveSyncReady: boolean
       syncs: { payment_id: string; provider: string; status: string; external_ref: string | null; error: string | null; attempts: number }[]
     }
-    expect(status).toMatchObject({ hosted: true, flagEnabled: true, available: true, connected: true, liveSyncReady: true })
+    expect(status).toMatchObject({ hosted: true, enabled: true, flagEnabled: true, available: true, connected: true, liveSyncReady: true })
     expect(status.syncs.length).toBeGreaterThan(0)
     for (const row of status.syncs) {
       expect(row).toMatchObject({ payment_id: expect.any(String), provider: 'fortnox', attempts: expect.any(Number) })
@@ -844,6 +844,46 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
       it('refuses an unknown stage', () => {
         expect(() => settings.stage('connected-with-company')).toThrow(/unknown stage/)
+      })
+    })
+
+    /**
+     * #2869: `/accounting` renders three different surfaces off ONE endpoint,
+     * so the scenario switches the flag answer per stage. The two OFF stages
+     * are what the Coming soon and self-hosted baselines photograph.
+     */
+    describe('accounting-feed (#2869)', () => {
+      const feed = scenarioWithApi('accounting-feed') as StagedScenarioShape
+      afterEach(() => feed.stage('on'))
+      const statusOf = () =>
+        feed.api('/accounting/feed/status', 'GET') as { hosted: boolean; enabled: boolean; available: boolean }
+
+      it('serves the three flag states, one per stage', () => {
+        const seen: Record<string, unknown> = {}
+        for (const stage of Object.keys(feed.stages)) {
+          feed.stage(stage)
+          const status = statusOf()
+          seen[stage] = { hosted: status.hosted, enabled: status.enabled, available: status.available }
+        }
+        expect(seen).toEqual({
+          on: { hosted: true, enabled: true, available: true },
+          // The distinction the owner decision turns on: BOTH are off, and
+          // `hosted` is the only field that tells them apart.
+          'coming-soon': { hosted: true, enabled: false, available: false },
+          'self-hosted': { hosted: false, enabled: false, available: false },
+        })
+      })
+
+      it('answers only the feed-status route in every stage', () => {
+        for (const stage of Object.keys(feed.stages)) {
+          feed.stage(stage)
+          expect(feed.api('/accounting/connections', 'GET'), stage).toBeUndefined()
+          expect(feed.api('/auth/me', 'GET'), stage).toBeUndefined()
+        }
+      })
+
+      it('refuses an unknown stage', () => {
+        expect(() => feed.stage('off')).toThrow(/unknown stage/)
       })
     })
 

@@ -1185,6 +1185,9 @@ export const FIXTURE_ACCOUNTING_FEED_SYNC = {
 }
 export const FIXTURE_ACCOUNTING_FEED_STATUS = {
   hosted: true,
+  // #2869: `enabled` is the flag on the wire, `flagEnabled` the older name
+  // for the same boolean — both required by the spec.
+  enabled: true,
   flagEnabled: true,
   liveSyncReady: true,
   entitled: true,
@@ -1192,6 +1195,14 @@ export const FIXTURE_ACCOUNTING_FEED_STATUS = {
   available: true,
   connected: true,
   companyName: FIXTURE_ACCOUNTING_CONNECTION.externalCompanyName,
+  // #2869: the destination row the summary line and the sidebar marker read.
+  destination: {
+    provider: FIXTURE_ACCOUNTING_CONNECTION.provider,
+    displayName: FIXTURE_ACCOUNTING_CONNECTION.displayName,
+    status: FIXTURE_ACCOUNTING_CONNECTION.status,
+    companyName: FIXTURE_ACCOUNTING_CONNECTION.externalCompanyName,
+    lastPushAt: FIXTURE_ACCOUNTING_CONNECTION.lastPushAt,
+  },
   missingScopes: [],
   syncs: [
     FIXTURE_ACCOUNTING_FEED_SYNC,
@@ -1209,6 +1220,27 @@ export const FIXTURE_ACCOUNTING_FEED_STATUS = {
   ],
   counts: { pending: 0, failed: 1, exhausted: 0 },
 }
+
+/**
+ * The two OFF states (#2869). `hosted && !enabled` is Coming soon (visible
+ * in production by owner decision); `!hosted` is "not available on
+ * self-hosted" and must never read as coming soon. Spreads off the ready
+ * answer, so a renamed key cannot leave one of them behind.
+ */
+export const FIXTURE_ACCOUNTING_FEED_COMING_SOON = {
+  ...FIXTURE_ACCOUNTING_FEED_STATUS,
+  enabled: false,
+  flagEnabled: false,
+  liveSyncReady: false,
+  entitled: false,
+  available: false,
+  connected: false,
+  companyName: null,
+  destination: null,
+  syncs: [],
+  counts: { pending: 0, failed: 0, exhausted: 0 },
+}
+export const FIXTURE_ACCOUNTING_FEED_SELF_HOSTED = { ...FIXTURE_ACCOUNTING_FEED_COMING_SOON, hosted: false }
 
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
@@ -2428,6 +2460,26 @@ function setSettingsAccountingStage(next) {
   settingsAccountingStage = next
 }
 
+/**
+ * The three feed states `/accounting` renders (#2869), keyed by the flag
+ * answer that produces each. The sidebar reads the same endpoint, so a
+ * capture also shows the Accounting entry's marker for that state.
+ */
+const ACCOUNTING_FEED_STAGES = {
+  on: FIXTURE_ACCOUNTING_FEED_STATUS,
+  'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
+  'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
+}
+let accountingFeedStage = 'on'
+function setAccountingFeedStage(next) {
+  if (!(next in ACCOUNTING_FEED_STAGES)) {
+    throw new Error(
+      `accounting-feed: unknown stage "${next}" — expected one of ` + Object.keys(ACCOUNTING_FEED_STAGES).join(', '),
+    )
+  }
+  accountingFeedStage = next
+}
+
 export const SCENARIOS = {
   'settings-accounting': {
     description:
@@ -2539,27 +2591,89 @@ export const SCENARIOS = {
    */
   'accounting-feed': {
     description:
-      'The /accounting feed page — connection pointer to Settings, synced transactions with a pushed and a failed row (#2868, #2903)',
+      'The /accounting feed page in its three states (#2868, #2869): the feed with the connection summary line, the prod Coming soon state, and the self-hosted not-available copy',
+    stages: ACCOUNTING_FEED_STAGES,
+    /** Exposed so the fixture-contract test can pin each flag state. */
+    stage: setAccountingFeedStage,
+    api(apiPath) {
+      if (apiPath !== '/accounting/feed/status') return undefined
+      const status = ACCOUNTING_FEED_STAGES[accountingFeedStage]
+      // The summary line renders `lastPushAt` as a RELATIVE time ("2 minutes
+      // ago"), so a fixed ISO date would age the capture every month. Served
+      // two minutes before now, the line is stable run to run.
+      return status.destination
+        ? { ...status, destination: { ...status.destination, lastPushAt: new Date(Date.now() - 2 * 60_000).toISOString() } }
+        : status
+    },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await page.evaluate(() => document.fonts.ready)
-      await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
-      await dismissMobileSidebar(page, vp)
+      // Module state, reset per viewport — see settings-accounting.
+      setAccountingFeedStage('on')
 
       const main = page.locator('main').first()
-      // Each claim the capture is evidence of, waited on: the pointer to
-      // Settings (Connect / Disconnect must be ABSENT), both sync chips, and
-      // the invoice number the page extracts from `external_ref`.
+      const settle = async () => {
+        await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+      }
+      const openStage = async (stage) => {
+        setAccountingFeedStage(stage)
+        await settle()
+      }
+      /** No connect and no sync control is reachable in an OFF state (#2869). */
+      const refuseFeedControls = async (stage) => {
+        for (const name of ['Connect', 'Reconnect', 'Disconnect', 'Sync now', 'Check in Fortnox']) {
+          await refuseIfPresent(main.getByRole('button', { name, exact: true }), `accounting-feed · ${stage} · ${name}`)
+        }
+      }
+
+      // ── flag on: the summary line and the feed ────────────────────────────
+      await settle()
+      // Each claim the capture is evidence of, waited on: the summary line
+      // (#2869), the pointer to Settings (Connect / Disconnect ABSENT), both
+      // sync chips, the retry counts, and the invoice number the page
+      // extracts from `external_ref`.
+      await main.getByTestId('feed-summary').waitFor({ timeout: 15_000 })
+      await main.getByText('Feeding Fortnox · Ada Lovelace AB', { exact: false }).waitFor({ timeout: 15_000 })
       await main.getByRole('link', { name: 'Open Settings', exact: true }).waitFor({ timeout: 15_000 })
       await main.getByText('Manage your accounting connection in Settings.').waitFor({ timeout: 15_000 })
       await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · Connect')
       await refuseIfPresent(main.getByRole('button', { name: 'Disconnect', exact: true }), 'accounting-feed · Disconnect')
       await main.getByRole('heading', { name: 'Synced transactions' }).waitFor({ timeout: 15_000 })
+      await main.getByTestId('feed-counts').waitFor({ timeout: 15_000 })
       await main.getByText('Fortnox invoice 1042', { exact: true }).waitFor({ timeout: 15_000 })
       await main.getByRole('button', { name: 'Check in Fortnox', exact: true }).waitFor({ timeout: 15_000 })
       await main.getByText('Synced', { exact: true }).waitFor({ timeout: 15_000 })
       await main.getByText('Failed', { exact: true }).waitFor({ timeout: 15_000 })
       await shoot(main, 'feed')
+
+      // ── hosted, flag off: Coming soon ─────────────────────────────────────
+      await openStage('coming-soon')
+      await main.getByTestId('accounting-coming-soon').waitFor({ timeout: 15_000 })
+      await main.getByRole('heading', { name: 'Accounting feed', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Coming soon', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
+      await refuseFeedControls('coming-soon')
+      await shoot(main, 'coming-soon')
+      // The sidebar reads the same answer: the Accounting entry stays, with
+      // its muted Coming soon marker. Desktop only — below `lg` the drawer is
+      // off-canvas and contributes nothing to a capture.
+      if (vp.width >= 1024) {
+        const entry = page.locator('nav[aria-label="All sections"] a[href="/accounting"]')
+        await entry.getByText('Soon', { exact: true }).waitFor({ timeout: 15_000 })
+        await shoot(page.locator('aside').first(), 'sidebar-coming-soon')
+      }
+
+      // ── self-hosted: not available, and NEVER coming soon ─────────────────
+      await openStage('self-hosted')
+      await main.getByTestId('accounting-self-hosted').waitFor({ timeout: 15_000 })
+      await main.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByText('Coming soon', { exact: false }), 'accounting-feed · self-hosted · Coming soon')
+      await refuseFeedControls('self-hosted')
+      await shoot(main, 'self-hosted')
+      // Self-hosted: the entry is HIDDEN, not marked (#2869) — a marker would
+      // be the coming-soon reading the owner decision rules out.
+      await refuseIfPresent(page.locator('nav[aria-label="All sections"] a[href="/accounting"]'), 'accounting-feed · self-hosted · sidebar entry')
     },
   },
 

@@ -39,15 +39,33 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
     // UI renders three different states from these — off, not entitled, ready —
     // and a bare `available:false` could not tell the second from the first.
     const { available, entitled, entitlementMode } = await accountingFeedAvailability(sub)
+    // #2869: this route answers 200 in EVERY off state — it sits outside
+    // `requireAccountingFeed` on purpose (the gated actions below 404). The
+    // dashboard renders three different off surfaces from the two flags:
+    // `!hosted` is "not available on self-hosted", `hosted && !enabled` is
+    // "Coming soon" (owner decision 2026-09-11: visible in prod), and
+    // `hosted && enabled && !entitled` is the add-on state. `enabled` is the
+    // flag's name on the wire; `flagEnabled` is the same boolean kept for the
+    // callers that already read it.
     const base = {
       hosted: config.hosted,
+      enabled: config.accountingEnabled,
       flagEnabled: config.accountingEnabled,
       liveSyncReady: hasLiveConnector(),
       entitled,
       entitlementMode,
     }
     if (!available) {
-      return { ...base, available: false, connected: false, missingScopes: [], syncs: [], counts: { pending: 0, failed: 0, exhausted: 0 } }
+      return {
+        ...base,
+        available: false,
+        connected: false,
+        companyName: null,
+        destination: null,
+        missingScopes: [],
+        syncs: [],
+        counts: { pending: 0, failed: 0, exhausted: 0 },
+      }
     }
     // #2864: the company the active destination points at, so the page can
     // say "Connected to <Company AB>". Null until a grant with the scope read it.
@@ -62,11 +80,26 @@ export default async function accountingFeedRoutes(app: FastifyInstance): Promis
       getAccountingFeedStatus(sub),
       getAccountingFeedCounts(sub),
     ])
+    // #2869: `destination` is the row flagged as the feed's target WHATEVER
+    // its status — what the page's summary line and the sidebar badge read:
+    // a `needs_reauthorisation` / `scope_missing` / `revoked_at_provider`
+    // destination is the attention state, and `lastPushAt` is "last push
+    // 2 min ago". Metadata only, never secrets (same rule as
+    // `GET /accounting/connections`).
     return {
       ...base,
       available: true,
       connected: active !== null,
       companyName: active?.externalCompanyName ?? null,
+      destination: destination
+        ? {
+            provider: destination.provider,
+            displayName: destination.displayName,
+            status: destination.status,
+            companyName: destination.externalCompanyName,
+            lastPushAt: destination.lastPushAt,
+          }
+        : null,
       missingScopes: destination?.missingScopes ?? [],
       syncs,
       counts,

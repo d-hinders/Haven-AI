@@ -441,3 +441,66 @@ concrete repo paths for the measured files: the covers-gate reads a path in
 prose as a claim about that file (the same false-positive class the
 2026-09-09 entry records for bare names), and a ledger has no business
 growing `covers:` over its own repro commands — the PR names the files.
+
+## 2026-09-13 — agent surface (safe-retirement, MCP hosted + local, signer, demo merchant; owner mandate 2026-09-12)
+
+Full report: [`docs/bug-reports/quality-scan-2026-09-13-agent-surface.md`](../bug-reports/quality-scan-2026-09-13-agent-surface.md).
+Method: live exercise on dev (two testnet purchases, `941c667e` skip-settle
+fixture and `86f70974` real erc7710) through the hosted MCP + local signer,
+plus four read-only explorations verified claim by claim. Prior findings
+excluded (the 2026-08-19 restart/state-loss refusal not re-surfaced; no delta
+measured).
+
+**Finding 1 — no single party model; three addresses are "the payer" of one payment.**
+- Evidence: `haven_list_receipts` → `payerAddress` = treasury `0xc70f…`;
+  `haven_get_payment_status` → `payerAddress` = delegate EOA `0xa3dc…`
+  (`modules/payments/agent-payment-status.ts:780`); merchant
+  `PAYMENT-RESPONSE.payer` / invoice buyer = delegate smart account `0x69c0…`
+  (`modules/x402/x402-delegation.ts:211`). Cost: #2906 review round on the
+  `components.account` collision; invoice buyer absent from Haven receipts.
+- Disposition: **pending owner decision.**
+
+**Finding 2 — "settled" is the merchant's 200, not settlement evidence.**
+- Evidence: `mcp-server/src/tools/paid-mcp-completion.ts` erc7710 branch
+  `settled: merchant7710.ok` with the hash unchecked → live `settled:true`,
+  `settlement_tx_hash 0x000…0`, `next_action none`; backend
+  `settlement-observed.ts` fail-closed leaves the intent `submitted /
+  check_status_later / txHash null` (still after 30 min), no receipt row.
+  Cost: runbook line 67 "NEVER `storage_50gb`"; `settlement-sweeper.ts`
+  lines 655/707/783.
+- Disposition: **pending owner decision.**
+
+**Finding 3 — retry/idempotency is prose, not protocol.**
+- Evidence: catalog prepare ×2 without a key → two intents, `idempotencyKey:
+  null` (`tools/catalog-purchase.ts:294,696`); plain x402 key is bucketed
+  (`sdk/src/x402.ts:24` `X402_IDEMPOTENCY_BUCKET_MS = 300_000`) with no
+  boundary surfaced; `PRICE_EXCEEDS_MAX` and the signer's success shape carry
+  no `next_*`. `gh issue list --state all --search idempotency` → 55;
+  `next_action` → 27.
+- Disposition: **pending owner decision.**
+
+Twelve verified `new-task`-sized defects (B1–B12) and ten proposals are in
+the report; refused under the bar as epics (one-PR remedies).
+
+**Probed clean** (dimension → command → number):
+- Sizing → `find packages/<p>/src -name '*.ts' … | xargs wc -l` → signer
+  2,809 src / 3,963 test; mcp 1,703 / 3,209; mcp-server 4,880 / 10,058;
+  demo-merchant-mcp 3,169 / 2,767; connect 10,156 / 11,977; cli 2,524 /
+  2,294; sdk 9,820 / 10,694.
+- Live path (dev) → `haven_get_agent` … `haven_settle_mcp_tool` → real
+  erc7710 purchase confirmed with hash `0xc632…`, budget 1.0 → 0.999, receipt
+  row present.
+- Retired rail fail-closed → `git grep "process.env.SAFE" -- packages/backend/src`
+  → 0; `execution_rail` read by one repository query.
+- Guard net → `git grep -l "vi.doMock(" -- 'packages/backend/src/**/*.test.ts'`
+  → 3 (outside `mock-factory-exports.guard`'s `vi.mock(`-only net; B10).
+- Catalog badges → `haven_discover_tools verified=verified` → 0 of 6 (B1).
+- Incident clustering → `gh issue list --state all --search <term>` →
+  idempotency 55, next_action 27, stranded 74, PAYMENT-SIGNATURE 125,
+  settled 129 (raw search counts; the classified cluster is in the report).
+- Wave blocks (#2501): **not taken this run** — blocks 1 (guard mutation
+  sample), 2 (`covers:` completeness), 3 (stale numbers), 4 (retired
+  vocabulary; the #2907 naming census ran at 2,920 on `c3f0eddc` but is a
+  rename census, not the retired-rail one), 5 (merge-method drift), 6 (nets with holes beyond B10), 7 (chain
+  health). The run was scoped to the owner's four areas and the live path;
+  a full-repo run should take the seven blocks from the 2026-09-03 baselines.

@@ -85,7 +85,7 @@ function toIso(value: string | null): string | null {
 function ledgerAmount(entry: AccountingEntry, currency: LedgerCurrency): { amount: string | null; rate: string | null } {
   if (currency === DEFAULT_LEDGER_CURRENCY) return { amount: entry.amountSek, rate: entry.fxRate }
   const rate = entry.fxRates?.[currency]
-  if (rate == null) return { amount: null, rate: null }
+  if (rate == null) return { amount: entry.amountSek, rate: entry.fxRate }
   const tokenAmount = Number(entry.amountHuman ?? NaN)
   // A zero amount is fed, not withheld: `amount_sek` stores 0.0000 for one and
   // the SEK path pushes it, so withholding it here would make a zero-value

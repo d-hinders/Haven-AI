@@ -32,8 +32,8 @@ export const version = '082_evidence_ledger_fx_rates'
  * the number would still look like a book-time rate.
  *
  * Freezing is by the gate the whole capture shares: `amount_sek`,
- * `fx_rate_sek`, `fx_source` and `fx_rates` are written only by the write that
- * first sets `fx_at`, so a re-settlement or a repeated evidence write never
+ * `fx_rate_sek`, `fx_source`, `fx_rates` and `fx_at` are written only by the
+ * write that finds the row holding no capture at all, so a re-settlement or a repeated evidence write never
  * overwrites what was captured — and never adds a half that was missing. That
  * is stricter than the per-column `COALESCE` these columns used before this
  * migration, and deliberately: a capture can succeed for one currency and fail

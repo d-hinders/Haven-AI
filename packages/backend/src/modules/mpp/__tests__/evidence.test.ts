@@ -113,16 +113,15 @@ describe('recordMachinePaymentEvidenceBase', () => {
     // all-or-nothing; it stopped being so when a capture could succeed for one
     // currency and fail for another, and the proof-attach path re-runs this
     // write weeks later.
-    for (const column of ['amount_sek', 'fx_rate_sek', 'fx_source', 'fx_rates']) {
-      expect(sql).toContain(
-        `${column} = CASE WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.${column} ELSE machine_payment_evidence.${column} END`,
-      )
+    // The gate is "this row holds no capture yet" rather than fx_at alone, so
+    // the statement does not depend on a caller always writing the two
+    // together.
+    const gate =
+      'machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL'
+    for (const column of ['amount_sek', 'fx_rate_sek', 'fx_source', 'fx_rates', 'fx_at']) {
+      expect(sql).toContain(`${column} = CASE WHEN ${gate}`)
+      expect(sql).toContain(`THEN EXCLUDED.${column} ELSE machine_payment_evidence.${column} END`)
     }
-    // fx_at itself stays COALESCE: it is the gate, and it must be write-once
-    // rather than gated on itself.
-    expect(sql).toContain(
-      'fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at)',
-    )
     // MUTATION TARGET: replace any of those CASEs with a plain COALESCE and
     // the real-database tests in
     // modules/accounting/__tests__/ledger-currency.db.test.ts go red.

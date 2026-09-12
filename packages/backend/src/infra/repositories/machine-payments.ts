@@ -87,16 +87,27 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
       -- so under COALESCE that row would fill amount_sek with THAT day's rate
       -- while fx_at still said settlement. Found by review before merge.
       --
+      -- The gate is "this row holds NO capture yet", not "fx_at is null":
+      -- keying on the timestamp alone would leave a row that somehow holds an
+      -- amount without a timestamp open to a later rewrite, which is a caller
+      -- invariant to rely on rather than a property of the statement. The
+      -- repository's own freeze test writes exactly that shape.
+      --
       -- The accepted cost: a row that captured anything keeps exactly what it
       -- captured. A pre-082 row (or a partial capture) never gains the missing
       -- half, because that half's book-time value is not knowable after the
       -- fact — a ledger in the missing currency reads it as not-ready, which
       -- is the honest answer rather than a rate from the wrong day.
-      amount_sek = CASE WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.amount_sek ELSE machine_payment_evidence.amount_sek END,
-      fx_rate_sek = CASE WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.fx_rate_sek ELSE machine_payment_evidence.fx_rate_sek END,
-      fx_source = CASE WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.fx_source ELSE machine_payment_evidence.fx_source END,
-      fx_rates = CASE WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.fx_rates ELSE machine_payment_evidence.fx_rates END,
-      fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at),
+      amount_sek = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.amount_sek ELSE machine_payment_evidence.amount_sek END,
+      fx_rate_sek = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_rate_sek ELSE machine_payment_evidence.fx_rate_sek END,
+      fx_source = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_source ELSE machine_payment_evidence.fx_source END,
+      fx_rates = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_rates ELSE machine_payment_evidence.fx_rates END,
+      fx_at = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_at ELSE machine_payment_evidence.fx_at END,
       updated_at = NOW()`
 }
 

@@ -478,8 +478,9 @@ came from and when it was taken — for every currency in the map.
 
 **How the freeze actually works, and the one case it refuses.** The SEK
 columns each `COALESCE`, so a later write fills a gap and never overwrites.
-The map is frozen *with the timestamp* instead: it is written only by the write
-that first sets `fx_at`. The difference matters because
+The capture is frozen as one record instead: `amount_sek`, `fx_rate_sek`,
+`fx_source`, `fx_rates` and `fx_at` are written only by the write that finds
+the row holding no capture at all. The difference matters because
 `recordMachinePaymentEvidenceBase` also runs from the proof-attach path, hours
 or weeks after settlement, and re-reads prices when it does. Under a plain
 `COALESCE` a row whose map was NULL — every row settled before migration 082,

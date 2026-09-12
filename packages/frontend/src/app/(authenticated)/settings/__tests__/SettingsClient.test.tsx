@@ -50,10 +50,23 @@ const CONNECTED = {
   settings: { suggestedAccount: null, autoFeed: true },
 }
 
+/**
+ * The card reads the feed status too (#2869) and FAILS CLOSED without it —
+ * a failed read renders no controls — so the ON answer is served here. The
+ * shape is `components/accounting/__tests__/fixtures.ts`'s `feedStatus()`.
+ */
+const FEED_ON = {
+  hosted: true, enabled: true, flagEnabled: true, liveSyncReady: true, entitled: true, entitlementMode: 'all',
+  available: true, connected: true, companyName: 'Ada Lovelace AB',
+  destination: { provider: 'fortnox', displayName: 'Fortnox', status: 'connected', companyName: 'Ada Lovelace AB', lastPushAt: '2026-09-10T14:30:00.000Z' },
+  missingScopes: [], syncs: [], counts: { pending: 0, failed: 0, exhausted: 0 },
+}
+
 function serveAccounting(connections: unknown[]) {
   mockApi.get.mockImplementation((url: string) => {
     if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
     if (url === '/accounting/connections') return Promise.resolve({ connections })
+    if (url === '/accounting/feed/status') return Promise.resolve(FEED_ON)
     return Promise.reject(new Error(`unexpected GET ${url}`))
   })
 }

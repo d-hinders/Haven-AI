@@ -532,12 +532,25 @@ Use for the guarded hosted reporting add-on. `/accounting` redirects here and
 is not a separate product recipe.
 
 Structure:
-1. Hide the route when the deployment is self-hosted or the feature flag is off.
-2. Show add-on availability before connection controls.
+1. Two distinct OFF states, two copies, never interchangeable (#2869, owner
+   decision 2026-09-11). **Hosted with the flag off** is *Coming soon*: the
+   route stays visible in production, the sidebar entry carries a muted *Soon*
+   pill (its accessible name, and its visible text below `lg`, is *Coming
+   soon*), and the page explains what the feed will do and which platforms
+   are being lined up — with no connect and no sync control reachable,
+   disabled ones included. The page header and the Settings card carry a
+   neutral one-liner in both off states; the product subtitle ("…your
+   accountant codes and confirms them") is earned by the feed that is on. **Self-hosted** is *not available on self-hosted*: the copy
+   must never read as coming soon (nothing is scheduled for that deployment),
+   the sidebar entry is hidden, and the Settings card lists no providers.
+2. Show add-on availability before connection controls (the flag-on,
+   not-entitled case).
 3. State whether live delivery is ready. A preview must say that nothing is
    being sent to Fortnox or another provider.
-4. Show connected/disconnected provider state and explicit connect/disconnect
-   actions.
+4. Show connected/disconnected provider state with ONE summary line at the
+   top of the feed — where spend is going, or what needs the user's hand and
+   where to fix it. The connect/disconnect actions themselves live in
+   Settings → Accounting (#2868); the feed page links there and offers none.
 5. Show draft transaction states with retry where supported. Only a live
    connector may say `Synced`. Preview/local tracking must say `Tracked`,
    `Prepared`, or `Not delivered`; it must not imply external delivery.

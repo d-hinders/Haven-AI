@@ -15,8 +15,43 @@ export const sv: Messages = {
     openAccounting: (label: string) => `${label}. Öppna bokföring.`,
   },
   accountingPage: {
+    title: 'Bokföring',
+    subtitle:
+      'Dina agenters betalningar dyker upp i ditt bokföringsprogram som utkast — din redovisningskonsult konterar och bekräftar dem.',
+    subtitleOff: 'Kopplingar till bokföringsprogram för agentutgifter.',
     manageInSettings: 'Hantera din bokföringskoppling under Inställningar.',
     openSettings: 'Öppna Inställningar',
+    summary: {
+      feeding: (provider: string) => `Matar ${provider}`,
+      lastPush: (when: string) => `senaste matning ${when}`,
+      nothingPushedYet: 'inget matat ännu',
+      notConnected: 'Inte kopplad',
+      notConnectedDetail: 'Koppla ditt bokföringsprogram under Inställningar för att börja mata avslutade betalningar.',
+      fixInSettings: 'Åtgärda i Inställningar',
+    },
+    counts: {
+      pending: 'Pågår',
+      failed: 'Försöker igen',
+      exhausted: 'Slutat försöka',
+      exhaustedHelp: 'Försökt 8 gånger utan att lyckas. Synka nu försöker igen.',
+    },
+    comingSoon: {
+      title: 'Bokföringsflöde',
+      body:
+        'Avslutade agentbetalningar kommer att dyka upp i ditt bokföringsprogram som utkast med betalningsbevis bifogat — din redovisningskonsult konterar och bokför dem. Haven avgör inte konton eller moms.',
+      platformsTitle: 'Plattformar som förbereds',
+      platformsBody: 'Vilka av dessa som går live är inte bestämt.',
+      notYet: 'Inget kan kopplas ännu.',
+    },
+    selfHosted: {
+      title: 'Inte tillgängligt på egen server',
+      body:
+        'Bokföringsflödet är en del av Havens värdtjänst och är inte tillgängligt på en egen installation. Inget matas från den här installationen.',
+    },
+    nav: {
+      attention: 'behöver åtgärd',
+      comingSoon: 'Snart',
+    },
   },
   settings: {
     title: 'Inställningar',
@@ -77,6 +112,7 @@ export const sv: Messages = {
       title: 'Bokföring',
       description:
         'Anslut bokföringsprogrammet ditt företag använder. Avklarade agentbetalningar dyker upp där med betalningsunderlag bifogat; din redovisningskonsult bokför dem.',
+      descriptionOff: 'Ditt företags bokföringsprogram.',
       disclaimer:
         'Haven tillhandahåller dataverktyg, inte bokförings- eller skatterådgivning. Betalningar matas som utkast — du och din redovisningskonsult ansvarar fortfarande för kontering, riktighet och inlämning.',
       loadError: 'Vi kunde inte läsa in bokföringskopplingar. Försök igen om en stund.',

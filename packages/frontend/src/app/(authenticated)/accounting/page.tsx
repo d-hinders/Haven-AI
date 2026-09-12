@@ -3,21 +3,21 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
+  accountingFeedOffState,
   useAccountingFeed,
+  type AccountingFeedStatus,
   type AccountingSyncStatus,
   type AccountingVerification,
 } from '@/hooks/useAccountingFeed'
 import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Row } from '@/components/ui/Row'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { CONNECT_OUTCOME_PARAMS, readConnectOutcome } from '@/components/accounting/ConnectionsCard'
+import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/ComingSoon'
+import { ACCOUNTING_SETTINGS_HREF, FeedSummary } from '@/components/accounting/FeedSummary'
 import { truncate } from '@/lib/format'
-
-/** Where the connection is managed (#2868): Settings owns Connect / Reconnect / Disconnect. */
-const ACCOUNTING_SETTINGS_HREF = '/settings'
 
 /**
  * The OAuth callback still redirects here (`routes/accounting-connections.ts`
@@ -53,7 +53,7 @@ const STATUS: Record<AccountingSyncStatus, { label: string; cls: string }> = {
   skipped: { label: 'Skipped', cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]' },
 }
 
-/** Same tone convention as Row's leadingTone — text-color variant (#1364 review). */
+/** Same tone convention as `ui/Row`'s leadingTone — text-color variant (#1364 review). */
 const TONE_TEXT: Record<'success' | 'warning' | 'danger', string> = {
   success: 'text-[var(--v2-success)]',
   warning: 'text-[var(--v2-warning)]',
@@ -63,6 +63,58 @@ const TONE_TEXT: Record<'success' | 'warning' | 'danger', string> = {
 function StatusChip({ status }: { status: AccountingSyncStatus }) {
   const s = STATUS[status]
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>
+}
+
+/**
+ * The retry-state counts (#2866) next to the list — over EVERY row, where
+ * the list below is capped. `exhausted` is the one that needs the user
+ * (the sweep has given up; "Sync now" re-claims it), so it is the only
+ * count that changes tone.
+ */
+function FeedCounts({ counts }: { counts: AccountingFeedStatus['counts'] }) {
+  const t = useT()
+  const copy = t.accountingPage.counts
+  const cells: Array<{ key: keyof typeof counts; label: string }> = [
+    { key: 'pending', label: copy.pending },
+    { key: 'failed', label: copy.failed },
+    { key: 'exhausted', label: copy.exhausted },
+  ]
+  const exhausted = counts.exhausted > 0
+  return (
+    <div data-testid="feed-counts">
+      <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
+        {cells.map(({ key, label }) => {
+          const attention = key === 'exhausted' && exhausted
+          return (
+            <div key={key} className="flex items-center gap-1.5">
+              <dt className="text-[var(--v2-ink-3)]">{label}</dt>
+              <dd
+                className={`v2-tabular font-semibold ${attention ? 'text-[var(--v2-warning)]' : 'text-[var(--v2-ink)]'}`}
+                data-testid={`feed-count-${key}`}
+              >
+                {counts[key]}
+              </dd>
+            </div>
+          )
+        })}
+      </dl>
+      {/*
+        The explanation is INLINE, and only when it applies (#2869 design
+        review): a `title` is unreachable on touch and to a screen reader,
+        and "Stopped retrying" is the one count that needs the user.
+      */}
+      {exhausted ? (
+        <p className="mt-1 text-xs text-[var(--v2-warning)]" data-testid="feed-counts-exhausted-help">
+          {copy.exhaustedHelp}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/** Nothing to count and nothing listed — the row would be three zeros over an empty list. */
+function hasFeedActivity(status: Pick<AccountingFeedStatus, 'counts' | 'syncs'>): boolean {
+  return status.syncs.length > 0 || Object.values(status.counts).some((n) => n > 0)
 }
 
 /** "fortnox:supplierinvoice:123" → 123 (the number shown in Fortnox's UI). */
@@ -153,26 +205,67 @@ export default function AccountingPage() {
     </Suspense>
   )
 
+  // #2869 design review: the product subtitle ("…appears in your accounting
+  // tool as draft transactions") sat directly above "Nothing can be connected
+  // yet." / "Not available on self-hosted". The off states — and the two
+  // renders before the status is known — get the neutral line; the product
+  // sentence is shown only once the feed is on.
+  const off = accountingFeedOffState(status)
+  const header = (
+    <PageHeader
+      title={t.accountingPage.title}
+      subtitle={status && !off ? t.accountingPage.subtitle : t.accountingPage.subtitleOff}
+    />
+  )
+
   if (loading) {
     return (
       <div className="max-w-3xl">
         {forwarder}
-        <PageHeader title="Accounting" subtitle="Sync your agent spend into your accounting tool." />
+        {header}
         <Skeleton variant="text" className="h-5 w-64" />
       </div>
     )
   }
 
-  // Self-hosted (or feature not live): the hosted-only add-on is hidden entirely.
-  if (!status || !status.hosted || !status.flagEnabled) return forwarder
+  if (!status) {
+    return (
+      <div className="max-w-3xl">
+        {forwarder}
+        {header}
+        {error ? <p className="text-sm text-[var(--v2-danger)]">{error}</p> : null}
+      </div>
+    )
+  }
+
+  // #2869: the two OFF states, two copies (owner decision 2026-09-11).
+  // `!hosted` is "not available on self-hosted" — checked FIRST, so a
+  // self-hosted box can never read as coming soon; `hosted && !enabled` is
+  // Coming soon, visible in production. Neither offers a connect or sync
+  // control. The add-on card below is the third case: flag on, not entitled.
+  if (off === 'self_hosted') {
+    return (
+      <div className="max-w-3xl">
+        {forwarder}
+        {header}
+        <SelfHostedUnavailable />
+      </div>
+    )
+  }
+  if (off === 'coming_soon') {
+    return (
+      <div className="max-w-3xl">
+        {forwarder}
+        {header}
+        <ComingSoon />
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-3xl">
       {forwarder}
-      <PageHeader
-        title="Accounting"
-        subtitle="Your agent spend appears in your accounting tool as draft transactions — your accountant codes and confirms them."
-      />
+      {header}
 
       {!status.available ? (
         <Card className="p-5" hover={false}>
@@ -198,39 +291,38 @@ export default function AccountingPage() {
           )}
 
           {/*
-            The Connect / Disconnect controls moved to Settings → Accounting
-            (#2868). This row only says where they went; the feed below keeps
-            working off the active destination.
+            The connection summary line (#2869): where payments go right now,
+            or the attention state with its way to Settings. Connect /
+            Disconnect live in Settings (#2868); the feed below works off the
+            active destination.
           */}
-          <Card className="p-0" hover={false}>
-            <Row
-              className="px-5"
-              title="Fortnox"
-              subtitle={status.connected ? t.settings.accounting.status.connected : t.settings.accounting.status.disconnected}
-              leadingTone={status.connected ? 'success' : 'neutral'}
-              leading={<span className="text-sm">FN</span>}
-              trailing={
-                <Button variant="ghost" href={ACCOUNTING_SETTINGS_HREF}>
-                  {t.accountingPage.openSettings}
-                </Button>
-              }
-            />
-            <p className="px-5 pb-4 text-xs text-[var(--v2-ink-3)]">{t.accountingPage.manageInSettings}</p>
-          </Card>
+          <FeedSummary status={status} />
 
           <Card className="p-0" hover={false}>
-            <div className="flex items-center justify-between p-5">
-              <div>
+            <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
                 <h2 className="v2-text-h3 text-[var(--v2-ink)]">Synced transactions</h2>
                 <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Drafts fed to your accounting tool. Failures retry on sync.</p>
+                {hasFeedActivity(status) ? (
+                  <div className="mt-2">
+                    <FeedCounts counts={status.counts} />
+                  </div>
+                ) : null}
               </div>
-              <Button
-                variant="ghost"
-                onClick={() => run('sync', sync)}
-                disabled={busy !== null || !status.connected}
-              >
-                {busy === 'sync' ? 'Syncing…' : 'Sync now'}
-              </Button>
+              {/*
+                Wrapped (#2869 design review): as a direct child of the
+                `flex-col` header the button stretched full-width below `sm`
+                while the other actions on the page stay content-width.
+              */}
+              <div className="shrink-0">
+                <Button
+                  variant="ghost"
+                  onClick={() => run('sync', sync)}
+                  disabled={busy !== null || !status.connected}
+                >
+                  {busy === 'sync' ? 'Syncing…' : 'Sync now'}
+                </Button>
+              </div>
             </div>
 
             {error ? (
@@ -254,32 +346,39 @@ export default function AccountingPage() {
                       : undefined
                   return (
                     <div key={`${s.provider}-${s.payment_id}`}>
-                      <Row
-                        className="px-5"
-                        title={truncate(s.payment_id)}
-                        subtitle={
-                          s.error ??
-                          (invoiceNo
-                            ? `Fortnox invoice ${invoiceNo}`
-                            : s.attempts > 1
-                              ? `${s.attempts} attempts`
-                              : s.provider)
-                        }
-                        trailing={
-                          <span className="flex items-center gap-2">
-                            {invoiceNo && (
-                              <Button
-                                variant="ghost"
-                                onClick={() => void runVerify(s.payment_id)}
-                                disabled={verifying !== null}
-                              >
-                                {verifying === s.payment_id ? 'Checking…' : 'Check in Fortnox'}
-                              </Button>
-                            )}
-                            <StatusChip status={s.status} />
-                          </span>
-                        }
-                      />
+                      {/*
+                        Not `ui/Row` (#2869 capture): it truncates title and
+                        subtitle to one line and never wraps its trailing slot,
+                        so at 390px the Check-in-Fortnox button squeezed the id
+                        to "pay_01…3…" and the invoice line to "Fortnox inv…".
+                        Same reason #2868 chose `SettingsRow`: the actions
+                        stack under the text below `sm`.
+                      */}
+                      <div className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--v2-ink)]">{truncate(s.payment_id)}</p>
+                          <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+                            {s.error ??
+                              (invoiceNo
+                                ? `Fortnox invoice ${invoiceNo}`
+                                : s.attempts > 1
+                                  ? `${s.attempts} attempts`
+                                  : s.provider)}
+                          </p>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {invoiceNo && (
+                            <Button
+                              variant="ghost"
+                              onClick={() => void runVerify(s.payment_id)}
+                              disabled={verifying !== null}
+                            >
+                              {verifying === s.payment_id ? 'Checking…' : 'Check in Fortnox'}
+                            </Button>
+                          )}
+                          <StatusChip status={s.status} />
+                        </span>
+                      </div>
                       <div aria-live="polite">
                         {v && (
                           <div className="flex items-center justify-between gap-3 px-5 pb-3">

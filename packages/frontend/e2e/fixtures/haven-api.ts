@@ -262,6 +262,9 @@ export const accountingFeedSync = {
 
 export const accountingFeedStatus = {
   hosted: true,
+  // #2869: `enabled` is the flag's name on the wire; `flagEnabled` is the
+  // same boolean under the older name, and both are in the spec's `required`.
+  enabled: true,
   flagEnabled: true,
   liveSyncReady: true,
   entitled: true,
@@ -269,6 +272,15 @@ export const accountingFeedStatus = {
   available: true,
   connected: true,
   companyName: accountingConnection.externalCompanyName as string | null,
+  // #2869: the destination row the summary line and the sidebar badge read.
+  destination: {
+    provider: accountingConnection.provider,
+    displayName: accountingConnection.displayName,
+    status: accountingConnection.status as
+      | 'connected' | 'needs_reauthorisation' | 'revoked_at_provider' | 'scope_missing' | 'disconnected',
+    companyName: accountingConnection.externalCompanyName as string | null,
+    lastPushAt: accountingConnection.lastPushAt as string | null,
+  } as Record<string, unknown> | null,
   missingScopes: [] as string[],
   syncs: [
     accountingFeedSync,
@@ -285,6 +297,48 @@ export const accountingFeedStatus = {
     },
   ],
   counts: { pending: 0, failed: 1, exhausted: 0 },
+}
+
+/**
+ * The two OFF states of the feed (#2869), as spreads off the ready answer
+ * above — `hosted && !enabled` is Coming soon, `!hosted` is "not available
+ * on self-hosted", and the dashboard must never show one for the other.
+ */
+export const accountingFeedComingSoon = {
+  ...accountingFeedStatus,
+  enabled: false,
+  flagEnabled: false,
+  liveSyncReady: false,
+  entitled: false,
+  available: false,
+  connected: false,
+  companyName: null,
+  destination: null,
+  syncs: [] as typeof accountingFeedStatus.syncs,
+  counts: { pending: 0, failed: 0, exhausted: 0 },
+}
+
+export const accountingFeedSelfHosted = { ...accountingFeedComingSoon, hosted: false }
+
+/**
+ * The ATTENTION state (#2869 design review): the destination's sign-in has
+ * expired — still the destination, cannot push — and the retry sweep has
+ * given up on three rows (`counts.exhausted`, #2866). This is what raises
+ * the attention summary on `/accounting`, the inline "Stopped retrying"
+ * explanation, and the sidebar dot. `connected` is false: it means an active
+ * `connected` destination, which a dead grant is not.
+ */
+export const accountingFeedAttention = {
+  ...accountingFeedStatus,
+  connected: false,
+  companyName: null,
+  destination: {
+    ...(accountingFeedStatus.destination as Record<string, unknown>),
+    status: 'needs_reauthorisation',
+    companyName: null,
+    lastPushAt: null,
+  } as Record<string, unknown> | null,
+  counts: { pending: 0, failed: 1, exhausted: 3 },
 }
 
 type JsonValue = Record<string, unknown> | unknown[]
@@ -646,6 +700,24 @@ export async function mockHavenApi(page: Page) {
     }
 
     await fulfillUnmockedRoute(route, method, path)
+  })
+}
+
+/**
+ * Serve one feed-status answer over the shared fixture (#2869), so a spec can
+ * render `/accounting` and the sidebar in a chosen flag state. Registered
+ * AFTER `mockHavenApi` (later routes win) and scoped to that one read —
+ * everything else keeps falling through.
+ */
+export async function serveAccountingFeedStatus(page: Page, status: unknown) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/accounting/feed/status') {
+      await fulfillJson(route, status as JsonValue)
+      return
+    }
+    await route.fallback()
   })
 }
 

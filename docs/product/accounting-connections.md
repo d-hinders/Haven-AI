@@ -39,17 +39,25 @@ the retry sweep, what on-call reads when something is stuck — is in
 - **Settings → Accounting** is where a connection is made, changed and removed
   (owner decision 2026-09-11; the card ships in #2868). One row per provider:
   Fortnox, and the platforms listed as *Coming soon* below.
-- **`/accounting`** is the feed page: every payment the feed has handled, its
-  state, **Sync now**, and *Check in Fortnox* for a delivered one. (#2869
-  reworks this page and adds a sidebar badge for a connection that needs
-  attention; until #2868 lands the page also carries the Connect/Disconnect
-  buttons that move to Settings.)
+- **`/accounting`** is the feed page (#2869): a one-line summary of the
+  connection at the top — which platform, which company, when the last
+  payment was delivered, or what needs your attention with a *Fix in
+  Settings* action — then every payment the feed has handled, its state,
+  **Sync now**, and *Check in Fortnox* for a delivered one. Nothing connects
+  or disconnects here; that is Settings. The sidebar's *Accounting* entry
+  carries a small dot when the connection needs a reconnect or a payment has
+  given up retrying — it says "look", the page says what.
 - **Transactions** shows a small badge on each fed payment — *In Fortnox*,
   *Feeding…*, *Not fed* — and links to `/accounting` (#2870).
 
 The feature is **dev-only for now**. Every account on the dev deployment is
-entitled; production shows the feature as *Coming soon* (the exact state is
-#2869's), and exposing it there is a separate, explicit decision (#2876).
+entitled; production shows the feature as *Coming soon* (#2869): the
+`/accounting` page says what the feed will do and which platforms are lined
+up, ending with "Nothing can be connected yet."; the sidebar entry carries a
+muted *Soon* pill; the Settings card lists every platform as *Coming soon*
+with no action. A self-hosted Haven shows *Not available on self-hosted*
+instead (the feed is part of the hosted service) and no sidebar entry.
+Exposing the feed in production is a separate, explicit decision (#2876).
 Agents and MCP get nothing new from any of this: the feed reads settled
 payments, it does not take part in making them.
 
@@ -169,4 +177,4 @@ point rule above means the switch never re-feeds history.
 - It does not touch money. The feed reads payments that have already settled;
   a Fortnox outage delays the feed, never a payment.
 - It does not email you. The state shows on the row, on `/accounting`, and
-  (from #2869) as a sidebar badge.
+  as the sidebar dot (#2869).

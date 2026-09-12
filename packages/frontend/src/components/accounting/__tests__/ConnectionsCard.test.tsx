@@ -7,7 +7,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
-import { COMING_SOON, connection, provider } from './fixtures'
+import { COMING_SOON, connection, feedStatus, provider } from './fixtures'
+import { en } from '@/lib/i18n/messages/en'
 
 const { mockApi, mockReplace, searchParamsRef } = vi.hoisted(() => ({
   mockApi: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -29,10 +30,13 @@ import { ConnectionsCard, readConnectOutcome } from '@/components/accounting/Con
 
 const PROVIDERS = [provider(), ...COMING_SOON]
 
-function serve(connections: ReturnType<typeof connection>[]) {
+function serve(connections: ReturnType<typeof connection>[], status = feedStatus()) {
   mockApi.get.mockImplementation((url: string) => {
     if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
     if (url === '/accounting/connections') return Promise.resolve({ connections })
+    // #2869: the card reads the feed status too — it renders its providers in
+    // the matching off state instead of offering Connect.
+    if (url === '/accounting/feed/status') return Promise.resolve(status)
     return Promise.reject(new Error(`unexpected GET ${url}`))
   })
 }
@@ -266,5 +270,71 @@ describe('ConnectionsCard', () => {
     mockApi.get.mockRejectedValue(new Error('down'))
     renderCard()
     expect(await screen.findByRole('alert')).toHaveTextContent('We could not load accounting connections.')
+  })
+
+  /**
+   * The card in the feed's OFF states (#2869). The connection routes are NOT
+   * behind the feed flag, so without the feed-status read this card would
+   * offer a working Connect on a deployment whose feed is switched off.
+   */
+  describe('the feed is off (#2869)', () => {
+    it('hosted with the flag off: providers listed as Coming soon, with no action at all', async () => {
+      serve([], feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
+      renderCard()
+      expect(await screen.findByTestId('accounting-coming-soon')).toBeInTheDocument()
+      expect(screen.getByText(en.accountingPage.comingSoon.notYet)).toBeInTheDocument()
+      expect(screen.getByTestId('connection-row-fortnox')).toBeInTheDocument()
+      for (const name of [/^connect$/i, /reconnect/i, /disconnect/i, /^settings$/i]) {
+        expect(screen.queryByRole('button', { name })).toBeNull()
+      }
+      // The neutral description, not "Connect the accounting tool your
+      // company uses" above "Nothing can be connected yet." (#2869 design review).
+      expect(screen.getByText(en.settings.accounting.descriptionOff)).toBeInTheDocument()
+      expect(screen.queryByText(en.settings.accounting.description)).toBeNull()
+    })
+
+    it('self-hosted: the not-available copy, no providers, and never the coming-soon string', async () => {
+      serve([], feedStatus({ hosted: false, enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
+      renderCard()
+      expect(await screen.findByTestId('accounting-self-hosted')).toBeInTheDocument()
+      expect(screen.getByText(en.accountingPage.selfHosted.title)).toBeInTheDocument()
+      expect(screen.queryByTestId('connection-row-fortnox')).toBeNull()
+      expect(document.body.textContent).not.toContain(en.common.comingSoon)
+      expect(screen.queryByRole('button', { name: /^connect$/i })).toBeNull()
+      expect(screen.getByText(en.settings.accounting.descriptionOff)).toBeInTheDocument()
+      expect(screen.queryByText(en.settings.accounting.description)).toBeNull()
+    })
+
+    it('the feed that is on carries the product description', async () => {
+      serve([connection()])
+      renderCard()
+      await screen.findByTestId('connection-list')
+      expect(screen.getByText(en.settings.accounting.description)).toBeInTheDocument()
+      expect(screen.queryByText(en.settings.accounting.descriptionOff)).toBeNull()
+    })
+
+    /**
+     * Fail CLOSED (#2869 review): a failed status read cannot tell a
+     * flagged-off deployment from a hosted one, and the connection routes
+     * answer either way until #2918 gates them — so no controls, not the
+     * full Connect UI.
+     */
+    it('a failed feed-status read shows the load error and NO controls, even though the listings answered', async () => {
+      mockApi.get.mockImplementation((url: string) => {
+        if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
+        if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
+        if (url === '/accounting/feed/status') return Promise.reject(new Error('502'))
+        return Promise.reject(new Error(`unexpected GET ${url}`))
+      })
+      renderCard()
+      expect(await screen.findByRole('alert')).toHaveTextContent(en.settings.accounting.loadError)
+      expect(screen.queryByTestId('connection-list')).toBeNull()
+      expect(screen.queryByTestId('connection-row-fortnox')).toBeNull()
+      for (const name of [/^connect$/i, /reconnect/i, /disconnect/i, /^settings$/i]) {
+        expect(screen.queryByRole('button', { name })).toBeNull()
+      }
+      expect(screen.queryByTestId('accounting-coming-soon')).toBeNull()
+      expect(screen.queryByTestId('accounting-self-hosted')).toBeNull()
+    })
   })
 })

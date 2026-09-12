@@ -21,9 +21,5 @@
     "DelegationBudget": 1,
     "RevokeAllPrepare": 1,
     "RevokePrepare": 1
-  },
-  "packages/frontend/src/hooks/useAccountingFeed.ts": {
-    "AccountingSync": 1,
-    "AccountingVerification": 1
   }
 }

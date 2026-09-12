@@ -25,12 +25,34 @@ import { useAuth } from '@/context/AuthContext'
 import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { useT } from '@/context/LocaleContext'
+import { accountingFeedOffState, accountingNeedsAttention, useAccountingFeed } from '@/hooks/useAccountingFeed'
 
 export interface NavItem {
   label: string
   href: string
   icon: React.ReactNode
   badge?: string
+  /**
+   * Full text for an abbreviated `badge`: the pill's accessible name, and
+   * its visible text below `lg`, where the drawer is full-width and has the
+   * room (#2869 design review — a `title` is unreachable on touch and to a
+   * screen reader).
+   */
+  badgeTitle?: string
+  /**
+   * `brand` (default) is the live-count pill the Approvals entry used to
+   * carry; `muted` is a marker, not a count — "Coming soon" on Accounting
+   * while the feed is switched off (#2869).
+   */
+  badgeTone?: 'brand' | 'muted'
+  /**
+   * A small dot after the label, with this as its screen-reader text —
+   * "needs attention" on Accounting when the destination needs a reconnect
+   * or the retry sweep has given up on a row (#2869). Not a count: the
+   * page says what, this only says "look".
+   */
+  attention?: string
 }
 
 // Lucide icons via the shared Icon convention (w/h-full fills the nav slot).
@@ -97,10 +119,37 @@ function NavLink({
       <span className={`inline-flex w-4 h-4 items-center justify-center flex-shrink-0 ${active ? 'text-[var(--v2-brand)]' : ''}`}>
         {item.icon}
       </span>
-      <span className="flex-1">{item.label}</span>
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+      {item.attention && (
+        <span
+          data-testid={`nav-attention${item.href.replace(/\//g, '-')}`}
+          className="inline-flex h-2 w-2 flex-shrink-0 rounded-full bg-[var(--v2-warning)]"
+        >
+          <span className="sr-only"> {item.attention}</span>
+        </span>
+      )}
       {item.badge && (
-        <span className="text-xs font-semibold leading-none px-1.5 py-0.5 rounded-full bg-[var(--v2-brand)] text-white v2-tabular">
-          {item.badge}
+        <span
+          // `whitespace-nowrap`: the pill is a stadium, a one-line shape —
+          // "Coming soon" wrapped to two lines in the first #2869 capture.
+          className={`whitespace-nowrap flex-shrink-0 text-xs font-semibold leading-none px-1.5 py-0.5 rounded-full v2-tabular ${
+            item.badgeTone === 'muted'
+              ? 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
+              : 'bg-[var(--v2-brand)] text-white'
+          }`}
+        >
+          {item.badgeTitle ? (
+            // The abbreviation is for the 240px rail only; the full phrase
+            // is what assistive tech reads and what the mobile drawer shows.
+            <>
+              <span aria-hidden="true" className="hidden lg:inline">{item.badge}</span>
+              <span aria-hidden="true" className="lg:hidden">{item.badgeTitle}</span>
+              {/* The leading space keeps the accessible name "Accounting Coming soon", not "AccountingComing soon". */}
+              <span className="sr-only"> {item.badgeTitle}</span>
+            </>
+          ) : (
+            item.badge
+          )}
         </span>
       )}
     </Link>
@@ -108,9 +157,14 @@ function NavLink({
 }
 
 export default function Sidebar() {
+  const t = useT()
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuth()
+  // #2869: the Accounting entry reads the feed status for its markers. One
+  // read per shell mount; the page refetches its own copy after Sync now,
+  // this one refreshes on the next mount.
+  const { status: accountingStatus, loading: accountingLoading } = useAccountingFeed()
   const [collapsed, setCollapsed] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < DESKTOP_BREAKPOINT_PX,
   )
@@ -131,6 +185,34 @@ export default function Sidebar() {
   // answers 410 (#1986) and the queue UI is deleted, so an entry point here
   // could only ever lead to a dead end. The delegation rail enforces budgets
   // on-chain and produces no approvals at all.
+
+  // #2869: the Admin → Accounting entry in its three feed states.
+  //   flag on               — plain, plus the attention dot when the
+  //                           destination needs a reconnect or a sync is
+  //                           `exhausted` (`accountingNeedsAttention`).
+  //   hosted && !enabled    — still rendered, with a muted "Coming soon"
+  //                           marker (owner decision 2026-09-11: visible in
+  //                           production; exposure is a separate decision).
+  //   !hosted               — HIDDEN. The feed is part of the hosted service
+  //                           and nothing is scheduled for a self-hosted box,
+  //                           so an entry would only lead to a page that says
+  //                           so; `/accounting` still renders that copy by
+  //                           URL.
+  //   status pending        — NOTHING is rendered for the entry (#2869
+  //                           review): a self-hosted answer would otherwise
+  //                           remove an entry that had already painted, and
+  //                           the rail would shift. A FAILED read renders the
+  //                           plain entry — never a marker it has not earned.
+  const accountingOff = accountingFeedOffState(accountingStatus)
+  const accountingPending = accountingLoading && !accountingStatus
+  const accountingItem: NavItem = {
+    ...baseNavItems[6],
+    ...(accountingOff === 'coming_soon'
+      ? { badge: t.accountingPage.nav.comingSoon, badgeTitle: t.common.comingSoon, badgeTone: 'muted' as const }
+      : accountingNeedsAttention(accountingStatus)
+        ? { attention: t.accountingPage.nav.attention }
+        : {}),
+  }
 
   // Labeled clusters (#858): the core money loop first, tools and admin
   // after — same routes, same order within each cluster as before.
@@ -154,7 +236,8 @@ export default function Sidebar() {
     {
       label: 'Admin',
       items: [
-        baseNavItems[6], // Accounting
+        // Accounting (#2869): markers per state; hidden on self-hosted; absent until the status has answered.
+        ...(accountingPending || accountingOff === 'self_hosted' ? [] : [accountingItem]),
         baseNavItems[7], // Custody
       ],
     },

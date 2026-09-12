@@ -27,6 +27,8 @@ describe('agent info helpers', () => {
       id: 'agent-1',
       name: 'Research agent',
       status: 'active',
+      // #2908: both names, same value; `safeAddress` is the deprecated alias.
+      accountAddress: '0xSafe',
       safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
@@ -206,6 +208,8 @@ describe('agent info helpers', () => {
       id: 'agent-1',
       name: 'Research agent',
       status: 'active',
+      // #2908: both names, same value; `safeAddress` is the deprecated alias.
+      accountAddress: '0xSafe',
       safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
@@ -521,6 +525,7 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
 
 const mappedAllowances = {
   agentId: 'agent-1',
+  accountAddress: '0xSafe',
   safeAddress: '0xSafe',
   delegateAddress: '0xDelegate',
   chainId: 8453,

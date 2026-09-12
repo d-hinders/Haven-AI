@@ -277,7 +277,7 @@ export async function consentInputFromClient(
         ? (summary as HavenAllowance[])
         : []
     if (isAllowanceSummary(summary)) {
-      safeAddress = summary.safeAddress ?? safeAddress
+      safeAddress = summary.accountAddress ?? summary.safeAddress ?? safeAddress
       delegateAddress = summary.delegateAddress
       chainId = typeof summary.chainId === 'number' ? summary.chainId : chainId
     }

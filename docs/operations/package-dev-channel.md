@@ -103,6 +103,20 @@ and the `release` skill.
 
 ## The loop: test a package change on dev without a prod release
 
+> **Re-verification (#2908, naming epic #2906 phase 1):** the connector's
+> covered files changed in what they WRITE and READ, not in how the channel
+> works — `runtime.ts` hands `writeCredentials` an `accountAddress` (written to
+> disk as `account_address`, no `safe_address`), and `doctor.ts`'s
+> `credentials` check reports which name a stored set carries. Nothing about
+> `HAVEN_CONNECTOR_CHANNEL`, the re-run hint, the runtime-spec override or the
+> publish job moved. The epic's O3 proof is exactly this loop: after the
+> release carrying #2908 lands on `@dev`, re-run `npx @haven_ai/connect@dev`
+> on one founder machine whose credential files and `~/.haven` env still
+> carry the OLD names (`safe_address`, `HAVEN_SAFE_ADDRESS`), confirm
+> `--doctor` says `stored under the pre-#2908 name safe_address — still read`,
+> pay one x402 call, and confirm the receipt's `payer` field is populated —
+> recorded on #2906 before promotion.
+
 Prerequisite: the [operator checklist](#operator-checklist-owner-only) below
 has been completed once for the dev environment. If step 5 there is not done,
 the dev dashboard hands out the production connector and step 4 here will show

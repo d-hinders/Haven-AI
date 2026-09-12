@@ -96,6 +96,10 @@ interface IdentityFile {
   agent_id?: string
   api_url?: string
   hosted_mcp_url?: string
+  /** #2908: the name this package writes from this release on. */
+  account_address?: string
+  /** Pre-#2908 name; still read by every runtime, rewritten on the next re-key. */
+  safe_address?: string
 }
 
 // #2423: the channel comes from the SDK's build-time `HAVEN_CONNECTOR_CHANNEL`,
@@ -514,6 +518,28 @@ async function readIdentity(directory: string): Promise<IdentityFile | undefined
   }
 }
 
+/**
+ * #2908: which NAME the stored files carry the account address under. Reported
+ * rather than judged — both are read by every runtime this connector installs
+ * (the `safe_address` fallback is permanent, #2906 decision 2a), so neither is
+ * a failure; a set written before #2908 simply says so, and the next re-key or
+ * setup rewrites it under the new name. Exported for tests.
+ */
+export function describeAccountAddressKey(
+  identity: IdentityFile | undefined,
+  signerFile: Record<string, unknown> | undefined,
+): string {
+  const files = [identity as Record<string, unknown> | undefined, signerFile]
+  const has = (key: 'account_address' | 'safe_address') =>
+    files.some((f) => typeof f?.[key] === 'string' && (f[key] as string).trim() !== '')
+  if (has('account_address')) return 'account address stored as account_address'
+  if (has('safe_address')) {
+    return 'account address stored under the pre-#2908 name safe_address — still read; ' +
+      'the next --rekey or setup rewrites it as account_address'
+  }
+  return 'no account address stored'
+}
+
 /** Every per-agent check for ONE credential directory. */
 async function checksForAgent(
   entry: { directory: string; identity?: IdentityFile; sidecar: SignerRuntimeSidecar | null },
@@ -538,7 +564,8 @@ async function checksForAgent(
     label: 'Agent credentials',
     ok: credentialsOk,
     detail: credentialsOk
-      ? `identity.json and signer.json parse (agent ${identity?.agent_id ?? 'unknown'})`
+      ? `identity.json and signer.json parse (agent ${identity?.agent_id ?? 'unknown'}; ` +
+        `${describeAccountAddressKey(identity, signerFile)})`
       : 'identity.json or signer.json is missing or unparseable.',
     ...(credentialsOk ? {} : { repair: `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.` }),
   })

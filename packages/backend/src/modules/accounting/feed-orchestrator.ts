@@ -252,18 +252,30 @@ export function feedSettledPaymentBestEffort(userId: string, paymentId: string):
  * Idempotent and resumable via the dedup ledger. This is the user's own
  * action ("Sync now", the #2867 backfill), so it feeds with `manual: true`
  * — an `auto_feed = false` connection still pushes here.
+ *
+ * `fed` counts what this call actually PUSHED — the `{ outcome: 'pushed' }`
+ * results (#2915) — never what it enumerated: a candidate can come back
+ * `not_fed` (FX not ready, below the floor), `skipped` (a dead grant or a
+ * connector skip) or `failed` (the push threw), and telling the user "N fed"
+ * about a payment that never reached the ledger made the dialog lie and the
+ * same claim repeat on every Sync. `total` is the number enumerated, so the
+ * caller can say what did not go through.
  */
-export async function syncUser(userId: string, opts: { limit?: number } = {}): Promise<{ fed: number }> {
-  if (!(await accountingFeedAvailable(userId))) return { fed: 0 }
+export async function syncUser(userId: string, opts: { limit?: number } = {}): Promise<{ fed: number; total: number }> {
+  if (!(await accountingFeedAvailable(userId))) return { fed: 0, total: 0 }
   const destination = await getActiveDestination(userId)
-  if (!destination) return { fed: 0 }
+  if (!destination) return { fed: 0, total: 0 }
 
   // Selection SQL lives in infra/repositories/accounting-feed-syncs.ts (#999);
   // the feed-from floor (#2862) is applied there so history is never even
   // enumerated for a freshly activated destination.
   const ids = await listUnpushedPaymentIds(userId, destination.provider, opts.limit ?? 200, destination.feedFrom)
-  for (const id of ids) await feedSettledPayment(userId, id, { manual: true })
-  return { fed: ids.length }
+  let fed = 0
+  for (const id of ids) {
+    const outcome = await feedSettledPayment(userId, id, { manual: true })
+    if (outcome.outcome === 'pushed') fed += 1
+  }
+  return { fed, total: ids.length }
 }
 
 /** Per-user sync status for the Reporting UI (#500). */

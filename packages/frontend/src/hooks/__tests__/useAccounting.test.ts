@@ -153,7 +153,7 @@ describe('accounting hooks on the generic routes (#2862)', () => {
 
   it('backfill POSTs …/backfill with `since` exactly as given, then re-lists', async () => {
     mockApiGet.mockImplementation(routeGet)
-    mockApiPost.mockResolvedValue({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3 })
+    mockApiPost.mockResolvedValue({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3, total: 3 })
     const { result } = renderHook(() => useAccountingConnections())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
@@ -162,7 +162,7 @@ describe('accounting hooks on the generic routes (#2862)', () => {
       answer = await result.current.backfill('fortnox', '2026-01-01')
     })
     expect(mockApiPost).toHaveBeenCalledWith('/accounting/connections/fortnox/backfill', { since: '2026-01-01' })
-    expect(answer).toEqual({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3 })
+    expect(answer).toEqual({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 3, total: 3 })
     expect(mockApiGet).toHaveBeenCalledWith('/accounting/connections')
     expect(mockApiGet.mock.calls.filter((c) => c[0] === '/accounting/connections')).toHaveLength(2)
   })

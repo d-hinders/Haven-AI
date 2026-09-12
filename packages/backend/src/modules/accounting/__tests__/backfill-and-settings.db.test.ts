@@ -150,14 +150,14 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
 
       // Neither path touches it: no claim row, nothing pushed.
       expect(await feedSettledPayment(userId, history)).toEqual({ outcome: 'not_fed' })
-      expect(await syncUser(userId)).toEqual({ fed: 0 })
+      expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 })
       expect(await syncRows(userId)).toEqual([])
       expect(connector.pushed).toHaveLength(0)
 
       // The user chooses to include the last three days.
       const since = daysAgo(3)
       const result = await backfillConnection(userId, 'memory', since)
-      expect(result).toEqual({ feedFrom: since, fed: 1 })
+      expect(result).toEqual({ feedFrom: since, fed: 1, total: 1 })
       const row = (await getConnection(userId, 'memory'))!
       expect(row.feed_from!.toISOString()).toBe(since)
       expect(new Date(row.feed_from!).getTime()).toBeLessThan(floor.getTime())
@@ -167,7 +167,7 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
       expect(await syncRows(userId)).toEqual([{ payment_id: history, status: 'pushed' }])
       expect(connector.pushed.map((p) => p.tx.paymentId)).toEqual([history])
       // Resumable and idempotent: a second Sync now finds nothing new.
-      expect(await syncUser(userId)).toEqual({ fed: 0 })
+      expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 })
       expect(connector.pushed).toHaveLength(1)
     })
 
@@ -200,7 +200,7 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
       await expect(backfillConnection(userId, 'memory', daysAgo(6))).rejects.toMatchObject({ code: 'SINCE_NOT_EARLIER' })
       // Earlier again: now the payment flows.
       const twelve = daysAgo(12)
-      expect(await backfillConnection(userId, 'memory', twelve)).toEqual({ feedFrom: twelve, fed: 1 })
+      expect(await backfillConnection(userId, 'memory', twelve)).toEqual({ feedFrom: twelve, fed: 1, total: 1 })
       expect(connector.pushed.map((p) => p.tx.paymentId)).toEqual([old])
       expect(backfillChoice((await getConnection(userId, 'memory'))!)!.since).toBe(twelve)
     })
@@ -270,7 +270,7 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
       expect(await listUnpushedPaymentIds(userId, 'memory', 200, null)).toEqual([fresh])
 
       // Sync now is the user's own action: it pushes.
-      expect(await syncUser(userId)).toEqual({ fed: 1 })
+      expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
       expect(await syncRows(userId)).toEqual([{ payment_id: fresh, status: 'pushed' }])
       expect(connector.pushed.map((p) => p.tx.paymentId)).toEqual([fresh])
 
@@ -298,6 +298,65 @@ describeDb('backfill choice and per-connection settings (#2867)', () => {
       expect(await listDueRetrySyncs(new Date(), 200)).toEqual([])
       await updateConnectionSettings(userId, 'memory', { auto_feed: true })
       expect((await listDueRetrySyncs(new Date(), 200)).map((r) => r.payment_id)).toEqual([paymentId])
+    })
+  })
+
+  /**
+   * #2915: `syncUser.fed` counts `{ outcome: 'pushed' }` results, never the
+   * enumerated candidates. The old `fed: ids.length` told the user "N earlier
+   * payments fed" about payments that came back `not_fed` (no book-time SEK,
+   * below the floor), `skipped` or `failed` — the /accounting list stayed
+   * empty while the dialog claimed otherwise, and the same claim repeated on
+   * every Sync. `total` is the number enumerated.
+   */
+  describe('fed counts pushes, not enumerated rows (#2915)', () => {
+    /** The beforeEach entry mock, restated so a test can vary the FX half. */
+    function entryMock(fxReady: (paymentId: string) => boolean) {
+      mocks.buildAccountingEntryForPayment.mockImplementation(async (_u: string, paymentId: string) => {
+        const row = await db.query<{ confirmed_at: Date }>(`SELECT confirmed_at FROM machine_payment_evidence WHERE payment_intent_id = $1`, [paymentId])
+        const entry = accountingEntry(paymentId)
+        return fxReady(paymentId)
+          ? { ...entry, settledAt: row.rows[0].confirmed_at.toISOString(), account: null }
+          : // A supported getBookTimeCapture shape: the source quoted another
+            // currency, so there is no book-time SEK (amount_sek NULL).
+            { ...entry, settledAt: row.rows[0].confirmed_at.toISOString(), account: null, amountSek: null, fxRate: null }
+      })
+    }
+
+    it('a payment with no book-time SEK is enumerated, not fed: { fed: 0, total: 1 }, no claim row, nothing pushed; it feeds once the FX is ready', async () => {
+      const { userId, agentId } = await seedUser()
+      connector.connect(userId)
+      await activeMemory(userId)
+      await new Promise((r) => setTimeout(r, 20))
+      const stale = await seedSettled(userId, agentId, 0)
+      entryMock(() => false)
+
+      // MUTATION TARGET: the old `fed: ids.length` answered { fed: 1 } here.
+      expect(await syncUser(userId)).toEqual({ fed: 0, total: 1 })
+      expect(await syncRows(userId)).toEqual([])
+      expect(connector.pushed).toHaveLength(0)
+
+      // The payment stays unclaimed, so the NEXT Sync still sees it — and
+      // feeds it once the book-time SEK exists (the #2915 repeat-claim loop,
+      // resolved the honest way).
+      entryMock(() => true)
+      expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
+      expect(await syncRows(userId)).toEqual([{ payment_id: stale, status: 'pushed' }])
+      expect(connector.pushed.map((p) => p.tx.paymentId)).toEqual([stale])
+    })
+
+    it('a mixed batch splits the two numbers: the pushable payment is fed, the rest is only enumerated', async () => {
+      const { userId, agentId } = await seedUser()
+      connector.connect(userId)
+      await activeMemory(userId)
+      await new Promise((r) => setTimeout(r, 20))
+      const good = await seedSettled(userId, agentId, 0)
+      const noSek = await seedSettled(userId, agentId, 0)
+      entryMock((paymentId) => paymentId !== noSek)
+
+      expect(await syncUser(userId)).toEqual({ fed: 1, total: 2 })
+      expect(await syncRows(userId)).toEqual([{ payment_id: good, status: 'pushed' }])
+      expect(connector.pushed.map((p) => p.tx.paymentId)).toEqual([good])
     })
   })
 

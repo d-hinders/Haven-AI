@@ -3147,17 +3147,20 @@ export const openapiSpec = {
         operationId: 'syncAccountingFeed',
         summary: 'Backfill and retry the feed for the caller.',
         description:
-          'Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.',
+          'Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. `fed` counts the payments this call actually pushed (#2915) — a candidate whose FX was not ready, that was skipped, or that failed is not counted even though it was enumerated; `total` is how many were enumerated. 0 fed is a normal answer, not a failure.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
-            description: 'Rows fed.',
+            description: 'Payments pushed, and how many candidates the call enumerated.',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['fed'],
-                  properties: { fed: { type: 'integer' } },
+                  required: ['fed', 'total'],
+                  properties: {
+                    fed: { type: 'integer', description: 'Payments this call pushed (at most 200).' },
+                    total: { type: 'integer', description: 'Payments this call enumerated as candidates — the ones not in `fed` were skipped, failed, or were not feedable (no book-time SEK, below the floor).' },
+                  },
                 },
               },
             },
@@ -3462,15 +3465,16 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
-            description: 'The new floor and how many payments this call fed (0 is normal when the history is already pushed or empty).',
+            description: 'The new floor, how many payments this call pushed, and how many it enumerated (0 fed is normal when the history is already pushed or empty).',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['feedFrom', 'fed'],
+                  required: ['feedFrom', 'fed', 'total'],
                   properties: {
                     feedFrom: { type: 'string', format: 'date-time', description: 'The connection\'s feed-from after the move — `since`, normalised.' },
-                    fed: { type: 'integer', description: 'Payments fed by this call (at most 200).' },
+                    fed: { type: 'integer', description: 'Payments this call pushed (at most 200).' },
+                    total: { type: 'integer', description: 'Payments this call enumerated — the ones not in `fed` were skipped, failed, or were not feedable (no book-time SEK, below the floor).' },
                   },
                 },
               },

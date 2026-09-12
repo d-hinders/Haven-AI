@@ -161,7 +161,7 @@ describeDb('feed-from on activate (#2862)', () => {
     // MUTATION TARGET: with the timestamp dropped, the floor is null and the
     // historical payment is enumerated and pushed.
     expect(await listUnpushedPaymentIds(userId, 'memory', 200, feedFrom)).toEqual([])
-    expect(await syncUser(userId)).toEqual({ fed: 0 })
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 })
     expect(connector.pushed).toHaveLength(0)
     const rows = await db.query(`SELECT * FROM accounting_feed_syncs WHERE user_id = $1`, [userId])
     expect(rows.rows).toHaveLength(0)
@@ -169,7 +169,7 @@ describeDb('feed-from on activate (#2862)', () => {
     // A settlement AFTER the floor flows — the floor is a floor, not a wall.
     await new Promise((r) => setTimeout(r, 20))
     const fresh = await seedSettled(userId, agentId, 0)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     expect(connector.pushed.map((p) => p.tx.paymentId)).toEqual([fresh])
     const synced = await db.query<{ payment_id: string; status: string }>(
       `SELECT payment_id, status FROM accounting_feed_syncs WHERE user_id = $1`, [userId],
@@ -184,14 +184,14 @@ describeDb('feed-from on activate (#2862)', () => {
     await seedConnection(userId, 'fortnox')
     await seedConnection(userId, 'memory')
     await activateProvider(userId, 'memory')
-    expect(await syncUser(userId)).toEqual({ fed: 0 }) // the floor holds
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 }) // the floor holds
 
     // A post-push scope error demoted the active row: no destination now.
     await setStatus(userId, 'memory', 'scope_missing', 'attachment scope missing')
     // MUTATION TARGET: without the row-backed guard in getActiveDestination
     // the registry scan finds the connector "connected" and pushes the
     // two-day-old history with no floor.
-    expect(await syncUser(userId)).toEqual({ fed: 0 })
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 })
     expect(connector.pushed).toHaveLength(0)
     const rows = await db.query(`SELECT payment_id FROM accounting_feed_syncs WHERE user_id = $1`, [userId])
     expect(rows.rows).toEqual([])
@@ -217,7 +217,7 @@ describeDb('feed-from on activate (#2862)', () => {
     // pushes the fortnox-era payment into the memory ledger.
     expect(row.feed_from).not.toBeNull()
     expect(new Date(row.feed_from!).getTime()).toBeGreaterThanOrEqual(before - 1000)
-    expect(await syncUser(userId)).toEqual({ fed: 0 })
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 })
     expect(connector.pushed).toHaveLength(0)
 
     // A reconnect of an existing row keeps whatever floor it had: memory

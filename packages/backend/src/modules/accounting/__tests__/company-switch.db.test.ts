@@ -169,7 +169,7 @@ describeDb('company switch on reconnect (#2864)', () => {
     // The first connect stamped its floor; the payment below settles after it.
     await new Promise((r) => setTimeout(r, 20))
     const inAlpha = await seedSettled(userId, agentId, 0)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     const pushed = (await getSyncState(userId, 'fortnox', inAlpha))!
     expect(pushed).toMatchObject({ status: 'pushed', external_ref: 'fortnox:supplierinvoice:111001' })
     expect(alpha.state.creates).toBe(1)
@@ -204,14 +204,14 @@ describeDb('company switch on reconnect (#2864)', () => {
     // Next sync: the Alpha-era payment is below the floor and already pushed
     // — nothing is enumerated, nothing is created in Beta, the row is untouched.
     expect(await listUnpushedPaymentIds(userId, 'fortnox', 200, row.feed_from)).toEqual([])
-    expect(await syncUser(userId)).toEqual({ fed: 0 })
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 })
     expect(beta.state.creates).toBe(0)
     expect(await getSyncState(userId, 'fortnox', inAlpha)).toMatchObject({ status: 'pushed', external_ref: pushed.external_ref, attempts: 1 })
 
     // A payment settled AFTER the switch flows into Beta — the floor is a floor.
     await new Promise((r) => setTimeout(r, 20))
     const inBeta = await seedSettled(userId, agentId, 0)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     expect(beta.state.creates).toBe(1)
     expect(await getSyncState(userId, 'fortnox', inBeta)).toMatchObject({ status: 'pushed', external_ref: 'fortnox:supplierinvoice:222001' })
     const all = await db.query<{ payment_id: string; status: string }>(`SELECT payment_id, status FROM accounting_feed_syncs WHERE user_id = $1 ORDER BY created_at`, [userId])
@@ -225,7 +225,7 @@ describeDb('company switch on reconnect (#2864)', () => {
     await completeOAuth2Connect({ provider: FORTNOX, cfg: CFG, connector: new FortnoxConnector(alpha.impl), userId, code: 'code-1', fetchImpl: alpha.impl })
     await new Promise((r) => setTimeout(r, 20))
     const inAlpha = await seedSettled(userId, agentId, 0)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
 
     await new Promise((r) => setTimeout(r, 25))
     const beta = fortnoxCompany(222, 'Beta AB')
@@ -245,13 +245,13 @@ describeDb('company switch on reconnect (#2864)', () => {
     const refused = await reopenPushedPayment(userId, 'fortnox', inAlpha, 'reopened: fortnox invoice 111001 no longer exists')
     expect(refused).toEqual({ reopened: false, error_code: 'previous_company', switched_at: expect.any(String), company_name: 'Alpha AB' })
     expect(await getSyncState(userId, 'fortnox', inAlpha)).toMatchObject({ status: 'pushed', external_ref: 'fortnox:supplierinvoice:111001' })
-    expect(await syncUser(userId)).toEqual({ fed: 0 })
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 0 })
     expect(beta.state.creates).toBe(0)
 
     // Positive control: a post-switch Beta row that Beta genuinely lost IS reopenable.
     await new Promise((r) => setTimeout(r, 20))
     const inBeta = await seedSettled(userId, agentId, 0)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     beta.state.invoices.clear()
     expect(await verifyPushedPayment(userId, inBeta)).toMatchObject({ ok: true, verification: { registered: false, missing: 'deleted' } })
     expect(await reopenPushedPayment(userId, 'fortnox', inBeta, 'reopened: gone')).toEqual({ reopened: true })
@@ -270,10 +270,10 @@ describeDb('company switch on reconnect (#2864)', () => {
     }
     await connect(alpha, 'code-1')
     const inAlpha = await seedSettled(userId, agentId, 0)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     await connect(beta, 'code-2')
     const inBeta = await seedSettled(userId, agentId, 0)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     await connect(alpha, 'code-3')
     expect(companySwitchLog((await getConnection(userId, 'fortnox'))!)).toHaveLength(2)
 

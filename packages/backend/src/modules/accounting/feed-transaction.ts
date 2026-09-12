@@ -43,8 +43,19 @@ function toIso(value: string | null): string | null {
   return Number.isNaN(d.getTime()) ? String(value) : d.toISOString()
 }
 
-/** Reduce a canonical entry to the non-asserting feed shape. */
-export function toFeedTransaction(entry: AccountingEntry): FeedTransaction {
+/**
+ * Reduce a canonical entry to the non-asserting feed shape.
+ *
+ * `suggestedAccount` (#2867): the entry's per-merchant override wins; the
+ * connection's `settings.suggested_account` is the fallback for everything
+ * else. Either way it lands in the SAME field — a suggestion the connector
+ * may surface only as its non-asserting hint (Fortnox: `YourReference`),
+ * never as an `Account` key; `assertNonAsserting` is the guard on that.
+ */
+export function toFeedTransaction(
+  entry: AccountingEntry,
+  opts: { connectionSuggestedAccount?: string | null } = {},
+): FeedTransaction {
   return {
     paymentId: entry.paymentId,
     // The type says ISO string, but the entry builder hands through pg's
@@ -65,6 +76,6 @@ export function toFeedTransaction(entry: AccountingEntry): FeedTransaction {
     fxAt: toIso(entry.fxAt),
     receiptRef: entry.receiptRef,
     merchantReceipt: entry.merchantReceipt ?? null,
-    suggestedAccount: entry.account ?? null,
+    suggestedAccount: entry.account ?? opts.connectionSuggestedAccount ?? null,
   }
 }

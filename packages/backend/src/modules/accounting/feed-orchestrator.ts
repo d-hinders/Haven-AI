@@ -1,5 +1,5 @@
 import { listUnpushedPaymentIds, countSyncsForUser, type FeedSyncCounts } from '../../infra/repositories/accounting-feed-syncs.js'
-import { getActiveConnection, listConnections, setStatus } from '../../infra/repositories/accounting-connections.js'
+import { connectionSettings, getActiveConnection, listConnections, setStatus, type ConnectionSettings } from '../../infra/repositories/accounting-connections.js'
 import { accountingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from './entry.js'
 import { toFeedTransaction } from './feed-transaction.js'
@@ -16,16 +16,23 @@ import { claimSync, markPushed, markFailed, markSkipped, listSyncs, type FeedSyn
  * idempotent; settlement is never blocked or delayed by it.
  */
 
-/** Feed nothing settled before this (#2862 feed-from rule); null = no floor. */
+/**
+ * Feed nothing settled before `feedFrom` (#2862 feed-from rule); null = no
+ * floor. `settings` (#2867) is the row's user settings — `autoFeed` gates the
+ * automatic paths, `suggestedAccount` is the hint the connector may surface.
+ */
 type ActiveDestination =
-  | { kind: 'ready'; provider: string; connector: AccountingConnector; feedFrom: Date | null }
+  | { kind: 'ready'; provider: string; connector: AccountingConnector; feedFrom: Date | null; settings: ConnectionSettings }
   /**
    * #2863: the active row's grant is dead (`needs_reauthorisation`,
    * `revoked_at_provider`). Nothing is pushed and nothing is refreshed; each
    * payment that would have been fed gets a `skipped` row naming the state,
    * re-claimable once the user re-consents.
    */
-  | { kind: 'degraded'; provider: string; status: DegradedConnectionStatus; reason: string | null; feedFrom: Date | null }
+  | { kind: 'degraded'; provider: string; status: DegradedConnectionStatus; reason: string | null; feedFrom: Date | null; settings: ConnectionSettings }
+
+/** A user with no row at all (the registry-scan fallback) has no settings: the defaults. */
+const DEFAULT_SETTINGS: ConnectionSettings = { suggestedAccount: null, autoFeed: true }
 
 /**
  * The user's active destination (#2862): the `accounting_connections` row
@@ -53,7 +60,13 @@ async function getActiveDestination(userId: string): Promise<ActiveDestination |
   if (active) {
     const connector = getConnector(active.provider)
     if (!connector || !(await connector.isConnected(userId))) return null
-    return { kind: 'ready', provider: active.provider, connector, feedFrom: active.feed_from ? new Date(active.feed_from) : null }
+    return {
+      kind: 'ready',
+      provider: active.provider,
+      connector,
+      feedFrom: active.feed_from ? new Date(active.feed_from) : null,
+      settings: connectionSettings(active),
+    }
   }
   // MUTATION TARGET (feed-from.db.test.ts "a degraded active row feeds
   // nothing"): removing this guard re-opens the registry scan for row-backed
@@ -65,13 +78,20 @@ async function getActiveDestination(userId: string): Promise<ActiveDestination |
     // (`scope_missing` keeps #2862's shape: no destination, no rows.)
     for (const r of rows) {
       if (r.is_active_destination && isTokenDeadStatus(r.status)) {
-        return { kind: 'degraded', provider: r.provider, status: r.status, reason: r.status_reason, feedFrom: r.feed_from ? new Date(r.feed_from) : null }
+        return {
+          kind: 'degraded',
+          provider: r.provider,
+          status: r.status,
+          reason: r.status_reason,
+          feedFrom: r.feed_from ? new Date(r.feed_from) : null,
+          settings: connectionSettings(r),
+        }
       }
     }
     return null
   }
   for (const connector of listConnectors()) {
-    if (await connector.isConnected(userId)) return { kind: 'ready', provider: connector.provider, connector, feedFrom: null }
+    if (await connector.isConnected(userId)) return { kind: 'ready', provider: connector.provider, connector, feedFrom: null, settings: DEFAULT_SETTINGS }
   }
   return null
 }
@@ -104,17 +124,36 @@ export type FeedOutcome =
   | { outcome: 'failed'; reason: string; error?: unknown }
   | { outcome: 'not_fed' }
 
+/**
+ * How a feed call was triggered (#2867). `manual` is the user's own action
+ * — "Sync now" (`syncUser`) and the backfill — and is the only trigger that
+ * pushes for a connection whose `auto_feed` setting is false. Everything
+ * else (the settlement hook, the retry sweep, a caller that says nothing) is
+ * automatic and is gated by it.
+ */
+export interface FeedOptions {
+  manual?: boolean
+}
+
 /** Feed one settled payment. No-op unless the feed is available + a connector is connected. */
-export async function feedSettledPayment(userId: string, paymentId: string): Promise<FeedOutcome> {
+export async function feedSettledPayment(userId: string, paymentId: string, opts: FeedOptions = {}): Promise<FeedOutcome> {
   const notFed: FeedOutcome = { outcome: 'not_fed' }
   if (!(await accountingFeedAvailable(userId))) return notFed
   const destination = await getActiveDestination(userId)
   if (!destination) return notFed
   const { provider, feedFrom } = destination
 
+  // #2867 auto_feed=false: the user asked for manual only. An automatic
+  // trigger stops HERE — before the entry is built, before any claim row —
+  // so the payment stays unclaimed for the Sync now / backfill that will
+  // feed it. MUTATION TARGET (backfill-and-settings.db.test.ts "auto_feed
+  // false: the settlement hook is a no-op"): drop this return and the hook
+  // pushes for a manual-only user.
+  if (!opts.manual && !destination.settings.autoFeed) return notFed
+
   const entry = await buildAccountingEntryForPayment(userId, paymentId)
   if (!entry) return notFed
-  const tx = toFeedTransaction(entry)
+  const tx = toFeedTransaction(entry, { connectionSuggestedAccount: destination.settings.suggestedAccount })
   // Not ready: no book-time SEK yet. Don't feed an amount-less transaction —
   // backfill/retry picks it up once the FX is captured.
   if (tx.amountSek == null) return notFed
@@ -186,15 +225,19 @@ export async function feedSettledPayment(userId: string, paymentId: string): Pro
 /**
  * Settlement hook — fire-and-forget so the feed never blocks or delays
  * settlement. Idempotent, so a cut-off mid-push is recovered by the next sync.
+ * An automatic trigger: a connection with `auto_feed = false` (#2867) makes
+ * it a no-op for that user (the gate is in `feedSettledPayment`).
  */
 export function feedSettledPaymentBestEffort(userId: string, paymentId: string): void {
-  void feedSettledPayment(userId, paymentId).catch(() => {})
+  void feedSettledPayment(userId, paymentId, { manual: false }).catch(() => {})
 }
 
 /**
  * Backfill / retry — feed every settled, FX-ready payment that hasn't been
  * pushed yet (covers connect-time backfill and retry of failed/never-attempted).
- * Idempotent and resumable via the dedup ledger.
+ * Idempotent and resumable via the dedup ledger. This is the user's own
+ * action ("Sync now", the #2867 backfill), so it feeds with `manual: true`
+ * — an `auto_feed = false` connection still pushes here.
  */
 export async function syncUser(userId: string, opts: { limit?: number } = {}): Promise<{ fed: number }> {
   if (!(await accountingFeedAvailable(userId))) return { fed: 0 }
@@ -205,7 +248,7 @@ export async function syncUser(userId: string, opts: { limit?: number } = {}): P
   // the feed-from floor (#2862) is applied there so history is never even
   // enumerated for a freshly activated destination.
   const ids = await listUnpushedPaymentIds(userId, destination.provider, opts.limit ?? 200, destination.feedFrom)
-  for (const id of ids) await feedSettledPayment(userId, id)
+  for (const id of ids) await feedSettledPayment(userId, id, { manual: true })
   return { fed: ids.length }
 }
 

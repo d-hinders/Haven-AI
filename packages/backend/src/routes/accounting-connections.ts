@@ -2,13 +2,16 @@ import { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
 import {
+  BackfillRefusedError,
   ConnectionNotActivatableError,
+  ConnectionSettingsError,
   InvalidApiKeyError,
   OAUTH_STATE_PURPOSE,
   OAUTH_STATE_TTL_SECONDS,
   ProviderNotConnectableError,
   UnsupportedBaseCurrencyError,
   activateProvider,
+  backfillConnection,
   completeProviderOAuthCallback,
   connectProviderWithApiKey,
   connectUrlFor,
@@ -17,6 +20,7 @@ import {
   listConnectionSummaries,
   listProviderListings,
   newOAuthStateClaims,
+  updateConnectionSettings,
   type OAuthStateClaims,
 } from '../modules/accounting/index.js'
 
@@ -32,6 +36,10 @@ interface CallbackQuery {
 
 interface ApiKeyBody {
   apiKey?: string
+}
+
+interface BackfillBody {
+  since?: unknown
 }
 
 const PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{1,31}$/
@@ -215,6 +223,49 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
       } catch (err) {
         if (err instanceof ConnectionNotActivatableError) {
           return reply.code(err.code === 'NOT_FOUND' ? 404 : 409).send({ error: err.message, error_code: err.code })
+        }
+        throw err
+      }
+    },
+  )
+
+  // POST /accounting/connections/:provider/backfill { since } — the user's
+  // explicit choice to include history (#2867): feed_from moves EARLIER to
+  // `since` (never later — that is activate's job), the choice is recorded
+  // under settings.backfill, and one bounded sync runs.
+  app.post<{ Params: ProviderParams; Body: BackfillBody }>(
+    '/connections/:provider/backfill',
+    { onRequest: authMiddleware },
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { provider } = request.params
+      try {
+        return await backfillConnection(sub, provider, request.body?.since)
+      } catch (err) {
+        if (err instanceof BackfillRefusedError) {
+          const status = err.code === 'NOT_FOUND' ? 404 : err.code === 'NOT_ACTIVE' ? 409 : 400
+          return reply.code(status).send({ error: err.message, error_code: err.code })
+        }
+        throw err
+      }
+    },
+  )
+
+  // PATCH /accounting/connections/:provider/settings { suggested_account?,
+  // auto_feed? } — exactly those two keys (#2867); anything else is a 400
+  // that names the key.
+  app.patch<{ Params: ProviderParams; Body: unknown }>(
+    '/connections/:provider/settings',
+    { onRequest: authMiddleware },
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { provider } = request.params
+      try {
+        return { connection: await updateConnectionSettings(sub, provider, request.body ?? {}) }
+      } catch (err) {
+        if (err instanceof ConnectionSettingsError) {
+          if (err.code === 'NOT_FOUND') return reply.code(404).send({ error: err.message, error_code: err.code })
+          return reply.code(400).send({ error: err.message, error_code: err.code, key: err.key })
         }
         throw err
       }

@@ -115,6 +115,16 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      `connection needs_reauthorisation: <provider error>`; and the
      `secretsKeyConfigured()` check BEFORE the single-use refresh token is
      consumed. Do not add a second refresh path in the connector.
+   - **The user's settings and the backfill are the generic layer's, not
+     yours (#2867).** `settings.suggested_account` arrives on
+     `FeedTransaction.suggestedAccount` (the per-merchant override wins when
+     one exists); surface it ONLY through your non-asserting hint field
+     (Fortnox: `YourReference`), never as an account key — the guard from
+     the first bullet is the test. `settings.auto_feed = false` is enforced
+     BEFORE your connector is called (the orchestrator's early return and
+     the sweep's selection); a connector never sees the setting. The
+     backfill route moves `feed_from` earlier and runs the same `syncUser`;
+     nothing in a connector is backfill-aware.
    - **Retries are the sweep's, not yours (#2866).** A thrown error or a
      `failed` result lands in the ledger and `retry-sweep.ts` re-feeds the
      row with backoff (1 min doubling to 1 h, 8 attempts, then

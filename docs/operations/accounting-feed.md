@@ -307,8 +307,10 @@ there is exactly one per user.
 | `POST /accounting/connections/:provider/api-key` | session | validate an API key at the provider, store encrypted (no live api_key provider today → 409); a non-SEK company is 409 `UNSUPPORTED_BASE_CURRENCY` before the key is stored (#2864) |
 | `DELETE /accounting/connections/:provider` | session | disconnect: secrets cleared, row kept as `disconnected`; revoke at the provider first when the descriptor declares it (Fortnox does, #2863 — `POST /oauth-v1/revoke` with the refresh token; a failed revoke still disconnects locally) |
 | `POST /accounting/connections/:provider/activate` | session | make it the destination; **`feed_from = now`** — nothing settled before the switch is fed |
-| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), `missingScopes` of the destination row whatever its status (#2865), recent syncs |
-| `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from` |
+| `POST /accounting/connections/:provider/backfill` | session | `{ since }`: the user's choice to include history — moves `feed_from` **earlier only** (a later date is 400 `SINCE_NOT_EARLIER`), records it under `settings.backfill`, runs one bounded sync; active `connected` destination only (#2867) |
+| `PATCH /accounting/connections/:provider/settings` | session | exactly `suggested_account` (Fortnox: four-digit BAS) and `auto_feed` (default true); any other key is 400 naming it; a JSONB merge — the company-switch log and the backfill record survive (#2867) |
+| `GET /accounting/feed/status` | session | availability, `connected` (= an active destination exists), `companyName` of the active destination (#2864), `missingScopes` of the destination row whatever its status (#2865), `counts` (#2866), recent syncs |
+| `POST /accounting/feed/sync` | session + entitlement | backfill/retry for the active destination, honouring `feed_from`; a manual action — pushes for an `auto_feed = false` connection too (#2867) |
 | `GET /accounting/feed/verify/:paymentId` | session + entitlement | read-back through the active connection's connector |
 | `POST /accounting/feed/reopen/:paymentId` | session + entitlement | verification-gated reopen on the active connection's provider; a row from before the connection's latest company switch is refused 409 `previous_company` (#2864) |
 | `POST /accounting/fortnox/push` | session | LEGACY asserting voucher push; 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
@@ -331,8 +333,8 @@ anything settled before the floor, so a switch never re-feeds history into
 the new ledger. On-call read:
 `SELECT provider, status, is_active_destination, feed_from FROM
 accounting_connections WHERE user_id = '<uuid>'`. A user who wants history in
-the new ledger takes the backfill (#2867), which passes an explicit earlier
-date.
+the new ledger takes the backfill (#2867, below), which passes an explicit
+earlier date.
 
 **`scope_missing`.** (For `needs_reauthorisation`, see *Token lifecycle*
 below; for the four ways a row gets here and the way out, see
@@ -641,7 +643,13 @@ for the inbox upload) and a push is at most six sequential requests. The
 sweep's own terminal write (`exhausted:`) is guarded — it never touches a row
 a manual "Sync now" re-claimed or pushed in the meantime. Each due row goes through the same `feedSettledPayment` the
 settlement hook uses, so the dedup ledger, the feed-from floor, the FX gate
-and the degraded-destination skip all apply.
+and the degraded-destination skip all apply — and so does the user's
+`auto_feed` setting (#2867): the selection's JOIN also requires
+`(c.settings -> 'auto_feed') IS DISTINCT FROM 'false'::jsonb` (a non-throwing
+comparison — a malformed value from a direct DB edit can never fail the whole
+tick), so a manual-only
+connection's rows are never enumerated (see *Backfill choice and
+per-connection settings* below).
 
 **Terminal reason.** The attempt that reaches 8 leaves the row `failed` with
 `error = exhausted: <last reason>` — the string the dashboard keys on.
@@ -684,6 +692,86 @@ sweep's own pacing cannot cause a 429. `exhausted > 0` is a row to look at:
 the leader-election or query layer, not a push. A tick that is still running
 when the next fires is skipped in-process (no overlap on one replica; the
 leader lock covers replicas).
+
+## Backfill choice and per-connection settings (#2867)
+
+**The rule these serve.** Every connection gets `feed_from = now` at connect
+(when it takes the active flag) and at activate (#2862), and again at a
+company switch (#2864) — so a second provider connected months later never
+re-feeds history unasked. The backfill is the ONE path that moves the floor
+**earlier**; nothing moves it later except those three.
+
+**Backfill.** `POST /accounting/connections/:provider/backfill { since }` —
+`since` is a strict ISO date (`YYYY-MM-DD`, or a date-time with a timezone —
+free-form dates, TZ-less times and rolled-over days such as `2026-02-30` are
+refused): it must be in the past and not
+precede 2020-01-01 (400 `SINCE_INVALID`), and it must be **earlier than the
+current `feed_from`** (400 `SINCE_NOT_EARLIER`; the floor is untouched, no
+sync runs). A row with `feed_from IS NULL` — a pre-#2862 Fortnox row that
+already feeds everything — is refused the same way: there is nothing earlier
+to include. Only the active `connected` destination can be backfilled (409
+`NOT_ACTIVE`): the sync feeds the active destination, and activating a
+connection later re-stamps its floor to now anyway. On success the statement
+(`RECORD_BACKFILL_SQL`) moves `feed_from` and records
+`settings.backfill = { since, requestedAt }` in ONE guarded UPDATE (the
+"earlier only" check is its WHERE clause, so two concurrent backfills cannot
+leap-frog), then one `syncUser` runs — **bounded to 200 payments** and
+resumable through the claim ledger, so a larger history takes further
+**Sync now** presses; the answer is `{ feedFrom, fed }`. A second backfill
+with an even earlier date moves the floor again; one with a later date than
+the NEW floor is refused against that floor. **Not implemented in this
+slice:** a `since` on the connect-url request (the "include payments since
+<date>" choice at connect) — the OAuth `state` and the callback handler are
+#2865's surface; the dashboard (slice 10) connects first and calls the
+backfill route second, which is the same two writes in the same order.
+
+**Settings.** `PATCH /accounting/connections/:provider/settings` takes
+exactly two keys, each optional; an unknown key (including the camelCase
+spellings) or a wrong type is a 400 `INVALID_SETTING` whose `key` names it,
+and nothing in that patch is applied:
+
+| key | stored as | rule |
+|---|---|---|
+| `suggested_account` | `settings.suggested_account` | Fortnox: a four-digit BAS account, `^[1-8]\d{3}$` (trimmed); other providers: 1–32 characters; `null` clears |
+| `auto_feed` | `settings.auto_feed` | boolean; absent = `true` |
+
+The write is a SQL-side JSONB merge (`MERGE_CONNECTION_SETTINGS_SQL`,
+`settings || patch`) — never read-modify-write — so the #2864
+`companySwitches` log and the `backfill` record above survive every PATCH.
+`GET /accounting/connections` reads them back with defaults applied as
+`settings: { suggestedAccount, autoFeed }`; the raw column is never on the
+wire. Any row can carry settings — a `disconnected` row keeps them for its
+reconnect (the upsert preserves `settings`).
+
+**`suggested_account` is a hint, not an account.** It rides the feed
+transaction's existing `suggestedAccount` field (a per-merchant override from
+the legacy account map, when one exists, wins over the connection default)
+and the Fortnox connector surfaces it ONLY as `YourReference: "suggested
+account 6540"` on the unattested supplier invoice — the same non-asserting
+hint field it has carried since #496. `assertNonAsserting()` still bans
+`Account` on the payload, and the connector test carries the mutation: put
+the hint under `Account` and the push throws before any request. The
+accountant still codes.
+
+**`auto_feed = false` means "manual only".** The three automatic paths and
+the two manual ones:
+
+| path | trigger | `auto_feed = false` |
+|---|---|---|
+| settlement hook (`feedSettledPaymentBestEffort`) | a payment settles | **no-op** — returns before the entry is built, no claim row, the payment stays unclaimed |
+| background retry sweep (#2866) | interval | **not enumerated** — the selection's JOIN excludes the connection; its `failed`/`skipped` rows wait, exactly like a state-skipped row |
+| `POST /accounting/feed/sync` (Sync now) | the user | pushes (`manual: true`) |
+| `POST /accounting/connections/:provider/backfill` | the user | pushes (it runs `syncUser`) |
+
+The sweep follows the hook, not the button, on purpose: a user who asked
+that nothing be pushed without them pressing Sync now would otherwise see
+the sweep retry a failed manual push five minutes later. The consequence is
+that a manual push which FAILS on a manual-only connection is retried only
+by the next Sync now. On-call read for a "nothing syncs" report:
+`SELECT provider, is_active_destination, feed_from, settings FROM
+accounting_connections WHERE user_id = '<uuid>'` — `"auto_feed": false` in
+`settings` is the answer, not a fault. **Supplier strategy is not a setting:**
+one supplier per merchant, fixed (owner decision 2026-09-11).
 
 ## Schema for on-call: `accounting_feed_syncs`
 

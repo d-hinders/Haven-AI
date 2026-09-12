@@ -1160,13 +1160,53 @@ export type paths = {
         put?: never;
         /**
          * Make this connection the feed destination; feed_from = now.
-         * @description Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (a later slice). Only a `connected` connection can be activated.
+         * @description Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (`POST /accounting/connections/{provider}/backfill`, #2867). Only a `connected` connection can be activated.
          */
         post: operations["activateAccountingConnection"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Include history: move feed_from EARLIER to `since` and run one bounded sync.
+         * @description The user's explicit choice to feed payments settled before the connection became the destination (#2867). Every connection gets `feedFrom = now` at connect and at activate, so nothing is re-fed unasked; this is the ONE call that moves it earlier. `since` must be an ISO date in the past and not before 2020-01-01 (400 `SINCE_INVALID`), and EARLIER than the current `feedFrom` (400 `SINCE_NOT_EARLIER` — a backfill only ever includes more history; moving the floor forward is activate's job; a connection with no floor already feeds everything and is refused the same way). Only the active, `connected` destination can be backfilled (409 `NOT_ACTIVE`). The choice is recorded on the connection and one sync runs, bounded to 200 payments and resumable — press Sync now for the rest. Ignores `autoFeed: false`: this is a manual action.
+         */
+        post: operations["backfillAccountingConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Per-connection settings: suggested account and auto-feed.
+         * @description Exactly two keys, each optional (#2867). `suggested_account`: for Fortnox a four-digit BAS account (`^[1-8]\d{3}$`), for other providers a non-empty string of at most 32 characters, `null` to clear; it reaches the ledger only as the connector's non-asserting hint, never as an account field. `auto_feed`: `false` makes the settlement hook and the retry sweep skip this user while Sync now and the backfill still push; absent = `true`. Any other key, or an invalid value, is a 400 that names the key. Other stored connection state (the company-switch log, the backfill record) is preserved — the write is a merge. Supplier strategy is not a setting (one supplier per merchant, fixed).
+         */
+        patch: operations["updateAccountingConnectionSettings"];
         trace?: never;
     };
     "/accounting/fortnox/push": {
@@ -8620,7 +8660,7 @@ export interface operations {
                             isActiveDestination: boolean;
                             /**
                              * Format: date-time
-                             * @description Nothing settled before this is fed. Set to now by activate.
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
                              */
                             feedFrom: string | null;
                             grantedScope: string | null;
@@ -8644,6 +8684,12 @@ export interface operations {
                             connectedAt: string;
                             /** Format: date-time */
                             updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
                         }[];
                     };
                 };
@@ -8814,7 +8860,7 @@ export interface operations {
                             isActiveDestination: boolean;
                             /**
                              * Format: date-time
-                             * @description Nothing settled before this is fed. Set to now by activate.
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
                              */
                             feedFrom: string | null;
                             grantedScope: string | null;
@@ -8838,6 +8884,12 @@ export interface operations {
                             connectedAt: string;
                             /** Format: date-time */
                             updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
                         };
                     };
                 };
@@ -8985,7 +9037,7 @@ export interface operations {
                             isActiveDestination: boolean;
                             /**
                              * Format: date-time
-                             * @description Nothing settled before this is fed. Set to now by activate.
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
                              */
                             feedFrom: string | null;
                             grantedScope: string | null;
@@ -9009,6 +9061,12 @@ export interface operations {
                             connectedAt: string;
                             /** Format: date-time */
                             updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
                         };
                     };
                 };
@@ -9045,6 +9103,234 @@ export interface operations {
             };
             /** @description The connection is not in the `connected` state. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    backfillAccountingConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: date-time
+                     * @description ISO date or date-time; the new feed-from floor.
+                     * @example 2026-01-01
+                     */
+                    since: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new floor and how many payments this call fed (0 is normal when the history is already pushed or empty). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: date-time
+                         * @description The connection's feed-from after the move — `since`, normalised.
+                         */
+                        feedFrom: string;
+                        /** @description Payments fed by this call (at most 200). */
+                        fed: number;
+                    };
+                };
+            };
+            /** @description `SINCE_INVALID` (not a date, in the future, before 2020-01-01) or `SINCE_NOT_EARLIER` (not earlier than the current feed-from, or the connection has no floor). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No connection for this provider. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The connection is not the active `connected` destination (`NOT_ACTIVE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    updateAccountingConnectionSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Fortnox: a four-digit BAS account. Null clears.
+                     * @example 6540
+                     */
+                    suggested_account?: string | null;
+                    /** @description False = manual only. */
+                    auto_feed?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The connection with its settings after the merge. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connection: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864). */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description An unknown key or an invalid value; `key` names it. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "INVALID_SETTING";
+                        /** @description The offending setting, or null when the body itself is not an object. */
+                        key: string | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No connection for this provider. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

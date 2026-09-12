@@ -47,11 +47,11 @@ async function seedSafe(userId: string, accountType: 'safe' | 'delegator_hybrid'
   return safe.rows[0].id
 }
 
-async function seedAgent(userId: string, safeId: string | null, name: string): Promise<void> {
+async function seedAgent(userId: string, accountId: string | null, name: string): Promise<void> {
   await db.query(
     `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, safe_id)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    [userId, name, `0x${String(++n).padStart(40, 'a')}`, `hash-${n}`, `sk_${n}`, safeId],
+    [userId, name, `0x${String(++n).padStart(40, 'a')}`, `hash-${n}`, `sk_${n}`, accountId],
   )
 }
 

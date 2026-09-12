@@ -252,7 +252,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const parsed = validateCreateBody(request.body, reply)
       if (!parsed) return
 
-      const safe = await resolveUserSafe(sub, request.body.safe_id)
+      const safe = await resolveAccountForSetup(sub, request.body.safe_id)
       if (!safe) {
         return reply.code(400).send({ error: 'Haven wallet is required' })
       }
@@ -286,7 +286,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         {
           id: setupId,
           userId: sub,
-          safeId: safe.id,
+          accountId: safe.id,
           name: parsed.name,
           description: parsed.description,
           runtime: parsed.runtime,
@@ -466,7 +466,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             delegateAddress,
             apiKeyHash: request.body.api_key_hash,
             apiKeyPrefix,
-            safeId: setup.safe_id,
+            accountId: setup.safe_id,
             mcpServerName,
           },
           tx,
@@ -860,8 +860,8 @@ const LOCAL_MCP_RUNTIMES = new Set([
   'codex-desktop',
 ])
 
-async function resolveUserSafe(userId: string, safeId?: string): Promise<SmartAccountRow | null> {
-  return setups.findAccountForSetup(userId, safeId)
+async function resolveAccountForSetup(userId: string, accountId?: string): Promise<SmartAccountRow | null> {
+  return setups.findAccountForSetup(userId, accountId)
 }
 
 async function loadSetupByToken(setupToken: string | undefined): Promise<SetupRow | null> {

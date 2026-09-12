@@ -26,7 +26,7 @@ let seq = 0
 interface Seeded {
   userId: string
   agentId: string
-  safeId: string
+  accountId: string
   apiKeyHash: string
 }
 
@@ -42,14 +42,14 @@ async function seedAgent(): Promise<Seeded> {
      VALUES ($1, $2, 84532, 'delegation', 'delegator_hybrid') RETURNING id`,
     [userId, `0x${String(n).padStart(40, 'a')}`],
   )
-  const safeId = safe.rows[0].id
+  const accountId = safe.rows[0].id
   const apiKeyHash = `hash-old-${n}`
   const agent = await db.query<{ id: string }>(
     `INSERT INTO agents (user_id, safe_id, name, delegate_address, api_key_hash, api_key_prefix, status)
      VALUES ($1, $2, 'Rekey agent', $3, $4, 'sk_agent_old', 'active') RETURNING id`,
-    [userId, safeId, OLD_DELEGATE, apiKeyHash],
+    [userId, accountId, OLD_DELEGATE, apiKeyHash],
   )
-  return { userId, agentId: agent.rows[0].id, safeId, apiKeyHash }
+  return { userId, agentId: agent.rows[0].id, accountId, apiKeyHash }
 }
 
 async function seedDelegation(agentId: string, status = 'active'): Promise<string> {

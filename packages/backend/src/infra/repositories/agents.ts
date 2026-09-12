@@ -488,7 +488,7 @@ export interface NewAgent {
   delegateAddress: string
   apiKeyHash: string
   apiKeyPrefix: string
-  safeId: string | null
+  accountId: string | null
 }
 
 export interface CreatedAgent {
@@ -510,7 +510,7 @@ export interface CreatedAgent {
     // field-by-field and drop the column with neither tsc nor a test noticing.
     | 'mcp_server_name'
   >
-  safeInfo: AccountInfoRow
+  accountInfo: AccountInfoRow
 }
 
 /**
@@ -534,19 +534,19 @@ export async function createAgent(
       input.delegateAddress,
       input.apiKeyHash,
       input.apiKeyPrefix,
-      input.safeId,
+      input.accountId,
     ])
     const agent = agentResult.rows[0]
-    const safeInfoResult = input.safeId
-      ? await tx.query<AccountInfoRow>(FIND_ACCOUNT_INFO_SQL, [input.safeId])
+    const accountInfoResult = input.accountId
+      ? await tx.query<AccountInfoRow>(FIND_ACCOUNT_INFO_SQL, [input.accountId])
       : null
-    const safeInfo = safeInfoResult?.rows[0] ?? {
+    const accountInfo = accountInfoResult?.rows[0] ?? {
       safe_address: null,
       safe_name: null,
       safe_chain_id: null,
     }
 
-    return { agent, safeInfo }
+    return { agent, accountInfo }
   })
 }
 

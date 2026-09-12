@@ -11,14 +11,14 @@ import {
   type MonthlySpendRow,
 } from '../infra/repositories/dashboard.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { fetchPortfolioForSafe } from '../modules/accounts/index.js'
+import { fetchPortfolioForAccount } from '../modules/accounts/index.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
   compareTransactions,
   type EnrichedTransaction,
   enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
-  fetchSafeTransactions,
+  fetchAccountTransactions,
   mergeX402Transactions,
 } from '../modules/transactions/index.js'
 import { withDashboardAgentAccountAlias, withTransactionAccountAlias } from '../openapi/wire-aliases.js'
@@ -99,7 +99,7 @@ export default async function dashboardRoutes(
     }
 
     const currentPortfolio = await Promise.all(
-      safes.map((safe) => fetchPortfolioForSafe(safe.chain_id, safe.safe_address)),
+      safes.map((safe) => fetchPortfolioForAccount(safe.chain_id, safe.safe_address)),
     )
 
     const totalUsd = currentPortfolio.reduce((sum, item) => sum + item.totalUsd, 0)
@@ -135,9 +135,9 @@ export default async function dashboardRoutes(
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(
       safes.map(async (safe) => {
-        const { transactions } = await fetchSafeTransactions({
-          safeId: safe.id,
-          safeAddress: safe.safe_address,
+        const { transactions } = await fetchAccountTransactions({
+          accountId: safe.id,
+          accountAddress: safe.safe_address,
           chainId: safe.chain_id,
           log: request.log,
         })
@@ -160,7 +160,7 @@ export default async function dashboardRoutes(
 
       const safe = safes[index]
       request.log.warn(
-        { err: result.reason, safeId: safe.id, chainId: safe.chain_id },
+        { err: result.reason, accountId: safe.id, chainId: safe.chain_id },
         'Dashboard transaction aggregation failed',
       )
     })

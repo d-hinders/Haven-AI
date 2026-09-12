@@ -219,15 +219,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     // Validate the requested account (safe_id or its account_id twin) belongs
     // to the user, if either was provided.
-    let resolvedSafeId: string | null = null
+    let resolvedAccountId: string | null = null
     if (requestedAccountId) {
-      const ownedSafeId = await findUserAccountIdForUser(requestedAccountId, sub)
-      if (!ownedSafeId) {
+      const ownedAccountId = await findUserAccountIdForUser(requestedAccountId, sub)
+      if (!ownedAccountId) {
         return reply.code(400).send({ error: 'Invalid Safe — not found or not yours' })
       }
-      resolvedSafeId = requestedAccountId
+      resolvedAccountId = requestedAccountId
     } else {
-      resolvedSafeId = await findDefaultUserAccountId(sub)
+      resolvedAccountId = await findDefaultUserAccountId(sub)
     }
 
     const existingAgentId = await findNonRevokedAgentIdByDelegate(sub, delegate_address.toLowerCase())
@@ -245,14 +245,14 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const apiKeyPrefix = apiKey.slice(0, 12)
 
     try {
-      const { agent, safeInfo } = await createAgent({
+      const { agent, accountInfo } = await createAgent({
         userId: sub,
         name: name.trim(),
         description: description?.trim() ?? null,
         delegateAddress: delegate_address.toLowerCase(),
         apiKeyHash,
         apiKeyPrefix,
-        safeId: resolvedSafeId,
+        accountId: resolvedAccountId,
       })
 
       emitFunnelEvent(sub, 'agent_created', { agent_id: agent.id })
@@ -266,9 +266,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       // agree rather than one silently creating a permanently-failed row.
       const passportChainId =
         issue_passport === true &&
-        safeInfo.safe_chain_id != null &&
-        PASSPORT_CHAIN_IDS.has(safeInfo.safe_chain_id)
-          ? safeInfo.safe_chain_id
+        accountInfo.safe_chain_id != null &&
+        PASSPORT_CHAIN_IDS.has(accountInfo.safe_chain_id)
+          ? accountInfo.safe_chain_id
           : null
       if (passportChainId != null) {
         try {
@@ -293,7 +293,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       return reply.code(201).send({
-        ...withAgentAccountAlias({ ...agent, ...safeInfo }),
+        ...withAgentAccountAlias({ ...agent, ...accountInfo }),
         api_key: apiKey,
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.

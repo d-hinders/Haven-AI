@@ -473,7 +473,7 @@ describe('safes payload carries the rail (#1069)', () => {
 
   it('the session SELECT carries the signer-set inputs and both endpoints map them through the predicate (#1205)', async () => {
     // The recommendation's production origin: raw facts in the SQL, the
-    // ANSWER computed by sessionSafePayload — chain classification stays in
+    // ANSWER computed by sessionAccountPayload — chain classification stays in
     // exactly one place (modules/accounts/mainnet-gate.ts). Same #1069-class
     // guard shape: assert the statement, then count the mapping call sites.
     const { LIST_SESSION_ACCOUNTS_FOR_USER_SQL } = await import(
@@ -485,8 +485,8 @@ describe('safes payload carries the rail (#1069)', () => {
 
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
-    const mapped = src.match(/\.map\(sessionSafePayload\)/g) ?? []
-    expect(mapped.length, 'both /auth/login and /auth/me must map through sessionSafePayload').toBe(2)
+    const mapped = src.match(/\.map\(sessionAccountPayload\)/g) ?? []
+    expect(mapped.length, 'both /auth/login and /auth/me must map through sessionAccountPayload').toBe(2)
   })
 })
 

@@ -7,8 +7,10 @@ const {
   assertRelayerBudget,
   recordRelayerSpend,
   finishRelayerSpend,
+  relayerSpendSummary,
   RelayerBudgetExceededError,
 } = await import('../relayer-spend-guard.js')
+import type { RelayerOperation } from '../relayer-spend-guard.js'
 
 // #717: budgets on relayer-paid ops. The direction of every failure mode is
 // the contract under test — over-cap throws, everything ELSE (db error,
@@ -80,11 +82,42 @@ describe('recordRelayerSpend + finishRelayerSpend (#717)', () => {
 
   it('the attempt row is inserted PRE-broadcast and returns its id', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ id: 'evt-1' }] })
-    const id = await recordRelayerSpend({ operation: 'safe_deploy', chainId: 84532, userId: 'user-1' })
+    const id = await recordRelayerSpend({ operation: 'hybrid_deploy', chainId: 84532, userId: 'user-1' })
     expect(id).toBe('evt-1')
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(sql).toContain('RETURNING id')
-    expect(params).toEqual([84532, 'safe_deploy', null, 'user-1', null, null, null, null])
+    expect(params).toEqual([84532, 'hybrid_deploy', null, 'user-1', null, null, null, null])
+  })
+
+  // #2910: 'safe_deploy' is retired from the live enum — the Safe-rail deploy
+  // route it named is gone (#1988) — but the relayer_gas_events.operation
+  // column rows written before the retirement keep the literal value as
+  // history (owner decision, epic #2906 Notes). The repository layer never
+  // re-validates that column against RelayerOperation (it is typed string
+  // throughout infra/repositories/relayer-gas-events.ts), so the read path
+  // must not throw on an old row — proven here, not assumed.
+  it('#2910: the read path returns a historical safe_deploy row without throwing', async () => {
+    // mockResolvedValue (no trailing Once suffix): the db-mock ratchet
+    // (#1227) counts every occurrence of that vitest matcher name including
+    // in comments and is shrink-only, so a genuinely new call site here must
+    // not add one.
+    mockQuery.mockResolvedValue({
+      rows: [{ chain_id: 84532, operation: 'safe_deploy', ops: '3', total_cost_wei: '900000000000000' }],
+    })
+    const rows = await relayerSpendSummary(24)
+    expect(rows).toEqual([
+      { chain_id: 84532, operation: 'safe_deploy', ops: 3, total_cost_wei: '900000000000000' },
+    ])
+  })
+
+  // #2910 AC: 'safe_deploy' no longer typechecks as a live RelayerOperation.
+  // Mutation-proved: re-adding the member to the union in
+  // infra/relayer-spend-guard.ts makes this line's @ts-expect-error itself an
+  // error (no error to suppress), failing `npm run typecheck`.
+  it('#2910: safe_deploy is no longer assignable to RelayerOperation', () => {
+    // @ts-expect-error safe_deploy retired from the union (#2910/epic #2906)
+    const rejected: RelayerOperation = 'safe_deploy'
+    void rejected
   })
 
   it('finish stamps the hash + receipt numbers and derives the cost', async () => {

@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { findAccountOwnership } from '../infra/repositories/transaction-history.js'
 import { isSupportedChain } from '../domain/chains.js'
-import { fetchPortfolioForSafe } from '../modules/accounts/index.js'
+import { fetchPortfolioForAccount } from '../modules/accounts/index.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 function parseChainId(value: unknown): number | null {
@@ -24,11 +24,11 @@ export default async function portfolioRoutes(
   app.get<{ Params: { safeAddress: string }; Querystring: { chain_id?: string } }>(
     '/:safeAddress',
     async (request, reply) => {
-      const { safeAddress } = request.params
+      const { safeAddress: accountAddress } = request.params
       const requestedChainId = parseChainId(request.query.chain_id)
       const { sub } = request.user as { sub: string }
 
-      if (!ETH_ADDRESS_RE.test(safeAddress)) {
+      if (!ETH_ADDRESS_RE.test(accountAddress)) {
         return reply.code(400).send({ error: 'Invalid address' })
       }
 
@@ -42,7 +42,7 @@ export default async function portfolioRoutes(
 
       // Verify ownership and get chain_id (repository query, #999 — the same
       // ownership check the transaction-history route runs).
-      const ownedSafes = await findAccountOwnership(sub, safeAddress, requestedChainId)
+      const ownedSafes = await findAccountOwnership(sub, accountAddress, requestedChainId)
       if (ownedSafes.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
@@ -51,7 +51,7 @@ export default async function portfolioRoutes(
       }
 
       const chainId = requestedChainId ?? ownedSafes[0].chain_id
-      return fetchPortfolioForSafe(chainId, safeAddress)
+      return fetchPortfolioForAccount(chainId, accountAddress)
     },
   )
 }

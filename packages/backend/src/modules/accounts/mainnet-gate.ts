@@ -97,7 +97,7 @@ export function needsBackupSignerRecommendation(check: SignerFloorCheck): boolea
  * (via approvers); they still get `value_bearing_chain` so that surface can
  * apply the same classification to its own count.
  */
-export function sessionSafePayload<
+export function sessionAccountPayload<
   T extends {
     chain_id: number
     account_type: string | null

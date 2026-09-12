@@ -55,19 +55,19 @@ async function seedAgentOnRail(
     [`pr-${++seq}-${Date.now()}@test.example`],
   )
   const userId = user.rows[0].id
-  let safeId: string | null = null
+  let accountId: string | null = null
   if (rail !== null) {
     const safe = await db.query<{ id: string }>(
       `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
        VALUES ($1, $2, 84532, $3, $4) RETURNING id`,
       [userId, `0x${String(seq).padStart(40, 'a')}`, rail, accountType ?? 'safe'],
     )
-    safeId = safe.rows[0].id
+    accountId = safe.rows[0].id
   }
   const agent = await db.query<{ id: string }>(
     `INSERT INTO agents (user_id, name, safe_id, status)
      VALUES ($1, 'passport agent', $2, $3) RETURNING id`,
-    [userId, safeId, agentStatus],
+    [userId, accountId, agentStatus],
   )
   return { agentId: agent.rows[0].id, userId }
 }

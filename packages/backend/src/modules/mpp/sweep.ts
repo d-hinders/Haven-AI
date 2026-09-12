@@ -165,7 +165,7 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
 
   const authorization = buildSweepAuthorization({
     delegateAddress: agent.delegate_address,
-    safeAddress: agent.safe_address,
+    accountAddress: agent.safe_address,
     chainId: agent.chain_id,
     valueAtomic: balance,
   })

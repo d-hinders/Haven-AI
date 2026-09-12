@@ -2,7 +2,7 @@
  * Real-DB tests for the session safes projection (#1205, harness #1220).
  *
  * The session payload now carries the raw signer-set inputs
- * (`owner_address`, `passkey_count`) that `sessionSafePayload` maps through
+ * (`owner_address`, `passkey_count`) that `sessionAccountPayload` maps through
  * `needsBackupSignerRecommendation`. The passkey count is a JOIN against
  * `hybrid_account_passkeys` — exactly the "what does the query return" class
  * that belongs on the real database, not on a positional mock.
@@ -83,8 +83,8 @@ describeDb('listSessionAccountsForUser signer-set projection (#1205)', () => {
   it('stays tenant-scoped: another user sees none of it', async () => {
     const owner = await seedUser()
     const other = await seedUser()
-    const safeId = await seedSafe(owner, { accountType: 'delegator_hybrid' })
-    await seedPasskey(safeId, 'key-a')
+    const accountId = await seedSafe(owner, { accountType: 'delegator_hybrid' })
+    await seedPasskey(accountId, 'key-a')
 
     expect(await listSessionAccountsForUser(other)).toEqual([])
   })

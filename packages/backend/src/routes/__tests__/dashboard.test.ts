@@ -8,7 +8,7 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
 const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   portfolioMocks: {
-    fetchPortfolioForSafe: vi.fn(),
+    fetchPortfolioForAccount: vi.fn(),
   },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
@@ -34,7 +34,7 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     enrichTransactionsWithAgents: vi.fn(
       async (_userId: string, transactions: unknown[]) => transactions,
     ),
-    fetchSafeTransactions: vi.fn(),
+    fetchAccountTransactions: vi.fn(),
     mergeX402Transactions: vi.fn(),
   },
 }))
@@ -97,18 +97,18 @@ describe('dashboard routes', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    portfolioMocks.fetchPortfolioForSafe.mockReset()
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
     transactionMocks.compareTransactions.mockClear()
     transactionMocks.enrichedTransactionIdentityKey.mockClear()
     transactionMocks.enrichTransactionsWithAgents.mockClear()
-    transactionMocks.fetchSafeTransactions.mockReset()
+    transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
 
-    portfolioMocks.fetchPortfolioForSafe.mockResolvedValue({
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
       totalUsd: 100,
       totalEur: 92,
     })
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
 
     mockQuery.mockImplementation((sql: string) => {
@@ -188,7 +188,7 @@ describe('dashboard routes', () => {
       blockNumber: 45725826,
       isError: false,
     }
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [tx] })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [tx] })
     transactionMocks.mergeX402Transactions.mockImplementation(
       async (_userId: string, _safes: unknown[], transactions: unknown[]) => transactions,
     )
@@ -280,7 +280,7 @@ describe('dashboard routes', () => {
       blockNumber: 45725826,
       isError: false,
     }
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [tx] })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [tx] })
     transactionMocks.mergeX402Transactions.mockImplementation(
       async (_userId: string, _safes: unknown[], transactions: unknown[]) => transactions,
     )
@@ -316,8 +316,8 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
   afterAll(async () => app.close())
 
   it('a delegator_hybrid agent reports the active delegation, not the frozen mirror', async () => {
-    portfolioMocks.fetchPortfolioForSafe.mockResolvedValue({ totalUsd: 0, totalEur: 0 })
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [] })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 0, totalEur: 0 })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })

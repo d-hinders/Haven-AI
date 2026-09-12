@@ -41,17 +41,17 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
   return { agentId: agent.rows[0].id, userId: user.rows[0].id }
 }
 
-async function seedBoundAgent(): Promise<{ agentId: string; userId: string; safeAddress: string }> {
+async function seedBoundAgent(): Promise<{ agentId: string; userId: string; accountAddress: string }> {
   const agent = await seedAgent()
-  const safeAddress = ADDR(String(++seq).padStart(2, '0'))
+  const accountAddress = ADDR(String(++seq).padStart(2, '0'))
   const safe = await db.query<{ id: string }>(
     `INSERT INTO user_safes (user_id, safe_address, chain_id, name, account_type, execution_rail)
      VALUES ($1, $2, 84532, 'Bound test account', 'delegator_hybrid', 'delegation')
      RETURNING id`,
-    [agent.userId, safeAddress],
+    [agent.userId, accountAddress],
   )
   await db.query(`UPDATE agents SET safe_id = $1 WHERE id = $2`, [safe.rows[0].id, agent.agentId])
-  return { ...agent, safeAddress }
+  return { ...agent, accountAddress }
 }
 
 async function seedIntent(agentId: string, userId: string): Promise<string> {
@@ -355,7 +355,7 @@ describeDb('machine-payments repository (#1224)', () => {
       chainId: 84532,
       tokenAddress: ADDR('0e'),
       fromAddress: ADDR('d1'),
-      toAddress: agent.safeAddress,
+      toAddress: agent.accountAddress,
       valueAtomic: '100000',
       validAfter: '0',
       validBefore: '9999999999',
@@ -375,7 +375,7 @@ describeDb('machine-payments repository (#1224)', () => {
           sweepId,
           agent.agentId,
           agent.userId,
-          agent.safeAddress,
+          agent.accountAddress,
         ),
       ),
     )
@@ -390,7 +390,7 @@ describeDb('machine-payments repository (#1224)', () => {
         sweepId,
         agent.agentId,
         agent.userId,
-        agent.safeAddress,
+        agent.accountAddress,
       ),
     ).toBe('not_bound')
     expect(await insertPreparedSweepForBoundAgent(input)).toBe(false)

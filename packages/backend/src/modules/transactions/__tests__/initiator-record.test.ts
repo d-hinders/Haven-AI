@@ -142,7 +142,7 @@ function mockModules({ x402Rows = [], piRows = [], sweepRows = [] }: RepoMockOpt
     findMachinePaymentEvidenceDetail: vi.fn(),
   }))
   vi.doMock('../aggregate.js', () => ({
-    fetchSafeTransactions: vi.fn().mockResolvedValue({
+    fetchAccountTransactions: vi.fn().mockResolvedValue({
       transactions: [RAW_TWIN],
       hadFailures: false,
     }),
@@ -180,11 +180,11 @@ describe('initiatedBy dedup guard (#2097)', () => {
   it('per-Safe page: x402 intent + raw twin collapse to ONE attributed row (initiatedBy=agent)', async () => {
     mockModules({ x402Rows: [X402_ROW] })
 
-    const { buildSafeTransactionsPage } = await import('../orchestration.js')
-    const page = await buildSafeTransactionsPage({
+    const { buildAccountTransactionsPage } = await import('../orchestration.js')
+    const page = await buildAccountTransactionsPage({
       userId: 'user-1',
-      safeId: 'safe-1',
-      safeAddress: '0xsafe',
+      accountId: 'safe-1',
+      accountAddress: '0xsafe',
       chainId: 8453,
       log,
       fresh: false,

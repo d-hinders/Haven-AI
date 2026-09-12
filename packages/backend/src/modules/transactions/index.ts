@@ -15,8 +15,8 @@
 
 export type {
   EnrichedTransaction,
-  FetchSafeTransactionsParams,
-  FetchSafeTransactionsResult,
+  FetchAccountTransactionsParams,
+  FetchAccountTransactionsResult,
   ParsedTokenFilter,
   Transaction,
   TransactionAccounting,
@@ -35,22 +35,22 @@ export {
   type TransactionCsvLookups,
 } from './csv-export.js'
 export { compareTransactions, enrichedTransactionIdentityKey } from './ordering.js'
-export { fetchSafeTransactions } from './aggregate.js'
+export { fetchAccountTransactions } from './aggregate.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
 export { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 
 export {
-  aggregateSafeTransactions,
-  buildSafeTransactionsPage,
+  aggregateAccountTransactions,
+  buildAccountTransactionsPage,
   filterEnrichedTransactions,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
   resolveTransactionFilters,
-  type AggregateSafeTransactionsResult,
+  type AggregateAccountTransactionsResult,
   type OffsetPage,
-  type SafeTransactionsPage,
-  type SafeTransactionsPageParams,
+  type AccountTransactionsPage,
+  type AccountTransactionsPageParams,
   type TransactionFilterOptions,
   type TransactionFilterResult,
   type TransactionFilterTokenOption,

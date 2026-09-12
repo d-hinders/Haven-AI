@@ -20,6 +20,9 @@
  *
  *   route           chars  console errors  wall-clock text  verdict
  *   /settings       1,407  0               none            deferred (see below)
+ *                   ^ measured before #2926; the Settings language row was
+ *                     removed there, so /settings now reads ~90 characters
+ *                     lower. The verdict below is unchanged.
  *   /dashboard        810  0               "3mo ago"       ADDED, clock frozen
  *   /agents           549  1 (chain RPC)   none            rejected
  *   /transactions     320  0               "3mo ago"       ADDED, clock frozen
@@ -73,7 +76,8 @@
  * wrong with them, they are simply lower-traffic, and every added baseline is
  * re-blessed forever. `/settings` is the cheapest next candidate: it measured
  * as the most render-complete and most deterministic authenticated route in the
- * repo (1,407 chars, zero console errors, no chain call, no wall-clock text).
+ * repo (1,407 chars at the time of that measurement — see the note in the
+ * table — zero console errors, no chain call, no wall-clock text).
  *
  * ── Everything NOT listed above still has NO baseline ────────────────────────
  *
@@ -277,7 +281,8 @@ const ANCHOR_TIMEOUT_MS = 60_000
  *
  * Per route rather than one global floor, because the floor has to sit under
  * the route's real content and `/transactions` legitimately renders 320
- * characters while `/settings` renders 1,407.
+ * characters while `/settings` renders an order of magnitude more (1,407 when
+ * measured; see the table note).
  *
  * Per AXIS as well, not just per route (#2817): a responsive layout carries
  * less text at 390 than at 1280 — `/transactions` measures 246 characters at

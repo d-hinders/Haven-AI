@@ -1,5 +1,5 @@
 import { render, screen, waitFor, renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider, useLocale, useT } from '@/context/LocaleContext'
 import type { ReactNode } from 'react'
 
@@ -26,6 +26,13 @@ describe('LocaleContext', () => {
   beforeEach(() => {
     window.localStorage.clear()
     document.documentElement.lang = ''
+  })
+
+  // In afterEach, not at the end of the test body: an assertion that throws
+  // above the restore would otherwise leak the navigator.language getter spy
+  // into the rest of the file.
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('serves English and the matching catalog', async () => {
@@ -65,7 +72,6 @@ describe('LocaleContext', () => {
     expect(result.current.t.settings.title).toBe('Settings')
     expect(getItem).not.toHaveBeenCalled()
     expect(languageReads).not.toHaveBeenCalled()
-    vi.restoreAllMocks()
   })
 
   it('throws when used outside a provider', () => {

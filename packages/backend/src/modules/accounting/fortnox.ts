@@ -80,11 +80,18 @@ export function isFortnoxScopeError(err: unknown): boolean {
 /**
  * A refusal FOR SCOPE, as opposed to the scope error code alone: Fortnox
  * answers a grant without the scope with `[2000663]` (as a 400 on the file
- * connection POST, found live) or a bare 403. Both mean "re-consent", never
- * "retry" — an outage, a 401, a 429 or a 5xx is none of these.
+ * connection POST, found live) or a BARE 403 — one that carries no Fortnox
+ * error code. A 403 WITH another code (a licence or user-permission error
+ * such as `[2003295]`) is not a scope problem and must not park the
+ * connection behind a re-consent that cannot fix it (review on #2900); it
+ * stays a plain failure with the verbatim message. Never "retry": an
+ * outage, a 401, a 429 or a 5xx is none of these. The ONE predicate for
+ * pre-push and post-push alike.
  */
 export function isFortnoxScopeRefusal(err: unknown): err is FortnoxError {
-  return err instanceof FortnoxError && (err.status === 403 || isFortnoxScopeError(err))
+  if (!(err instanceof FortnoxError)) return false
+  if (isFortnoxScopeError(err)) return true
+  return err.status === 403 && err.code === undefined
 }
 
 /**

@@ -296,6 +296,24 @@ describe('pre-push scope refusal (#2865)', () => {
     expect(res).toMatchObject({ status: 'skipped', externalRef: null, connectionStatus: 'scope_missing', missingScopes: ['supplierinvoice'] })
   })
 
+  it('a 403 WITH another Fortnox code (licence / user permission) is NOT a scope refusal: thrown, connection untouched (review on #2900)', async () => {
+    // MUTATION TARGET: `status === 403` alone parks this behind a re-consent that cannot fix it.
+    const { impl } = fetchStub({ ...suppliers, '/supplierinvoices': () => ({ status: 403, body: { ErrorInformation: { message: 'Licens saknas', code: 2003295 } } }) })
+    await expect(new FortnoxConnector(impl).pushTransaction('u1', TX)).rejects.toThrow(/HTTP 403/)
+  })
+
+  it('a bare 403 on the ATTACHMENT step is the same post-push refusal as [2000663]: row pushed with note, connection flips (one predicate, review on #2900)', async () => {
+    mockLoadUnderlag.mockResolvedValue({ filename: 'haven-receipt-pay-123.pdf', pdf: Buffer.from('%PDF-fake') })
+    const { impl } = fetchStub({
+      ...suppliers,
+      '/supplierinvoices': () => ({ body: { SupplierInvoice: { GivenNumber: 778 } } }),
+      '/inbox': () => ({ status: 403, body: { ErrorInformation: { message: 'forbidden' } } }),
+    })
+    const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)
+    expect(res).toMatchObject({ status: 'pushed', connectionStatus: 'scope_missing', missingScopes: ['inbox'] })
+    expect(res.note).toMatch(/attachment/i)
+  })
+
   it('a scope refusal on the SUPPLIER step is pre-push too — nothing exists, the scope named is supplier', async () => {
     const { impl } = fetchStub({ '/suppliers?name=': () => ({ status: 400, body: scopeError }) })
     const res = await new FortnoxConnector(impl).pushTransaction('u1', TX)

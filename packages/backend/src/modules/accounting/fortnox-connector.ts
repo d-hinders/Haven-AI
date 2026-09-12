@@ -3,7 +3,6 @@ import {
   FortnoxError,
   fortnoxOAuth2Config,
   fortnoxScopeForPath,
-  isFortnoxScopeError,
   isFortnoxScopeRefusal,
 } from './fortnox.js'
 import {
@@ -414,7 +413,7 @@ export class FortnoxConnector implements AccountingConnector {
           await this.attachFile(accessToken, givenNumber, underlag)
         } catch (err) {
           notes.push(`receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
-          if (isFortnoxScopeError(err)) scopeLost(err)
+          if (isFortnoxScopeRefusal(err)) scopeLost(err)
         }
       }
 
@@ -425,7 +424,7 @@ export class FortnoxConnector implements AccountingConnector {
           )
         } catch (err) {
           notes.push(`merchant receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
-          if (isFortnoxScopeError(err)) scopeLost(err)
+          if (isFortnoxScopeRefusal(err)) scopeLost(err)
         }
       }
     }
@@ -486,7 +485,7 @@ export class FortnoxConnector implements AccountingConnector {
     } catch (err) {
       // MUTATION TARGET (fortnox-connector.test.ts "getCompanyInfo"): widening
       // this to every error turns a Fortnox outage into a scope_missing row.
-      if (err instanceof FortnoxError && (err.status === 403 || isFortnoxScopeError(err))) {
+      if (isFortnoxScopeRefusal(err)) {
         return { externalCompanyId: null, name: null, baseCurrency: 'SEK', scopeMissing: true }
       }
       throw err

@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
 import { en } from '@/lib/i18n/messages/en'
 import { FeedSummary, relativeTime } from '@/components/accounting/FeedSummary'
+import { INTL_LOCALE } from '@/lib/i18n'
 import { feedStatus } from './fixtures'
 import type { AccountingFeedStatus } from '@/hooks/useAccountingFeed'
 
@@ -110,7 +111,14 @@ describe('relativeTime', () => {
     expect(relativeTime('2026-09-12T07:00:00.000Z', 'en', base)).toMatch(/3 hours ago/)
     expect(relativeTime('2026-09-10T10:00:00.000Z', 'en', base)).toMatch(/2 days ago/)
   })
-  it('is localised', () => {
-    expect(relativeTime('2026-09-12T09:58:00.000Z', 'sv', base)).toMatch(/2 minuter sedan/)
+  // #2926 removed the Swedish catalog, so there is no second locale to
+  // contrast with. What stays worth pinning is that the tag comes from
+  // INTL_LOCALE rather than being hard-coded at the Intl call: 'en-GB' is
+  // day-month, which is the format the rest of the app reads in.
+  it('formats through the locale-to-BCP-47 map, not a literal', () => {
+    expect(INTL_LOCALE.en).toBe('en-GB')
+    expect(relativeTime('2026-09-12T09:58:00.000Z', 'en', base)).toBe(
+      new Intl.RelativeTimeFormat(INTL_LOCALE.en, { numeric: 'auto' }).format(-2, 'minute'),
+    )
   })
 })

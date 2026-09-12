@@ -1,27 +1,10 @@
 'use client'
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
-import {
-  DEFAULT_LOCALE,
-  LOCALE_STORAGE_KEY,
-  isLocale,
-  localeFromLanguageTag,
-  messages,
-  type Locale,
-  type Messages,
-} from '@/lib/i18n'
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
+import { DEFAULT_LOCALE, messages, type Locale, type Messages } from '@/lib/i18n'
 
 interface LocaleContextValue {
   locale: Locale
-  setLocale: (locale: Locale) => void
   /** Active message catalog for `locale`. */
   t: Messages
 }
@@ -31,47 +14,25 @@ const LocaleContext = createContext<LocaleContextValue | null>(null)
 /**
  * Holds the active UI language.
  *
- * SSR-safe by design: the first render (server and client) uses
- * DEFAULT_LOCALE so hydration matches; an effect then upgrades to the stored
- * choice, or the browser language on first visit. The choice is device-local
- * (localStorage) because language is a per-device preference, not account data.
+ * The Haven dashboard ships one language (#2926) — see `lib/i18n/index.ts`
+ * for the scope of that claim — so there is nothing to resolve: every
+ * render — server and client — is `DEFAULT_LOCALE`, which is also why there is
+ * no hydration seam left to guard. The provider stays because the catalog and
+ * `useT()` stay: a second locale changes what this holds, not who reads it.
+ *
+ * It keeps setting `<html lang>` rather than leaving that to the static
+ * attribute in the root layout, so the value continues to follow the locale the
+ * catalog is actually rendering when there is more than one again.
  */
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE)
-
-  // Resolve the persisted / browser-preferred locale after mount.
-  useEffect(() => {
-    let resolved: Locale | null = null
-    try {
-      const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY)
-      if (isLocale(stored)) resolved = stored
-    } catch {
-      // localStorage can throw (private mode, blocked storage) — fall through.
-    }
-    if (!resolved) resolved = localeFromLanguageTag(navigator.language)
-    if (resolved && resolved !== locale) setLocaleState(resolved)
-    // Run once on mount; later changes go through setLocale.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const locale = DEFAULT_LOCALE
 
   // Keep <html lang> in sync for accessibility and correct hyphenation.
   useEffect(() => {
     document.documentElement.lang = locale
   }, [locale])
 
-  const setLocale = useCallback((next: Locale) => {
-    setLocaleState(next)
-    try {
-      window.localStorage.setItem(LOCALE_STORAGE_KEY, next)
-    } catch {
-      // Persisting is best-effort; the in-memory choice still applies.
-    }
-  }, [])
-
-  const value = useMemo<LocaleContextValue>(
-    () => ({ locale, setLocale, t: messages[locale] }),
-    [locale, setLocale],
-  )
+  const value = useMemo<LocaleContextValue>(() => ({ locale, t: messages[locale] }), [locale])
 
   return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>
 }

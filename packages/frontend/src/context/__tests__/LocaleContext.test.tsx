@@ -1,30 +1,41 @@
-import { render, screen, fireEvent, waitFor, renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { render, screen, waitFor, renderHook } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider, useLocale, useT } from '@/context/LocaleContext'
-import { LOCALE_STORAGE_KEY } from '@/lib/i18n'
 import type { ReactNode } from 'react'
 
 function Probe() {
-  const { locale, setLocale } = useLocale()
+  const { locale } = useLocale()
   const t = useT()
   return (
     <div>
       <span data-testid="locale">{locale}</span>
       <span data-testid="title">{t.settings.title}</span>
-      <button onClick={() => setLocale('sv')}>to-sv</button>
     </div>
   )
 }
 
 const wrapper = ({ children }: { children: ReactNode }) => <LocaleProvider>{children}</LocaleProvider>
 
+/**
+ * Single-locale contract (#2926). Swedish, the Settings toggle and
+ * browser-language detection were removed; what these pin is that the
+ * provider still holds a locale and a catalog, still sets `<html lang>`, and
+ * reads NOTHING from the device — no storage key, no `navigator.language`.
+ */
 describe('LocaleContext', () => {
   beforeEach(() => {
     window.localStorage.clear()
     document.documentElement.lang = ''
   })
 
-  it('defaults to English and exposes the matching catalog', async () => {
+  // In afterEach, not at the end of the test body: an assertion that throws
+  // above the restore would otherwise leak the navigator.language getter spy
+  // into the rest of the file.
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('serves English and the matching catalog', async () => {
     render(
       <LocaleProvider>
         <Probe />
@@ -34,26 +45,33 @@ describe('LocaleContext', () => {
     expect(screen.getByTestId('title')).toHaveTextContent('Settings')
   })
 
-  it('switches locale, swaps the catalog, persists, and updates <html lang>', async () => {
+  it('sets <html lang> to the active locale', async () => {
     render(
       <LocaleProvider>
         <Probe />
       </LocaleProvider>,
     )
-
-    fireEvent.click(screen.getByText('to-sv'))
-
-    await waitFor(() => expect(screen.getByTestId('title')).toHaveTextContent('Inställningar'))
-    expect(screen.getByTestId('locale')).toHaveTextContent('sv')
-    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('sv')
-    expect(document.documentElement.lang).toBe('sv')
+    await waitFor(() => expect(document.documentElement.lang).toBe('en'))
   })
 
-  it('hydrates from a persisted choice', async () => {
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'sv')
+  it('reads no device preference — not storage, not navigator.language', async () => {
+    const getItem = vi.spyOn(window.localStorage, 'getItem')
+    // A leftover `haven.locale` from before #2926 is inert: nothing reads it,
+    // so no migration ships and no device is asked to forget it.
+    window.localStorage.setItem('haven.locale', 'sv')
+    getItem.mockClear()
+    const languageReads = vi.fn()
+    vi.spyOn(navigator, 'language', 'get').mockImplementation(() => {
+      languageReads()
+      return 'sv-SE'
+    })
+
     const { result } = renderHook(() => useLocale(), { wrapper })
-    await waitFor(() => expect(result.current.locale).toBe('sv'))
-    expect(result.current.t.settings.title).toBe('Inställningar')
+
+    await waitFor(() => expect(result.current.locale).toBe('en'))
+    expect(result.current.t.settings.title).toBe('Settings')
+    expect(getItem).not.toHaveBeenCalled()
+    expect(languageReads).not.toHaveBeenCalled()
   })
 
   it('throws when used outside a provider', () => {

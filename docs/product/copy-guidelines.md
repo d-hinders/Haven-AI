@@ -710,12 +710,14 @@ precedents:
 - The "payment evidence document" rule above is not yet reflected in the one
   shipped string that remains: the generated underlag PDF is titled "HAVEN
   PAYMENT RECEIPT" (`packages/backend/src/modules/accounting/receipt-underlag.ts:91`),
-  and "betalningsbevis" appears nowhere in the Swedish catalog. The bullet also
+  and "betalningsbevis" appears in no catalog — there is only the English one
+  since #2926 removed the Swedish catalog, so the term now has nowhere to live
+  short of the backend string itself. The bullet also
   named the approval and send surfaces as labelling it "Payment receipt"; those
   surfaces were deleted with the Safe rail (#1989) and the label survives on no
   surface at all — checked over `packages/` rather than `packages/frontend`,
   case-insensitively, so the claim's scope matches the check's. The rule is
   still unenforced — the remaining drift sits in `packages/backend/**` and the
-  i18n catalogs, which the copy lint does not scan.
+  i18n catalog, which the copy lint does not scan.
 
 Correct these in product-copy changes; do not weaken this guide to match them.

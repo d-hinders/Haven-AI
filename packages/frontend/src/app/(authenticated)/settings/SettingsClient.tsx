@@ -5,8 +5,7 @@ import { Icon } from '@/components/ui/Icon'
 import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
-import { useLocale, useT } from '@/context/LocaleContext'
-import type { Locale } from '@/lib/i18n'
+import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SettingsSection as Section, SettingsRow as SettingRow } from './SettingsSection'
@@ -14,8 +13,10 @@ import { ConnectionsCard } from '@/components/accounting/ConnectionsCard'
 
 
 /**
- * Inline segmented control — the canonical Settings toggle (used for currency
- * and language). One tinted track (`--v2-surface`) with a white, shadowed
+ * Inline segmented control — the canonical Settings toggle. Currency is its
+ * only user since #2926 removed the language row; it is kept as the page's
+ * toggle pattern (dark mode, #2927, is the next one). One tinted track
+ * (`--v2-surface`) with a white, shadowed
  * thumb on the active option; matches the design-system surface rules (no
  * nested filled cards — the track is a control surface, not a grouping card).
  */
@@ -102,7 +103,6 @@ function ComingSoonToggle({ label, comingSoonText }: { label: string; comingSoon
 export default function SettingsClient() {
   const { passkeys = [] } = useAuth()
   const { currency, setCurrency, saving } = usePreferences()
-  const { locale, setLocale } = useLocale()
   const t = useT()
 
   const hasPasskey = passkeys.length > 0
@@ -136,21 +136,6 @@ export default function SettingsClient() {
                 options={[
                   { value: 'USD', label: '$ USD' },
                   { value: 'EUR', label: '€ EUR' },
-                ]}
-              />
-            )}
-          />
-          <SettingRow
-            label={t.settings.language.label}
-            detail={t.settings.language.detail}
-            action={(
-              <SegmentedControl
-                ariaLabel={t.settings.language.label}
-                value={locale}
-                onChange={(next: Locale) => setLocale(next)}
-                options={[
-                  { value: 'en', label: t.settings.language.english },
-                  { value: 'sv', label: t.settings.language.swedish },
                 ]}
               />
             )}

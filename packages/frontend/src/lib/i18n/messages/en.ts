@@ -107,12 +107,6 @@ export const en = {
       label: 'Preferred currency',
       detail: 'Used for balances, spending limits, and portfolio totals.',
     },
-    language: {
-      label: 'Language',
-      detail: "Choose the language Haven's interface is shown in.",
-      english: 'English',
-      swedish: 'Svenska',
-    },
     agentSpendAlerts: {
       label: 'Agent spend alerts',
       detail: 'Receive updates when agents use their budget.',

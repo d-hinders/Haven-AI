@@ -53,7 +53,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 // distinguish "no query ran" from "a query ran and found nothing". The three
 // read-path cases at the bottom are deliberately shallow for the same reason:
 // they assert the routes still SERVE, and their query semantics stay pinned
-// where they already are, in user-safes-characterization.test.ts and the
+// where they already are, in smart-accounts-characterization.test.ts and the
 // repository suites.
 const { mockPoolQuery, mockClientQuery, mockRelease, mockConnect } = vi.hoisted(() => ({
   mockPoolQuery: vi.fn(),

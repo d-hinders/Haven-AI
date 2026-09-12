@@ -84,9 +84,17 @@ describe('openapiSpec', () => {
     expect(openapiSpec.components.schemas.AgentPaymentPhase.enum).toEqual(
       Object.values(AgentPaymentPhase),
     )
-    expect(openapiSpec.components.schemas.AgentPaymentNextAction.enum).toEqual(
-      Object.values(AgentPaymentNextAction),
-    )
+    // #2907 (naming P0): the served enum carries one additive value beyond
+    // the backend mirror — `fund_account_or_raise_allowance`, the twin of
+    // `fund_safe_or_raise_allowance` accepted on input but never yet
+    // emitted (#2914 flips the emitted value). The mirror itself is
+    // untouched because it is parity-pinned to the SDK
+    // (`agent-payment-taxonomy.parity.test.ts`), which is P1's (#2908)
+    // surface, not P0's.
+    expect(openapiSpec.components.schemas.AgentPaymentNextAction.enum).toEqual([
+      ...Object.values(AgentPaymentNextAction),
+      'fund_account_or_raise_allowance',
+    ])
     expect(openapiSpec.components.schemas.AgentPaymentRail.enum).toEqual(
       Object.values(AgentPaymentRail),
     )
@@ -508,6 +516,10 @@ describe('TransactionBase settlementScheme (#1705)', () => {
           safeId: '11111111-1111-4111-8111-111111111111',
           safeAddress: '0x3333333333333333333333333333333333333333',
           safeName: 'Main',
+          // #2907: dual-emitted account twins, same values.
+          accountId: '11111111-1111-4111-8111-111111111111',
+          accountAddress: '0x3333333333333333333333333333333333333333',
+          accountName: 'Main',
         },
       ),
     ).toEqual([])

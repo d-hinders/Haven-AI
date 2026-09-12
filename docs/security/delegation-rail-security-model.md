@@ -35,7 +35,7 @@ covers:
   - packages/frontend/src/hooks/useSafeOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-12"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -778,6 +778,32 @@ informed transitions while the account's on-chain last-signer guard remains the
 hard backstop.
 
 ## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
+
+> **Re-verified #2907 (naming epic #2906, phase 0):** the funding-leg
+> `sign_data.components` object (`delegation-authorize.ts`, `replay.ts`) gains
+> a `payer_account` field — an additive, same-value twin of the deprecated
+> `safe` field, not a rename into `components.account` (which already means
+> the *delegate* account address on this shape, a different address). No
+> authority, signing path, or invariant mapping changes: `payer_account` is a
+> read-side label, mutation-tested equal to `safe`
+> (`openapi/payer-account-alias.test.ts`). `routes/user-safes.ts` also gained
+> an additive `/user/accounts` prefix registration of the same handler
+> module — §2's invariant mapping and this doc's route list are otherwise
+> unaffected: no new authority, no new signing path.
+>
+> **Review-findings correction, same PR:** that additive `/user/accounts`
+> mount was NOT reflected in `middleware/owner-cli.ts`'s `OWNER_CLI_ALLOWED_
+> ROUTES`, which named only the `/user/safes` literal — `routeAllowsOwnerCli`
+> compares the registered route's exact URL, so an `owner_cli` token that
+> could read `GET /user/safes` and `GET /user/safes/{safeId}/funding` got a
+> 401 on the identical `/user/accounts` / `/user/accounts/{safeId}/funding`
+> mount, for the same data, through the same handler. This is a REFUSAL gap,
+> not an authorization grant — the token already had this read through the
+> `/user/safes` prefix — so fixing it (adding the two twin entries) does not
+> widen the owner_cli surface §9 below describes; it makes the surface
+> actually reachable through both names, which is the whole point of an
+> additive rename. Proven with a parity test that fails 4 assertions when the
+> twin entries are removed.
 
 > **Re-verified #2850:** this diff touched two files in this document's
 > covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by

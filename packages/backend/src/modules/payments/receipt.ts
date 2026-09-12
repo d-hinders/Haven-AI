@@ -33,7 +33,21 @@ export interface PaymentReceiptRow {
   amount_sek: string | null
 }
 
-/** Pure mapping DB row → receipt bundle. */
+/**
+ * Pure mapping DB row → receipt bundle.
+ *
+ * #2907: `payment.account` is an additive same-value twin of `payment.safe`
+ * — `account` is free on this shape (no other field on `payment` already
+ * claims that name, unlike `sign_data.components`, where `account` already
+ * means the delegate account and a twin there is named `payer_account`
+ * instead). `PaymentReceipt` is a published `@haven_ai/sdk` type
+ * (byte-identical, no source change in this slice), so the literal is built
+ * with the extra field and widened with a type assertion rather than
+ * changing the SDK interface. Verification is unaffected: `verifyPaymentReceipt`
+ * recovers the signer from the STORED `authorization.signHash` — it never
+ * recomputes a hash over `payment`, so an additive field here changes nothing
+ * about what a signature covers.
+ */
 export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
   return {
     version: RECEIPT_VERSION,
@@ -45,10 +59,11 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
       amountSek: row.amount_sek,
       recipient: row.to_address,
       safe: row.safe_address,
+      account: row.safe_address,
       chainId: row.chain_id,
       settledAt: row.confirmed_at,
       resourceUrl: row.resource_url,
-    },
+    } as PaymentReceipt['payment'],
     authorization: {
       delegate: row.delegate_address,
       signHash: row.sign_hash,

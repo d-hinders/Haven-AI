@@ -13,6 +13,7 @@ import {
 import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { getChain } from '../domain/chains.js'
+import { withAccountAddressAlias, withAccountsEnvelopeAlias } from '../openapi/wire-aliases.js'
 import {
   formatTokenAmount,
   getFaucetUrl,
@@ -32,13 +33,17 @@ interface RenameSafeBody {
 export default async function userSafesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /user/safes — list all Safes for the authenticated user
+  // GET /user/safes (and its #2907 twin GET /user/accounts) — list all
+  // linked accounts for the authenticated user. Dual-emits account_address
+  // alongside safe_address on every item (equality-tested,
+  // `openapi/wire-aliases.test.ts`).
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const safes = await listAccountsForUser(sub)
+    const safes = (await listAccountsForUser(sub)).map(withAccountAddressAlias)
 
-    return { safes }
+    // #2907: `accounts` twins the `safes` envelope key, same array.
+    return withAccountsEnvelopeAlias({ safes })
   })
 
   // POST /user/safes/deploy — TOMBSTONE (#1984 closed it, #1988 deleted the
@@ -71,7 +76,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      return renamed
+      return withAccountAddressAlias(renamed)
     },
   )
 

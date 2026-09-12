@@ -1,0 +1,16 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "POST /auth/login",
+  "request": {
+    "method": "POST",
+    "url": "/auth/login",
+    "payload": {
+      "email": "test@example.com",
+      "password": "wrong-password"
+    }
+  },
+  "status": 401,
+  "body": {
+    "error": "Invalid email or password"
+  }
+}

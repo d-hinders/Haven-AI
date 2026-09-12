@@ -70,6 +70,10 @@ describe('User routes', () => {
       expect(body.id).toBe(USER_UUID)
       expect(body.name).toBe('Ada Lovelace')
       expectMatchesSpec('PUT', '/user/profile', response.json())
+      // #2907: request-level twin === old, not just the mapper's own unit
+      // test — mutation-proven by dropping the withSessionAccountAddressAlias
+      // call at this route.
+      expect(body.account_address).toBe(body.safe_address)
     })
 
     it('returns 400 for invalid name', async () => {
@@ -124,6 +128,8 @@ describe('User routes', () => {
       const body = response.json()
       expect(body.id).toBe('user-1')
       expect(body.wallet_address).toBe(walletAddress)
+      // #2907: request-level twin === old.
+      expect(body.account_address).toBe(body.safe_address)
     })
 
     it('returns 400 for invalid address', async () => {
@@ -185,6 +191,71 @@ describe('User routes', () => {
 
       expect(response.statusCode).toBe(401)
       expect(response.json().error).toBe('Unauthorized')
+    })
+  })
+
+  // --- GET /passkeys ---
+  // #2907: account_address twins safe_address on each passkey (same value).
+  // SQL-dispatched (mockImplementation), not positional (#1227 ratchet) —
+  // this file's baseline is shrink-only.
+  describe('GET /passkeys', () => {
+    it('dual-emits account_address alongside safe_address on each passkey, request-level equal', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+      mockQuery.mockImplementation((sql: string) =>
+        String(sql).includes('FROM user_passkeys')
+          ? Promise.resolve({
+              rows: [{
+                id: SAFE_UUID_A,
+                credential_id: 'cred-1',
+                signer_address: '0x1111111111111111111111111111111111111111',
+                chain_id: 8453,
+                safe_address: '0x2222222222222222222222222222222222222222',
+                created_at: '2026-05-25T12:00:00.000Z',
+              }],
+            })
+          : Promise.resolve({ rows: [] }),
+      )
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/passkeys',
+        headers: { authorization: `Bearer ${token}` },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expectMatchesSpec('GET', '/passkeys', body)
+      // Mutation-proven: dropping the withSessionAccountAddressAlias call in
+      // routes/passkeys.ts leaves this undefined, failing the equality below.
+      expect(body.passkeys[0].account_address).toBe(body.passkeys[0].safe_address)
+      expect(body.passkeys[0].account_address).toBe('0x2222222222222222222222222222222222222222')
+    })
+
+    it('a null safe_address (never bound) dual-emits null, not a crash', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+      mockQuery.mockImplementation((sql: string) =>
+        String(sql).includes('FROM user_passkeys')
+          ? Promise.resolve({
+              rows: [{
+                id: SAFE_UUID_A,
+                credential_id: 'cred-1',
+                signer_address: '0x1111111111111111111111111111111111111111',
+                chain_id: 8453,
+                safe_address: null,
+                created_at: '2026-05-25T12:00:00.000Z',
+              }],
+            })
+          : Promise.resolve({ rows: [] }),
+      )
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/passkeys',
+        headers: { authorization: `Bearer ${token}` },
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json().passkeys[0].account_address).toBeNull()
     })
   })
 })

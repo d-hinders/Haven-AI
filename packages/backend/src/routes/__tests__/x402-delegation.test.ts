@@ -572,6 +572,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(201)
       expect(res.json().sign_data.signature_scheme).toBe('eip712_userop')
+      // #2907: payer_account is a same-value twin of `safe` on a REAL
+      // response, not a source regex — mutation-proven by pointing
+      // payer_account at the delegate account instead.
+      const components = res.json().sign_data.components
+      expect(components.payer_account).toBe(components.safe)
+      expect(components.payer_account).not.toBe(components.account)
     })
 
     it('spends the LAST of the budget: remaining exactly equal to the amount is allowed', async () => {
@@ -1529,6 +1535,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
     // The whole point: NO fresh sponsored estimation ran.
     expect(mockPrepareFunding).not.toHaveBeenCalled()
     expect(mockCreateIntent).not.toHaveBeenCalled()
+    // #2907: payer_account is a same-value twin of `safe` on the REPLAY
+    // response too, not a source regex — mutation-proven by pointing
+    // payer_account at the delegate account instead.
+    const components = body.sign_data.components
+    expect(components.payer_account).toBe(components.safe)
+    expect(components.payer_account).not.toBe(components.account)
   })
 
   it('a confirmed idempotent retry replays the receipt (#961)', async () => {

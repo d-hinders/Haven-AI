@@ -3,10 +3,10 @@
  *
  * The feed used to push SEK to every destination. It now pushes the currency
  * the connected company books in, converted with the rate frozen at
- * settlement. Four things have to hold, and all four are database behaviour —
- * a JSONB column, a `COALESCE` in an upsert, and a real `SELECT` mapping back
- * into the entry — so they are proven here rather than against mocks
- * (`CLAUDE.md`, data-layer rule; `testing-strategy.md`).
+ * settlement. What has to hold is database behaviour — a JSONB column, the
+ * gate in an upsert, and a real `SELECT` mapping back into the entry — so it is
+ * proven here rather than against mocks (`CLAUDE.md`, data-layer rule;
+ * `testing-strategy.md`).
  *
  * 1. **CHARACTERISATION — a SEK ledger is fed exactly what it was fed before.**
  *    The amount comes from the `amount_sek` COLUMN, never re-derived from the
@@ -20,7 +20,12 @@
  * 3. The rate is frozen: a second evidence write with different rates does not
  *    move the captured map, so a re-settlement can never re-price history.
  * 4. No rate for the destination's currency is *not ready*, not a fallback:
- *    nothing is pushed, no claim row is taken, the payment stays backfillable.
+ *    nothing is pushed and no claim row is taken. Whether it is ever feedable
+ *    depends on which shape it is: a whole-capture failure (`fx_at` NULL) is
+ *    genuinely backfillable, while a capture that succeeded for another
+ *    currency can never gain this one — the capture is frozen as a whole.
+ * 5. A capture missing the SEK half is still enumerated for backfill: "FX-ready"
+ *    is a capture in either form, not `amount_sek` alone.
  *
  * MUTATION TARGETS are named at each site.
  */

@@ -239,7 +239,7 @@ export const LIST_UNPUSHED_PAYMENT_IDS_SQL = `SELECT COALESCE(mpe.payment_intent
        ON s.user_id = mpe.user_id AND s.provider = $2
       AND s.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
       AND s.status = 'pushed'
-     WHERE mpe.user_id = $1 AND mpe.amount_sek IS NOT NULL AND s.id IS NULL
+     WHERE mpe.user_id = $1 AND (mpe.amount_sek IS NOT NULL OR mpe.fx_rates IS NOT NULL) AND s.id IS NULL
        AND ($4::timestamptz IS NULL OR COALESCE(mpe.confirmed_at, mpe.created_at) >= $4::timestamptz)
      ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
      LIMIT $3`
@@ -248,6 +248,17 @@ export const LIST_UNPUSHED_PAYMENT_IDS_SQL = `SELECT COALESCE(mpe.payment_intent
  * Settled, FX-ready payment ids for the user with no `pushed` sync row yet.
  * `feedFrom` (#2862) is the active destination's floor: nothing settled
  * before it is enumerated. Null = no floor (the pre-#2862 selection).
+ *
+ * "FX-ready" is a capture in EITHER form since #2877: `amount_sek` for a SEK
+ * ledger, or a rate map for any other. `amount_sek IS NOT NULL` alone was the
+ * whole test while SEK was the only thing the feed pushed; once a capture can
+ * succeed for EUR and fail for SEK — the price source quotes per currency, and
+ * `getBookTimeCapture` returns exactly that — the narrow test silently omitted
+ * a row a EUR ledger could be fed from, permanently: this statement is the
+ * only path by which a never-fed payment reaches a connector, so an omission
+ * here is not a delay, it is a payment that is never fed at all. Found by
+ * review (#2877), which followed the same per-currency-failure argument the
+ * capture freeze rests on one step further than the freeze did.
  */
 export async function listUnpushedPaymentIds(
   userId: string,

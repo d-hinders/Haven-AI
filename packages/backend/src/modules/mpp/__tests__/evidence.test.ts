@@ -107,7 +107,7 @@ describe('recordMachinePaymentEvidenceBase', () => {
     await recordMachinePaymentEvidenceBase(payment())
 
     const { sql, params } = evidenceInsert()
-    // #2877: the four capture columns are gated on fx_at rather than each
+    // #2877: the five capture columns share one gate rather than each being
     // COALESCE'd, so the row always holds ONE capture from one price read.
     // Per-column COALESCE was equivalent only while the capture was
     // all-or-nothing; it stopped being so when a capture could succeed for one

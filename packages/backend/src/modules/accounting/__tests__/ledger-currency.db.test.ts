@@ -35,11 +35,11 @@ vi.mock('../../agents/index.js', () => ({ accountingFeedAvailable: mocks.account
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { upsertEvidenceBase } from '../../../infra/repositories/machine-payments.js'
-import { getSyncState } from '../../../infra/repositories/accounting-feed-syncs.js'
+import { getSyncState, listUnpushedPaymentIds } from '../../../infra/repositories/accounting-feed-syncs.js'
 import { SECRETS_KEY_ENV } from '../../../infra/secrets.js'
 import { connectWithApiKey } from '../api-key-flow.js'
 import { clearConnectors, InMemoryConnector, registerConnector } from '../connector.js'
-import { feedSettledPayment } from '../feed-orchestrator.js'
+import { feedSettledPayment, syncUser } from '../feed-orchestrator.js'
 import type { AccountingProvider } from '../provider.js'
 import { clearTestProviders, registerTestProvider } from '../registry.js'
 
@@ -323,6 +323,30 @@ describeDb('multi-currency ledgers (#2877)', () => {
     expect(amount).toBe('11.4620')
     expect(amount).not.toMatch(/e/i)
     expect(amount.split('.')[1]).toHaveLength(4)
+  })
+
+  it('a capture missing the SEK half is still enumerated for backfill: a EUR ledger can be fed from the map it does have', async () => {
+    const { userId, agentId } = await seedUser()
+    const connector = await connectBooking(userId, 'EUR')
+    // The price source quoted EUR but not SEK at settlement — a state
+    // getBookTimeCapture supports by design. The row is the one the backfill
+    // selector used to miss, because "FX-ready" was spelled amount_sek.
+    const paymentId = await seedSettled(userId, agentId, { fxRates: { EUR: 0.92 } })
+    await db.query(
+      `UPDATE machine_payment_evidence SET amount_sek = NULL, fx_rate_sek = NULL WHERE payment_intent_id = $1`,
+      [paymentId],
+    )
+
+    // MUTATION TARGET: narrow LIST_UNPUSHED_PAYMENT_IDS_SQL back to
+    // `mpe.amount_sek IS NOT NULL` and this payment is never enumerated — not
+    // delayed, never fed, because this statement is the only path by which a
+    // payment with no sync row reaches a connector.
+    expect(await listUnpushedPaymentIds(userId, 'memory', 50, null)).toContain(paymentId)
+    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(connector.pushed[0].tx.ledgerCurrency).toBe('EUR')
+    expect(connector.pushed[0].tx.amountLedger).toBe('0.9200')
+    // The SEK half stays missing and is not invented.
+    expect(connector.pushed[0].tx.amountSek).toBeNull()
   })
 
   it('a connection whose provider could not name a currency books in the default (SEK)', async () => {

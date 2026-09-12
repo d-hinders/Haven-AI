@@ -526,7 +526,15 @@ should be asked to read.
     fixes it, and nothing to wait for; the honest reading is that this payment
     has no book-time rate in that currency and never will.
 
-  Either way the row is untouched and every other destination is unaffected. A
+  A third shape exists and is worth naming, because it is the one the backfill
+  selector used to miss: the capture succeeded for some currency but **not for
+  SEK**. Such a row is fed normally to a ledger whose currency IS in the map —
+  "FX-ready" means a capture in either form (`amount_sek`, or a rate map), not
+  `amount_sek` alone (#2877). It stays permanently not-ready for SEK, by the
+  same rule as the second case.
+
+  In every shape the row is untouched and every other destination is
+  unaffected. A
   **zero** amount is fed, not withheld: the SEK path pushes a zero, and
   withholding it would leave such a payment in the second state above for a
   reason no rate could ever fix. Feeding SEK into a non-SEK ledger would be a wrong

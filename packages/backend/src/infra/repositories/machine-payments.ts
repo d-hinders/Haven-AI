@@ -35,7 +35,8 @@ export type { Executor }
 
 /**
  * The book-time capture — `amount_sek`, `fx_rate_sek`, `fx_source`, `fx_rates`
- * — freezes as ONE record, gated on `fx_at` (migrations 026 and 082). See the
+ * and `fx_at` — freezes as ONE record, written only when the row holds no
+ * capture yet (migrations 026 and 082). See the
  * CASE block below for why per-column COALESCE stopped being safe once a
  * capture could succeed for one currency and fail for another.
  *
@@ -74,9 +75,9 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
       challenge_payload = COALESCE(machine_payment_evidence.challenge_payload, EXCLUDED.challenge_payload),
       confirmed_at = EXCLUDED.confirmed_at,
       -- The book-time capture is written ATOMICALLY, by the one write that
-      -- first sets fx_at (#2877). fx_at is the gate for all five columns, so
-      -- what the row holds is always one capture from one price read, never a
-      -- mixture of two taken on different days.
+      -- finds the row holding no capture at all (#2877). One predicate gates
+      -- all five columns, so what the row holds is always one capture from one
+      -- price read, never a mixture of two taken on different days.
       --
       -- Per-column COALESCE was safe only while the capture was all-or-nothing
       -- (pre-#2877, getBookTimeSekValue returned a value or null, so fx_at
@@ -146,9 +147,9 @@ export interface EvidenceBaseInput {
   fxAt: string | null
   /**
    * Book-time token→currency rates for the supported ledger currencies (#2877),
-   * serialised JSON. Frozen as part of the one capture, gated on `fx_at` along
-   * with the SEK columns: a later write neither overwrites what was captured
-   * nor adds a half that was missing.
+   * serialised JSON. Frozen as part of the one capture, under the same
+   * "row holds no capture yet" gate as the SEK columns: a later write neither
+   * overwrites what was captured nor adds a half that was missing.
    */
   fxRates: string | null
 }

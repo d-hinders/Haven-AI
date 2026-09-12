@@ -707,8 +707,8 @@ precedents:
 - The homepage and the How it works page advertise EURe and Gnosis Chain even
   though current account creation offers Base and Base Sepolia, where USDC is
   the payment-token example.
-- The "payment evidence document" rule above is not yet reflected in the one
-  shipped string that remains: the generated underlag PDF is titled `'HAVEN
+- The "payment evidence document" rule above is not yet reflected in the
+  strings that remain: the generated underlag PDF is titled `'HAVEN
   PAYMENT RECEIPT (underlag)'` in
   `packages/backend/src/modules/accounting/receipt-underlag.ts` — named by its
   string rather than its line, which drifts (this bullet said `:91` for a
@@ -722,8 +722,14 @@ precedents:
   surfaces were deleted with the Safe rail (#1989) and the label survives on no
   surface at all — checked over `packages/` rather than `packages/frontend`,
   case-insensitively, so the claim's scope matches the check's. The rule is
-  still unenforced — the remaining drift is the backend string alone; the
-  English catalog uses the preferred wording ("payment evidence attached"). The
-  copy lint reaches neither.
+  still unenforced — the remaining drift sits in the generated underlag
+  document under `packages/backend/**`, which the copy lint does not scan. A
+  SCOPE claim, deliberately, not a count: the title above is not the only
+  string there — the document's closing paragraph says "the verifiable Haven
+  payment receipt" and names the receipt JSON, and the attachment is filed as
+  `haven-receipt-<id>.pdf`. An earlier draft of this bullet said "the backend
+  string alone" and was wrong for that reason. The English catalog is clear of
+  it either way: it uses the preferred wording ("payment evidence attached")
+  throughout.
 
 Correct these in product-copy changes; do not weaken this guide to match them.

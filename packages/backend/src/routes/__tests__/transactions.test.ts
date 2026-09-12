@@ -1188,6 +1188,34 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     ])
   })
 
+  // #2907 (naming P0 finding #2): every transaction row, and the top-level
+  // `failedAccountIds`, dual-emit the account_* twins ON THE WIRE. Removing
+  // `withTransactionAccountAlias(...)` or `withFailedAccountIdsAlias(...)`
+  // from this route leaves `wire-aliases.test.ts` green (it never calls the
+  // route) — this is the request-level check that catches it.
+  it('#2907: transactions[] and failedAccountIds dual-emit the account_* twins', async () => {
+    const token = signToken({ sub: 'twin-user', email: 'twin@example.com' })
+    stubMixedTransactionFetch()
+    mockPoolForAggregation([
+      { id: 'safe-twin', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
+    ])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/transactions?fresh=1',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.transactions.length).toBeGreaterThan(0)
+    for (const tx of body.transactions) {
+      expect(tx.accountId).toBe(tx.safeId)
+      expect(tx.accountAddress).toBe(tx.safeAddress)
+      expect(tx.accountName).toBe(tx.safeName)
+    }
+    expect(body.failedAccountIds).toEqual(body.failedSafeIds)
+  })
+
   it('filters by tokenKey: native excludes ERC-20, and the token address excludes native', async () => {
     const token = signToken({ sub: 'filter-user', email: 'filter@example.com' })
     stubMixedTransactionFetch()
@@ -1328,6 +1356,33 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     })
     expect(unrecognized.statusCode).toBe(400)
     expect(unrecognized.json().error).toBe('Invalid safeId')
+  })
+
+  // #2907 finding #10: when both are given, `accountId` wins (documented in
+  // `openapi/spec.ts`'s parameter description). Scoping to the account WITH
+  // transactions via `accountId` while `safeId` names the EMPTY one proves
+  // which one the route actually reads first — a swapped `??` operand would
+  // pass every other test here (both still filter something) but flip this
+  // one silently.
+  it('#2907: accountId wins when both accountId and safeId are given', async () => {
+    const token = signToken({ sub: 'precedence-user', email: 'precedence@example.com' })
+    const ACCOUNT_WITH_TXS_ID = '77777777-7777-4777-8777-777777777777'
+    const ACCOUNT_EMPTY_ID = '88888888-8888-4888-8888-888888888888'
+
+    stubMixedTransactionFetch()
+    mockPoolForAggregation([
+      { id: ACCOUNT_WITH_TXS_ID, safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+      { id: ACCOUNT_EMPTY_ID, safe_address: SENDER, chain_id: 100, name: 'Empty' },
+    ])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions?accountId=${ACCOUNT_WITH_TXS_ID}&safeId=${ACCOUNT_EMPTY_ID}&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    // If safeId (the empty account) won, total would be 0.
+    expect(response.json().total).toBeGreaterThan(0)
   })
 
   it('agentId=user selects the unattributed outbound tx, not the agent-attributed one', async () => {

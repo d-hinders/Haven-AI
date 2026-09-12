@@ -349,6 +349,64 @@ describe('Auth routes', () => {
       expectMatchesSpec('GET', '/auth/me', body)
     })
 
+    // #2907 (naming P0 finding #2): the session user dual-emits
+    // `account_address` alongside `safe_address` ON THE WIRE, and each entry
+    // in `safes` carries its own `account_address` twin too. Removing
+    // `withSessionAccountAddressAlias(...)` (or the `.map(withAccountAddressAlias)`
+    // on the safes list) from this route leaves `wire-aliases.test.ts` green
+    // (it never calls the route) — this is the request-level check that
+    // catches it.
+    it('#2907: dual-emits account_address at the top level and per-safe', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+      const SAFE_ADDRESS = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+      // Dispatched by SQL text rather than a chain of positional per-call
+      // mocks — the shrink-only db-mock ratchet (#1227) caps that count per
+      // file, and this file is already at its baseline.
+      mockQuery.mockImplementation((sql: string) => {
+        const text = String(sql)
+        if (text.includes('FROM users WHERE id')) {
+          return Promise.resolve({
+            rows: [{
+              id: USER_UUID,
+              name: 'Ada Lovelace',
+              email: 'test@example.com',
+              wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
+              safe_address: SAFE_ADDRESS,
+              currency_preference: 'USD',
+              created_at: '2025-01-01T00:00:00.000Z',
+            }],
+          })
+        }
+        if (text.includes('FROM user_safes')) {
+          return Promise.resolve({
+            rows: [{
+              id: 'safe-1',
+              safe_address: SAFE_ADDRESS,
+              chain_id: 8453,
+              name: 'Main',
+              is_default: true,
+              account_type: 'delegator_hybrid',
+            }],
+          })
+        }
+        throw new Error(`Unexpected query: ${text}`)
+      })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/auth/me',
+        headers: { authorization: `Bearer ${token}` },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expect(body.account_address).toBe(body.safe_address)
+      expect(body.account_address).toBe(SAFE_ADDRESS)
+      expect(body.safes).toHaveLength(1)
+      expect(body.safes[0].account_address).toBe(body.safes[0].safe_address)
+    })
+
     it('returns 401 without token', async () => {
       const response = await app.inject({
         method: 'GET',

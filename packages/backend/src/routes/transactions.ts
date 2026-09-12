@@ -380,8 +380,11 @@ export default async function transactionRoutes(
   // (`openapi/spec.ts`) are the SAME Fastify route — a single dynamic path
   // segment has no wire-visible name, so `GET /transactions/0xabc...` is
   // already both paths at once; find-my-way also refuses two parametric
-  // routes with different param names at one position (`FST_ERR_..._NAME`),
-  // so registering a second one here would fail at boot. Unlike the
+  // routes with different param names at one position — verified against a
+  // live Fastify instance: `app.get('/transactions/:accountAddress', ...)`
+  // after the registration below throws `FST_ERR_DUPLICATED_ROUTE` at
+  // `app.ready()`, not a param-name-specific code — so registering a second
+  // one here would fail at boot. Unlike the
   // multi-segment `/user/safes/...` twins, there is nothing to register
   // twice.
   app.get<{

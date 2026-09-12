@@ -83,13 +83,67 @@ function grepTotalWithExclusions(ref) {
     .length
 }
 
-const ref = process.argv[2] ?? ''
-const total = grepTotalWithExclusions(ref)
+/**
+ * Run the census against `ref` (empty string = working tree) and return the
+ * total plus the per-token breakdown. Exported so
+ * `safe-account-rename-census.test.mjs` can assert on it directly rather than
+ * shelling out and scraping stdout — the two things this file guarantees
+ * (every per-token count is a real number, and the CLI enforces "each > 0")
+ * are checked in code, not by re-reading a printed string.
+ *
+ * `PER_TOKEN` entries are written with a single backslash where they need one
+ * (e.g. `components\.safe`) — that is already a valid PCRE token, so no
+ * unescaping step belongs here. A `token.replace(/\\\\/g, '\\')` used to sit
+ * where the display string is built: it matches a literal double backslash,
+ * which none of these tokens ever contain, so it silently did nothing on
+ * every run. Removed rather than "fixed", because there is nothing for it to
+ * do — the tokens are printed as written.
+ */
+export function runCensus(ref) {
+  const total = grepTotalWithExclusions(ref)
+  const perToken = PER_TOKEN.map((token) => ({ token, count: grepCount(ref, token, true) }))
+  return { ref, total, perToken }
+}
 
-console.log(`#2907 census — ref: ${ref || '(working tree)'}`)
-console.log(`Tier-A pattern total (excluding false positives): ${total}`)
-console.log('Per-token counts (each must be > 0):')
-for (const token of PER_TOKEN) {
-  const count = grepCount(ref, token, true)
-  console.log(`  ${token.replace(/\\\\/g, '\\')}: ${count}`)
+/**
+ * The whole point of the per-token breakdown (issue #2907 AC): a dead
+ * alternation inside the one big TIER_A group is silent in the total — only a
+ * per-token assertion catches it. Pulled out as a pure function, independent
+ * of `git grep`, so `safe-account-rename-census.test.mjs` can prove the
+ * decision itself with a fabricated zero rather than depending on the repo
+ * ever actually reaching one (which would mean the guard already failed).
+ */
+export function zeroedTokens(perToken) {
+  return perToken.filter((entry) => entry.count === 0).map((entry) => entry.token)
+}
+
+function main() {
+  const ref = process.argv[2] ?? ''
+  const { total, perToken } = runCensus(ref)
+
+  console.log(`#2907 census — ref: ${ref || '(working tree)'}`)
+  console.log(`Tier-A pattern total (excluding false positives): ${total}`)
+  console.log('Per-token counts (each must be > 0):')
+  for (const { token, count } of perToken) {
+    console.log(`  ${token}: ${count}`)
+  }
+
+  // Printing a zero and exiting 0 anyway is the same failure mode this script
+  // exists to prevent, so a zero here fails the run rather than scrolling
+  // past in a green CI log.
+  const zeroed = zeroedTokens(perToken)
+  if (zeroed.length > 0) {
+    console.error(`\n#2907 census FAILED — zero matches for: ${zeroed.join(', ')}`)
+    console.error(
+      'A per-token count of 0 means that token is not just rare, it is ABSENT — the ' +
+        'assertion this census exists to make. Fix the pattern or the census scope, not the threshold.',
+    )
+    process.exitCode = 1
+  }
+}
+
+// Only run as a CLI when invoked directly — importing `runCensus` for a test
+// must not also execute `main()` and print/exit on the test's behalf.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main()
 }

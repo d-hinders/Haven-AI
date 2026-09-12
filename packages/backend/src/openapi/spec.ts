@@ -2807,7 +2807,8 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'Rename a linked Safe.',
         description: 'Display metadata only — the name exists nowhere on-chain. ' +
-          deprecatedSafeAlias('renameUserAccount') + ' Twin path: PUT /user/accounts/{accountId}.',
+          deprecatedSafeAlias('renameUserAccount') + ' Twin path: PUT /user/accounts/{safeId}.' +
+          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
         requestBody: {
@@ -2839,7 +2840,8 @@ export const openapiSpec = {
         summary: 'Unlink a Safe from the Haven account.',
         description:
           'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key. ' +
-          deprecatedSafeAlias('unlinkUserAccount') + ' Twin path: DELETE /user/accounts/{accountId}.',
+          deprecatedSafeAlias('unlinkUserAccount') + ' Twin path: DELETE /user/accounts/{safeId}.' +
+          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
         responses: {
@@ -2923,7 +2925,8 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'Make a linked Safe the default.',
         description: "Exactly one Safe is default per user; setting one clears the previous. " +
-          deprecatedSafeAlias('setDefaultUserAccount') + ' Twin path: PUT /user/accounts/{accountId}/default.',
+          deprecatedSafeAlias('setDefaultUserAccount') + ' Twin path: PUT /user/accounts/{safeId}/default.' +
+          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
         responses: {
@@ -2965,7 +2968,8 @@ export const openapiSpec = {
         summary: 'Machine-readable funding facts for one Safe: what to fund, with what, where, and how much.',
         description:
           'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority. ' +
-          deprecatedSafeAlias('getAccountFunding') + ' Twin path: GET /user/accounts/{accountId}/funding.',
+          deprecatedSafeAlias('getAccountFunding') + ' Twin path: GET /user/accounts/{safeId}/funding.' +
+          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id (the delegation-rail account).' }],
         responses: {
@@ -5929,7 +5933,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'safeId', in: 'query', schema: uuid, deprecated: true, description: deprecatedSafeAlias('accountId') },
-          { name: 'accountId', in: 'query', schema: uuid, description: "#2907 twin of 'safeId'; both accepted, both filter identically." },
+          { name: 'accountId', in: 'query', schema: uuid, description: "#2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins." },
           { name: 'agentId', in: 'query', schema: { type: 'string' } },
           { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
@@ -5964,7 +5968,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'safeId', in: 'query', schema: uuid, deprecated: true, description: deprecatedSafeAlias('accountId') },
-          { name: 'accountId', in: 'query', schema: uuid, description: "#2907 twin of 'safeId'; both accepted, both filter identically." },
+          { name: 'accountId', in: 'query', schema: uuid, description: "#2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins." },
           { name: 'agentId', in: 'query', schema: { type: 'string' } },
           { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
           { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] } },

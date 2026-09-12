@@ -89,6 +89,11 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(userSafesRoutes, { prefix: '/user/safes' })
+    // #2907: the SAME module, mounted a second time under the account-vocabulary
+    // prefix, exactly as `index.ts` registers it in production. Without this
+    // second registration the parity test below would exercise only the
+    // `/user/safes` half of the pair and could not have caught the 401.
+    await app.register(userSafesRoutes, { prefix: '/user/accounts' })
     // Cast as in owner-cli-authorization.test.ts: the declared JWT payload
     // type names only { sub, email }, but purpose-carrying tokens are real.
     ownerToken = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
@@ -254,5 +259,54 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
     expect(gnosis.statusCode).toBe(200)
     expect(gnosis.json().chain.name).toBe('Gnosis Chain')
     expect('faucet_url' in gnosis.json()).toBe(false)
+  })
+
+  // ── #2907 owner_cli parity across the safe/account twin prefixes ───
+
+  describe('#2907: owner_cli parity between /user/safes and /user/accounts', () => {
+    // Reproduces the exact probe from the review finding: a `purpose:
+    // 'owner_cli'` token got 200 on `/user/safes` and 401 on `/user/accounts`
+    // for the identical caller and the identical row, because the allow-list
+    // named only the `/user/safes` literal. Both prefixes are the SAME route
+    // module here (registered in beforeAll), so a real mismatch can only come
+    // from the allow-list, not from two diverging implementations.
+    it('GET / (list) gets the same status on both prefixes for an owner_cli token', async () => {
+      mockPoolQuery.mockResolvedValue({ rows: [] })
+
+      const safes = await app.inject({
+        method: 'GET',
+        url: '/user/safes',
+        headers: auth(ownerCliToken),
+      })
+      const accounts = await app.inject({
+        method: 'GET',
+        url: '/user/accounts',
+        headers: auth(ownerCliToken),
+      })
+
+      expect(accounts.statusCode).toBe(safes.statusCode)
+      expect(safes.statusCode).toBe(200)
+    })
+
+    it('GET /:safeId/funding gets the same status on both prefixes for an owner_cli token', async () => {
+      mockPoolQuery
+        .mockResolvedValueOnce({ rows: [ownershipRow()] })
+        .mockResolvedValueOnce({ rows: [ownershipRow()] })
+      mockGetChainClient.mockReturnValue(chainClientWithUsdc(0n))
+
+      const safes = await app.inject({
+        method: 'GET',
+        url: `/user/safes/${SAFE_ID}/funding`,
+        headers: auth(ownerCliToken),
+      })
+      const accounts = await app.inject({
+        method: 'GET',
+        url: `/user/accounts/${SAFE_ID}/funding`,
+        headers: auth(ownerCliToken),
+      })
+
+      expect(accounts.statusCode).toBe(safes.statusCode)
+      expect(safes.statusCode).toBe(200)
+    })
   })
 })

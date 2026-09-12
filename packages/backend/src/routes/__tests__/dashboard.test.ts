@@ -167,6 +167,54 @@ describe('dashboard routes', () => {
     expect(agentQuery).toContain("a.status IN ('active', 'paused')")
   })
 
+  // #2907 (naming P0 finding #2): DashboardAgentPreview and the preview
+  // transaction dual-emit the account_* twins, equal to their safe_*/safeId
+  // originals, ON THE WIRE. Dropping `withDashboardAgentAccountAlias(...)` or
+  // `withTransactionAccountAlias(...)` from this route leaves the mapper's own
+  // unit test green (it never calls the route) — this is the request-level
+  // check that catches it.
+  it('#2907: agents[] and transactions[] dual-emit the account_* twins', async () => {
+    const tx = {
+      hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+      type: 'native',
+      from: '0x2222222222222222222222222222222222222222',
+      to: SAFE.safe_address,
+      value: '1000000000000000000',
+      valueFormatted: '1',
+      asset: 'ETH',
+      decimals: 18,
+      direction: 'in',
+      timestamp: 1778240999,
+      blockNumber: 45725826,
+      isError: false,
+    }
+    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [tx] })
+    transactionMocks.mergeX402Transactions.mockImplementation(
+      async (_userId: string, _safes: unknown[], transactions: unknown[]) => transactions,
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.agents.length).toBeGreaterThan(0)
+    for (const agent of body.agents) {
+      expect(agent.accountId).toBe(agent.safeId)
+      expect(agent.accountName).toBe(agent.safeName)
+      expect(agent.accountChainId).toBe(agent.safeChainId)
+    }
+    expect(body.transactions.length).toBeGreaterThan(0)
+    for (const item of body.transactions) {
+      expect(item.accountId).toBe(item.safeId)
+      expect(item.accountAddress).toBe(item.safeAddress)
+      expect(item.accountName).toBe(item.safeName)
+    }
+  })
+
   // #2055 (epic #1440, #2021 readability waiver): the approval queue is gone,
   // so `actionableApprovals` / `pendingApprovals` are structurally zero — the
   // wire fields survive for compatibility but no query backs them anymore.

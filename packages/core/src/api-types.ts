@@ -791,14 +791,14 @@ export type paths = {
         /**
          * Rename a linked Safe.
          * @deprecated
-         * @description Display metadata only — the name exists nowhere on-chain. Deprecated — same value as `renameUserAccount`; removed in the release after #2908. Twin path: PUT /user/accounts/{accountId}.
+         * @description Display metadata only — the name exists nowhere on-chain. Deprecated — same value as `renameUserAccount`; removed in the release after #2908. Twin path: PUT /user/accounts/{safeId}. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
          */
         put: operations["renameUserSafe"];
         post?: never;
         /**
          * Unlink a Safe from the Haven account.
          * @deprecated
-         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key. Deprecated — same value as `unlinkUserAccount`; removed in the release after #2908. Twin path: DELETE /user/accounts/{accountId}.
+         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key. Deprecated — same value as `unlinkUserAccount`; removed in the release after #2908. Twin path: DELETE /user/accounts/{safeId}. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
          */
         delete: operations["unlinkUserSafe"];
         options?: never;
@@ -841,7 +841,7 @@ export type paths = {
         /**
          * Make a linked Safe the default.
          * @deprecated
-         * @description Exactly one Safe is default per user; setting one clears the previous. Deprecated — same value as `setDefaultUserAccount`; removed in the release after #2908. Twin path: PUT /user/accounts/{accountId}/default.
+         * @description Exactly one Safe is default per user; setting one clears the previous. Deprecated — same value as `setDefaultUserAccount`; removed in the release after #2908. Twin path: PUT /user/accounts/{safeId}/default. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
          */
         put: operations["setDefaultUserSafe"];
         post?: never;
@@ -881,7 +881,7 @@ export type paths = {
         /**
          * Machine-readable funding facts for one Safe: what to fund, with what, where, and how much.
          * @deprecated
-         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority. Deprecated — same value as `getAccountFunding`; removed in the release after #2908. Twin path: GET /user/accounts/{accountId}/funding.
+         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority. Deprecated — same value as `getAccountFunding`; removed in the release after #2908. Twin path: GET /user/accounts/{safeId}/funding. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
          */
         get: operations["getSafeFunding"];
         put?: never;
@@ -14955,7 +14955,7 @@ export interface operations {
                  * @description Deprecated — same value as `accountId`; removed in the release after #2908.
                  */
                 safeId?: string;
-                /** @description #2907 twin of 'safeId'; both accepted, both filter identically. */
+                /** @description #2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins. */
                 accountId?: string;
                 agentId?: string;
                 tokenKey?: string;
@@ -15018,7 +15018,7 @@ export interface operations {
                  * @description Deprecated — same value as `accountId`; removed in the release after #2908.
                  */
                 safeId?: string;
-                /** @description #2907 twin of 'safeId'; both accepted, both filter identically. */
+                /** @description #2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins. */
                 accountId?: string;
                 agentId?: string;
                 tokenKey?: string;

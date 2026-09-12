@@ -113,6 +113,56 @@ describe('agent routes', () => {
     // The populated shape is where drift would actually show.
     expectMatchesSpec('GET', '/agents/{id}', response.json())
 
+    // #2907 (naming P0 finding #2): the twin is asserted PRESENT and EQUAL
+    // to the old field ON THE WIRE — a request-level check, not just the
+    // mapper's own unit test. Removing the `withAgentAccountAlias(...)` call
+    // from this route leaves `wire-aliases.test.ts` green (it never calls the
+    // route) and this assertion is what catches it.
+    const body = response.json()
+    expect(body.account_id).toBe(body.safe_id)
+    expect(body.account_address).toBe(body.safe_address)
+    expect(body.account_name).toBe(body.safe_name)
+    expect(body.account_chain_id).toBe(body.safe_chain_id)
+
+    await app.close()
+  })
+
+  it('#2907: GET /agents (list) dual-emits the account_* twins, equal to safe_*', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+
+    // account_type is deliberately NOT 'delegator_hybrid': that branch reads
+    // active delegations through a second query, which this assertion does
+    // not need. Dispatched by SQL text rather than a positional per-call mock
+    // — the shrink-only db-mock ratchet (#1227) caps that count per file, and
+    // this file is already at its baseline.
+    mockQuery.mockImplementation(async () => ({
+      rows: [{
+        id: AGENT_UUID,
+        name: 'Research Agent',
+        description: null,
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        safe_id: SAFE_UUID,
+        safe_address: '0x2222222222222222222222222222222222222222',
+        safe_name: 'Main wallet',
+        safe_chain_id: 8453,
+        api_key_prefix: 'sk_agent_abc',
+        status: 'active',
+        account_type: 'hybrid',
+        created_at: '2026-05-25T12:00:00.000Z',
+        mcp_last_seen_at: null,
+      }],
+    }))
+
+    const response = await app.inject({ method: 'GET', url: '/agents' })
+
+    expect(response.statusCode).toBe(200)
+    const agent = response.json().agents[0]
+    expect(agent.account_id).toBe(agent.safe_id)
+    expect(agent.account_address).toBe(agent.safe_address)
+    expect(agent.account_name).toBe(agent.safe_name)
+    expect(agent.account_chain_id).toBe(agent.safe_chain_id)
+
     await app.close()
   })
 

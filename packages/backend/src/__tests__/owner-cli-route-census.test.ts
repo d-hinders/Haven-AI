@@ -340,9 +340,39 @@ describe('owner_cli route census (#2526)', () => {
       'GET /user/safes/{safeId}/funding',
       'POST /agents/{id}/delegations/build',
       'POST /agents/{id}/delegations/{hash}/revoke',
+      // #2907: the account-vocabulary twin mount carries identical authority
+      // to its `/user/safes*` counterpart above — pinned by name so a future
+      // edit to the list cannot silently drop one side of the pair again.
+      'GET /user/accounts',
+      'GET /user/accounts/{safeId}/funding',
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)
+    }
+  })
+
+  it('#2907: an owner_cli token gets IDENTICAL treatment on the safe/account twin paths', async () => {
+    // The bug this closes: `routeAllowsOwnerCli` compares the registered
+    // route's literal URL, so listing `/user/safes*` alone left the identical
+    // `/user/accounts*` mount refusing the same token for the same data. This
+    // is the enforcement-level half of that parity claim (no HTTP, no DB) —
+    // the full request/response parity lives in
+    // `routes/__tests__/user-safes-funding.test.ts`.
+    const routes = await census()
+    const byPrefix = new Map(routes.map((r) => [key(r), r]))
+    const pairs: [string, string][] = [
+      ['GET /user/safes', 'GET /user/accounts'],
+      ['GET /user/safes/{safeId}/funding', 'GET /user/accounts/{safeId}/funding'],
+    ]
+    for (const [safePath, accountPath] of pairs) {
+      const safeRoute = byPrefix.get(safePath)
+      const accountRoute = byPrefix.get(accountPath)
+      expect(safeRoute, safePath).toBeDefined()
+      expect(accountRoute, accountPath).toBeDefined()
+      expect(routeAllowsOwnerCli(asRequest(safeRoute!))).toBe(
+        routeAllowsOwnerCli(asRequest(accountRoute!)),
+      )
+      expect(routeAllowsOwnerCli(asRequest(accountRoute!))).toBe(true)
     }
   })
 })

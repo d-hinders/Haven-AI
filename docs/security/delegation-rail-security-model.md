@@ -790,6 +790,20 @@ hard backstop.
 > an additive `/user/accounts` prefix registration of the same handler
 > module — §2's invariant mapping and this doc's route list are otherwise
 > unaffected: no new authority, no new signing path.
+>
+> **Review-findings correction, same PR:** that additive `/user/accounts`
+> mount was NOT reflected in `middleware/owner-cli.ts`'s `OWNER_CLI_ALLOWED_
+> ROUTES`, which named only the `/user/safes` literal — `routeAllowsOwnerCli`
+> compares the registered route's exact URL, so an `owner_cli` token that
+> could read `GET /user/safes` and `GET /user/safes/{safeId}/funding` got a
+> 401 on the identical `/user/accounts` / `/user/accounts/{safeId}/funding`
+> mount, for the same data, through the same handler. This is a REFUSAL gap,
+> not an authorization grant — the token already had this read through the
+> `/user/safes` prefix — so fixing it (adding the two twin entries) does not
+> widen the owner_cli surface §9 below describes; it makes the surface
+> actually reachable through both names, which is the whole point of an
+> additive rename. Proven with a parity test that fails 4 assertions when the
+> twin entries are removed.
 
 > **Re-verified #2850:** this diff touched two files in this document's
 > covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by

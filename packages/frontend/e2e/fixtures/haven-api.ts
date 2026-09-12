@@ -841,19 +841,73 @@ export async function dismissMobileSidebar(page: Page) {
   const viewport = page.viewportSize()
   if (!viewport || viewport.width >= 1024) return
 
-  const closeButton = page.getByRole('button', { name: 'Close sidebar' })
-  if (await closeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    // No `{ force: true }` (#1749). It used to be required, and that was the
-    // undiagnosed symptom: `force` skips the actionability check, and the
-    // check this helper was failing is the hit-test — TopBar's `z-[100]`
-    // covered the toggle's `z-[60]`, so the real user gesture was impossible
-    // on every authenticated route below `lg`. Keeping the plain click makes
-    // this helper the regression canary: if the layering breaks again, every
-    // mobile e2e test fails here with "intercepts pointer events" instead of
-    // quietly forcing its way through.
-    await closeButton.click()
-    await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
+  /**
+   * #2902: decide from GEOMETRY, not from the toggle's accessible name.
+   *
+   * The helper used to ask `getByRole('button', { name: 'Close sidebar' })
+   * .isVisible()` and click only on true. That probe waits for nothing —
+   * `isVisible()` returns immediately (its `timeout` option is ignored,
+   * per Playwright's own types) — so it is a single instantaneous read of a
+   * label that is a FUNCTION OF THE VIEWPORT: Sidebar's `matchMedia` sync
+   * effect (Sidebar.tsx) sets `collapsed` on mount and on every breakpoint
+   * crossing, and the name derives from it (`Open sidebar` when collapsed,
+   * `Close sidebar` when not). Resize 1280 -> 390 mid-test — the shape
+   * `agent-card-name-measure` is built on — and the name flips a tick after
+   * the resize lands. Under CI load the probe could read the pre-commit DOM
+   * (`Close sidebar` still present, drawer already sliding closed), return
+   * true, and then `click()` re-resolved the role+name locator against a tree
+   * that would never contain that name again: a locator matching NOTHING polls
+   * until the TEST timeout kills it. `test.slow()` triples that spec's 60 s,
+   * so one lost race was 180 s per attempt on #2900/#2889 — attempt AND retry,
+   * because once the name is gone the failure is deterministic.
+   *
+   * The drawer's position IS the state, and it is the same fact
+   * `waitForDrawerOpen` (above) already trusts for the OPEN direction:
+   * `getBoundingClientRect()` reports the border box AFTER transforms, so
+   * open-below-`lg` reads `left === 0` (`translate-x-0`) and closed reads
+   * `left === -width` (`-translate-x-full`). The off-canvas drawer is
+   * `position: fixed`, so the box reads without reflowing anything.
+   */
+  const drawer = page.locator('aside').first()
+  const drawerLeft = async (): Promise<number | null> => {
+    const box = await drawer.boundingBox()
+    return box && box.width > 0 ? Math.round(box.x) : null
   }
+
+  // Settle before deciding: the drawer animates on `transition-transform
+  // duration-200` (and the resize also triggers Sidebar's matchMedia sync),
+  // so a single read can land mid-motion. Two consecutive equal reads ~300 ms
+  // apart mean the position has stopped changing; bounded at 10 s.
+  let left = await drawerLeft()
+  let stableFor = 0
+  const deadline = Date.now() + 10_000
+  while (stableFor < 300 && Date.now() < deadline) {
+    await page.waitForTimeout(150)
+    const next = await drawerLeft()
+    if (next === left) stableFor += 150
+    else stableFor = 0
+    left = next
+  }
+
+  // Settled closed (or no drawer box at all): nothing to dismiss. This also
+  // kills the old shape's second latent race — a stale probe reading
+  // `Close sidebar` off a closed drawer would have CLICKED THE DRAWER OPEN
+  // and then hung on the `Open sidebar` wait below.
+  if (left === null || left !== 0) return
+
+  // Settled OPEN: dismiss it. The plain click is kept deliberately — no
+  // `{ force: true }` (#1749). It used to be required, and that was the
+  // undiagnosed symptom: `force` skips the actionability check, and the check
+  // this helper was failing is the hit-test — TopBar's `z-[100]` covered the
+  // toggle's `z-[60]`, so the real user gesture was impossible on every
+  // authenticated route below `lg`. Keeping the plain click makes this helper
+  // the regression canary: if the layering breaks again, mobile e2e tests
+  // fail here with "intercepts pointer events" instead of quietly forcing
+  // their way through. Bounded at 10 s rather than the test timeout (#2902):
+  // a genuine failure reports in seconds, not minutes.
+  const closeButton = page.getByRole('button', { name: 'Close sidebar' })
+  await closeButton.click({ timeout: 10_000 })
+  await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible', timeout: 10_000 })
 }
 
 /**

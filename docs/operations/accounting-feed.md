@@ -62,7 +62,7 @@ mechanism live on 2026-07-16). The owner decisions of 2026-09-11 are in the
 | Variable | Meaning | dev | prod |
 |---|---|---|---|
 | `HAVEN_HOSTED` | The feed is a hosted add-on; nothing below matters on a self-host | `true` | `true` |
-| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval (the connection routes stay reachable behind the session — a connection can be made, nothing is fed). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so prod is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | unset — AND `HAVEN_REPORTING_FEED_ENABLED` unset or `false` (Coming soon) |
+| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval, and (#2918) the connection routes 404 too — `GET /connections`, `connect-url`, `api-key`, disconnect, activate, backfill and settings all answer the same 404 body as the feed actions; only `GET /providers` stays reachable (the Coming soon page reads it) and the OAuth callback redirects instead of 404ing (see *Routes*). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so prod is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | unset — AND `HAVEN_REPORTING_FEED_ENABLED` unset or `false` (Coming soon) |
 | `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | unset |
 | `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | unset until #2876 (zero rows) |
 | `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` | Retry-sweep cadence (#2866). Default 300 000 (5 min); floor 10 000; unset, empty, 0 or NaN take the default | default | default |
@@ -198,8 +198,8 @@ off**, and the two off states read differently — exposure (flipping
 | `hosted` | `enabled` | `/accounting` | sidebar entry | Settings → Accounting card |
 |---|---|---|---|---|
 | true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868) |
-| true | **false** | **Coming soon**: what the feed will do, the platforms being lined up, and "Nothing can be connected yet." No connect or sync control is reachable | rendered, with a muted **Soon** pill (accessible name and, below `lg`, visible text: *Coming soon*) | every provider listed as *Coming soon* with **no action at all** — not even a disabled Connect |
-| **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** |
+| true | **false** | **Coming soon**: what the feed will do, the platforms being lined up, and "Nothing can be connected yet." No connect or sync control is reachable | rendered, with a muted **Soon** pill (accessible name and, below `lg`, visible text: *Coming soon*) | every provider listed as *Coming soon* with **no action at all** — not even a disabled Connect. The controls are absent by design, not just disabled: the backend 404s the connection routes too (#2918), so a request the UI never offers would refuse anyway |
+| **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** — same backend 404 underneath (#2918) |
 
 In both off states the page header and the Settings card carry a neutral
 one-liner ("Accounting tool connections for agent spend." / "Your company's
@@ -220,27 +220,43 @@ stay 404.
 ## Routes
 
 Session-authenticated unless noted. `sync`, `verify` and `reopen` 404 when
-the feed is unavailable for the caller (`middleware/accountingFeed.ts` — 404,
-not 403, so an unentitled account learns nothing); `status` answers
-`available: false` instead; the connection routes are session-only and do not
-consult the flag.
+the feed is unavailable for the caller (`middleware/accountingFeed.ts` —
+`requireAccountingFeed`, 404 not 403, so an unentitled account learns
+nothing); `status` answers `available: false` instead.
 
-| route | what it does |
-|---|---|
-| `GET /accounting/providers` | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
-| `GET /accounting/connections` | the caller's connections — metadata only, never secrets: `status`, `statusReason`, `missingScopes`, `externalCompanyId` / `externalCompanyName`, `baseCurrency`, `feedFrom`, `isActiveDestination`, `settings: { suggestedAccount, autoFeed }`, `lastPushAt` |
-| `POST /accounting/connections/:provider/connect-url` | consent URL for a live OAuth2 provider: signed, purpose-scoped, provider-bound, single-use `state` (10 min). Also the **re-consent** path — issued for an existing row whatever its status |
-| `GET /accounting/connections/:provider/callback` | public, authenticated by the `state` (its `jti` is consumed before the code exchange). Reads the company (`getCompanyInfo`), refuses a ledger outside the supported currencies before storing anything (#2877), UPSERTs the row: on an existing row it replaces secrets, `granted_scope`, `status → connected`, and keeps `settings`, `feed_from`, the active flag and the sync history. A grant narrower than `requiredScopes` is stored as `scope_missing`. Redirects to `/accounting?provider=…&connect=…` |
-| `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (no live `api_key` provider today → 409); a ledger outside the supported currencies → 409 `UNSUPPORTED_BASE_CURRENCY` (#2877) |
-| `DELETE /accounting/connections/:provider` | disconnect: revoke at the provider first when the descriptor declares `revoke` (Fortnox does), then secrets cleared, row kept as `disconnected`, active flag dropped; a failed revoke still disconnects locally (one `warn` line, error NAME only: `accounting provider revoke failed on disconnect`) |
-| `POST /accounting/connections/:provider/activate` | make it the destination; stamps **`feed_from = now`** in the same transaction |
-| `POST /accounting/connections/:provider/backfill` | `{ since }`: moves `feed_from` **earlier only** (400 `SINCE_INVALID` / `SINCE_NOT_EARLIER`, 409 `NOT_ACTIVE`), records `settings.backfill`, runs one bounded sync; answers `{ feedFrom, fed }` |
-| `PATCH /accounting/connections/:provider/settings` | exactly `suggested_account` and `auto_feed`; anything else 400 `INVALID_SETTING` naming `key`; a SQL-side JSONB merge |
-| `GET /accounting/feed/status` | **200 in every state, including both OFF states** (#2869), always the complete shape: `hosted`, `enabled` (`flagEnabled` is the same value, deprecated in the spec, removed one release after #2869), `entitled`, `entitlementMode`, `liveSyncReady`, `available`, `connected` (= an active `connected` destination exists), `companyName`, `destination` — the destination row's `{ provider, displayName, status, companyName, lastPushAt }` whatever its status, or `null`; the page summary and the sidebar marker read it — `missingScopes` (of that row), `counts { pending, failed, exhausted }` over ALL the user's rows, `syncs` (recent rows) |
-| `POST /accounting/feed/sync` | Sync now: backfill + retry for the active destination, honouring `feed_from`; manual, so it pushes for an `auto_feed = false` connection too |
-| `GET /accounting/feed/verify/:paymentId` | live read-back through the active connection's connector: `registered` / `booked` (+ voucher) / `cancelled` / `missing` |
-| `POST /accounting/feed/reopen/:paymentId` | verification-gated reopen: flips `pushed → failed` ONLY when the provider confirms the record is gone; 409 otherwise, 409 `previous_company` for a row pushed under a previous company |
-| `POST /accounting/fortnox/push` | LEGACY asserting voucher push (`accounting/legacy/`); 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
+The connection routes (#2918, `requireAccountingFeature` in the same file)
+gate on `config.hosted && config.accountingEnabled` alone — **not** the
+account entitlement, which stays the feed's own gate (#2861): an unentitled
+account on a hosted, enabled deployment can still connect, activate and
+backfill, so upgrading later needs no reconnect. Same 404 body as
+`requireAccountingFeed`. `GET /providers` is the one exception — it stays
+session-only so the Coming soon page can still list platforms with the flag
+off — and the OAuth callback is the other: reached by a browser redirect, not
+a fetch the SPA controls, so a consent already in flight when the flag flips
+lands on `connect=error&reason=feature_off` instead of a bare 404, with the
+`state`'s `jti` still consumed either way (see the callback row below).
+
+| auth | route | what it does |
+|---|---|---|
+| session | `GET /accounting/providers` | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment. Never gated on the flag (#2918) — the Coming soon page reads it with the feed off |
+| session + feature gate | `GET /accounting/connections` | the caller's connections — metadata only, never secrets: `status`, `statusReason`, `missingScopes`, `externalCompanyId` / `externalCompanyName`, `baseCurrency`, `feedFrom`, `isActiveDestination`, `settings: { suggestedAccount, autoFeed }`, `lastPushAt`. 404 (#2918) when not hosted or the flag is off |
+| session + feature gate | `POST /accounting/connections/:provider/connect-url` | consent URL for a live OAuth2 provider: signed, purpose-scoped, provider-bound, single-use `state` (10 min). Also the **re-consent** path — issued for an existing row whatever its status. 404 (#2918) when not hosted or the flag is off, ahead of the unknown-provider 404 |
+| public (signed `state`) | `GET /accounting/connections/:provider/callback` | authenticated by the `state` (its `jti` is consumed before the code exchange, and before the feature check — see below). Reads the company (`getCompanyInfo`), refuses a ledger outside the supported currencies before storing anything, UPSERTs the row: on an existing row it replaces secrets, `granted_scope`, `status → connected`, and keeps `settings`, `feed_from`, the active flag and the sync history. A grant narrower than `requiredScopes` is stored as `scope_missing`. Redirects to `/accounting?provider=…&connect=…`. NOT gated the same way as the other connection routes (#2918): a consent already in flight when the flag is flipped off redirects `connect=error&reason=feature_off` — never a bare 404 — with the state still consumed, so it cannot be replayed once the flag comes back on |
+| session + feature gate | `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (no live `api_key` provider today → 409); a ledger outside the supported currencies → 409 `UNSUPPORTED_BASE_CURRENCY`. 404 (#2918) when not hosted or the flag is off |
+| session + feature gate | `DELETE /accounting/connections/:provider` | disconnect: revoke at the provider first when the descriptor declares `revoke` (Fortnox does), then secrets cleared, row kept as `disconnected`, active flag dropped; a failed revoke still disconnects locally (one `warn` line, error NAME only: `accounting provider revoke failed on disconnect`). 404 (#2918) when not hosted or the flag is off |
+| session + feature gate | `POST /accounting/connections/:provider/activate` | make it the destination; stamps **`feed_from = now`** in the same transaction. 404 (#2918) when not hosted or the flag is off |
+| session + feature gate | `POST /accounting/connections/:provider/backfill` | `{ since }`: moves `feed_from` **earlier only** (400 `SINCE_INVALID` / `SINCE_NOT_EARLIER`, 409 `NOT_ACTIVE`), records `settings.backfill`, runs one bounded sync; answers `{ feedFrom, fed }`. 404 (#2918) when not hosted or the flag is off |
+| session + feature gate | `PATCH /accounting/connections/:provider/settings` | exactly `suggested_account` and `auto_feed`; anything else 400 `INVALID_SETTING` naming `key`; a SQL-side JSONB merge. 404 (#2918) when not hosted or the flag is off |
+| session | `GET /accounting/feed/status` | **200 in every state, including both OFF states** (#2869), always the complete shape: `hosted`, `enabled` (`flagEnabled` is the same value, deprecated in the spec, removed one release after #2869), `entitled`, `entitlementMode`, `liveSyncReady`, `available`, `connected` (= an active `connected` destination exists), `companyName`, `destination` — the destination row's `{ provider, displayName, status, companyName, lastPushAt }` whatever its status, or `null`; the page summary and the sidebar marker read it — `missingScopes` (of that row), `counts { pending, failed, exhausted }` over ALL the user's rows, `syncs` (recent rows) |
+| session + `requireAccountingFeed` (entitlement) | `POST /accounting/feed/sync` | Sync now: backfill + retry for the active destination, honouring `feed_from`; manual, so it pushes for an `auto_feed = false` connection too |
+| session + `requireAccountingFeed` (entitlement) | `GET /accounting/feed/verify/:paymentId` | live read-back through the active connection's connector: `registered` / `booked` (+ voucher) / `cancelled` / `missing` |
+| session + `requireAccountingFeed` (entitlement) | `POST /accounting/feed/reopen/:paymentId` | verification-gated reopen: flips `pushed → failed` ONLY when the provider confirms the record is gone; 409 otherwise, 409 `previous_company` for a row pushed under a previous company |
+| session | `POST /accounting/fortnox/push` | LEGACY asserting voucher push (`accounting/legacy/`); 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
+
+"feature gate" above is `requireAccountingFeature` (#2918): `config.hosted &&
+config.accountingEnabled`, no entitlement check. "`requireAccountingFeed`
+(entitlement)" is the older gate that ALSO requires the account entitlement
+(#2861) — the feed actions still need it; connecting deliberately does not.
 
 ## Connection states
 

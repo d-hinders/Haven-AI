@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { requireAccountingFeature } from '../middleware/accountingFeed.js'
 import {
   BackfillRefusedError,
   ConnectionNotActivatableError,
@@ -73,7 +74,11 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // #2864: a connect refused because the company books in another currency
   // is the one failure the user can act on differently (pick another
   // company), so the redirect names it: `&reason=unsupported_currency`.
-  const redirect = (provider: string, outcome: 'connected' | 'denied' | 'error', reason?: 'unsupported_currency') =>
+  const redirect = (
+    provider: string,
+    outcome: 'connected' | 'denied' | 'error',
+    reason?: 'unsupported_currency' | 'feature_off',
+  ) =>
     `${accountingUrl}?provider=${encodeURIComponent(provider)}&connect=${outcome}${reason ? `&reason=${reason}` : ''}`
 
   function providerRefusal(err: unknown): { status: number; body: { error: string; error_code: string } } | null {
@@ -91,7 +96,10 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   })
 
   // GET /accounting/connections — the caller's connections, metadata only.
-  app.get('/connections', { onRequest: authMiddleware }, async (request) => {
+  // Gated (#2918): unlike /providers (a static registry the Coming soon page
+  // reads, #2869), this and every write below act on real state, so they
+  // 404 when the deployment is not hosted or the flag is off.
+  app.get('/connections', { onRequest: [authMiddleware, requireAccountingFeature] }, async (request) => {
     const { sub } = request.user as { sub: string }
     return { connections: await listConnectionSummaries(sub) }
   })
@@ -105,7 +113,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // settings, feed_from, active flag and sync history (`completeOAuth2Connect`).
   app.post<{ Params: ProviderParams }>(
     '/connections/:provider/connect-url',
-    { onRequest: authMiddleware },
+    { onRequest: [authMiddleware, requireAccountingFeature] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { provider } = request.params
@@ -128,6 +136,17 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
 
   // GET /accounting/connections/:provider/callback?code=&state= (public;
   // authenticated by the state).
+  //
+  // #2918: this route is special. It is reached by a browser redirect, not a
+  // fetch the SPA controls — a consent can be mid-flight when an operator
+  // flips the flag, and the user holding that browser tab did nothing wrong.
+  // A bare 404 here would be the one gated response that is NOT the SPA
+  // hiding a control it never showed; it would be a broken redirect the user
+  // is sitting on. So the feature-off path still redirects, named
+  // `reason=feature_off` so the frontend can render something more specific
+  // than "error" (`accounting=connect=error` is caller-facing regardless).
+  // And the `state`'s `jti` is consumed EITHER WAY — a state cannot be
+  // banked while the flag is off and replayed after it comes back on.
   app.get<{ Params: ProviderParams; Querystring: CallbackQuery }>(
     '/connections/:provider/callback',
     async (request, reply) => {
@@ -148,10 +167,16 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
 
       // Single-use: consumed BEFORE the code exchange, so a replay never
       // reaches the provider. A store that cannot answer refuses (see
-      // modules/accounting/oauth-state.ts).
+      // modules/accounting/oauth-state.ts). Consumed before the feature
+      // check too, so a state issued while the feature was on cannot be
+      // replayed after it is re-enabled.
       if (!(await consumeOAuthState(claims.jti))) {
         request.log.warn({ userId: claims.sub, provider }, 'accounting oauth state replayed or unverifiable — refused')
         return reply.redirect(redirect(provider, 'error'))
+      }
+
+      if (!config.hosted || !config.accountingEnabled) {
+        return reply.redirect(redirect(provider, 'error', 'feature_off'))
       }
 
       try {
@@ -176,7 +201,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // the provider, then store encrypted. The key is never echoed.
   app.post<{ Params: ProviderParams; Body: ApiKeyBody }>(
     '/connections/:provider/api-key',
-    { onRequest: authMiddleware },
+    { onRequest: [authMiddleware, requireAccountingFeature] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { provider } = request.params
@@ -198,7 +223,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // DELETE /accounting/connections/:provider — disconnect (row kept, secrets cleared).
   app.delete<{ Params: ProviderParams }>(
     '/connections/:provider',
-    { onRequest: authMiddleware },
+    { onRequest: [authMiddleware, requireAccountingFeature] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { provider } = request.params
@@ -214,7 +239,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // destination; feed_from = now.
   app.post<{ Params: ProviderParams }>(
     '/connections/:provider/activate',
-    { onRequest: authMiddleware },
+    { onRequest: [authMiddleware, requireAccountingFeature] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { provider } = request.params
@@ -235,7 +260,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // under settings.backfill, and one bounded sync runs.
   app.post<{ Params: ProviderParams; Body: BackfillBody }>(
     '/connections/:provider/backfill',
-    { onRequest: authMiddleware },
+    { onRequest: [authMiddleware, requireAccountingFeature] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { provider } = request.params
@@ -256,7 +281,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // that names the key.
   app.patch<{ Params: ProviderParams; Body: unknown }>(
     '/connections/:provider/settings',
-    { onRequest: authMiddleware },
+    { onRequest: [authMiddleware, requireAccountingFeature] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { provider } = request.params

@@ -1098,7 +1098,7 @@ export type paths = {
         };
         /**
          * PUBLIC OAuth callback — authenticated by the signed state, not by a session.
-         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" — nothing was stored; an existing connection is left as it was, and the user can pick another company).
+         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" — nothing was stored; an existing connection is left as it was, and the user can pick another company). #2918: this route is NEVER the bare 404 the other connection routes answer when the feature is off — a consent can be mid-flight when the flag is flipped, so the off-path still redirects, named `connect=error&reason=feature_off`, and the `state`'s `jti` is consumed either way (a state cannot be banked while the flag is off and replayed after it comes back on).
          */
         get: operations["accountingOAuthCallback"];
         put?: never;
@@ -8734,6 +8734,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description The deployment is not hosted, or the accounting feature flag is off. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     getAccountingConnectUrl: {
@@ -8774,7 +8789,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Unknown provider. */
+            /** @description Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8836,7 +8851,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal. */
+            /** @description Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal, or `&reason=feature_off` (#2918) when the deployment is not hosted or the flag is off. */
             302: {
                 headers: {
                     [name: string]: unknown;
@@ -8949,7 +8964,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Unknown provider. */
+            /** @description Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9013,6 +9028,21 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The deployment is not hosted, or the accounting feature flag is off. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9111,7 +9141,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description No connection for this provider. */
+            /** @description No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9212,7 +9242,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description No connection for this provider. */
+            /** @description No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9354,7 +9384,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description No connection for this provider. */
+            /** @description No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
             404: {
                 headers: {
                     [name: string]: unknown;

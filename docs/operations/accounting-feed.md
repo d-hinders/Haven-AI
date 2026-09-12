@@ -511,13 +511,24 @@ should be asked to read.
   currency, with the SEK capture kept below it as `Haven SEK ref` — one
   document, two clearly-labelled figures, rather than an invoice in kroner
   attached to a receipt that says kronor.
-- **No rate for that currency is *not ready*, never a fallback.** A
-  settlement-time pricing outage for the destination's currency — or a token
-  amount that is absent or negative — leaves the payment unfed and unclaimed,
-  so the retry sweep and the backfill can deliver it once a rate exists. A
+- **No rate for that currency is *not ready*, never a fallback** — and read
+  "not ready" precisely, because two cases hide under it:
+  - **The whole capture failed** (`fx_at` NULL — a pricing outage at
+    settlement). Genuinely backfillable: the next write, from the retry sweep,
+    the backfill or the proof-attach path, captures everything at once.
+  - **The capture succeeded but not for this currency** (`fx_at` set, the
+    currency absent from the map). **This never recovers.** The capture is
+    frozen as a whole, so the missing rate cannot be added later — its
+    book-time value is not knowable after the fact. The payment stays unfed
+    and unclaimed for that ledger permanently, re-evaluated cheaply by every
+    sweep without consuming an attempt. There is no operator action that
+    fixes it, and nothing to wait for; the honest reading is that this payment
+    has no book-time rate in that currency and never will.
+
+  Either way the row is untouched and every other destination is unaffected. A
   **zero** amount is fed, not withheld: the SEK path pushes a zero, and
-  withholding it here would leave such a payment re-evaluated by every sweep
-  forever, since no rate can ever make it ready. Feeding SEK into a non-SEK ledger would be a wrong
+  withholding it would leave such a payment in the second state above for a
+  reason no rate could ever fix. Feeding SEK into a non-SEK ledger would be a wrong
   number wearing the right label, so it is deliberately not done.
 - **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment
   into a USD-booking company carries the rate the source actually quoted

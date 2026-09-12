@@ -107,27 +107,25 @@ describe('recordMachinePaymentEvidenceBase', () => {
     await recordMachinePaymentEvidenceBase(payment())
 
     const { sql, params } = evidenceInsert()
-    expect(sql).toContain(
-      'amount_sek = COALESCE(machine_payment_evidence.amount_sek, EXCLUDED.amount_sek)',
-    )
-    expect(sql).toContain(
-      'fx_rate_sek = COALESCE(machine_payment_evidence.fx_rate_sek, EXCLUDED.fx_rate_sek)',
-    )
-    expect(sql).toContain(
-      'fx_source = COALESCE(machine_payment_evidence.fx_source, EXCLUDED.fx_source)',
-    )
+    // #2877: the four capture columns are gated on fx_at rather than each
+    // COALESCE'd, so the row always holds ONE capture from one price read.
+    // Per-column COALESCE was equivalent only while the capture was
+    // all-or-nothing; it stopped being so when a capture could succeed for one
+    // currency and fail for another, and the proof-attach path re-runs this
+    // write weeks later.
+    for (const column of ['amount_sek', 'fx_rate_sek', 'fx_source', 'fx_rates']) {
+      expect(sql).toContain(
+        `${column} = CASE WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.${column} ELSE machine_payment_evidence.${column} END`,
+      )
+    }
+    // fx_at itself stays COALESCE: it is the gate, and it must be write-once
+    // rather than gated on itself.
     expect(sql).toContain(
       'fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at)',
     )
-    // #2877: the rate map freezes WITH its timestamp, not independently —
-    // the proof-attach path re-runs this write weeks later, and a per-column
-    // COALESCE would let it fill a NULL map with a rate taken that day while
-    // fx_at still said settlement. MUTATION TARGET: replace the CASE with a
-    // plain COALESCE and the real-database test in
-    // modules/accounting/__tests__/ledger-currency.db.test.ts goes red.
-    expect(sql).toContain(
-      'WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.fx_rates',
-    )
+    // MUTATION TARGET: replace any of those CASEs with a plain COALESCE and
+    // the real-database tests in
+    // modules/accounting/__tests__/ledger-currency.db.test.ts go red.
 
     const excludedColumns = [
       'rail',

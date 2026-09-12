@@ -106,6 +106,11 @@ function ledgerAmount(entry: AccountingEntry, currency: LedgerCurrency): { amoun
  * supplier invoice: 15 junk decimals a provider may reject, and exponent
  * notation no accounting system reads as a number. Fixing the scale here is
  * what makes a computed amount indistinguishable in shape from a stored one.
+ *
+ * The no-exponent property holds below 1e21, where `toFixed` switches to
+ * exponent form regardless. Nothing a budget-constrained settlement can reach,
+ * and `NUMERIC(38,4)` would be out of range there too — recorded because the
+ * sentence above would otherwise read as unconditional.
  */
 function toLedgerScale(value: number): string {
   return value.toFixed(LEDGER_SCALE)

@@ -70,6 +70,12 @@ export interface BookTimeCapture extends BookTimeLedgerRates {
  * Returns `null` only when NOTHING was usable — the same "nulls, and never a
  * bogus zero, and never a blocked settlement" contract the SEK capture has
  * had since migration 026.
+ *
+ * One deliberate behaviour change from the SEK-only capture it replaces: this
+ * reads the price source even for a non-positive or unparseable amount, where
+ * the old function short-circuited. The rates are wanted regardless of the
+ * amount — they are what a ledger in another currency will need — and the
+ * 60 s price cache absorbs the read.
  */
 export async function getBookTimeCapture(
   tokenSymbol: string,

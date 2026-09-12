@@ -228,8 +228,11 @@ describeDb('multi-currency ledgers (#2877)', () => {
     // this pushes 10.42 into a Danish ledger as though it were kroner.
     expect(await feedSettledPayment(userId, paymentId)).toEqual({ outcome: 'not_fed' })
     expect(connector.pushed).toHaveLength(0)
-    // No claim row: the retry sweep and the backfill can still take it once a
-    // rate exists, exactly as a null amount_sek behaves on the SEK path.
+    // No claim row — but not, in this case, "until a rate exists": this row
+    // captured SEK, so its fx_at is set and the map can never gain DKK. The
+    // payment is unfeedable to a DKK ledger permanently, and is re-evaluated
+    // (cheaply, without consuming an attempt) by every sweep. Only a row whose
+    // whole capture failed — fx_at NULL — is genuinely backfillable.
     expect(await getSyncState(userId, 'memory', paymentId)).toBeNull()
   })
 
@@ -258,6 +261,40 @@ describeDb('multi-currency ledgers (#2877)', () => {
     // ledger at all, because its book-time rates are not knowable.
     expect(await feedSettledPayment(userId, paymentId)).toEqual({ outcome: 'not_fed' })
     expect(connector.pushed).toHaveLength(0)
+  })
+
+  it('a partial capture stays partial: a later write cannot fill amount_sek at a NEW rate under the OLD fx_at', async () => {
+    const { userId, agentId } = await seedUser()
+    await connectBooking(userId, 'SEK')
+    // The state #2877's merged capture made reachable and the pre-#2877 one
+    // could not: the price source quoted EUR but not SEK, so fx_at and the map
+    // are set and amount_sek is NULL. Found by review — under the per-column
+    // COALESCE the proof-attach path would later fill amount_sek with THAT
+    // day's rate while fx_at still said settlement, re-pricing a Swedish
+    // ledger on the path this change claims is untouched.
+    const paymentId = await seedSettled(userId, agentId, { fxRates: { EUR: 0.92 } })
+    await db.query(
+      `UPDATE machine_payment_evidence SET amount_sek = NULL, fx_rate_sek = NULL WHERE payment_intent_id = $1`,
+      [paymentId],
+    )
+    const before = await db.query<{ fx_at: Date }>(
+      `SELECT fx_at FROM machine_payment_evidence WHERE payment_intent_id = $1`,
+      [paymentId],
+    )
+
+    // A re-write long after settlement, with SEK quoting fine now.
+    await seedSettledAgain(userId, agentId, paymentId, { SEK: 20.84, EUR: 0.99 })
+
+    // MUTATION TARGET: restore `amount_sek = COALESCE(…, EXCLUDED.amount_sek)`
+    // in evidenceBaseUpsertSql and amount_sek fills with 20.84 — a rate from
+    // the day of the attach, stamped with the settlement fx_at above it.
+    const after = await db.query<{ amount_sek: string | null; fx_rate_sek: string | null; fx_at: Date }>(
+      `SELECT amount_sek, fx_rate_sek, fx_at FROM machine_payment_evidence WHERE payment_intent_id = $1`,
+      [paymentId],
+    )
+    expect(after.rows[0].amount_sek).toBeNull()
+    expect(after.rows[0].fx_rate_sek).toBeNull()
+    expect(after.rows[0].fx_at.toISOString()).toBe(before.rows[0].fx_at.toISOString())
   })
 
   it('a zero-amount payment feeds to a non-SEK ledger, exactly as it does to a SEK one', async () => {

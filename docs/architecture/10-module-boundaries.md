@@ -91,7 +91,7 @@ packages/backend/src/
   http/       thin fastify routes: validate -> call module -> serialize
 ```
 
-This is not invented from scratch. `modules/reporting/` and `modules/fee/`
+This is not invented from scratch. `modules/accounting/` (`modules/reporting/` until #2859) and `modules/fee/`
 (folded from `lib/reporting/` and `lib/fee/` by #998) already have this shape
 — a directory, an entry point, colocated tests — and they are visibly the
 most maintainable code in the backend. The target generalises them.

@@ -8,6 +8,10 @@ covers:
   - packages/backend/src/modules/accounting/company-info.ts
   - packages/backend/src/modules/accounting/feed-orchestrator.ts
   - packages/backend/src/modules/accounting/fortnox.ts
+  - packages/backend/src/modules/accounting/fortnox-connector.ts
+  - packages/backend/src/modules/accounting/retry-sweep.ts
+  - packages/backend/src/modules/accounting/provider.ts
+  - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
   - packages/backend/src/routes/accounting-connections.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
@@ -62,12 +66,9 @@ payments, it does not take part in making them.
 
 Two things on the Fortnox side decide whether step 1 succeeds:
 
-- **Who can connect.** The Fortnox user who approves the integration must be a
-  system administrator of that company with an integration licence. The epic
-  records this as **not yet verified** against a live customer (it is what
-  Fortnox's onboarding guidance says; the review of 2026-09-11 could not
-  confirm it on the developer pages) — so keep it out of external copy until
-  one connect has proven it, and treat a refused approval as the signal.
+- **Who can connect.** Fortnox decides which of its users may approve an
+  integration for a company. If Fortnox refuses the approval, ask your Fortnox
+  administrator to approve it or to grant you the right to.
 - **What the integration is allowed to do.** Haven asks Fortnox for exactly the
   permissions the feed needs — bookkeeping, supplier invoices, suppliers,
   archive, inbox, file attachments and *Företagsinformation* (company
@@ -144,7 +145,10 @@ Fortnox no longer honours either), clears the stored credentials, and stops
 feeding. What was already fed stays in Fortnox; the feed history stays in Haven
 and shows again if you reconnect. You can also remove the integration from
 inside Fortnox at any time — Haven then shows *Sign-in expired* the next time
-it has to renew its sign-in, within about an hour.
+it has to renew its sign-in, which happens on the next payment push or sync
+after the current sign-in lapses (a Fortnox sign-in lasts an hour; nothing
+renews it in the background, so a quiet connection shows the change only when
+the next payment settles or you press **Sync now**).
 
 ## The other platforms
 

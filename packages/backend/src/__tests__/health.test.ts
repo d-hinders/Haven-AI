@@ -131,6 +131,43 @@ describe('GET /health/ops', () => {
     expect(JSON.stringify(res.json())).not.toMatch(/user_id|userId|payment_id|paymentId|fortnox/)
   })
 
+  it('degrades accounting to nulls + unavailable when the counters throw — relayer and passport still answer, 200 (#2905)', async () => {
+    // MUTATION TARGET (routes/health.ts): remove the try/catch around
+    // getAccountingCounters and this is a 500 with no relayer on the wire.
+    const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(), child: vi.fn() }
+    app = Fastify({ logger: false })
+    app.addHook('onRequest', async (request) => {
+      request.log = log as never
+    })
+    registerHealthRoutes(app, {
+      checkDatabase: vi.fn().mockResolvedValue(undefined),
+      getRelayerStatus: () => [
+        { chainId: 8453, address: '0x1234567890123456789012345678901234567890', balanceWei: '42', low: true, checkedAt: '2026-09-12T00:00:00.000Z' },
+      ],
+      getPassportStatus: () => ({ configured: true }) as never,
+      trustProxyHops: 1,
+      opsToken: 'operator-secret',
+      getAccountingCounters: vi.fn(async () => {
+        const err = new Error('connect ECONNREFUSED db.internal:5432 password=hunter2')
+        err.name = 'DatabaseConnectionError'
+        throw err
+      }),
+    })
+    const res = await app.inject({ method: 'GET', url: '/health/ops', headers: { 'x-haven-ops-token': 'operator-secret' } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({
+      relayer: [expect.objectContaining({ chainId: 8453, low: true })],
+      passport: { configured: true },
+      trustProxy: { hops: 1, authRateLimitArmed: true },
+      accounting: { exhaustedSyncs: null, connectionsNeedingAttention: null, unavailable: true },
+    })
+    // The failure is logged at warn with the error's class only — never its message.
+    expect(log.warn).toHaveBeenCalledTimes(1)
+    expect(log.warn.mock.calls[0][0]).toEqual({ errName: 'DatabaseConnectionError' })
+    expect(JSON.stringify(log.warn.mock.calls[0])).not.toMatch(/hunter2|db\.internal|ECONNREFUSED/)
+    expect(JSON.stringify(res.json())).not.toMatch(/hunter2|db\.internal|ECONNREFUSED/)
+  })
+
   it('uses constant-time token comparison', async () => {
     const source = await readFile(new URL('../middleware/ops-token.ts', import.meta.url), 'utf8')
     expect(source).toContain('timingSafeEqual')

@@ -19,6 +19,24 @@ export interface HealthRouteOptions {
   getAccountingCounters: () => Promise<AccountingOpsCounters>
 }
 
+/**
+ * What `/health/ops` reports for `accounting`: the two counters, or — when the
+ * aggregate queries throw — both `null` with `unavailable: true`. The siblings
+ * on the payload are in-memory reads that cannot throw; the counters are the
+ * one database round-trip, and a database that is down must not take the
+ * relayer and passport diagnostics with it (that is exactly when on-call
+ * reads them).
+ */
+export type HealthOpsAccounting =
+  | (AccountingOpsCounters & { unavailable?: false })
+  | { exhaustedSyncs: null; connectionsNeedingAttention: null; unavailable: true }
+
+const ACCOUNTING_UNAVAILABLE: HealthOpsAccounting = {
+  exhaustedSyncs: null,
+  connectionsNeedingAttention: null,
+  unavailable: true,
+}
+
 /** Register the public liveness probe and the separately authenticated operator diagnostics. */
 export function registerHealthRoutes(app: FastifyInstance, options: HealthRouteOptions): void {
   app.get('/health', async (_request, reply) => {
@@ -50,6 +68,17 @@ export function registerHealthRoutes(app: FastifyInstance, options: HealthRouteO
       return reply.status(401).send({ error: 'Unauthorized' })
     }
 
+    // MUTATION TARGET (health.test.ts "degrades accounting"): without this
+    // catch a database error 500s the whole payload, siblings included.
+    let accounting: HealthOpsAccounting
+    try {
+      accounting = await options.getAccountingCounters()
+    } catch (err) {
+      // The error's class only — never its message, which can carry SQL or a host name.
+      request.log.warn({ errName: err instanceof Error ? err.name : typeof err }, 'health/ops accounting counters unavailable')
+      accounting = ACCOUNTING_UNAVAILABLE
+    }
+
     return {
       relayer: options.getRelayerStatus(),
       passport: options.getPassportStatus(),
@@ -57,7 +86,7 @@ export function registerHealthRoutes(app: FastifyInstance, options: HealthRouteO
         hops: options.trustProxyHops,
         authRateLimitArmed: options.trustProxyHops > 0,
       },
-      accounting: await options.getAccountingCounters(),
+      accounting,
     }
   })
 }

@@ -6,23 +6,33 @@ import {
   type Executor,
 } from '../../infra/repositories/accounting-connections.js'
 import { countExhaustedSyncs } from '../../infra/repositories/accounting-feed-syncs.js'
+import { scopesFromStatusReason } from './provider.js'
 
 /**
- * Operations signals for the accounting feed (#2872, epic #2858): the three
+ * Operations signals for the accounting feed (#2872, epic #2858): the
  * structured log events on-call greps for and the two counters `/health/ops`
  * exposes. Nothing here decides anything — it is what the module SAYS about
  * what it did.
  *
- * ## The three events
+ * ## The events
  *
  * | event | when | shape (besides `event`) |
  * |---|---|---|
  * | `accounting.sweep.run` | once per retry-sweep tick (`retry-sweep.ts`) | the `RetrySweepResult` counters |
+ * | `accounting.sweep.failed` | the tick threw outside a run — leader election or an unhandled error (`retry-sweep.ts`) | `err` |
  * | `accounting.sync.exhausted` | the sweep writes a row's terminal `exhausted:` reason | `userId`, `provider`, `paymentId`, `attempts`, `reason` |
- * | `accounting.connection.needs_attention` | a connection flips to a state only a re-consent resolves (`NEEDS_ATTENTION_STATUSES`) | `userId`, `provider`, `status`, `reason` |
+ * | `accounting.connection.needs_attention` | a connection flips to a state only a re-consent resolves (`NEEDS_ATTENTION_STATUSES`) | `userId`, `provider`, `status`, `reasonPrefix`, `missingScopes` |
  *
- * `reason` is the provider's error message as the ledger stores it — never
- * token material (the OAuth flow writes the error CODE, `oauth-flow.ts`).
+ * The event does NOT carry the row's full `status_reason`. That column holds
+ * the OAuth error code on a refused refresh (`oauth-flow.ts`) but, on the
+ * three `scope_missing` paths, the connector's free-text detail after the
+ * ` — ` separator — the provider's message and the request path, which for
+ * a supplier-lookup refusal embeds the recipient's name. Never token
+ * material, but per-tenant text that does not belong on a log line. So the
+ * line carries `reasonPrefix` (the text before ` — `, e.g.
+ * `missing scopes: invoice`, or the whole reason when it has no separator)
+ * and `missingScopes` (the parsed list); the full text stays on the row,
+ * which is what on-call reads (runbook: the SQL is next to each state).
  * Every line carries `event` so one grep (`"event":"accounting.`) finds all
  * of them whichever transport wrote it: the sweep writes through the app
  * logger it is given at boot, this file through `OpsEventSink`, which
@@ -42,6 +52,8 @@ export const ACCOUNTING_EVENT = {
   sweepRun: 'accounting.sweep.run',
   syncExhausted: 'accounting.sync.exhausted',
   connectionNeedsAttention: 'accounting.connection.needs_attention',
+  /** The sweep's tick threw outside a run (leader election, an unhandled error) — `retry-sweep.ts`, always at `warn`. */
+  sweepFailed: 'accounting.sweep.failed',
 } as const
 
 export type OpsEventLevel = 'info' | 'warn'
@@ -91,8 +103,31 @@ export async function flagConnectionStatus(
   // MUTATION TARGET (feed-orchestrator.test.ts "needs_attention event"):
   // without this emit a degraded connection is a dashboard-only fact.
   if (needsAttention(status)) {
-    emitOpsEvent('warn', { event: ACCOUNTING_EVENT.connectionNeedsAttention, userId, provider, status, reason })
+    emitOpsEvent('warn', {
+      event: ACCOUNTING_EVENT.connectionNeedsAttention,
+      userId,
+      provider,
+      status,
+      reasonPrefix: reasonPrefix(reason),
+      missingScopes: scopesFromStatusReason(reason),
+    })
   }
+}
+
+/** Separator between the parseable head of a `status_reason` and the connector's free-text detail. */
+const REASON_DETAIL_SEPARATOR = ' — '
+
+/**
+ * The part of a `status_reason` safe for a log line: everything before the
+ * ` — ` separator. Bounded by the repository's own head (`missing scopes:`
+ * plus scope tokens, or a short fixed phrase) and, for a reason without the
+ * separator, by `REASON_PREFIX_MAX_LENGTH` — so the line can never carry
+ * the 1000-character row text.
+ */
+export const REASON_PREFIX_MAX_LENGTH = 120
+export function reasonPrefix(reason: string | null): string | null {
+  if (reason === null) return null
+  return reason.split(REASON_DETAIL_SEPARATOR)[0].slice(0, REASON_PREFIX_MAX_LENGTH)
 }
 
 export interface AccountingOpsCounters {

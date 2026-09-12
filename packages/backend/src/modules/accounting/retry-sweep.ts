@@ -63,8 +63,10 @@ import { ACCOUNTING_EVENT } from './ops-signals.js'
  *   was considered, `debug` when idle); and one `accounting.sync.exhausted`
  *   line at `warn` for every row that takes the terminal reason — the
  *   signal on-call alerts on (thresholds in
- *   `docs/operations/accounting-feed.md`). Both carry `event` so a single
- *   grep finds them alongside `accounting.connection.needs_attention`.
+ *   `docs/operations/accounting-feed.md`). A tick that throws outside a run
+ *   (leader election, an unhandled error) logs `accounting.sweep.failed` at
+ *   `warn`. All carry `event` so a single grep finds them alongside
+ *   `accounting.connection.needs_attention`.
  */
 
 /** Terminal reason prefix on a row the sweep gave up on. */
@@ -335,7 +337,7 @@ export function startRetrySweep(opts: StartRetrySweepOptions): NodeJS.Timeout | 
         await runRetrySweep({ log: opts.log })
       })
     } catch (err) {
-      opts.log.warn({ err }, 'Accounting retry sweep failed')
+      opts.log.warn({ event: ACCOUNTING_EVENT.sweepFailed, err }, 'Accounting retry sweep failed')
     } finally {
       running = false
     }

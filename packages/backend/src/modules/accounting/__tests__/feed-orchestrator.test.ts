@@ -43,7 +43,7 @@ vi.mock('../../../infra/repositories/accounting-connections.js', async (importOr
 
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import { registerConnector, clearConnectors, InMemoryConnector, type AccountingConnector } from '../connector.js'
-import { setOpsEventSink, type OpsEvent, type OpsEventLevel } from '../ops-signals.js'
+import { flagConnectionStatus, setOpsEventSink, REASON_PREFIX_MAX_LENGTH, type OpsEvent, type OpsEventLevel } from '../ops-signals.js'
 
 const USER = 'u1'
 const PID = 'pi1'
@@ -140,6 +140,9 @@ describe('feed orchestrator (#499)', () => {
     expect(connectionMocks.setStatus).toHaveBeenCalledWith(USER, 'memory', 'scope_missing', expect.stringMatching(/insufficient scope/))
     expect(mocks.markFailed).not.toHaveBeenCalled()
     // #2872: the flip is announced as the needs_attention event, AFTER the write.
+    // #2905: the line carries the parseable head of the reason and the scope
+    // list — never the connector's free-text detail (which on a Fortnox
+    // supplier-lookup refusal embeds the recipient's name in the request path).
     expect(events).toEqual([
       {
         level: 'warn',
@@ -148,10 +151,13 @@ describe('feed orchestrator (#499)', () => {
           userId: USER,
           provider: 'memory',
           status: 'scope_missing',
-          reason: expect.stringMatching(/insufficient scope/),
+          reasonPrefix: 'missing scopes: attachments',
+          missingScopes: ['attachments'],
         },
       },
     ])
+    expect(JSON.stringify(events)).not.toMatch(/insufficient scope/)
+    expect(Object.keys(events[0].event).sort()).toEqual(['event', 'missingScopes', 'provider', 'reasonPrefix', 'status', 'userId'])
     expect(setStatusCallsAtEmit).toEqual([1])
   })
 
@@ -169,6 +175,8 @@ describe('feed orchestrator (#499)', () => {
     expect(events.map((e) => [e.level, e.event.event, e.event.status])).toEqual([
       ['warn', 'accounting.connection.needs_attention', 'scope_missing'],
     ])
+    expect(events[0].event).toMatchObject({ reasonPrefix: 'missing scopes: invoice', missingScopes: ['invoice'] })
+    expect(events[0].event).not.toHaveProperty('reason')
 
     // Positive control: a skip that is NOT about the grant leaves the connection alone — and says nothing.
     connectionMocks.setStatus.mockClear()
@@ -179,6 +187,27 @@ describe('feed orchestrator (#499)', () => {
     await feedSettledPayment(USER, PID)
     expect(connectionMocks.setStatus).not.toHaveBeenCalled()
     expect(events).toEqual([])
+  })
+
+  it('#2905: the needs_attention line is bounded — a 5000-char Fortnox reason with a recipient name in the path yields a short prefix and the scope list, the row keeps the full text', async () => {
+    const detail = `fortnox request failed (HTTP 403 [2000663]) on /suppliers?name=Acme%20Recipient%20AB ${'x'.repeat(5000)}`
+    const reason = `missing scopes: supplier, supplierinvoice — ${detail}`
+    await flagConnectionStatus(USER, 'fortnox', 'scope_missing', reason)
+    expect(connectionMocks.setStatus).toHaveBeenCalledWith(USER, 'fortnox', 'scope_missing', reason)
+    expect(events).toHaveLength(1)
+    const line = events[0].event
+    expect(line).toMatchObject({ reasonPrefix: 'missing scopes: supplier, supplierinvoice', missingScopes: ['supplier', 'supplierinvoice'] })
+    expect((line.reasonPrefix as string).length).toBeLessThanOrEqual(REASON_PREFIX_MAX_LENGTH)
+    expect(JSON.stringify(line)).not.toMatch(/Acme|suppliers\?name|xxxx/)
+    // A reason with no separator (the refused-refresh shape) is still capped, never the 1000-char row text.
+    events.length = 0
+    await flagConnectionStatus(USER, 'fortnox', 'needs_reauthorisation', `refresh refused: ${'y'.repeat(2000)}`)
+    expect((events[0].event.reasonPrefix as string).length).toBe(REASON_PREFIX_MAX_LENGTH)
+    expect(events[0].event.missingScopes).toEqual([])
+    // A null reason stays null.
+    events.length = 0
+    await flagConnectionStatus(USER, 'fortnox', 'revoked_at_provider', null)
+    expect(events[0].event).toMatchObject({ reasonPrefix: null, missingScopes: [] })
   })
 
   it('skips (no claim) when book-time SEK is missing', async () => {

@@ -118,8 +118,9 @@ where those differ from this record, they and the code win.
   working without the new scope.
 
 **Kept unverified on purpose:** that the connecting Fortnox user must be a
-system administrator with an integration licence. Documented as such; not in
-external copy.
+system administrator with an integration licence. Stated only in the runbook's
+*Provider notes*, labelled unverified; not in the product doc and not in
+external copy (review on #2905 removed it from the product doc).
 
 **Invariants preserved** (#491, `CLAUDE.md`): the feed never asserts VAT,
 accounts or rows; never blocks settlement; is idempotent on

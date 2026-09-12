@@ -142,7 +142,10 @@ describe('accounting retry sweep (#2866)', () => {
 
       leader.mockImplementation(async () => { throw new Error('lock down') })
       await vi.advanceTimersByTimeAsync(1_000)
-      expect(log.lines.some((l) => l.level === 'warn' && l.msg === 'Accounting retry sweep failed')).toBe(true)
+      // #2905: the failure line carries `event` like its siblings, so one grep finds it.
+      const failed = log.lines.filter((l) => l.level === 'warn' && l.msg === 'Accounting retry sweep failed')
+      expect(failed).toHaveLength(1)
+      expect(failed[0].obj).toMatchObject({ event: 'accounting.sweep.failed', err: expect.any(Error) })
       clearInterval(timer!)
     })
   })

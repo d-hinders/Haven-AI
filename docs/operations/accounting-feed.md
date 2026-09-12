@@ -12,7 +12,13 @@ covers:
   - packages/backend/src/infra/repositories/accounting-connections.ts
   - packages/backend/src/db/migrations/080_accounting_connections.ts
   - packages/backend/src/db/migrations/081_drop_fortnox_connections_retired.ts
+  - packages/backend/src/config.ts
+  - packages/backend/src/index.ts
+  - packages/backend/src/modules/agents/entitlements.ts
+  - packages/backend/src/modules/transactions/accounting.ts
+  - packages/backend/src/modules/x402/settlement-sweeper.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
+  - packages/frontend/src/app/(authenticated)/settings/SettingsClient.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/hooks/useAccounting.ts
   - packages/frontend/src/components/accounting/ConnectionsCard.tsx
@@ -48,7 +54,7 @@ mechanism live on 2026-07-16). The owner decisions of 2026-09-11 are in the
 | Variable | Meaning | dev | prod |
 |---|---|---|---|
 | `HAVEN_HOSTED` | The feed is a hosted add-on; nothing below matters on a self-host | `true` | `true` |
-| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval (the connection routes stay reachable behind the session — a connection can be made, nothing is fed). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` | `true` | unset (Coming soon) |
+| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval (the connection routes stay reachable behind the session — a connection can be made, nothing is fed). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so prod is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | unset — AND `HAVEN_REPORTING_FEED_ENABLED` unset or `false` (Coming soon) |
 | `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | unset |
 | `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | unset until #2876 (zero rows) |
 | `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` | Retry-sweep cadence (#2866). Default 300 000 (5 min); floor 10 000; unset, empty, 0 or NaN take the default | default | default |
@@ -105,14 +111,24 @@ and the degraded-destination rules apply identically.
 question, not an accounting one — the feed needs a `machine_payment_evidence`
 row, and that row is written when an intent reaches `confirmed`. The erc7710
 paths that can leave a settled payment without one, the leader-gated sweep
-that completes them, its 24-hour recovery horizon and the two `warn` lines
-that carry a `remedy` — `Settled erc7710 payment is past its settlement window
-and the sweep cannot attribute it` and `Settlement sweep confirmed an erc7710
-payment but no evidence row landed` — are documented where that code is:
+that completes them and its 24-hour recovery horizon are documented where
+that code is:
 [`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md)
 § *Completing an erc7710 settlement* and § *Completing a settlement nobody
 reported*. If `/accounting` has **no row** for a payment the user can see on
 Transactions, start there; if it has a row, stay here.
+
+**Settlement-side reasons and fixes** (`settlement-sweeper.ts`, verified at
+this head). Three `warn` lines can name such a payment; only the first carries
+a `remedy` field, the other two carry a `reason`:
+
+| line | `reason` | what it means | fix |
+|---|---|---|---|
+| `Settled erc7710 payment is past its settlement window and the sweep cannot attribute it` (`paymentId`, `agentId`, `chainId`, `delegationHash`, `reason`, `remedy`) | `no_manager_log` | the route that settled it emitted no decodable DelegationManager log, so the sweep will not attribute by shape | the `remedy` says it: have the agent re-report the merchant's settlement transaction hash to `POST /machine-payments/evidence` with its own credential — that path runs the same verifier without `requireDelegationBound` and is not horizon-bound |
+| same line | `ambiguous_redemption` | two different transactions redeemed the same settlement child (look-alike payments authorized before #2094) — a fact Haven will not resolve by choosing | a human decides which payment the settlement belongs to first; then the same re-report |
+| `Settlement sweep confirmed an erc7710 payment but no evidence row landed` (`paymentId`, `agentId`, `txHash`, `chainId`, `outcome`, `reason`) | `missing_resource_url`, `intent_not_found`, `write_threw` | the intent flipped `submitted → confirmed` but the `machine_payment_evidence` write failed; the tick counts it as `evidenceFailed`, not `evidencePushed` | nothing, at first: the recovery pass re-derives the hole from state (confirmed erc7710 intent, no evidence row) and retries it every tick — `evidenceRecovered` counts the ones that close |
+| `Settled erc7710 payment is confirmed with no evidence row and the row could not be written` (same fields, from the recovery pass, every attempt it cannot satisfy) | `missing_resource_url` | the one non-transient cause: `machine_payment_evidence.resource_url` is NOT NULL and the intent's `payment_resource_url` and `x402_resource_url` are both null, so the row can never be written | set the intent's resource URL to the merchant resource the payment paid for. The recovery pass backs a repeatedly failing payment off exponentially from the 2-minute tick to a ceiling of **1 h** (`SCAN_BACKOFF_MAX_MS`), so a long-stuck payment may wait up to an hour after the fix; the backoff is in-memory, so **restarting the leader clears it**. After **24 h** (`SWEEP_RECOVERY_HORIZON_SECONDS`) the payment leaves the recovery horizon and needs a manual evidence write — the same `POST /machine-payments/evidence` re-report |
+| same line | `intent_not_found`, `write_threw` | transient (a database blip, a lost connection) | the next tick closes it; if it repeats, read `err` on the neighbouring `Settlement sweep evidence recovery failed` line |
 
 ## Where it shows
 
@@ -129,11 +145,22 @@ Transactions, start there; if it has a row, stay here.
   (`?provider=<id>&connect=connected|denied|error[&reason=unsupported_currency]`).
   #2869 reworks the page, adds the sidebar badge for a connection needing
   attention and the prod *Coming soon* state — not merged; not described here.
+- **Where the user manages it (#2868, PR #2903)** — the *Accounting*
+  card on `/settings` (`SettingsClient.tsx` →
+  `components/accounting/ConnectionsCard.tsx`, with `ConnectionRow`,
+  `ConnectionSettings` and `BackfillDialog`): one row per provider with
+  Connect / Reconnect / Disconnect, the per-connection settings and the
+  backfill choice on connect. The product doc describes the states as the
+  user sees them; those four component files are covered here once #2903
+  merges (they do not exist on this branch, so they are not in `covers:` yet).
 - **`/transactions`** (#2870) — a badge per fed row: *In Fortnox* (`pushed`),
   *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`, the `error` on
   hover), linking to `/accounting`. Emitted only when the account is
-  entitled, has a connection AND a sync row exists — no badge means "not
-  entitled / not connected / before `feed_from`", never "failed".
+  entitled, has an ACTIVE destination in `connected` (`hasActiveConnection`
+  — a destination in `needs_reauthorisation` / `scope_missing` hides every
+  badge on the page, including *In Fortnox* on rows already delivered) AND a
+  sync row exists — no badge means "not entitled / not connected / connection
+  degraded / before `feed_from`", never "failed".
 
 ## Routes
 
@@ -171,7 +198,7 @@ which is what `missingScopes` on the API reads.
 | status | how a row gets here | what the feed does meanwhile | the way out |
 |---|---|---|---|
 | `connected` | connect / reconnect callback; a validated API key | feeds | — |
-| `needs_reauthorisation` | the token endpoint refused the refresh with a verdict on the GRANT: `invalid_grant`, or a 400/403 with no readable code (`oauth-flow.ts`). NOT on 401 / `invalid_client` and the other client-side codes — those are Haven's credentials — and not on 429 / 408 / 5xx / network, which leave the row untouched with the refresh token unconsumed | still the destination; every payment is recorded `skipped` with `connection needs_reauthorisation: <reason>`; nothing is refreshed, nothing pushed; the sweep leaves its rows alone | the user's **Reconnect** (the same connect-url + callback on the same row); then the skipped rows are re-claimed by the sweep or Sync now |
+| `needs_reauthorisation` | the token endpoint refused the refresh with a verdict on the GRANT: `invalid_grant`; a 400/403 with no readable code; or a 400/403 carrying any code that is NOT one of the client-side ones (`isGrantRefusal`, `oauth-flow.ts`). NOT on 401 / `invalid_client` and the other client-side codes — those are Haven's credentials — and not on 429 / 408 / 5xx / network, which leave the row untouched with the refresh token unconsumed | still the destination; every payment is recorded `skipped` with `connection needs_reauthorisation: <reason>`; nothing is refreshed, nothing pushed; the sweep leaves its rows alone | the user's **Reconnect** (the same connect-url + callback on the same row); then the skipped rows are re-claimed by the sweep or Sync now |
 | `scope_missing` | (1) at the callback, the echoed scope string is short of `requiredScopes`; (2) at connect, the company read was refused for scope; (3) PRE-push, the create call itself was refused for scope — the sync row is `skipped` (`scope refused before the invoice was created: …`), nothing exists at the provider; (4) POST-push, the attachment step was refused — the sync row stays **`pushed`** with the note, never re-pushed | no destination: no new rows, `syncUser` feeds nothing, the sweep's `c.status = 'connected'` leaves its rows alone | **Reconnect**; the callback UPDATEs the row and keeps settings, floor, flag and history. If it comes straight back `scope_missing`: the provider app registration lacks that scope (Fortnox: the developer-portal permissions must include every entry of `FORTNOX_SCOPE`) |
 | `revoked_at_provider` | reserved for a provider that reports a revocation to Haven (Fortnox has a consent-revoked webhook; Haven does not receive it). **No code path sets it today**; a revocation inside Fortnox surfaces as `needs_reauthorisation` at the next refresh | as `needs_reauthorisation` | Reconnect |
 | `disconnected` | the user's Disconnect; secrets NULL, `secrets_key_version = 0`, flag dropped, `status_reason = user disconnected [(grant revoked at provider)]` | nothing; history kept | **Connect** (the same row is reused; settings survive) |
@@ -293,8 +320,8 @@ to the 1 h cap.
 
 ## Ops signals: log events, counters, alert thresholds
 
-Three structured events (#2872), every line carrying `event`, so one grep —
-`"event":"accounting.` — finds all of them. All three reach the app logger:
+Four structured events (#2872), every line carrying `event`, so one grep —
+`"event":"accounting.` — finds all of them. All of them reach the app logger:
 the sweep writes through the logger it is given at boot; the connection event
 goes through `setOpsEventSink`, which `index.ts` points at the same logger
 (default `console`, for a flow run without the app).
@@ -303,11 +330,11 @@ goes through `setOpsEventSink`, which `index.ts` points at the same logger
 |---|---|---|---|
 | `accounting.sweep.run` | `info` when `considered > 0`, else `debug` | once per sweep tick | `considered`, `pushed`, `failed`, `deferred`, `exhausted`, `skipped`, `connections`, `rateLimited` |
 | `accounting.sync.exhausted` | `warn` | the sweep wrote a row's terminal reason (only when the guarded write took) | `userId`, `provider`, `paymentId`, `attempts` (8), `reason` (the last provider message) |
-| `accounting.connection.needs_attention` | `warn` | a connection was written `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — every write site goes through `flagConnectionStatus` (`ops-signals.ts`) | `userId`, `provider`, `status`, `reason` (the `status_reason`; the provider's error code, never token material) |
+| `accounting.connection.needs_attention` | `warn` | a connection was written `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — every write site goes through `flagConnectionStatus` (`ops-signals.ts`) | `userId`, `provider`, `status`, `reasonPrefix` (the head of the row's `status_reason` before its ` — ` separator — `missing scopes: a, b`, or `refresh refused: <OAuth error code>` — capped at 120 characters), `missingScopes` (the parsed list; empty unless the prefix names scopes). The line never carries the connector's free-text detail: on the `scope_missing` paths the row's full `status_reason` embeds the provider's message and the refused request path (a supplier-lookup refusal includes the recipient's name), so read that from the row, not the log. Never token material |
+| `accounting.sweep.failed` | `warn`, always logged | the sweep's tick threw outside a run — leader election or the query layer, not a push (`Accounting retry sweep failed`) | `err` |
 
-`Accounting retry sweep failed` (`warn`, with `err`) is the leader-election or
-query layer, not a push. `accounting_company_switch` (`info`, JSON on
-`console`) is the #2864 company-switch line.
+`accounting_company_switch` (`info`, JSON on `console`) is the #2864
+company-switch line.
 
 **Counters** on `GET /health/ops` (`X-Haven-Ops-Token`; 404 when
 `HAVEN_OPS_TOKEN` is unset, 401 on a wrong token — the accounting queries run
@@ -318,7 +345,10 @@ only after the token passes), under `accounting`:
 | `exhaustedSyncs` | `COUNT(*) FROM accounting_feed_syncs WHERE status = 'failed' AND attempts >= 8` (`COUNT_EXHAUSTED_SYNCS_SQL`) | rows the sweep has given up on, deployment-wide — the same predicate as the per-user `counts.exhausted`, never the reason prefix |
 | `connectionsNeedingAttention` | `COUNT(*) FROM accounting_connections WHERE status IN ('needs_reauthorisation', 'scope_missing', 'revoked_at_provider')` (`COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL`) | connections only a re-consent resolves; `disconnected` is the user's choice and is not counted |
 
-Both are read live, one aggregate each, no per-user data on the wire.
+Both are read live, one aggregate each, no per-user data on the wire. When
+the queries throw, both fields are `null` and `unavailable: true` is added —
+the route answers 200 with the in-memory fields intact rather than 500ing
+the whole payload (review on #2905).
 
 **Alert thresholds** (dev today; the numbers are the first honest ones, not
 tuned ones — a handful of connections exist):
@@ -330,7 +360,9 @@ tuned ones — a handful of connections exist):
 | `accounting.connection.needs_attention` | one occurrence is expected product behaviour (the user reconnects); alert when **the same user flips again within 10 minutes of a reconnect** | the re-consent cannot grant what the app registration does not declare, or the client credentials are wrong — an operator problem |
 | `connectionsNeedingAttention` | `>= 3` at once, or `>= 50 %` of `SELECT count(*) FROM accounting_connections WHERE status <> 'disconnected'` | several grants died together: a rotated `FORTNOX_CLIENT_SECRET` shows as 401s in the log and flips nobody, so this shape points at a scope change in the app registration or a provider-side revocation |
 | `accounting.sweep.run` with `rateLimited > 0` | three consecutive ticks | another integration is spending the tenant's Fortnox budget — the sweep's own pacing cannot cause a 429 |
-| `accounting.sweep.run` absent | > 2 × the interval on the leader — **only meaningful with the logger at `debug`**, since an idle tick logs at that level; at `info` the line appears only when a row was due | the sweep is not running: the flag is off, or the leader lock is held elsewhere; `Accounting retry sweep failed` (`warn`, always logged) says which |
+| `accounting.sweep.run` absent | > 2 × the interval on the leader — **only meaningful with the logger at `debug`**, since an idle tick logs at that level; at `info` the line appears only when a row was due | the sweep is not running: the flag is off, or the leader lock is held elsewhere; `accounting.sweep.failed` (`warn`, always logged) says which |
+| `accounting.sweep.failed` | two consecutive ticks | the tick cannot even start: the leader lock's advisory query fails, or `listDueRetrySyncs` throws — a database problem on the leader, not a provider one; read `err` |
+| `accounting.unavailable: true` on `/health/ops` | any | the two aggregate counters threw (the route logs `health/ops accounting counters unavailable` at `warn` with the error's class); the relayer and passport fields still answer, so the database, not the process, is the first thing to check |
 | `[accounting] could not re-encrypt secrets for connection=` at boot | any | a version-0 row the boot job could not encrypt; see *Secrets at rest* |
 
 ## Secrets at rest, and the key
@@ -469,8 +501,10 @@ Basic client auth) before the secrets are cleared; a failed revoke still
 clears locally. The user can always also remove the integration inside Fortnox.
 
 **Error codes seen live.** `[2000663]` scope — mapped to the scope the endpoint
-needed (`fortnoxScopeForPath`: `/supplierinvoices` → `supplierinvoice`,
-`/inbox` → `inbox`, `/supplierinvoicefileconnections` → `connectfile`) because
+needed (`fortnoxScopeForPath`, five entries: `/supplierinvoicefileconnections`
+→ `connectfile`, `/supplierinvoices` → `supplierinvoice`, `/suppliers` →
+`supplier`, `/inbox` → `inbox`, `/companyinformation` →
+`companyinformation`; any other path → no scope named) because
 Fortnox does not say which; a bare 403 counts as scope, a 403 with another code
 (a licence error such as `[2003295]`) is a plain `failed`. `[2000359]`
 non-ASCII in Comments/Name (middle dots, `://`, `…`) — the connector sanitises;

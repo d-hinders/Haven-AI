@@ -34,7 +34,7 @@ import agentActivityRoutes from '../../../routes/agent-activity.js'
 import userSafesRoutes from '../../../routes/user-safes.js'
 import machinePaymentRoutes from '../../../routes/machine-payments.js'
 import { buildApp } from '../../../__tests__/helpers.js'
-import { buildPaymentReceipt, type PaymentReceiptRow } from '../../../modules/payments/receipt.js'
+import { buildPaymentReceipt, type PaymentReceiptRow } from '../../../modules/payments/index.js'
 
 const FIXTURES_DIR = path.dirname(fileURLToPath(import.meta.url))
 const BASE_SHA = '6e3ea1dc'

@@ -14,10 +14,13 @@
  * This file writes fixtures as a side effect of one `it()` — it is a
  * recording tool, not a behavioral assertion, and is not part of the P0
  * replay suite (that is `openapi/__tests__/p0-characterization.test.ts` at
- * HEAD). It is committed so the recording is reproducible, but is not run as
- * part of the ordinary CI test pass (the ordinary include pattern collects
- * it like any other `*.test.ts`; the single `it()` is intentionally cheap —
- * see the report for why it is not gated out here).
+ * HEAD). It is committed so the recording is reproducible. The ordinary
+ * include pattern collects it like any other `*.test.ts`, so the recording
+ * `it()` is SKIPPED unless `P0_CHARACTERIZATION_RECORD=1` is set — and even
+ * then `record.ts` refuses to run anywhere but the base commit
+ * (`assertRunningAtBaseSha`). To re-record: check out a scratch worktree at
+ * the base SHA and run
+ * `P0_CHARACTERIZATION_RECORD=1 npx vitest run src/openapi/__fixtures__/p0-characterization/record.run.test.ts`.
  */
 import { describe, it, expect, vi } from 'vitest'
 
@@ -57,7 +60,7 @@ vi.mock('../../../modules/passport/index.js', () => ({
 }))
 
 describe('#2907 AC #1 recorder (base 6e3ea1dc)', () => {
-  it(
+  it.skipIf(process.env.P0_CHARACTERIZATION_RECORD !== '1')(
     'records every P0-twinned route response under the OLD names',
     async () => {
       const { recordAll } = await import('./record.js')

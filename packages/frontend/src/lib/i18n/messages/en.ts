@@ -280,7 +280,7 @@ export const en = {
         connected: (provider: string) => `${provider} is connected.`,
         denied: (provider: string) => `You declined the ${provider} consent. Nothing was connected.`,
         unsupportedCurrency:
-          'Haven currently feeds SEK ledgers only. Choose a company that books in SEK and try again.',
+          'Haven feeds ledgers that book in SEK, EUR, USD, DKK, NOK or GBP. Choose a company that books in one of those and try again.',
         error: (provider: string) => `We could not connect ${provider}. Try again in a moment.`,
       },
     },

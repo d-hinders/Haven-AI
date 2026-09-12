@@ -1,5 +1,6 @@
 import { listUnpushedPaymentIds, countSyncsForUser, type FeedSyncCounts } from '../../infra/repositories/accounting-feed-syncs.js'
 import { connectionSettings, getActiveConnection, listConnections, type ConnectionSettings } from '../../infra/repositories/accounting-connections.js'
+import { DEFAULT_LEDGER_CURRENCY, type LedgerCurrency, ledgerCurrencyOrDefault } from '../../domain/ledger-currency.js'
 import { flagConnectionStatus } from './ops-signals.js'
 import { accountingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from './entry.js'
@@ -23,14 +24,14 @@ import { claimSync, markPushed, markFailed, markSkipped, listSyncs, type FeedSyn
  * automatic paths, `suggestedAccount` is the hint the connector may surface.
  */
 type ActiveDestination =
-  | { kind: 'ready'; provider: string; connector: AccountingConnector; feedFrom: Date | null; settings: ConnectionSettings }
+  | { kind: 'ready'; provider: string; connector: AccountingConnector; feedFrom: Date | null; settings: ConnectionSettings; ledgerCurrency: LedgerCurrency }
   /**
    * #2863: the active row's grant is dead (`needs_reauthorisation`,
    * `revoked_at_provider`). Nothing is pushed and nothing is refreshed; each
    * payment that would have been fed gets a `skipped` row naming the state,
    * re-claimable once the user re-consents.
    */
-  | { kind: 'degraded'; provider: string; status: DegradedConnectionStatus; reason: string | null; feedFrom: Date | null; settings: ConnectionSettings }
+  | { kind: 'degraded'; provider: string; status: DegradedConnectionStatus; reason: string | null; feedFrom: Date | null; settings: ConnectionSettings; ledgerCurrency: LedgerCurrency }
 
 /** A user with no row at all (the registry-scan fallback) has no settings: the defaults. */
 const DEFAULT_SETTINGS: ConnectionSettings = { suggestedAccount: null, autoFeed: true }
@@ -67,6 +68,10 @@ async function getActiveDestination(userId: string): Promise<ActiveDestination |
       connector,
       feedFrom: active.feed_from ? new Date(active.feed_from) : null,
       settings: connectionSettings(active),
+      // #2877: what the connected company books in, as reported by the
+      // provider at connect and refused there if unsupported. A row whose
+      // provider could not say books in the default.
+      ledgerCurrency: ledgerCurrencyOrDefault(active.base_currency),
     }
   }
   // MUTATION TARGET (feed-from.db.test.ts "a degraded active row feeds
@@ -86,13 +91,16 @@ async function getActiveDestination(userId: string): Promise<ActiveDestination |
           reason: r.status_reason,
           feedFrom: r.feed_from ? new Date(r.feed_from) : null,
           settings: connectionSettings(r),
+          ledgerCurrency: ledgerCurrencyOrDefault(r.base_currency),
         }
       }
     }
     return null
   }
   for (const connector of listConnectors()) {
-    if (await connector.isConnected(userId)) return { kind: 'ready', provider: connector.provider, connector, feedFrom: null, settings: DEFAULT_SETTINGS }
+    if (await connector.isConnected(userId)) {
+      return { kind: 'ready', provider: connector.provider, connector, feedFrom: null, settings: DEFAULT_SETTINGS, ledgerCurrency: DEFAULT_LEDGER_CURRENCY }
+    }
   }
   return null
 }
@@ -154,10 +162,15 @@ export async function feedSettledPayment(userId: string, paymentId: string, opts
 
   const entry = await buildAccountingEntryForPayment(userId, paymentId)
   if (!entry) return notFed
-  const tx = toFeedTransaction(entry, { connectionSuggestedAccount: destination.settings.suggestedAccount })
-  // Not ready: no book-time SEK yet. Don't feed an amount-less transaction —
+  const tx = toFeedTransaction(entry, {
+    connectionSuggestedAccount: destination.settings.suggestedAccount,
+    ledgerCurrency: destination.ledgerCurrency,
+  })
+  // Not ready: no book-time amount in the destination's own currency yet
+  // (#2877 — for a SEK destination this is the pre-existing amountSek check,
+  // same column, same value). Don't feed an amount-less transaction —
   // backfill/retry picks it up once the FX is captured.
-  if (tx.amountSek == null) return notFed
+  if (tx.amountLedger == null) return notFed
   // Settled before the destination was activated: history stays where it
   // was booked. No claim row either — the backfill (#2867) must be able to
   // feed it later on the user's explicit choice.

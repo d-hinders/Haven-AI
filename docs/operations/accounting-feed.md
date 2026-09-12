@@ -12,6 +12,11 @@ covers:
   - packages/backend/src/infra/repositories/accounting-connections.ts
   - packages/backend/src/db/migrations/080_accounting_connections.ts
   - packages/backend/src/db/migrations/081_drop_fortnox_connections_retired.ts
+  - packages/backend/src/db/migrations/082_evidence_ledger_fx_rates.ts
+  - packages/backend/src/domain/ledger-currency.ts
+  - packages/backend/src/infra/prices.ts
+  - packages/backend/src/infra/fiat-values.ts
+  - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/backend/src/config.ts
   - packages/backend/src/index.ts
   - packages/backend/src/modules/agents/entitlements.ts
@@ -79,7 +84,8 @@ stays for paid tiers later.
 Purchase settles on-chain (x402 funding confirmation, erc7710 settlement, MPP receipt)
   │
   ▼
-machine_payment_evidence row written (with the book-time SEK amount when FX is ready)
+machine_payment_evidence row written (the book-time capture when FX is ready:
+  │  the SEK amount AND a rate per supported ledger currency, frozen together — #2877)
   │
   ▼
 feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settlement
@@ -91,7 +97,9 @@ feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settle
   │    or disconnected row is no destination: nothing is recorded)
   ├─ auto_feed = false on that row → stop here (manual only, #2867)
   ├─ feed-from floor: nothing settled before feed_from is fed (#2862)
-  ├─ FX not ready (no SEK amount) → stop here, no claim, retried later
+  ├─ FX not ready (no amount in the DESTINATION's booking currency — #2877; for
+  │    a SEK ledger this is the same amount_sek check as before) → stop here,
+  │    no claim; see 'Ledger currency' for when a retry can ever succeed
   ├─ claimSync(user, provider, payment) → accounting_feed_syncs row `pending`
   │    (UNIQUE (provider, payment_id, user_id) — the double-post guard)
   ├─ build the non-asserting FeedTransaction (account demoted to a hint,
@@ -222,8 +230,8 @@ consult the flag.
 | `GET /accounting/providers` | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment |
 | `GET /accounting/connections` | the caller's connections — metadata only, never secrets: `status`, `statusReason`, `missingScopes`, `externalCompanyId` / `externalCompanyName`, `baseCurrency`, `feedFrom`, `isActiveDestination`, `settings: { suggestedAccount, autoFeed }`, `lastPushAt` |
 | `POST /accounting/connections/:provider/connect-url` | consent URL for a live OAuth2 provider: signed, purpose-scoped, provider-bound, single-use `state` (10 min). Also the **re-consent** path — issued for an existing row whatever its status |
-| `GET /accounting/connections/:provider/callback` | public, authenticated by the `state` (its `jti` is consumed before the code exchange). Reads the company (`getCompanyInfo`), refuses a non-SEK ledger before storing anything, UPSERTs the row: on an existing row it replaces secrets, `granted_scope`, `status → connected`, and keeps `settings`, `feed_from`, the active flag and the sync history. A grant narrower than `requiredScopes` is stored as `scope_missing`. Redirects to `/accounting?provider=…&connect=…` |
-| `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (no live `api_key` provider today → 409); non-SEK → 409 `UNSUPPORTED_BASE_CURRENCY` |
+| `GET /accounting/connections/:provider/callback` | public, authenticated by the `state` (its `jti` is consumed before the code exchange). Reads the company (`getCompanyInfo`), refuses a ledger outside the supported currencies before storing anything (#2877), UPSERTs the row: on an existing row it replaces secrets, `granted_scope`, `status → connected`, and keeps `settings`, `feed_from`, the active flag and the sync history. A grant narrower than `requiredScopes` is stored as `scope_missing`. Redirects to `/accounting?provider=…&connect=…` |
+| `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (no live `api_key` provider today → 409); a ledger outside the supported currencies → 409 `UNSUPPORTED_BASE_CURRENCY` (#2877) |
 | `DELETE /accounting/connections/:provider` | disconnect: revoke at the provider first when the descriptor declares `revoke` (Fortnox does), then secrets cleared, row kept as `disconnected`, active flag dropped; a failed revoke still disconnects locally (one `warn` line, error NAME only: `accounting provider revoke failed on disconnect`) |
 | `POST /accounting/connections/:provider/activate` | make it the destination; stamps **`feed_from = now`** in the same transaction |
 | `POST /accounting/connections/:provider/backfill` | `{ since }`: moves `feed_from` **earlier only** (400 `SINCE_INVALID` / `SINCE_NOT_EARLIER`, 409 `NOT_ACTIVE`), records `settings.backfill`, runs one bounded sync; answers `{ feedFrom, fed }` |
@@ -269,6 +277,69 @@ row says, and a scope the grant lacks is added only by a new consent. The only
 operator-side causes of a state are a wrong app registration and rotated
 client credentials (Fortnox section).
 
+## Ledger currency (#2877)
+
+**Which currencies feed.** `SEK`, `EUR`, `USD`, `DKK`, `NOK` and `GBP` —
+`SUPPORTED_LEDGER_CURRENCIES` in `packages/backend/src/domain/ledger-currency.ts`.
+It lives there because `infra/prices.ts` quotes exactly those currencies against
+the token: one list is what keeps "accepted at connect" and "a rate the feed can
+use" the same set. A company booking outside it is refused **at connect**, before
+any secret is stored — 409 `UNSUPPORTED_BASE_CURRENCY`, or the OAuth callback's
+`reason=unsupported_currency`. A provider that cannot say (`base_currency` null)
+passes and books in SEK, the default.
+
+> **No production connection is non-SEK today.** Fortnox is the only `live`
+> provider and its `getCompanyInfo` reports `SEK` by construction. The machinery
+> below ships ahead of its first user — the `coming_soon` providers.
+
+**What is pushed, and when the rate was taken.** The record carries the amount in
+the connection's `base_currency`, converted with the rate captured **at
+settlement** and frozen there — never a rate looked up when the push happens.
+`getBookTimeCapture` (`infra/fiat-values.ts`) takes ONE price read and produces
+both the SEK value and a rate per supported currency, written to
+`machine_payment_evidence.fx_rates` (JSONB, migration 082) beside the SEK
+columns. `fx_source` and `fx_at` keep their meaning for every currency in the map.
+
+**The capture freezes as one record.** `amount_sek`, `fx_rate_sek`, `fx_source`,
+`fx_rates` and `fx_at` are written only by the write that finds the row holding
+**no capture at all**. That is stricter than the per-column `COALESCE` these
+columns used before, and deliberately: `recordMachinePaymentEvidenceBase` also
+runs from the proof-attach path weeks after settlement and re-reads prices, and a
+per-column fill would have put that day's rate beside an `fx_at` still saying
+settlement — a feed-time rate wearing a book-time label.
+
+**Three shapes on-call will see, and only one of them recovers:**
+
+| shape | fed? | recovers? |
+|---|---|---|
+| Whole capture failed (`fx_at` NULL — a pricing outage at settlement) | no | **yes** — the next write captures everything at once |
+| Captured, but not the destination's currency | no, for that ledger | **never** — the missing rate is not knowable after the fact |
+| Captured, but not SEK | yes, to a ledger whose currency IS in the map | SEK never recovers; the other currencies are unaffected |
+
+The second and third are permanent by design: no claim row, no sync status, no
+operator action, nothing to wait for. Feeding a SEK figure into a non-SEK ledger
+would be a wrong number wearing the right label, so it is not done.
+
+**"FX-ready" means a capture in either form** — `amount_sek` *or* a rate map —
+in `LIST_UNPUSHED_PAYMENT_IDS_SQL`, which is the only path by which a
+never-fed payment reaches a connector. A zero amount is fed (the SEK path
+pushes a zero); negative or unparseable stays not-ready.
+
+**Figures are fixed-scale**: four decimals, `amount_sek`'s own scale since
+migration 026, so a computed amount has the same shape as a stored one and no
+float tail or exponent notation reaches a supplier invoice.
+
+**What the accountant sees on the attachment.** The underlag PDF states the
+figure on the record it backs: `Book value` in the invoiced currency, with the
+SEK capture kept below it as `Haven SEK ref` when they differ. One document,
+two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
+kronor.
+
+**A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
+a USD-booking company carries the rate the source actually quoted, with its
+provenance. Haven asserts no parity between a stablecoin and the currency it is
+named after; the rate is factual provenance on an unattested document.
+
 ## Sync statuses
 
 `accounting_feed_syncs`, one row per (user, provider, payment):
@@ -284,7 +355,7 @@ pushed row (#498), or the `exhausted:` prefix once the sweep has given up.
 | `failed` | the push failed; `error` is the provider message verbatim | nothing at first — the sweep retries with backoff (1 min doubling to 1 h, 8 attempts). Persisting: fix the named cause; **Sync now** retries immediately |
 | `failed`, `error` starts `exhausted:` | the sweep gave up at attempt 8; the last reason follows the prefix; `accounting.sync.exhausted` was logged | fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | claimed and in flight, or a crashed in-flight push | wait; the sweep releases a `pending` older than 15 min to `failed` (attempts untouched) and re-feeds it. Do not edit the row |
-| `skipped` | a connector skip with the reason preserved (`not_connected`, `no_sek_amount`, `not_outbound`), `connection needs_reauthorisation: …`, or `scope refused before the invoice was created: …` | fix the named cause (usually: the user reconnects); the sweep retries skipped rows like failed ones — but NOT while the connection is not `connected`. Sync now also re-claims them |
+| `skipped` | a connector skip with the reason preserved (`not_connected`, `no_ledger_amount` — `no_sek_amount` on rows recorded before #2877, `not_outbound`), `connection needs_reauthorisation: …`, or `scope refused before the invoice was created: …` | fix the named cause (usually: the user reconnects); the sweep retries skipped rows like failed ones — but NOT while the connection is not `connected`. Sync now also re-claims them |
 | *(no row)* | the hook never ran (feed off, not entitled, no destination, `auto_feed = false`), the payment predates `feed_from`, FX was not ready, or the payment never produced an evidence row (settlement-side, above) | read `GET /accounting/feed/status`; **Sync now** or the backfill feeds it once the cause is gone |
 
 **On-call read, per user:**
@@ -531,7 +602,9 @@ company fields replaced, `feed_from = now`, `status_reason` names both
 companies, `settings.companySwitches` appended, one
 `accounting_company_switch` log line. Pre-switch `pushed` rows stay; *Check in
 Fortnox* reports them `missing` through the new company (correct), and the
-reopen refuses them `previous_company`.
+reopen refuses them `previous_company`. A switch does not re-price history
+either (#2877): a record already pushed keeps the currency it was pushed in,
+and the new connection feeds what settles after its `feed_from`.
 
 **Token lifecycle.** Access tokens live one hour; refresh tokens are
 single-use and rotate on every refresh (45-day life). The refresh runs under a
@@ -560,7 +633,8 @@ a new occurrence is a new field that slipped through. Rate limit: 25 requests /
 
 **What the accountant sees.** *Meny → Leverantörsfakturor*: an unbooked
 supplier invoice per payment, `ExternalInvoiceNumber = HAVEN-<paymentId>`
-(the join key), `DueDate = InvoiceDate`, Total in SEK, `Booked: false`, no
+(the join key), `DueDate = InvoiceDate`, Total and Currency in the connection's
+booking currency — SEK for every Fortnox company (#2877) — `Booked: false`, no
 voucher until attested; the Haven payment-evidence PDF and, when captured, the
 merchant's receipt as attachments. **First-visit gotcha (2026-08-13):** a
 company that has never opened the module in the UI gets Fortnox's one-time

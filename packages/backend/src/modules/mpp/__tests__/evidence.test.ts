@@ -8,12 +8,12 @@ import {
 
 const {
   mockQuery,
-  mockGetBookTimeSekValue,
+  mockGetBookTimeCapture,
   mockRecordSettledFee,
   mockFeedSettledPaymentBestEffort,
 } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  mockGetBookTimeSekValue: vi.fn(),
+  mockGetBookTimeCapture: vi.fn(),
   mockRecordSettledFee: vi.fn(),
   mockFeedSettledPaymentBestEffort: vi.fn(),
 }))
@@ -25,7 +25,7 @@ vi.mock('../../../db.js', () => ({
 }))
 
 vi.mock('../../../infra/fiat-values.js', () => ({
-  getBookTimeSekValue: (...args: unknown[]) => mockGetBookTimeSekValue(...args),
+  getBookTimeCapture: (...args: unknown[]) => mockGetBookTimeCapture(...args),
 }))
 
 vi.mock('../../fee/index.js', () => ({
@@ -89,9 +89,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-06-19T10:01:02.003Z'))
   mockQuery.mockResolvedValue({ rows: [] })
-  mockGetBookTimeSekValue.mockResolvedValue({
-    amountSek: 132.5,
-    fxRate: 10.6,
+  mockGetBookTimeCapture.mockResolvedValue({
+    sek: { amountSek: 132.5, fxRate: 10.6, fxSource: 'coingecko_spot' },
+    rates: { SEK: 10.6, EUR: 0.92, DKK: 6.87 },
     fxSource: 'coingecko_spot',
   })
   mockRecordSettledFee.mockResolvedValue(undefined)
@@ -107,18 +107,24 @@ describe('recordMachinePaymentEvidenceBase', () => {
     await recordMachinePaymentEvidenceBase(payment())
 
     const { sql, params } = evidenceInsert()
-    expect(sql).toContain(
-      'amount_sek = COALESCE(machine_payment_evidence.amount_sek, EXCLUDED.amount_sek)',
-    )
-    expect(sql).toContain(
-      'fx_rate_sek = COALESCE(machine_payment_evidence.fx_rate_sek, EXCLUDED.fx_rate_sek)',
-    )
-    expect(sql).toContain(
-      'fx_source = COALESCE(machine_payment_evidence.fx_source, EXCLUDED.fx_source)',
-    )
-    expect(sql).toContain(
-      'fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at)',
-    )
+    // #2877: the five capture columns share one gate rather than each being
+    // COALESCE'd, so the row always holds ONE capture from one price read.
+    // Per-column COALESCE was equivalent only while the capture was
+    // all-or-nothing; it stopped being so when a capture could succeed for one
+    // currency and fail for another, and the proof-attach path re-runs this
+    // write weeks later.
+    // The gate is "this row holds no capture yet" rather than fx_at alone, so
+    // the statement does not depend on a caller always writing the two
+    // together.
+    const gate =
+      'machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL'
+    for (const column of ['amount_sek', 'fx_rate_sek', 'fx_source', 'fx_rates', 'fx_at']) {
+      expect(sql).toContain(`${column} = CASE WHEN ${gate}`)
+      expect(sql).toContain(`THEN EXCLUDED.${column} ELSE machine_payment_evidence.${column} END`)
+    }
+    // MUTATION TARGET: replace any of those CASEs with a plain COALESCE and
+    // the real-database tests in
+    // modules/accounting/__tests__/ledger-currency.db.test.ts go red.
 
     const excludedColumns = [
       'rail',
@@ -150,7 +156,7 @@ describe('recordMachinePaymentEvidenceBase', () => {
       'coingecko_spot',
       '2026-06-19T10:01:02.003Z',
     ])
-    expect(mockGetBookTimeSekValue).toHaveBeenCalledWith('USDC', '12.5')
+    expect(mockGetBookTimeCapture).toHaveBeenCalledWith('USDC', '12.5')
     expect(mockRecordSettledFee).toHaveBeenCalledOnce()
     expect(mockFeedSettledPaymentBestEffort).toHaveBeenCalledWith(
       '22222222-2222-2222-2222-222222222222',
@@ -159,12 +165,14 @@ describe('recordMachinePaymentEvidenceBase', () => {
   })
 
   it('writes evidence with null SEK fields when book-time pricing is unavailable', async () => {
-    mockGetBookTimeSekValue.mockResolvedValueOnce(null)
+    // #2877: one capture, so one outage — the SEK columns and the rate map
+    // can no longer disagree about whether a price was available.
+    mockGetBookTimeCapture.mockResolvedValueOnce(null)
 
     await recordMachinePaymentEvidenceBase(payment())
 
     const { params } = evidenceInsert()
-    expect(params.slice(19, 23)).toEqual([null, null, null, null])
+    expect(params.slice(19, 24)).toEqual([null, null, null, null, null])
     expect(mockRecordSettledFee).toHaveBeenCalledOnce()
     expect(mockFeedSettledPaymentBestEffort).toHaveBeenCalledOnce()
   })
@@ -195,7 +203,7 @@ describe('recordMachinePaymentEvidenceBase', () => {
       await recordMachinePaymentEvidenceBase(payment(overrides))
     }
 
-    expect(mockGetBookTimeSekValue).not.toHaveBeenCalled()
+    expect(mockGetBookTimeCapture).not.toHaveBeenCalled()
     expect(mockQuery).not.toHaveBeenCalled()
     expect(mockRecordSettledFee).not.toHaveBeenCalled()
     expect(mockFeedSettledPaymentBestEffort).not.toHaveBeenCalled()

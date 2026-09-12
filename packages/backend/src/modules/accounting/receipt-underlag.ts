@@ -27,6 +27,15 @@ export interface ReceiptUnderlagData {
   fxRate: string | null
   fxSource: string | null
   fxAt: string | null
+  /**
+   * The figure on the record this underlag backs, and its currency (#2877).
+   * For a SEK ledger it is the SEK book value and the line is unchanged; for
+   * any other it is the amount actually invoiced, so the document and the
+   * invoice cannot state two unrelated numbers.
+   */
+  amountLedger: string | null
+  ledgerCurrency: string
+  fxRateLedger: string | null
   merchantName: string | null
   merchantAddress: string | null
   resourceUrl: string | null
@@ -94,9 +103,16 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     `Payment id     ${data.paymentId}`,
     `Settled at     ${data.settledAt}`,
     `Amount         ${data.amountAtomic} ${data.token} (atomic units)`,
-    data.amountSek != null
-      ? `Book value     ${data.amountSek} SEK (rate ${data.fxRate ?? 'n/a'}, ${data.fxSource ?? 'n/a'}, ${data.fxAt ?? 'n/a'})`
+    data.amountLedger != null
+      ? `Book value     ${data.amountLedger} ${data.ledgerCurrency} (rate ${data.fxRateLedger ?? 'n/a'}, ${data.fxSource ?? 'n/a'}, ${data.fxAt ?? 'n/a'})`
       : 'Book value     not captured',
+    // The SEK capture is kept as a second line for a non-SEK ledger: it is the
+    // value migration 026 has recorded for this payment all along, and an
+    // accountant reconciling against Haven's own history should be able to see
+    // it without being told the invoice is in kronor.
+    ...(data.ledgerCurrency !== 'SEK' && data.amountSek != null
+      ? [`Haven SEK ref  ${data.amountSek} SEK (rate ${data.fxRate ?? 'n/a'}, same capture)`]
+      : []),
     `Merchant       ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
     ...(data.merchantName && data.merchantAddress ? [`Merchant addr  ${data.merchantAddress}`] : []),
     `Resource       ${data.resourceUrl ?? 'n/a'}`,
@@ -217,6 +233,9 @@ export async function loadReceiptUnderlag(
     fxRate: tx.fxRate,
     fxSource: tx.fxSource,
     fxAt: tx.fxAt,
+    amountLedger: tx.amountLedger,
+    ledgerCurrency: tx.ledgerCurrency,
+    fxRateLedger: tx.fxRateLedger,
     merchantName: tx.counterparty.name,
     merchantAddress: tx.counterparty.address ?? row.merchant_address,
     resourceUrl: tx.resourceUrl,

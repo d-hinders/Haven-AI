@@ -29,10 +29,12 @@
  *      reason AND flips the connection; the same payment is not attempted
  *      again while `scope_missing`, and is delivered exactly once after the
  *      connection is `connected` again
- *   7. a provider reporting a non-SEK base currency is refused at connect by
- *      the generic flow with "Haven currently feeds SEK ledgers only", before
- *      any secret is stored (#2864 owns the policy; this proves BOTH flows —
- *      the OAuth2 runner and the API-key runner — reach the enforcement point)
+ *   7. a provider reporting an UNSUPPORTED base currency is refused at connect
+ *      by the generic flow, before any secret is stored (#2864 owns the
+ *      policy; this proves BOTH flows — the OAuth2 runner and the API-key
+ *      runner — reach the enforcement point). #2877 widened the supported set
+ *      from SEK alone to `domain/ledger-currency.ts`, so the refused case is
+ *      a currency outside that list and 7d is its positive control
  *   8. a reconnect that reports a DIFFERENT company id is a company switch
  *      (#2864): one row, company fields replaced, `feed_from` = now, the
  *      switch recorded, the previous company's `pushed` rows untouched and
@@ -104,6 +106,9 @@ export function feedTransaction(paymentId: string, over: Partial<FeedTransaction
     token: 'USDC',
     amountAtomic: '1000',
     amountSek: '10.42',
+    ledgerCurrency: 'SEK',
+    amountLedger: '10.42',
+    fxRateLedger: '10.42',
     fxRate: '10.42',
     fxSource: 'riksbank',
     fxAt: '2026-09-10T09:30:00.000Z',
@@ -120,7 +125,8 @@ export function accountingEntry(paymentId: string) {
   return {
     paymentId, txHash: '0xabc', chainId: 84532, settledAt: tx.settledAt, direction: 'out' as const,
     counterparty: { ...tx.counterparty, country: null }, resourceUrl: tx.resourceUrl, token: tx.token,
-    amountAtomic: tx.amountAtomic, amountSek: tx.amountSek, fxRate: tx.fxRate, fxSource: tx.fxSource, fxAt: tx.fxAt,
+    amountAtomic: tx.amountAtomic, amountHuman: '0.001', amountSek: tx.amountSek, fxRate: tx.fxRate,
+    fxSource: tx.fxSource, fxAt: tx.fxAt, fxRates: { SEK: 10.42, EUR: 0.92, DKK: 6.87 },
     receiptRef: tx.receiptRef, merchantReceipt: null, account: '6540', vatTreatment: 'reverse_charge',
   }
 }
@@ -309,16 +315,19 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
       expect((await connection(c.userId))?.status).toBe('connected')
     })
 
-    it('7. a provider reporting a non-SEK base currency is refused at connect by the generic flow, and nothing is stored', async () => {
+    it('7. a provider reporting an UNSUPPORTED base currency is refused at connect by the generic flow, and nothing is stored', async () => {
       const userId = await seedUser()
-      const c = await harness.setup({ userId, company: { baseCurrency: 'EUR' } })
+      // JPY: not a ledger currency Haven feeds (#2877 widened the rule from
+      // SEK-only to the six in `domain/ledger-currency.ts`; an unsupported
+      // currency is still refused at connect, which is the invariant here).
+      const c = await harness.setup({ userId, company: { baseCurrency: 'JPY' } })
       registerConnector(c.connector)
       // MUTATION TARGET (#2864): drop `assertSupportedBaseCurrency` from the
-      // flow and the connect resolves with a stored EUR row.
+      // flow and the connect resolves with a stored JPY row.
       const err = await c.connect().then(() => null, (e: unknown) => e)
       expect(err).toBeInstanceOf(UnsupportedBaseCurrencyError)
       expect((err as Error).message).toContain(UNSUPPORTED_BASE_CURRENCY_MESSAGE)
-      expect((err as Error).message).toContain('EUR')
+      expect((err as Error).message).toContain('JPY')
       // Before any secret is stored: no row at all.
       expect(await connection(userId)).toBeNull()
       expect(await listConnections(userId)).toEqual([])
@@ -327,19 +336,33 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
       expect(c.revokeCalls()).toBe(harness.provider.authKind === 'oauth2' && harness.provider.capabilities.revoke ? 1 : 0)
     })
 
-    it('7c. … and a RECONNECT that reports a non-SEK ledger leaves the existing row exactly as it was', async () => {
+    it('7c. … and a RECONNECT that reports an unsupported ledger leaves the existing row exactly as it was', async () => {
       const userId = await seedUser()
       const sek = await harness.setup({ userId, company: { baseCurrency: 'SEK' } })
       registerConnector(sek.connector)
       await sek.connect()
       const before = (await connection(userId))!
       clearConnectors()
-      const eur = await harness.setup({ userId, company: { baseCurrency: 'EUR' } })
-      registerConnector(eur.connector)
-      await expect(eur.connect()).rejects.toBeInstanceOf(UnsupportedBaseCurrencyError)
+      const jpy = await harness.setup({ userId, company: { baseCurrency: 'JPY' } })
+      registerConnector(jpy.connector)
+      await expect(jpy.connect()).rejects.toBeInstanceOf(UnsupportedBaseCurrencyError)
       const after = (await connection(userId))!
       expect(after).toEqual(before)
       expect(after.base_currency).toBe('SEK')
+    })
+
+    it('7d. a SUPPORTED non-SEK ledger connects and is stored with its own currency (#2877)', async () => {
+      const userId = await seedUser()
+      // MUTATION TARGET: narrow `isSupportedLedgerCurrency` back to SEK and
+      // this connect is refused — the widening is what this case measures,
+      // and case 7 above is the control that the refusal still exists.
+      const c = await harness.setup({ userId, company: { externalCompanyId: 'co-7d', name: 'Syv D ApS', baseCurrency: 'DKK' } })
+      registerConnector(c.connector)
+      await expect(c.connect()).resolves.toBeUndefined()
+      expect(await connection(userId)).toMatchObject({
+        status: 'connected', base_currency: 'DKK', is_active_destination: true,
+        external_company_id: 'co-7d', external_company_name: 'Syv D ApS',
+      })
     })
 
     it('7b. positive control: the same flow with a SEK ledger stores the connection with id, name and currency', async () => {

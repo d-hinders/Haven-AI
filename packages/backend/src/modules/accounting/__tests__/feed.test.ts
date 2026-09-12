@@ -19,6 +19,8 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     counterparty: { address: '0xmerchant', name: 'Soundside', country: 'US' },
     token: 'USDC',
     amountAtomic: '12500000',
+    amountHuman: '0.1',
+    fxRates: { SEK: 10 },
     amountSek: '132.50',
     fxRate: '10.60',
     fxSource: 'coingecko_spot',
@@ -35,7 +37,7 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
 
 describe('toFeedTransaction', () => {
   it('carries book-time FX, counterparty, and receipt', () => {
-    const tx = toFeedTransaction(entry())
+    const tx = toFeedTransaction(entry(), { ledgerCurrency: 'SEK' })
     expect(tx).toMatchObject({
       paymentId: 'pi1',
       settledAt: '2026-06-20T10:00:00.000Z',
@@ -50,7 +52,7 @@ describe('toFeedTransaction', () => {
   })
 
   it('asserts nothing — no vatTreatment or posted account fields', () => {
-    const tx = toFeedTransaction(entry()) as unknown as Record<string, unknown>
+    const tx = toFeedTransaction(entry(), { ledgerCurrency: 'SEK' }) as unknown as Record<string, unknown>
     expect(tx.vatTreatment).toBeUndefined()
     expect(tx.account).toBeUndefined()
     expect(tx.category).toBeUndefined()
@@ -58,8 +60,8 @@ describe('toFeedTransaction', () => {
   })
 
   it('surfaces a per-merchant override only as a suggestion', () => {
-    expect(toFeedTransaction(entry()).suggestedAccount).toBeNull()
-    expect(toFeedTransaction(entry({ account: '6550' })).suggestedAccount).toBe('6550')
+    expect(toFeedTransaction(entry(), { ledgerCurrency: 'SEK' }).suggestedAccount).toBeNull()
+    expect(toFeedTransaction(entry({ account: '6550' }), { ledgerCurrency: 'SEK' }).suggestedAccount).toBe('6550')
   })
 })
 
@@ -93,7 +95,7 @@ describe('connector registry + in-memory adapter', () => {
 
   it('skips unconnected users, pushes connected ones, and dedups', async () => {
     const c = new InMemoryConnector()
-    const tx = toFeedTransaction(entry())
+    const tx = toFeedTransaction(entry(), { ledgerCurrency: 'SEK' })
 
     expect(await c.pushTransaction('u1', tx)).toMatchObject({ status: 'skipped', reason: 'not_connected' })
 

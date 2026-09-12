@@ -121,7 +121,7 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, x402DelegationMoc
     },
     fiatMocks: {
       getFiatValuesForTokenAmount: vi.fn(),
-      getBookTimeSekValue: vi.fn().mockResolvedValue(null),
+      getBookTimeCapture: vi.fn().mockResolvedValue(null),
     },
     delegationMocks: {
       prepareDelegationPayment: vi.fn(),
@@ -302,7 +302,7 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
     for (const m of Object.values(delegationMocks)) m.mockReset()
     for (const m of Object.values(x402DelegationMocks)) m.mockReset()
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
-    fiatMocks.getBookTimeSekValue.mockResolvedValue(null)
+    fiatMocks.getBookTimeCapture.mockResolvedValue(null)
   })
 
   // ── The spend paths ──────────────────────────────────────────────────────

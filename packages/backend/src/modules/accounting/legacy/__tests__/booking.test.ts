@@ -12,6 +12,8 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     counterparty: { address: '0xm', name: null, country: null },
     token: 'USDC',
     amountAtomic: '100000000',
+    amountHuman: '100.0',
+    fxRates: { SEK: 10 },
     amountSek: '100.00',
     fxRate: '10',
     fxSource: 'coingecko_spot',

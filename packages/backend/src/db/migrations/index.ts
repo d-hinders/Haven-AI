@@ -80,6 +80,7 @@ import * as deviceAuthorizations from './078_device_authorizations.js'
 import * as schemaLocalConstraintRepair from './079_schema_local_constraint_repair.js'
 import * as accountingConnections from './080_accounting_connections.js'
 import * as dropFortnoxConnectionsRetired from './081_drop_fortnox_connections_retired.js'
+import * as evidenceLedgerFxRates from './082_evidence_ledger_fx_rates.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -219,4 +220,5 @@ export const migrations: Migration[] = [
   schemaLocalConstraintRepair,
   accountingConnections,
   dropFortnoxConnectionsRetired,
+  evidenceLedgerFxRates,
 ]

@@ -13,6 +13,7 @@
  * The descriptor list lives in `registry.ts`; adding a provider is described
  * in this directory's `README.md`.
  */
+import { isSupportedLedgerCurrency, ledgerCurrencyList } from '../../domain/ledger-currency.js'
 
 export type ProviderAuthKind = 'oauth2' | 'api_key'
 
@@ -42,10 +43,11 @@ export interface AccountingProvider {
 
 /**
  * What the connector reports about the company behind a grant. The base
- * currency is what the generic connect flow refuses on when it is not SEK —
- * the feed's amounts are book-time SEK (#467) and a non-SEK ledger would book
- * them as the wrong currency. `#2864` owns the enforcement policy; the flow
- * here calls the check, and the conformance suite proves it is called.
+ * currency is what the generic connect flow refuses on when it is outside
+ * `SUPPORTED_LEDGER_CURRENCIES` — and, since #2877, the currency the feed
+ * pushes in: the amount is that currency's, from the rate frozen at
+ * settlement (#467 captures it). `#2864` owns the enforcement policy; the
+ * flow here calls the check, and the conformance suite proves it is called.
  */
 export interface ProviderCompanyInfo {
   externalCompanyId: string | null
@@ -83,16 +85,16 @@ export class ProviderError extends Error {
 
 /**
  * The connect-time currency rule (owner decision 2026-09-11, enforced by
- * #2864 for EVERY provider, at connect and on a company switch). Kept as one
- * named function so the generic flows call exactly one thing and a
- * multi-currency follow-on has exactly one place to widen it. Null (provider
- * cannot say) passes: refusing the unknown would refuse every provider that
- * has no company endpoint, and the feed pushes SEK regardless.
+ * #2864 for EVERY provider, at connect and on a company switch; widened from
+ * SEK-only to the supported ledger currencies by #2877). Kept as one named
+ * function so the generic flows call exactly one thing and the list has
+ * exactly one home — `domain/ledger-currency.ts`, which `infra/prices.ts`
+ * reads too, so a currency accepted here is a currency the feed can be quoted
+ * a rate for. Null (provider cannot say) passes: refusing the unknown would
+ * refuse every provider that has no company endpoint, and the feed books such
+ * a connection in the default currency.
  */
-export const SUPPORTED_BASE_CURRENCY = 'SEK'
-
-/** The user-facing refusal, verbatim — the route and the UI show this sentence. */
-export const UNSUPPORTED_BASE_CURRENCY_MESSAGE = 'Haven currently feeds SEK ledgers only'
+export const UNSUPPORTED_BASE_CURRENCY_MESSAGE = `Haven feeds ${ledgerCurrencyList()} ledgers`
 
 export class UnsupportedBaseCurrencyError extends Error {
   readonly code = 'UNSUPPORTED_BASE_CURRENCY' as const
@@ -107,7 +109,7 @@ export class UnsupportedBaseCurrencyError extends Error {
 
 export function assertSupportedBaseCurrency(info: ProviderCompanyInfo): void {
   if (info.baseCurrency == null) return
-  if (info.baseCurrency.toUpperCase() !== SUPPORTED_BASE_CURRENCY) {
+  if (!isSupportedLedgerCurrency(info.baseCurrency)) {
     throw new UnsupportedBaseCurrencyError(info.baseCurrency.toUpperCase())
   }
 }

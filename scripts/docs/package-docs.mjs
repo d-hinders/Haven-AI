@@ -367,8 +367,13 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/backend/src/modules/accounting/api-key-flow.ts',
       'packages/backend/src/modules/accounting/__tests__/connector-conformance.ts',
       'packages/backend/src/routes/accounting-connections.ts',
+      // #2877: the README spells out the supported ledger currencies and
+      // tells connector authors to push `tx.amountLedger` in
+      // `tx.ledgerCurrency`, so both files are claims this doc makes.
+      'packages/backend/src/domain/ledger-currency.ts',
+      'packages/backend/src/modules/accounting/feed-transaction.ts',
     ],
-    'last-verified': '2026-09-11',
+    'last-verified': '2026-09-12',
   },
 ]
 

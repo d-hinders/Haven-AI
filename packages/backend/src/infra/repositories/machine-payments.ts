@@ -34,7 +34,11 @@ export type { Executor }
 // ── Evidence base upsert (lib/machine-payment-evidence.ts) ───────────────────
 
 /**
- * FX columns COALESCE so book-time values freeze at settlement.
+ * The book-time capture — `amount_sek`, `fx_rate_sek`, `fx_source`, `fx_rates`
+ * and `fx_at` — freezes as ONE record, written only when the row holds no
+ * capture yet (migrations 026 and 082). See the
+ * CASE block below for why per-column COALESCE stopped being safe once a
+ * capture could succeed for one currency and fail for another.
  *
  * #2118: this was parameterised so the intent- and approval-anchored writes
  * could not drift. Only the intent-anchored write survives.
@@ -45,13 +49,13 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
       chain_id, resource_url, merchant_address, payer_address, settlement_address,
       token_symbol, token_address, amount_raw, amount_human, challenge_id,
       idempotency_key, challenge_payload, confirmed_at,
-      amount_sek, fx_rate_sek, fx_source, fx_at
+      amount_sek, fx_rate_sek, fx_source, fx_at, fx_rates
     ) VALUES (
       $1, $2, $3, $4, $5, 'payment_confirmed', LOWER($6::TEXT),
       $7, $8, LOWER($9::TEXT), LOWER($10::TEXT), LOWER($11::TEXT),
       $12, LOWER($13::TEXT), $14, $15, $16,
       $17, $18, $19,
-      $20, $21, $22, $23
+      $20, $21, $22, $23, $24::JSONB
     )
     ${conflictClause}
     DO UPDATE SET
@@ -70,10 +74,41 @@ function evidenceBaseUpsertSql(conflictClause: string): string {
       idempotency_key = EXCLUDED.idempotency_key,
       challenge_payload = COALESCE(machine_payment_evidence.challenge_payload, EXCLUDED.challenge_payload),
       confirmed_at = EXCLUDED.confirmed_at,
-      amount_sek = COALESCE(machine_payment_evidence.amount_sek, EXCLUDED.amount_sek),
-      fx_rate_sek = COALESCE(machine_payment_evidence.fx_rate_sek, EXCLUDED.fx_rate_sek),
-      fx_source = COALESCE(machine_payment_evidence.fx_source, EXCLUDED.fx_source),
-      fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at),
+      -- The book-time capture is written ATOMICALLY, by the one write that
+      -- finds the row holding no capture at all (#2877). One predicate gates
+      -- all five columns, so what the row holds is always one capture from one
+      -- price read, never a mixture of two taken on different days.
+      --
+      -- Per-column COALESCE was safe only while the capture was all-or-nothing
+      -- (pre-#2877, getBookTimeSekValue returned a value or null, so fx_at
+      -- was non-NULL exactly when amount_sek was). getBookTimeCapture can
+      -- succeed for the rate map and fail for SEK — the price source quotes
+      -- per currency — which makes fx_at set, amount_sek NULL reachable. The
+      -- proof-attach path re-runs this write weeks later and re-reads prices,
+      -- so under COALESCE that row would fill amount_sek with THAT day's rate
+      -- while fx_at still said settlement. Found by review before merge.
+      --
+      -- The gate is "this row holds NO capture yet", not "fx_at is null":
+      -- keying on the timestamp alone would leave a row that somehow holds an
+      -- amount without a timestamp open to a later rewrite, which is a caller
+      -- invariant to rely on rather than a property of the statement. The
+      -- repository's own freeze test writes exactly that shape.
+      --
+      -- The accepted cost: a row that captured anything keeps exactly what it
+      -- captured. A pre-082 row (or a partial capture) never gains the missing
+      -- half, because that half's book-time value is not knowable after the
+      -- fact — a ledger in the missing currency reads it as not-ready, which
+      -- is the honest answer rather than a rate from the wrong day.
+      amount_sek = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.amount_sek ELSE machine_payment_evidence.amount_sek END,
+      fx_rate_sek = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_rate_sek ELSE machine_payment_evidence.fx_rate_sek END,
+      fx_source = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_source ELSE machine_payment_evidence.fx_source END,
+      fx_rates = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_rates ELSE machine_payment_evidence.fx_rates END,
+      fx_at = CASE WHEN machine_payment_evidence.fx_at IS NULL AND machine_payment_evidence.amount_sek IS NULL AND machine_payment_evidence.fx_rates IS NULL
+        THEN EXCLUDED.fx_at ELSE machine_payment_evidence.fx_at END,
       updated_at = NOW()`
 }
 
@@ -110,6 +145,13 @@ export interface EvidenceBaseInput {
   fxRateSek: number | string | null
   fxSource: string | null
   fxAt: string | null
+  /**
+   * Book-time token→currency rates for the supported ledger currencies (#2877),
+   * serialised JSON. Frozen as part of the one capture, under the same
+   * "row holds no capture yet" gate as the SEK columns: a later write neither
+   * overwrites what was captured nor adds a half that was missing.
+   */
+  fxRates: string | null
 }
 
 export async function upsertEvidenceBase(
@@ -140,6 +182,7 @@ export async function upsertEvidenceBase(
     input.fxRateSek,
     input.fxSource,
     input.fxAt,
+    input.fxRates,
   ])
 }
 

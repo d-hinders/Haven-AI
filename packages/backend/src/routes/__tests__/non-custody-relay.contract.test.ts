@@ -33,7 +33,7 @@ const { mockQuery, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
-    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
+    getBookTimeCapture: vi.fn().mockResolvedValue(null),
   },
   delegationMocks: {
     prepareDelegationPayment: vi.fn(),

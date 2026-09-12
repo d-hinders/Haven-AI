@@ -451,9 +451,9 @@ describe('accounting connection routes (#2862)', () => {
       expect(leaks(res.headers.location as string)).toBe(false)
     })
 
-    it('#2864: a non-SEK ledger is the one named refusal — connect=error&reason=unsupported_currency, nothing stored', async () => {
+    it('#2864/#2877: an UNSUPPORTED ledger currency is the one named refusal — connect=error&reason=unsupported_currency, nothing stored', async () => {
       const state = await issueState()
-      flowMocks.completeOAuth2Connect.mockRejectedValueOnce(new UnsupportedBaseCurrencyError('EUR'))
+      flowMocks.completeOAuth2Connect.mockRejectedValueOnce(new UnsupportedBaseCurrencyError('JPY'))
       const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
       expect(res.statusCode).toBe(302)
       expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=unsupported_currency')
@@ -477,17 +477,17 @@ describe('accounting connection routes (#2862)', () => {
       expectMatchesSpec('POST', '/accounting/connections/{provider}/api-key', res.json(), '201')
     })
 
-    it('#2864: a company that books in a non-SEK currency is refused with "Haven currently feeds SEK ledgers only" (409), and nothing is stored', async () => {
+    it('#2864/#2877: a company that books in an UNSUPPORTED currency is refused (409) with the supported list named, and nothing is stored', async () => {
       registerTestProvider(KEYED)
       registerConnector(stubConnector('keyed'))
       // The flow throws BEFORE it stores (proven on the real database by the
       // conformance suite's case 7 for both flows); the route maps the error.
-      flowMocks.connectWithApiKey.mockRejectedValueOnce(new UnsupportedBaseCurrencyError('EUR'))
+      flowMocks.connectWithApiKey.mockRejectedValueOnce(new UnsupportedBaseCurrencyError('JPY'))
       const res = await authed('POST', '/accounting/connections/keyed/api-key', { apiKey: API_KEY })
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'UNSUPPORTED_BASE_CURRENCY' })
-      expect(res.json().error).toContain('Haven currently feeds SEK ledgers only')
-      expect(res.json().error).toContain('EUR')
+      expect(res.json().error).toContain('Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers')
+      expect(res.json().error).toContain('JPY')
       expect(res.json()).not.toHaveProperty('connection')
       expect(rows.size).toBe(0)
       expect(leaks(res.body)).toBe(false)

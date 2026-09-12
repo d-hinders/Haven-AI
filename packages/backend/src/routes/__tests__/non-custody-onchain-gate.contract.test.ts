@@ -137,7 +137,7 @@ const { mockQuery, fiatMocks, delegationMocks } = vi.hoisted(() => ({
   // the header. Since #2259 NONE of them survives as an export.
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
-    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
+    getBookTimeCapture: vi.fn().mockResolvedValue(null),
   },
   delegationMocks: {
     prepareDelegationPayment: vi.fn(),

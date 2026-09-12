@@ -639,7 +639,7 @@ const accountingConnection = {
       description: "The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it.",
     },
     externalCompanyName: { type: ['string', 'null'], description: 'The company the connection points at, for "Connected to <Company AB>" (#2864).' },
-    baseCurrency: { type: ['string', 'null'], description: 'ISO-4217 as the provider reported it at connect; a non-SEK ledger is refused at connect with "Haven currently feeds SEK ledgers only" (#2864).' },
+    baseCurrency: { type: ['string', 'null'], description: 'ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK.' },
     lastPushAt: { type: ['string', 'null'], format: 'date-time' },
     lastError: { type: ['string', 'null'] },
     connectedAt: { type: 'string', format: 'date-time' },
@@ -3331,7 +3331,7 @@ export const openapiSpec = {
         operationId: 'accountingOAuthCallback',
         summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
         description:
-          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a non-SEK currency is `connect=error&reason=unsupported_currency` (#2864: \"Haven currently feeds SEK ledgers only\" — nothing was stored; an existing connection is left as it was, and the user can pick another company).",
+          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: \"Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers\" — nothing was stored; an existing connection is left as it was, and the user can pick another company).",
         security: [],
         parameters: [
           { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
@@ -3352,7 +3352,7 @@ export const openapiSpec = {
         operationId: 'connectAccountingApiKey',
         summary: 'Connect a live API-key provider: validate the key at the provider, then store it encrypted.',
         description:
-          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a non-SEK currency is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven currently feeds SEK ledgers only") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.',
+          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
@@ -3377,7 +3377,7 @@ export const openapiSpec = {
           '404': { ...errorResponse, description: 'Unknown provider.' },
           '409': {
             ...providerRefusal,
-            description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a non-SEK currency (`UNSUPPORTED_BASE_CURRENCY`, #2864 — nothing stored).',
+            description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored).',
           },
           '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
         },

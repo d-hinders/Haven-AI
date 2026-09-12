@@ -16,7 +16,7 @@
  * forwards that query to `/settings` untouched, so this card is the one
  * place that reads it: `connected` opens the backfill choice, `denied` and
  * `error` become a sentence beside the card, and `reason=unsupported_currency`
- * gets its own ("Haven currently feeds SEK ledgers only"). The query is then
+ * gets its own (the supported ledger currencies, named — #2877). The query is then
  * stripped with `router.replace` so a reload does not replay the outcome.
  *
  * "First successful connect" is inferred, not signalled: the callback does

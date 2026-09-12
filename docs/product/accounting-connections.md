@@ -85,11 +85,17 @@ Two things on the Fortnox side decide whether step 1 succeeds:
   that does not declare it makes the connection *Needs more access*
   immediately (the states below).
 
-**SEK only, for now.** Haven feeds SEK ledgers. A company whose base currency
-is not SEK is refused at connect with *"Haven currently feeds SEK ledgers
-only"* and nothing is stored. Most agent payments settle in USDC; the SEK amount
-on each fed document is the conversion Haven records at settlement.
-Multi-currency ledgers are a follow-on (#2877).
+**Which ledger currencies Haven feeds.** SEK, EUR, USD, DKK, NOK and GBP
+(#2877). A company that books in anything else is refused at connect — the
+message names the currencies Haven does feed — and nothing is stored. Most
+agent payments settle in USDC, and the amount on each fed document is the
+conversion Haven recorded **at the moment the payment settled**, in the
+currency your company books in; the rate and its source travel with the
+document, and Haven never re-prices a payment afterwards.
+
+In practice every connection today books in SEK, because Fortnox is the only
+platform Haven can connect to yet and a Fortnox company books in kronor. The
+other currencies matter when the platforms listed as *Coming soon* arrive.
 
 **One company per connection.** If you reconnect and approve a *different*
 Fortnox company, Haven keeps the connection, switches it to the new company,

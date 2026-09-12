@@ -213,7 +213,7 @@ export const sv: Messages = {
         connected: (provider: string) => `${provider} är anslutet.`,
         denied: (provider: string) => `Du avböjde samtycket för ${provider}. Inget anslöts.`,
         unsupportedCurrency:
-          'Haven matar för närvarande bara SEK-bokföring. Välj ett företag som bokför i SEK och försök igen.',
+          'Haven matar bokföring i SEK, EUR, USD, DKK, NOK eller GBP. Välj ett företag som bokför i någon av dessa och försök igen.',
         error: (provider: string) => `Vi kunde inte ansluta ${provider}. Försök igen om en stund.`,
       },
     },

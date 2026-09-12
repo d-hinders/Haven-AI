@@ -7,7 +7,7 @@ const { mockQuery, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
-    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
+    getBookTimeCapture: vi.fn().mockResolvedValue(null),
   },
 }))
 
@@ -191,7 +191,7 @@ describe('payment routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
-    fiatMocks.getBookTimeSekValue.mockResolvedValue(null)
+    fiatMocks.getBookTimeCapture.mockResolvedValue(null)
   })
 
   // #2055: was "...from an approval request id" — `approval_requests` is

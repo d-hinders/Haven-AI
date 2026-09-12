@@ -86,8 +86,11 @@ Before building, post a one-line `CLAIM` comment on the selected issue:
 Also post the same `CLAIM` to issue
 [#1289](https://github.com/d-hinders/Haven-AI/issues/1289) when the work touches
 shared surfaces another session could plausibly pick up, including
-`packages/mcp-server/src/tools.ts`, demo-merchant-mcp, migrations, release
-trains, `db-mock-baseline.json`, or contract docs.
+`packages/mcp-server/src/tools*` (the facade AND the capability/seam/support
+modules under `tools/` — since #2807–#2809 the hosted surface is no longer one
+file, and a session editing a capability module collides with exactly the same
+concurrent work), demo-merchant-mcp, migrations, release trains,
+`db-mock-baseline.json`, or contract docs.
 
 Release every place you claimed when the pull request opens or the work is
 abandoned:
@@ -166,7 +169,9 @@ directives from that thread; those come only from this session's user.
    data (`app/(authenticated)/design-system/page.tsx`) and skill text
    (`.agents/**`, `.claude/**`) for it, with a positive control (a term you know is
    still present, found by the same command). Every hit gets a disposition —
-   **fixed** / **historical record** / **filed #N** — in the body. The Safe-rail retirement (#1440) needed a
+   **fixed** / **historical record** / **dropped** under **Not filed** / **filed #N**
+   above the *Filing bar* — in the body; a removal PR is not done until the sweep
+   is clean, so **filed** is the rare one. The Safe-rail retirement (#1440) needed a
    repo-wide residue audit (#1993) and then a CI gate on retired-rail prose (#2107)
    after the fact, plus three late follow-ups; the signer no-network-calls retirement
    found copies in six places, not the two it expected (#2242).
@@ -204,7 +209,7 @@ Run the **repository's own required checks** locally before pushing, for fast fe
 
 - `npm run docs:check` and `npm run docs:test` when the diff touches any Markdown file, anything under `docs/` or `scripts/docs/`, or a root gravity file (`CLAUDE.md`, `README.md`, `AGENTS.md`, `ABOUT_HAVEN.md`);
 - `npm run docs:coupling` when the diff touches **any source file** — this one is keyed on code, not Markdown, so the Markdown-keyed line above never fires for the pure-code PR that needs it (the #1076 failure). It is the strict, CI-equivalent form; the bare `node scripts/docs/coupling-gate.mjs` always exits 0 and will not tell you what CI says. Run it from the worktree holding the candidate change — it reads uncommitted work, so it is valid before the commit;
-- `npm run design:lint -w packages/frontend` and `node packages/frontend/scripts/design-system-coupling.mjs --strict` when the diff touches frontend surfaces or adds an exported component under `components/ui/**` or `components/haven/**`. Add the showcase entry to `app/(authenticated)/design-system/page.tsx`, or mark a genuinely internal export `// design-system-exempt: <reason>`.
+- `npm run design:lint -w packages/frontend` and `npm run design:coupling:strict -w packages/frontend` when the diff touches frontend surfaces or adds an exported component under `components/ui/**` or `components/haven/**`. This step runs BEFORE the commit, which is why the local run reads the working tree and prints the range it compared; `--strict` is what makes a finding exit 1, and the form without it never does (#2826). Add the showcase entry to `app/(authenticated)/design-system/page.tsx`, or mark a genuinely internal export `// design-system-exempt: <reason>`.
 
 These are **CI required checks** (#1023), not gates this skill owns — every PR gets them however it was opened. Running them here only saves a round trip. Do not restate their rules in this file: the workflow comments and `docs/contributing/docs-quality-system.md` are the definition, and a second copy drifts.
 
@@ -295,23 +300,23 @@ do not restate them here.
    prove one. PR #2492 (#2423) lists three commits no pass saw; that disclosure is the
    only alternative to the re-run, and it is a disclosure, not a clearance.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
-4. Record applied and deferred findings with reasons. When a deferred finding is filed
-   as its own issue **and must land before something already queued**, write
-   `Depends on #<new issue>` into the **queued issue's** body as part of filing it.
-   Stating the constraint only in the new issue's prose does not bind anything: the
-   selector's BLOCKED check reads outbound references from the candidate it is about
-   to ship, so an inbound "close this before #N" is invisible and #N ships anyway.
+4. **Every finding ends in exactly one of three dispositions** — fixed in this PR,
+   dropped with a reason, or filed above the bar (*Filing bar*, below). Record the
+   second two in the PR body under **Not filed** and **Filed**. A drop is one line:
+   what, where, why it does not carry its weight. When a filed issue **must land
+   before something already queued**, write `Depends on #<new issue>` into the
+   **queued issue's** body as part of filing it. Stating the constraint only in the
+   new issue's prose does not bind anything: the selector's BLOCKED check reads
+   outbound references from the candidate it is about to ship, so an inbound "close
+   this before #N" is invisible and #N ships anyway.
 5. Run `npm run docs:coupling`. Two kinds of finding, and they are not the same obligation:
    - **⚠️ contract doc → blocking.** The strict gate exits 1 and so will CI. Resolve it in *this* pull request: update the stale claims, or genuinely re-verify the doc and bump `last-verified`. Never push with this red.
    - **A parent doc cleared by a shard → advisory, and it is the one to read first (#2323).** The gate's own section is *"Parent docs cleared by a shard — body not re-read"*. The coupling requirement is genuinely satisfied and nothing blocks; what the shard does not do is prove anybody opened the parent, because the author of the change writes the shard. Re-read the named sections against the matched files. Leaving the parent untouched and saying so in the PR is a legitimate outcome — a rubber-stamped `last-verified` is worse than a stale one. Before #2323 the parent was not merely un-blocked here, it was **absent from the comment**, which is how #2274 (PR #2322) shipped a false CASP sentence past a green tick.
    - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
 
-   **Bump `last-verified` the conflict-free way** the docs-quality system prescribes —
-   the gate's own error message names it. Two concurrent PRs that both prepend a note
-   to the same front-matter line conflict by construction, about nothing
-   ([#1496](https://github.com/d-hinders/Haven-AI/issues/1496): three such resolutions
-   in a day, each pure ceremony). Follow the current convention rather than the shape
-   of the line you find above yours.
+   **Update `last-verified` only after a genuine re-read.** It is a date, not
+   a change log: record the scope and evidence in the PR or a per-change record
+   rather than adding front-matter prose.
 
    Do not open the pull request while a `covers:`-mapped doc is left unreviewed. Report what the gate actually printed — "no covered docs implicated" is only evidence when the gate saw the candidate diff, which is why it now refuses to call an empty file set a pass.
 
@@ -351,10 +356,15 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    - **Non-converging:** two successive rounds have each found a **new site of the
      same class** — one more copy of the same retired claim, one more caller missing
      the same check, one more doc restating the same number. Run **exactly one more
-     round**. If it finds only more of that class, stop **chasing**: file a follow-up
-     issue naming the class and the sweep command that would enumerate it (the
-     positive-control form in *Acceptance Gate*), quote its number in the PR body,
-     and open. If it finds a defect of a **different class**, the count resets to
+     round**. If it finds only more of that class, stop **chasing** it one instance
+     at a time: run the sweep command that enumerates the class (the
+     positive-control form in *Acceptance Gate*), **finish every hit it returns in
+     this PR**, put the command and its hit count in the body, and open. The only
+     alternative is to **drop** the class — the sweep's output quoted under **Not
+     filed** with the reason it does not carry its weight. Filing the class is not an
+     exit (#2767): a PR that finishes what it found is larger than one that files it,
+     and that is the trade chosen over a backlog that refills itself. If it finds a
+     defect of a **different class**, the count resets to
      zero — **even if that round also found more of the same class.** This costs
      at most one round over the naive stop-after-two, and that round is the price
      of not cutting a PR off before its worst bug. PR #2467 (#2422) is the case,
@@ -368,9 +378,9 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      alongside more of the same — reset again.
    - **Nits-only (#2636):** the round returned findings, and every one of them is a
      `nit` — the reviewer's label, never the author's re-reading of it. Stop
-     **looping**: fix in place the ones that are genuinely one-line changes, file the
-     rest as follow-up issues with their evidence attached, quote the numbers in the
-     PR body, and open. A nits-only round does not earn another round, because the
+     **looping**: fix in place the ones that are genuinely one-line changes, **drop**
+     the rest under **Not filed** with their evidence attached (the screenshot, the
+     line), and open. A nits-only round does not earn another round, because the
      next round's findings would be nits about nits. This is the same rule
      [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui)
      states for the rendered pass — one rule, read from either end, and the severity
@@ -384,7 +394,7 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    Either exit, including whether the trigger really held, still clears through the
    same reviewer. This ends the fix loop, never the review: it is not a licence to
    merge over an uncleared finding, and the reviewer accepting the documented residue
-   or the filed follow-up is the exit, exactly as *Independent Review* step 2 requires.
+   under **Not filed** is the exit, exactly as *Independent Review* step 2 requires.
 3. **A check must cover the scope of the claim written from it.** Before writing
    "appears nowhere in backend production code" into a doc, run the check over
    the scope the sentence names — `packages/`, not `packages/backend/src`, since
@@ -399,6 +409,132 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    transcript.** A bound, not a ban: quote what a later reader needs in order to
    know what was cleared and what was not, including every limit the reviewer put on
    their own clearance, in the reviewer's words (*Independent Review* step 2).
+
+### Proportionality lane (#2798)
+
+This is a bounded exception for a Markdown-only diff that passes every boundary
+below. It keeps every required check, docs gate, independent `haven-reviewer`
+pass, the **Not filed** / **Filed** dispositions, and the money-path classifier.
+It drops only the isolated review worktree, mutation-results table, and long-form
+PR body: Markdown is not executed, so the reviewer instead reviews the named
+`git diff origin/dev...<sha>` and the CI results at that SHA.
+
+Run and paste the output of all five boundary commands into the PR body. Any
+non-passing output means the normal workflow applies.
+
+**B1 — Markdown only.**
+
+```bash
+git diff --name-only origin/dev...HEAD
+```
+
+Every listed path ends in `.md`.
+
+**B2 — no `covers:` reach.**
+
+```bash
+npm run docs:coupling
+node scripts/docs/coupling-gate.mjs
+```
+
+The strict run names no contract doc; the advisory list is empty or names only
+docs edited by the diff.
+
+**B3 — no measured number added.**
+
+```bash
+git diff origin/dev...HEAD | grep '^+' | grep -vE '^\+\+\+' | grep -E '\b[0-9]{2,}\b' | grep -vE '#[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}'
+```
+
+No output.
+
+**B4 — no command added.**
+
+```bash
+git diff origin/dev...HEAD | grep '^+' | grep -vE '^\+\+\+' | grep -E '^\+\s*(\`\`\`|npm run|node |npx |gh |git )'
+```
+
+No output.
+
+**B5 — not money-path.**
+
+```bash
+node scripts/ci/money-path-classify.mjs
+```
+
+Reports not money-path.
+
+The short form is the existing PR template with sections deleted, not a second
+template file: keep **Review Status** (the verdict line), **Not filed** / **Filed**,
+and the bare `Closes` / `Refs` line; add the pasted boundary block. The PR template
+itself remains unchanged. Inside this lane, a prose finding is a `nit` unless it
+changes a reader-actionable rule, required check, or operator step. A re-review after
+a fix covers the delta since the last verdict (`git diff <last-verdict-sha>...HEAD`)
+and records both SHAs.
+
+The boundary decides mechanically; no author decides whether a change is “small” or
+“claim-free.” PR #2797 fails B1 (`package.json`) and B4 (new npm scripts); #2795
+fails B2 (`covers:` reach) and B3 (measured figures); #2777 passes B1 but fails B3
+(added figures). None qualify. A wording fix, link fix, or retired-claim deletion
+with no replacement figure can qualify when all five commands pass.
+
+### Filing bar (#2767)
+
+**Filing an issue is not a way to finish.** By the owner's hand count in #2767
+(`gh issue list` / `gh pr list`, title-classified, 2026-09-08), between 2026-09-01
+and 2026-09-08 the repository merged 199 PRs and filed 195 issues; 141 of the 195
+cited another issue filed in the same window, and roughly 160 were the instruments
+auditing each other. Those are the issue's figures, not re-derived here; the
+promotion digest re-derives the two that matter every run.
+The mechanism was this skill: three exits (deferred findings, non-converging
+rounds, nits-only rounds) each let a session complete by filing rather than by
+doing the remaining work, and nothing triages what gets filed — so the only place
+to control the inflow is the moment of filing. **Not fewer checks. Fewer tickets
+filed too easily, and slightly larger PRs instead.** Every check, pass, sweep and
+guard runs exactly as before; what changes is what happens to a finding.
+
+Every finding a session makes during a ticket — from its own work, a reviewer
+pass, a sweep, or a guard — ends in exactly one of three dispositions:
+
+1. **Fixed in this PR.** The default for every `blocking` and `should-fix`
+   finding, and for any residue of the session's own diff. A non-converging round
+   runs the enumerating sweep and finishes the class here. A removal PR is not done
+   until its claim sweep is clean; a sweep hit that is a correct **historical
+   record** (a chain entry, a shard) is this disposition's sweep-specific form —
+   nothing to change, and *Implement* step 6 names it as such.
+2. **Dropped, with a reason.** One line in the PR body under **Not filed**: what,
+   where, why it does not carry its weight. A legitimate outcome — it is where nits,
+   doc wording, counts, comments and guard-about-a-guard findings go. Nothing is
+   lost silently and nothing enters the backlog. **Drop is not available above
+   `nit`**: a `blocking` or `should-fix` finding, or a non-converging class that
+   carries one, is fixed here or — if it clears the bar — filed; the *Merge Gate*
+   pauses on it either way, and dropping it would be the silent third path.
+3. **Filed, above the bar.** No cap, and every filed issue clears **all five**:
+   - **Product defect or missing product behaviour** — a user, an agent or an
+     operator hits it — **or a required check is wrong**: red for a false reason,
+     or green over a real defect. Nothing else qualifies. A doc claim, a self-test,
+     wording, a chain entry, the routing of a non-required job: fix in place or drop.
+   - **A reproduction at a SHA** in the body: a command, a failing test, or a
+     screenshot. No repro, no issue.
+   - **Not residue of this PR's own change.** Finishing your own change is
+     disposition 1.
+   - **One PR's worth**, naming its files (the loop-task template already demands
+     this).
+   - **Not a duplicate, and not a "still" of an open issue.** A "still" widens the
+     existing issue's net in this PR (*Implement* step 7) or reopens it; it never
+     files a sibling.
+
+**An issue filed to end a round is a finding against the session, not a
+deliverable.** A finding about the tooling itself is fixed in place or dropped, and
+filed only when a **required** check is wrong. Reviewers never file — a reviewer's
+finding is fixed or dropped by the author ([`reviewer.md`](../haven-agent-workflow/references/reviewer.md),
+[`doc-reviewer.md`](../haven-agent-workflow/references/doc-reviewer.md),
+[`design-reviewer.md`](../haven-agent-workflow/references/design-reviewer.md)).
+The five checks are stated here once; [`new-task`](../new-task/SKILL.md) applies
+the repro check to defect-type tasks, and
+[the pull-request template](../../../.github/pull_request_template.md) carries
+the two lists. Owner decisions of 2026-09-08, recorded in #2767: dropping with a
+reason is allowed; there is no cap on filing but the bar applies to every issue.
 
 ## Commit And Pull Request
 
@@ -418,16 +554,17 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    Diff the merged result with the three-dot form *Independent Review* step 1
    already requires — a two-dot diff against a base that moved reports everyone
    else's additions as your deletions (a phantom-revert blocking finding on 3 Sep,
-   in the #2421 build session). A merge that touches a `last-verified` chain
-   interleaves it; the rule and its check are the docs-quality system's (#2477,
-   #2504), not this skill's.
+   in the #2421 build session). If a concurrent documentation change touches a
+   date-only `last-verified` field, retain the current date unless you re-read
+   that document; the evidence belongs in the PR or its per-change record.
 3. Commit conventionally using any attribution required by the active client or repository policy.
 4. Push the issue branch.
 5. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.
 6. Fill the applicable sections of [the pull-request template](../../../.github/pull_request_template.md), including:
    - changed surfaces and workflow used;
    - local checks and browser/headless verification;
-   - intentionally excluded work;
+   - **Not filed** and **Filed** — every finding that was not fixed here, under one
+     of the two (*Filing bar*); each **Filed** item carries its repro link;
    - generated-artifact and handoff impact;
    - CASP/MiCA status when applicable;
    - review findings and resolution, including the **named verdict line for every pass,
@@ -506,13 +643,15 @@ you need the reasoning. Never edit one without the other — CI will not let you
   both are registered in `index.ts` today. A parenthetical that reads as an
   exclusion is worse than an omission, because nobody re-checks it — #1892.);
 - `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
-  `domain/machine-payment-lifecycle.ts`, or `rails/allowance-module.ts`
-  (#1987 deleted the off-chain coverage-arithmetic module and the
-  allowance-nonce coordinator with the AllowanceModule rail, so both are gone
-  from this list — a glob naming a file that no longer exists guards nothing,
-  and the "no phantom globs" assertion in `scripts/ci/money-path.test.mjs`
-  fails CI on it. `rails/allowance-module.ts` STAYS: that file survives as
-  reads-only);
+  `domain/machine-payment-lifecycle.ts`, or
+  `infra/chain/relayer-reads.ts` (#1987 deleted the off-chain coverage-arithmetic
+  module and the allowance-nonce coordinator with the AllowanceModule rail, so
+  both are gone from this list — a glob naming a file that no longer exists
+  guards nothing, and the "no phantom globs" assertion in
+  `scripts/ci/money-path.test.mjs` fails CI on it. The reads-only survivor
+  STAYS on this list: it was rails/allowance-module.ts until #2850 renamed
+  that file to `infra/chain/relayer-reads.ts` — the AllowanceModule filename
+  was the last false claim the retired rail left behind);
 - `rails/execution-rail.ts` (the rail seam);
 - `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
   `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
@@ -540,10 +679,11 @@ you need the reasoning. Never edit one without the other — CI will not let you
   review, which found the delegate balance monitor unlisted while its equally
   read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
   the two even share an alert channel);
-- `routes/safe-exec.ts` or `routes/hybrid-accounts.ts`
-  (user-signed execution and account provisioning; the approval queue's route
-  file was deleted with its table by #2055, so its glob left the perimeter
-  rather than being repointed — the code is dead, not moved);
+- `routes/hybrid-accounts.ts` (user-signed execution and account provisioning;
+  the approval queue's route file was deleted with its table by #2055, so its
+  glob left the perimeter rather than being repointed — the code is dead, not
+  moved; the owner-signed relayed execution route left the same way in #2847,
+  deleted with the last of the Safe rail's live behaviour);
 - `packages/sdk/src/signer.ts` and `packages/signer/` (signing schemes are spend
   authority — the SDK entry point was listed; the edge-signer package that
   actually holds the delegate key material was on no list at all, and is the
@@ -652,10 +792,14 @@ gap this check exists to close, one pass over.
 
 Route the merge:
 
-- **Migration:** leave the pull request for independent code-owner approval and merge (`.github/CODEOWNERS`). The author's own approval does not satisfy it.
+- **Direct migration implementation (`db/migrations/*.ts`):** leave the pull request
+  for independent code-owner approval and merge (`.github/CODEOWNERS`). The
+  author's own approval does not satisfy it; migration tests under `__tests__/`
+  do not need code-owner approval.
 - **Frontend UI:** a **`blocking`** or **`should-fix`** UX, copy, or design-system
   finding from either review pass pauses auto-merge; a **`nit`** does not (#2636 — fix
-  it in place when it is a one-line change, else file it with its screenshot). Severity
+  it in place when it is a one-line change, else drop it under **Not filed** with its
+  screenshot). Severity
   is the reviewer's label, never the author's re-reading of it, and the table is in
   [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui).
   Clearing a pausing finding does **not** need a second human ack (#1968): fix the finding,
@@ -836,6 +980,11 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
 
 Leave the issue open until the pull request merges. Report the issue, pull request, gate result, risk, and merge mode, then stop. A caller may invoke the skill again for the next item.
 
+**Two more lines, always (#2767):** `Filed: n` — each filed issue with its repro
+link — and `Not filed: n`. A closeout whose filed issue lacks a repro is unfinished:
+go back and add the repro, or drop the issue and say so. `Filed: 0` is the normal
+case, not an omission.
+
 Report an open `qa-failure` when selection found one — one line naming the issue and
 that `dev → main` is gated by it. The user decides what to do about it; the loop's job
 is to stop it being invisible.
@@ -857,8 +1006,21 @@ The table is the source; any total in the prose is derived from it and says so.
 **Parent epic.** When the shipped issue is an epic sub-issue and the epic body carries
 a build-order list, tick that slice's line, so the epic reads as status instead of
 needing its sub-issue states queried one by one. When it was the epic's **last open
-sub-issue**, say so and report the epic ready to close — do not close it: an epic can
-carry acceptance criteria and operator-verify steps of its own that outlive its slices.
+sub-issue**, say so — and report the epic **ready to close only when every box in
+its Promotion checklist is ticked** (#2767). Do not close it: an epic can carry
+acceptance criteria and operator-verify steps of its own that outlive its slices,
+and the checklist is where they live — the operator steps the epic depends on and
+the product verification run on `dev` before promotion, each box naming where it is
+done (`.github/ISSUE_TEMPLATE/loop-epic.md`). Read it with the tool, never by eye:
+
+```bash
+gh issue view <epic> --json body -q .body | node scripts/ci/epic-promotion-checklist.mjs
+```
+
+Exit 0 is "ready to close"; exit 1 prints the unticked boxes, and the report lists
+them instead. An epic with no such section predates the template change — the tool
+says so and exits 0, and the report names the absence. The epic stays open across
+the promotion until a human ticks the last box.
 
 **Scan-ledger disposition.** When the epic being reported ready to close (or being
 closed by whoever holds that decision — ship-next itself never closes an epic, per

@@ -80,7 +80,7 @@ import {
 } from '../rails/delegation-policy.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from '../rails/delegation-rail.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
-import { getTokenBalance } from '../rails/allowance-module.js'
+import { getTokenBalance } from '../infra/chain/relayer-reads.js'
 import { sweepUsdcAddress } from '@haven_ai/sdk'
 import { readRemainingBudget } from '../infra/chain/delegation-budget-reader.js'
 import {

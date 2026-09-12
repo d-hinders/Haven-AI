@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockApiGet = vi.fn()
 
@@ -42,6 +42,7 @@ function response(transactions: AggregatedTransaction[]): TransactionsFeedRespon
     hasMore: false,
     partialFailure: false,
     failedSafeIds: [],
+    truncated: false,
   }
 }
 
@@ -116,5 +117,104 @@ describe('useTransactionsFeed', () => {
     ])
     expect(mockApiGet).toHaveBeenCalledTimes(2)
     expect(mockApiGet).toHaveBeenLastCalledWith('/transactions?offset=1&limit=25')
+  })
+})
+
+describe('useTransactionsFeed visible-only polling (#2732)', () => {
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('a successful silent tick refetches fresh and keeps the loaded window: no pagination reset, no spinner flag', async () => {
+    const pageOne = {
+      ...response([tx('0xa', 'safe-1'), tx('0xb', 'safe-1')]),
+      hasMore: true,
+    }
+    mockApiGet.mockResolvedValueOnce(pageOne)
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.loadingInitial).toBe(false)
+
+    // User loaded a second page (4 rows in view).
+    mockApiGet.mockResolvedValueOnce({
+      ...response([tx('0xc', 'safe-1'), tx('0xd', 'safe-1')]),
+      offset: 2,
+    })
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(result.current.transactions).toHaveLength(4)
+
+    mockApiGet.mockResolvedValueOnce(
+      response([tx('0xa', 'safe-1'), tx('0xb', 'safe-1'), tx('0xc', 'safe-1'), tx('0xd', 'safe-1')]),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+
+    // The tick asked for the loaded window (limit = 4 loaded rows), fresh,
+    // at offset 0 — not a page reset to limit=25.
+    expect(mockApiGet).toHaveBeenLastCalledWith(
+      '/transactions?offset=0&limit=4&fresh=1',
+    )
+    expect(result.current.refreshing).toBe(false)
+    expect(result.current.loadingInitial).toBe(false)
+  })
+
+  it('a failed silent tick keeps the rows the presenter is pointing at: list, total and flags unchanged, no error flip', async () => {
+    mockApiGet.mockResolvedValueOnce(response([tx('0xa', 'safe-1')]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.transactions).toHaveLength(1)
+
+    mockApiGet.mockRejectedValueOnce(new Error('500 mid-demo'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+
+    expect(result.current.transactions).toHaveLength(1)
+    expect(result.current.transactions[0]?.hash).toBe('0xa')
+    expect(result.current.total).toBe(1)
+    expect(result.current.error).toBeNull()
+    expect(result.current.loadingInitial).toBe(false)
+    expect(result.current.refreshing).toBe(false)
+  })
+
+  it('does not double-fire when a manual refresh races a poll tick (one in-flight request)', async () => {
+    let resolveTick!: (value: TransactionsFeedResponse) => void
+    mockApiGet.mockResolvedValueOnce(response([tx('0xa', 'safe-1')]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockReturnValueOnce(
+      new Promise<TransactionsFeedResponse>((resolve) => { resolveTick = resolve }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(mockApiGet).toHaveBeenCalledTimes(2)
+
+    // A manual refresh issued while the tick is in flight starts its own
+    // request (the hook's requestIdRef supersedes the tick), but the poll
+    // cadence itself issued no second request for the same moment.
+    mockApiGet.mockResolvedValueOnce(response([tx('0xb', 'safe-1')]))
+    const manual = result.current.refresh()
+    expect(mockApiGet).toHaveBeenCalledTimes(3)
+    resolveTick(response([tx('0xc', 'safe-1')]))
+    await act(async () => {
+      await manual
+    })
+    expect(mockApiGet).toHaveBeenCalledTimes(3)
   })
 })

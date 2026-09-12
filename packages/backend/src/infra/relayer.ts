@@ -19,7 +19,7 @@ const relayers = new Map<number, Wallet>()
 // broadcast. Postgres arbitrates nonce lanes there, so those submitters are
 // cross-replica safe; this lock remains as the cheap in-process belt inside
 // that pipeline, and as the ONLY serialisation for the Safe-bound legacy
-// sites (safe-deploy/exec, allowance-module, the deployers) — which retire
+// sites (safe-deploy/exec, the chain-read module, the deployers) — which retire
 // with #1440. Until they do, multi-replica remains gated on THEM, not on the
 // queue lane.
 const sendLocks = new Map<number, Promise<unknown>>()
@@ -65,7 +65,7 @@ export async function getRelayerFeeOverrides(
 /**
  * The ONE provider per chain that backs every relayer submission (#1533).
  *
- * Exported so `rails/allowance-module.ts` can delegate instead of keeping a
+ * Exported so `infra/chain/relayer-reads.ts` can delegate instead of keeping a
  * second `Map` of its own. Two provider instances for one relayer EOA is how
  * the 2026-08-18 stale-nonce failure happened: `withRelayerSendLock`
  * serialises SUBMISSIONS, but ethers populates each transaction's nonce from

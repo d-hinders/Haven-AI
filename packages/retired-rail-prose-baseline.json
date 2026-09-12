@@ -29,11 +29,8 @@
   "packages/backend/src/modules/mpp/challenge.ts": {
     "remain-readable": 1
   },
-  "packages/backend/src/modules/reporting/__tests__/feed-rail-parity.test.ts": {
+  "packages/backend/src/modules/accounting/__tests__/feed-rail-parity.test.ts": {
     "both-rails": 2
-  },
-  "packages/backend/src/modules/x402/settlement-observed.ts": {
-    "both-rails": 1
   },
   "packages/backend/src/openapi/spec.ts": {
     "remain-readable": 1
@@ -56,6 +53,9 @@
   "packages/core/src/api-types.ts": {
     "remain-readable": 1
   },
+  "packages/frontend/public/docs/security-model.md": {
+    "still-readable": 2
+  },
   "packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
     "both-rails": 1
   },
@@ -63,7 +63,6 @@
     "remain-readable": 1
   },
   "packages/frontend/src/app/(authenticated)/custody/page.tsx": {
-    "both-rails": 2,
     "remain-readable": 1
   },
   "packages/frontend/src/components/AgentPanel.tsx": {
@@ -78,10 +77,6 @@
   "packages/frontend/src/components/agent-panel/RemoveAgentDialog.tsx": {
     "remain-readable": 1,
     "stays-readable": 1
-  },
-  "packages/frontend/src/components/connect-agent/ConnectionVerificationFooter.tsx": {
-    "both-rails": 1,
-    "rail-conditional": 1
   },
   "packages/frontend/src/components/ui/CopyButton.tsx": {
     "still-readable": 1

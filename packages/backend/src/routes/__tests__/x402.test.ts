@@ -22,7 +22,7 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)
 
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
@@ -368,7 +368,7 @@ describe('x402 routes', () => {
     //
     // #2307: a `generateTransferHash` spy used to stand here, asserting that
     // no sign-hash was computed. It could not fail — the symbol is not an export of
-    // `rails/allowance-module.js`, so the mock factory entry was a function
+    // `infra/chain/relayer-reads.js`, so the mock factory entry was a function
     // nothing could ever reach. The sign-hash builder was DELETED by #1987,
     // which is a stronger guarantee than a spy: `mock-factory-exports.guard`
     // now fails if the name is reintroduced to a factory, and the

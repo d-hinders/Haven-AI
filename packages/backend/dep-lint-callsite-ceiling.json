@@ -3,7 +3,7 @@
   "files": {
     "packages/backend/src/index.ts": 1,
     "packages/backend/src/infra/transaction.ts": 3,
-    "packages/backend/src/modules/accounting/accounting-entry.ts": 2,
+    "packages/backend/src/modules/accounting/entry.ts": 2,
     "packages/backend/src/modules/catalog/catalog-discovery.ts": 2,
     "packages/backend/src/modules/catalog/merchant-catalog.ts": 3,
     "packages/backend/src/platform/leader-lock.ts": 6,

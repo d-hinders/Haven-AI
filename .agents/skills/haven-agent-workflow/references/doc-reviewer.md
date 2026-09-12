@@ -27,7 +27,14 @@ Mechanism and the guard's limits live in [`ai-agent-workflow.md` § Review Isola
    `docs/**` · `packages/**/*.md` (the copy that ships to npm — outside every net on #2422 round 3) · code comments and JSDoc (`config.ts` was #2422's fifth-round survivor; `capabilities.ts` #2242's) · fixtures and tests (`allowance-format.test.ts`, #2408 pass 3) · skill and prompt text under `.agents/**` and `.claude/**` · CASP shards under `docs/regulatory/casp-changelog/`.
 3. **Positive control before you trust a zero.** Show the same grep finding a known hit — the retired phrase in the shard or diff that quotes it — before reporting that a phrase family has no other copies (#2242: `grep -nE 'fetch\('` returned nothing because the call site is `fetchImpl(`; a zero from an untested instrument is not evidence).
 4. Then take the coupling gate's list as the **floor**: `npm run docs:coupling` (strict, CI-equivalent; reads uncommitted work) or `node scripts/docs/coupling-gate.mjs --changed=<files>`. A ⚠️ `contract: true` finding is blocking; the rest are advisory. Read every implicated doc. The eight governed `packages/**` READMEs carry no front-matter — their `covers:` rows live in `scripts/docs/package-docs.mjs` (#2088); every other `packages/**/*.md` is in that manifest's exempt map by decision, so do not file it as missing front-matter. Mapping rules: [`docs-quality-system.md`](../../../../docs/contributing/docs-quality-system.md).
-5. For each implicated doc and each sweep hit, check the claim against the changed code: **now-wrong** (behaviour, value, path, default, flow step the diff changed), **now-required** (a capability, endpoint, env var or state the doc should mention), **broken-ref** (a file or symbol renamed or removed). Also sanity-check the gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) when the diff touches a surface they summarise.
+5. **A hit's disposition is the author's, and it is never "file it" (#2767).** The
+   claim sweep keeps its full scope; what changes is where a hit goes. A `contract:
+   true` finding blocks and is fixed in this PR. A hit in a non-contract doc is fixed
+   in place when small, or **dropped** — one line under **Not filed** in the PR body
+   with the reason — never filed as its own issue. You report the hit and the
+   smallest correct update; the author fixes or drops. The *could not verify* list
+   (return item 6) stays exactly as it is.
+6. For each implicated doc and each sweep hit, check the claim against the changed code: **now-wrong** (behaviour, value, path, default, flow step the diff changed), **now-required** (a capability, endpoint, env var or state the doc should mention), **broken-ref** (a file or symbol renamed or removed). Also sanity-check the gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) when the diff touches a surface they summarise.
 
 ### 2b. The no-claims exit (#2638)
 
@@ -63,17 +70,16 @@ A root with no `node_modules` cannot re-run anything, and every verdict that say
 
 A CASP shard, an archive doc, a `last-verified` `Prior:` entry or a quotation that correctly records what *was* true is not stale. Say so **per hit** — `historical record, correct` — rather than flagging it or skipping it silently. Every hit gets one of: `stale`, `historical record`, `conditional truth (still holds)`, `out of scope, why`.
 
-## 6. `last-verified`: a bump records a re-read, never substitutes for one
+## 6. `last-verified`: a date records a re-read, never substitutes for one
 
-A bump records the re-read scope and what was **NOT** re-verified; a stamp without a re-read is a false verification claim and the staleness audit ranks on it. A doc whose claims did not change is right to stay unbumped with a scoped note. When the strict coupling gate forces a touch on a `contract: true` doc whose claims did not change, the note says exactly that — `re-verified, not edited, scope: <claim>` (PR #2502: `package-dev-channel.md`). Convention: [`docs-quality-system.md` § `last-verified` chain integrity](../../../../docs/contributing/docs-quality-system.md#last-verified-chain-integrity-1843).
-
-## 7. Chain ceiling (#2477)
-
-`scripts/docs/chain-integrity.mjs` fails a `last-verified` line over `MAX_CHAIN_BYTES` (65,536), measured in **UTF-8 bytes** since [#2562](https://github.com/d-hinders/Haven-AI/issues/2562) — it compared `line.length` (UTF-16 code units) while reporting "bytes" before that, and the two differ by hundreds on a chain dense with em-dashes and arrows. Measure any doc you would have bumped, and say when it is near the ceiling; never propose an entry that would exceed it. Since #2562 a **non-blocking 40 KiB band** also names every governed doc on its way there, on every run — if the doc you are bumping is already warned, say so in your findings rather than adding to it silently.
-
-```bash
-node -e 'import("./scripts/docs/chain-integrity.mjs").then(async m=>{const fs=await import("node:fs");const l=m.lastVerifiedLine(fs.readFileSync(process.argv[1],"utf8"));console.log(m.chainLineBytes(l),"of",m.MAX_CHAIN_BYTES,"bytes; band",m.WARN_CHAIN_BYTES)})' <doc>
-```
+A date records the re-read scope; a stamp without a re-read is a false
+verification claim and the staleness audit ranks on it. A doc whose claims did
+not change is right to stay unbumped. When the strict coupling gate forces a
+touch on a `contract: true` doc whose claims did not change, the PR explains
+that it was re-read and not edited, with the claim's scope (PR #2502:
+`package-dev-channel.md`). Historical verification blocks retired in #2681 are
+preserved in the documentation-quality archive; they are historical records,
+not a current-doc review control.
 
 ## What NOT to flag
 

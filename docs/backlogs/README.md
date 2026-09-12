@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-09-02" # #2300: the "Money-path?" summary bullet names the hosted MCP tool surface (`packages/mcp-server/src/**`) beside the surfaces it already listed; the pointer to the authoritative JSON is unchanged. Scope: that bullet only. Prior: #2276: the queue-state table said a closed issue is done and implied every open issue is ready; an `operator-verify` issue is neither — merged code, open on purpose, not queueable. Added that one exception. Scope: the queue-state paragraph only; the issue-writing rigour section and the loop-template mapping were NOT re-verified. Prior: #1341: re-verified queue readiness after ship-next gained #1289 active-claim coordination
+last-verified: "2026-09-08"
 ---
 
 # Backlogs moved to GitHub Issues
@@ -28,7 +28,7 @@ The loop reads **GitHub Issues**. Two sources (see
 | Source | When | How to run |
 | --- | --- | --- |
 | **Standalone labeled issue** | a small, self-contained task | open an issue + add the **`code-quality`** label → run `ship-next` |
-| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>` |
+| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>`; its **Promotion checklist** (operator steps + product verification on `dev`, each an unticked box) keeps the epic open until a human ticks the last one — `ship-next` reports it ready to close only then ([#2767](https://github.com/d-hinders/Haven-AI/issues/2767)) |
 
 Issue state *is* the backlog state: an open issue with no PR and no live claim
 or work overlap is **ready**, an open issue with an open Haven PR is **in
@@ -57,8 +57,9 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
   ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)) — a prose copy is
   how the delegation rail went unlabelled for months. The label selects the
   `money.md` playbook and the characterization-test bar; it does not pause the
-  merge (#1024). Migrations require independent code-owner review and merge
-  through `.github/CODEOWNERS`.
+  merge (#1024). Direct migration implementation `.ts` files require independent
+  code-owner review and merge through `.github/CODEOWNERS`; migration tests do
+  not.
 - **Characterization-first** — for a change to existing money-path behavior, pin
   the current behavior with a test before changing it.
 
@@ -72,5 +73,5 @@ The retired tracks all completed (or moved to issues):
   PR #530; remaining money-path follow-ups were moved to GitHub Issues.
 
 The human-curated code-quality cadence ledger still lives at
-[`../contributing/code-quality-loop.md`](../contributing/code-quality-loop.md) —
+[`.agents/skills/quality-scan/references/discovery-method.md`](../../.agents/skills/quality-scan/references/discovery-method.md) —
 that is a discovery/priority record, separate from the loop's runtime queue.

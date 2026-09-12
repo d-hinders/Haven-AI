@@ -18,6 +18,7 @@
  */
 
 import { Check } from 'lucide-react'
+import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
@@ -168,31 +169,34 @@ export default function OnboardingClient() {
         }}
       />
 
-      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
-          >
-            <HavenMark />
-            Haven
-          </Link>
-          {/* #1239: this header is the ONLY page a signed-in user without
-              accounts can reach (login auto-redirects here, ProtectedRoute
-              bounces every other page back here) — so it must carry the way
-              out, or switching accounts requires clearing site data. */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[var(--v2-ink-3)]">{name}</span>
-            <button
-              type="button"
-              onClick={() => {
-                logout()
-                router.replace('/login')
-              }}
-              className="text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+      <div className="relative z-10">
+        <SafeAreaBand />
+        <div className="border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
+          <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
             >
-              Log out
-            </button>
+              <HavenMark />
+              Haven
+            </Link>
+            {/* #1239: this header is the ONLY page a signed-in user without
+                accounts can reach (login auto-redirects here, ProtectedRoute
+                bounces every other page back here) — so it must carry the way
+                out, or switching accounts requires clearing site data. */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-[var(--v2-ink-3)]">{name}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  logout()
+                  router.replace('/login')
+                }}
+                className="text-xs font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] transition-colors"
+              >
+                Log out
+              </button>
+            </div>
           </div>
         </div>
       </div>

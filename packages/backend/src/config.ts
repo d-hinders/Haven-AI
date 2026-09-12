@@ -51,12 +51,38 @@ function optionalEnv(key: string, fallback: string): string {
  * unknown length of time with nothing anywhere saying so. The owner decision
  * (folded into #2630 rather than filed separately) is: stay fail-open, but
  * stop being silent — the same `warnPublicRpc` shape #2615 established for an
- * unset RPC endpoint, applied here. Branches on the RAW value, not the
- * resolved one: a deliberately-configured `TRUST_PROXY_HOPS=0` is an operator
- * choice and stays silent, exactly as a garbage value that resolves to the
- * same 0 does NOT (it gets the louder, different, "not a non-negative
- * integer" message below) — unset and "invalid" are distinct operator
- * mistakes and get distinct messages.
+ * unset RPC endpoint, applied here. It branched on the RAW value, not the
+ * resolved one, following the #2615 convention that a variable which is SET is
+ * a deliberate configuration: unset/empty and garbage warn, each with its own
+ * message, and a deliberately-set value stays quiet.
+ *
+ * ## The explicit 0 warns too now (#2667)
+ *
+ * That convention is right for `RPC_URL_BASE`, where a set value can name a
+ * real choice (a public endpoint someone picked on purpose). It is a weaker
+ * fit here, and #2667 says why: `0` is not a configuration of the rate-limit
+ * tier, it is the ABSENCE of one — the tier returns no limit at all at 0 hops
+ * (`middleware/rate-limit.ts`), so the only thing an operator can select with
+ * `TRUST_PROXY_HOPS=0` is "no front-door throttling, and no signal saying so".
+ * There is no deployment where that is the intended posture: behind Railway
+ * there is at least one edge hop, and in front of no proxy the variable is
+ * moot. So a fat-fingered `0` for `1`, or a `0` left behind while debugging,
+ * reproduced the exact state #2630's warning exists to flag — through a
+ * spelling that warning was blind to.
+ *
+ * It gets its OWN message, not the unset one: "not set" and "you set 0" are
+ * different operator situations with different remedies (the first may be
+ * nobody's intent at all; the second is a decision that needs reconsidering),
+ * and collapsing them would let a `0` paste masquerade as a missing variable
+ * in the logs. Three disarmed spellings, three distinct messages — pinned by
+ * the pairwise-distinctness mutation proof in
+ * `__tests__/config-trust-proxy.test.ts`.
+ *
+ * Boot behaviour is UNCHANGED: every path below still returns 0 and nothing
+ * throws. Refusing to boot on `0` in production was the stronger option on
+ * #2667 and is deliberately NOT taken here, for the same reason #2615 item 3
+ * answered its own fail-open/fail-closed question as fail-open: an operator
+ * decision, not a warning PR.
  */
 export function parseTrustProxyHops(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === '') {
@@ -77,6 +103,18 @@ export function parseTrustProxyHops(raw: string | undefined): number {
       `TRUST_PROXY_HOPS is set to ${JSON.stringify(raw)}, which is not a non-negative integer — ` +
       'treating it as 0: the proxy stays UNTRUSTED and the per-IP auth rate limits stay DISARMED. ' +
       'Set a plain hop count (e.g. 1), never "true".',
+    )
+    return 0
+  }
+  if (hops === 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `TRUST_PROXY_HOPS is explicitly set to ${JSON.stringify(raw)}, which resolves to 0 — the proxy ` +
+      'stays UNTRUSTED and the per-IP auth rate limits (signup, login, device_start, device_lookup, ' +
+      'device_token) stay DISARMED, exactly as if the variable were unset. There is no deployment ' +
+      'where 0 is the intended posture (#2667): set the real hop count (Railway terminates in exactly ' +
+      'one edge proxy, so that is usually 1) to arm them, or remove the variable if no proxy fronts ' +
+      'this process.',
     )
     return 0
   }
@@ -253,6 +291,9 @@ export function parseConnectorChannel(raw: string | undefined | null): string {
 }
 
 // Validate on import — fail fast at startup
+export const RETRY_SWEEP_INTERVAL_DEFAULT_MS = 5 * 60 * 1000
+export const RETRY_SWEEP_INTERVAL_FLOOR_MS = 10_000
+
 export const config = {
   // Required
   databaseUrl: requireEnv('DATABASE_URL'),
@@ -355,10 +396,31 @@ export const config = {
   legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
 
   // Managed-deployment marker — true only on Haven's hosted backend. The
-  // reporting feed (#491) is a hosted-only paid add-on and never runs elsewhere.
+  // accounting feed (#491) is a hosted-only add-on and never runs elsewhere.
   hosted: process.env.HAVEN_HOSTED === 'true',
-  // Global kill-switch for the reporting feed; dark by default.
-  reportingFeedEnabled: process.env.HAVEN_REPORTING_FEED_ENABLED === 'true',
+  // Global kill-switch for the accounting feed; dark by default.
+  //
+  // #2859 renamed this from HAVEN_REPORTING_FEED_ENABLED. The old name is still
+  // honoured so a deployed backend keeps working across the deploy that carries
+  // this rename — the operator step that sets the new one lands after merge.
+  // The NEW name wins when both are set, so flipping the variable is safe in
+  // either order. `readAccountingEnabled` warns once on the deprecated name.
+  accountingEnabled: readAccountingEnabled(),
+  // Who is entitled to the accounting feed once it is on (#2861):
+  //   granted — the account must hold the entitlement row (today's behaviour;
+  //             the default, so prod is unchanged by this variable's absence)
+  //   all     — every account on this deployment is entitled. Dev only. The
+  //             entitlement table stays for the tiers that come later.
+  // An invalid non-empty value refuses the boot, on the same reasoning as
+  // HAVEN_CONNECTOR_CHANNEL above: a typo must not silently fall back to
+  // "granted" and look like the feature is off when it is merely misspelled.
+  accountingEntitlementMode: parseAccountingEntitlementMode(process.env.HAVEN_ACCOUNTING_ENTITLEMENT_MODE),
+  // Cadence of the background retry sweep (#2866): every tick re-feeds the
+  // failed / skipped / stale-pending sync rows whose backoff has elapsed. A
+  // few minutes is the intended shape — the per-row backoff (1 min doubling
+  // to 1 h) does the spacing, the tick only bounds how soon a due row is
+  // seen. Inert with the flag off regardless of this value.
+  accountingRetrySweepIntervalMs: parseRetrySweepIntervalMs(process.env.HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS),
 
   // Database pool
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
@@ -378,4 +440,61 @@ export const config = {
  */
 export function relayerPrivateKeyForChain(chainId: number): string {
   return process.env[`RELAYER_PRIVATE_KEY_${chainId}`] || config.relayerPrivateKey
+}
+
+/**
+ * `HAVEN_ACCOUNTING_ENABLED`, falling back to the pre-#2859
+ * `HAVEN_REPORTING_FEED_ENABLED` with one warning.
+ *
+ * The new name wins whenever it is SET — not merely when it is `'true'`. An
+ * operator who sets it to `false` to turn the feed off would otherwise be
+ * overridden by a stale `HAVEN_REPORTING_FEED_ENABLED=true` still sitting in
+ * the environment, which is the opposite of what they asked for.
+ */
+function readAccountingEnabled(): boolean {
+  const current = process.env.HAVEN_ACCOUNTING_ENABLED
+  const deprecated = process.env.HAVEN_REPORTING_FEED_ENABLED
+  if (current !== undefined) return current === 'true'
+  if (deprecated !== undefined) {
+    console.warn(
+      '[config] HAVEN_REPORTING_FEED_ENABLED is deprecated (#2859) — rename it to ' +
+        'HAVEN_ACCOUNTING_ENABLED. The old name is still honoured for now.',
+    )
+    return deprecated === 'true'
+  }
+  return false
+}
+
+export type AccountingEntitlementMode = 'granted' | 'all'
+export const ACCOUNTING_ENTITLEMENT_MODES: readonly AccountingEntitlementMode[] = ['granted', 'all']
+
+/**
+ * `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` (#2861). Unset or empty → `granted`, so a
+ * deployment that never heard of this variable keeps today's gate. Any other
+ * non-empty value that is not one of the two modes throws at import time and
+ * refuses the boot — the `parseConnectorChannel` precedent.
+ */
+/**
+ * HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS (#2866). Unset, empty, 0 or NaN
+ * take the default; anything below the floor is raised to it — a negative
+ * value would otherwise make setInterval spin (Node clamps negatives to
+ * 1 ms) and hammer the leader lock on every replica (review on #2899).
+ */
+export function parseRetrySweepIntervalMs(raw: string | undefined | null): number {
+  const n = Number(raw)
+  if (!raw || !Number.isFinite(n) || n === 0) return RETRY_SWEEP_INTERVAL_DEFAULT_MS
+  return Math.max(RETRY_SWEEP_INTERVAL_FLOOR_MS, n)
+}
+
+export function parseAccountingEntitlementMode(raw: string | undefined | null): AccountingEntitlementMode {
+  if (raw === undefined || raw === null) return 'granted'
+  const value = raw.trim()
+  if (value === '') return 'granted'
+  if (value === 'granted' || value === 'all') return value
+  throw new Error(
+    `HAVEN_ACCOUNTING_ENTITLEMENT_MODE is set to ${JSON.stringify(raw)}; it must be "granted" ` +
+      '(the account holds an entitlement row) or "all" (every account on this deployment). ' +
+      'Refusing to start rather than falling back, because a misspelled "all" on dev would ' +
+      'silently mean "granted" and look like the feed is off for everyone.',
+  )
 }

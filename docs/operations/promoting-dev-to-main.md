@@ -7,7 +7,8 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
-last-verified: "2026-09-07" # #2638: EDITED, scope = ONE new checklist item under § *Open and review the PR* — open the standing weekly staleness-audit issue (#2645, upserted by `docs-audit.yml`) and disposition every `current` doc it ranks: fix, file, or accept with a reason in the promotion PR. Written with the reason it is not redundant with the coupling gate: a `contract: true` doc is blocked on the PR that made it stale and never reaches promotion, so what this sweeps is the non-contract drift that is deliberately allowed to accumulate on `dev`. Notes that `archived`/`research` are no longer ranked (same PR) and that an unchanged report is a valid ticked outcome. Scope: that ONE item. NOT re-verified: the QA, migration, sweep-floor, env, npm, prod-bar or post-merge items. Prior: #2647: EDITED, scope = the **npm** checklist item only. It described one outcome to read (the per-package publish table); since #2647 there are two jobs and two outcomes, and the new failure mode is a green publish with a red `promote-tags` — versions live under `alpha`, `latest` still on the previous release, which is the 0.1.35-alpha.0 outcome. The item now says to check `npm view ... dist-tags` before calling the promotion done, names the token expiry as the likely cause, and says the fix is renewing and re-running that job rather than cutting another version. NOT re-verified: the prod bar, the qa-freshness section, the merge-method rules or anything else in this checklist. Prior: #2633: EDITED, scope = the "Required checks are green" item under § *Open and review the PR*, split in two. It named `dev-gate` and stopped; the bar is now written out as a list — 19 required contexts, the 15 shared with `dev` plus `gate`, `qa-freshness`, **Design visual regression** and **Frontend browser smoke**, the last two added to ruleset 18134280 on 2026-09-07 by epic #2632's owner step O2 — with the note that `main` is now the only branch still requiring an up-to-date head, since O1 removed that policy from the shared ruleset. Numbers point at the inventory in `../contributing/autonomous-pr-loop.md` step 3 rather than being restated. Verified against `gh api repos/d-hinders/Haven-AI/rulesets`. Scope: that ONE item. NOT re-verified: the QA, migration, sweep-floor, env, npm or post-merge verification items. Prior: #2615: EDITED, scope = ONE new checklist item in § *Merge, deploy, and verify prod*, naming the production RPC variable set and the trap that produced the issue — `RPC_URL` reads as "RPC is configured" in a variable list and covers Gnosis (100) only, which the delegation rail does not use. The evidence standard is stated as the ABSENCE of the new boot warning in the deploy log rather than the presence of a variable in the Railway dashboard, matching what #2511 used one environment over: a dashboard read is a name-level observation, the boot log is the process saying what it resolved. The defaults in the table are read off `packages/backend/src/config.ts` on this branch, where each literal now lives in exactly one place (the `warnPublicRpc` call sites). NOT a claim that the variable IS set in production — it was not on 2026-09-07, that is the open operator step on #2615, and this item is written as the check rather than as a state. Scope: that ONE item. NOT re-verified: the migration bullet, the npm checklist, the rollback item, the smoke-hostname section, or any `covers:` target. Prior: #2421: the **npm** checklist item re-read against `.github/workflows/publish.yml`, which this PR changes. It still holds as written for the promotion: the prod path is version-gated, derives the tag from the version (`alpha`/`latest`) and reports per-package outcomes (#1159). What the item did not say, and now does, is that the SAME workflow gained a second channel — a push to `dev` publishes `0.0.0-dev.*` snapshots under the `dev` dist-tag — which changes nothing about this checklist, because a snapshot can reach neither `alpha` nor `latest` and a promotion cannot publish one. Scope: that ONE checklist item; the migration, sweep-floor, env and QA items were NOT re-verified in this pass. Prior: #2150: the "Migration availability" bullet re-read against the migration runner on this branch — the hand-run out-of-band pre-build is no longer the only way to get `CREATE INDEX CONCURRENTLY` past the runner's `BEGIN`/`COMMIT`, so it is demoted to a fallback behind the in-repo `transactional = false` opt-out, and the deploy-verification step gains the one failure state the opt-out introduces (a migration left `status = 'running'`, which stops the backend booting until an operator acts). Scope: those two bullets only — QA, npm, rollback and the merge-commit rule were not re-verified. Prior: #2151: the migration checklist re-read for hot-table lock availability; adds the lock-duration question and its pre-build/low-traffic mitigations. Prior: re-verified for #1266 demo merchant x402 settlement selection/canary posture
+  - scripts/release-scope.mjs
+last-verified: "2026-09-09"
 ---
 
 # Promoting `dev → main` (production release)
@@ -47,6 +48,67 @@ for how the environments are wired, see
       publish workflow own it. Without this, an agent following the runbook to
       the letter resolves the command to a dist-tag that predates the change.
 
+- [ ] **Re-measure the release scope, here at the door.** `publish.yml` rebuilds
+      the tarballs from **`main`'s tree at promotion time**, not from the bump
+      commit — so anything merged to `dev` since the bump publishes inside this
+      release whether or not the release record names it.
+
+      ```sh
+      npm run release:scope        # origin/main..origin/dev
+      ```
+
+      Compare the shipped delta against the CASP shard for this version and amend
+      the shard if they disagree. The script reads what ships from each package's
+      built sourcemaps and `files` field. Build first (`npm run build`) — it
+      **refuses** (exit 2) rather than guessing when a package is unbuilt, and a
+      refusal means "measure again", never "clean".
+
+      An **exit 1** is different and must not be read as a refusal: the delta WAS
+      measured, but one or more source files could not be classified. Only one of
+      the three causes it prints is a stale build; the other two are benign and a
+      rebuild will not change them. Read the list and decide, rather than
+      rebuilding reflexively. Do not hand-count the diff
+      ([#2724](https://github.com/d-hinders/Haven-AI/issues/2724)).
+
+## The promotion window — `dev` is held while the PR is open
+
+**From opening the promotion PR until it merges, do not merge anything into
+`dev`.** Nothing technically enforces the hold — GitHub will happily accept
+merges into `dev` while the promotion PR is open — which is exactly why this
+window is written down. The PR's head is the `dev` *branch*, not a pinned SHA,
+so anything that lands moves it, with three consequences:
+
+1. The required contexts on `main` are re-evaluated at the new head. Each one
+   that applies re-runs and must go green; the rest report `skipped`, which
+   GitHub counts as satisfied — most of `ci.yml`'s jobs are gated on
+   `needs.changes.outputs.*`, so a promotion rarely re-runs all of them. The
+   authoritative list of required contexts is the ruleset inventory in
+   [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md);
+   a second copy drifts.
+2. `qa-freshness` re-evaluates **coverage**, not only recency. A new commit
+   touching a money-path file the green QA run did not cover turns the gate red
+   and needs another dispatched money-flow run.
+3. The promoted scope changes silently, which is the release-record trap in
+   [#2724](https://github.com/d-hinders/Haven-AI/issues/2724).
+
+The sharpest consequence is not the re-runs but the review: `main` carries
+`dismiss_stale_reviews_on_push: true`, so a merge into `dev` **dismisses an
+approval already given** on the promotion PR. Code-owner review itself is
+conditional — `.github/CODEOWNERS` has one rule, on migration files — so a
+promotion carrying a migration can additionally sit waiting on a human for an
+unbounded time, and that whole wait is inside the hold.
+
+**If something must land anyway**, it is not forbidden — it is three pieces of
+work: re-measure the scope (#2724), re-dispatch *QA — money-flow (dev)*, and
+expect a full re-run of the required contexts.
+
+**The hold lifts the moment the promotion merges.** The tarballs are built from
+`main` at that point, so later `dev` merges only deploy and publish
+`0.0.0-dev.*` snapshots and cannot reach the released version.
+
+More than one agent session and several people merge into `dev` independently,
+so this is a rule to point at rather than a question to ask the release runner.
+
 ## Open and review the PR (base `main`, head `dev`)
 
 - [ ] Skim the **cumulative diff since the last promotion**. Since #1024 removed
@@ -58,7 +120,14 @@ for how the environments are wired, see
       `qa-dev` run, naming the offending commits. You no longer have to verify
       this by hand — if the gate is green, the run covered the money path. If it
       fails, re-run *QA — money-flow (dev)* rather than reaching for
-      `qa-override`.
+      `qa-override`. **Dispatch it rather than waiting.** The automatic
+      post-deploy runs are bound to whatever commit was deployed, and during the
+      hold nothing merges — so no new deployment fires and no new automatic run
+      appears at the head you are promoting. Waiting is not a way to produce
+      one. When you inspect any run, **read the `money-flow` job's conclusion,
+      never the run's**: a run whose job skipped is still `success` at run level
+      and is a green tick that is not coverage. The one-line check is in
+      [`agent-qa.md` § *Automation & gating*](./agent-qa.md#automation--gating).
 - [ ] **Migrations:** list every migration included since the last promotion.
       Confirm each is **forward-only / safe on existing rows**, and that a
       **prod DB snapshot** exists before they run on deploy.
@@ -120,7 +189,7 @@ for how the environments are wired, see
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
-- [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
+- [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions — the same three as [`ship-next` § *Filing bar*](../../.agents/skills/ship-next/SKILL.md#filing-bar-2767) (#2767): **fix** it (here or in a follow-up PR you open), **drop** it with the reason recorded in this promotion PR, or **file** it only when it clears the bar (a doc claim on its own does not — fix or drop). Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
 - [ ] A code-owner approval is present if the batch touches an owned path
       (migrations / release tooling / CODEOWNERS).
 

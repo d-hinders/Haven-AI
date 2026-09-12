@@ -3,9 +3,15 @@ import { FastifyInstance } from 'fastify'
 import pool from '../db.js'
 import { config } from '../config.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { buildAccountingEntries } from '../modules/accounting/index.js'
-import { sieExporter } from '../modules/accounting/index.js'
-import { reconcileEntries } from '../modules/accounting/index.js'
+import { buildAccountingEntries, FortnoxError, getValidFortnoxAccessToken } from '../modules/accounting/index.js'
+import { sieExporter } from '../modules/accounting/legacy/index.js'
+// dep-lint-exempt: `legacy/index.ts` is deliberately NOT re-exported from the
+// accounting module's public entry point (#2859) — that is the whole point of
+// the split: the non-asserting feed must not be able to reach the asserting
+// #462 code, and `__tests__/legacy-import-guard.test.ts` fails if it does. A
+// deep import is therefore the ONLY way in, and these three dark legacy routes
+// (`HAVEN_LEGACY_BOOKKEEPING_ENABLED`) are the only sanctioned consumers.
+import { pushVoucher, reconcileEntries, toFortnoxVoucher } from '../modules/accounting/legacy/index.js'
 
 interface ExportQuery {
   format?: string
@@ -118,5 +124,52 @@ export default async function accountingRoutes(app: FastifyInstance): Promise<vo
       [sub, resourceUrl],
     )
     return reply.code(204).send()
+  })
+
+  // POST /accounting/fortnox/push?from=&to= — the LEGACY asserting voucher
+  // push (#462 P2 #465), moved here from `routes/fortnox.ts` when #2862
+  // replaced that router with the provider-generic `/accounting/connections`
+  // surface. Path, gate and shape are unchanged: it is dark behind
+  // `HAVEN_LEGACY_BOOKKEEPING_ENABLED` (410 by default) and provider-specific
+  // by nature — it pushes FINISHED Fortnox vouchers, which is exactly what the
+  // non-asserting feed moved away from (#491/#492).
+  app.post<{ Querystring: PeriodQuery }>('/fortnox/push', async (request, reply) => {
+    if (!config.legacyBookkeepingEnabled) {
+      return reply.code(410).send({
+        error: 'Pushing finished vouchers is disabled. Agent spend now syncs into your accounting tool as draft transactions for your accountant to confirm.',
+      })
+    }
+    const { sub } = request.user as { sub: string }
+    const { from, to } = request.query
+    if (from && !ISO_DATE_RE.test(from)) return reply.code(400).send({ error: 'Invalid "from" date (expected ISO)' })
+    if (to && !ISO_DATE_RE.test(to)) return reply.code(400).send({ error: 'Invalid "to" date (expected ISO)' })
+
+    const accessToken = await getValidFortnoxAccessToken(sub)
+    if (!accessToken) return reply.code(400).send({ error: 'Fortnox is not connected. Connect it first.' })
+
+    const entries = await buildAccountingEntries({ userId: sub, from, to })
+
+    let pushed = 0
+    let skipped = 0
+    const failures: { paymentId: string; error: string }[] = []
+
+    for (const entry of entries) {
+      const voucher = toFortnoxVoucher(entry)
+      if (!voucher) {
+        skipped += 1 // no book-time SEK — unbookable
+        continue
+      }
+      try {
+        await pushVoucher(accessToken, voucher)
+        pushed += 1
+      } catch (err) {
+        failures.push({
+          paymentId: entry.paymentId,
+          error: err instanceof FortnoxError ? err.message : String(err),
+        })
+      }
+    }
+
+    return reply.send({ pushed, skipped, failed: failures.length, failures })
   })
 }

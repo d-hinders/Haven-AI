@@ -110,6 +110,19 @@ export const dashboardTransaction = {
   source: 'x402',
   x402ResourceUrl: 'https://research.example/report',
   x402MerchantAddress: testRecipientAddress,
+  // #2870: the payment-intent id the accounting badge is keyed on, and the
+  // badge's own object. Carried on the row itself so the fixture-shape parity
+  // test (`fixture-shape-parity.test.ts`) sees the same keys the screenshot
+  // dataset has. Rendered only by `/transactions` (table + drawer); the
+  // dashboard's recent-transactions preview reads neither key, so its
+  // baseline is unchanged.
+  paymentId: 'pay-research-1',
+  accounting: {
+    provider: 'fortnox',
+    status: 'pushed',
+    externalRef: 'fortnox:supplierinvoice:11',
+    error: null,
+  },
 }
 
 const balances = [
@@ -172,6 +185,160 @@ export const dashboardOverview = {
     },
   ],
   transactions: [dashboardTransaction],
+}
+
+/**
+ * Accounting connections (#2868, backend #2862–#2867). `GET
+ * /accounting/providers` lists Fortnox live and the three coming-soon
+ * providers; the connection row is exported so a spec can seed any of the
+ * five states with a spread (`{ ...accountingConnection, status: '…' }`).
+ * The screenshot harness carries the same shapes — `fixture-shape-parity`
+ * holds the two together.
+ */
+export const accountingProvider = {
+  id: 'fortnox',
+  displayName: 'Fortnox',
+  authKind: 'oauth2',
+  capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
+  availability: 'live',
+  requiredScopes: ['bookkeeping', 'companyinformation', 'archive'],
+  configured: true,
+}
+
+export const accountingProviders = [
+  accountingProvider,
+  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+    ...accountingProvider,
+    id: displayName.toLowerCase(),
+    displayName,
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: false },
+    availability: 'coming_soon',
+    requiredScopes: [],
+    configured: false,
+  })),
+]
+
+export const accountingConnection = {
+  provider: 'fortnox',
+  displayName: 'Fortnox',
+  authKind: 'oauth2',
+  status: 'connected',
+  statusReason: null,
+  isActiveDestination: true,
+  feedFrom: '2026-05-01T10:00:00.000Z',
+  grantedScope: 'bookkeeping companyinformation archive',
+  missingScopes: [] as string[],
+  tokenExpiresAt: '2026-05-01T11:00:00.000Z',
+  externalCompanyId: '1234567',
+  externalCompanyName: 'Ada Lovelace AB',
+  baseCurrency: 'SEK',
+  lastPushAt: '2026-05-02T09:15:00.000Z',
+  lastError: null,
+  connectedAt: '2026-05-01T10:00:00.000Z',
+  updatedAt: '2026-05-02T09:15:00.000Z',
+  settings: { suggestedAccount: '6540', autoFeed: true },
+}
+
+/**
+ * `GET /accounting/feed/status` (#2903 review): the `/accounting` feed page
+ * renders NOTHING unless `hosted && flagEnabled`, so a harness without this
+ * answer has no evidence of that page at all. Ready, entitled, connected to
+ * the company above, with one pushed row and one retryable failure so both
+ * chips render. The screenshot harness carries the same shape —
+ * `fixture-shape-parity` holds the two together.
+ */
+export const accountingFeedSync = {
+  id: '9d1f4c0a-6b2e-4f3a-9c8d-1e2f3a4b5c6d',
+  user_id: '11111111-1111-4111-8111-111111111111',
+  provider: 'fortnox',
+  payment_id: 'pay_01HZX8KQ4M2N3P5R7T9V1W3Y5A',
+  external_ref: 'fortnox:supplierinvoice:1042',
+  status: 'pushed',
+  error: null as string | null,
+  attempts: 1,
+  created_at: '2026-05-02T09:15:00.000Z',
+  updated_at: '2026-05-02T09:15:00.000Z',
+}
+
+export const accountingFeedStatus = {
+  hosted: true,
+  // #2869: `enabled` is the flag's name on the wire; `flagEnabled` is the
+  // same boolean under the older name, and both are in the spec's `required`.
+  enabled: true,
+  flagEnabled: true,
+  liveSyncReady: true,
+  entitled: true,
+  entitlementMode: 'all',
+  available: true,
+  connected: true,
+  companyName: accountingConnection.externalCompanyName as string | null,
+  // #2869: the destination row the summary line and the sidebar badge read.
+  destination: {
+    provider: accountingConnection.provider,
+    displayName: accountingConnection.displayName,
+    status: accountingConnection.status as
+      | 'connected' | 'needs_reauthorisation' | 'revoked_at_provider' | 'scope_missing' | 'disconnected',
+    companyName: accountingConnection.externalCompanyName as string | null,
+    lastPushAt: accountingConnection.lastPushAt as string | null,
+  } as Record<string, unknown> | null,
+  missingScopes: [] as string[],
+  syncs: [
+    accountingFeedSync,
+    {
+      ...accountingFeedSync,
+      id: '2a7c9e1b-3d5f-4a6c-8e0b-2f4d6a8c0e1f',
+      payment_id: 'pay_01HZX8M0R6S8U0W2Y4A6C8E0G2',
+      external_ref: null,
+      status: 'failed',
+      error: 'Fortnox answered 503 — will retry',
+      attempts: 2,
+      created_at: '2026-05-03T11:00:00.000Z',
+      updated_at: '2026-05-03T11:05:00.000Z',
+    },
+  ],
+  counts: { pending: 0, failed: 1, exhausted: 0 },
+}
+
+/**
+ * The two OFF states of the feed (#2869), as spreads off the ready answer
+ * above — `hosted && !enabled` is Coming soon, `!hosted` is "not available
+ * on self-hosted", and the dashboard must never show one for the other.
+ */
+export const accountingFeedComingSoon = {
+  ...accountingFeedStatus,
+  enabled: false,
+  flagEnabled: false,
+  liveSyncReady: false,
+  entitled: false,
+  available: false,
+  connected: false,
+  companyName: null,
+  destination: null,
+  syncs: [] as typeof accountingFeedStatus.syncs,
+  counts: { pending: 0, failed: 0, exhausted: 0 },
+}
+
+export const accountingFeedSelfHosted = { ...accountingFeedComingSoon, hosted: false }
+
+/**
+ * The ATTENTION state (#2869 design review): the destination's sign-in has
+ * expired — still the destination, cannot push — and the retry sweep has
+ * given up on three rows (`counts.exhausted`, #2866). This is what raises
+ * the attention summary on `/accounting`, the inline "Stopped retrying"
+ * explanation, and the sidebar dot. `connected` is false: it means an active
+ * `connected` destination, which a dead grant is not.
+ */
+export const accountingFeedAttention = {
+  ...accountingFeedStatus,
+  connected: false,
+  companyName: null,
+  destination: {
+    ...(accountingFeedStatus.destination as Record<string, unknown>),
+    status: 'needs_reauthorisation',
+    companyName: null,
+    lastPushAt: null,
+  } as Record<string, unknown> | null,
+  counts: { pending: 0, failed: 1, exhausted: 3 },
 }
 
 type JsonValue = Record<string, unknown> | unknown[]
@@ -393,6 +560,9 @@ export async function mockHavenApi(page: Page) {
         hasMore: false,
         partialFailure: false,
         failedSafeIds: [],
+        // Required since #2882. `false` is the honest default here: the
+        // fixture serves one transaction, well inside the explorer window.
+        truncated: false,
       })
       return
     }
@@ -505,6 +675,21 @@ export async function mockHavenApi(page: Page) {
     // the backend endpoint. A mock for a dead endpoint intercepts nothing and
     // reads as coverage of a flow that cannot happen (#1993).
 
+    if (method === 'GET' && path === '/accounting/providers') {
+      await fulfillJson(route, { providers: accountingProviders })
+      return
+    }
+
+    if (method === 'GET' && path === '/accounting/connections') {
+      await fulfillJson(route, { connections: [accountingConnection] })
+      return
+    }
+
+    if (method === 'GET' && path === '/accounting/feed/status') {
+      await fulfillJson(route, accountingFeedStatus)
+      return
+    }
+
     if (method === 'GET' && path === '/user/owners') {
       await fulfillJson(route, {
         owners: [],
@@ -515,6 +700,24 @@ export async function mockHavenApi(page: Page) {
     }
 
     await fulfillUnmockedRoute(route, method, path)
+  })
+}
+
+/**
+ * Serve one feed-status answer over the shared fixture (#2869), so a spec can
+ * render `/accounting` and the sidebar in a chosen flag state. Registered
+ * AFTER `mockHavenApi` (later routes win) and scoped to that one read —
+ * everything else keeps falling through.
+ */
+export async function serveAccountingFeedStatus(page: Page, status: unknown) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/accounting/feed/status') {
+      await fulfillJson(route, status as JsonValue)
+      return
+    }
+    await route.fallback()
   })
 }
 
@@ -577,6 +780,195 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
   })
 }
 
+/**
+ * Flesh out `/agents/:id` for an agent id that IS in the shared list but has
+ * no detail-page handlers of its own (#2733).
+ *
+ * The shared fixture serves the agent DETAIL page's reads fully only for the
+ * list it was seeded around: `GET /agents/:id/passport` and
+ * `GET /agents/:id/delegate-balance` fall through to `fulfillUnmockedRoute`
+ * (a 599 that the visual gate fails on), and there is no
+ * `GET /agents/:id/activity|stats` handler at all — the page renders
+ * "No activity yet" because `useAgentActivity` swallows the failure rather
+ * than because the fixture answered it. `serveAgentDetailResponses` overlays
+ * exactly those four reads, AFTER `mockHavenApi` (later-registered routes
+ * win), so a baseline of `/agents/<id>` photographs a fully-answered screen:
+ *
+ *  - a delegate balance with recoverable USDC, the shape that renders the
+ *    recoverable-funds banner (the #2194 incident state);
+ *  - an anchored passport (#1072), the richer of the two passport states;
+ *  - one confirmed x402 payment and one read-only MCP tool call, so the
+ *    activity table and the audit-trail panel both render content;
+ *  - stats matching those rows, so the two StatBlocks do not read 0 beside a
+ *    non-empty activity table.
+ *
+ * Scoped deliberately: everything else keeps falling back to the shared
+ * fixture, so the agents LIST and every unrelated surface are untouched.
+ */
+export async function serveAgentDetailResponses(page: Page, agentId: string) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() !== 'GET') return route.fallback()
+
+    if (path === '/agents') {
+      // The detail page resolves its agent from the LIST read
+      // (`AgentDetailClient` finds the id in `useAgents()`), and the shared
+      // fixture seeds that list with `agent-e2e` only — an overlay answering
+      // the detail reads but not the list would render the not-found branch.
+      // Extend the list with the researched agent rather than replace it, so
+      // the connect-flow rows the shared list exists for are untouched.
+      await fulfillJson(route, {
+        agents: [
+          testAgent,
+          {
+            ...testAgent,
+            id: agentId,
+            created_at: '2026-05-02T10:00:00.000Z',
+            allowances: [
+              {
+                id: 'dlg-e2e-1',
+                agent_id: agentId,
+                token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                token_symbol: 'USDC',
+                allowance_amount: '250.000000',
+                reset_period_min: 10_080,
+              },
+            ],
+          },
+        ],
+      })
+      return
+    }
+
+    if (path === `/agents/${agentId}/delegate-balance`) {
+      await fulfillJson(route, {
+        delegate_address: '0x3333333333333333333333333333333333333333',
+        safe_address: testSafeAddress,
+        chain_id: testSafe.chain_id,
+        eth: '0',
+        eth_atomic: '0',
+        usdc: '8.00',
+        usdc_atomic: '8000000',
+        usdc_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        sweep_min_usdc: '0.01',
+      })
+      return
+    }
+
+    if (path === `/agents/${agentId}/passport`) {
+      await fulfillJson(route, {
+        passport: {
+          status: 'anchored',
+          assurance_level: 0,
+          attestation_uid: `0x${'22'.repeat(32)}`,
+          tx_hash: `0x${'c3'.repeat(32)}`,
+          chain_id: testSafe.chain_id,
+          attempts: 1,
+          last_error: null,
+          requested_at: '2026-06-02T10:05:00.000Z',
+          anchored_at: '2026-06-02T10:05:12.000Z',
+        },
+        standing: {
+          agentId,
+          standing: 'active',
+          anchor: 'anchored',
+          attestationUid: `0x${'22'.repeat(32)}`,
+          chainLagging: false,
+          revocationConfirmedAt: null,
+        },
+      })
+      return
+    }
+
+    if (path === `/agents/${agentId}/delegations`) {
+      // One ACTIVE delegation — the spend authority row the budget card and
+      // the page summary both read. 250.00 USDC per week, recipient-pinned,
+      // mirroring the screenshot harness's `dlg-1` shape so both capture
+      // paths describe the same authority.
+      await fulfillJson(route, {
+        delegations: [
+          {
+            id: 'dlg-e2e-1',
+            chain_id: testSafe.chain_id,
+            token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            recipient_address: testRecipientAddress,
+            delegation_hash: `0x${'4d'.repeat(32)}`,
+            version: 1,
+            status: 'active',
+            budget_atomic: '250000000',
+            period_seconds: 604_800,
+            start_date: '2026-06-02T10:00:00.000Z',
+            expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
+            created_at: '2026-06-02T10:00:00.000Z',
+          },
+        ],
+      })
+      return
+    }
+
+    if (path === `/agent-activity/${agentId}/activity`) {
+      await fulfillJson(route, {
+        activity: [
+          {
+            type: 'payment',
+            id: 'pay-e2e-1',
+            agent_id: agentId,
+            agent_name: testAgent.name,
+            token: 'USDC',
+            token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            amount_raw: '25000000',
+            amount: '25.00',
+            to: testRecipientAddress,
+            reason: null,
+            status: 'confirmed',
+            tx_hash: `0x${'a1'.repeat(32)}`,
+            source: 'x402',
+            x402_resource_url: 'https://api.example.dev/reports',
+            x402_merchant_address: testRecipientAddress,
+            chain_id: testSafe.chain_id,
+            safe_id: testSafe.id,
+            safe_address: testSafeAddress,
+            safe_name: testSafe.name,
+            explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
+            confirmed_at: '2026-07-10T08:20:00.000Z',
+            payment_proof_status: 'payment_confirmed',
+            payment_flow_status: 'confirming_merchant',
+            payment_attention_reason: null,
+            created_at: '2026-07-10T08:18:00.000Z',
+          },
+          {
+            type: 'mcp_tool_call',
+            id: 'call-e2e-1',
+            agent_id: agentId,
+            agent_name: testAgent.name,
+            tool_name: 'haven_pay_x402_quote',
+            payment_id: 'pay-e2e-1',
+            result_status: 'ok',
+            next_action: 'settle',
+            error_code: null,
+            status_code: 200,
+            created_at: '2026-07-10T08:17:00.000Z',
+          },
+        ],
+      })
+      return
+    }
+
+    if (path === `/agent-activity/${agentId}/stats`) {
+      await fulfillJson(route, {
+        all_time: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        today: [{ token: 'USDC', total_spent: '0.00', tx_count: 0 }],
+        this_week: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        pending_approvals: 0,
+      })
+      return
+    }
+
+    return route.fallback()
+  })
+}
+
 export async function seedAuthenticatedSession(page: Page) {
   await page.addInitScript(
     ({ tokenKey, activeSafeKey }) => {
@@ -636,19 +1028,73 @@ export async function dismissMobileSidebar(page: Page) {
   const viewport = page.viewportSize()
   if (!viewport || viewport.width >= 1024) return
 
-  const closeButton = page.getByRole('button', { name: 'Close sidebar' })
-  if (await closeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    // No `{ force: true }` (#1749). It used to be required, and that was the
-    // undiagnosed symptom: `force` skips the actionability check, and the
-    // check this helper was failing is the hit-test — TopBar's `z-[100]`
-    // covered the toggle's `z-[60]`, so the real user gesture was impossible
-    // on every authenticated route below `lg`. Keeping the plain click makes
-    // this helper the regression canary: if the layering breaks again, every
-    // mobile e2e test fails here with "intercepts pointer events" instead of
-    // quietly forcing its way through.
-    await closeButton.click()
-    await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
+  /**
+   * #2902: decide from GEOMETRY, not from the toggle's accessible name.
+   *
+   * The helper used to ask `getByRole('button', { name: 'Close sidebar' })
+   * .isVisible()` and click only on true. That probe waits for nothing —
+   * `isVisible()` returns immediately (its `timeout` option is ignored,
+   * per Playwright's own types) — so it is a single instantaneous read of a
+   * label that is a FUNCTION OF THE VIEWPORT: Sidebar's `matchMedia` sync
+   * effect (Sidebar.tsx) sets `collapsed` on mount and on every breakpoint
+   * crossing, and the name derives from it (`Open sidebar` when collapsed,
+   * `Close sidebar` when not). Resize 1280 -> 390 mid-test — the shape
+   * `agent-card-name-measure` is built on — and the name flips a tick after
+   * the resize lands. Under CI load the probe could read the pre-commit DOM
+   * (`Close sidebar` still present, drawer already sliding closed), return
+   * true, and then `click()` re-resolved the role+name locator against a tree
+   * that would never contain that name again: a locator matching NOTHING polls
+   * until the TEST timeout kills it. `test.slow()` triples that spec's 60 s,
+   * so one lost race was 180 s per attempt on #2900/#2889 — attempt AND retry,
+   * because once the name is gone the failure is deterministic.
+   *
+   * The drawer's position IS the state, and it is the same fact
+   * `waitForDrawerOpen` (above) already trusts for the OPEN direction:
+   * `getBoundingClientRect()` reports the border box AFTER transforms, so
+   * open-below-`lg` reads `left === 0` (`translate-x-0`) and closed reads
+   * `left === -width` (`-translate-x-full`). The off-canvas drawer is
+   * `position: fixed`, so the box reads without reflowing anything.
+   */
+  const drawer = page.locator('aside').first()
+  const drawerLeft = async (): Promise<number | null> => {
+    const box = await drawer.boundingBox()
+    return box && box.width > 0 ? Math.round(box.x) : null
   }
+
+  // Settle before deciding: the drawer animates on `transition-transform
+  // duration-200` (and the resize also triggers Sidebar's matchMedia sync),
+  // so a single read can land mid-motion. Two consecutive equal reads ~300 ms
+  // apart mean the position has stopped changing; bounded at 10 s.
+  let left = await drawerLeft()
+  let stableFor = 0
+  const deadline = Date.now() + 10_000
+  while (stableFor < 300 && Date.now() < deadline) {
+    await page.waitForTimeout(150)
+    const next = await drawerLeft()
+    if (next === left) stableFor += 150
+    else stableFor = 0
+    left = next
+  }
+
+  // Settled closed (or no drawer box at all): nothing to dismiss. This also
+  // kills the old shape's second latent race — a stale probe reading
+  // `Close sidebar` off a closed drawer would have CLICKED THE DRAWER OPEN
+  // and then hung on the `Open sidebar` wait below.
+  if (left === null || left !== 0) return
+
+  // Settled OPEN: dismiss it. The plain click is kept deliberately — no
+  // `{ force: true }` (#1749). It used to be required, and that was the
+  // undiagnosed symptom: `force` skips the actionability check, and the check
+  // this helper was failing is the hit-test — TopBar's `z-[100]` covered the
+  // toggle's `z-[60]`, so the real user gesture was impossible on every
+  // authenticated route below `lg`. Keeping the plain click makes this helper
+  // the regression canary: if the layering breaks again, mobile e2e tests
+  // fail here with "intercepts pointer events" instead of quietly forcing
+  // their way through. Bounded at 10 s rather than the test timeout (#2902):
+  // a genuine failure reports in seconds, not minutes.
+  const closeButton = page.getByRole('button', { name: 'Close sidebar' })
+  await closeButton.click({ timeout: 10_000 })
+  await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible', timeout: 10_000 })
 }
 
 /**
@@ -669,6 +1115,45 @@ export async function dismissMobileSidebar(page: Page) {
  * `dismissMobileSidebar` no-ops at or above `lg`, so this is correct at both
  * viewports without a branch.
  */
+/**
+ * Waits for the mobile drawer to finish sliding OPEN.
+ *
+ * The name says `Open` because that is the only thing it waits for: the
+ * predicate is the open position, so calling it after a dismiss would hang for
+ * the full timeout rather than confirming the drawer left.
+ *
+ * A visible control is not this signal. `<aside>` animates on
+ * `transition-transform duration-200`, and a transforming element still has a
+ * non-empty box, so Playwright calls it visible from the first frame. Geometry
+ * read on that signal lands on a part-way drawer. Two specs found this
+ * independently — #1749's false layering failure "hit three of four widths on
+ * this spec's first run", and a #2819 mutation that should have moved the
+ * drawer over a sample point measured its right edge at 178px on a 390px
+ * viewport instead.
+ *
+ * `getBoundingClientRect()` reports the border box AFTER transforms, so
+ * `left` interpolates from `-width` to 0 rather than jumping — which is why
+ * `left === 0` is the arrival, and why a frame-to-frame stability check is the
+ * wrong shape: its first poll can land before the transition starts, when the
+ * closed position is trivially stable.
+ *
+ * At or above `lg` the drawer is `lg:static` at the shell's left edge, so this
+ * resolves on the first poll whatever the drawer is doing. Below `lg` is where
+ * it means something.
+ */
+export async function waitForDrawerOpen(page: Page) {
+  await page.waitForFunction(
+    () => {
+      const aside = document.querySelector('aside')
+      if (!aside) return false
+      const rect = aside.getBoundingClientRect()
+      return Math.round(rect.left) === 0 && rect.width > 0
+    },
+    undefined,
+    { timeout: 10_000 },
+  )
+}
+
 export async function openReceiveFundsModal(page: Page) {
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)

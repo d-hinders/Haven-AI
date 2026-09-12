@@ -38,7 +38,6 @@ import { countRecentEvents, insertEvent, updateEvent, spendSummary, type SpendSu
 
 export type RelayerOperation =
   | 'safe_deploy'
-  | 'safe_exec'
   | 'hybrid_deploy'
   | 'allowance_transfer'
   | 'sweep'
@@ -70,12 +69,6 @@ const RULES: Record<RelayerOperation, BudgetRule> = {
     windowMinutes: 24 * 60,
     envVar: 'RELAYER_MAX_DEPLOYS_PER_USER_PER_DAY',
     defaultCap: 10,
-  },
-  safe_exec: {
-    identity: 'user_id',
-    windowMinutes: 60,
-    envVar: 'RELAYER_MAX_EXECS_PER_USER_PER_HOUR',
-    defaultCap: 20,
   },
   allowance_transfer: {
     identity: 'agent_id',

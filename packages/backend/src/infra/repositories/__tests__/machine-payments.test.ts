@@ -104,6 +104,7 @@ function evidenceInput(
     fxRateSek: null,
     fxSource: null,
     fxAt: null,
+    fxRates: null,
     ...overrides,
   }
 }

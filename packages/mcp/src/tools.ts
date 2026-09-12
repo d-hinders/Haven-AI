@@ -451,7 +451,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
 /**
  * RETAINED DELIBERATELY, and unreachable from any live rail (#2101). The same
- * reasoning as the hosted server's copy in `packages/mcp-server/src/tools.ts`:
+ * reasoning as the hosted server's copy in
+ * `packages/mcp-server/src/tools/support/quote-response.ts` (it was
+ * `tools.ts` until #2808 moved the predicate into shared support):
  * no rail mints a payment-level `pending` / `pending_approval` any more (410 on
  * the legacy rail per #1986; 403/502 at prepare with nothing written on the
  * delegation rail; `approval_requests` dropped by #2055), but the one branch it

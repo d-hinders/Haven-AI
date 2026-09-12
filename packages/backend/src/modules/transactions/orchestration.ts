@@ -15,6 +15,7 @@ import { getChain } from '../../domain/chains.js'
 import { fetchSafeTransactions } from './aggregate.js'
 import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 import { enrichTransactionsWithAgents } from './enrichment.js'
+import { enrichTransactionsWithAccounting } from './accounting.js'
 import { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 import type { EnrichedTransaction, ParsedTokenFilter, Transaction, UserSafeRow } from './types.js'
 
@@ -23,6 +24,21 @@ import type { EnrichedTransaction, ParsedTokenFilter, Transaction, UserSafeRow }
 export interface AggregateSafeTransactionsResult {
   merged: EnrichedTransaction[]
   failedSafeIds: string[]
+  /**
+   * Any account's history came back cut off at the explorer window (#2882).
+   * Aggregated with OR: one capped account makes the whole feed incomplete,
+   * because the rows are merged into one list and the caller cannot tell
+   * which account's tail is missing.
+   *
+   * Computed BEFORE `filterEnrichedTransactions`, deliberately. A view
+   * filtered down to a small, complete account still reports truncation when
+   * some other account is capped — one caveat too many rather than a false
+   * claim of completeness, which is the direction every judgement call in
+   * this feature errs toward. Making it filter-aware would mean deciding
+   * which accounts a filter can still reach, and the honest answer for an
+   * unfiltered `total` is the one here.
+   */
+  truncated: boolean
 }
 
 /** Fans `fetchSafeTransactions` out across every Safe, tagging each transaction with its Safe. */
@@ -33,10 +49,11 @@ export async function aggregateSafeTransactions(
 ): Promise<AggregateSafeTransactionsResult> {
   const merged: EnrichedTransaction[] = []
   const failedSafeIds: string[] = []
+  let truncated = false
 
   for (const safe of safes) {
     try {
-      const { transactions, hadFailures } = await fetchSafeTransactions({
+      const { transactions, hadFailures, truncated: safeTruncated } = await fetchSafeTransactions({
         safeId: safe.id,
         safeAddress: safe.safe_address,
         chainId: safe.chain_id,
@@ -46,6 +63,10 @@ export async function aggregateSafeTransactions(
 
       if (hadFailures) {
         failedSafeIds.push(safe.id)
+      }
+
+      if (safeTruncated) {
+        truncated = true
       }
 
       for (const tx of transactions) {
@@ -66,7 +87,7 @@ export async function aggregateSafeTransactions(
     }
   }
 
-  return { merged, failedSafeIds }
+  return { merged, failedSafeIds, truncated }
 }
 
 /** x402-merge, sort, dedupe, and agent-enrich the full merged feed (pre-filter, pre-paginate). */
@@ -93,6 +114,17 @@ export async function mergeSortDedupeAndEnrich(
 export interface TransactionFilterOptions {
   agentId?: string
   tokenFilter?: ParsedTokenFilter | null
+  /**
+   * Direction and chain, applied server-side for the CSV export (#2871).
+   *
+   * The dashboard has always filtered these two in the browser, over the page
+   * it had loaded (`TransactionsClient`'s `visibleTransactions`). The export
+   * runs over the whole result set, so it has to apply them here or the file
+   * would not match the list it was taken from. Both are optional and the
+   * `GET /` feed passes neither, so its behaviour is unchanged.
+   */
+  direction?: 'in' | 'out'
+  chainId?: number
 }
 
 /** The agentId (including the synthetic `user`) and tokenKey filters applied to the GET / feed. */
@@ -101,6 +133,9 @@ export function filterEnrichedTransactions(
   options: TransactionFilterOptions,
 ): EnrichedTransaction[] {
   return transactions.filter((tx) => {
+    if (options.direction && tx.direction !== options.direction) return false
+    if (options.chainId !== undefined && tx.chainId !== options.chainId) return false
+
     if (options.agentId === 'user') {
       return tx.direction === 'out' && !tx.agentId
     }
@@ -197,7 +232,10 @@ export async function buildSafeTransactionsPage(
   const start = (page - 1) * limit
   const paginated = enrichedAllTransactions.slice(start, start + limit)
 
-  const transactions = await enrichTransactionsWithAgents(userId, paginated)
+  const attributed = await enrichTransactionsWithAgents(userId, paginated)
+  // #2870: after agent enrichment — that is what puts `paymentId` on raw
+  // explorer rows — and over the PAGE only, so this is one ledger query.
+  const transactions = await enrichTransactionsWithAccounting(userId, attributed, log)
 
   return { transactions, total }
 }

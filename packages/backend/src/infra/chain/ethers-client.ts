@@ -2,7 +2,7 @@
  * `ChainClient` implementation for the legacy AllowanceModule rail (#994).
  *
  * Wraps EXISTING `ethers` code rather than reimplementing it: `getProvider`
- * is `lib/allowance-module.ts`'s own per-chain cached `ethers.JsonRpcProvider`
+ * is `infra/chain/relayer-reads.ts`'s own per-chain cached `ethers.JsonRpcProvider`
  * (also what the relayer and the rest of the legacy rail use), and the
  * native/ERC-20 balance-read split below is a verbatim relocation of what
  * `routes/balances.ts` used to do inline with its own
@@ -10,7 +10,7 @@
  * substitution only changes WHERE this runs, never WHAT it does.
  */
 import { ethers } from 'ethers'
-import { getProvider } from '../../rails/allowance-module.js'
+import { getProvider } from '../../infra/chain/relayer-reads.js'
 import type { ChainClient } from '../../domain/chain-client.js'
 import { assertErc20TokenAddress } from './token-address-guard.js'
 

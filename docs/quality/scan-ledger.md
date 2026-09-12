@@ -4,7 +4,8 @@ status: current
 covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
-last-verified: "2026-09-03" # #2501 (second pass, after spec review on the issue): `covers:` gains `references/dimensions.md`, where the seven measurement blocks now live; the measurement-block bullet no longer names a `scripts/quality/` that does not exist; the wave-dimension bullet points at the reference file. Re-read in this pass: the front-matter, the Entry conventions list, and the 2026-08-19 entry's `Probed clean:` guard-mutation line (it keeps its name — block 1 is that dimension made executable). No dated entry edited; nothing appended. Prior: #2501: header only — the entry conventions gain the wave-dimension coverage bullet (`Probed clean:` names every Method § *Wave dimensions* block by number, so an untaken block is distinguishable from a clean one). No body entry re-verified; nothing appended. Prior: #1882: front-matter only — the `last-verified` chain had DROPPED `#1442`. A whole-entry silent replacement, not a compression: `be5bf280` (PR #1560, 2026-08-18) overwrote the 2026-08-14 run's entry with the 2026-08-18 run's. Restored verbatim from `be5bf280^` at the chain tail. Nothing in the body was re-verified in this pass. #1602: entry conventions added (measurement blocks `command → number`, mandatory `Probed clean:` baselines); dispositions now appended by ship-next's closeout when a scan-born epic closes. Prior: 2026-08-18 full-repo run appended (epic #1554) Prior: 2026-08-14 full-repo run appended: the API-contract finding (epic #1442, approved); prior real-DB finding re-checked and excluded as improved
+  - scripts/test-support/guard-cli.mjs
+last-verified: "2026-09-08"
 ---
 
 # Quality-Scan Ledger
@@ -103,6 +104,11 @@ the boundaries.**
 **Disposition: approved by the owner 2026-08-14 → epic #1442** (backlog; no
 `code-quality` label yet, so the loop will not pick the slices up until queued).
 Becomes `shipped` when the epic closes.
+
+**2026-09-08:** epic #1442 CLOSED 2026-08-15, so this finding is `shipped`. The
+line was owed on the day the epic closed and is 24 days late — recorded here
+rather than by editing the line above, per the append-only rule. Found by the
+review of the 2026-09-08 entry, which is the pass that re-read this section.
 
 **Excluded this run:** the 2026-07 real-DB finding — its ratchet reads 62
 mocks / 465 calls against the 1,059 recorded above, i.e. materially improved,
@@ -221,3 +227,217 @@ connect-flow, #1585 Codex feedback) drained the pool.
   interim/until mentions of which 6 are the stale refs above.
 
 **Disposition: n/a** — nothing reported for decision.
+
+## 2026-09-08 — full repo (partial: dimension 1 and sizing only)
+
+**Finding: a guard's self-test exercises the functions it exports, not the path
+CI runs.** 33 of 44 guard self-tests never run their script as a process, and 13
+guards keep a refusal in `main()` that those tests cannot reach. A guard in that
+shape can lose its refusal entirely and stay green.
+
+Measured against `origin/dev` at `1671d2bf`:
+
+- guard/gate scripts →
+  `ls scripts/*.mjs scripts/ci/*.mjs scripts/docs/*.mjs | grep -v '\.test\.'` → **44**
+- self-tests that never spawn the script →
+  `grep -LE "spawnSync|execFileSync|execSync|child_process|guard-cli" scripts/*.test.mjs scripts/{ci,docs}/*.test.mjs | wc -l` → **33**
+- self-tests that do → same grep, `-l` → **11**
+
+  > **The `|guard-cli` term is not optional, and it was missing from the first
+  > draft of this line.** The remedy PRs route their spawns through a shared
+  > helper (`scripts/test-support/guard-cli.mjs`, #2721) rather than calling
+  > `spawnSync` in each test, and the narrower pattern does not follow it. So a
+  > future run re-running the recorded command verbatim reads the epic as having
+  > shipped nothing. Measured at `940834f5` — dev with #2739 and #2740 already
+  > merged, i.e. ten of the thirteen guards remediated: the narrow pattern still
+  > says **33**, unmoved, while the pattern above says **23**. This is the
+  > instrument counting itself: the number a ledger records is only a baseline
+  > if the command that produced it can still see the thing it measured.
+- refusal-bearing guards whose tests cannot reach `main()` → for each
+  non-spawning test's sibling script, count
+  `process.exit(1)|process.exitCode = 1|throw new Error` after the last
+  `^export ` → **13**
+
+**Demonstrated cost — two survivals in one week, both by execution, both caught
+by review rather than CI:**
+
+- **#2690** — the `covers:` gap check's `--update` rise-refusal and its
+  legacy-format error live only in `main()`. Mutated to `if (false)`, the suite stayed **22/22 green**
+  and `docs:check` green.
+- **#2704** — `lint-migration-constraint-scope.mjs` was green under
+  `isScoped() → return true`, because the repo happened to be clean.
+
+A third, same week, is the shape a function-level test cannot see by
+construction: the reaper's host guard read `new URL(url).hostname` while `pg`
+dials the host `pg-connection-string` resolves, so `?host=prod-db` walked past
+it.
+
+**Remedy exists and is proven in-repo.** The `covers:` gap check's own
+self-test moved from the 33 to the 11 on 2026-09-08 by driving the real CLI
+against a throwaway baseline; both mutations above now redden. (Named by
+behaviour rather than by path: this check flagged the first draft of this entry
+for asserting things about tracked files a ledger's `covers:` has no business
+reaching — remedy 2, delete the claim, which is the one #2678 prefers.)
+
+**Disposition: approved 2026-09-08** — epic #2720, slices #2721 (`scripts/`, 8
+guards), #2722 (`scripts/ci/`, 3, `qa-freshness` first because it gates
+promotion), #2723 (`scripts/docs/`, 2, after checking #2678 has not taken them).
+Drive with `ship-next epic=#2720`. Becomes `shipped` when the epic closes.
+
+**2026-09-08 (later the same day):** slices #2721 (PR #2739, eight guards under
+`scripts/`, plus the shared `scripts/test-support/guard-cli.mjs` harness) and
+#2723 (PR #2740, `scripts/docs/`) MERGED. #2722 (`scripts/ci/`) remains, and
+the epic stays open. Appended rather than edited, per the convention above.
+
+**2026-09-09:** slice #2722 (`scripts/ci/`) ships in the pull request that adds
+this entry, taking the epic's own headline figure to **zero**. Re-running the
+recorded commands at that commit:
+
+- self-tests that never spawn → **19** (22 before this slice; the three that
+  moved are `qa-freshness`, `baseline-audit` and `baseline-push-followup`)
+- refusal-bearing guards whose tests cannot reach `main()` → **0**, down from 13
+  at the 2026-09-08 measurement
+
+The zero was checked against a positive control before being written here: the
+same command at the parent commit returns **3**, naming those three guards with
+3, 1 and 1 refusals — the counts this slice's issue predicted. A zero from an
+instrument that has not been shown able to return non-zero is not a result.
+
+Appended rather than edited, per the convention above.
+
+**2026-09-09 (later):** #2780 taught `covers-gaps.mjs` to resolve backticked
+bare component names, which its path regex could not see because it needs a
+`packages/`-style prefix. The block-2 reading of **128 pairs across 39 docs** above is
+a record of 2026-09-08 and is left as written; the reading after this change is
+**154 across 40**, from +38 newly visible pairs and −8 closed (4 in
+`design-system.md` by #2779, 4 in `docs-quality-system.md`).
+
+The +38 was measured with a read-only script BEFORE the gate changed, precisely
+so the size was known rather than discovered as a wall of baseline entries, and
+the gate then reported the same 38 — two instruments agreeing. Accepted into the
+baseline with the explicit `--accept-new` override rather than by weakening the
+ratchet; the plain `--update` correctly refused the rise.
+
+One cost, found by the change catching its own pull request: the first draft of
+THIS entry named two components in code spans as EXAMPLES of the token shape,
+and the gate read them as claims about those files. That is the same
+false-positive class block 2 records for paths — a measurement command read as
+an assertion — now widened to bare names. Remedy taken is the one #2678 prefers:
+delete the claim, since an illustration should not be a code span. Anyone
+writing about this gate should expect it.
+
+A second, disclosed in `covers-gaps.mjs` rather than here because it is a
+property of the check: a bare-resolved gap depends on basename uniqueness, and a
+second file with the same basename makes the gap vanish while `hasShrunk`
+reports progress.
+
+Appended rather than edited, per the convention above.
+
+**Excluded this run:** the 2026-07 real-DB finding (`shipped`), the 2026-08-14
+API-contract finding (epic #1442), the 2026-08-18 outbound-lifecycle finding
+(`shipped`, epic #1554). None re-surfaced; no evidence any has worsened.
+
+**Probed clean** (dimension → command → number):
+
+- Sizing → `ls scripts/*.mjs scripts/{ci,docs}/*.mjs | grep -v '\.test\.' | wc -l` → 44 guard scripts,
+  44 `*.test.mjs` files, but 13 scripts with no sibling test at all — recorded as
+  a baseline, not reported: "add tests here" without a structural thesis is under
+  the bar.
+- block 1 **Guard falsifiability by execution** → this run's finding. NOT a
+  systematic mutation sweep: a per-guard harness was attempted and abandoned
+  (`process.exit(1)` occurs 0–3× per script, so one pattern does not fit), and
+  the two survivals cited are from this week's own PR work rather than from a
+  sample. Weaker evidence than the block asks for, and the finding says so.
+- block 2 **Contract-doc `covers:` completeness** → NOT TAKEN this run. Owned by
+  #2679, shipped 2026-09-08; baseline `npm run docs:covers-gaps` → 128 pairs
+  across 39 of 72 governed docs. (Named by npm script, not by file path — the
+  check reads a path in prose as a claim about that file and cannot tell a
+  measurement command from an assertion. Second false-positive class after the
+  fenced-`covers:`-example one it already documents; worth a line on #2678
+  rather than a baselined gap here.)
+- block 3 **Stale numbers in prose** → NOT TAKEN this run.
+- block 4 **Retired-vocabulary residue** → NOT TAKEN this run. A ratchet now
+  exists (`npm run lint:retired-rail-prose`, #2685) and is green on `dev`.
+- block 5 **Merge-method drift on `dev`** → NOT TAKEN this run.
+- block 6 **Nets with holes** → partially, and it produced a `new-task` rather
+  than an epic line: the migrations CODEOWNERS gate is configured
+  `require_code_owner_review=true` with `required_approving_review_count=0`,
+  which GitHub does not enforce. Filed as #2705, reproduced on a live PR.
+- block 7 **Chain health** → NOT TAKEN as a finding, but re-measured while
+  assessing #2681: 78 of 78 governed docs are on the one-entry-per-line list
+  after #2637 (`ae7a3563`), 0 on the old single line; chain is 511 KB /
+  77,142 words at `1671d2bf` — **12.1% of all tracked Markdown bytes**, or
+  13.5% counting only `docs/**` plus the root gravity files. Recorded because
+  #2681's body carries the pre-#2637 figures.
+  The first draft of this line said `508 KB / 76,670 words, 13.4% of all
+  tracked Markdown bytes`, which was the only figure in this entry with no
+  command beside it — and review could not reproduce it. 13.4% was real but
+  measured against `docs/**` + root, not against all tracked Markdown, which
+  excludes ~560 KB under `packages/**` and `.agents/**`. Corrected against a
+  recorded instrument: sum each doc's `verified:` block from the ref's own
+  blobs (`git ls-tree -r --name-only <ref>` → for each `*.md`, the lines from
+  `verified:` to the end of the front-matter) and divide by the byte sum of the
+  same file list. A size figure quoted without its denominator is not a
+  measurement, and this block deliberately retired size as a finding.
+- Incident clustering → NOT TAKEN as a systematic sweep this run.
+- Comment archaeology → NOT TAKEN this run.
+---
+
+## 2026-09-10 — packages/mcp-server (finding: the hosted-MCP monolith, epic #2806)
+
+**Finding: the hosted tool-contract surface has no seam — names, schemas,
+input-policy decisions, descriptions, parsing and all 22 handlers live in one
+monolithic money-path file, so every hosted tool change edits and reviews the
+same file.** Measured against `origin/dev` at `3f9ba290` (the SHA the epic
+review re-derived everything at); the slice's git history names the file
+this entry counts lines of.
+
+- sizing → `git show 3f9ba290:<mcp-tools-module> | wc -l` → **4277**
+  (`git show 7a07b321:<mcp-tools-module> | wc -l` → **1350** at the #980
+  closeout commit, the epic's baseline)
+- companion suite → `git show 3f9ba290:<mcp-tools-tests> | wc -l` → **6391**
+- churn, pinned window →
+  `git log origin/dev --oneline --since=2026-08-09T00:00:00Z --until=2026-09-09T23:59:59Z -- <mcp-tools-module> | wc -l` → **81**
+  of `git log origin/dev --oneline -- <mcp-tools-module> | wc -l` → **111** all-time
+- incident class the seam hardens → #2051, #2282, #2312, #2348 (repeated
+  money-path failures landing in this one file; the repo records them)
+
+**Approval: 2026-09-09 (epic #2806, slices #2807–#2812, linear build order).**
+Slice #2807 establishes the typed contract and registration seam without
+moving handler behaviour; #2808 extracts shared safety support; #2809–#2812
+extract the capability handlers and enforce one-owner-per-tool. Drive with
+`ship-next epic=#2806`. This entry records the approval the slices already
+carry; it lands with slice #2807's pull request so the ledger and the code
+move together. Reproduce the slice (the files are named in its PR):
+
+- contracts extracted, facade preserved → line counts of the facade and of
+  the three new contract/registry/parsing modules in the PR head (the facade
+  shrinks; its export surface unchanged, pinned by the new characterization
+  suite)
+- characterization-before-structure → the PR's commit order: the
+  characterization commit precedes the structural commit
+- registration runtime twin, five failure modes → run the two new registry
+  test files in the slice's PR (missing schema / description / input-policy /
+  handler and duplicated ownership each fail naming the tool; the server
+  builder refuses to boot an incomplete registry). Compile-time twins:
+  TS2741 on the `Record` annotations, TS2322 on the input-policy
+  double-decision sentinel, TS1117 on a duplicated literal key —
+  mutation-proven per mode in slice #2807's handoff evidence, byte-identical
+  restores sha-verified. One documented asymmetry: a duplicate key WITHIN one
+  shipped object literal collapses last-wins at construction, so its twin is
+  compile-time only plus the entries-injection unit test.
+- test-name parity across the move → grep `^it\('` counts before/after:
+  **329** both sides, zero changed names (the two new test files are additive)
+
+**Post-slice re-measurement (this PR's tree, slice #2807 applied):** the
+facade line count and the three new module line counts, as stated in the PR
+and its handoff — the facade holds handlers and error normalization only; the
+contract data, registration seam and parsing live in typed modules. The
+remaining shrink happens in #2809–#2812 and is measured by the same command.
+
+Becomes `shipped` when epic #2806 closes with its promotion checklist run.
+Appended rather than edited, per the convention above. Written WITHOUT
+concrete repo paths for the measured files: the covers-gate reads a path in
+prose as a claim about that file (the same false-positive class the
+2026-09-09 entry records for bare names), and a ledger has no business
+growing `covers:` over its own repro commands — the PR names the files.

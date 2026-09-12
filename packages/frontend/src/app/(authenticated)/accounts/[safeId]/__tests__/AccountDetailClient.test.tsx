@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
 const mockUseAuth = vi.fn()
-const mockUseOwnerDirectory = vi.fn()
 const mockUseUserSafes = vi.fn()
 const mockUsePreferences = vi.fn()
 const mockUseContacts = vi.fn()
@@ -22,10 +21,6 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
-}))
-
-vi.mock('@/context/OwnerDirectoryContext', () => ({
-  useOwnerDirectory: () => mockUseOwnerDirectory(),
 }))
 
 vi.mock('@/hooks/useUserSafes', () => ({
@@ -117,6 +112,28 @@ const SAFE = {
   account_type: 'delegator_hybrid' as const,
 }
 
+/** Minimal aggregated row — the truncation cases only need the count line to render. */
+function txRow() {
+  return {
+    hash: '0xabc',
+    type: 'erc20' as const,
+    from: '0x' + 'bb'.repeat(20),
+    to: SAFE.safe_address,
+    value: '1000000',
+    valueFormatted: '1.00',
+    asset: 'USDC',
+    decimals: 6,
+    direction: 'in' as const,
+    timestamp: 1_778_240_999,
+    blockNumber: 1,
+    isError: false,
+    chainId: SAFE.chain_id,
+    safeId: SAFE.id,
+    safeAddress: SAFE.safe_address,
+    safeName: SAFE.name,
+  }
+}
+
 describe('AccountDetailClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -133,12 +150,6 @@ describe('AccountDetailClient', () => {
       setActiveSafe: vi.fn(),
       loading: false,
       passkeys: [],
-    })
-    mockUseOwnerDirectory.mockReturnValue({
-      getOwnerAlias: (address: string) =>
-        address.toLowerCase() === '0x5555555555555555555555555555555555555555'
-          ? 'Personal wallet'
-          : null,
     })
     mockUseUserSafes.mockReturnValue({
       renameSafe: vi.fn(),
@@ -208,6 +219,7 @@ describe('AccountDetailClient', () => {
       error: null,
       total: 0,
       hasMore: false,
+      truncated: false,
       refresh: vi.fn(),
     })
   })
@@ -489,5 +501,45 @@ describe('AccountDetailClient', () => {
     const card = screen.getByTestId('account-signers-card')
     expect(card).toHaveAttribute('data-safe-address', SAFE.safe_address)
     expect(card).not.toHaveAttribute('data-agent-id')
+  })
+
+  // #2882: this surface reads the same capped feed as /transactions and made
+  // the louder claim — "N transactions for this Haven wallet" from a total
+  // that counts only what the explorer window returned. The mock above now
+  // carries `truncated`, without which every case renders the un-truncated
+  // branch and a regression here would pass silently.
+  it('does not claim a complete history when the feed is capped', () => {
+    mockUseTransactionsFeed.mockReturnValue({
+      transactions: [txRow()],
+      loadingInitial: false,
+      error: null,
+      total: 47,
+      hasMore: true,
+      truncated: true,
+      refresh: vi.fn(),
+    })
+
+    render(<AccountDetailClient />)
+
+    expect(screen.getByText(/47 recent transactions for this Haven wallet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^47 transactions for this Haven wallet$/i)).toBeNull()
+    expect(screen.getByText(/loaded/i)).toBeInTheDocument()
+  })
+
+  it('states the plain count when the feed is complete', () => {
+    mockUseTransactionsFeed.mockReturnValue({
+      transactions: [txRow()],
+      loadingInitial: false,
+      error: null,
+      total: 3,
+      hasMore: false,
+      truncated: false,
+      refresh: vi.fn(),
+    })
+
+    render(<AccountDetailClient />)
+
+    expect(screen.getByText(/3 transactions for this Haven wallet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/recent transactions for this Haven wallet/i)).toBeNull()
   })
 })

@@ -1,0 +1,1090 @@
+/**
+ * #2808 — the helper-to-capability ownership map and its enforcement.
+ *
+ * TWO ROLES, one file:
+ *
+ * 1. EVIDENCE. The issue's derived rule: "every helper called from more than
+ *    one capability slice's handler bodies lives in shared support", re-derived
+ *    after #2809, #2810, #2811 and #2812. The slices are the tool partitions
+ *    the epic #2806 chain carves `createToolHandlers` into:
+ *
+ *      #2809 state/direct/recovery : get_agent, get_allowances, sweep_delegate,
+ *                                    send, pay, submit, get_payment_status,
+ *                                    get_resume_state, list_receipts,
+ *                                    verify_receipt
+ *      #2810 catalog/quote/prepare : discover_tools, submit_catalog_entry,
+ *                                    quote_mcp_tool, quote_catalog_purchase,
+ *                                    prepare_catalog_purchase, pay_mcp_tool
+ *      #2811 plain-HTTP x402       : quote_x402, pay_x402_quote,
+ *                                    resume_x402_payment, report_x402_outcome
+ *      #2812 paid-MCP completion   : complete_mcp_tool, settle_mcp_tool
+ *
+ *    Measured at origin/dev 618cce60 against those handler bodies, the
+ *    cross-slice helpers are exactly the five groups the issue names plus the
+ *    three the epic review note added (buildMcpToolQuoteResponse,
+ *    isPendingApproval, quoteWarnings) — all below, each with its slices.
+ *    Re-derived 2026-09-10 at this branch's head (f6fe66f8) under the
+ *    partition the sibling issue bodies state (#2810 claims
+ *    haven_submit_catalog_entry; #2811 claims haven_report_x402_outcome;
+ *    #2809 keeps payment status/resume-state), after the first measurement
+ *    misfiled those two handlers under #2809: the slice tags below did NOT
+ *    change, because both handler bodies call only helpers already shared by
+ *    all four slices (runTool, buildAgentGuidance) plus the #2807 parsing
+ *    seam (parseStrict) — re-grepped tools.ts, recorded here per the issue's
+ *    re-derivation rule.
+ *
+ *    RE-DERIVED AGAIN for #2809, now that s2809 is a real module rather than a
+ *    projected partition: the slice's ten handler bodies live in
+ *    `tools/state-direct-recovery.ts` and their imports are the measurement.
+ *    Nothing in the map moved. The six helpers those bodies call —
+ *    `runTool`, `buildAgentGuidance`, `isPendingApproval`,
+ *    `delegationSignFields`, `submitSignatureWithExpiryMapping`,
+ *    `submitErc7710WithExpiryMapping` — are all imported from support, and
+ *    `parseStrict` from the #2807 parsing seam; none is copied into the
+ *    capability. The `capabilityImports` check below reads that module's real
+ *    import specifiers rather than trusting this paragraph.
+ *
+ * 2. ENFORCEMENT. The mapping is executable, with ground truth derived from
+ *    the imported support-module namespaces at runtime rather than any hand-
+ *    maintained list: every runtime export of every support module must be
+ *    assigned to exactly one entry below (a NEW support export fails this
+ *    suite until it is mapped — support cannot grow unowned, even when its
+ *    author forgets the enumeration list), every assigned name must actually
+ *    exist, `tools.ts` stays handler-and-facade only (no helper definitions
+ *    regrow in the monolith), `parse`/`parseStrict` stay in #2807's parsing
+ *    seam and NEVER move into support, and support modules import no
+ *    capability code.
+ *
+ * MUTATION PROTOCOL (per the issue's acceptance criteria, non-negotiable):
+ * the two load-bearing guards carry proofs that the suite can fail —
+ *   (a) selecting the WRONG QUOTED OPTION must fail the cap (the #2051
+ *       steering exploit) — tests marked MUTATION (a);
+ *   (b) RELAYING BEFORE merchant-context validation must fail (the #2282
+ *       funded-but-unsettled stranding) — tests marked MUTATION (b).
+ * Reverting the guard code in support (cap-price.ts / mcp-context.ts) turns
+ * the named test red while every positive control stays green; restore after.
+ */
+import { describe, expect, it, vi, beforeAll } from 'vitest'
+import fs from 'node:fs'
+import {
+  AgentPaymentFailureCode,
+  AgentPaymentNextAction,
+  HavenApiError,
+} from '@haven_ai/sdk'
+import * as capPrice from './cap-price.js'
+import * as catalogEntry from './catalog-entry.js'
+import * as errors from './errors.js'
+import * as guidance from './guidance.js'
+import * as mcpContext from './mcp-context.js'
+import * as paidMcpCompletion from '../paid-mcp-completion.js'
+import * as quoteResponse from './quote-response.js'
+import * as signerCompat from './signer-compat.js'
+import { parse, parseStrict } from '../parsing.js'
+import { createToolHandlers, toolSchemas } from '../../tools.js'
+import {
+  AGENT_ALLOWANCES_RESPONSE,
+  AGENT_RESPONSE,
+  DELEGATE_KEY,
+  PAYMENT_REQUIRED,
+  X402_INTENT_RESPONSE,
+  clearCalls as _clearCalls,
+  handlers,
+  installSharedFixtureLifecycle,
+  keylessClient,
+  mintPaymentHeaders,
+  ok,
+  recordedCalls,
+  stubFetch,
+  VALID_PAYMENT_HEADER_REF,
+} from '../../test-support/hosted-mcp.js'
+
+installSharedFixtureLifecycle()
+
+// ── the ownership map ─────────────────────────────────────────────────────────
+
+/** Capability slices of the #2806 chain, by tool partition. */
+const CAPABILITY_SLICES = {
+  s2809: 'state/direct/recovery handlers (#2809)',
+  s2810: 'catalog/quote/prepare handlers (#2810)',
+  s2811: 'plain-HTTP x402 handlers (#2811)',
+  s2812: 'paid-MCP completion handlers (#2812)',
+} as const
+
+type Slice = keyof typeof CAPABILITY_SLICES
+
+/**
+ * The derived mapping: helper → owning support module → the slices whose
+ * handler bodies call it. A helper listed with 2+ slices MUST live in
+ * support. A helper with one slice belongs to that capability, not here —
+ * the map may retain such an export only as a declared exception in
+ * SINGLE_SLICE_RETAINED below (with a reason), and the suite enforces that
+ * rule in both directions.
+ */
+const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
+  // tools/support/errors.ts — error normalization + HostedToolError ("error
+  // normalization and HostedToolError" group; the class named explicitly per
+  // the epic review note so it falls through no crack).
+  HostedToolError: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  runTool: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  normalizeError: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  isX402PaymentWindowExpired: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  paymentWindowExpiredError: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  paymentWindowExpiredErrorFor: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  // tools/support/guidance.ts — agent guidance and purchase summaries.
+  buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
+  // tools/support/cap-price.ts — cap/price selection.
+  readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  assertWithinMaxAmount: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  resolveCapAtomic: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  humanToAtomic: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  atomicToDisplay: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  requireSettleableSelection: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  quoteWarnings: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  CAP_WARNING_TEXT: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  QUOTE_EXPIRES_SOON_MS: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  MaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
+  // tools/support/signer-compat.ts — expiry/signing context, signer half.
+  SIGNER_CAPABILITY_KEY: { module: 'signer-compat', slices: ['s2810', 's2811'] },
+  signerCompatibilityNotice: { module: 'signer-compat', slices: ['s2810', 's2811'] },
+  // tools/support/mcp-context.ts — transport serialization/context validation,
+  // signing context, relay wrappers. The merchant delivery/context-rehydration
+  // helpers that #2808 parked here moved to their owning capability module in
+  // #2812 (see CAPABILITY_OWNED below).
+  delegationSignFields: { module: 'mcp-context', slices: ['s2809', 's2810', 's2811'] },
+  buildX402SigningContext: { module: 'mcp-context', slices: ['s2810', 's2811'] },
+  serializeMcpTransport: { module: 'mcp-context', slices: ['s2810', 's2812'] },
+  parseMcpTransport: { module: 'mcp-context', slices: ['s2810', 's2812'] },
+  isMerchantEndpointMiss: { module: 'mcp-context', slices: ['s2810'] },
+  withDiscoveryGuidance: { module: 'mcp-context', slices: ['s2810'] },
+  quoteMcpToolCall: { module: 'mcp-context', slices: ['s2810'] },
+  submitSignatureWithExpiryMapping: { module: 'mcp-context', slices: ['s2809', 's2812'] },
+  submitErc7710WithExpiryMapping: { module: 'mcp-context', slices: ['s2809'] },
+  coerceJsonField: { module: 'mcp-context', slices: ['s2811'] },
+  // tools/paid-mcp-completion.ts — the #2812 capability module itself now owns
+  // its single-slice merchant helpers (the carve-out the #2808 map retained
+  // them for has landed, so "until #2812 moves them" is satisfied).
+  resolveMerchantCallContext: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  ResolvedMerchantCallContext: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  deliverMerchantPayment: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  preflightMcpPaymentHeader: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  // tools/support/quote-response.ts — quote responses + status predicates.
+  buildMcpToolQuoteResponse: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  wrongTool: { module: 'quote-response', slices: ['s2811'] },
+  resolveResumeState: { module: 'quote-response', slices: ['s2811'] },
+  // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
+  // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
+  getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
+}
+
+/**
+ * Declared single-slice exceptions to the rule above.
+ *
+ * The rule says a helper called from exactly one capability slice belongs to
+ * that capability, not here. Each export below is measured at exactly one
+ * slice, yet is retained in shared support — either until the #2809–#2812
+ * carve-out chain lands and moves it into its owning capability module, or,
+ * once that slice HAS landed, because the slice looked and argued that moving
+ * it would be worse. Two of the four capability modules now exist
+ * (state-direct-recovery, catalog-purchase), so "the carve-out will move it"
+ * is no longer an answer for s2809 or s2810 entries: those carry a decision.
+ * The retained set is executable: the enforcement test requires every
+ * single-slice entry in HELPER_OWNERSHIP to appear here with a non-empty
+ * reason, and rejects any name here that is not a 1-slice map entry, so a
+ * future slice cannot add a single-slice support export without declaring
+ * it. Entries marked "deliberate" genuinely share code/pattern with another
+ * support helper and are expected to remain shared even after the carve-out.
+ */
+const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
+  // s2810 (#2810 catalog/quote/prepare capability — LANDED; each of the four
+  // was re-argued rather than moved, the way #2809 re-argued its own):
+  isMerchantEndpointMiss:
+    'DELIBERATE, and the earlier reason here was WRONG: no #2810 handler calls it. ' +
+    'tools/catalog-purchase.ts references it zero times — it is called from inside ' +
+    'mcp-context.ts\'s own discovery wrapper (the `if (!isMerchantEndpointMiss(probeErr))` ' +
+    'guard), so the 1-slice attribution is transitive, not a call site. Moving a helper a ' +
+    'capability cannot see into that capability would be renaming, not owning.',
+  withDiscoveryGuidance:
+    'DELIBERATE, same as isMerchantEndpointMiss: zero references from ' +
+    'tools/catalog-purchase.ts, called only from mcp-context.ts\'s discovery wrapper. It is ' +
+    'also the mcp-server half of the #1271/#1301 bounded same-origin discovery pattern whose ' +
+    'other half is shared verbatim with the local runtime through @haven_ai/sdk; forking the ' +
+    'mcp-server half into one capability is what the CASP record for #1301 argues against.',
+  quoteMcpToolCall:
+    'DELIBERATE. This one IS called by #2810 (tools/catalog-purchase.ts), so the earlier ' +
+    'reason was accurate — but moving it alone forks the pattern, because it is the wrapper ' +
+    'that calls the two helpers above, and moving all three would relocate a security-relevant ' +
+    'perimeter helper (bounded, same-origin, redirect: error, 5s, 64KB) into a capability ' +
+    'module while packages/mcp keeps its own copy of the same pattern. Same shape of argument ' +
+    'as #2809 made for submitErc7710WithExpiryMapping on the signing path.',
+  getUsableCatalogMcpEntry:
+    'DELIBERATE. Called by #2810, but catalog-entry.ts\'s own header records why it is shared: ' +
+    'the #2811 resume tests PIN the error shape of these quote/preflight refusals. Moving it ' +
+    'into tools/catalog-purchase.ts would put a contract #2811 depends on inside another ' +
+    'capability, and the dependency rule in this file forbids #2811 importing it there — so ' +
+    'the move would trade a support export for a rule violation.',
+  // s2812 (#2812 paid-MCP completion capability): the four helpers the map
+  // retained "until #2812 moves them" are MOVED — they live in
+  // tools/paid-mcp-completion.ts now, mapped there in HELPER_OWNERSHIP. The
+  // single-slice rule does not allow a capability module to be an undeclared
+  // exception, so no s2812 entry remains here.
+  // s2809 (#2809 state/direct/recovery capability):
+  submitErc7710WithExpiryMapping:
+    'Only the #2809 handlers call it — from tools/state-direct-recovery.ts since #2809 landed — but it ' +
+    'is DELIBERATE: it shares the expiry-mapping pattern with submitSignatureWithExpiryMapping ' +
+    '(s2809+s2812) and stays beside it in support until #2812 settles where the shared pattern lives. ' +
+    'Moving it into the capability would fork the pattern across a module boundary on the signing path, ' +
+    'which is the failure this epic exists to make impossible.',
+  // s2811 (#2811 plain-HTTP x402 capability, to come):
+  coerceJsonField:
+    'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
+  wrongTool:
+    'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
+  resolveResumeState:
+    'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
+}
+
+/**
+ * The capability modules of the #2806 chain, DERIVED from the directory —
+ * every non-test `tools/*.ts` that is not one of #2807's three named seams.
+ *
+ * Hand-written, this was `['state-direct-recovery']`, and the three suites it
+ * drives — the sibling-import ban, the allowed-import allow-list and the
+ * handler-only rule — would have silently skipped #2810's module until someone
+ * remembered to append it (haven-reviewer, #2809 round 3). Those are exactly
+ * the rules that stop a capability reaching into a sibling or forking
+ * `submitSignatureWithExpiryMapping`, so applying them to modules that do not
+ * exist yet is the whole point.
+ *
+ * The seam list is an EXCLUSION rather than the capability list being an
+ * inclusion, so the default for a new file is "checked". A new seam has to be
+ * argued for here; a new capability needs nothing.
+ */
+const TOOL_SEAM_MODULES = ['contracts', 'parsing', 'registry']
+
+const CAPABILITY_MODULES: readonly string[] = fs
+  .readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.ts') && !e.name.endsWith('.test.ts'))
+  .map((e) => e.name.replace(/\.ts$/, ''))
+  .filter((stem) => !TOOL_SEAM_MODULES.includes(stem))
+  .sort()
+
+/**
+ * The modules a capability is ALLOWED to import, as import-specifier prefixes.
+ *
+ * The #2806 dependency rule is one-directional: a capability may reach the
+ * #2807 contract/parsing/registry seams, the #2808 shared support, and the
+ * SDK — and never a sibling capability. Sibling reach is what would let two
+ * slices share a helper without either owning it, re-creating the monolith
+ * one import at a time.
+ */
+const CAPABILITY_ALLOWED_IMPORTS = [
+  '@haven_ai/sdk',
+  'zod',
+  './contracts.js',
+  './parsing.js',
+  './registry.js',
+  './support/',
+]
+
+/**
+ * Per-capability additions to the allow-list, for node built-ins a module
+ * genuinely needs. Declared PER MODULE and named, never a blanket `node:`
+ *
+ *   paid-mcp-completion — `node:crypto` for randomUUID: the JSON-RPC envelope
+ *   id (`haven-mcp-<uuid>`) of every paid merchant delivery. Moving the
+ *   delivery helpers here in #2812 carried the id minting with them.
+ */
+const CAPABILITY_EXTRA_ALLOWED_IMPORTS: Record<string, string[]> = {
+  'paid-mcp-completion': ['node:crypto'],
+}
+
+/** Support module → its runtime export names, enumerated (not derived). */
+const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
+  'cap-price': [
+    'assertWithinMaxAmount',
+    'readMaxAmountCap',
+    'humanToAtomic',
+    'resolveCapAtomic',
+    'atomicToDisplay',
+    'requireSettleableSelection',
+    'priceSelectedOption',
+    'CAP_WARNING_TEXT',
+    'QUOTE_EXPIRES_SOON_MS',
+    'quoteWarnings',
+  ],
+  'catalog-entry': ['getUsableCatalogMcpEntry'],
+  errors: [
+    'HostedToolError',
+    'runTool',
+    'isX402PaymentWindowExpired',
+    'paymentWindowExpiredError',
+    'paymentWindowExpiredErrorFor',
+    'normalizeError',
+  ],
+  guidance: ['buildAgentGuidance', 'buildPurchaseSummary'],
+  'mcp-context': [
+    'delegationSignFields',
+    'isMerchantEndpointMiss',
+    'withDiscoveryGuidance',
+    'quoteMcpToolCall',
+    'serializeMcpTransport',
+    'parseMcpTransport',
+    'buildX402SigningContext',
+    'coerceJsonField',
+    'submitSignatureWithExpiryMapping',
+    'submitErc7710WithExpiryMapping',
+  ],
+  // The #2812 capability module — a single-slice owner, not shared support,
+  // but the four helpers it owns are mapped in HELPER_OWNERSHIP like any
+  // other, so the same runtime↔enumeration ground-truth checks cover them.
+  'paid-mcp-completion': [
+    'resolveMerchantCallContext',
+    'ResolvedMerchantCallContext',
+    'deliverMerchantPayment',
+    'preflightMcpPaymentHeader',
+  ],
+  'quote-response': [
+    'buildMcpToolQuoteResponse',
+    'isPendingApproval',
+    'wrongTool',
+    'resolveResumeState',
+  ],
+  'signer-compat': ['SIGNER_CAPABILITY_KEY', 'signerCompatibilityNotice'],
+}
+
+/**
+ * Capability modules that own helpers OUTRIGHT — the #2808 carve-out rule
+ * ("a helper called from exactly one slice belongs to that capability"),
+ * completed when #2812 moved its four merchant helpers out of support.
+ *
+ * Same ground-truth contract as the support maps: the imported namespace is
+ * the forward direction (every runtime export must be mapped or excluded),
+ * the enumeration the reverse (every mapped name must exist). The module's
+ * REGISTRATION SURFACE — the `_TOOLS` tuple, the `create*Handlers` factory
+ * and the tuple's name type — is deliberately not enumerated here: those are
+ * handlers and contracts, guarded by `tools/module-boundaries.test.ts` and
+ * the per-capability contribution tests, not helpers.
+ */
+const HELPER_HOST_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
+  'paid-mcp-completion': paidMcpCompletion,
+}
+
+const HELPER_HOST_MODULE_EXPORTS: Record<string, string[]> = {
+  'paid-mcp-completion': [
+    'resolveMerchantCallContext',
+    'ResolvedMerchantCallContext',
+    'deliverMerchantPayment',
+    'preflightMcpPaymentHeader',
+  ],
+}
+
+const ALL_MODULE_EXPORTS = { ...SUPPORT_MODULE_EXPORTS, ...HELPER_HOST_MODULE_EXPORTS }
+
+/**
+ * Exact-name exclusion for the capability registration surface — the `_TOOLS`
+ * tuple and the `create*Handlers` factory are the module's handler/contract
+ * API, not helpers, and must never enter the helper map (a helper map that
+ * "owned" a handler factory would let the handler-only check below forbid the
+ * module from defining its own handlers). Listed explicitly — NOT a prefix —
+ * so a future real helper named like these can never hide behind it.
+ */
+const REGISTRATION_SURFACE_EXPORTS = new Set([
+  'PAID_MCP_COMPLETION_TOOLS',
+  'createPaidMcpCompletionHandlers',
+])
+
+/** Type-only exports: mapped for ownership, absent at runtime by design. */
+const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext'])
+
+/**
+ * Exact-name exclusion for symbols that appear on a module namespace at
+ * runtime but are not helpers and can never be owned: vitest's module
+ * internals (import.meta/env interop). Listed explicitly — NOT a prefix or
+ * regex — so a future real helper named like these can never be hidden from
+ * enforcement. Re-check the keys when vitest major versions change them.
+ */
+const MODULE_INTERNAL_SYMBOLS = new Set(['default', 'META_ENV'])
+
+const SUPPORT_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
+  'cap-price': capPrice,
+  'catalog-entry': catalogEntry,
+  errors,
+  guidance,
+  'mcp-context': mcpContext,
+  'quote-response': quoteResponse,
+  'signer-compat': signerCompat,
+}
+
+/** All helper-bearing modules: shared support + the capability helper hosts. */
+const ALL_MODULE_OBJECTS = { ...SUPPORT_MODULE_OBJECTS, ...HELPER_HOST_MODULE_OBJECTS }
+
+// Type-level names ride the mapped export; the TYPE_ONLY set covers their
+// absence at runtime in the checks above.
+
+describe('shared-helper ownership map (#2808)', () => {
+  it('maps every helper-bearing module export to exactly one ownership entry', () => {
+    // Ground truth is the IMPORTED NAMESPACE, not the enumeration lists: an
+    // export added to a module but forgotten in the list must still fail here
+    // (the runtime→enumeration direction). Vitest-visible module-internal
+    // symbols are excluded by exact name, never by prefix — a blanket prefix
+    // filter could hide a future real helper. The namespace set spans shared
+    // support AND the capability helper hosts (#2812's paid-mcp-completion);
+    // a host's registration surface (_TOOLS tuple, create*Handlers factory)
+    // is handler/contract API, excluded by exact name.
+    const unowned: string[] = []
+    for (const [moduleName, runtime] of Object.entries(ALL_MODULE_OBJECTS)) {
+      for (const name of Object.keys(runtime)) {
+        if (MODULE_INTERNAL_SYMBOLS.has(name) || TYPE_ONLY_EXPORTS.has(name)) continue
+        if (REGISTRATION_SURFACE_EXPORTS.has(name)) continue
+        const owner = HELPER_OWNERSHIP[name]
+        if (!owner) unowned.push(`${moduleName}.${name} (no HELPER_OWNERSHIP entry)`)
+        else if (owner.module !== moduleName) unowned.push(`${moduleName}.${name} (mapped to ${owner.module})`)
+      }
+    }
+    expect(
+      unowned,
+      `exports without exactly one matching ownership entry (add them to HELPER_OWNERSHIP with their module and slices): ${unowned.join(', ')}`,
+    ).toEqual([])
+    const unmapped: string[] = []
+    for (const [moduleName, exports] of Object.entries(ALL_MODULE_EXPORTS)) {
+      const runtime = ALL_MODULE_OBJECTS[moduleName] as Record<string, unknown>
+      for (const name of exports) {
+        if (!TYPE_ONLY_EXPORTS.has(name) && !(name in runtime)) {
+          throw new Error(`module ${moduleName} declares export "${name}" that does not exist at runtime`)
+        }
+        if (!HELPER_OWNERSHIP[name]) unmapped.push(`${moduleName}.${name}`)
+      }
+    }
+    expect(unmapped, `unmapped module exports (add them to HELPER_OWNERSHIP with their slices): ${unmapped.join(', ')}`).toEqual([])
+  })
+
+  it('maps only names that exist in a helper-bearing module', () => {
+    const phantom: string[] = []
+    for (const [name, owner] of Object.entries(HELPER_OWNERSHIP)) {
+      // Type-only exports carry no runtime export; the module is still their
+      // single owner (declared there, exported nowhere else).
+      if (TYPE_ONLY_EXPORTS.has(name)) continue
+      const moduleExports = ALL_MODULE_EXPORTS[owner.module] ?? []
+      if (!moduleExports.includes(name)) phantom.push(`${owner.module}⊥${name}`)
+    }
+    expect(phantom, `ownership entries naming helpers their module does not carry: ${phantom.join(', ')}`).toEqual([])
+  })
+
+  it('keeps parse/parseStrict owned by the #2807 parsing seam, never support', () => {
+    // The issue is explicit: parse/parseStrict remain #2807's contract/parsing
+    // seam. No helper-bearing module may carry them — support or a capability
+    // helper host.
+    for (const [moduleName, exports] of Object.entries(ALL_MODULE_EXPORTS)) {
+      expect(exports, `${moduleName} must not own the parsing seam`).not.toContain('parse')
+      expect(exports, `${moduleName} must not own the parsing seam`).not.toContain('parseStrict')
+    }
+    for (const runtime of Object.values(ALL_MODULE_OBJECTS)) {
+      expect('parse' in runtime, 'parse must stay in tools/parsing.ts').toBe(false)
+      expect('parseStrict' in runtime, 'parseStrict must stay in tools/parsing.ts').toBe(false)
+    }
+    expect(typeof parse).toBe('function')
+    expect(typeof parseStrict).toBe('function')
+  })
+
+  const HANDLER_ONLY_MODULES: ReadonlyArray<readonly [label: string, relative: string]> = [
+    ['tools.ts', '../../tools.ts'],
+    ...CAPABILITY_MODULES.map((m) => [`tools/${m}.ts`, `../${m}.ts`] as const),
+  ]
+
+  it.each(HANDLER_ONLY_MODULES)('keeps %s handler-only: no support helper is re-defined there', (_label, rel) => {
+    // The facade keeps createToolHandlers + re-exports; a capability module
+    // keeps its own handlers; the #2807 seam and #2808 support carry
+    // everything else. Read the SOURCE, not the runtime: a helper definition
+    // regrowing HERE must move to support — this suite refuses to ratify it.
+    //
+    // #2809 widened this from the facade alone to every capability module.
+    // Copying a shared helper into a capability is the exact drift the epic
+    // exists to prevent (the issue names submitSignatureWithExpiryMapping,
+    // on the signing path, as the crossing that must not fork), and checking
+    // only tools.ts would have blessed a fork the moment the handlers left it.
+    //
+    // #2812: the ban is over SHARED ownership only. A capability helper host
+    // (paid-mcp-completion owns resolveMerchantCallContext et al. outright)
+    // may define the helpers HELPER_OWNERSHIP assigns to it — re-defining
+    // THOSE there is ownership, not a fork. What stays forbidden everywhere
+    // is re-defining a helper whose owner is a DIFFERENT module.
+    const src = fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
+    const ownStem = _label.startsWith('tools/') ? _label.slice('tools/'.length).replace(/\.ts$/, '') : ''
+    for (const [name, owner] of Object.entries(HELPER_OWNERSHIP)) {
+      if (ownStem && owner.module === ownStem) continue
+      expect(
+        src.match(new RegExp(`(export )?(async )?function ${name}\\b|(export )?class ${name}\\b|(export )?const ${name}\\b`)),
+        `"${name}" must live in ${owner.module}, not be re-defined in ${_label}`,
+      ).toBeNull()
+    }
+  })
+
+  it('keeps every mapped helper justified as shared (the issue names five)', () => {
+    // Slice tags must reference real slices of the #2806 chain (no typos).
+    const realSlices = new Set(Object.keys(CAPABILITY_SLICES))
+    for (const [name, entry] of Object.entries(HELPER_OWNERSHIP)) {
+      for (const slice of entry.slices) {
+        expect(realSlices.has(slice), `"${name}" names unknown slice "${slice}"`).toBe(true)
+      }
+    }
+    // The issue requires the mapping to include, AT MINIMUM:
+    for (const required of [
+      'buildMcpToolQuoteResponse',
+      'isPendingApproval',
+      'quoteWarnings',
+      'HostedToolError',
+      'submitSignatureWithExpiryMapping',
+    ]) {
+      const entry = HELPER_OWNERSHIP[required]
+      expect(entry, `the issue REQUIRES "${required}" in the committed mapping`).toBeDefined()
+    }
+  })
+
+  it('enforces the single-slice rule: 2+ slices here, or a declared retained reason', () => {
+    // The map's stated rule is now executable, in BOTH directions:
+    //   →  every HELPER_OWNERSHIP entry must have 2+ slices OR be declared in
+    //      SINGLE_SLICE_RETAINED with a non-empty reason — a future slice
+    //      cannot add a single-slice support export without declaring it;
+    //   ←  every SINGLE_SLICE_RETAINED key must be a HELPER_OWNERSHIP entry
+    //      measured at exactly one slice — an exception cannot outlive the
+    //      measurement that justifies it (e.g. after a carve-out moves the
+    //      helper or a second slice starts calling it, the declaration must
+    //      be re-judged, not silently kept).
+    const undeclared: string[] = []
+    for (const [name, entry] of Object.entries(HELPER_OWNERSHIP)) {
+      if (entry.slices.length >= 2) continue
+      // A single-slice helper whose owner is a capability helper host IS the
+      // rule's success outcome (#2812 moved the four merchant helpers there):
+      // nothing to declare. Only a single-slice helper still sitting in
+      // SHARED support needs a retained reason (or a move).
+      if (entry.module in HELPER_HOST_MODULE_EXPORTS) continue
+      const reason = SINGLE_SLICE_RETAINED[name]
+      if (typeof reason !== 'string' || reason.trim().length === 0) {
+        undeclared.push(`${name} (${entry.slices.join('+')})`)
+      }
+    }
+    expect(
+      undeclared,
+      `single-slice support exports without a SINGLE_SLICE_RETAINED reason (move them to their capability or declare why they are retained): ${undeclared.join(', ')}`,
+    ).toEqual([])
+    const stale: string[] = []
+    for (const name of Object.keys(SINGLE_SLICE_RETAINED)) {
+      const entry = HELPER_OWNERSHIP[name]
+      if (!entry) stale.push(`${name} (no HELPER_OWNERSHIP entry)`)
+      else if (entry.slices.length !== 1) stale.push(`${name} (${entry.slices.join('+')})`)
+    }
+    expect(
+      stale,
+      `SINGLE_SLICE_RETAINED entries that are not single-slice HELPER_OWNERSHIP entries (re-judge the declaration): ${stale.join(', ')}`,
+    ).toEqual([])
+  })
+})
+
+describe('capability-module dependency rule (#2806, first enforced #2809)', () => {
+  it('derives a non-empty capability set that contains this slice', () => {
+    // The derivation's own positive control (#2444): an empty or mis-rooted
+    // readdir would make every it.each below vacuous, and a suite with no
+    // cases reports exactly like a suite that passed.
+    expect(CAPABILITY_MODULES.length).toBeGreaterThan(0)
+    expect(CAPABILITY_MODULES).toContain('state-direct-recovery')
+    for (const seam of TOOL_SEAM_MODULES) {
+      expect(CAPABILITY_MODULES, `${seam} is a #2807 seam, not a capability`).not.toContain(seam)
+    }
+  })
+
+  /** Every `from '…'` specifier in a module's source, in file order. */
+  function importSpecifiers(stem: string): string[] {
+    const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
+    return [...src.matchAll(/\bfrom\s+'([^']+)'/g)].map((m) => m[1])
+  }
+
+  /**
+   * The rule as a PURE function, so it can be driven with inputs the
+   * repository does not contain yet.
+   *
+   * With one capability module in the tree, `siblingReach` over the real file
+   * is structurally incapable of returning a hit — there is no sibling to
+   * reach. A guard whose "no" is unreachable is not a guard, so the rule is
+   * separated from the file it is applied to: the synthetic case below proves
+   * the instrument can say yes, and the file case is then a meaningful no.
+   * #2810 is where the real file first CAN violate it.
+   */
+  function siblingReach(specifiers: string[], stem: string, capabilities: readonly string[]): string[] {
+    const siblings = capabilities.filter((m) => m !== stem)
+    return specifiers.filter((spec) =>
+      siblings.some((m) => spec === `./${m}.js` || spec.endsWith(`/${m}.js`)),
+    )
+  }
+
+  it('POSITIVE CONTROL: siblingReach names a capability reaching into a sibling', () => {
+    // The #2810 shape, written out before #2810 exists.
+    expect(
+      siblingReach(
+        ['@haven_ai/sdk', './support/errors.js', './state-direct-recovery.js'],
+        'catalog-quote-prepare',
+        ['state-direct-recovery', 'catalog-quote-prepare'],
+      ),
+    ).toEqual(['./state-direct-recovery.js'])
+    // …and stays silent on a module importing only seams and support.
+    expect(
+      siblingReach(
+        ['@haven_ai/sdk', './contracts.js', './support/errors.js'],
+        'catalog-quote-prepare',
+        ['state-direct-recovery', 'catalog-quote-prepare'],
+      ),
+    ).toEqual([])
+  })
+
+  it.each(CAPABILITY_MODULES)('%s imports no sibling capability module', (stem) => {
+    // Read the SPECIFIERS, not the runtime graph: a capability that reaches a
+    // sibling still resolves and still passes every behavioural test — the
+    // damage is structural, so the check has to be structural too.
+    const reached = siblingReach(importSpecifiers(stem), stem, CAPABILITY_MODULES)
+    expect(reached, `${stem} must not import a sibling capability: ${reached.join(', ')}`).toEqual([])
+  })
+
+  it.each(CAPABILITY_MODULES)('%s imports only the seams and support it is allowed to', (stem) => {
+    // The allow-list is the positive form of the rule above. It also catches
+    // the case the sibling check cannot see: a capability reaching BACKWARDS
+    // into `tools.ts`, the facade that composes it, which would make the
+    // module graph cyclic and the extraction cosmetic. Node built-ins are
+    // allowed only per module, declared by name in
+    // CAPABILITY_EXTRA_ALLOWED_IMPORTS — never a blanket `node:` prefix.
+    const allowed = [
+      ...CAPABILITY_ALLOWED_IMPORTS,
+      ...(CAPABILITY_EXTRA_ALLOWED_IMPORTS[stem] ?? []),
+    ]
+    const disallowed = importSpecifiers(stem).filter(
+      (spec) => !allowed.some((a) => spec.startsWith(a)),
+    )
+    expect(
+      disallowed,
+      `${stem} imports outside the capability contract (contracts/parsing/registry seams, support, SDK, declared node built-ins): ${disallowed.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('takes the five named cross-slice helpers from shared ownership, never a copy', () => {
+    // The issue names five by hand — submitSignatureWithExpiryMapping (the one
+    // #2809↔#2812 crossing, on the signing path), buildAgentGuidance,
+    // isPendingApproval, runTool and parseStrict. Four are support exports;
+    // parseStrict is #2807's parsing seam and must NOT come from support.
+    const src = fs.readFileSync(new URL('../state-direct-recovery.ts', import.meta.url), 'utf8')
+    const specifierFor = (name: string): string | undefined =>
+      [...src.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g)]
+        .filter(([, names]) => names.split(',').some((n) => n.trim().replace(/^type\s+/, '') === name))
+        .map(([, , spec]) => spec)[0]
+
+    for (const name of [
+      'submitSignatureWithExpiryMapping',
+      'buildAgentGuidance',
+      'isPendingApproval',
+      'runTool',
+    ]) {
+      const spec = specifierFor(name)
+      expect(spec, `"${name}" must be imported by the capability, not re-implemented in it`).toBeDefined()
+      expect(spec, `"${name}" must come from shared support`).toMatch(/^\.\/support\//)
+      // …and support must actually be its declared owner, so the import is
+      // checked against the derived map rather than against a path shape.
+      expect(HELPER_OWNERSHIP[name]?.module, `"${name}" is not a mapped support helper`).toBeDefined()
+      expect(spec).toBe(`./support/${HELPER_OWNERSHIP[name].module}.js`)
+    }
+    expect(specifierFor('parseStrict'), 'parseStrict stays in the #2807 parsing seam').toBe(
+      './parsing.js',
+    )
+  })
+
+  it('is not shadowed: no capability tool is re-declared in the tools.ts literal', () => {
+    // The gap haven-reviewer measured on #2809. A key written into the
+    // facade's own object literal AFTER the spread silently shadows the
+    // capability's handler: TS1117 does not reach across a spread, and no key
+    // is excess because both sides are HostedToolName, so `tsc` exits 0 on a
+    // duplicate `haven_pay`. Their mutation was caught only by behavioural
+    // tests, and only because its body DIVERGED — a stale duplicate with an
+    // identical body would pass every other check in the tree.
+    //
+    // Source-read, because the shadow is invisible at runtime: by the time a
+    // map exists the duplicate has already collapsed last-wins, which is the
+    // same reason the #2807 registry twin takes entry LISTS rather than maps.
+    //
+    // #2812: the facade no longer carries ANY literal key — createToolHandlers
+    // is capability spreads only — so a keys parse of the honest facade finds
+    // zero keys and a shadow scan over that empty list can never fire. The
+    // assertion therefore moved up a level: the composition body must contain
+    // NOTHING BUT spreads. Any literal key — duplicate or not — is red here,
+    // which subsumes the shadow case and keeps the failure mode (a silent
+    // last-wins override) structurally unreachable rather than merely
+    // unobserved.
+    const facade = fs.readFileSync(new URL('../../tools.ts', import.meta.url), 'utf8')
+    const fnStart = facade.indexOf('export function createToolHandlers')
+    expect(fnStart, 'createToolHandlers not found in tools.ts — the probe is broken').toBeGreaterThan(-1)
+    const openBrace = facade.indexOf('{', fnStart)
+    const bodyEnd = facade.indexOf('\n}', openBrace)
+    expect(openBrace, 'createToolHandlers body not opened — the probe is broken').toBeGreaterThan(fnStart)
+    expect(bodyEnd, 'createToolHandlers body not terminated — the probe is broken').toBeGreaterThan(openBrace)
+    const body = facade.slice(openBrace + 1, bodyEnd)
+    // The ONLY statements the composition may contain: the return opener, the
+    // capability spreads, and the object closer. Anything else — a literal
+    // `haven_x:` key (quoted or not), a helper call, a conditional — is red.
+    const statements = body
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((t) => t !== '' && !t.startsWith('//'))
+    const unexpected = statements.filter(
+      (t) => t !== 'return {' && t !== '}' && !/^\.{3}create[A-Za-z0-9]+Handlers\(haven\),$/.test(t),
+    )
+    expect(
+      unexpected,
+      `tools.ts's createToolHandlers must compose capability spreads ONLY — a literal key here silently shadows a capability handler: ${unexpected.join(' | ')}`,
+    ).toEqual([])
+    const owned = new Set<string>()
+    for (const stem of CAPABILITY_MODULES) {
+      const src = fs.readFileSync(new URL(`../${stem}.ts`, import.meta.url), 'utf8')
+      // Anchor the end to the START of the tuple, not to the file: a module
+      // declaring any other `] as const` array above its `_TOOLS` tuple would
+      // otherwise slice to '' and drop its tools out of `owned` silently.
+      const start = src.indexOf('_TOOLS = [')
+      expect(
+        start,
+        `tools/${stem}.ts declares no _TOOLS tuple. Either it is a capability module missing one, ` +
+          `or it is a new SEAM — in which case add its stem to TOOL_SEAM_MODULES with a reason, ` +
+          `rather than leaving it to fail here.`,
+      ).toBeGreaterThan(-1)
+      const tuple = src.slice(start, src.indexOf('] as const', start))
+      for (const [, name] of tuple.matchAll(/'(haven_[a-z0-9_]+)'/g)) owned.add(name)
+    }
+    expect(owned.size, 'the capability tuple parse found no tools — the probe is broken').toBeGreaterThan(0)
+    // …and the capability tuples alone must still cover the whole hosted
+    // surface: with the facade a pure composition, the only way a tool loses
+    // its owner is a capability tuple dropping it (the compile-checked
+    // direction is TS2741 on this very composition; this is the data twin).
+    expect(
+      owned.size,
+      'the capability tuples must cover the whole hosted surface — a short count means a tool lost its owner',
+    ).toBe(Object.keys(toolSchemas).length)
+  })
+
+  it('#2810: contributes exactly the six tools it claims, and only those', async () => {
+    const { CATALOG_PURCHASE_TOOLS, createCatalogPurchaseHandlers } = await import(
+      '../catalog-purchase.js'
+    )
+    const contributed = Object.keys(createCatalogPurchaseHandlers(keylessClient())).sort()
+    expect(contributed).toEqual([...CATALOG_PURCHASE_TOOLS].sort())
+    // Spelled out as well as derived: the tuple comparison alone would still
+    // pass if a tool were dropped from BOTH the tuple and the handler map at
+    // once, which is exactly what a careless extraction does.
+    expect(contributed).toEqual([
+      'haven_discover_tools',
+      'haven_pay_mcp_tool',
+      'haven_prepare_catalog_purchase',
+      'haven_quote_catalog_purchase',
+      'haven_quote_mcp_tool',
+      'haven_submit_catalog_entry',
+    ])
+    // And the facade still answers for the whole surface: the composed map is
+    // a superset, so a capability silently dropping a tool cannot pass here
+    // while `createToolHandlers` quietly loses it.
+    const composed = createToolHandlers(keylessClient())
+    for (const name of contributed) {
+      expect(typeof (composed as Record<string, unknown>)[name]).toBe('function')
+    }
+  })
+
+  it('contributes exactly the ten tools it claims, and only those', async () => {
+    const { STATE_DIRECT_RECOVERY_TOOLS, createStateDirectRecoveryHandlers } = await import(
+      '../state-direct-recovery.js'
+    )
+    const contributed = Object.keys(
+      createStateDirectRecoveryHandlers(keylessClient()),
+    ).sort()
+    expect(contributed).toEqual([...STATE_DIRECT_RECOVERY_TOOLS].sort())
+    expect(contributed).toEqual(
+      [
+        'haven_get_agent',
+        'haven_get_allowances',
+        'haven_get_payment_status',
+        'haven_get_resume_state',
+        'haven_list_receipts',
+        'haven_pay',
+        'haven_send',
+        'haven_submit',
+        'haven_sweep_delegate',
+        'haven_verify_receipt',
+      ],
+    )
+    // And the facade still answers for the whole surface: the composed map is
+    // a superset, so a capability silently dropping a tool cannot pass here
+    // while `createToolHandlers` quietly loses it.
+    const composed = createToolHandlers(keylessClient())
+    for (const name of contributed) {
+      expect(typeof (composed as Record<string, unknown>)[name]).toBe('function')
+    }
+  })
+})
+
+// ── MUTATION (a): the cap binds the SELECTED option, not another entry ────────
+//
+// Proven live on #2051/#2052: a merchant-controlled accepts[] could steer the
+// cap onto the unselected entry — 900 USDC authorized against a stated 1 USDC
+// cap while the response reported 1 USDC. `priceSelectedOption` (support) is
+// the one function all three purchase paths go through. Reverting its
+// assertWithinMaxAmount call (or reordering selection/cap) makes THE EXPLOIT
+// succeed at 900000000 while THE MIRROR keeps passing.
+
+const FACILITATORS = ['0x4444444444444444444444444444444444444444']
+const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+const CHILD = {
+  payment_id: 'pay_7710',
+  status: 'pending_signature',
+  sign_data: {
+    hash: '0x' + '11'.repeat(32),
+    signature_scheme: 'eip712_delegation',
+    typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+  },
+}
+
+/** Two payable Base-USDC entries that differ in amount and in the erc7710 tag. */
+function steeredMerchant(standardAtomic: string, erc7710Atomic: string | null) {
+  const base = PAYMENT_REQUIRED.accepts[0]
+  return {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      { ...base, amount: standardAtomic, maxAmountRequired: standardAtomic },
+      ...(erc7710Atomic === null
+        ? []
+        : [
+            {
+              ...base,
+              amount: erc7710Atomic,
+              maxAmountRequired: erc7710Atomic,
+              extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS },
+            },
+          ]),
+    ],
+  }
+}
+
+/** The authorize request body — assert on what was SENT, never on call counts. */
+function x402Body() {
+  const call = recordedCalls().find((c) => new URL(c.url).pathname === '/x402')
+  if (!call) return undefined
+  const raw = call.body
+  return (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, any>
+}
+
+describe('MUTATION (a): selecting the wrong quoted option fails the cap', () => {
+  function pay(pr: unknown, agent: Record<string, unknown>, cap: Record<string, string>) {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: agent },
+      // The SUCCESSFUL authorize stub: an unfixed build does not merely error,
+      // it MINTS the settlement child at the over-cap amount.
+      'POST /x402': { status: 201, body: CHILD },
+    })
+    return handlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      ...cap,
+    })
+  }
+
+  it('THE EXPLOIT: refuses an over-cap erc7710 entry advertised beside an under-cap standard entry', async () => {
+    // 1 USDC standard (passes the cap) + 900 USDC erc7710 (the one actually sent).
+    const res = await pay(steeredMerchant('1000000', '900000000'), DELEGATION_AGENT, {
+      max_amount_human: '1',
+    })
+    expect(res.success).toBe(false)
+    expect((res as { code?: string }).code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+    // Refused BEFORE the authorize: no settlement child was ever minted.
+    expect(x402Body()).toBeUndefined()
+  })
+
+  it('THE MIRROR (positive control): a cheap erc7710 beside an over-cap standard entry is allowed', async () => {
+    // Refusing here would cite an amount that was never going to be authorized
+    // (#2052 measured 3 USDC standard / 0.50 USDC erc7710 against a 1 USDC cap).
+    const res = ok<Record<string, any>>(
+      await pay(steeredMerchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }),
+    )
+    expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(x402Body()?.amount).toBe('500000')
+    expect(x402Body()?.settlementScheme).toBe('erc7710')
+  })
+
+  it('a human cap converts with the SELECTED option decimals, not another entry (via support)', () => {
+    // Unit-level pin on the moved helper: two options, both Base USDC — the
+    // conversion uses the option HANDED IN, so the cap cannot drift between
+    // entries at the helper level either. 1.5 USDC quoted against a 1 USDC
+    // cap refuses; the same helper pricing the 0.5 entry passes.
+    const option = PAYMENT_REQUIRED.accepts[0]
+    expect(() => capPrice.priceSelectedOption({ kind: 'human', value: '1' }, option)).toThrow(
+      /exceeds max_amount_human 1 USDC/,
+    )
+    const cheap = { ...option, amount: '500000', maxAmountRequired: '500000' }
+    const priced = capPrice.priceSelectedOption({ kind: 'human', value: '1' }, cheap)
+    expect(priced.amountAtomic).toBe('500000')
+    expect(priced.amount).toBe('0.5')
+    expect(priced.token).toBe('USDC')
+  })
+})
+
+// ── MUTATION (b): the relay never precedes merchant-context validation ────────
+//
+// Proven on #2282: a settle whose merchant-call context is unavailable used to
+// relay FUNDING first and only then discover the missing context — stranding a
+// funded_but_unsettled intent. resolveMerchantCallContext (support) now runs
+// before anything is submitted, on both schemes. Reverting that ordering in
+// mcp-context.ts/deliverMerchantPayment makes "does NOT relay funding" red
+// while the retryable positive control stays green.
+
+const SIG = '0x' + '11'.repeat(65)
+
+/** The exact wire assertion that matters: did any funding relay leave? */
+const fundingRelayed = () =>
+  recordedCalls().some(
+    (call) => call.method === 'POST' && call.url.endsWith('/payments/pay_x402/sign'),
+  )
+
+describe('MUTATION (b): relaying before merchant-context validation fails', () => {
+  beforeAll(async () => {
+    await mintPaymentHeaders()
+  })
+
+  it('does NOT relay funding when a quote-first intent has no stored merchant context (3009)', async () => {
+    // The #2282 repro: an intent created by haven_pay_x402_quote stores no MCP
+    // call context. Route the funding relay as a SUCCESS so the assertion
+    // cannot pass for the wrong reason — if the ordering regresses, the money
+    // moves.
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError(
+        'No stored merchant call context for this intent — pass merchant_url, tool_name, ' +
+          'arguments, and mcp_transport explicitly (version-skew fallback).',
+        409,
+      ),
+    )
+    const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
+    })
+
+    // THE assertion: no funding userop was relayed. An error code alone is not
+    // enough — the pre-#2282 behaviour produced this same code with the money
+    // already gone.
+    expect(fundingRelayed()).toBe(false)
+    expect(merchant).not.toHaveBeenCalled()
+    if (payload.success) throw new Error('expected a context-unavailable failure')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+  })
+
+  it('positive control: the same tool succeeds on an explicit-context retry, nothing stranded', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+    })
+    const h = createToolHandlers(haven)
+
+    const refused = await h.haven_settle_mcp_tool({
+      payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1,
+    })
+    expect(refused.success).toBe(false)
+    expect(fundingRelayed()).toBe(false)
+
+    const retry = ok<{ settled: boolean; funding_tx_hash: string | null }>(
+      await h.haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'legacy' },
+        mcp_transport: { handshake_required: true, source: 'path' },
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+    expect(fundingRelayed()).toBe(true)
+    expect(retry.data.settled).toBe(true)
+    expect(retry.data.funding_tx_hash).toBe('0xfund')
+  })
+
+  it('does NOT submit the erc7710 settlement child when the context is unavailable', async () => {
+    // The no-funding-leg scheme has the same shape: POST /x402/:id/settle
+    // consumes the signed settlement child, which cannot be re-signed.
+    stubFetch({})
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    const settle = vi.spyOn(haven, 'submitX402Erc7710')
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      // no payment_header => erc7710 branch
+    })
+
+    expect(settle).not.toHaveBeenCalled()
+    if (payload.success) throw new Error('expected a context-unavailable failure')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantCallContextUnavailable)
+  })
+})
+
+// ── ADOPTION: the shared fixture replaces the cloned setups ───────────────────
+
+describe('shared fixture (test-support/hosted-mcp.ts)', () => {
+  it('records every fetch with url/method/body/headers — the superset stub', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: AGENT_ALLOWANCES_RESPONSE },
+    })
+    await handlers().haven_get_agent({})
+    const calls = recordedCalls()
+    // getAgentSummary reads the agent AND its allowances (two GETs, the shape
+    // the original tools.test.ts fixture modeled).
+    expect(calls).toHaveLength(2)
+    const agentCall = calls.find((c) => c.url.endsWith('/machine-payments/agent'))!
+    expect(agentCall.method).toBe('GET')
+    expect(agentCall.headers).toBeDefined()
+    expect(agentCall.body).toBeUndefined()
+  })
+
+  it('keeps the custody invariant fixture: the delegate key never crosses the wire', async () => {
+    stubFetch({
+      'POST /payments': { status: 201, body: { payment_id: 'pay_1', status: 'pending_signature', sign_data: { hash: '0x1' } } },
+    })
+    await handlers().haven_pay({ token: 'USDC', amount: '1', to: '0xabc' })
+    expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
+    expect(JSON.stringify(recordedCalls())).not.toContain('delegate_key')
+  })
+
+  it('serves the x402 quote fixture the later capability splits consume', async () => {
+    stubFetch({
+      'GET /paid': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) },
+      },
+    })
+    const res = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://haven.test/paid' }),
+    )
+    expect(res.data.payment_required).toBeDefined()
+    expect(res.data.accepted_scheme).toBeDefined()
+  })
+})

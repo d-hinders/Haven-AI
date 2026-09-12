@@ -470,7 +470,8 @@ export class HavenClient {
    * Sign a payment's `sign_data` with the correct scheme for its rail.
    *
    * Dispatching on the server-provided scheme means a caller never has to
-   * know which rail an account is on; an unknown scheme is a hard error,
+   * know which rail an account is on; an unknown scheme — or an absent one,
+   * since the legacy AllowanceModule rail retired (#2850) — is a hard error,
    * never a guessed signature. The session rail's 'eip191_userop' is retired
    * (#834) — the backend refuses those intents with HTTP 410 before any
    * sign_data reaches a client, so encountering it here is a hard error too.
@@ -514,7 +515,14 @@ export class HavenClient {
       return signSettlementDelegationTypedData(this.delegateKey, signData.typed_data as never)
     }
     if (scheme === undefined) {
-      return signHash(this.delegateKey, signData.hash) // legacy AllowanceModule rail
+      // The legacy AllowanceModule rail signed the bare hash when no scheme
+      // was present. Every live sign_data emitter sets `signature_scheme` and
+      // the backend spec makes it required, so absence is a malformed payload:
+      // refuse it loudly rather than silently signing on a guessed scheme
+      // (#2850, epic #1440). signHash itself stays live for the EIP-3009 leg.
+      throw new HavenSigningError(
+        'sign_data.signature_scheme is required — the legacy AllowanceModule rail that signed the bare hash is retired (#2850). Refusing to guess a signing scheme.',
+      )
     }
     throw new HavenSigningError(
       `Unknown sign_data.signature_scheme '${scheme}' — refusing to guess a signing scheme. Update @haven_ai/sdk.`,
@@ -668,8 +676,10 @@ export class HavenClient {
    * allowance/budget summary a settle response carries.
    *
    * #1310/#1311 parity: this is the ONE home for logic that was duplicated
-   * verbatim in `packages/mcp-server/src/tools.ts` and `packages/mcp/src/tools.ts`
-   * (both hosted and local `haven_get_payment_status` handlers) — extracted
+   * verbatim in the hosted and local `haven_get_payment_status` handlers —
+   * `packages/mcp-server/src/tools/state-direct-recovery.ts` since #2809 (it
+   * was `packages/mcp-server/src/tools.ts` when this was written) and
+   * `packages/mcp/src/tools.ts` — extracted
    * here because both packages already depend on `@haven_ai/sdk` and call
    * methods on a `HavenClient` instance, so this needed no new dependency
    * edge. `funded_but_unsettled` is deliberately excluded: that phase means

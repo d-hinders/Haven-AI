@@ -4,7 +4,7 @@ status: current
 covers:
   - .agents/skills/ship-next/SKILL.md
   - .github/labels.yml
-last-verified: "2026-08-04"
+last-verified: "2026-09-08"
 ---
 
 # Ship-next playbooks
@@ -53,7 +53,7 @@ and are synced to the repo by `.github/workflows/labels.yml`.
 | `money-path` | payments, agent authority, allowances, migrations | `money.md` |
 
 An issue may carry several surface labels; the skill loads each matching
-playbook. `money-path` selects `money.md` and its characterization-test bar; since #1024 it no longer pauses the merge — only migrations stay hard-gated.
+playbook. `money-path` selects `money.md` and its characterization-test bar; since #1024 it no longer pauses the merge — only direct migration implementation files stay hard-gated. Migration tests under `__tests__/` do not require code-owner approval.
 
 ## How a run uses these
 

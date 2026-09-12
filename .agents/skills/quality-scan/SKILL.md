@@ -18,6 +18,16 @@ following its **Epics** section, which is what gets the `epic` label and the
 sub-issue links right. A finding filed without those is a tracking issue nothing
 can query and `ship-next` cannot pull from.
 
+## References
+
+- [`references/dimensions.md`](references/dimensions.md) — the seven wave
+  dimensions a run probes, numbered. `Probed clean:` cites these by number.
+- [`references/discovery-method.md`](references/discovery-method.md) — the
+  code-quality discovery method: how to run a pass, the discovery prompts, the
+  coverage summary and the verification baseline. Moved here from
+  `docs/contributing/code-quality-loop.md` by #2640 so the method sits with the
+  skill that performs it. Read it before a full-repository sweep.
+
 ## Scope
 
 Bare invocation sweeps the whole repository. An argument narrows it:
@@ -130,9 +140,6 @@ scan would otherwise be empty, so the emptiness is explained.
       checks, and each gate's green-without-running exit branches. This is
       the *CI gate coverage vs. what is actually exercised* dimension made
       concrete (#2317, #2088, #2300, #1044).
-   7. **Chain health** — `last-verified` line length against
-      `chain-integrity.mjs`'s ceiling, in the guard's unit, and duplicate
-      entries (#2477).
 4. Read the comment archaeology: `TODO`s, issue-number references, and
    repeated warning comments are where a codebase names its own recurring
    pain. A warning copy-pasted across files is a structural finding announcing

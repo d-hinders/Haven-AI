@@ -3,12 +3,16 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/infra/__tests__/helpers/db-harness.ts
+  - packages/backend/src/infra/__tests__/helpers/schema-reference.ts
+  - packages/backend/src/infra/__tests__/helpers/test-env.ts
+  - packages/backend/scripts/reap-test-schemas.mjs
   - packages/backend/src/infra/__tests__/helpers/db-availability.ts
   - packages/backend/vitest.setup.ts
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
+  - scripts/lib/ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-09-07" # #2621: § *resetDb() restores ROWS, never SCHEMA* — the first of the "Two rules follow:" snippets is replaced by its helper call: `db-harness.ts` gains `withMigrationReverted(revert, body, restore)`, and the five migration test files that still hand-drove a revert with the restore as the body's last statement (`059`, `062`, `071`, `072`, `073`) now route every site through it. The hand-written try/finally the old snippet showed is NOT wrong — `070`/`075` keep it unchanged — and the section's prose after the snippet is untouched; the edit is the canonical example, which had been teaching the inline shape as the shape to reach for. Proven by mutation on `071`/`072`/`073`: suppress the restore under a `-t` filter and the guard names the file and the table(s) for the two table-restoring files (for `073` only under a double-blind, because its own registered `afterAll(up)` net heals the drift before the guard's registered one runs — the #2625 ordering), while for `072` the run stays GREEN with both settlement indexes verifiably gone from `pg_indexes`: the name-diff cannot see index drift, so there the guard must stay silent and the helper's finally is the only defense. Each mutated file was restored byte-identically, checked by hashing the working copy against the committed blob. NOT re-verified: the #2354/#2211 contention and timing figures, the #2329 hook rule, the layer map, the ratchet, the #2616 "Two limits" subsection below (this diff changes none of it), or anything outside this one snippet and its follow-on paragraph. Prior: #2616: § *Using the harness* gains § *`resetDb()` restores ROWS, never SCHEMA*. Written from a reproduction, not from reading: leaving a `down()` unrestored at the END of a migration test file poisons the persistent worker schema, the NEXT run's first assertion in that file fails, and that same run then heals it with its own later `up()` — one failure, self-clearing, which is why re-running the file to check is the thing that hides it. Three earlier reproduction attempts failed for exactly that reason and the section says so, because the wrong debugging instinct is the expensive part. The three compounding facts are each verified against `db-harness.ts` at this commit: `resetDb()` empties tables and never creates or drops one, `ensureMigrated()` is memoised and decides from `schema_migrations`, and worker schemas are created `IF NOT EXISTS`. Records why `assertWorkerSchemaAtHead()` is an `afterAll` rather than a check inside `resetDb()` — some files legitimately CREATE tables and `resetDb()` runs in `beforeEach`, so a check there needs an allowlist that drifts. (An earlier draft of this sentence said "six files" from an unchecked grep; the count is unsupported and is GONE rather than re-counted, per amendment 2 below — this metadata line said it in the present tense after the body had dropped it, which a re-review caught.) Amended TWICE, and both amendments are corrections of this same entry's earlier account rather than new material. (2) An independent haven-reviewer pass found the real source: `agents-allowances-retired.test.ts` re-created `agent_allowances` in its `afterAll` under a rule that had inverted — its own comment cited 069 as asserting the table EXISTS, which stopped being true when migration 075 dropped it and 069 inverted. That needs no failure and no kill, and it poisons every worker the file touches; the reviewer reproduced it end to end and then reproduced 069's failure on the schema it left. The section now names it as the cause and demotes process termination to the rarer second route. The `finally` limit is rewritten too: `finally` covers only files that revert a MIGRATION, and this leak came from an ordinary repository test's hook. The unsupported "six test files legitimately CREATE tables" count is removed rather than re-counted — the placement argument never needed a number, and the reviewer measured 5, not 6. (1) Amended after the section was first written, because the full suite then reproduced #2616's actual failure in this tree and the measurement contradicted the draft's account of the TRIGGER: the draft said a failing assertion between `down()` and `up()`, and the real reservoir is process TERMINATION — `075`'s test already restores in a `finally` and 39 of 336 worker schemas on this machine still carried `agent_allowances` with 075 recorded as applied. The § *Two limits* subsection states both limits the first draft would have over-claimed past, and the corrected framing: worker ids are assigned per run, so this presents as order-dependence while involving no ordering at all. Scope: that ONE new subsection and its limits. NOT re-measured or re-derived in this pass: the #2354 contention figures, the #2211 timings, the #2329 hook rule, the layer map, the ratchet, or any other `covers:` target. Prior: #2354: § *Using the harness* gains § *A warm reset that loses to contention* — the warm resetDb() cost measured phase by phase at 1/2/4/8 concurrent workers and 10 vs 36 tables (DELETE path flat in both; floor = catalog read, which scales with pg_class size — 205 orphaned worker schemas locally; TRUNCATE fallback scales with relations AND workers), the proof that a warm reset never takes the migration advisory lock, the deterministic table-lock reproduction of the 5000 ms signature, and the three changes: planEmptying() scopes the cycle fallback to the cycle footprint, RESET_LOCK_WAIT_MS bounds a relation-lock wait and names the holder by pid, the slow-call announcement names its phase (incl. `acquiring connection`, bounded by the pool's connectionTimeoutMillis, haven-reviewer should-fix); the residual limit (slow with no holder) is PINNED by two fixtures rather than described (haven-reviewer should-fix, #2354 item 4); pool exhaustion named as the third wait with its own wrapped failure and fixture (haven-doc-reviewer re-review finding). Verified on this branch against native Postgres 16 under a load average of 9-115 (parallel agent sessions) — the maxima quoted are contended numbers. Scope: the new subsection only; the #2329 subsection was re-read (its ~25 ms warm figure is now qualified as fresh-catalog in the new text rather than edited); the #2211 paragraph's 38 tables / 136 indexes was re-counted with readSchemaShape()'s own predicate — 36 / 130 today, migration 073 (2026-08-31) dropped x402_receipts and x402_resources — and the paragraph now says so (haven-doc-reviewer finding: the diff quoted 36, 38 and 39 without reconciling them); its timings were NOT re-measured. Prior: #2329: harness section re-read against db-harness.ts and gains § *Harness calls belong in a HOOK, not in a test body* — the `beforeAll`/`beforeEach` example was already here as a preference, and two files that ignored it charged the cold migration-run cost to vitest's 5000 ms `testTimeout` instead of the `hookTimeout: 120_000` `vitest.config.ts` sizes for it, reddening a required check twice on unrelated PRs (#2274, #2295). Records the rule, its two escapes, the structural guard that now enforces it, the new 2000 ms slow-call diagnostic, and why raising `testTimeout` was rejected (#2209's "would only have moved the date", one level up). Verified on this branch against native Postgres: the CI failure reproduces deterministically and passes after the fix; measured cold init 572 ms quiet at 73 migrations, warm `resetDb()` ~25 ms. Scope: the harness section and the new subsection only — resetDb()'s DELETE mechanics and the #2211 numbers above them were re-read but NOT re-measured, and nothing outside § *Using the harness* was re-verified. The rule is suite-scoped (a hook in a sibling `describe` does not warm a cold call) and resolves local helper functions to a fixed point in both directions — harness calls reached through a helper, and hooks REGISTERED through one, the latter found by haven-reviewer on re-review as the same hole through a different door. Its one stated limit (a call behind an object method) is pinned by a fixture rather than left implied, and the doc says so, because a guard read as a closed guarantee is worse than one whose edges are written down — both tightened after haven-reviewer reproduced a silent pass for each against the first draft. The hook/body file counts here are AST-derived against `origin/dev`, not grepped — haven-doc-reviewer caught an off-by-one (48 -> 47) in the first draft that came from an indentation heuristic, and the corrected sentence also names the third category the two-bucket framing had hidden (a file budgeted by its own explicit timeout). Prior: #2211: resetDb() now empties the worker schema with foreign-key-ordered DELETEs instead of one TRUNCATE ... RESTART IDENTITY CASCADE — same coverage (every table, every time), cost now set by rows written rather than by relation count: ~371 ms -> ~48 ms quiet, ~414-448 ms -> ~52-61 ms loaded, 861 s -> 345 s of backend test time; harness section re-read against db-harness.ts and the resetDb()-in-a-loop convention rewritten around the new mechanics (the convention itself stands). Prior: #2209: harness section re-read against db-harness.ts; adds the resetDb()-in-a-loop convention with measured per-call cost (~250 ms quiet / ~800 ms-1.2 s loaded at 38 tables) — no harness behaviour changed, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #2198: harness section re-read against db-harness.ts — the cross-worker migration lock now WAITS by polling pg_try_advisory_lock (shared helper db/advisory-lock.ts) instead of blocking in pg_advisory_lock, because a blocking waiter pins a snapshot that deadlocks CREATE INDEX CONCURRENTLY; no doc-visible change, initDbHarness()/resetDb()/the beforeAll example are unchanged. Prior: #1763: the no-database section is rewritten — the local default inverts to failing, HAVEN_SKIP_DB_TESTS=1 acknowledges a narrowed run, and the verdict prints after vitest's summary; harness section re-read against db-harness.ts, the beforeAll example unchanged and still preferred. Prior: resetDb now awaits initDbHarness (the un-awaited-init 42P01/40P01 CI flake); harness section re-read against db-harness.ts, example unchanged and still the preferred shape
+last-verified: "2026-09-09"
 ---
 
 # Backend testing strategy: the real-database rule
@@ -284,6 +288,224 @@ drifts. `afterAll`, in the files that change schema, is where the rule is
 unambiguous — and that is not only the migration tests, as #2616 itself
 showed.
 
+#### Two more coverage gaps, both closed (#2625)
+
+An independent review pass on the #2616 fix (PR #2623) found two more gaps in
+`assertWorkerSchemaAtHead()`, neither introduced by that PR — both pre-existing
+limits of a guard that did not exist before it, filed so its green would not be
+read as more than it was.
+
+**Shape-blind.** The original guard diffed `readSchemaShape().tables` — a
+table NAME list. A repair that recreates a table with the wrong columns,
+indexes or constraints passed silently: reproduced by leaving
+`ALTER TABLE agents ADD COLUMN __scratch_leak text` in a terminal `afterAll`
+and observing the name-only guard report clean. Not hypothetical for one real
+caller: `agents-allowances-retired.test.ts` recreates `agent_allowances` from
+a DDL block hand-copied from a migration file, so a later migration adding a
+column to that table would leave the copy off head in SHAPE while still
+matching in NAME. The fix widens the head snapshot and the live comparison
+from a table-name list to a per-table COLUMN and INDEX fingerprint
+(`readSchemaFingerprint()`), kept as a SEPARATE function from
+`readSchemaShape()` so the extra catalog cost lands only at the two places
+that need it — once per FILE (the head capture; the memo is per module
+instance and vitest gives each file its own) and once per call to the
+guard — never inside `resetDb()`'s own per-test path. Measured on this branch,
+native Postgres 16, 78 migrations / 34 tables, 30 calls each after a warm-up:
+`readSchemaFingerprint()` had a ~31 ms median (27-34 ms) against `readSchemaShape()`'s
+~15 ms median (10-21 ms) — roughly double, still tens of milliseconds, and paid
+only where stated above.
+
+**Skipped when a sibling `afterAll` throws.** The guard is registered FIRST by
+callers so vitest's LIFO ordering runs it LAST, after a file's own cleanup —
+deliberate, because the question is what a file LEAVES. But when an
+earlier-executing sibling `afterAll` in the same suite throws, vitest never
+runs the hooks still queued behind it in that suite: a later-registered guard
+is skipped outright, not merely delayed — so a repair hook that fails partway
+(a lock timeout, an FK cascade, a permissions error) takes the guard down with
+it, and the drift reaches later runs unrecorded. `db-harness.ts` cannot change
+how any individual caller registers its OWN inner call, so the fix works from
+OUTSIDE that registration: the harness module now ALSO registers
+`assertWorkerSchemaAtHead()` once per file, at module scope, outside any nested
+`describe` — every real-DB file imports this module, so the call happens once
+per file in that file's ROOT suite, a different failure boundary than any hook
+a nested `describe` registers. Reproduced two ways: isolated (no database) that
+a root-level `afterAll` is not skipped by a sibling throwing inside a nested
+`describe`, even though a hook registered inside that describe, scheduled to
+run after the throw, is; and end to end against a disposable child vitest
+process that imports the real `db-harness.js`, leaves real drift with **no**
+explicit guard registration of its own anywhere, and throws in its own
+`afterAll` — the drift is still reported, attributed to the correct table.
+
+**What this now guarantees, and what it still does not.** Every real-DB file
+now gets the schema-purity check automatically, whether or not it opts in —
+which means "a file that legitimately creates a table in a hook and leaves it"
+is no longer a safe pattern ANYWHERE, not only in the files that used to
+opt in. This repo's own two harness smoke files
+(`db-harness.test.ts`, `db-harness-parallel.test.ts`) did exactly that (a
+scratch table for the cross-worker isolation proof, kept around rather than
+dropped) and needed a `DROP TABLE` in their own `afterAll` in the same change.
+The existing per-file `afterAll(assertWorkerSchemaAtHead)` convention is not
+made redundant by this — it still gives the earliest possible failure in the
+ordinary, non-throwing case, registered as a second, additional call. What is
+still true from the section above: a schema already poisoned before a run
+started is invisible to either registration, because both diff against
+whatever `ensureMigrated()` observed AT THE START of this run, and a killed
+process still skips every `afterAll`, root-level ones included.
+
+Verified: the full backend suite green against native Postgres 16 (242 files,
+3153 tests, 2 skipped, 0 failures) — **on a cold vitest cache, and under
+`--sequence.shuffle.files` at two seeds.**
+
+Those conditions are not ceremony; an earlier draft of this section claimed
+three consecutive green runs and the claim was false. The reproduction test
+asserted the CHILD process's worker id equalled the PARENT's, which holds only
+when that file happens to sort first. It did sort first — because vitest's
+sequencer **runs previously-failed files first**, so the failure moved the file
+to position 1 and hid itself on every later local run. CI, which never has a
+warm cache, would have failed deterministically. A single green run of an
+order-dependent test says nothing, and this one erased its own evidence.
+
+So: **any test whose outcome can depend on `VITEST_WORKER_ID` must be validated
+on a cold cache and under a shuffled file order.** `VITEST_WORKER_ID` is not a
+stable worker identity — it is the file's ORDINAL in the run's spec list
+(vitest increments it once per `runFiles`, and `isolate: true` dispatches one
+call per file), so it changes with file order, and every file in a run gets a
+different one. Two consequences worth stating plainly: a spawned single-file
+`vitest run` is always worker 1, and schemas accumulate one per FILE rather
+than one per core (#2622).
+
+### Drift that was already there when the run started (#2622)
+
+Everything above is about drift a run *causes*. This is about drift a run
+**inherits**, which is the half nothing could see.
+
+Three facts compound. `ensureMigrated()` decides from `schema_migrations`:
+nothing pending, nothing to do. `resetDb()` empties rows and never touches
+schema. Worker schemas are created `IF NOT EXISTS` and outlive the run. So a
+schema that is off migration head when a run *starts* stays off it forever —
+the schema says "migration applied" while the table that migration dropped is
+still sitting in it.
+
+`assertWorkerSchemaAtHead()` cannot close this, and no amount of tightening it
+would: it captures head **after** the migration run, so drift already present at
+that moment *becomes* head and diffs clean against itself for the rest of time.
+
+**`try/finally` does not help either**, and this is the part that misleads: the
+trigger is process **termination**, not a failing assertion. An interrupted
+local run, a cancelled CI job. #2622 measured 336 worker schemas on one machine,
+39 carrying a table migration 075 drops, with 075 recorded as applied in all 39.
+
+#### The reference, and why it is not disposable schemas
+
+`vitest.global-setup.ts` now builds **one pristine schema per run** —
+`test_schema_reference`, dropped and recreated, migrated, fingerprinted — and
+publishes the fingerprint's path in `HAVEN_SCHEMA_REFERENCE`. `ensureMigrated()`
+compares this worker's schema against it **before** capturing head, and fails
+naming the schema, the difference and the repair.
+
+#2622's other candidate was dropping and recreating every worker schema, priced
+there as "a full migration run per worker per run". That price is wrong in the
+expensive direction. Worker schemas are allocated **per FILE**: `VITEST_WORKER_ID`
+is the file's ordinal in the run's spec list, not a stable worker identity —
+measured, by a module-scope log printing once per file from three different pids
+and three different ids. At 62 real-DB files that is 62 full migration runs per
+suite run against a cold init of ~572 ms, which is the cost #2211 and #2354
+exist to have attacked. One reference per run is two orders cheaper.
+
+The reference schema is **dropped and recreated**, never reused. Reusing it
+would reproduce this very defect one level up: a stale reference compares every
+worker against yesterday's drift and reports clean.
+
+#### Consequences you will meet
+
+- **A file that CREATES a table must remove it.** Not a style preference: the
+  table is inherited drift the moment the run ends, and the guard now says so at
+  the start of the next one. The two harness smoke files gained a
+  `DROP TABLE IF EXISTS harness_smoke` for exactly this. `CREATE TABLE IF NOT
+  EXISTS` is what made the leak survivable and therefore invisible.
+- **The message names the repair** — `DROP SCHEMA test_wN CASCADE` — because the
+  reader is meeting a schema they did not knowingly create, carrying drift from a
+  run they do not remember.
+- **A missing reference is reported, not assumed.** A run without the package
+  global setup reaches the harness legitimately, and warns once that inherited
+  drift was NOT checked. A guard that cannot say whether it ran is the false-zero
+  this repo keeps paying for.
+
+#### What this does NOT catch
+
+The `#2616` section above states its two limits; this one has its own, and they
+were found by review rather than by reasoning — each reproduced against a real
+schema.
+
+- **CHECK, FOREIGN KEY and EXCLUDE constraints, plus triggers, views, sequences
+  and functions, are invisible.** Narrowed from a flat "constraints" on review:
+  UNIQUE and PRIMARY KEY constraints have a backing index that `pg_indexes`
+  DOES report, so those *are* seen — `user_safes_user_id_safe_address_chain_id_key`
+  is one. The unqualified word read as licence to stop looking. The
+  fingerprint reads `pg_tables`, `information_schema.columns` and `pg_indexes`,
+  nothing else. The dangerous direction is proven:
+  `ALTER TABLE outbound_txs DROP CONSTRAINT outbound_txs_status_check` on a
+  worker schema leaves the run **green** — the schema now accepts `status`
+  values production rejects, and the guard reports it at head. The migration set
+  contains 11 `ADD CONSTRAINT`s, so this class is live.
+- **`varchar(n)` and `numeric(p,s)` width.** `data_type` is `character varying`
+  either way, so widening or narrowing a column is not seen.
+- **Column ORDINAL position**, since columns are compared by name.
+- **An index redefined under the same name**, since only `indexname` is read.
+- **Every schema the run does not visit.** The guard is per file, so it inspects
+  at most the ordinals that run's files draw — 62 of the 177 schemas here. A
+  green suite is evidence about those, and about nothing else. The
+  whole-reservoir question needs `--audit` below.
+
+#### The rollout window, and a Ctrl-C
+
+Because the check runs inside `ensureMigrated()` — before any file's own
+`beforeAll` — there is **no self-heal path**. A `harness_smoke` left in
+`test_w55` by a branch WITHOUT this change makes the next run on that ordinal
+fail, and it fails even for the file that owns the table, because
+`CREATE TABLE IF NOT EXISTS` never gets to run. The same is true after a
+`Ctrl-C`. That is the intended trade — a leftover that used to be silent is now
+loud — but it converts a previously benign artifact into a per-ordinal failure
+that only `DROP SCHEMA` or the reaper clears, and this repo runs many worktrees
+against one Postgres.
+
+#### The accumulation, which is a separate problem
+
+Schemas are never dropped, and there is one per file rather than one per core, so
+the set grows with the largest run the machine has ever done: 336 in #2622, 167
+here. That is a standing cost independent of drift — `readSchemaShape()` scans
+`pg_class`, which § *A warm reset that loses to contention* already names as the
+floor under every reset — and every one is a place drift can hide.
+
+```bash
+npm run db:reap-test-schemas -w packages/backend            # dry run
+npm run db:reap-test-schemas -w packages/backend -- --yes   # drop them
+```
+
+Dry run by default, `--keep N` to keep the lowest N ordinals (the ones an
+ordinary run reuses; the tail is dead weight). It refuses any host that is not
+**loopback**, with no override flag, because it drops schemas and "the operator
+passed the wrong URL" is exactly the case a destructive script has to survive.
+The host it checks is the one **`pg` will dial**, not the URL's own hostname: a
+`?host=` query parameter overrides the driver's target while
+`new URL().hostname` still reads `localhost`, which defeated the first version
+of this guard. `postgres` and `db` were once allow-listed and are not — they are
+ordinary DNS names in production namespaces.
+
+```bash
+npm run db:reap-test-schemas -w packages/backend -- --audit   # read-only
+```
+
+`--audit` compares **every** `test_w*` schema against the reference and names
+the drifted ones, exiting 1 if any. It exists because a claim needed it: an
+earlier version of this section said no accumulated schema had tripped the
+guard, and a run structurally cannot support that — it visits 62 of 177. The
+review falsified the sentence with a green suite over a database holding two
+drifted schemas. Measured with `--audit` instead: **177 schemas, 0 drifted**,
+and the zero is a real one — planting a column in `test_w120`, a schema no run
+visits, makes it report `test_w120: agents (columns +__audit_control)` and exit
+1.
+
 ### Harness calls belong in a HOOK, not in a test body (#2329)
 
 The sibling of the rule above, and the reason the `beforeAll`/`beforeEach`
@@ -519,7 +741,10 @@ Counts, not coverage, deliberately: a coverage percentage can be satisfied
 without proving anything and rewards touching whatever is easiest; these
 counts measure the thing that actually hurts. After a legitimate reduction,
 lock it in with `node scripts/db-mock-ratchet.mjs --update` (it refuses to
-ratchet upward). Rare, justified exceptions: a file-level
+ratchet upward). If the baseline file is genuinely new, an empty scan writes
+it directly; a non-empty scan requires review and the explicit
+`--update --accept-new` first-run override. That override cannot raise an
+existing baseline. Rare, justified exceptions: a file-level
 `// db-mock-exempt: <reason>` with a reason of at least 20 characters — a
 suite that characterizes the exact SQL text sent is the canonical example.
 

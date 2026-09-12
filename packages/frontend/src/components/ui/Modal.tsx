@@ -15,9 +15,23 @@ const widthClasses = {
 
 type ModalWidth = keyof typeof widthClasses
 
+// The panel's ceiling, minus exactly what the wrapper's padding reserves
+// (#2730). Without the subtraction a tall dialog fills `100vh - 2rem` inside a
+// box that is shorter than that by the notch plus the home indicator, and the
+// overflow lands on the footer — the action row #1946 moved out of the scroll
+// body precisely so it could not be pushed off screen.
+//
+// `max(gutter, inset)` per side, mirroring `.v2-safe-overlay`'s own rule, NOT
+// `gutter + inset`. The first version added them, which double-counted by up to
+// the gutter on a notched phone and left the panel 32px shorter than the box it
+// sits in. It erred conservative — no overflow, so no test could see it — which
+// is exactly why the arithmetic has to match the padding it claims to mirror
+// rather than merely be smaller than it. Both `max()` terms are the gutter
+// where the insets are 0, so this stays `100vh - 2rem` on every desktop.
 const maxHeightClasses = {
-  default: 'max-h-[calc(100vh-2rem)]',
-  tight: 'max-h-[calc(100vh-24px)]',
+  default:
+    'max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]',
+  tight: 'max-h-[calc(100vh-max(12px,var(--v2-safe-top))-max(12px,var(--v2-safe-bottom)))]',
 } as const
 
 type ModalMaxHeight = keyof typeof maxHeightClasses
@@ -38,6 +52,7 @@ export function Modal({
   width = 'md',
   maxHeight = 'default',
   bodyClassName = '',
+  panelTestId,
 }: {
   open: boolean
   onClose: () => void
@@ -55,6 +70,13 @@ export function Modal({
   width?: ModalWidth
   maxHeight?: ModalMaxHeight
   bodyClassName?: string
+  /**
+   * `data-testid` for the PANEL — the bordered box — not the `role="dialog"`
+   * wrapper, which is `fixed inset-0` and therefore the whole viewport. A
+   * visual baseline of `getByRole('dialog')` is a screenshot of the page
+   * behind the modal; this is the handle a clip should use (#2903 review).
+   */
+  panelTestId?: string
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -132,11 +154,14 @@ export function Modal({
   if (!open) return null
 
   return (
+    // `v2-safe-overlay` + a 1rem gutter is `p-4` that also clears the notch and
+    // the home indicator (#2730): each side takes whichever of the two is
+    // larger, so nothing moves where the insets are 0.
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem]"
     >
       <div
         className="absolute inset-0 v2-modal-backdrop"
@@ -145,6 +170,7 @@ export function Modal({
 
       <div
         ref={panelRef}
+        data-testid={panelTestId}
         className={`relative flex w-full flex-col overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-modal ${maxHeightClasses[maxHeight]} ${widthClasses[width]}`}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--v2-border)] px-5 py-4">

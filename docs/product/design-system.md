@@ -5,7 +5,13 @@ covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
+  - packages/frontend/src/components/AuthenticatedShell.tsx
+  - packages/frontend/e2e/safe-area-insets.mobile.spec.ts
+  - packages/frontend/src/components/ui/Toast.tsx
   - packages/frontend/src/app/layout.tsx
+  - packages/frontend/src/lib/brand-colours.ts
+  - packages/frontend/src/lib/installed-app.ts
+  - packages/frontend/src/components/brand/AppIconArtwork.tsx
   - packages/frontend/src/app/page.tsx
   - packages/frontend/src/app/how-it-works/**
   - packages/frontend/src/app/protocols/**
@@ -17,7 +23,69 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
-last-verified: "2026-09-07" # #2636: EDITED, scope = ONE cell of the agent-roles table — the `haven-design-reviewer` row said "any finding pauses auto-merge", the blanket rule #2636 retires; it now names `blocking`/`should-fix` as pausing and a `nit` as not. Found by `haven-reviewer` sweeping for the concept after my own string sweep missed it, and this file's `covers:` lists no `.agents/`/`.claude/` policy file, so the coupling gate could not have implicated it either — a second contradicting merge rule would have survived in the doc a designer reads first. #1968's clearing clause in the same cell is unchanged. Scope: that ONE table cell. NOT re-verified: the surface hierarchy, the token tables, the primitive inventory, or anything else in this file. Prior: chain-reset(#2562): compacted at the new 40 KiB advisory band — this chain was 45275 bytes (44.2 KiB) at 2214a0272875, over the band and on the way to the 65,536-byte ceiling. Compacting here is the point of the band: the alternative is that it lands on whoever next edits this doc for an unrelated reason, which is exactly what #2557 hit. The 20 newest entries are retained VERBATIM and in order; the 8 older ones leave the line and stay fully recoverable in git history (`git log -p -- docs/product/design-system.md`, or read the line at 2214a0272875). Two counts, because they measure different things and the gate prints the second: 8 ENTRIES were dropped (listed below by leading ref), while 14 issue REFS disappear from the line entirely. Neither bounds the other, in either direction: a dropped entry's own ref SURVIVES when a kept entry still cites it or when it is named in the list below, and a single dropped entry can take SEVERAL refs with it when its prose cited issues that appear nowhere else. Here it went the second way — more refs than entries. The chain had 28 entries and no duplicates — counted with the validator's own `chainEntries` and `chainAnomalies`, not by eye — so this is genuine growth, not the concatenating-merge damage the ceiling was written for. Dropped entries: #1946, #1945, #1893, #1803, #1867, #1878, #1710, #1708. Nothing was re-verified by this edit, no claim in the body changed, and the date is deliberately NOT bumped. Prior: #2468: re-read the affected Button census, focus-ring anti-vacuity decision, marketing exemption, arrow census, tap-target guidance, and published grep after retiring /investor-briefing; the surviving scanner population is intentionally one BrandBandButton. Scope: those references only; the rest of this document was not re-read. Prior: #2374: § 3 *Buttons* — the FOURTH tap-target borrower loses half of itself. The `/accounts` card's `Set as default` star was removed by owner decision, so the paragraph that described a PAIR now carries a scoped note saying which of its claims are history and which still bind: the both-axes rule for an icon square STAYS (it is general, and `WalletButton.tsx:129` still borrows it — re-read against source in this pass), and the `gap-2.5` clearance bullet keeps its rule while losing its example. Also re-read in the same pass, against source: the whole of § *Tap targets* and the three OTHER borrowers, all still true; `AccountsOverviewClient.tsx` now renders one action, `Set active`, gated on `!isActive` alone. Scope: the fourth-borrower block and the two lines pointing at it. NOT re-verified: §§ 1-2, 4-9, § *Cards*, § *Transactions table*. Prior: #2325: § 3 *Cards* gains the narrow-header priority entry directly after the #2251 grid-track rule it leans on — at 390 the `/agents` header's `ml-auto shrink-0` stamp takes 118.8px of a 300px row and squeezes the MCP chip to 38.5px (`haven-research`, measured 113px, renders `haven…`); the fix is `flex-wrap` on the row plus `basis-full sm:basis-auto` on the stamp (stamp below the block under `sm`, on the line at `sm` and up), with the two measured dead ends (`flex-shrink: 1` on the stamp, `flex-wrap` alone) recorded, and the choice of `sm` itself justified by a sweep of the unwrapped layout (a 34-char slug is cut to 148.5px at 500 and 208.5px at 560, whole only from 639), so the 466-639 band's extra line is an accepted cost rather than an oversight; the wrapped line is left-aligned (`text-left sm:text-right`) on the rendered review's finding that right-flush over-weighted a deliberately demoted element. Verified against source: both spec files cited in the entry exist and their assertions match the prose — `e2e/agent-card-mcp-chip-measure.spec.ts` (chip >= own scrollWidth at 390, stamp below block, 768 control; revert turns the 390 arm red on the mechanism guard, stamp top 263px vs block bottom 347px) and `e2e/agent-card-fit-measure.spec.ts` (green alongside). Scope: § 3 *Cards* only — the new entry and nothing else; the *Tooltips* paragraphs were NOT re-read this pass. Prior: #2389: ONE body sentence under § *Transactions table* — the "what can and cannot see this class of defect" note at the end of the container-collapse discussion — re-verified against `packages/frontend/package.json` `test:visual`, `scripts/ci/visual-baseline-inventory.mjs` and the five `e2e/*.visual.spec.ts` on this branch. It said the gate renders `/design-system` at 1280/390 only, contradicting the § 9 row #2318 corrected in this same file (#2318's note was scoped to that row, which is why this survived). The gate compares every committed baseline (24 across 5 spec files, including whole-page `/dashboard` and `/transactions`), and the inventory script is now cited as the authority for what is compared instead of a restated scope. The viewport-band argument survives on its true premise: every visual spec takes its width from `scripts/evidence-viewports.mjs`, which holds exactly 1280 and 390, so no committed baseline exists at any width between them. Scope: that sentence only. NOT re-verified: the rest of § *Transactions table*, §§ 1-8, § 9. Prior: #2241: § 3 *Buttons* gains a FOURTH tap-target borrower — the `/accounts` card's `Set active` / `Set as default` pair — and with it the `opacity-0` hit-test lesson: an `opacity-0` control is invisible AND STILL LIVE (`elementFromPoint` at Pixel 5 returned both buttons on unchanged `dev`), so gate the hover treatment on `(hover: hover)` rather than adding a `(hover: none)` override, and note that revealing an already-in-flow `opacity-0` control on touch costs the layout nothing. Also records that the "8px between stacked controls" clearance rule bites BETWEEN two borrowers inside one wrapper, not only against a neighbouring bar. RE-READ in the same pass, against source: the whole of § *Tap targets* and all three prior borrowers. Every claim in them is STILL TRUE — `Button.tsx:40-41` still carries the `sm`/`md` overlay and `lg` still carries none; `WalletButton.tsx:129` still carries the `h-11 w-11` square form and still clears it at `sm:after:content-none`; `Sidebar.tsx:235` still has the overlay WITHOUT `relative`, which is what the "do not add `relative` to an already-positioned element" paragraph asserts, and it is still `fixed`; `investor-briefing/page.tsx:559` still paints `h-9` under a `h-11` overlay. Scope: § 3 *Buttons* only — NOTHING else in this file was re-verified, and `covers:` is deliberately unchanged: `app/(authenticated)/accounts/**` is a borrower, not a design-system surface, exactly as `WalletButton.tsx` and `investor-briefing/page.tsx` are already documented here without being covered. Prior: #2318: §9's Enforcement table described the visual-regression row as the "`/design-system` snapshot suite". That has been wrong since #1863 made `test:visual` select every `e2e/**/*.visual.spec.ts` (verified against `packages/frontend/package.json`, not from the issue text — the script carries no path filter, and there are five such specs today), and #2318 makes it doubly wrong by adding whole-page `/dashboard` and `/transactions` baselines. The row now points at `frontend.md` §4's table for scope — which §9 already declares authoritative — rather than restating a scope that drifts, and says plainly that a screen absent from the job's own printed baseline list is not covered. Found by `haven-doc-reviewer`, which also confirmed this doc's `covers:` does not list `ci.yml` or `e2e/**`, so the coupling gate correctly did NOT flag it — the sentence was stale without being coupled. Scope: the §9 Enforcement table's visual-regression ROW only. NOT re-verified: the rest of §9, or §§1-8. Prior: #2251: § 3 *Cards* gains the grid-track rule — a grid item's `min-width: auto` makes a card unable to shrink below its own min-content, so a `truncate` descendant widens the column instead of ellipsising, and Tailwind's `grid-cols-N` only overrides that at and above the breakpoint that declares it. Written as the card sibling of the existing `truncate`d-cell paragraph under *Transaction tables*, which it cites rather than restates. RE-READ in the same pass, against source: the *Tooltips* reachability paragraph's "`McpServerName` inside `AgentCard` is the live case" is STILL TRUE and is now load-bearing twice over — the same nesting that keeps that tooltip hover-only is the wrapper this new rule names as the broken link in the `min-w-0` chain. Nothing else in § 3 was re-verified. Prior: #2043: § 3 *Tooltips* gains *Essential vs elaboration, worked on one component* — the content rule the #2038 reachability limit forces, worked on `McpServerName`, whose two branches sit on opposite sides of it. RE-READ in the same pass, against source: the #2038 paragraph's "`McpServerName` inside `AgentCard` is the live case" is STILL TRUE — only the null branch's tooltip was removed, and the recorded-name tooltip (`McpServerName.tsx`'s recorded branch) is still nested in that composite `role="link"` card (`AgentCard.tsx:121-126`), so the sentence keeps its referent. Two COUNTED literals corrected rather than carried: the label was **169** characters, not 167 — measured on the string as it stood on `origin/dev` (`git show origin/dev:.../McpServerName.tsx`), and the wrong figure appeared twice in this section, once in the new paragraph and once in the pre-existing *Width* paragraph. The *Width* fix is outside #2043's diff and is taken anyway, because two paragraphs disagreeing about one string is worse than one being wrong. Scope: § 3 *Tooltips* only — the Reachability, Width and standalone-ring paragraphs were re-read; NOTHING else in this file was, and no other counted literal (§ Buttons' census included) is touched. Prior: #2231 (#2067): § 1 Tokens -> Shadows said `--v2-shadow-scroll-edge` had "one call site". False as of this diff: `WalletPopover` clamps its height to the viewport and now renders the same `.v2-scroll-edge-cue`, and the measurement behind both moved to `hooks/useScrollEdgeCue.ts` (the #901 pattern-absorption preflight on its 2nd occurrence). Corrected to name both call sites and the shared hook, and "dialog body" loosened to "overlay body" — a popover is not the Modal dialog body that sentence was written about. A line was added saying a third call site is a design decision rather than free reuse, because the count was load-bearing and its replacement should not read as an invitation. Scope: THAT PARAGRAPH ONLY. § 3 -> *Modal* still describes the cue as Modal's own and was NOT rewritten; § *Tooltips* was checked and is NOT stale (`VIEWPORT_MARGIN` went module-private -> exported, but the doc claims only the 8px gutter behaviour, which is unchanged). No other section of this file was re-read, and no counted literal was touched. Prior: #2002: § 6 gains § *Showcase copies of overlays* — the rule for a permanently-open showcase copy of a dialog/overlay primitive, which § 6 had no home for. RE-READ and re-verified in the same pass, against source rather than assumed: § 6's whole *Accessibility expectations for production primitives* bullet list, all six bullets STILL TRUE — Modal `role="dialog"`/`aria-modal`/Escape/focus trap/focus return (`ui/Modal.tsx:144-183`) and its scroll cue `aria-hidden` + `pointer-events-none` (:263), Toast polite/assertive live regions (`ui/Toast.tsx:216-243`), the #2038 Tooltip standalone condition (`ui/Tooltip.tsx:179-305`), `role="status"`/`aria-busy`/`aria-live` loading regions, and the shell skip link to `main#main-content` (`(authenticated)/layout.tsx:41,51`). The new subsection was written from a fresh census of every overlay showcase on `/design-system` (9 families; 8 trigger-driven and live, 1 — `WalletPopover`, two instances — permanently open) and its cited evidence re-checked: the `wrong_wallet` illustration (#2073) is hand-built markup whose copy MATCHES `OnchainActionGate`'s string today, so it is stated as a divergence risk and not as a divergence; #2204's `/design-system` exemption is the permanently-`aria-busy` skeleton showcase, not animation. Scope: § 6 only, and within it the bullet list plus the new subsection. § *Focus rings* was NOT re-read, and neither was any other section of this file — no counted literal (the § Buttons census included) is touched by this change. Prior: #2195/#2196/#2203: § Buttons — the Distribution paragraph RE-DERIVED by running its own published command, not reasoned about. Was "111 ghost, 9 tertiary, 6 danger, 2 primary — 128"; now 112/11/5/1 — 129. Attribution, because it matters who owes what: on unchanged `origin/dev` (7047dbc8) the same command already answered 111/11/5/1 — 128, so tertiary 9→11, danger 6→5 and primary 2→1 had drifted from earlier merged work and the doc's total was right for the wrong reasons; this branch causes exactly ghost 111→112 (one new `variant="ghost"` control in the recoverable-funds banner). The paragraph's two stated blind spots were re-checked in the same pass and BOTH were stale: it named three dynamic call sites and there are four (`ReplaceSigningKeyModal.tsx:933` was missing), and `DashboardClient.tsx` had moved :336→:334. Scope: that ONE paragraph and its caveat sentence. The rest of § Buttons and the whole rest of this file were NOT re-read. Prior: #2097: § Transaction tables (a section backed by `packages/frontend/src/components/transactions/**`, which this doc `covers:` by glob) gains the Initiator-semantics rule — the Initiator column and the detail panel's Initiator row both read the record's `initiatedBy`, render `You` ONLY for `'human'`, and fall back to an explicit unknown rather than `You`; the three `?? 'You'` fallbacks in `transaction-presentation.tsx`/`TransactionDetailPanel.tsx` are gone. Verified ONLY that §'s column list and the shared `transactionInitiator` helper; the rest of this file was NOT re-read, and the authoring-side sections it touches are verified by their own tests. Prior: #1947: the danger-variant use census no longer cites "the approval queue's reject" — that call site died with #1989's screen deletion; the surviving uses (agent revoke/remove, delete contact) re-checked. Scope: that parenthetical only. Prior: #2038: § Tooltips rewritten (reachability contract, the composite-control limit, the `focus-visible` ring on newly-focusable triggers, the one-second touch→mouse suppression WINDOW rather than a latch, and the width cap) and the accessibility-expectations line corrected. Verified ONLY those two places, against `ui/Tooltip.tsx` and MEASURED geometry in real Chromium (167-character label: 988px wide on a 320px viewport before, wrapped inside the cap with an 8px gutter after). The old line "Tooltip triggers are keyboard focusable when the tooltip is needed for non-mouse users" was FALSE for every bare-span trigger, not stale — the wrapper had no `tabIndex` and `onFocus` never fired. NOT a re-read of this file; no other § was checked. Prior: #1989: four citations pointed at files this diff deletes — the sidebar "Approvals item ... live actionable-count badge", the tertiary-variant census ("eight product call sites ... three in settings/ManageApprovers", now five), `ApprovalNotifications.tsx:133` in the focus-ring blind-spot list, and `SendModal.tsx:627` in the 12px tap-target debt row. All corrected in place; the counts were re-derived, not guessed. Scope: those four lines. Prior: #1999: § Transaction tables re-keyed onto the CONTAINER — `revealAt="md"|"xl"` at 718px/974px container width, `tableColumnClass`/`tableHideFromClass` for the body half, `<Table scrollable>` for the dense scrolling shape. Verified ONLY that section, from MEASURED geometry in real Chromium on all four Table-bearing routes (container 340/717/718/850/973/718/973/974 across viewports 390..1280 — the sawtooth reproduces identically on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id`, with the sidebar mounted; a first probe read it with the `ssr:false` sidebar not yet mounted and reported NO sawtooth, which is why the instrument now asserts the sidebar's computed `position`). Two corrections to what #1827 left here: the `lg` step is 240 + 16 = **256**px, not 241 + 16 = 257 (the sidebar's `border-r` is inside its border-box `w-[240px]`; `main` measures 784px at a 1024px viewport), and `TransactionsTable`'s exemption is re-measured rather than restated. NOT a re-read of this file; no other § was checked. Prior: #1827: § Transaction tables gains the two-stage column-reveal rule. Verified ONLY that section, against `/design-system`'s Transaction-history showcase and `TransactionsTable.tsx`, from MEASURED geometry in real Chromium (content width 717.9px at both 768px and 1024px; Failed-row title 71.1px/5 lines before, 141.7px/2 lines after; 1280px unchanged to the pixel). The sawtooth is the load-bearing claim and it is a reading, not an inference — the instrument was validated in the same run against `/transactions`, which reads one line at every width. NOT a re-read of this file; no other § was checked. Prior: #1952: § 3 gains the **Local hint marker** subsection and § 1's `--v2-border-strong` row gains its fourth use. NOT a re-read of this file — ONLY the new subsection and that one token row were verified, against `WalletButton.tsx` and the three lighter `border-l` call sites (`ConnectionVerificationFooter.tsx`, `WaitingForConnector.tsx` ×2) found by grep. The entry is deliberately labelled thin: ONE call site, against § 5 Arrows' stated bar of not founding a precedent on one instance, and the two review passes on #1952 SPLIT on whether it belongs here (the doc pass said one-off, the design pass said a fourth undocumented use of the token invites a fifth). Recorded with the disagreement visible rather than resolved silently, and with an explicit delete-if-unused instruction. No other § was re-read. Prior: #1955/#1954: § Buttons' Tap-targets rule gains "The third borrower" — `/investor-briefing`'s `InvestorButton` at `size="sm"` borrows the #1726/#1766 `::after` extension, and it is the first borrower that MUST take `relative`: it is a statically positioned `<a>`, so the overlay has no containing block otherwise. The existing "must not take `relative`" instruction was written for the `fixed` mobile toggle and was reading as unconditional; it is now scoped to already-positioned controls. The 36 → 44 figure is MEASURED with `elementFromPoint` at 393px, not read off a class string, and the instrument was validated in the same run against the hero's `lg` CTA (paints 44, reads 44), so the pre-fix 150×36 is a reading rather than silence. Both halves are asserted in `e2e/investor-briefing-tap-target.mobile.spec.ts` because a paint-raising "fix" satisfies the 44px line and breaks the density the issue was protecting — mutation-proven both ways (overlay removed → the hit-rectangle assertion red; `h-9`→`h-11` → the painted-height assertion red). Marketing is design-lint-exempt (#874), so that spec is the whole guard. The published census in the same § was re-derived by RUNNING it, not by reading it: still **2 lines**, but both citations had drifted and are corrected — `BrandBandButton.tsx:74`→`:75` and `investor-briefing/page.tsx:548`→`:572`; the `InvestorButton` pattern entry's span `528-554`→`529-578`. The value was right and the locations were not, which is the failure a pinned line number always has. #1954 also absorbed all six marketing trailing arrows into `components/marketing/TrailingArrow.tsx`; § Buttons' `trailingArrow` paragraph was re-read and is still TRUE (still the identical raw `<svg>`, still not `Icon`+lucide, extraction verified pixel-neutral) so it is deliberately left unedited. ONLY § Buttons' Tap-targets block, its census paragraph and the `InvestorButton` pattern entry were re-verified in this pass; the variant table, token tables, § 5, § Focus rings and everything else were NOT re-read. Prior: #1968: the guard table's `haven-design-reviewer` row gains how the pause CLEARS — a clean re-review, not a human ack. That row only; nothing else in this file re-verified.
+  - packages/frontend/src/__tests__/capture-viewports.test.ts
+  - packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts
+  - packages/frontend/src/__tests__/showcase-permanently-open-pin.test.ts
+  - packages/frontend/src/__tests__/busy-tolerant-captures-pin.test.ts
+  - packages/frontend/src/__tests__/button-tertiary-hover-pin.test.ts
+  - packages/frontend/src/components/WalletButton.tsx
+  - packages/frontend/src/components/agent-panel/AgentCard.tsx
+  - packages/frontend/src/components/AccountSignersCard.tsx
+  - packages/frontend/src/components/DelegationSendModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectionVerificationFooter.tsx
+  - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
+  - packages/frontend/src/components/EnvBadge.tsx
+  - packages/frontend/src/components/__tests__/WalletButton.test.tsx
+  - packages/frontend/e2e/accounts-card-tap-target.mobile.spec.ts
+  - packages/frontend/e2e/agent-card-fit-measure.spec.ts
+  - packages/frontend/e2e/agent-card-mcp-chip-measure.spec.ts
+  - packages/frontend/e2e/marketing-cta-focus.spec.ts
+  - packages/frontend/e2e/mobile-nav-layering.mobile.spec.ts
+  - packages/frontend/e2e/mobile-nav-tap-target.mobile.spec.ts
+  - packages/frontend/e2e/modal-action-row-reachability.spec.ts
+  - packages/frontend/e2e/modal-scroll-cue.spec.ts
+  - packages/frontend/e2e/table-container-collapse.spec.ts
+  - packages/frontend/e2e/transaction-title-measure.spec.ts
+  - packages/frontend/scripts/design-lint.mjs
+  - packages/frontend/scripts/evidence-viewports.mjs
+  - packages/frontend/scripts/full-page-capture.mjs
+  - packages/frontend/src/__tests__/compiled-colour-utilities.test.ts
+  - packages/frontend/src/__tests__/design-token-alpha.test.ts
+  - packages/frontend/src/__tests__/focus-ring.test.ts
+  - packages/frontend/src/__tests__/shadow-token.test.ts
+  - packages/frontend/src/__tests__/showcase-overlay-guard.test.ts
+  - packages/frontend/src/__tests__/token-contrast.test.ts
+  - packages/frontend/src/__tests__/z-index-scale.test.ts
+  - packages/frontend/src/app/(authenticated)/accounts/AccountsOverviewClient.tsx
+  - packages/frontend/src/app/(authenticated)/contacts/page.tsx
+  - packages/frontend/src/components/AgentPanel.tsx
+  - packages/frontend/src/components/ConfirmDialog.tsx
+  - packages/frontend/src/components/InfoModal.tsx
+  - packages/frontend/src/components/NetworkSwitcher.tsx
+  - packages/frontend/src/components/__tests__/wallet-popover-presentational-guard.test.ts
+  - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
+  - packages/frontend/src/components/ui/__tests__/Modal.test.tsx
+  - packages/frontend/src/components/ui/__tests__/Tooltip.test.tsx
+  - packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts
+  - packages/frontend/src/hooks/useScrollEdgeCue.ts
+  - packages/frontend/src/lib/__tests__/installed-app.test.ts
+  - scripts/ci/visual-baseline-inventory.mjs
+  - scripts/lib/lint-escapes.mjs
+  - packages/frontend/src/app/(authenticated)/profile/ProfileClient.tsx
+  - packages/frontend/src/components/ComingSoonModal.tsx
+  - packages/frontend/src/components/DashboardOnboardingGuide.tsx
+  - packages/frontend/src/components/ErrorBoundary.tsx
+  - packages/frontend/src/components/NetworkPill.tsx
+  - packages/frontend/src/components/OnchainActionGate.tsx
+  - packages/frontend/src/components/ReceiveFundsModal.tsx
+  - packages/frontend/src/components/agent-panel/McpServerName.tsx
+  - packages/frontend/src/components/haven/Address.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/DashboardClient.tsx
+  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/connect-agent/CopyBlock.tsx
+  - packages/frontend/src/components/connect-agent/SetupStates.tsx
+  - packages/frontend/src/components/haven/DirectionMark.tsx
+last-verified: "2026-09-10"
 ---
 
 # Haven Design System
@@ -46,7 +114,7 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 | `--v2-surface-2` | `#eef2f7` | Disabled states, deeper card stacking |
 | `--v2-surface-code` | `#0b1120` | Dark code blocks on light pages (Stripe pattern) |
 | `--v2-surface-hover` | `#f0f4f9` | Sidebar/user-menu row hover and subtle interactive shells |
-| `--v2-modal-backdrop` | `rgba(26, 31, 54, 0.66)` | Overlay dim for Modal, SidePanel and the mobile nav scrim — solid, deliberately **no** blur (see § Layering) |
+| `--v2-modal-backdrop` | `rgba(26, 31, 54, 0.66)` | Overlay dim for Modal and SidePanel — solid, deliberately **no** blur (see § Layering) |
 
 ### Ink (text)
 
@@ -75,13 +143,15 @@ All tokens live as CSS custom properties at `:root` in `packages/frontend/src/ap
 
 Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do not use the gradient for buttons, badges, large panels, or repeated decoration.
 
+**Four tokens leave the stylesheet ([#2729](https://github.com/d-hinders/Haven-AI/issues/2729), [#2763](https://github.com/d-hinders/Haven-AI/issues/2763)): `--v2-brand` from this table, `--v2-bg` from § *Surfaces*, `--v2-warning` from § *Semantic*, and `--v2-ink-on-brand` from § *Ink hierarchy*.** The installed-app shell — `/manifest.webmanifest`, the `<meta name="theme-color">` the root layout emits, and the generated home-screen icon routes `APP_ICONS` in `packages/frontend/src/lib/installed-app.ts` names — carries `--v2-brand` as `theme_color` and `--v2-bg` as `background_color`, with `--v2-warning` painting the badge on the dev install's icon. `--v2-ink-on-brand` paints the icon's H and badge label, separately from the splash background so a future background change cannot make either disappear. A manifest is JSON and a `<meta>` is an attribute, so those values exist as strings in `packages/frontend/src/lib/brand-colours.ts`; that file is not a second source of truth, because `src/lib/__tests__/installed-app.test.ts` parses `globals.css` and fails on any drift between the two. `BRAND_COLOURS.brand` also supplies RainbowKit's accent and the first WalletButton identicon palette stop, so those consumers cannot quietly diverge from the same token. Change the token here and in the CSS, and let that test tell you the copy moved with it — never edit the copy first.
+
 ### Semantic
 
 | Token | Value | Soft variant | Use |
 |---|---|---|---|
 | `--v2-success` | `#047857` | `--v2-success-soft` `#ecfdf5` | Settled, confirmed, incoming |
 | `--v2-debit` | `#0369a1` | `--v2-debit-soft` `#f0f9ff` | Outgoing / sent money (sibling to success; never a warning) |
-| `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review |
+| `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge; a paused agent's status markers — `AgentCard`'s header pill (`:146`) and bot tile (`:94`), the same fact on two surfaces (#2764) |
 | `--v2-danger` | `#b42318` | `--v2-danger-soft` `#fef2f2` | Failed, destructive |
 
 Same rule as v1: **never repurpose a semantic color**.
@@ -241,6 +311,115 @@ the token exists to make continuation legible in one specific way, and it stops
 meaning that if it becomes a general-purpose edge shadow. See § *Modal* →
 scroll-continuation cue.
 
+### Safe areas — the notch and the home indicator ([#2730](https://github.com/d-hinders/Haven-AI/issues/2730))
+
+Four tokens, and the rule is that nothing calls `env()` directly:
+
+```css
+--v2-safe-top:    env(safe-area-inset-top, 0px);
+--v2-safe-right:  env(safe-area-inset-right, 0px);
+--v2-safe-bottom: env(safe-area-inset-bottom, 0px);
+--v2-safe-left:   env(safe-area-inset-left, 0px);
+```
+
+They are non-zero only where the viewport is `viewport-fit=cover` — set on the
+root viewport export for the installed app (#2729) — and the page therefore
+paints under the status bar and the home indicator. **Every consuming rule takes
+the larger of the padding it already had and the inset** (`max(1.5rem,
+var(--v2-safe-left))`), or adds them where they mean different things
+(`calc(1.5rem + var(--v2-safe-bottom))`: 24px the content wants, plus clearance
+the device demands). Both forms collapse to the previous value where the insets
+are 0, which is every desktop and every gate — that is what lets this land
+without moving a baseline.
+
+**Read the token, never `env()`.** The indirection is not tidiness: Chromium
+exposes no way to emulate a safe area, so a Playwright assertion written against
+a raw `env()` asserts against a permanent 0 and cannot fail. Overriding these
+four custom properties reproduces a real notch's arithmetic against the real
+stylesheet, which is what `e2e/safe-area-insets.mobile.spec.ts` does. The `0px`
+fallback is load-bearing for a second reason: a bare `env()` in a browser
+without that inset resolves to an empty token, which makes the surrounding
+`calc()` invalid and drops the declaration to its initial value — `<main>` would
+lose its 24px entirely rather than fall back to it.
+
+`.v2-safe-overlay` is the shared form for a full-screen overlay: it pads each
+side by `max(var(--v2-safe-gutter, 0px), <that side's inset>)`. **Its contract
+is to set `--v2-safe-gutter`, never a `p-*` utility alongside it** — the class
+is longhand CSS declared after `@tailwind utilities`, so a Tailwind padding
+utility of equal specificity silently loses. The gutter also INHERITS, so a
+`.v2-safe-overlay` rendered inside an open `ui/Modal` picks up that modal's
+`1rem` without asking for it — nothing nests that way today, and anything that
+starts to should set its own. An overlay that had a `p-4` gutter sets
+`--v2-safe-gutter: 1rem` to keep it; the ones that never had a gutter set none.
+
+**The padding insets the panel, not the backdrop.** Where an overlay puts its
+dim layer in a separate `inset-0` child — the common shape, deliberately not
+listed by name here, because such a list rots on the next overlay and nothing
+lints it — `inset-0` on that absolutely positioned child resolves against the
+wrapper's PADDING box, not its content box. So the backdrop still starts at
+`y=0` and covers the reserved bands while the panel inside it starts below the
+notch. That asymmetry is intended: a dim layer that stopped at the inset would
+leave an undimmed strip under the status bar. (A few overlays take the other
+shape — `.v2-modal-backdrop` on the `fixed inset-0` wrapper itself, with no dim
+child at all. Same geometry, nothing to reconcile: with no padding between them
+the wrapper *is* the dim layer. Named by shape rather than by component on
+purpose — a list of file names here is a claim `covers:` has to reach, and the
+gate is right to ask for one fewer of those, not one more.)
+
+The drawer reaches the same strip by the third route: it is `inset-y-0` and,
+below `lg`, `w-full`, with the notch reserved in its own `max-lg:pt-*`. Since
+[#2820](https://github.com/d-hinders/Haven-AI/issues/2820) deleted the nav
+scrim, that drawer is what covers the band when the navigation is open, and it
+covers it **opaquely** with `--v2-surface` where a backdrop covers it dim. Both
+facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`, and the opaque one
+is load-bearing: a translucent value there would mean a dim layer had returned
+to the strip under another name, which is the state
+[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) is trying to get out
+of.
+
+That also leaves a modal backdrop as the only `.v2-modal-backdrop` reaching the
+safe area on the demo path, which is what #2819's remaining device test turns
+on. Moving it below the inset — `top-[var(--v2-safe-top)]`, or swapping the
+wrapper's padding for `inset` — would break that test while still looking
+entirely correct on screen, so the spec asserts each surface spans the band, is
+the topmost element at a point inside it, and still carries a fill:
+`elementFromPoint` settles stacking, not opacity, so a transparent or
+faded-out layer would satisfy the first two on its own.
+
+A panel that also sets its own `max-h` must subtract at least each side's inset,
+or it reserves height the wrapper's padding has already taken. How much depends
+on what the ceiling is measured from: a ceiling measured off `100vh` subtracts
+the full `max(gutter, inset)` per side, while one based on `90vh` or
+`100vh-2rem` subtracts the raw insets, which is enough because its base already
+leaves the gutter. A panel with **no** ceiling at all is the case to watch: the
+available box shrinks by the insets, and with `items-center` and nothing to
+clamp it an over-tall panel overflows both ends with no scroll path.
+
+`ui/SidePanel` is the deliberate exception: it is flush to three screen edges by
+design, so a gutter on its wrapper would un-flush it at every width. Its insets
+go on the panel, where `box-sizing: border-box` takes them out of the scroll
+body between the header and footer rows — not on the rows themselves, because
+`footer` is optional and the only shipped caller passes none.
+
+**Keep `backdrop-filter` off anything that spans a safe-area band** (#2819). The
+top bar originally grew the blurred `<header>` itself by `--v2-safe-top`, putting
+the status-bar band inside a `backdrop-filter` layer; on the installed iOS shell
+that band was seen keeping the nav scrim's grey after the drawer closed. **The
+mechanism is unconfirmed** — the symptom needs a standalone shell with non-zero
+insets and no engine in CI has one — so the rule removes the class of failure
+rather than resting on a diagnosis. Use `ui/SafeAreaBand`: a strip as a sibling
+*above* the bar, never padding inside it.
+
+The **filter** half is absolute; the **opacity** half is a default. Blur is for
+content scrolling under a bar, and nothing scrolls under the status bar, so the
+band gains nothing from a filter — and an opaque band gives the OS-drawn status
+glyphs a fixed backdrop instead of one that drifts with the page, which is why
+`SafeAreaBand` defaults to `bg-bg`. Where the bar's own background is
+translucent by design the band should match it rather than invent a second
+colour: the marketing `SiteHeader` passes `bg-transparent` so its dark-section
+tint shows through. That is a real exception to *opaque*, and not one to
+*unfiltered*.
+
 ### Layering (z-index) ([#1749](https://github.com/d-hinders/Haven-AI/issues/1749))
 
 Every stacking layer has a named token. **Reach for a token, never a fresh number.**
@@ -249,8 +428,9 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 --v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
 --v2-z-sticky:         20;   /* sticky table headers */
 --v2-z-chrome:        100;   /* TopBar */
+--v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
---v2-z-nav-scrim:     130;   /* mobile drawer scrim */
+--v2-z-nav-scrim:     130;   /* mobile navigation tier (consumer retired by #2820, ordering kept) */
 --v2-z-nav-drawer:    140;   /* mobile drawer */
 --v2-z-nav-toggle:    150;   /* the Open / Close sidebar toggle */
 --v2-z-modal:         200;   /* Modal, SidePanel */
@@ -259,13 +439,17 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 --v2-z-toast:        9999;   /* Toast, skip-to-content link */
 ```
 
-The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it slides over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar, and its scrim exists to dim everything behind it — the bar included. Let the bar win and the drawer is decapitated, the scrim dims all but the top strip, and the toggle (which sits *inside* that strip by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar. Let the bar win and the drawer is decapitated, and the toggle (which sits *inside* that band by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
 
-Tiers are spaced by 10 so a new layer lands between two without renumbering. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+`--v2-z-nav-scrim` has no consumer since #2820 — the drawer is full width below `lg`, so the slide-over scrim it used to carry was deleted — and the tier stays anyway. The scale's job is ordering, not inventory: removing the tier would renumber the ascent the tests pin and retire a landing place the day a second navigation overlay returns. Nothing new may take the tier back without a consumer that needs it.
 
-That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
+Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the top bar can hang down across the bar's band on a phone, and under the nav tiers because the drawer the bar opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
 
-**One dim treatment for every overlay: `v2-modal-backdrop`** ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818)). `Modal`, `SidePanel` and the mobile nav scrim all use it. It is a solid `--v2-modal-backdrop` fill and it deliberately carries **no `backdrop-filter`** — the reason is written at its definition in `globals.css`: a full-viewport blur makes the compositor hold a GPU snapshot of the whole page and re-blur it on every paint, which on tall pages ballooned VRAM and made the overlay feel sluggish.
+That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.mobile.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
+
+**One dim treatment for every overlay: `v2-modal-backdrop`** ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818)). `Modal` and `SidePanel` use it. It is a solid `--v2-modal-backdrop` fill and it deliberately carries **no `backdrop-filter`** — the reason is written at its definition in `globals.css`: a full-viewport blur makes the compositor hold a GPU snapshot of the whole page and re-blur it on every paint, which on tall pages ballooned VRAM and made the overlay feel sluggish.
+
+The mobile nav scrim used this token too, until #2820 deleted the scrim outright: with the drawer full width below `lg` there is nothing left to dim, and an element that exists only to be deleted is not a consumer to keep. The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
 
 The nav scrim was the exception until #1818, and instructively so: it read `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, but the opacity modifier on a bare `var()` compiled to nothing (see § "Opacity on a token colour"), so the scrim painted no background — and a `backdrop-filter` with nothing behind it to composite costs nothing. **The blur was free only by accident.** Fixing the fill would have made it real, on a `fixed inset-0` element, which is precisely the shape the rule above exists to prevent. So the fix reused the shared token rather than reviving a second convention.
 
@@ -313,12 +497,19 @@ Marketing pages may still use larger hero type:
 
 The authenticated app uses one stable product shell:
 
-- Sidebar: 240px desktop rail, mobile overlay, white surface, subtle active tint, and a 2px brand accent bar on the active route.
+- Sidebar: 240px desktop rail, full-screen mobile sheet below `lg` (#2820), white surface, subtle active tint, and a 2px brand accent bar on the active route.
+- **Below `lg` the drawer is SECONDARY navigation** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731)). Primary is a five-slot bottom tab bar — Dashboard, Agents, Transactions, Accounts, and More, which opens the drawer for everything else. Four properties are worth knowing before touching it:
+  - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the drawer's, so a positional read reorders the bar the next time an entry is inserted.
+  - **Active state prefix-matches on a `/` boundary**, so `/agents/agent-research` lights Agents — the screen the demo spends its time on — while `/accounts` cannot light for a hypothetical `/accounts-archive`.
+  - **One active idiom across the bar and the drawer it opens** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)): active is brand ink plus a 2px brand rail — on the drawer the rail runs down the row's left edge, on the tab bar across the cell's top edge — and the drawer additionally tints the row, which the bar does not, because a fill in a 56px cell reads as a pressed button. The rail carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-ink` is 16.24:1 and `--v2-ink-3` 5.32:1 (the pre-#2818 active/inactive pair, ~3:1 in contrast with each other), while `--v2-brand` is 6.29:1 and `--v2-brand` against `--v2-ink-3` only **1.18:1** — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. Both text states clear AA at 12px; the rail is `aria-hidden` and `aria-current="page"` remains the programmatic cue.
+  - **"More" is a sibling of the bar, not a cell in it.** The bar sits on the `--v2-z-tab-bar` tier so the drawer covers it; the control sits on the higher `--v2-z-nav-toggle` tier so one button both opens the drawer and closes it while painted over it. A child cannot climb out of its parent's stacking context, so the bar lays out five columns, fills four, and the button takes the fifth by geometry. It keeps the accessible name *Open sidebar*, which the screenshot harness waits on from 25 call sites.
+- **The drawer is FULL WIDTH below `lg`** ([#2820](https://github.com/d-hinders/Haven-AI/issues/2820)). A tab bar's More is a full-height sheet in the iOS idiom, not a 240px slide-over — so below the breakpoint the drawer takes `w-full`, carries **no scrim** (there is nothing left to dim), drops its `border-r` (a full-width column has no edge against the page), and distributes the space its old dead middle band wasted between the nav groups (`max-lg` auto margins between groups, which resolve to zero when the nav runs out of room, so short and landscape viewports scroll instead of clipping). Its surface shows through the Close control while open — the toggle paints `--v2-bg` only while the drawer is closed — and the drawer's footer reserves the toggle's fifth-of-a-screen column on the right (`max-lg:pr-[calc(20%+var(--v2-safe-right))]`), so the fixed control never sits over the user card's kebab. At `lg` and above none of this exists: the rail is the same 240px static column it has always been.
+- **`--v2-tab-bar-h` is reserved by three surfaces and only one of them is the bar**: `<main>` adds it to its bottom padding so the last row does not sit under the bar, and the toast container lifts by it so a notification is not hidden behind the navigation. The safe-area inset is added at each site rather than folded into the token — the bar pads itself with it, the others clear the bar *and* the inset. Note the toast offset carries on the `sm:` variant as well: `sm:bottom-…` overrides the base, so an offset applied only to the base is silently lost between 640px and 1023px, the band where the bar still renders.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: 56px blurred white header. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
-- Main content: scrolls inside the shell, with `p-6 lg:p-8` and a skip link targeting `main#main-content`.
+- Top bar: a 56px blurred white bar with an unblurred status-bar band above it — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). The band is not breakpoint-gated: the inset is 0 on anything without a notch, so it collapses on its own rather than needing `max-lg:`. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
+- Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
 
 ### PageHeader
 
@@ -327,7 +518,20 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
 - Optional uppercase eyebrow.
 - One compact h1 using `.v2-text-h1`.
 - Optional subtitle using `.v2-text-body`.
-- Right-side actions that wrap on narrow viewports.
+- Right-side actions that wrap on narrow viewports — and **stack onto their own
+  row below `sm`**, which is right for a row of labelled buttons and wrong for a
+  single icon-only control.
+- `inlineActions` keeps the actions on the title's row at every width
+  ([#2821](https://github.com/d-hinders/Haven-AI/issues/2821)). Reach for it
+  when the slot holds one icon-only control: on agent detail it holds the kebab
+  alone — the `StatusBadge` beside it renders `null` while the agent is active —
+  and the stacked row was a lone bordered icon, left-aligned, belonging visually
+  to nothing.
+
+  It is a **prop, not a `Children.count`**. Counting tells you how many nodes
+  there are, not whether they are icon-only, and a caller wrapping its actions
+  in a fragment counts as one either way. The caller knows which shape it has;
+  the primitive owns what to do about it.
 
 Do not use marketing hero typography for normal authenticated pages.
 
@@ -380,6 +584,19 @@ rather than repeated per entry:
   affordances — `app/page.tsx:299`, `:320`, `app/protocols/page.tsx:80` — none of which are
   `Button`s. Corrected in #1830.)
 
+**Busy state: no spinner, no `loading` prop (#2871).** An action in flight
+disables its button and swaps the label to `Verbing…` — `Preparing…`,
+`Sending…`, `Pausing…`. That much is the pattern already used by the
+budget-grant action's `busyLabel`, the agent pause action and the accounting
+sync button. **`aria-busy` is the new part** (#2871): it was added to the
+primitive so the state is exposed rather than only painted, and the
+transactions CSV export is its first and so far only call site — the three
+older examples above do not set it. Read its scope narrowly: `aria-busy`
+exposes, it does not announce — a `disabled` button is not focusable, so
+anything the user must actually be told belongs in a `role="alert"` (failure)
+or `role="status"` (neutral) node, the way that export reports a refusal or an
+empty result.
+
 #### The four variants
 
 Primary — **variant**, `variant="primary"`, and the default when `variant` is omitted:
@@ -408,7 +625,9 @@ between them is made wrongly by default. Ghost paints a **box**: a white fill an
 `--v2-border-strong` outline, so at rest it reads as a control. Tertiary paints **no box at
 all**: transparent fill, no border, and dimmed `--v2-ink-2` label, so at rest it reads as
 text and only resolves into a control on hover — which is also the only variant that shifts
-its *text* colour on hover (`ink-2` → `ink`), because it has no border to do that work.
+its *text* colour on hover (`ink-2` → `ink`), pinned by
+[`packages/frontend/src/__tests__/button-tertiary-hover-pin.test.ts`](../../packages/frontend/src/__tests__/button-tertiary-hover-pin.test.ts)
+(#2680), because it has no border to do that work.
 
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
@@ -804,9 +1023,9 @@ guesses about `Modal` wrong:
 
 | Box | What it is | Scrolls? |
 |---|---|---|
-| The wrapper | `fixed inset-0 … p-4`, and it carries `role="dialog"` | **No.** `overflow: visible`, `position: fixed`. It reports ~4px of `scrollHeight` overflow from its own padding that `scrollTop` can never consume |
-| The panel | `max-h-[calc(100vh-2rem)]`, `overflow-hidden`, `flex flex-col` | No |
-| The body | `[data-modal-body]` — `min-h-0 flex-1 overflow-y-auto` | **Yes. This is the only scroller.** |
+| The wrapper | `fixed inset-0 … v2-safe-overlay` with a `1rem` gutter (`p-4` until #2730; still 1rem a side wherever the safe-area insets are 0), and it carries `role="dialog"` | **No.** `overflow: visible`, `position: fixed`. It reports ~4px of `scrollHeight` overflow from its own padding that `scrollTop` can never consume |
+| The panel | `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]` — exactly `100vh-2rem` wherever the insets are 0, and more taken off on a notched device — `overflow-hidden`, `flex flex-col` | No |
+| The body | `[data-modal-body]` — `min-h-0 flex-1 overflow-y-auto` | **Yes. This is the only scroller**, pinned by [`packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts`](../../packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts) (#2680). |
 
 Two consequences, both of which have already cost real time:
 
@@ -918,7 +1137,13 @@ font-medium text-[var(--v2-ink-2)]`). One call site so far —
 on `/design-system` → *Signing credential (wallet menu)*.
 
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
-`--v2-info` family, and `--v2-warning` is scoped to 402/pending-review (§ 1), so
+`--v2-info` family, and `--v2-warning` is scoped to 402/pending-review, to
+environment identity — the `DEV` chip and the dev install's icon badge (§ 1) —
+and to a paused agent's status MARKERS, the pill and bot tile in `AgentCard`. It
+is not for a paused agent's prose: that card's own comment argues the tone
+belongs on a marker rather than a paragraph, which is a narrower claim than the
+enumeration and is why the two read as contradicting each other until you check
+(#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
 another device" hints in `AccountSignersCard` and `DelegationSendModal` are
@@ -1010,8 +1235,48 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 - Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
 - **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (no dashboard-send path sets it today), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
 - Sticky header on desktop.
-- A narrow container hides secondary columns and keeps icon, activity, amount, and external link readable.
-- Date and Amount are sortable; amount sorting uses the raw transaction value, never the formatted display string.
+- A narrow container hides secondary columns and keeps icon, activity and
+  external link readable. The amount stays readable too, but below `md` it is no
+  longer a column: it rides under the title inside the activity cell (#2734).
+- **A stacked amount hangs under the START of the title, never right-aligned.**
+  This is the rule both mobile transaction rows follow, written down here
+  because #2734 shipped the other way first and a design review reversed it:
+  right alignment is a property of a column of numbers, and a stacked amount is
+  not a column — aligning it right leaves one cell carrying two alignment rails.
+  How much indent that takes differs by component and is not part of the rule:
+  `TransactionActivityRow` needs `pl-11` because its `DirectionMark` is a
+  sibling in the same box, while `TransactionsTable`'s mark is its own `<td>`,
+  so its `px-4` content edge already is the title's text start.
+- The stacked amount is nested inside the **activity** cell, so a call site
+  passing `amount` without `activity` would lose the amount entirely below `md`.
+  All three call sites include both today.
+- **Sorting is a `md`+ affordance, by decision and not by omission** (owner
+  decision 2026-09-09, #2790). Date and Amount are sortable at `md` and up;
+  amount sorting uses the raw transaction value, never the formatted display
+  string. Both headers are `revealAt="md"` and there is no sort control outside
+  the header row, so below `md` the table offers no way to re-sort. (It is still
+  sorted — by the default below — it just cannot be changed.)
+
+  Written down because its absence looks like a bug to the next reader. What
+  makes it safe rather than merely accepted: the default is
+  `{ column: 'date', direction: 'desc' }` — newest first — and the sort state is
+  component-local, neither persisted nor in the URL, so a phone always lands on
+  a deterministic order and can never be stranded in an unexplained one. The
+  only path to a hidden active sort is narrowing the window below **768px**
+  mid-session — the viewport at which this shell's table container drops under
+  the 718px `md` stage. Note which number is which: 718px is the CONTAINER
+  stage, and the first draft of this sentence attached it to a window width,
+  contradicting the sawtooth measured two subsections below. "Desktop" was wrong
+  too — a tablet rotating landscape to portrait across 768px is the same event.
+  A resize does preserve the sort: `sort` is `useState` inside the table and the
+  collapse is pure container-query CSS, so nothing remounts and the rows keep
+  their order while the header is gone.
+
+  **Do not add a mobile sort control on suspicion.** The reason this is a
+  decision is that #2734 removed the last sortable header below `md` as a side
+  effect of collapsing the amount column, and the alternative considered and
+  rejected was bolting a sort button onto a screen the mobile epic (#2736) is
+  already reshaping. If a real need appears, it belongs with that epic.
 - Empty state renders inside the table with the correct column span.
 
 Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
@@ -1034,11 +1299,41 @@ So `Table.HeaderCell` / `Table.SortableHeaderCell` take **`revealAt="md" | "xl"`
 
 - **Container-keying makes DOM mount order a layout input**, which viewport-keying never did. `Sidebar` is `dynamic(ssr:false)`, so for the frames before its chunk mounts the shell hands the table ~256px it is about to take back. Measured two ways. Deterministically (stage with the sidebar in layout vs `display: none`, fixed viewport): `/transactions` is same-stage at 768/1024/1100/1279/1280, so no mount transition can change its column set. By timing, at low load: the `/design-system` showcase paints **seven** columns at a 1034px container and collapses to **five** at 794px roughly **106ms** later at a 1100px viewport (98ms at 1279px); 1024px is same-stage. Accepted on an internal showcase route where the whole page shifts 240px in the same window — but check it before keying a **new** surface on the container.
 
-Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it (this table keeps the date under the Amount until the `xl` stage, the same place the narrow layout puts it).
+Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it — this table moves the date under the Amount for the `md`→`xl` band. Note the limit of that example, since it was written before #2792: below `md` the Amount column collapses too and the date goes with it, so the narrow layout drops the date rather than relocating it. Moving beats dropping where there is somewhere to move to.
 
 **`TransactionsTable.tsx` still reveals everything at the single `md` stage, and must not be restructured to match the showcase's two.** It is also a seven-column table and it escapes measure starvation a different way, by **truncating its title to one line instead of wrapping it**. Re-measured under the container keying: one line at every width, 89.6px at 768px *and* at 1024px (ellipsised, with the full string on the `title` attribute), 225.1px at 1280px — so the defect above simply does not arise there. The staging rule is about tables whose flexible cell *wraps*. Restructuring `TransactionsTable` for consistency with a showcase would be a change against a defect measurement says is absent, which is the trap § *Local hint marker* already warns about. What #1999 did change there is only the *key*: the same columns collapse at the same widths, from the container instead of the viewport.
 
-Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390. So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard — see `e2e/transaction-title-measure.spec.ts`, which asserts the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation. `e2e/table-container-collapse.spec.ts` therefore holds the viewport fixed and resizes the query container itself, in both halves (header labels and body cells) at once.
+**Where the two DO now agree: the amount column collapses below `md` in both**
+([#2734](https://github.com/d-hinders/Haven-AI/issues/2734) for the component,
+[#2792](https://github.com/d-hinders/Haven-AI/issues/2792) for the showcase),
+with the amount riding under the title and the date going with it. The showcase
+carried the old column for one merge and
+`e2e/table-container-collapse.spec.ts` measured the gap — 3 surviving body cells
+at a 717px container on `/transactions`, still 4 here.
+
+**Scope that assertion honestly: it counts surviving CELLS.** It is the check
+that the two tables collapse the same number of columns, and nothing more. It
+cannot see the amount stacked in the wrong place, an alignment divergence, or
+the title-wrap inversion #2792 found and fixed — the showcase ellipsised below
+`md` while the component wrapped, at the same 248px cell, so both tables passed
+this spec while rendering different rows. A green tick here is not a statement
+that the two render alike.
+
+Two axes still diverge **on purpose**, and neither is drift: the showcase stages
+in two steps (`md` + `xl`) where the component reveals at one, per the paragraph
+above; and the component carries its narrow widths unconditionally into desktop
+while the showcase hands them back with `md:w-auto`, because the showcase sizes
+its columns from content and the component does not.
+
+Do not read that `md:w-auto` as a pattern to copy. It is a **viewport**-keyed
+width on a table whose collapse is **container**-keyed, and it is harmless only
+because this shell makes the two coincide (container ≥ 718px ⟺ viewport ≥ 768px).
+Under a container resize that does not track the viewport they split — the exact
+trap the paragraphs above spend three passes warning about. A new
+container-keyed table takes `tableColumnClass` / `tableHideFromClass`, never a
+`md:` width.
+
+Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390 (pinned by [`packages/frontend/src/__tests__/capture-viewports.test.ts`](../../packages/frontend/src/__tests__/capture-viewports.test.ts), #2680). So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard — see `e2e/transaction-title-measure.spec.ts`, which asserts the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation. `e2e/table-container-collapse.spec.ts` therefore holds the viewport fixed and resizes the query container itself, in both halves (header labels and body cells) at once.
 
 ### Sections (`Section`)
 
@@ -1175,7 +1470,7 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
 - **The marketing exemption in the first bullet covers this whole section, including these arrow rules.** `components/brand`, `components/marketing`, the landing page, `/protocols` and `/how-it-works` are intentionally bespoke and exempt from every icon rule here (#874). The authoritative list is `MARKETING_SURFACES` in `packages/frontend/scripts/design-lint.mjs` — read it there; this sentence is a pointer, not a copy.
 - **In a gated surface, an arrow that is an affordance comes from lucide.** A control's trailing arrow (`Button`'s `trailingIcon`, which renders lucide `ArrowRight` for you), a list/row chevron, a disclosure marker, anything that animates (`ErrorBoundary`'s `group-open:rotate-90`, `AgentPanel`'s removed-agents toggle). Never a raw glyph — it cannot be rotated, sized on the icon scale, or stroked at 1.5, and it lands wherever the label's typeface puts it rather than where the icon system does.
-- **Exactly one gated file may render a raw arrow:** `components/haven/TransactionMovement.tsx`, the `From <a> → To <b>` movement line. The glyph joins two operands the way a colon would — `aria-hidden`, on the text baseline at the run's own size and weight, with the words `From` and `To` carrying the direction. A lucide glyph would sit at a fixed pixel size beside text it must match, and since #1774 it is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to fill. **Every other raw arrow in a gated surface is a defect**, whatever it is called.
+- **Exactly one gated file may render a raw arrow:** `components/haven/TransactionMovement.tsx`, the `From <a> → To <b>` movement line (the one-file allowlist is pinned by [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts), #2680). The glyph joins two operands the way a colon would — `aria-hidden`, on the text baseline at the run's own size and weight, with the words `From` and `To` carrying the direction. A lucide glyph would sit at a fixed pixel size beside text it must match, and since #1774 it is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to fill. **Every other raw arrow in a gated surface is a defect**, whatever it is called.
 
   **Why a one-file allowlist and not a rule of thumb.** This section has now been wrong three times in the same way, and the shape is worth keeping:
 
@@ -1262,7 +1557,9 @@ Accessibility expectations for production primitives:
 `SidePanel`, `ConfirmDialog`, `InfoModal`, `ComingSoonModal`, `DropdownMenu`,
 `Tooltip` and `Toast` — so the thing on the page is the component, with its
 mount, focus trap and dismissal intact. That is the default. Exactly one
-showcase is held permanently open: `WalletPopover`'s two signing-credential
+showcase is held permanently open (pinned by
+[`packages/frontend/src/__tests__/showcase-permanently-open-pin.test.ts`](../../packages/frontend/src/__tests__/showcase-permanently-open-pin.test.ts),
+#2680): `WalletPopover`'s two signing-credential
 states, side by side, because the blocking pixel gate captures the page at rest
 and a trigger-driven overlay is photographed shut. Reach for a permanently-open
 copy only for a state no trigger can put in the capture.
@@ -1459,9 +1756,9 @@ This system is enforced by automated gates (epic [#904](https://github.com/d-hin
 
 | Gate | Catches | Posture |
 |---|---|---|
-| **design-lint** (`npm run design:lint -w packages/frontend`) | Token bypass (raw palette classes, hex colours, micro-fonts), structural bypass (hand-rolled header bands, raw `<table>`/`<svg>`, address slices) **and** off-scale `<Icon>` sizing (#1858 — the only rule scanned per element rather than per line) | Blocking CI; shrink-only baseline |
+| **design-lint** (`npm run design:lint -w packages/frontend`) | Token bypass (raw palette classes, hex colours, micro-fonts), structural bypass (hand-rolled header bands, raw `<table>`/`<svg>`, address slices) **and** off-scale `<Icon>` sizing (#1858 — the only rule scanned per element rather than per line; the busy-tolerant capture surface is pinned by [`packages/frontend/src/__tests__/busy-tolerant-captures-pin.test.ts`](../../packages/frontend/src/__tests__/busy-tolerant-captures-pin.test.ts), #2680) | Blocking CI; shrink-only baseline |
 | **Visual regression** (every `e2e/**/*.visual.spec.ts`, #2318) | Unreviewed pixel drift in any shared primitive, and whole-screen drift on the routes that have a baseline | Blocking CI; Linux baselines. Scope is `frontend.md` §4's table, not this row — the job prints the baselines it compared into its own summary, and a screen absent from that list is not covered |
-| **Design-system coupling** (`npm run design:coupling -w packages/frontend`) | A new `ui/`/`haven/` primitive missing from `/design-system` | **Blocking** on every PR (*Design-system coupling (strict)*, #1023); a sticky comment explains the finding |
+| **Design-system coupling** (`npm run design:coupling:strict -w packages/frontend`) | A new `ui/`/`haven/` primitive missing from `/design-system` | **Blocking** on every PR (*Design-system coupling (strict)*, #1023); a sticky comment explains the finding |
 | **copy-lint** (`npm run lint:copy`) | Banned multi-word technical terms in user-facing copy | Blocking CI; shrink-only baseline |
 | **haven-design-reviewer** | Rendered-UX issues (visual weight, spacing rhythm, states, touch targets) reviewed from the screenshot evidence | Review pass; a `blocking`/`should-fix` finding pauses auto-merge (a `nit` does not, #2636), cleared by a clean re-review rather than a human ack (#1968) |
 

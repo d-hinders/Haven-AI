@@ -309,7 +309,16 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/backend/src/routes/payments.ts',
       'packages/backend/src/rails/execution-rail.ts',
     ],
-    'last-verified': '2026-08-27',
+    // #2756: the over-budget discriminator paragraph re-read against
+    // `delegation-authorize.ts` and corrected — both x402 legs refuse at a
+    // pre-check before the REDEMPTION, not "before any chain call" (the
+    // pre-check is itself an `eth_call` against the enforcer's storage), and
+    // the revert-reason discriminator applies to `over-budget-refused` alone.
+    // The body was also edited substantively by #2753 while this date said
+    // 2026-08-27; a manifest entry is this file's equivalent of a chain, so it
+    // drifts the same way a `last-verified` does. Scope: that paragraph and
+    // the scenario-table rows it names. Nothing else in that README re-read.
+    'last-verified': '2026-09-08',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',
@@ -339,6 +348,32 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Products table, hosted URLs and Run sections were read only far enough
     // to place the section).
     'last-verified': '2026-09-02',
+  },
+  {
+    doc: 'packages/backend/src/modules/accounting/README.md',
+    owner: '@AntonioSaaranen',
+    status: 'current',
+    // #2862: the recipe for adding an accounting provider — descriptor,
+    // connector, generic flows, conformance runner. Couples to the contract
+    // files it describes, not to the Fortnox adapter (the runbook covers
+    // `modules/accounting/**` for operations).
+    covers: [
+      'packages/backend/src/modules/accounting/provider.ts',
+      'packages/backend/src/modules/accounting/registry.ts',
+      'packages/backend/src/modules/accounting/connector.ts',
+      'packages/backend/src/modules/accounting/connections.ts',
+      'packages/backend/src/modules/accounting/oauth-flow.ts',
+      'packages/backend/src/modules/accounting/oauth-state.ts',
+      'packages/backend/src/modules/accounting/api-key-flow.ts',
+      'packages/backend/src/modules/accounting/__tests__/connector-conformance.ts',
+      'packages/backend/src/routes/accounting-connections.ts',
+      // #2877: the README spells out the supported ledger currencies and
+      // tells connector authors to push `tx.amountLedger` in
+      // `tx.ledgerCurrency`, so both files are claims this doc makes.
+      'packages/backend/src/domain/ledger-currency.ts',
+      'packages/backend/src/modules/accounting/feed-transaction.ts',
+    ],
+    'last-verified': '2026-09-12',
   },
 ]
 
@@ -371,15 +406,16 @@ export const EXEMPT_PACKAGE_DOCS = {
     '`packages/sdk/src/agent-guidance.ts`, and a byte-equality test pins this file to it, so the '+
     'thing that catches drift is that test rather than a doc gate. Its audience is a model '+
     'mid-task, so front-matter would be tokens it pays for and cannot use.',
-  'packages/frontend/src/lib/loop-harness/README.md':
-    'Rationale note for a differential-testing harness. The harness IS its own proof — if the ' +
-    'invariant it describes stops holding, the harness fails, not the prose.',
   'packages/qa-agent/src/pilot/README.md':
     'Index of hand-run testnet proof scripts, each of which documents itself in its own header. ' +
     'Governed one level up: `packages/qa-agent/README.md` carries the QA harness contract.',
   'packages/sdk/src/__fixtures__/README.md':
     'Provenance record for one generated test fixture — a regeneration recipe, not a description ' +
     'of behaviour. It is correct or it is not; there is no state it can drift out of sync with.',
+  'packages/backend/src/modules/accounting/__tests__/fixtures/fortnox/README.md':
+    'Provenance index for the recorded Fortnox HTTP fixtures the conformance runner serves ' +
+    '(#2862): a file-to-request table, not a description of behaviour. The runner that reads ' +
+    'them is what catches drift — a renamed fixture fails the suite, not a doc gate.',
 }
 
 /**

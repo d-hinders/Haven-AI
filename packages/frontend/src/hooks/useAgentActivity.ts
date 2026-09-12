@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import type { PaymentStatus } from '@/lib/payment-status'
 
 /**
@@ -88,24 +89,35 @@ export function useAgentActivity(agentId: string | null) {
   const [activity, setActivity] = useState<ActivityItem[]>([])
   const [stats, setStats] = useState<AgentStats | null>(null)
   const [loading, setLoading] = useState(true)
+  // #2732: one in-flight request per hook — a silent poll racing a mount or
+  // refetch must not interleave late responses over newer data.
+  const requestIdRef = useRef(0)
 
-  const fetchData = useCallback(async () => {
-    if (!agentId) return
-    try {
-      const [activityRes, statsRes] = await Promise.all([
-        api.get<{ activity: ActivityItem[] }>(`/agent-activity/${agentId}/activity`),
-        api.get<AgentStats>(`/agent-activity/${agentId}/stats`),
-      ])
-      // A 200 whose body omits `activity` must not void the array the page
-      // filters over — that crashed /agents/[agentId] outright (#1075).
-      setActivity(activityRes?.activity ?? [])
-      setStats(statsRes ?? null)
-    } catch {
-      // Silently fail
-    } finally {
-      setLoading(false)
-    }
-  }, [agentId])
+  const fetchData = useCallback(
+    async (silent = false) => {
+      if (!agentId) return
+      const requestId = ++requestIdRef.current
+      try {
+        const [activityRes, statsRes] = await Promise.all([
+          api.get<{ activity: ActivityItem[] }>(`/agent-activity/${agentId}/activity`),
+          api.get<AgentStats>(`/agent-activity/${agentId}/stats`),
+        ])
+        if (requestIdRef.current !== requestId) return
+        // A 200 whose body omits `activity` must not void the array the page
+        // filters over — that crashed /agents/[agentId] outright (#1075).
+        setActivity(activityRes?.activity ?? [])
+        setStats(statsRes ?? null)
+      } catch {
+        // Silently fail — including silent ticks, which by #2732 must change
+        // no visible state on a failed fetch anyway.
+      } finally {
+        if (requestIdRef.current === requestId) {
+          setLoading(false)
+        }
+      }
+    },
+    [agentId],
+  )
 
   useEffect(() => {
     if (agentId) {
@@ -113,6 +125,10 @@ export function useAgentActivity(agentId: string | null) {
       fetchData()
     }
   }, [agentId, fetchData])
+
+  useVisiblePolling(() => {
+    void fetchData(true)
+  })
 
   return { activity, stats, loading, refetch: fetchData }
 }

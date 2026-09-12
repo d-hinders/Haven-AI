@@ -39,15 +39,8 @@
 //
 // ## What it deliberately does not read
 //
-// **Front-matter.** A `last-verified` chain records what a past PR changed, so
-// it quotes the retired wording by design and forever — `frontend.md`'s chain
-// alone carries several such quotes. The chain is stripped before scanning
-// (newline-for-newline, so reported line numbers still point at the real line),
-// which is strictly more reliable than the substring filter the issue's
-// prototype sweep used: that filter is sentence-scoped too, so it misses a
-// chain entry whose own sentence happens not to contain the words
-// `last-verified` or `Prior:` — the residue that prototype printed.
-// In-body quotations of a chain are still filtered by substring.
+// **Front-matter.** It is metadata, not user-facing prose. The scanner blanks
+// it newline-for-newline so reported body line numbers remain accurate.
 //
 // ## Residue
 //
@@ -59,12 +52,30 @@
 // Usage:
 //   node scripts/docs/ui-gate-wording.mjs            # check (runs in docs:check)
 //   node scripts/docs/ui-gate-wording.mjs --update   # rewrite the baseline
+//   node scripts/docs/ui-gate-wording.mjs --update --accept-new
+//                                                      # reviewed non-empty first write
 //
 // See docs/contributing/docs-quality-system.md.
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// #2747: this gate carried PRIVATE copies of `newViolations`/`hasShrunk` while
+// five sibling gates imported them from here. That is why the #2728 sweep,
+// which found the missing `--update` refusal in `design-lint` by reading this
+// module's importer list, could not reach this file: a gate that CLONED the
+// engine is invisible to the sweep that finds gates which imported it. The
+// clone was both why it drifted and why nothing found it.
+import {
+  newViolations,
+  hasShrunk,
+  updateRefusals,
+  ACCEPT_NEW_BASELINE_FLAG,
+  firstRunRefusalMessage,
+  loadBaseline,
+  writeBaseline,
+  runGate,
+} from '../lib/ratchet.mjs'
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'docs', 'ui-gate-wording-baseline.json')
@@ -75,8 +86,7 @@ export const BASELINE_PATH = join(REPO_ROOT, 'scripts', 'docs', 'ui-gate-wording
  * `requires` are ALL matched against the sentence with its whitespace
  * flattened, so word order does not matter and a hard wrap between any two
  * words of a phrase is invisible to the match. `excludes` are the forms that
- * are legitimate: the corrected `blocking`/`should-fix` wording, and text that
- * is quoting a `last-verified` chain inside a doc body.
+ * are legitimate: the corrected `blocking`/`should-fix` wording.
  */
 export const RULES = [
   {
@@ -120,13 +130,6 @@ export const RULES = [
     excludes: [],
   },
 ]
-
-/**
- * Sentences that are quoting the `last-verified` chain from inside a doc BODY.
- * Front-matter is stripped before this ever applies; this is for prose that
- * pastes a chain entry as an example.
- */
-const CHAIN_QUOTE = [/last-verified/i, /\bPrior:/]
 
 /**
  * The escape for a sentence that QUOTES the retired wording in order to explain
@@ -377,7 +380,6 @@ export function scanText(file, raw) {
   for (const s of sentences(body)) {
     const { flat, map } = flattenWithMap(s.text)
     if (flat.length === 0) continue
-    if (CHAIN_QUOTE.some((re) => re.test(flat))) continue
     for (const rule of RULES) {
       // Rules match the MARKUP-STRIPPED sentence, and the reported position is
       // mapped from THAT SAME text (#2671). The previous code searched the
@@ -428,39 +430,74 @@ export function countByFile(hits) {
   return counts
 }
 
-/** Occurrences beyond what the baseline allows. */
-export function newViolations(counts, baseline) {
-  const failures = []
-  for (const [file, rules] of Object.entries(counts)) {
-    for (const [rule, count] of Object.entries(rules)) {
-      const allowed = baseline?.[file]?.[rule] ?? 0
-      if (count > allowed) failures.push({ file, rule, count, allowed })
-    }
-  }
-  return failures.sort((a, b) => a.file.localeCompare(b.file) || a.rule.localeCompare(b.rule))
-}
+// Re-exported, not redefined. The point of #2747 is that this gate stops
+// carrying its own COPY of the decision, not that it stops offering the names.
+// The only importer is this gate's own test file -- there are no other callers,
+// so this is an export surface kept for the tests rather than for a consumer,
+// and it is worth saying so instead of implying a wider audience.
+export { newViolations, hasShrunk }
 
-/** True when any baselined count has fallen — the ratchet can be tightened. */
-export function hasShrunk(counts, baseline) {
-  for (const [file, rules] of Object.entries(baseline ?? {})) {
-    for (const [rule, allowed] of Object.entries(rules)) {
-      if ((counts?.[file]?.[rule] ?? 0) < allowed) return true
-    }
-  }
-  return false
-}
-
-async function readBaseline() {
-  try {
-    return JSON.parse(await readFile(BASELINE_PATH, 'utf8'))
-  } catch (err) {
-    if (err.code === 'ENOENT') return {}
-    throw err
-  }
+/**
+ * The shared engine's violations, sorted for a stable report. The ordering is
+ * this gate's own concern -- `lib/ratchet.mjs` deliberately does not sort, and
+ * the private copy this replaced did, so keeping it here preserves the output
+ * byte-for-byte while the DECISION moves to the one place all six gates share.
+ *
+ * The shared engine names the second dimension `key`; this gate calls it a
+ * `rule`, and the printing below reads `f.key`.
+ *
+ * One difference the swap DOES carry, stated rather than left to surface on the
+ * commit that matters: the baseline's key ORDER. The inline writer this gate
+ * used sorted with `localeCompare`; `lib/ratchet.mjs`'s `writeBaseline` uses a
+ * bare `.sort()`, i.e. code units. Measured over the four tracked root docs in
+ * this gate's 454-file set, exactly ONE moves: `README.md`, which sorted after
+ * `docs/…` under `localeCompare` and sorts before it under code units.
+ * `CLAUDE.md`, `AGENTS.md` and `ABOUT_HAVEN.md` sort before `docs/` under BOTH
+ * orders — `localeCompare` is primary-strength on letters, so `A`/`C` precede
+ * `d` either way. A first draft of this note named those two as the example,
+ * which was the one sentence here nobody had measured. Today's baseline has a
+ * single entry so nothing churns, and the first `--update` that adds `README.md`
+ * rewrites the whole file once. Deliberate: the five gates already on `writeBaseline`
+ * have code-unit-sorted baselines, and changing the shared writer to
+ * `localeCompare` would churn theirs instead of this one's.
+ */
+function sortedViolations(counts, baseline) {
+  return newViolations(counts, baseline).sort(
+    (a, b) => a.file.localeCompare(b.file) || a.key.localeCompare(b.key),
+  )
 }
 
 async function main() {
   const update = process.argv.includes('--update')
+  const acceptNew = process.argv.includes(ACCEPT_NEW_BASELINE_FLAG)
+  // A corrupt baseline used to be REPAIRED by `--update`, which read nothing
+  // and overwrote. Reading it first is what makes the refusal possible, so the
+  // repair path is gone and a `SyntaxError` with a raw stack is not a remedy
+  // (#2747, review finding). Name it instead.
+  let loaded
+  try {
+    // The shape check this gate carried in #2747 lived here. It moved into
+    // `loadBaseline` in #2759, where it covers all six gates and one more case
+    // this one never reached: an OBJECT baseline holding a non-numeric COUNT,
+    // which `count > allowed` reads as false and so silently allows everything
+    // for that key. Proven dead before removing it rather than assumed —
+    // neutering the local check changed nothing, because `loadBaseline` throws
+    // first. An unreachable guard is a guard that cannot fail.
+    loaded = loadBaseline(BASELINE_PATH)
+  } catch (err) {
+    // The headline says "unusable" rather than "not JSON": this also catches a
+    // permissions failure, where "not readable as JSON" would misdirect (N1).
+    console.error(`✗ ${BASELINE_PATH} is unusable as a baseline: ${err.message}`)
+    console.error(
+      '\nUntil #2747 `--update` overwrote it without reading, so a corrupt file repaired ' +
+        'itself silently. It no longer can — the refusal has to read the baseline to compare ' +
+        'against it. Delete the file and re-run with `--update`; an empty scan regenerates it ' +
+        'directly. If the scan finds debt, review it and explicitly use `--update --accept-new` ' +
+        'to initialize the non-empty baseline.',
+    )
+    process.exit(1)
+  }
+  const { baseline, firstRun } = loaded
   const files = listMarkdownFiles()
   const hits = []
   for (const file of files) {
@@ -469,26 +506,37 @@ async function main() {
   const counts = countByFile(hits)
 
   if (update) {
-    const sorted = Object.fromEntries(
-      Object.entries(counts)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([f, r]) => [f, Object.fromEntries(Object.entries(r).sort(([a], [b]) => a.localeCompare(b)))]),
-    )
-    await writeFile(BASELINE_PATH, `${JSON.stringify(sorted, null, 2)}\n`)
+    // #2747: this branch used to write unconditionally, with no comparison at
+    // all -- so the command the message below sends you to absorbed any amount
+    // of retired wording silently, on a gate that runs inside `docs:check`.
+    // Same shape as #2728's, on the sixth consumer of the shared engine.
+    const violations = updateRefusals(counts, baseline, { firstRun, acceptNew })
+    if (violations.length > 0) {
+      console.error('✗ --update refuses to RAISE the baseline. Grown:')
+      for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      if (firstRun) console.error(firstRunRefusalMessage(firstRun))
+      console.error(
+        '\nThese rules were RETIRED. Growth is a reviewed decision, not a ratchet step: ' +
+          'correct the sentence, or add the allow marker on a line that genuinely quotes the ' +
+          'retired wording. If a baseline change is genuinely correct, it belongs in a ' +
+          'reviewed commit of its own.',
+      )
+      process.exit(1)
+    }
+    writeBaseline(BASELINE_PATH, counts)
     console.log(`ui-gate-wording: baseline written (${hits.length} existing occurrence(s) ratcheted).`)
     return
   }
 
-  const baseline = await readBaseline()
-  const failures = newViolations(counts, baseline)
+  const failures = sortedViolations(counts, baseline)
 
   if (failures.length > 0) {
     console.error('✗ Retired UI merge-gate wording found in live documentation:\n')
     for (const f of failures) {
-      const rule = RULES.find((r) => r.id === f.rule)
-      console.error(`  ${f.file} — ${f.rule}: ${f.count} found, baseline allows ${f.allowed}`)
+      const rule = RULES.find((r) => r.id === f.key)
+      console.error(`  ${f.file} — ${f.key}: ${f.count} found, baseline allows ${f.allowed}`)
       console.error(`    states ${rule.what}`)
-      for (const h of hits.filter((h) => h.file === f.file && h.rule === f.rule)) {
+      for (const h of hits.filter((h) => h.file === f.file && h.rule === f.key)) {
         console.error(`    ${f.file}:${h.line}: ${h.sentence}`)
       }
       console.error(`    → ${rule.fix}\n`)
@@ -497,9 +545,9 @@ async function main() {
       'These two rules were retired by #2636 and corrected in ten places across five ' +
         'review rounds, because every sweep before this check was line-bound and the docs ' +
         'are hard-wrapped (#2657). Correct the sentence rather than baselining it; ' +
-        '`node scripts/docs/ui-gate-wording.mjs --update` is for a reviewed, intentional ' +
-        'change only, and a `last-verified` chain entry never needs one — front-matter is ' +
-        'not scanned.\n',
+        'since #2747 `node scripts/docs/ui-gate-wording.mjs --update` REFUSES to raise the ' +
+        'baseline, so it is not a way past this: run it after a genuine reduction to ' +
+        'tighten the ratchet. Front-matter is not scanned.\n',
     )
     process.exit(1)
   }
@@ -514,9 +562,8 @@ async function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main().catch((err) => {
-    // Fail closed: a broken gate that passes is the defect one layer up.
-    console.error('ui-gate-wording error:', err)
-    process.exit(1)
-  })
+  // Fail closed: a broken gate that passes is the defect one layer up. The
+  // named remedy for a bad baseline lives in `main`'s own try/catch and never
+  // reaches this one.
+  runGate('ui-gate-wording', main)
 }

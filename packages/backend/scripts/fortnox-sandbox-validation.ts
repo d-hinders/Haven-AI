@@ -34,8 +34,8 @@ import {
   FortnoxConnector,
   externalInvoiceNumber,
   underlagFromData,
-  type ReportingTransaction,
-} from '../src/modules/reporting/index.js'
+  type FeedTransaction,
+} from '../src/modules/accounting/index.js'
 
 const TOKEN_PATH = path.join(homedir(), '.haven', 'fortnox-sandbox.json')
 
@@ -119,7 +119,7 @@ async function main() {
   const accessToken = await getToken()
   const connector = new FortnoxConnector()
   const paymentId = `sandbox-${Date.now()}`
-  const tx: ReportingTransaction = {
+  const tx: FeedTransaction = {
     paymentId,
     settledAt: new Date().toISOString(),
     direction: 'out',

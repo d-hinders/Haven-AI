@@ -6,14 +6,13 @@ under each block are the run in which the command last produced a number —
 its positive control until the ledger supersedes them.
 
 The 2026-09-03 retrospective over the 600-issue wave measured what the wave
-was made of; these are its seven classes, one block each, so a reader can
+was made of; these are its measured classes, one block each, so a reader can
 re-take any of them and the ledger can tell "no finding" from "did not look".
 Three rules hold for every block:
 
 - **Use the instrument that exists; never re-implement it.** The money-path
   matcher is `scripts/ci/qa-freshness.mjs`'s `matchesGlob` (the one
-  `money-path-classify.mjs` self-tests before it classifies anything); chain
-  arithmetic is `scripts/docs/chain-integrity.mjs`'s exports; a mutation runs
+  `money-path-classify.mjs` self-tests before it classifies anything); a mutation runs
   in a tree proven by `scripts/ci/review-isolation.mjs`, or in the builder's
   tree only behind a `cp` backup and a `git diff --quiet` after the restore.
   A second copy of a matcher is a second thing that can lie.
@@ -263,46 +262,3 @@ documented false-positive class); money path 29 verb files, 20 outside the
 perimeter (qa-agent pilots, backend scripts, `sdk/src/sweep.ts`,
 `frontend/src/lib/hybridAccountOps.ts`); visual gate 4 of 24 app routes
 shot; 36 Markdown files outside both docs-quality boundaries.
-
-**7. Chain health — headroom under the ceiling, and duplicates.** #2477's
-chain reached 774,483 bytes through concatenating merges; the gate now
-refuses a line over 64 KiB or carrying a duplicate entry — and, since #2504, a
-prior entry whose text changed while its ref stayed (`checkEntriesVerbatim`).
-This block samples the first two only: the third needs a base to compare
-against, so it is the gate's question on a PR, not the scan's over a tree. Say
-so when reporting, or "chain health clean" reads as three answers when it is
-two. All three fire only on the doc a PR changes — the scan reports headroom
-before it fails someone at push.
-
-```bash
-# Sample: every doc with a `last-verified` line, measured with the gate's own
-# parser and ceiling.
-node -e '
-import("./scripts/docs/chain-integrity.mjs").then(async (m) => {
-  const fs = await import("node:fs"); const cp = await import("node:child_process")
-  const files = cp.execFileSync("git", ["ls-files", "docs/*.md", "docs/**/*.md", "README.md", "CLAUDE.md", "AGENTS.md", "ABOUT_HAVEN.md"]).toString().trim().split("\n")
-  const rows = []
-  for (const f of files) { const line = m.lastVerifiedLine(fs.readFileSync(f, "utf8")); if (!line) continue; const a = m.chainAnomalies(line); rows.push({ f, bytes: m.chainLineBytes(line), pct: (100 * m.chainLineBytes(line) / m.MAX_CHAIN_BYTES).toFixed(1), dups: a.duplicates.length }) }
-  rows.sort((a, b) => b.bytes - a.bytes)
-  console.log("docs:", rows.length, "ceiling:", m.MAX_CHAIN_BYTES, "with duplicates:", rows.filter((r) => r.dups).length)
-  for (const r of rows.slice(0, 5)) console.log(r.bytes, r.pct + "%", "dups=" + r.dups, r.f)
-})'
-```
-
-Clean: no line above 80% of `MAX_CHAIN_BYTES` and `with duplicates: 0`.
-Report the top five with their headroom, and every doc carrying duplicates —
-those are latent gate failures waiting for the next editor. State the unit:
-since [#2562](https://github.com/d-hinders/Haven-AI/issues/2562) the guard
-compares **UTF-8 bytes** (`chainLineBytes`, i.e. `Buffer.byteLength`) of the
-line without its newline, which is `wc -c` minus one. It compared `line.length`
-— UTF-16 code units — while reporting "bytes" before that, and this recipe said
-so; the two differ by hundreds on a chain dense with em-dashes and arrows.
-#2562 also added a **non-blocking 40 KiB band**: the gate evaluates every
-governed doc on every run and prints the ones over it, so the "which chains are
-large" question now has a standing answer and this scan's job is the part the band does not do:
-duplicates, and the trend. On `893d74f6`: 92 docs;
-`mcp-runtime-compatibility.md` at 63,961 units of 65,536 (97.6%) one merge
-after its #2477 compaction — the doc `release-bump.mjs` re-pins on every
-release; `05-agent-api-openapi.md` carries 31 duplicate entries among 66.
-(Those historical figures are in the old unit, which is why they are anchored
-to a commit.)

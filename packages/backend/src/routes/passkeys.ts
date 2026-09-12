@@ -1,138 +1,23 @@
 import { FastifyInstance } from 'fastify'
-import { insertUserPasskey, listUserPasskeys } from '../infra/repositories/user-passkeys.js'
+import { listUserPasskeys } from '../infra/repositories/user-passkeys.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isSupportedChain } from '../domain/chains.js'
-import { predictSafePasskeySignerAddress } from '../modules/accounts/index.js'
 
-const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/
-const BASE64URL_RE = /^[A-Za-z0-9_-]+$/
-
-interface RegisterPasskeyBody {
-  credential_id: string
-  public_key_x: string
-  public_key_y: string
-  chain_id: number
-  raw_attestation_object?: string
-}
-
-
-function isBase64Url(value: string): boolean {
-  return value.length > 0 && value.length <= 1024 && BASE64URL_RE.test(value)
-}
-
-function decodeBase64Url(value: string): Buffer {
-  const padding = (4 - (value.length % 4)) % 4
-  const base64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(padding)
-  return Buffer.from(base64, 'base64')
-}
-
-function isValidBase64UrlPayload(value: string): boolean {
-  if (!isBase64Url(value)) {
-    return false
-  }
-
-  try {
-    const decoded = decodeBase64Url(value)
-    return decoded.length > 0
-  } catch {
-    return false
-  }
-}
-
+/**
+ * Passkeys, read-only as of #2847 (epic #1440).
+ *
+ * `POST /passkeys` — the Safe WebAuthn signer enrolment — is deleted with the
+ * Safe rail's last live behaviour. `GET /passkeys` stays: `AuthContext` reads
+ * it every session and existing enrolled passkeys remain part of the account
+ * record. The repository (`infra/repositories/user-passkeys.ts`) is untouched:
+ * the GET still reads it, and the enrol/bind helpers it also carries go with
+ * the `user_passkeys` table in a later slice — not here.
+ */
 export default async function passkeyRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
-
-  app.post<{ Body: RegisterPasskeyBody }>('/', async (request, reply) => {
-    const { sub } = request.user as { sub: string }
-    const {
-      credential_id,
-      public_key_x,
-      public_key_y,
-      chain_id,
-      raw_attestation_object,
-    } = request.body ?? {}
-
-    if (!isSupportedChain(chain_id)) {
-      return reply.code(400).send({ error: `Unsupported chain: ${chain_id}` })
-    }
-
-    if (!HEX_32_RE.test(public_key_x) || !HEX_32_RE.test(public_key_y)) {
-      return reply.code(400).send({ error: 'public_key_x and public_key_y must be 32-byte 0x-prefixed hex values' })
-    }
-
-    if (!isBase64Url(credential_id)) {
-      return reply.code(400).send({ error: 'credential_id must be a non-empty base64url string' })
-    }
-
-    if (
-      raw_attestation_object !== undefined &&
-      !isValidBase64UrlPayload(raw_attestation_object)
-    ) {
-      return reply.code(400).send({ error: 'raw_attestation_object must be a valid base64url string' })
-    }
-
-    const signerAddress = predictSafePasskeySignerAddress({
-      x: public_key_x as `0x${string}`,
-      y: public_key_y as `0x${string}`,
-      chainId: chain_id,
-    }).toLowerCase()
-
-    try {
-      // POC only: we persist the raw attestation for future verification, but do not
-      // cryptographically verify it yet. A bad enrollment only harms the enrolling user.
-      // SQL lives in infra/repositories/user-passkeys.ts (#999).
-      const row = await insertUserPasskey({
-        userId: sub,
-        credentialId: credential_id,
-        publicKeyX: Buffer.from(public_key_x.slice(2), 'hex'),
-        publicKeyY: Buffer.from(public_key_y.slice(2), 'hex'),
-        signerAddress,
-        chainId: chain_id,
-        rawAttestation: raw_attestation_object ? decodeBase64Url(raw_attestation_object) : null,
-      })
-
-      return reply.code(201).send(row)
-    } catch (error) {
-      const constraint = uniqueViolationConstraint(error)
-      // #1229: there is deliberately no "already has a passkey for this chain"
-      // 409 any more. A second passkey on the same chain is a BACKUP SIGNER —
-      // the only recovery this rail has — and refusing it locked every
-      // passkey-onboarded user out of protecting their account. Migration 056
-      // dropped the constraint; this branch went with it.
-      if (constraint === 'user_passkeys_credential_id_key') {
-        return reply.code(409).send({ error: 'This credential is already registered' })
-      }
-      throw error
-    }
-  })
 
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
     return { passkeys: await listUserPasskeys(sub) }
   })
-}
-
-/**
- * The constraint name from a Postgres unique violation (SQLSTATE 23505), or null
- * for any other error — including null/primitive throws. Lets the caller map the
- * two distinct passkey unique constraints to their 409s without an unsafe
- * `error as {...}` cast (which would throw on a null/primitive throw). Uses the
- * `'code' in err` narrowing from routes/contacts.ts and routes/agents.ts, and is
- * slightly stricter than agents.ts (a `typeof === 'string'` check rather than
- * coercing via `String(...)`). Unlike contacts (single constraint), passkeys
- * needs the constraint name to tell its two unique constraints apart.
- */
-function uniqueViolationConstraint(err: unknown): string | null {
-  if (
-    err &&
-    typeof err === 'object' &&
-    'code' in err &&
-    err.code === '23505' &&
-    'constraint' in err &&
-    typeof err.constraint === 'string'
-  ) {
-    return err.constraint
-  }
-  return null
 }

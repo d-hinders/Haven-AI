@@ -60,8 +60,9 @@ describe('shared Haven tool descriptions', () => {
   // SCOPE LIMIT: these guards iterate the fragments registered in
   // `tool-descriptions.ts` (the local MCP + SDK shared source of truth).
   // They do NOT cover hand-rolled description strings that live elsewhere
-  // — notably `packages/mcp-server/src/tools.ts`, where the legacy hosted
-  // MCP still carries the "Next: sign payload_hash..." prose the original
+  // — notably `packages/mcp-server/src/tools/contracts.ts` (it was
+  // `packages/mcp-server/src/tools.ts` until #2807 split the contracts out),
+  // where the hosted MCP still carries the "Next: sign payload_hash..." prose the original
   // feedback flagged. Aligning the hosted MCP is a separate, deferred
   // slice. A future author editing the hosted-MCP descriptions will not
   // get a signal from these guards, by design.

@@ -1,7 +1,7 @@
 /**
  * Shared shapes for the transactions module (#992). `routes/transactions.ts`
  * imports these (and only these + the functions in `index.ts`) — see the
- * module-entry-point dependency-cruiser rule.
+ * `no-deep-cross-module-import` dependency-cruiser rule.
  */
 import type { FastifyBaseLogger } from 'fastify'
 import type { TransactionSafeRow } from '../../infra/repositories/transaction-history.js'
@@ -32,6 +32,15 @@ export interface Transaction {
   /** Book-time SEK value (P0 #463); null for non-machine / unpriced transactions. */
   amountSek?: string | null
   /**
+   * The book-time FX rate `amountSek` was struck at, and where it came from —
+   * `machine_payment_evidence.fx_rate_sek` / `.fx_source` (#463, migration
+   * 026), surfaced for the CSV export (#2871). Null wherever `amountSek` is:
+   * they are written by the same pricing step, so a row never carries an
+   * amount without its rate.
+   */
+  fxRateSek?: string | null
+  fxSource?: string | null
+  /**
    * Who initiated the money movement that produced this row — recorded by
    * the backend (#2097), never derived in the frontend.
    *
@@ -49,6 +58,25 @@ export interface Transaction {
    * initiator record at all.
    */
   initiatedBy?: 'agent' | 'human' | 'unknown'
+  /**
+   * Accounting-feed state for this payment (#2870), joined from the sync
+   * ledger by `paymentId`. PRESENT only when the feed is available to the
+   * account, the user has a provider connection, AND a sync row exists;
+   * otherwise the key is absent (never null). No `booked` field: the ledger
+   * stores no verify result. See `accounting.ts`.
+   */
+  accounting?: TransactionAccounting
+}
+
+/** The `accounting` object on a transaction row (#2870). */
+export interface TransactionAccounting {
+  /** Ledger provider key, e.g. `'fortnox'`. The UI maps it to a display name. */
+  provider: string
+  status: 'pending' | 'pushed' | 'failed' | 'skipped'
+  /** Provider-side reference (`fortnox:supplierinvoice:<n>`) once pushed. */
+  externalRef: string | null
+  /** Failure / skip reason, or the #498 non-fatal note on a pushed row. */
+  error: string | null
 }
 
 export interface EnrichedTransaction extends Transaction {
@@ -94,6 +122,13 @@ export interface FetchSafeTransactionsParams {
 export interface FetchSafeTransactionsResult {
   transactions: Transaction[]
   hadFailures: boolean
+  /**
+   * At least one explorer leg came back at its window, so this account's
+   * history is cut off rather than complete (#2882). Independent of
+   * `hadFailures`: a read can be truncated without failing, and can fail
+   * without being truncated.
+   */
+  truncated: boolean
 }
 
 export interface ParsedTokenFilter {

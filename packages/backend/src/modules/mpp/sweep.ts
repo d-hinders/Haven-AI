@@ -24,7 +24,7 @@ import {
   resolveStrandedEventsForAgent,
 } from '../../infra/repositories/machine-payments.js'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
-import { getTokenBalance } from '../../rails/allowance-module.js'
+import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { getExplorerUrl } from '../../domain/chains.js'
 import {
   buildSweepAuthorization,

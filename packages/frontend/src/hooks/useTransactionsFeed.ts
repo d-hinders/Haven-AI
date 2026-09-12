@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import type {
   AggregatedTransaction,
   TransactionFilterState,
@@ -18,6 +19,11 @@ interface UseTransactionsFeedReturn {
   error: string | null
   partialFailure: boolean
   failedSafeIds: string[]
+  /**
+   * The feed is capped at the explorer window per account (#2882), so these
+   * rows and `total` are a partial view of the history rather than all of it.
+   */
+  truncated: boolean
   loadMore: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -79,6 +85,7 @@ export function useTransactionsFeed(
   const [error, setError] = useState<string | null>(null)
   const [partialFailure, setPartialFailure] = useState(false)
   const [failedSafeIds, setFailedSafeIds] = useState<string[]>([])
+  const [truncated, setTruncated] = useState(false)
 
   const requestIdRef = useRef(0)
   const filtersRef = useRef(filters)
@@ -87,13 +94,28 @@ export function useTransactionsFeed(
   transactionsRef.current = transactions
 
   const fetchPage = useCallback(
-    async (offset: number, append: boolean, fresh: boolean) => {
+    async (
+      offset: number,
+      append: boolean,
+      fresh: boolean,
+      opts: { silent?: boolean; limitOverride?: number } = {},
+    ) => {
       const requestId = ++requestIdRef.current
       const filtersForRequest = filtersRef.current
+      // #2732: a silent poll refetches the window the user has actually
+      // loaded (page 0 through the loaded count) instead of resetting to the
+      // first page — resetting would collapse pagination and scroll depth
+      // every 10 seconds. With nothing loaded yet the override is 0 and the
+      // tick falls back to the normal page size.
+      const override = opts.limitOverride ?? 0
+      const effectiveLimit = override > 0 ? override : limit
+      const silent = opts.silent ?? false
 
-      setError(null)
+      if (!silent) setError(null)
       if (append) {
         setLoadingMore(true)
+      } else if (silent) {
+        // Silent: no refreshing/initial flag — the AC forbids a spinner.
       } else if (fresh || transactionsRef.current.length > 0) {
         setRefreshing(true)
       } else {
@@ -102,7 +124,7 @@ export function useTransactionsFeed(
 
       try {
         const data = await api.get<TransactionsFeedResponse>(
-          `/transactions?${toQueryString(filtersForRequest, offset, limit, fresh)}`,
+          `/transactions?${toQueryString(filtersForRequest, offset, effectiveLimit, fresh)}`,
         )
         if (requestId !== requestIdRef.current) return
 
@@ -115,8 +137,13 @@ export function useTransactionsFeed(
         setHasMore(data.hasMore)
         setPartialFailure(data.partialFailure)
         setFailedSafeIds(data.failedSafeIds)
+        setTruncated(data.truncated)
+        if (silent) setError(null)
       } catch (err) {
         if (requestId !== requestIdRef.current) return
+        // #2732: a FAILED silent tick changes no visible state — the list
+        // keeps its last good rows instead of being emptied mid-demo.
+        if (silent) return
 
         setError(
           err instanceof Error ? err.message : 'Failed to load transactions',
@@ -127,6 +154,7 @@ export function useTransactionsFeed(
           setHasMore(false)
           setPartialFailure(false)
           setFailedSafeIds([])
+          setTruncated(false)
         }
       } finally {
         if (requestId !== requestIdRef.current) return
@@ -145,6 +173,7 @@ export function useTransactionsFeed(
     setHasMore(false)
     setPartialFailure(false)
     setFailedSafeIds([])
+    setTruncated(false)
     setLoadingInitial(true)
     setError(null)
     void fetchPage(0, false, false)
@@ -159,6 +188,15 @@ export function useTransactionsFeed(
     await fetchPage(0, false, true)
   }, [fetchPage])
 
+  // #2732 visible-only polling: silent, fresh (backend cache bypass), and
+  // scoped to the window the user has loaded so pagination survives the tick.
+  useVisiblePolling(() => {
+    void fetchPage(0, false, true, {
+      silent: true,
+      limitOverride: transactionsRef.current.length,
+    })
+  })
+
   return {
     transactions,
     total,
@@ -169,6 +207,7 @@ export function useTransactionsFeed(
     error,
     partialFailure,
     failedSafeIds,
+    truncated,
     loadMore,
     refresh,
   }

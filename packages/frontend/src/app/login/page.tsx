@@ -1,6 +1,7 @@
 'use client'
 
 import { Suspense, useState, useEffect } from 'react'
+import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
@@ -143,15 +144,25 @@ export default function LoginPage() {
         }}
       />
 
-      <div className="relative z-10 border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
-          >
-            <HavenMark />
-            Haven
-          </Link>
+      {/*
+        Safe-area inset (#2730). `viewport-fit=cover` is on the ROOT viewport
+        export, so its blast radius is every route, not just the authenticated
+        shell — and this is the first screen a freshly installed app shows, and
+        every launch after a session expires. Without the padding the brand link
+        renders under the status bar. Unchanged where the inset is 0.
+      */}
+      <div className="relative z-10">
+        <SafeAreaBand />
+        <div className="border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
+          <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[var(--v2-ink)]"
+            >
+              <HavenMark />
+              Haven
+            </Link>
+          </div>
         </div>
       </div>
 

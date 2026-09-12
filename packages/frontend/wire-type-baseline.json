@@ -21,9 +21,5 @@
     "DelegationBudget": 1,
     "RevokeAllPrepare": 1,
     "RevokePrepare": 1
-  },
-  "packages/frontend/src/hooks/useReporting.ts": {
-    "ReportingSync": 1,
-    "ReportingVerification": 1
   }
 }

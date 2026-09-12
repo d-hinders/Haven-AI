@@ -16,6 +16,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
+import { runGuard } from '../test-support/guard-cli.mjs'
 import {
   classify,
   parseHasPushToken,
@@ -463,5 +464,74 @@ describe('findStickyCommentId', () => {
     // The advisory gates use the same convention with different keys; matching
     // one of theirs would overwrite it.
     assert.equal(findStickyCommentId([{ id: 9, body: '<!-- haven:docs-coupling -->' }]), null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The CLI (#2722, slice 2 of epic #2720).
+//
+// The file's own docstring says the pure layer is covered and mutation-proven
+// while `main`'s sequencing is "NOT unit-tested — exercised only against a
+// stubbed `gh` binary". These cases close that gap by making the stub part of
+// the suite: the script runs as a process, `gh` is answered by a stand-in on
+// PATH, and the one line that turns `classify`'s verdict into a red step is
+// asserted rather than assumed.
+describe('baseline-push-followup CLI (#2722)', () => {
+  const GH_SHIM = `#!${process.execPath}
+const args = process.argv.slice(2)
+const joined = args.join(' ')
+if (args[0] === 'pr' && args[1] === 'list') { process.stdout.write('[{"number":7}]'); process.exit(0) }
+if (args[0] === 'api') {
+  // Order matters: a POST/PATCH also targets a /comments path, so the write
+  // must be recognised before the read.
+  if (args.includes('--method')) { process.stdout.write('{}'); process.exit(0) }
+  if (joined.includes('actions/runs')) {
+    process.stdout.write(JSON.stringify({ workflow_runs: [
+      { id: 11, name: 'CI', html_url: 'https://example.invalid/11', conclusion: 'action_required' },
+    ] }))
+    process.exit(0)
+  }
+  if (joined.includes('/comments')) { process.stdout.write('[]'); process.exit(0) }
+}
+process.stderr.write('gh shim: unexpected args ' + JSON.stringify(args) + '\\n')
+process.exit(64)
+`
+
+  const run = (env) =>
+    runGuard('ci/baseline-push-followup.mjs', {
+      files: { 'bin/gh': GH_SHIM },
+      chmod: { 'bin/gh': 0o755 },
+      binOnPath: true,
+      env: {
+        GITHUB_REPOSITORY: 'owner/repo',
+        GITHUB_REF_NAME: 'feature/x',
+        PUSHED_SHA: 'deadbeef',
+        GITHUB_RUN_ID: '99',
+        ...env,
+      },
+    })
+
+  test('REFUSES: a bot push onto a branch with an open PR is a deadlock, and exits 1', () => {
+    const { status, out } = run({ BASELINES_COMMITTED: 'true', HAS_PUSH_TOKEN: 'false' })
+    assert.equal(status, 1, out)
+    assert.match(out, /\[deadlocked\]/)
+    // The parked runs were enumerable here, so the comment path ran to
+    // completion — asserted so a shim that silently answers nothing cannot
+    // pass this as a deadlock detected with no follow-up attempted.
+    assert.match(out, /Parked runs found: 1/)
+    assert.match(out, /Sticky comment created on #7\./)
+  })
+
+  test('ACCEPTS: nothing was committed, so there is nothing to deadlock (exit 0)', () => {
+    const { status, out } = run({ BASELINES_COMMITTED: 'false', HAS_PUSH_TOKEN: 'false' })
+    assert.equal(status, 0, out)
+    assert.match(out, /\[no-commit\]/)
+    assert.doesNotMatch(out, /::error::/)
+  })
+
+  test('ACCEPTS: a push attributed to a real actor is not a deadlock (exit 0)', () => {
+    const { status, out } = run({ BASELINES_COMMITTED: 'true', HAS_PUSH_TOKEN: 'true' })
+    assert.equal(status, 0, out)
+    assert.match(out, /\[trusted-actor\]/)
   })
 })

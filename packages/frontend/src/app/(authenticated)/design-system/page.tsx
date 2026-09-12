@@ -1,6 +1,8 @@
 'use client'
 
 import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, TriangleAlert, X } from 'lucide-react'
+import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
+import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
@@ -427,6 +429,21 @@ export default function DesignSystemPage() {
               widening it would let a button steal taps from its neighbour in a tight
               toolbar.
             </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Button variant="tertiary" disabled aria-busy>
+                Preparing…
+              </Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              There is no spinner and no <code className="rounded bg-[var(--v2-surface)] px-1">loading</code> prop. An action in
+              flight disables its button and swaps the label to{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">Verbing…</code> — Preparing, Sending, Pausing — with{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">aria-busy</code> set so the state is exposed, not merely
+              painted. <code className="rounded bg-[var(--v2-surface)] px-1">aria-busy</code> exposes; it does not announce: a
+              disabled button is not focusable, so anything the user must be
+              told goes in a <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;alert&quot;</code> or{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;status&quot;</code> node instead.
+            </p>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs attention</StatusBadge>
@@ -621,6 +638,7 @@ export default function DesignSystemPage() {
                 ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
                 ['--v2-z-sticky', '20', 'Sticky table headers'],
                 ['--v2-z-chrome', '100', 'TopBar — the app shell’s own bar'],
+                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s other bar'],
                 ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
                 ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
                 ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],
@@ -663,6 +681,71 @@ export default function DesignSystemPage() {
             component is the failure this table exists to prevent.
           </p>
         </Card>
+      </Section>
+
+      <Section
+        title="Safe areas — the notch and the home indicator"
+        description="The four --v2-safe-* tokens carry the iOS insets. What matters on this page is the one structural rule they imply: nothing that spans a safe-area band may carry a backdrop-filter."
+      >
+        <Card hover={false} className="p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">
+            Safe areas — <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">SafeAreaBand</code>
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+            The strip behind the iOS status bar is its own element, never padding inside the bar.{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">ui/SafeAreaBand</code> renders
+            it: unblurred, and opaque by default, sized by{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>, and a
+            sibling above the blurred bar. It has no rendered sample here because it is a zero-height
+            box at every viewport this page can show — the inset is 0 without a notch. Keep{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">backdrop-filter</code> off
+            anything that spans a safe-area band: blur is for content scrolling under a bar, and
+            nothing scrolls under the status bar. Opaque is the default, not the rule: a bar
+            whose own background is translucent by design passes{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code> so its
+            colour shows through — an exception to <em>opaque</em>, never to <em>unfiltered</em>.
+          </p>
+        </Card>
+      </Section>
+
+      <Section
+        title="Bottom tab bar — primary navigation below lg"
+        description="Below `lg` the drawer stops being the primary navigation: four tabs (Dashboard, Agents, Transactions, Accounts) plus More, which opens the drawer for everything else. The drawer is not deleted, it becomes secondary. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the drawer's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
+      >
+        <Card hover={false} className="max-w-sm overflow-hidden">
+          {/*
+            The REAL component, in `presentational` mode — not a hand-rolled
+            copy of it. The showcase's mirror of `TransactionsTable` taught this
+            the expensive way: it kept teaching the pre-#2734 amount column for
+            a merge, and #2792 was the issue that noticed. `presentational`
+            swaps the fixed viewport placement for in-flow layout and drops the
+            landmark role, so this illustration cannot drift from the bar the
+            shell renders and cannot compete with it for the `Primary`
+            navigation name.
+
+            No `open` prop here, so the #2680 permanently-open census is
+            untouched — it counts bare `open` inside inert wrappers, and this is
+            neither.
+          */}
+          <MobileTabBar items={baseNavItems} presentational activeHref="/agents" />
+        </Card>
+        <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          Three surfaces reserve the bar&rsquo;s height from the{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-h</code>{' '}
+          token, and only one of them is the bar: <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code>{' '}
+          adds it to its bottom padding so the last row does not sit under the bar, and the toast
+          container lifts by it so the payoff notification is not hidden behind the navigation
+          everyone is looking at. The safe-area inset is added at each site rather than folded into
+          the token: the bar pads itself with it, the others clear the bar and the inset together.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          <strong>More is not a cell of this bar.</strong> It is a sibling of it, on the
+          nav-toggle tier rather than the tab-bar tier, because one control both opens the drawer
+          and closes it while painted over the drawer — and a child cannot climb out of its
+          parent&rsquo;s stacking context. It keeps the accessible name{' '}
+          <em>Open sidebar</em>, which is load-bearing: the screenshot harness waits on that name
+          from 25 call sites.
+        </p>
       </Section>
 
       <Section
@@ -1429,9 +1512,10 @@ export default function DesignSystemPage() {
                     wraps this showcase's longer names.
                     What the two deferred columns cost is NOT the same, and
                     the difference is worth naming rather than smoothing over.
-                    The DATE is not dropped at any width — it rides under the
-                    Amount until the `xl` stage, the same place the narrow
-                    layout puts it, and it is hidden by
+                    The DATE rides under the Amount between the `md` and `xl`
+                    stages. Below `md` it is dropped with the Amount column
+                    itself (#2792) — the narrow layout no longer carries it,
+                    which is what the component does too. It is hidden by
                     `tableHideFromClass('xl')` so it can never disagree with
                     the column it stands in for. The INITIATOR genuinely is
                     dropped between the two stages. For two of the three demo
@@ -1449,13 +1533,15 @@ export default function DesignSystemPage() {
                     that title is "Failed payment by Research assistant" and
                     #2357 did not touch it.
                     SCOPE: "the title already says it" holds in the `md`->`xl`
-                    band ONLY. BELOW `md` the Activity cell is `max-w-0` +
-                    `truncate` (see the `<td>` below), so the titles ellipsise
-                    to "Agent payme…" / "Failed payme…" and the `by <agent>`
-                    clause is cut off with them — measured on the 390px
-                    capture. The narrow layout therefore loses the initiator
-                    for ALL THREE rows, not just the first: there the column
-                    is dropped AND the title cannot stand in for it. Raised by
+                    band, and since #2792 it holds below `md` as well. The
+                    reading quoted here was "Agent payme…" / "Failed payme…",
+                    measured on a 390px capture when the Activity cell was
+                    138px and the title ellipsised. Collapsing the Amount
+                    column took the cell to 248px and the title now WRAPS, so
+                    the `by <agent>` clause survives and the narrow layout no
+                    longer loses the initiator. Re-measured on the 390px
+                    capture of this branch rather than left as prose: the
+                    instrument moved, so the reading had to be retaken. Raised by
                     `haven-design-reviewer` on #2448, against the rendered
                     mobile capture rather than from the source.
                     For the first row it is a real loss — a human-initiated payment's
@@ -1487,7 +1573,12 @@ export default function DesignSystemPage() {
                 <Table.HeaderCell align="left" revealAt="xl">Initiator</Table.HeaderCell>
                 <Table.HeaderCell align="left" revealAt="md">From / To</Table.HeaderCell>
                 <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} revealAt="xl" />
-                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" />
+                {/* `revealAt="md"` renders identically today — the header row
+                    is already `display: none` below the md stage — but this
+                    document's own rule is "header and body must be converted
+                    together, always", and a body cell on a stage its header
+                    does not name is the #1774 shape one layer down. */}
+                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" revealAt="md" />
                 <Table.HeaderCell srLabel="External details" className="w-8" />
               </tr>
             </Table.Head>
@@ -1568,11 +1659,14 @@ export default function DesignSystemPage() {
                       columns purely from content, so capping one collapses it.
                       Do not drop the `md:` here. */}
                   <td className="max-w-0 px-4 py-4 align-middle md:max-w-none">
-                    {/* `truncate` + `flex-wrap` mirror TransactionsTable
-                        exactly (#1772). Without `truncate` the `max-w-0`
-                        above word-wraps instead of ellipsising, so the
-                        showcase would teach a shape the real component does
-                        not have. */}
+                    {/* `break-words` + `flex-wrap` mirror TransactionsTable
+                        below `md`. This said `truncate` until #2792, on the
+                        reasoning that wrapping "would teach a shape the real
+                        component does not have" — which was true when the
+                        component ellipsised below `md` and stopped being true
+                        when #2734 gave it `break-words` and a 248px cell. The
+                        premise inverted and the class did not follow it, which
+                        is how a showcase drifts while looking deliberate. */}
                     {/* `md:flex-nowrap` for the same reason as `md:max-w-none`
                         above: this showcase's desktop titles WRAP to two
                         lines, so a wrapping flex row pushed the Failed badge
@@ -1580,12 +1674,13 @@ export default function DesignSystemPage() {
                         gate measured it — 17746 -> 17758 — after the first
                         attempt at this fix. Desktop must not move at all. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-                      {/* Ellipsise below md, wrap normally at md and up — the
-                          `md:` half restores this showcase's original desktop
-                          rendering byte for byte, so only the mobile baseline
-                          moves. */}
+                      {/* Wrap below md (matching the component), wrap at md
+                          and up (this showcase's own desktop shape). The `md:`
+                          half is untouched, so desktop stays byte-identical —
+                          only the narrow rendering changes, and it changes
+                          TOWARDS the component. */}
                       <p
-                        className="truncate text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
+                        className="break-words text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
                         title={row.title}
                       >
                         {row.title}
@@ -1594,6 +1689,16 @@ export default function DesignSystemPage() {
                     </div>
                     <div className={`mt-1 ${tableHideFromClass('md')}`}>
                       <TransactionMovement from={row.from} to={row.to} />
+                    </div>
+                    {/* The amount, riding under the title while its own column
+                        is collapsed (#2792). LEFT-aligned, hanging under the
+                        start of the title — the rule in this document's own
+                        § Transaction tables, which #2734 shipped the other way
+                        first and a design review reversed: right alignment is
+                        a property of a column of numbers, and a stacked amount
+                        is not a column. */}
+                    <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
+                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </div>
                   </td>
                   <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] ${tableColumnClass('xl')}`}>
@@ -1605,7 +1710,14 @@ export default function DesignSystemPage() {
                   <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] ${tableColumnClass('xl')}`}>
                     {row.date}
                   </td>
-                  <td className="w-[110px] px-2 py-4 align-middle text-right md:w-auto md:px-4">
+                  {/* Collapsed below `md`, in step with `TransactionsTable`
+                      (#2734/#2792). The 110px this column cost came straight
+                      out of Activity — the only flexible column — and that is
+                      what the showcase is here to demonstrate. The date rider
+                      goes with it, which is correct rather than incidental:
+                      the real table shows no date below `md` either, so the
+                      two now agree at every stage instead of at most of them. */}
+                  <td className={`px-4 py-4 align-middle text-right ${tableColumnClass('md')}`}>
                     <p>
                       <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
                     </p>

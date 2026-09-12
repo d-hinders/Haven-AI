@@ -10,7 +10,8 @@
 // Four things are verified here that the routing tests cannot see:
 //   1. every guard file the manifest names actually exists;
 //   2. every job it names actually runs the guard, per ci.yml;
-//   3. every npm script it names actually exists;
+//   3. every npm script it names actually exists — in the ROOT package.json,
+//      or, for a `<script> -w <workspace>` entry, in that workspace's (#2743);
 //   4. every entry is exercised by a routing-matrix row.
 //
 // Run with: node --test scripts/ci/root-guard-ownership.test.mjs
@@ -21,13 +22,69 @@ import assert from 'node:assert/strict'
 import { readFileSync, existsSync, globSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ROOT_GUARDS, ROOT_GUARD_RULES, OUTPUT_NAMES, globToRegExp } from './change-classifier.mjs'
+import {
+  ROOT_GUARDS,
+  ROOT_GUARD_RULES,
+  OUTPUT_NAMES,
+  globToRegExp,
+  classifyChangedFiles,
+} from './change-classifier.mjs'
 import { ROUTING_MATRIX } from './routing-matrix.mjs'
+import { GENERATED_COPIES } from '../../packages/cli/scripts/sync-agent-guidance.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
 const workflow = read('.github/workflows/ci.yml')
 const packageJson = JSON.parse(read('package.json'))
+
+/**
+ * Resolve one `runsVia` entry to the package.json that must define it.
+ *
+ * Two shapes, and the second is the one #2743 added:
+ *   `lint:deps`               -> the ROOT package.json
+ *   `test -w packages/sdk`    -> that WORKSPACE's package.json
+ *
+ * The workspace form exists because not every cross-package guard has a root
+ * script to hang ownership on. `packages/sdk/src/skill-content.ts` is pinned
+ * by `packages/frontend/src/lib/__tests__/agent-skill-bundle.test.ts`, which
+ * runs inside the frontend's own vitest — there is no root lint that reads it
+ * back, because the frontend's copy is text composed at build time. Inventing
+ * a root script that re-runs those tests would be a SECOND spelling of a check
+ * `frontend_checks` already performs, which ci.yml's own visual-baseline
+ * comment warns against ("two spellings of one check is how they drift").
+ *
+ * Two axes, and they move in OPPOSITE directions — cite both, or this comment
+ * becomes precedent for something it does not say (#2743, nit B):
+ *
+ *   - RESOLUTION is stricter. A bare name was checked against one file; a
+ *     workspace name is checked against that workspace's package.json AND
+ *     against the workspace existing, so `test -w packages/typo` fails loudly
+ *     here instead of silently matching nothing in ci.yml.
+ *   - GRANULARITY is coarser. A bare name pins one CI step; a workspace name
+ *     pins a whole suite, and a suite stays present however its contents
+ *     change. So the workspace form cannot, by itself, prove the guarded file
+ *     is still covered — deleting the parity test would leave this entry
+ *     green and covering nothing. What closes that is the separate
+ *     cross-package-import test below, which asserts the LINK rather than the
+ *     command. Prefer a root script whenever one honestly exists.
+ *
+ * What is checked, stated precisely because the imprecise version reads as a
+ * stronger guarantee than it is: every owning job's block must contain AT
+ * LEAST ONE of the entries as a whole `npm run <entry>` command — not every
+ * entry in every block. `frontend_checks` runs `test -w packages/frontend` and
+ * never `test -w packages/sdk`, and that is correct. The consequence to know:
+ * a manifest pairing two entries with one job passes on either spelling, so
+ * `runsVia` is a claim about the SET, and `jobRuns` is what ties that set to
+ * ci.yml rather than to an assertion.
+ */
+export function resolveRunsVia(entry) {
+  const workspace = entry.match(/^(\S+) -w (\S+)$/)
+  if (!workspace) return { script: entry, manifest: 'package.json', scripts: packageJson.scripts }
+  const [, script, dir] = workspace
+  const manifest = `${dir}/package.json`
+  if (!existsSync(path.join(ROOT, manifest))) return { script, manifest, scripts: null }
+  return { script, manifest, scripts: JSON.parse(read(manifest)).scripts ?? {} }
+}
 
 /**
  * Slice one job's block out of ci.yml.
@@ -44,6 +101,26 @@ function jobBlock(jobKey) {
   const rest = lines.slice(start + 1)
   const end = rest.findIndex((l) => /^  [a-z_]+:$/.test(l))
   return (end === -1 ? rest : rest.slice(0, end)).join('\n')
+}
+
+/**
+ * Does this job block run `npm run <entry>` — as the WHOLE command, not as a
+ * prefix of a longer one?
+ *
+ * Anchored deliberately (#2743, nit A). A bare `includes` was harmless while
+ * every runsVia was a root script name, because none is a prefix of another.
+ * The workspace form makes the prefix reachable: ci.yml's backend_checks runs
+ *
+ *     npm run test -w packages/backend -- src/openapi/spec.test.ts
+ *
+ * which an unanchored match would report as running a hypothetical
+ * `test -w packages/backend` guard, when it executes one unrelated spec file.
+ * Nothing at head is wrong -- that step is inside the job that would own it
+ * anyway -- but the sharp edge belongs to whoever adds the next entry, not to
+ * them discovering it.
+ */
+function jobRuns(block, entry) {
+  return block.split('\n').some((line) => line.trimEnd().endsWith(`npm run ${entry}`))
 }
 
 /** The ci.yml job key for an output flag — `backend` -> `backend_checks`. */
@@ -119,10 +196,16 @@ describe('the manifest describes reality', () => {
   test('every runsVia names a real npm script', () => {
     for (const guard of ROOT_GUARDS) {
       assert.ok(guard.runsVia?.length > 0, `${guard.path} names no runsVia command`)
-      for (const script of guard.runsVia) {
+      for (const entry of guard.runsVia) {
+        const { script, manifest, scripts } = resolveRunsVia(entry)
         assert.ok(
-          script in packageJson.scripts,
-          `${guard.path} claims to run via "${script}", which is not a script in package.json`,
+          scripts !== null,
+          `${guard.path} claims to run via "${entry}", but there is no ${manifest} — ` +
+            'a workspace-scoped runsVia must name a real workspace.',
+        )
+        assert.ok(
+          script in scripts,
+          `${guard.path} claims to run via "${entry}", which is not a script in ${manifest}`,
         )
       }
     }
@@ -138,7 +221,7 @@ describe('the manifest describes reality', () => {
         const key = jobKeyFor(job)
         const block = jobBlock(key)
         assert.ok(block, `ci.yml has no job "${key}" for the "${job}" flag`)
-        const runs = guard.runsVia.filter((script) => block.includes(`npm run ${script}`))
+        const runs = guard.runsVia.filter((entry) => jobRuns(block, entry))
         assert.ok(
           runs.length > 0,
           `${guard.path} names "${job}" as an owner, but ci.yml's ${key} runs none of ` +
@@ -173,7 +256,7 @@ describe('the manifest describes reality', () => {
         // command would otherwise leave this test silently covering less, which
         // is the failure shape this whole file exists to prevent.
         assert.ok(block, `ci.yml has no job "${jobKeyFor(flag)}" — see the convention test above`)
-        const runsIt = guard.runsVia.some((script) => block.includes(`npm run ${script}`))
+        const runsIt = guard.runsVia.some((entry) => jobRuns(block, entry))
         if (!runsIt) continue
         assert.ok(
           guard.jobs.includes(flag),
@@ -181,6 +264,255 @@ describe('the manifest describes reality', () => {
             `name "${flag}" as an owner. A PR touching that guard would skip the job running it.`,
         )
       }
+    }
+  })
+})
+
+describe('runsVia resolution (#2743)', () => {
+  // The workspace-scoped form is a TIGHTENING, and a tightening nothing
+  // observes can be reverted silently — which is exactly what review measured
+  // on #2728's sibling gates. So it is pinned here, not only exercised through
+  // whichever manifest entries happen to use it today.
+
+  test('a bare entry resolves against the ROOT package.json', () => {
+    const { script, manifest, scripts } = resolveRunsVia('lint:deps')
+    assert.equal(script, 'lint:deps')
+    assert.equal(manifest, 'package.json')
+    assert.ok('lint:deps' in scripts, 'the root manifest should define the control script')
+  })
+
+  test('a `-w` entry resolves against THAT WORKSPACE, not the root', () => {
+    const { script, manifest, scripts } = resolveRunsVia('test -w packages/frontend')
+    assert.equal(script, 'test')
+    assert.equal(manifest, 'packages/frontend/package.json')
+    assert.ok('test' in scripts)
+    // The distinguishing assertion: `test` exists in BOTH package.json files,
+    // so asserting its presence alone would pass against a resolver that never
+    // left the root. This pins the actual file that was read, and derives the
+    // difference rather than naming a script that could move between them.
+    assert.deepEqual(scripts, JSON.parse(read('packages/frontend/package.json')).scripts)
+    assert.ok(
+      Object.keys(scripts).some((k) => !(k in packageJson.scripts)),
+      'the two manifests must differ, or this test cannot tell which one was read',
+    )
+  })
+
+  test('a `-w` entry naming a workspace that does not exist is reported, not ignored', () => {
+    // The failure mode this replaces: a bare-name check would call
+    // `test -w packages/typo` "not a script in package.json" and a caller
+    // could not tell a typo'd script from a typo'd workspace. Worse, a lookup
+    // that silently returned {} would let the entry match nothing in ci.yml
+    // while still passing here.
+    const { manifest, scripts } = resolveRunsVia('test -w packages/does-not-exist')
+    assert.equal(manifest, 'packages/does-not-exist/package.json')
+    assert.equal(scripts, null, 'a missing workspace must be distinguishable from an empty one')
+  })
+
+  test('every workspace-scoped entry in the manifest names a directory that exists', () => {
+    // The generic form of the case above, over the real manifest — so a future
+    // entry with a typo'd workspace fails here rather than at the ci.yml match.
+    for (const guard of ROOT_GUARDS) {
+      for (const entry of guard.runsVia) {
+        if (!entry.includes(' -w ')) continue
+        const { manifest, scripts } = resolveRunsVia(entry)
+        assert.notEqual(scripts, null, `${guard.path}: ${entry} names a missing ${manifest}`)
+      }
+    }
+  })
+})
+
+describe('cross-package source imports route the importing job (#2743)', () => {
+  // THE class-closing test, and the reason #2743 exists at all.
+  //
+  // #2727 registered `packages/sdk/src/agent-guidance.ts` after the CLI copy
+  // went stale. #2743 registered `packages/sdk/src/skill-content.ts` after
+  // review found the identical hole one file over. Registering instances one
+  // at a time is how a boundary gets crossed twice, so this asserts the
+  // BOUNDARY: whenever a package's source reaches ACROSS into another
+  // package's `src/`, a change to the imported file must route the importing
+  // package's job -- otherwise the pin lives in a suite that does not run.
+  //
+  // SCOPE, so the describe name is not over-read: this catches statically
+  // written relative `from '.../<pkg>/src/...'` imports originating under
+  // packages/*/src. It does NOT see require()/dynamic import(), bare package
+  // specifiers, targets outside src/, importers outside packages/*/src, or
+  // READ-coupling — a file that opens another package's file rather than
+  // importing it. That last one is #2727's own shape
+  // (packages/cli/scripts/sync-agent-guidance.mjs reads agent-guidance.ts), so
+  // this block would not have caught the defect that preceded it; the
+  // generated-copy block below covers the read-coupled copies, and every other
+  // shape above is routed today by dependency fan-out or by the file's own
+  // surface rule. The class closed here is the import-shaped subset.
+  //
+  // Deliberately mechanism-agnostic. It asserts the classifier's OUTPUT, not
+  // that a manifest entry exists, because there are two legitimate ways to
+  // satisfy it and only one of them is this manifest:
+  //   - dependency fan-out (`.github/package-dependencies.json`) -- which is
+  //     how `packages/signer/src/settlement-child.test.ts` is covered for the
+  //     SDK fixture it imports, with no manifest entry and none needed;
+  //   - a root-guard ownership entry -- which is what the frontend needs,
+  //     because it declares no dependency on the SDK (that decoupling is the
+  //     whole reason its copies are inline).
+  // A test keyed on the manifest would demand a redundant entry for the
+  // signer case and would still miss a future package that has neither.
+
+  const SRC_IMPORT = /from\s+'((?:\.\.\/)+[a-z0-9-]+\/src\/[^']+)'/g
+  /** `packages/mcp-server` -> the `mcp_server` output flag. */
+  const flagFor = (pkgDir) => pkgDir.replace(/-/g, '_')
+
+  /** Resolve an extensionless TS import the way the bundlers do. */
+  function resolveSource(repoRelative) {
+    for (const ext of ['', '.ts', '.tsx', '.mts', '.mjs', '.js', '/index.ts']) {
+      if (existsSync(path.join(ROOT, repoRelative + ext))) return repoRelative + ext
+    }
+    return null
+  }
+
+  /** Every cross-package `src/` import in the repository, resolved. */
+  function crossPackageImports() {
+    const found = []
+    for (const file of globSync('packages/*/src/**/*.{ts,tsx,mts,mjs}', { cwd: ROOT })) {
+      const importer = file.split('/')[1]
+      for (const [, spec] of read(file).matchAll(SRC_IMPORT)) {
+        // Resolve the relative specifier against the importing file, then keep
+        // it only if it escaped into a DIFFERENT package.
+        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec))
+        if (!target.startsWith('packages/')) continue
+        const imported = target.split('/')[1]
+        if (imported === importer) continue
+        found.push({ file, importer, imported, target })
+      }
+    }
+    return found
+  }
+
+  test('the sweep finds the known imports — the instrument can say yes', () => {
+    // The positive control. Without it, a regex that silently stopped matching
+    // would turn every assertion below into a vacuous pass over an empty list,
+    // which is the exact failure shape this whole file exists to prevent.
+    const found = crossPackageImports()
+    assert.ok(found.length >= 4, `expected the known cross-package imports, saw ${found.length}`)
+    const targets = new Set(found.map((f) => f.target))
+    for (const known of [
+      'packages/sdk/src/agent-guidance',
+      'packages/sdk/src/skill-content',
+      'packages/sdk/src/__fixtures__/settlement-delegation-payload.json',
+    ]) {
+      assert.ok(targets.has(known), `the sweep no longer sees ${known} — has the regex drifted?`)
+    }
+  })
+
+  test('every cross-package import resolves to a real file', () => {
+    for (const { file, target } of crossPackageImports()) {
+      assert.ok(resolveSource(target), `${file} imports ${target}, which resolves to no file`)
+    }
+  })
+
+  test('a change to the imported file routes the IMPORTING package’s job', () => {
+    for (const { file, importer, target } of crossPackageImports()) {
+      const resolved = resolveSource(target)
+      const flag = flagFor(importer)
+      assert.ok(
+        OUTPUT_NAMES.includes(flag),
+        `${file} lives in packages/${importer}, which maps to no output flag`,
+      )
+      assert.equal(
+        classifyChangedFiles([resolved])[flag],
+        true,
+        `${file} pins ${resolved}, but a change to that file does not route "${flag}" — ` +
+          `so the pin lives in a suite the change never runs. Give ${resolved} a ` +
+          '.github/root-guard-ownership.json entry naming that job, or declare the ' +
+          'dependency in .github/package-dependencies.json if the packages really do depend.',
+      )
+    }
+  })
+})
+
+describe('generated copies route the jobs that verify them (#2743)', () => {
+  // The COPY direction of the same boundary. The block above asserts that a
+  // change to a canonical SOURCE reaches the job holding its pin; this asserts
+  // the reverse — that a hand-edit of a generated COPY reaches a job that runs
+  // the check comparing it back.
+  //
+  // Both directions had to be written, because closing one says nothing about
+  // the other and the copy direction was the worse hole: `for-agents.md` is a
+  // generated artifact that happens to be Markdown, so the DOC_ONLY `*.md` arm
+  // (whose `*` crosses `/`) swallowed it and an edit routed NOTHING — not even
+  // `code` — while its CLI sibling routed `cli` and its NON-MARKDOWN siblings
+  // in public/ routed `frontend`. Stated that way deliberately: the first
+  // draft said "any other file in public/", which was false — `402.md` is
+  // swallowed by the same arm, and believing the looser sentence is what made
+  // a one-file fix look like a directory-wide one.
+  //
+  // Derived from the generator's OWN list, so a third copy added to
+  // GENERATED_COPIES fails here until it routes, rather than joining silently.
+
+  const copies = GENERATED_COPIES.map((c) => path.relative(ROOT, c.file).split(path.sep).join('/'))
+
+  test('the copy list is the generator’s, and it is not empty', () => {
+    // Positive control: an import that silently resolved to [] would make every
+    // assertion below a vacuous pass.
+    assert.ok(copies.length >= 2, `expected the generated copies, saw ${copies.length}`)
+    assert.ok(copies.includes('packages/frontend/public/for-agents.md'))
+    assert.ok(copies.includes('packages/cli/src/agent-guidance-text.ts'))
+    for (const copy of copies) assert.ok(existsSync(path.join(ROOT, copy)), `${copy} is missing`)
+  })
+
+  test('a hand-edit of any generated copy routes a job that runs lint:runbook-parity', () => {
+    // `lint:runbook-parity` is the check that compares these back, so the copy
+    // must reach at least one job that runs it. Read off ci.yml rather than
+    // hardcoded, so moving the step between jobs cannot leave this stale.
+    const verifying = OWNING_FLAGS.filter((flag) => {
+      const block = jobBlock(jobKeyFor(flag))
+      return block && jobRuns(block, 'lint:runbook-parity')
+    })
+    assert.ok(verifying.length > 0, 'no ci.yml job runs lint:runbook-parity — has it been renamed?')
+
+    for (const copy of copies) {
+      const routed = classifyChangedFiles([copy])
+      assert.ok(
+        verifying.some((flag) => routed[flag]),
+        `${copy} is a generated copy verified by lint:runbook-parity, but editing it routes ` +
+          `none of ${JSON.stringify(verifying)} — so drift in the copy runs no check. ` +
+          'A generated artifact under a doc-only extension needs a DOC_EXCEPTIONS arm.',
+      )
+    }
+  })
+})
+
+describe('served public artifacts are not treated as docs (#2743)', () => {
+  // The directory rule, rather than a list of the files in it today.
+  //
+  // packages/frontend/public/ is served content: everything in it is fetched
+  // over HTTP by a browser or an agent, and several entries are asserted by
+  // frontend tests. The DOC_ONLY `*.md` arm swallowed the Markdown ones, so
+  // `for-agents.md` and `402.md` both routed NOTHING while every non-Markdown
+  // sibling routed `frontend`. Fixing only the first left the second open —
+  // which is how this test came to exist, and why it asserts the directory.
+  const PUBLIC_DIR = 'packages/frontend/public'
+
+  test('the directory has files, including Markdown — the instrument can say yes', () => {
+    // Positive control on BOTH halves: an empty sweep, or one that happened to
+    // contain no Markdown, would make the assertion below vacuous — and
+    // Markdown is the only extension the DOC_ONLY arm swallows.
+    const files = globSync(`${PUBLIC_DIR}/**/*`, { cwd: ROOT, nodir: true })
+    assert.ok(files.length >= 4, `expected served artifacts, saw ${files.length}`)
+    assert.ok(
+      files.some((f) => f.endsWith('.md')),
+      'no Markdown under public/ — this test would pass vacuously; has the directory moved?',
+    )
+  })
+
+  test('every served file routes the frontend job', () => {
+    for (const file of globSync(`${PUBLIC_DIR}/**/*`, { cwd: ROOT, nodir: true })) {
+      const served = file.split(path.sep).join('/')
+      assert.equal(
+        classifyChangedFiles([served])['frontend'],
+        true,
+        `${served} is served to users and agents, but editing it does not route "frontend" — ` +
+          'so no frontend test that asserts its content runs. Markdown here is a build ' +
+          'artifact, not documentation: it needs a DOC_EXCEPTIONS arm.',
+      )
     }
   })
 })
@@ -256,11 +588,27 @@ describe('routing completeness — every gated guard has an owner (#1626)', () =
   // exemption is DERIVED from the job's own `if:`, never asserted here, so the
   // day someone gates a job that runs an unregistered guard, this fails.
 
-  /** Root package.json script name -> the scripts/ files it runs. */
+  /**
+   * A guard path inside a command string.
+   *
+   * The optional `packages/<pkg>/` prefix is load-bearing (#2727). Without it
+   * these patterns anchored on a bare `scripts/`, so a guard living in a
+   * PACKAGE's scripts directory was seen under a truncated path —
+   * `node packages/cli/scripts/sync-agent-guidance.mjs` read as
+   * `scripts/sync-agent-guidance.mjs`, which matches no manifest entry and
+   * therefore no ownership. The completeness check below could not be
+   * satisfied for such a guard by ANY manifest edit: the very check that
+   * exists so a gated guard cannot go unowned was itself blind to a whole
+   * directory shape. Found while registering the first package-scoped guard.
+   */
+  const GUARD_PATH_IN_COMMAND = /(?:packages\/[a-zA-Z0-9._-]+\/)?scripts\/[a-zA-Z0-9/._-]+/g
+  const GUARD_PATH_AFTER_NODE =
+    /node (?:--test )?((?:packages\/[a-zA-Z0-9._-]+\/)?scripts\/[a-zA-Z0-9/._*-]+)/g
+
   const scriptTargets = new Map(
     Object.entries(packageJson.scripts).map(([name, body]) => [
       name,
-      [...body.matchAll(/scripts\/[a-zA-Z0-9/._-]+/g)].map((m) => m[0]),
+      [...body.matchAll(GUARD_PATH_IN_COMMAND)].map((m) => m[0]),
     ]),
   )
 
@@ -319,7 +667,7 @@ describe('routing completeness — every gated guard has an owner (#1626)', () =
 
       const targets = []
       for (const m of line.matchAll(/npm run ([a-z:._-]+)/g)) targets.push(...(scriptTargets.get(m[1]) ?? []))
-      for (const m of line.matchAll(/node (?:--test )?(scripts\/[a-zA-Z0-9/._*-]+)/g)) targets.push(m[1])
+      for (const m of line.matchAll(GUARD_PATH_AFTER_NODE)) targets.push(m[1])
 
       for (const target of targets) {
         // Expand a glob invocation to the files it actually runs. Left as a
@@ -356,6 +704,10 @@ describe('routing completeness — every gated guard has an owner (#1626)', () =
       ['scripts/dep-lint.mjs', 'backend_checks'],
       ['scripts/lint-wire-types.mjs', 'frontend_checks'],
       ['scripts/network-map-pins.test.mjs', 'sdk_checks'],
+      // Package-scoped, and the reason the patterns above carry an optional
+      // packages/<pkg>/ prefix. Pinned here so that prefix cannot be dropped
+      // without this walk visibly losing a guard it used to see (#2727).
+      ['packages/cli/scripts/sync-agent-guidance.mjs', 'sdk_checks'],
     ]) {
       assert.ok(
         all.some((i) => i.file === file && i.job === job && i.gated),

@@ -2059,3 +2059,14 @@ test('#2580: release-bump.mjs actually CALLS the rule, after the snapshot flag i
   assert.ok(snapshotParse !== -1 && snapshotParse < call, 'the call must come after --snapshot is parsed')
   assert.ok(call < firstWrite, 'the call must come before the run starts reporting changes')
 })
+
+test('#2681: release guidance does not recreate retired verification blocks', async () => {
+  const [script, readme] = await Promise.all([
+    readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8'),
+    readFile(join(ROOT, 'scripts', 'README.md'), 'utf8'),
+  ])
+  for (const [file, text] of [['release-bump.mjs', script], ['scripts/README.md', readme]]) {
+    assert.doesNotMatch(text, /prepend (?:an entry to )?(?:a |the )?`verified:`/i, `${file} must not instruct a retired block`)
+    assert.match(text, /last-verified/, `${file} keeps the date-only release instruction`)
+  }
+})

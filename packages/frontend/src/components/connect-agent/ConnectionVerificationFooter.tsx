@@ -7,12 +7,13 @@ import { truncate } from '@/lib/format'
 import { runtimeStatusHelper, runtimeStatusLabel } from './setup-copy'
 
 /**
- * The approval step's footer, shared by both rails (#1073).
+ * The approval step's footer (#1073).
  *
- * The verified-connection line plus the collapsible proof behind it. Both
- * approval steps show the same evidence for the same decision — only the
- * Safe-specific "Approvals required" row is rail-conditional, and it is
- * absent on the delegation rail because a single signature IS the approval.
+ * The verified-connection line plus the collapsible proof behind it. The
+ * approval step shows the same evidence for the same decision on every
+ * account — a single signature IS the approval. The retired rail's
+ * Safe-specific "Approvals required" row went with that rail (#2848): its
+ * inputs, the Safe threshold and owner count, reached no caller.
  *
  * #1684: ONE row, not two. The check line and a separate "Verification
  * details" disclosure directly beneath it were two rows stating one fact, so
@@ -26,8 +27,6 @@ export function ConnectionVerificationFooter({
   delegateAddress,
   install,
   connectorPackage,
-  safeThreshold = 1,
-  safeOwnerCount = 1,
 }: {
   delegateAddress: string | null
   install: AgentConnectionSetupStatusResponse['install_status'] | undefined
@@ -38,8 +37,6 @@ export function ConnectionVerificationFooter({
    * client-side literal that is wrong on any non-production backend.
    */
   connectorPackage?: string
-  safeThreshold?: number
-  safeOwnerCount?: number
 }) {
   const addressShort = delegateAddress ? truncate(delegateAddress) : null
   // `items-start` + `mt-0.5`: at 12px/normal leading that lands the 14px check
@@ -53,10 +50,10 @@ export function ConnectionVerificationFooter({
     ? 'Manual credential created'
     : 'Local connection verified'
 
-  // Nothing to disclose (no address, no runtime report, single-owner Safe):
-  // the same line renders as plain text rather than a summary that opens onto
-  // an empty list.
-  if (!delegateAddress && !install && safeThreshold <= 1) {
+  // Nothing to disclose (no address, no runtime report): the same line
+  // renders as plain text rather than a summary that opens onto an empty
+  // list.
+  if (!delegateAddress && !install) {
     return (
       <div className="flex items-start gap-2 text-[12px] text-[var(--v2-ink-2)]">
         {check}
@@ -116,16 +113,6 @@ export function ConnectionVerificationFooter({
               {runtimeStatusHelper(install, connectorPackage)
                 ? ` — ${runtimeStatusHelper(install, connectorPackage)}`
                 : ''}
-            </dd>
-          </div>
-        )}
-        {safeThreshold > 1 && (
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
-              Approvals required
-            </dt>
-            <dd className="mt-0.5 text-xs text-[var(--v2-ink-2)]">
-              {safeThreshold} of {safeOwnerCount}
             </dd>
           </div>
         )}

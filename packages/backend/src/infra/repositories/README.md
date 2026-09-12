@@ -116,7 +116,8 @@ The remaining inline SQL elsewhere sits behind explicit, printed
 
 #1167 then took the three largest of those waivers — `routes/user.ts` (10
 statements), `routes/dashboard.ts` (9) and `routes/agent-activity.ts` (14) —
-and emptied them, adding `users.ts`, `owner-aliases.ts`, `dashboard.ts` and
+and emptied them, adding `users.ts`, `owner-aliases.ts` (itself deleted by
+#2847 with the `/user/owners` directory that was its only caller),
 `agent-activity.ts` and extending `user-safes.ts`, `agents.ts` and
 `agent-tool-invocations.ts`. The gauge fell 108 → 75 and the waiver list 16 →
 13. Two placement lessons worth carrying forward:

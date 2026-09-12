@@ -30,12 +30,12 @@ const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
-    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
+    getBookTimeCapture: vi.fn().mockResolvedValue(null),
   },
   reportingMocks: {
     lateAttachMerchantReceipt: vi.fn().mockResolvedValue(undefined),
     // modules/mpp/evidence.ts's fire-and-forget feed hook — also part of the
-    // modules/reporting/ barrel post-#998, so it needs a mock here too (an
+    // modules/accounting/ barrel post-#998, so it needs a mock here too (an
     // unmocked call threw and 500'd the settle/evidence routes).
     feedSettledPaymentBestEffort: vi.fn(),
   },
@@ -59,7 +59,7 @@ vi.mock('../../modules/fee/index.js', () => ({
 
 // #956 late-attach: fire-and-forget, mocked so its own DB reads never
 // interleave with these tests.
-vi.mock('../../modules/reporting/index.js', () => reportingMocks)
+vi.mock('../../modules/accounting/index.js', () => reportingMocks)
 
 const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -97,7 +97,8 @@ const challenge = {
  * #2307 removed five of the six assertions that used to live here
  * (`getLatestBlockTimeSec`, `computeEffectiveAllowance`, `generateTransferHash`,
  * `recoverSigner`, `executeAllowanceTransfer`). None is an export of
- * `rails/allowance-module.ts` — #1987 deleted them all — so each was a mock
+ * `infra/chain/relayer-reads.ts` (named `rails/allowance-module.ts` when #1987
+ * ran) — #1987 deleted them all — so each was a mock
  * factory entry nothing could call, and each assertion passed unconditionally.
  *
  * `getTokenAllowance` IS a real export, so it stays. It is a weak guard on this

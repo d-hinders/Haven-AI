@@ -5,6 +5,7 @@
  * the agent list is delegation-only, so no legacy account reaches this panel.
  */
 import { expect, test, type Page } from '@playwright/test'
+import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import {
   mockHavenApi,
   seedAuthenticatedSession,
@@ -49,8 +50,8 @@ function agentState(overrides: Record<string, unknown>) {
 
 test.describe('agent panel empty states and card banners', () => {
   test.skip(
-    process.env.VISUAL_REGRESSION !== '1',
-    'Linux-rendered baselines — run via the CI job (or VISUAL_REGRESSION=1 in a Linux container)',
+    !VISUAL_SPECS_ENABLED,
+    VISUAL_SKIP_REASON,
   )
 
   test.beforeEach(async ({ page }) => {

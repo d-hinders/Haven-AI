@@ -47,6 +47,20 @@ describe('z-index scale (#1749)', () => {
     }
   })
 
+  it('the bottom tab bar is covered by the navigation that opens over it (#2730)', () => {
+    // The tab bar is app chrome pinned to the bottom of the screen, and the
+    // "More" drawer (#2731) opens FROM it — so the drawer and its scrim have to
+    // cover the bar, or the control that opened the drawer stays painted on top
+    // of it. The upper bound is the whole point of the token: a bar at
+    // `--v2-z-nav-drawer` or above is the #1749 inversion, one surface over.
+    expect(zToken('tab-bar')).toBeLessThan(zToken('nav-scrim'))
+    expect(zToken('tab-bar')).toBeLessThan(zToken('nav-drawer'))
+    // And above the content it scrolls over, but below the popovers anchored in
+    // the top bar, which can extend down across the bar's band on a phone.
+    expect(zToken('tab-bar')).toBeGreaterThan(zToken('sticky'))
+    expect(zToken('tab-bar')).toBeLessThan(zToken('chrome-popover'))
+  })
+
   it('the toggle sits above its own drawer and scrim, so one control does both', () => {
     // The Open and Close affordances are the SAME button. If the drawer or its
     // scrim covered it, the sidebar could be opened and then never closed by
@@ -69,6 +83,7 @@ describe('z-index scale (#1749)', () => {
       'content',
       'sticky',
       'chrome',
+      'tab-bar',
       'chrome-popover',
       'nav-scrim',
       'nav-drawer',

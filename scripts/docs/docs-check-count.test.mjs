@@ -23,7 +23,7 @@ const doc = readFileSync(`${repoRoot}docs/contributing/docs-quality-system.md`, 
 const fmMatch = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(doc)
 const body = fmMatch ? doc.slice(fmMatch[0].length) : doc
 
-// The chain script is the source of truth for what `docs:check` runs, in order.
+// package.json is the source of truth for what `docs:check` runs, in order.
 const docsCheck = pkg.scripts['docs:check']
 assert.ok(docsCheck, 'package.json defines a docs:check script')
 const parts = docsCheck.split('&&').map((s) => s.trim())
@@ -68,29 +68,6 @@ test('docs:check count: the doc states no stale total of blocking scripts', () =
   )
 })
 
-test('docs:check count: the chain-integrity ordinal matches its derived position', () => {
-  const idx = stepIndexOf('chain-integrity')
-  // Form 1: "the fourth docs:check step" (bare ordinal — #2533's stale shape).
-  // The regex is backtick-free on purpose: the doc's code spans wrap
-  // `docs:check` in backticks, which ".?" matches without quoting hazards.
-  const bare = new RegExp(`is the (first|second|third|fourth|fifth|sixth|seventh|eighth) .?docs:check.?( steps?)\\b`).exec(body)
-  if (bare) {
-    assert.equal(
-      wordToNumber(bare[1]),
-      idx,
-      `"is the ${bare[1]} docs:check step" vs derived position ${idx}`,
-    )
-    return
-  }
-  // Form 2: "the fourth of five docs:check steps" (#2657's shape).
-  const of = new RegExp(
-    `is the (first|second|third|fourth|fifth|sixth|seventh|eighth) of (one|two|three|four|five|six|seven|eight) .?docs:check.?( steps?)\\b`,
-  ).exec(body)
-  if (!of) return // sentence consciously reworded; nothing to derive
-  assert.equal(wordToNumber(of[1]), idx, `ordinal vs derived position ${idx}`)
-  assert.equal(wordToNumber(of[2]), steps.length, `"of ${of[2]}" vs ${steps.length} docs:check steps`)
-})
-
 test('docs:check count: every step appears in the check-inventory table', () => {
   const rows = body.split('\n').filter((l) => /^\|\s/.test(l))
   for (const s of steps) {
@@ -104,22 +81,14 @@ test('docs:check count: every step appears in the check-inventory table', () => 
 
 test('docs:check order: package.json runs the validators in the documented order', () => {
   // The documented teaching order; the guard pins the exact prefix so a
-  // reorder or an unaccounted sixth validator is a conscious edit, not drift.
-  // States green across the #2665 boundary: exactly the four-step pre-#2665
-  // chain, or that chain with ui-gate-wording.mjs appended as the fifth step.
+  // reorder or unaccounted validator is a conscious edit, not drift.
   const prefix = [
     'validate-frontmatter.mjs',
     'validate-agent-skills.mjs',
     'validate-readme-agent-section.mjs',
-    'chain-integrity.mjs',
+    'ui-gate-wording.mjs',
+    'covers-gaps.mjs',
   ]
   const names = steps.map((s) => s.split('/').pop())
-  assert.deepEqual(names.slice(0, prefix.length), prefix, 'docs:check prefix order')
-  if (names.length > prefix.length) {
-    assert.deepEqual(
-      names.slice(prefix.length),
-      ['ui-gate-wording.mjs'],
-      'the only step allowed beyond the documented four is #2657 ui-gate-wording.mjs — a new validator is a conscious doc+test edit (see #2666)',
-    )
-  }
+  assert.deepEqual(names, prefix, 'docs:check order')
 })

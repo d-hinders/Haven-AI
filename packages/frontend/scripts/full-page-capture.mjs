@@ -243,7 +243,7 @@ export const MIN_CONTENT_ELEMENTS = 6
  *
  * 40 CSS px at `deviceScaleFactor: 2` is the 80 device px that was reported.
  * The missing content is the three budget rows: budget data had not answered,
- * so every `AgentCard` was showing `AllowanceBarSkeleton` ("USDC loading…")
+ * so every `AgentCard` was showing its budget placeholder ("USDC loading…")
  * instead of its budget. 886/150 is 29x and 25x above the
  * floors, so nothing above this line can see it — and #1971's chain-read guard
  * cannot either, because the reads *had* been issued, just not answered yet.
@@ -269,7 +269,7 @@ export const MIN_CONTENT_ELEMENTS = 6
  * the shape the paragraph above asked for and declined to build: per-route
  * named content, named by the route.
  *
- * `AllowanceBarSkeleton` did not carry it and now does; adding it was an
+ * The budget placeholder row did not carry it and now does; adding it was an
  * accessibility fix in its own right (the row announced nothing when it
  * resolved). That is the intended pattern for the next loading state this
  * catches: mark the placeholder, do not extend the harness.
@@ -336,6 +336,7 @@ export const BUSY_TOLERANT_CAPTURES = [
     pattern: /^\/design-system$/,
     reason:
       'the skeleton/loading-state showcase renders aria-busy regions as documented CONTENT, ' +
+      'and since #2871 the Buttons card carries a permanently aria-busy example button, ' +
       'so they never resolve and never should',
   },
 ]

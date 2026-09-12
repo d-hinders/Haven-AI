@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/payments.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/modules/mpp/**
@@ -14,8 +14,7 @@ covers:
   - packages/backend/src/rails/delegation-authorization.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/domain/chains.ts
-  - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-09-02" # #2265: the ⚠️ banner scoped only the DIAGRAM, so the two sections after it read as current. "Key invariants in this flow" is now headed and bannered as retired — it described the BACKEND `computeEffectiveAllowance` and AllowanceModule signature re-verification, both deleted by #1987, and linked a function that no longer exists at the path it cited. Stated with that scope deliberately: a same-named frontend helper (`lib/allowance-math.ts`) is still live and unrelated, so an unqualified "deleted" would have been false. In "State Lifecycles" only the OWNER APPROVAL bullet is marked retired: the direct-intent lifecycle beside it (`pending_signature` → `submitted` → `confirmed`/`failed`) is LIVE and is the only payment lifecycle Haven has, so labelling the whole section history would have been the opposite error and was corrected before shipping. The dead `/approvals` routes are stated as 404 (deregistered by #2055), not 410. Scope: those two sections. NOT re-verified: the diagram, the banner above it, the delegation-rail section, or the x402 cross-reference. Prior: #2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation. Prior: #2055: the over-allowance closure paragraph updated — /approvals is deregistered (404) and approval_requests dropped by migration 070, superseding the #1986 410 wording; routes/approvals.ts removed from covers (file deleted). Diagrams remain historical record. Prior: #2020: the "what still works" list loses GET /machine-payments/allowances — the spend-authority report is 410 on this rail now (owner reversal of #1986); the sequences and diagrams are unchanged historical record. Prior: #1992: the retirement banner was accurate but stale in one clause - it said the Safe "deploy/exec/approver ROUTES" were "still to go in #1988". #1988 merged, and it deliberately KEPT `POST /safe/exec`; lumping exec in with deploy/approvers is exactly the flattening this epic's docs have to avoid. Corrected, with #1989's screen-vs-route distinction added. Scope: that banner; the mermaid diagram is a deliberate historical record and is unchanged. Prior: #1988: the "what still works" list credited approver management as a surviving read/edit path. It is deleted with the Safe-deploy and owner-change machinery, so the clause is corrected rather than left as a promise the API no longer keeps, and the reason `POST /safe/exec` stays open is restated in terms of fund ACCESS (owner-signed, relayed for gas) rather than approver recovery, which no longer rides on it. Scope: that callout; the payment sequences themselves were not re-verified. Prior: #1987: the two "the code is still present and is deleted by #1987" banners were future-tense and are now FALSE — the execution half is deleted, so both are rewritten in the past tense and `runLegacyAuthorize` is named as gone rather than as a live landmark. The diagrams themselves are unchanged historical record. Prior: #1986: the deferral in the prior note is now DISCHARGED — the payment-path 410 landed, so the legacy sequence and the over-allowance approval branch no longer run and the banner says so; diagram kept as history (code deleted by #1987/#1988). The delegation-rail branch re-read against the diff and unchanged, and the read paths it does not describe are unaffected. Prior: #1984: "import-only" corrected. The SEQUENCE itself is untouched and deliberately so — an existing allowance_module account still pays exactly as drawn; the payment-path 410 is slice #1986, not this one. Prior: #1199: signer-removal recovery change re-verified; payment sequence unchanged
+last-verified: "2026-09-11"
 ---
 
 # Haven — Payment Execution Sequence
@@ -28,35 +27,25 @@ reachable any more**; see the banner below and jump to the
 [delegation-rail branch](#delegation-rail-new-accounts) for the live flow.
 
 Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
-[packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts).
+[packages/backend/src/infra/chain/relayer-reads.ts](../../packages/backend/src/infra/chain/relayer-reads.ts)
+(the reads-only shared chain module — `rails/allowance-module.ts` before #2850 renamed it).
 
 > ⚠️ **THE SEQUENCE BELOW NO LONGER RUNS.** It is the legacy AllowanceModule
-> rail, retired under epic #1440: closed to new accounts by #1984 and
-> **fail-closed for spending by #1986**. `POST /payments` and
+> rail, retired under epic #1440 — sequence in the [decision log](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440).
+> `POST /payments` and
 > `POST /payments/:id/sign` now answer **HTTP 410 before the allowance read**
 > for any account whose `execution_rail` is not `delegation` and not
 > `session_key` — nothing written, no chain call, no transfer. Step 1 of the
 > diagram is where it stops. The over-allowance branch is gone at the other
-> end too: #2055 deleted `routes/approvals.ts` (the five queue endpoints
-> answer 404 now) and migration 070 dropped `approval_requests` outright,
-> superseding #1986's refuse-unconditionally interim. The diagram is kept as the record of what the rail DID, because
-> the code implementing it **has now been deleted** — the execution half by
-> #1987 (the AllowanceModule transfer, transfer-hash generation, ECDSA
-> signature recovery and the allowance-nonce coordinator), and the Safe-deploy
-> implementation, both deployers and the five approver routes by #1988.
-> **`POST /safe/exec` was deliberately KEPT** — it is owner-signed and relayed
-> for gas only, not the retired rail's agent authority — though #1989 deleted
-> the screen that composed such a transaction. Read the diagram as history: it
-> is not behaviour you can invoke, and it is no longer behaviour you could find
-> in the tree.
+> end too: the approval queue's routes answer 404 and its table is dropped.
+> The diagram is kept as the record of what the rail DID, because the code
+> implementing it **has now been deleted** — what went and what deliberately
+> survives is enumerated once in the [decision log](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440),
+> not here. Read the diagram as history: it is not behaviour you can invoke,
+> and it is no longer behaviour you could find in the tree.
 >
-> **What still works for one of these accounts:** the account-level READS.
-> Balances, transaction history, the accounts list, rename, re-default and
-> unlink. (`GET /machine-payments/allowances` is no longer among them: #2020
-> reversed #1986's left-readable decision on a recorded owner call, so the
-> spend-authority report answers the same fail-closed 410 as the spend paths —
-> the accounts are emptied and unsupported per the #2021 readability waiver.)
-> `POST /safe/exec` also stays open — it accepts an owner-signed execution and
+> **What still works for one of these accounts**, because it bears on reading
+> this diagram: `POST /safe/exec`, which accepts an owner-signed execution and
 > relays it for gas only. It is a lower-level access path, not a Haven
 > self-serve exit for every legacy owner: a known wallet owner may use Safe's
 > own owner-capable interface, while passkey-only and unknown-owner states
@@ -144,9 +133,8 @@ sequenceDiagram
 > the diagram above.** The banner earlier in this document scoped only the
 > *diagram*, so this section read as current until #2265. Nothing here is
 > live: the BACKEND's `computeEffectiveAllowance` and the AllowanceModule
-> signature path were deleted by #1987 — note the frontend keeps a
-> same-named helper (`packages/frontend/src/lib/allowance-math.ts`, used by
-> `AllowanceBar`), which is a different function and is untouched — and the owner
+> signature path were deleted by #1987 — the frontend's same-named helper and
+> its `AllowanceBar` consumer are gone too since #2848 (epic #1440) — and the owner
 > approval state machine went with `approval_requests` (#2055 / migration 070
 > — the routes now answer **404**). For the live rail see
 > [Delegation rail](#delegation-rail-new-accounts) below and
@@ -159,7 +147,8 @@ sequenceDiagram
   applies the module's reset semantics, so out-of-band AllowanceModule transfers
   under the same delegate/token allowance are already reflected and reset
   decisions use chain time
-  ([packages/backend/src/rails/allowance-module.ts](../../packages/backend/src/rails/allowance-module.ts)).
+  ([packages/backend/src/infra/chain/relayer-reads.ts](../../packages/backend/src/infra/chain/relayer-reads.ts) —
+  `rails/allowance-module.ts` before #2850 renamed it).
 - **The delegate signature is independently re-verified by the
   AllowanceModule.** Even if the backend skipped its own `ecrecover` check,
   the on-chain module would reject a bad signature.

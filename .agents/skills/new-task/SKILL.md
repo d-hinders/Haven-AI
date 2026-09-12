@@ -26,10 +26,20 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
    deliberately; this skill files to the backlog unless shipping was asked for,
    per *Backlog And Shipping*. Same template, opposite default, and only the
    filer knows which one applies.
-5. Check GitHub for a materially duplicate open issue.
-6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
-7. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now.
-8. Return the issue link and applied labels.
+5. Check GitHub for a materially duplicate open issue — and for an open issue this
+   would be a "still" of. A "still" reopens or widens that issue; it never files a
+   sibling ([ship-next § *Filing bar*](../ship-next/SKILL.md#filing-bar-2767)).
+6. **A defect-type task carries a reproduction before it is queued (#2767).** When
+   the task reports something broken — a product defect, missing product behaviour,
+   or a required check that is red for a false reason or green over a real defect —
+   the body names a repro at a SHA: a command, a failing test, or a screenshot. No
+   repro, no issue: ask the requester for one, or record the task as **Not filed**
+   in whatever PR or session surfaced it. Feature and epic tasks are unaffected;
+   the full five-check bar is stated once, in ship-next, and applies to every
+   filed defect whatever route files it.
+7. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
+8. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now.
+9. Return the issue link and applied labels.
 
 ## Epics
 
@@ -59,6 +69,14 @@ encodes have to be applied by hand; that is what the rest of this section is for
   is blocked.
 - File slices in build order where possible, so lowest-numbered-open matches the
   intended sequence.
+- **Write the epic's `## Promotion checklist` section** (owner decision
+  2026-09-08, #2767), from the slices' operator-step notes: one unticked box per
+  operator step the epic depends on, each naming where it is done, plus one box
+  for the epic's product verification — which runbook or QA scenario is run on
+  `dev`, by whom, before promotion. Every box starts unticked. `ship-next`'s
+  closeout reads this section with `scripts/ci/epic-promotion-checklist.mjs` and
+  reports the epic ready to close only when every box is ticked, so an epic filed
+  without it can never be reported ready in the way the template expects.
 - **Do not put `code-quality` on the slices** — the epic's open sub-issues already
   are the queue for `epic=#<n>`, and that label is for the standalone queue
   (`loop-epic.md` states this; it is the one rule most easily lost when filing

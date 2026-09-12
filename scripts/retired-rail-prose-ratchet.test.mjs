@@ -150,3 +150,116 @@ test('every phrase regex matches its own canonical example', () => {
     assert.ok(re.test(examples[id]), `phrase "${id}" does not match its own example`)
   }
 })
+
+// --- The CLI path (#2721, epic #2720)
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const SRC = 'packages/backend/src/z.ts'
+const BASE = 'packages/retired-rail-prose-baseline.json'
+const JUST = 'packages/retired-rail-prose-justifications.json'
+
+test('CLI: prose growth past the baseline exits non-zero and names the file', () => {
+  const { status, out } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SRC]: '// the row stays readable\n// and this one stays readable too\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 1 } }),
+      [JUST]: '{}',
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /retired-rail prose grew/)
+  assert.match(out, /z\.ts/)
+})
+
+test('CLI: a tree at the baseline exits 0', () => {
+  const { status } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SRC]: '// the row stays readable\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 1 } }),
+      [JUST]: JSON.stringify({ [SRC]: { 'stays-readable': { category: 'x', note: 'y' } } }),
+    },
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
+  const { status, out } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [SRC]: '// stays readable\n// stays readable\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 1 } }),
+      [JUST]: '{}',
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+})
+
+test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first run', () => {
+  // #2728, pinned here for the same reason as in db-mock-ratchet: review
+  // measured that reverting the shared allowance key left this suite entirely
+  // green, so the tightening this gate received was unobserved. `{}` is what
+  // `writeBaseline` writes at zero debt, so keying on emptiness disables the
+  // refusal permanently after the first successful cleanup.
+  const { status, out, wrote } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    files: {
+      [SRC]: '// stays readable\n// stays readable\n',
+      [BASE]: '{}',
+      [JUST]: '{}',
+    },
+    readBack: [BASE],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote[BASE], '{}')
+})
+
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
+  const shared = {
+    also: ['lib/ratchet.mjs'],
+    files: { [SRC]: '// stays readable\n// stays readable\n', [JUST]: '{}' },
+    readBack: [BASE],
+  }
+  const refused = runGuard('retired-rail-prose-ratchet.mjs', { ...shared, args: ['--update'] })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote[BASE], null)
+
+  const accepted = runGuard('retired-rail-prose-ratchet.mjs', {
+    ...shared, args: ['--update', '--accept-new'],
+  })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote[BASE], /stays-readable/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const { status, wrote } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'], args: ['--update'],
+    files: { [SRC]: '// current language\n', [JUST]: '{}' }, readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.deepEqual(JSON.parse(wrote[BASE]), {})
+})
+
+test('CLI: a malformed baseline prints one line, not a node:internal banner', () => {
+  // #2761, same shape as db-mock's — this gate's entrypoint was byte-identical
+  // to it before the conversion, and the acceptance criteria ask for a case per
+  // gate rather than one case and an argument by similarity.
+  const { status, out } = runGuard('retired-rail-prose-ratchet.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [SRC]: '// stays readable\n',
+      [BASE]: JSON.stringify({ [SRC]: { 'stays-readable': 'x' } }),
+      [JUST]: '{}',
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ retired-rail-prose-ratchet: /)
+  assert.doesNotMatch(out, /node:internal/)
+})

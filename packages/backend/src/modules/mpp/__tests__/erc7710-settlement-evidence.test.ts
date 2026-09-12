@@ -20,13 +20,13 @@ const feedSettledPaymentBestEffort = vi.fn()
 const getTransactionReceipt = vi.fn()
 const getBlock = vi.fn()
 
-vi.mock('../../reporting/index.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../reporting/index.js')>()),
+vi.mock('../../accounting/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../accounting/index.js')>()),
   feedSettledPaymentBestEffort: (...args: unknown[]) => feedSettledPaymentBestEffort(...args),
 }))
 
-vi.mock('../../../rails/allowance-module.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../rails/allowance-module.js')>()),
+vi.mock('../../../infra/chain/relayer-reads.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../infra/chain/relayer-reads.js')>()),
   getProvider: () => ({ getTransactionReceipt, getBlock }),
 }))
 

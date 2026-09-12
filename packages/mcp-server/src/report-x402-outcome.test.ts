@@ -8,17 +8,18 @@
  * request the tool makes, which request it deliberately does NOT make, and
  * what a caller can and cannot put into it.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { HavenClient } from '@haven_ai/sdk'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createToolHandlers, toolDescriptions, type ToolPayload, type ToolSuccess } from './tools.js'
+import {
+  clearCalls,
+  handlers,
+  installSharedFixtureLifecycle,
+  ok,
+  recordedCalls,
+  stubFetch,
+} from './test-support/hosted-mcp.js'
 
-interface CapturedCall {
-  url: string
-  method: string
-  body: Record<string, unknown> | undefined
-}
-
-let calls: CapturedCall[]
+installSharedFixtureLifecycle()
 
 const TX_HASH = '0x' + 'ab'.repeat(32)
 const RESOURCE_URL = 'https://merchant.example/resource'
@@ -43,42 +44,7 @@ function statusBody(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function stubFetch(routes: Record<string, { status?: number; body?: unknown }>) {
-  vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-    const method = (init.method ?? 'GET').toUpperCase()
-    const path = new URL(url).pathname
-    const body = init.body ? JSON.parse(init.body as string) : undefined
-    calls.push({ url, method, body })
-    const route = routes[`${method} ${path}`]
-    const status = route?.status ?? 200
-    const payload = route?.body ?? {}
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      headers: new Headers(),
-      json: async () => payload,
-      text: async () => JSON.stringify(payload),
-      clone: () => ({
-        ok: status >= 200 && status < 300,
-        status,
-        headers: new Headers(),
-        json: async () => payload,
-        text: async () => JSON.stringify(payload),
-      }),
-    }
-  })
-}
 
-function handlers() {
-  return createToolHandlers(
-    new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }),
-  )
-}
-
-function ok<T = unknown>(payload: ToolPayload): ToolSuccess<T> {
-  if (!payload.success) throw new Error(`expected success, got failure: ${payload.message}`)
-  return payload as ToolSuccess<T>
-}
 
 function fail(payload: ToolPayload) {
   if (payload.success) throw new Error('expected failure, got success')
@@ -93,12 +59,8 @@ const HAPPY_ROUTES = {
 }
 
 beforeEach(() => {
-  calls = []
+  clearCalls()
 })
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
-
 describe('haven_report_x402_outcome', () => {
   it('a rejection posts the reconciliation event the SDK retry path posts', async () => {
     stubFetch(HAPPY_ROUTES)
@@ -112,7 +74,7 @@ describe('haven_report_x402_outcome', () => {
 
     expect(result.data.outcome).toBe('rejected')
     expect(result.data.recorded).toBe('reconciliation_event')
-    const posted = calls.find((c) => c.url.endsWith('/machine-payments/reconciliation-events'))
+    const posted = recordedCalls().find((c) => c.url.endsWith('/machine-payments/reconciliation-events'))
     expect(posted?.body).toMatchObject({
       paymentId: 'pay_x402',
       rail: 'x402',
@@ -120,7 +82,7 @@ describe('haven_report_x402_outcome', () => {
       txHash: TX_HASH,
     })
     // Never an evidence write on a rejection.
-    expect(calls.some((c) => c.url.endsWith('/machine-payments/evidence'))).toBe(false)
+    expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/evidence'))).toBe(false)
   })
 
   it('an acceptance posts evidence and NOT a reconciliation event', async () => {
@@ -136,7 +98,7 @@ describe('haven_report_x402_outcome', () => {
     )
 
     expect(result.data.recorded).toBe('evidence')
-    const posted = calls.find((c) => c.url.endsWith('/machine-payments/evidence'))
+    const posted = recordedCalls().find((c) => c.url.endsWith('/machine-payments/evidence'))
     expect(posted?.body).toMatchObject({
       paymentId: 'pay_x402',
       rail: 'x402',
@@ -144,7 +106,7 @@ describe('haven_report_x402_outcome', () => {
       resourceUrl: RESOURCE_URL,
       merchantStatus: 200,
     })
-    expect(calls.some((c) => c.url.endsWith('/machine-payments/reconciliation-events'))).toBe(false)
+    expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/reconciliation-events'))).toBe(false)
   })
 
   it('NEVER contacts the merchant — the keyless property this path exists to protect', async () => {
@@ -160,8 +122,8 @@ describe('haven_report_x402_outcome', () => {
       merchant_body: 'Payment required',
     })
 
-    expect(calls.every((c) => new URL(c.url).origin === 'http://haven.test')).toBe(true)
-    expect(calls.some((c) => c.url.includes('merchant.example'))).toBe(false)
+    expect(recordedCalls().every((c) => new URL(c.url).origin === 'http://haven.test')).toBe(true)
+    expect(recordedCalls().some((c) => c.url.includes('merchant.example'))).toBe(false)
   })
 
   it('anchors on HAVEN’s tx hash and resource URL, which the caller cannot name', async () => {
@@ -182,7 +144,7 @@ describe('haven_report_x402_outcome', () => {
     )
     expect(result.data.tx_hash).toBe('0x' + 'cd'.repeat(32))
     expect(result.data.resource_url).toBe('https://other.example/r')
-    const posted = calls.find((c) => c.url.endsWith('/machine-payments/evidence'))
+    const posted = recordedCalls().find((c) => c.url.endsWith('/machine-payments/evidence'))
     expect(posted?.body).toMatchObject({
       txHash: '0x' + 'cd'.repeat(32),
       resourceUrl: 'https://other.example/r',
@@ -202,7 +164,7 @@ describe('haven_report_x402_outcome', () => {
     expect(payload.message).toContain('tx_hash')
     // Refused BEFORE anything is read or written — not parsed to the same
     // value as "absent" and then acted on.
-    expect(calls).toHaveLength(0)
+    expect(recordedCalls()).toHaveLength(0)
   })
 
   it('refuses an outcome that contradicts its own merchant_status, before any write', async () => {
@@ -211,7 +173,7 @@ describe('haven_report_x402_outcome', () => {
       ['accepted', 500],
       ['rejected', 200],
     ] as const) {
-      calls = []
+      clearCalls()
       const payload = fail(
         await handlers().haven_report_x402_outcome({
           payment_id: 'pay_x402',
@@ -220,7 +182,7 @@ describe('haven_report_x402_outcome', () => {
         }),
       )
       expect(payload.message).toContain('contradicts')
-      expect(calls).toHaveLength(0)
+      expect(recordedCalls()).toHaveLength(0)
     }
   })
 
@@ -243,7 +205,7 @@ describe('haven_report_x402_outcome', () => {
       }),
     )
     expect(payload.success).toBe(false)
-    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    expect(recordedCalls().some((c) => c.method === 'POST')).toBe(false)
   })
 
   it('refuses a CONFIRMED payment carrying no Haven funding tx — the anchor gate itself', async () => {
@@ -264,7 +226,7 @@ describe('haven_report_x402_outcome', () => {
       }),
     )
     expect(payload.message).toContain('no confirmed Haven funding transaction')
-    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    expect(recordedCalls().some((c) => c.method === 'POST')).toBe(false)
   })
 
   it('refuses a non-x402 payment', async () => {
@@ -280,7 +242,7 @@ describe('haven_report_x402_outcome', () => {
       }),
     )
     expect(payload.message).toContain('not x402')
-    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    expect(recordedCalls().some((c) => c.method === 'POST')).toBe(false)
   })
 
   it('surfaces the backend refusal when a delivery is already recorded', async () => {
@@ -308,7 +270,12 @@ describe('haven_report_x402_outcome', () => {
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
       const method = (init.method ?? 'GET').toUpperCase()
       const path = new URL(url).pathname
-      calls.push({ url, method, body: init.body ? JSON.parse(init.body as string) : undefined })
+      recordedCalls().push({
+        url,
+        method,
+        body: init.body ? JSON.parse(init.body as string) : undefined,
+        headers: (init.headers ?? {}) as Record<string, string>,
+      })
       if (path.endsWith('/status')) {
         seenStatus += 1
         if (seenStatus > 1) throw new Error('status read exploded')

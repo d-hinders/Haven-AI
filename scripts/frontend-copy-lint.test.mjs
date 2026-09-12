@@ -273,3 +273,205 @@ test('the REAL src/lib tree has no unscanned prose-shaped file', async () => {
     `add these to SCAN_FILES (or CONVENTION_EXEMPT with a reason): ${gaps.join(', ')}`,
   )
 })
+
+// --- The CLI path (#2721, epic #2720)
+//
+// The cases above test the term matching and the escape handling. The refusal
+// — new banned copy beyond the ratcheting baseline — lives in `main()`, and no
+// exported function reaches it. That is the line deciding whether a pull
+// request lands, and the shape that survived mutation elsewhere with a green
+// suite (#2690).
+
+import { runGuard } from './test-support/guard-cli.mjs'
+
+const PAGE = 'packages/frontend/src/app/page.tsx'
+const BASE = 'packages/frontend/copy-lint-baseline.json'
+const copy = (text) => `export default function P() {\n  return <p>${text}</p>\n}\n`
+
+// Both SCAN_DIRS must contain something: the guard REFUSES a scan directory
+// that matches no files ("repoint it, do not leave it matching nothing"), which
+// is its own positive control against a lint quietly reporting on an empty set.
+// A fixture supplying only `app/` trips that refusal and would have looked like
+// the copy rule firing.
+const OTHER = 'packages/frontend/src/components/Thing.tsx'
+
+// The guard carries THREE self-checks that fire before any copy rule, and each
+// one caught a draft of this fixture: a SCAN_DIRS entry matching no files, a
+// SCAN_FILES allowlist entry that does not exist, and (below) the baseline.
+// They are the guard's own positive controls — it refuses to report on a set it
+// could not actually read — so the fixture has to satisfy them before the rule
+// under test is even reached. `SCAN_FILES` is imported rather than restated, so
+// this scaffold cannot drift from the allowlist it exists to satisfy.
+const allowlisted = Object.fromEntries(
+  SCAN_FILES.map((rel) => [rel, 'export const x = 1\n']),
+)
+const scaffold = (files) => ({
+  ...allowlisted,
+  [OTHER]: copy('Nothing to see.'),
+  ...files,
+})
+
+test('CLI: a new banned term beyond the baseline exits non-zero and names it', () => {
+  const { status, out } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({ [PAGE]: copy('Haven runs a policy engine for you.'), [BASE]: '{}' }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /NEW banned product-copy terms/)
+  assert.match(out, /policy engine/)
+  // The file AND the position: a message naming only the term sends the
+  // reader searching the whole tree for it.
+  assert.match(out, /page\.tsx:\d+:\d+/)
+})
+
+test('CLI: copy with no banned term exits 0', () => {
+  // The control. Without it the case above passes against a lint that
+  // refuses everything.
+  const { status } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({ [PAGE]: copy('Your agents pay within the rules you set.'), [BASE]: '{}' }),
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: an occurrence already in the baseline is tolerated', () => {
+  // The ratchet half: this lint is shrink-only, so an existing occurrence must
+  // NOT fail the build. A refusal test alone cannot tell a working ratchet
+  // from a lint that fires on every hit.
+  const { status } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Haven runs a policy engine for you.'),
+      [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 1 } }),
+    }),
+  })
+  assert.equal(status, 0)
+})
+
+test('CLI: `--update` REFUSES to raise the baseline, and writes nothing', () => {
+  // #2728, and this test replaces the one that pinned the hole.
+  //
+  // The branch used to be `if (update) { writeBaseline(...); return }` -- no
+  // comparison at all -- so the command the failure message sends you to was
+  // the one that laundered the failure. Of the five gates then on the same
+  // `lib/ratchet.mjs`, three refused to raise and TWO did not -- this one and
+  // `packages/frontend/scripts/design-lint.mjs`, a blocking frontend gate that
+  // review found by reading the importer list rather than the issue text.
+  //
+  // The fixture is the SAME tree the hole test used, so the two are directly
+  // comparable: exit 0 + growth written, then exit 1 + baseline untouched.
+  const before = JSON.stringify({ [PAGE]: { 'policy engine': 0 } })
+  const grown = scaffold({ [PAGE]: copy('Haven runs a policy engine for you.'), [BASE]: before })
+  const shared = { also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'], files: grown }
+
+  // The plain run refuses it -- so the growth is real, not a fixture artifact.
+  assert.equal(runGuard('frontend-copy-lint.mjs', shared).status, 1)
+
+  const { status, out, wrote } = runGuard('frontend-copy-lint.mjs', {
+    ...shared,
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  // The file and the numbers, not just the headline: a refusal that cannot say
+  // WHAT grew sends the reader back to the plain run to find out.
+  assert.match(out, /page\.tsx \[policy engine\]: 0 → 1/)
+  // "writes nothing" is checked, not claimed -- a guard that printed the
+  // refusal after writing would still have laundered the copy.
+  assert.equal(wrote[BASE], before)
+})
+
+test('CLI: `--update` DOES write when the count fell', () => {
+  // The accept half. Without it the refusal above is also satisfied by an
+  // `--update` that refuses everything, which would break the ratchet in the
+  // other direction: debt could never be tightened after a real cleanup.
+  const { status, out, wrote } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Your agents pay within the rules you set.'),
+      [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 3 } }),
+    }),
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.match(out, /baseline written/)
+  // The written file, not the console line: a `writeBaseline` resolving its
+  // path against the wrong root prints this and writes nothing.
+  assert.equal(JSON.parse(wrote[BASE])[PAGE], undefined)
+})
+
+test('CLI: an existing but EMPTY baseline REFUSES growth -- it is not a first run', () => {
+  // #2728, review finding, and the sharper half of the defect.
+  //
+  // The refusal used to be keyed on `Object.keys(baseline).length === 0`. But
+  // `{}` is what `writeBaseline` PRODUCES the moment a gate reaches zero debt,
+  // so the guard switched itself off on the first successful cleanup -- and
+  // the cleanup is the step the gate's own message tells you to run. Not
+  // hypothetical: `packages/frontend/design-lint-baseline.json` is `{}` today.
+  //
+  // The allowance is now keyed on the baseline FILE not existing, which is the
+  // state it always meant.
+  const { status, out, wrote } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({ [PAGE]: copy('Haven runs a policy engine for you.'), [BASE]: '{}' }),
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /--update refuses to RAISE the baseline/)
+  assert.equal(wrote[BASE], '{}')
+})
+
+test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
+  const files = scaffold({ [PAGE]: copy('Haven runs a policy engine for you.') })
+  delete files[BASE]
+  const refused = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files,
+    args: ['--update'],
+    readBack: [BASE],
+  })
+  assert.equal(refused.status, 1)
+  assert.match(refused.out, /--update --accept-new/)
+  assert.equal(refused.wrote[BASE], null)
+
+  const accepted = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files,
+    args: ['--update', '--accept-new'],
+    readBack: [BASE],
+  })
+  assert.equal(accepted.status, 0)
+  assert.match(accepted.wrote[BASE], /"policy engine": 1/)
+})
+
+test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
+  const files = scaffold({ [PAGE]: copy('Your Haven wallet stays in your control.') })
+  delete files[BASE]
+  const { status, wrote } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'], files, args: ['--update'], readBack: [BASE],
+  })
+  assert.equal(status, 0)
+  assert.deepEqual(JSON.parse(wrote[BASE]), {})
+})
+
+test('CLI: a malformed baseline prints one line, and no longer dumps the error object', () => {
+  // #2761. This gate DID have an entrypoint catch, but it was `console.error(err)`
+  // — which prints a stack for a bug and an inspected object for a refusal.
+  // `runGate` splits those: a frameless refusal is one line, a bug keeps frames.
+  const { status, out } = runGuard('frontend-copy-lint.mjs', {
+    also: ['lib/ratchet.mjs', 'lib/lint-escapes.mjs'],
+    files: scaffold({
+      [PAGE]: copy('Your agents pay within the rules you set.'),
+      [BASE]: JSON.stringify({ [PAGE]: { 'policy engine': 'x' } }),
+    }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /✗ frontend-copy-lint: /)
+  assert.match(out, /\[policy engine\] is "x", not a number/)
+  assert.doesNotMatch(out, /node:internal/)
+  // The old shape printed `[TypeError: …]` via util.inspect; the message is bare now.
+  assert.doesNotMatch(out, /\[TypeError:/)
+})

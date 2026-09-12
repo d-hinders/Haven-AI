@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fixtures/haven-api'
 
 /**
  * Mobile navigation layering (#1749).
@@ -141,7 +141,11 @@ async function expectNavigationReachable(page: Page) {
   //    "intercepts pointer events" rather than silently passing.
   await open.click()
 
-  const nav = page.getByRole('navigation')
+  // Scoped to the DRAWER's landmark (#2731). The shell has two navigation
+  // landmarks now — the drawer and the bottom tab bar — and a bare
+  // `getByRole('navigation')` is a strict-mode violation rather than a
+  // silent wrong answer, which is the good failure mode.
+  const nav = page.getByRole('navigation', { name: 'All sections' })
   await expect(nav.getByRole('link', { name: 'Dashboard' })).toBeVisible()
 
   // 3. The drawer owns its own top band. It is `inset-y-0`, so its 56px logo
@@ -154,11 +158,7 @@ async function expectNavigationReachable(page: Page) {
   //    can land on a part-way drawer, return the scrim, and report a layering
   //    defect that does not exist. That false failure hit three of four widths
   //    on this spec's first run.
-  await page.waitForFunction(
-    () => Math.round(document.querySelector('aside')!.getBoundingClientRect().left) === 0,
-    undefined,
-    { timeout: 10_000 },
-  )
+  await waitForDrawerOpen(page)
 
   const layering = await page.evaluate(() => {
     const aside = document.querySelector('aside')!
@@ -222,9 +222,189 @@ test.describe('mobile navigation is reachable below lg (#1749)', () => {
     // hamburger onto the desktop shell.
     test('no mobile toggle renders at 1024px', async ({ page }) => {
       await page.goto('/dashboard')
-      await expect(page.getByRole('navigation').getByRole('link', { name: 'Dashboard' })).toBeVisible()
+      await expect(
+        page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Dashboard' }),
+      ).toBeVisible()
       await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeHidden()
       await expect(page.getByRole('button', { name: 'Close sidebar' })).toBeHidden()
     })
+  })
+})
+
+/**
+ * The drawer must leave the screen when the viewport CROSSES into mobile
+ * (#2586).
+ *
+ * `collapsed` was decided once, in a `useState` initialiser reading
+ * `window.innerWidth`, and never revisited. Below `lg` the drawer is
+ * `fixed inset-y-0 left-0` and only `-translate-x-full` keeps it off screen, so
+ * a window that starts at desktop width and then narrows leaves the whole
+ * sidebar — its footer row, the account link and the `User menu` kebab — parked
+ * on top of the page at `translate-x-0`. #2586 reports it obscuring the left
+ * edge of the `/agents` empty state's prompt card and clipping its footer link.
+ *
+ * ── Why this could not have been caught by a visual baseline ────────────────
+ * It reproduces only after a CROSSING. `scripts/screenshot.mjs` sets the
+ * viewport BEFORE it navigates, so the initialiser always sees the narrow width
+ * and a fresh 390px capture is clean — verified, by capturing the `/agents`
+ * empty state at 390 on the unfixed code and finding the prompt card and its
+ * footer link fully visible. #2586's third acceptance criterion asks whether a
+ * whole-page mobile baseline for `/agents` would have caught this. It would
+ * not, and no baseline could: the harness cannot express a resize. That is the
+ * answer to the criterion, and it is why the guard is here rather than there.
+ *
+ * ── Why a browser and not jsdom ────────────────────────────────────────────
+ * The unit sibling in `Sidebar.test.tsx` asserts the class string, which is the
+ * cheap half and pins the state machine. It cannot see whether the element
+ * actually covers anything: jsdom has no layout, so a drawer at
+ * `translate-x-0` and one at `-translate-x-full` occupy the same nothing. The
+ * claim that matters — page content at that coordinate is reachable — is a
+ * rendered property.
+ */
+test.describe('the drawer leaves the screen when the viewport narrows (#2586)', () => {
+  test.use({ viewport: { width: 1280, height: 900 } })
+
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+    // `/agents` with no agents is #2586's own route and state: the empty state
+    // is the first screen tall enough to reach the coordinate in question.
+    await page.route('**/api/agents*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ agents: [] }),
+      })
+    })
+  })
+
+  test('narrowing past lg puts the drawer off screen and hands the coordinate back to the page', async ({
+    page,
+  }) => {
+    await page.goto('/agents')
+    // Hide Next's dev-tools indicator, exactly as `scripts/screenshot.mjs`
+    // does. Under `next dev` that badge sits at the bottom-left of every page
+    // and OWNS this spec's hit-test coordinate — so without it the assertions
+    // below are answered by dev chrome rather than by the product. It is also
+    // the element #2586 mistook for the sidebar's avatar.
+    //
+    // AFTER the navigation, not in `beforeEach`: an earlier copy ran before
+    // any `goto`, so the injected style was discarded by the navigation and
+    // its `.catch(() => {})` hid that it never applied (review nit).
+    await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' })
+    // The shell renders after the auth context resolves, and at 1280 the
+    // `Open sidebar` toggle this spec's sibling waits on is `lg:hidden` — so
+    // wait on the drawer itself rather than on a control that is correctly
+    // absent at this width.
+    await page.waitForSelector('aside', { state: 'attached', timeout: 15_000 })
+
+    // Mounted wide: on screen and in flow, which is correct — at `lg` the
+    // drawer is `static`, not an overlay. Asserted so the crossing below is
+    // measured against a known start rather than an assumed one.
+    const wide = await page.evaluate(() => {
+      const r = document.querySelector('aside')!.getBoundingClientRect()
+      return { left: Math.round(r.left), width: Math.round(r.width) }
+    })
+    expect(wide.width).toBeGreaterThan(0)
+    expect(wide.left).toBe(0)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+
+    // The 200ms slide has to finish before anything is hit-tested: a
+    // transforming element still has a non-empty box, and reading mid-slide is
+    // how this spec's sibling produced three false failures on its first run.
+    await page.waitForFunction(
+      () => {
+        const r = document.querySelector('aside')?.getBoundingClientRect()
+        return !!r && Math.round(r.right) <= 0
+      },
+      undefined,
+      { timeout: 10_000 },
+    )
+
+    // 1. The drawer is fully clear of the viewport.
+    const narrow = await page.evaluate(() => {
+      const r = document.querySelector('aside')!.getBoundingClientRect()
+      return { right: Math.round(r.right), viewportWidth: window.innerWidth }
+    })
+    expect(narrow, `drawer still intrudes: ${JSON.stringify(narrow)}`).toMatchObject({ right: 0 })
+
+    // 2. The claim that actually matters, asked the way a tap asks it: at the
+    //    bottom-left coordinate the sidebar's footer row occupied, what would
+    //    the user reach? Anything inside `aside` here is the reported defect.
+    //    `insideDrawer: false` alone is too weak, and was (review finding): it
+    //    passes when the coordinate is owned by ANYTHING that is not the aside
+    //    — the `fixed inset-0` scrim included, which would obscure the entire
+    //    page. So the element is named and required to be inside `<main>`.
+    const hit = await page.evaluate(() => {
+      const aside = document.querySelector('aside')
+      const bar = document.querySelector('[data-mobile-tab-bar]')
+      const barH = bar ? Math.round(bar.getBoundingClientRect().height) : 0
+      // ABOVE the tab bar (#2731). The probe used to sit 40px off the bottom,
+      // which was page content then and is the bar's own band now — the bar is
+      // 56px tall and `fixed`. Reading the old coordinate would have reported
+      // "the page is covered" about chrome that is supposed to be there, which
+      // is a false defect rather than a missed one, but still a spec measuring
+      // the wrong box.
+      const top = document.elementFromPoint(24, window.innerHeight - barH - 40)
+      // ...and the bar's OWN band, which is new ground this spec should hold:
+      // after the drawer leaves, the bottom strip must belong to the tab bar
+      // and not to the drawer that just slid out of it.
+      const inBar = bar ? document.elementFromPoint(24, window.innerHeight - barH / 2) : null
+      return {
+        insideDrawer: !!(top && aside?.contains(top)),
+        insidePageContent: !!top?.closest('main'),
+        // Named so a failure says WHAT is covering the page rather than just
+        // `true` — the first question anyone asks next.
+        topElement: top?.tagName.toLowerCase() ?? null,
+        barBandIsTheBar: !!(inBar && bar?.contains(inBar)),
+        barBandInsideDrawer: !!(inBar && aside?.contains(inBar)),
+      }
+    })
+    expect(hit).toMatchObject({
+      insideDrawer: false,
+      insidePageContent: true,
+      barBandIsTheBar: true,
+      barBandInsideDrawer: false,
+    })
+
+    // 3. The symptom #2586 actually reported, asserted on the element it named:
+    //    the empty state's footer link must be reachable, not clipped by
+    //    anything. `toBeVisible` is not enough — a covered element is still
+    //    visible — so this hit-tests the link's own centre.
+    const guide = page.getByRole('link', { name: 'Read the agent guide' })
+    await expect(guide).toBeVisible()
+    // The shell is `h-screen overflow-hidden` with `<main>` as the only
+    // scroller, and the empty state is taller than the viewport — so the link
+    // starts BELOW the fold and `elementFromPoint` at its coordinates returns
+    // null (measured: `covering: null`, which reads as "covered" while nothing
+    // is covering it). Scroll it into view before hit-testing.
+    // No fixed wait after this: nothing in `src/` sets `scroll-behavior:
+    // smooth`, so the scroll completes synchronously, and a sleep in a spec
+    // whose own comment above argues for `waitForFunction` over fixed waits is
+    // the wrong example to leave behind (review nit). The link's own position
+    // is what the probe reads, and it is settled by the time this returns.
+    await guide.scrollIntoViewIfNeeded()
+    const linkReachable = await guide.evaluate((el) => {
+      // Per LINE BOX, not the bounding box. This link WRAPS at 390px, and the
+      // centre of a two-line inline element's bounding box falls in the gap
+      // between the lines — which returns the parent and reads as "covered"
+      // when nothing is covering it. Measured: the first assertion written
+      // this way failed on a page with the link fully legible.
+      const rects = Array.from(el.getClientRects())
+      const probes = rects.map((r) => {
+        const top = document.elementFromPoint(
+          Math.round(r.left + r.width / 2),
+          Math.round(r.top + r.height / 2),
+        )
+        return { reachable: top === el || el.contains(top), covering: top?.tagName.toLowerCase() ?? null }
+      })
+      return {
+        lineBoxes: rects.length,
+        reachable: probes.length > 0 && probes.every((p) => p.reachable),
+        covering: probes.find((p) => !p.reachable)?.covering ?? null,
+      }
+    })
+    expect(linkReachable).toMatchObject({ reachable: true })
   })
 })

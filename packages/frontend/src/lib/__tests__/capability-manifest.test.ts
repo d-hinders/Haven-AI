@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -10,7 +10,7 @@ import {
   type DiscoveryFacts,
 } from '../capability-manifest'
 import { AUTH_MARKED_PREFIXES, PUBLIC_SURFACES } from '../discovery-surfaces'
-import { CHAIN_REGISTRY } from '@haven_ai/core'
+import { CHAIN_REGISTRY, DEFAULT_CHAIN_ID, getChainData } from '@haven_ai/core'
 
 /**
  * The capability manifest at `/.well-known/haven.json` (#2531).
@@ -28,7 +28,7 @@ const FACTS: DiscoveryFacts = {
   connector_package: '@haven_ai/connect@dev',
   cli_package: '@haven_ai/cli@dev',
   openapi_url: 'https://api.test/openapi.json',
-  chains: { deployable: [84532], supported: [8453, 84532, 100] },
+  chains: { default: DEFAULT_CHAIN_ID, deployable: [84532], supported: [8453, 84532, 100] },
 }
 
 /** Every own-origin path the manifest names. They are relative by design. */
@@ -94,6 +94,8 @@ describe('capability manifest', () => {
     const manifest = buildManifestFrom('https://attacker.example', FACTS)
     expect(manifest.api.base).toBe('https://api.test')
     expect(manifest.hosted_mcp.url).toBe('https://mcp.test')
+    expect(manifest.api.openapi_mirror).toContain('/api/openapi.json')
+    expect(manifest.api.openapi_mirror).toContain('same document')
   })
 
   it('omits the keys whose targets do not exist yet, and names what lands them', () => {
@@ -138,6 +140,7 @@ describe('capability manifest', () => {
 
   it('takes the environment-dependent values from the backend, never a literal', () => {
     const manifest = buildManifestFrom(ORIGIN, FACTS)
+    expect(manifest.chains?.default).toBe(DEFAULT_CHAIN_ID)
     expect(manifest.packages.connect.channel).toBe('@haven_ai/connect@dev')
     expect(manifest.packages.connect.one_liner).toBe('npx @haven_ai/connect@dev')
     // #2617: the CLI mirrors the connector's channel shape — the runbook and
@@ -184,7 +187,7 @@ describe('capability manifest', () => {
     // of the FACTS. If they ever disagree, an entry naming unsourced facts is
     // worse than a shorter list — and the static `deployable` half still
     // reports the id.
-    const unknown = { ...FACTS, chains: { deployable: [999999], supported: [8453, 999999] } }
+    const unknown = { ...FACTS, chains: { default: DEFAULT_CHAIN_ID, deployable: [999999], supported: [8453, 999999] } }
     const manifest = buildManifestFrom(ORIGIN, unknown)
     expect(manifest.chains?.deployable).toEqual([999999])
     expect(manifest.chains?.supported.map((entry) => entry.id)).toEqual([8453])
@@ -248,6 +251,46 @@ describe('capability manifest', () => {
     } finally {
       delete process.env.NEXT_PUBLIC_API_URL
     }
+  })
+
+  describe('environment (#2709)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('reports production when the build variable is unset — the production convention', () => {
+      // Production leaves NEXT_PUBLIC_HAVEN_ENV unset (dev-environment.md,
+      // EnvBadge). The manifest used to read the raw variable and answer
+      // `unknown` on exactly the deployment where an agent most needs the
+      // answer.
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+      expect(buildManifestFrom(ORIGIN, FACTS).environment).toBe('production')
+    })
+
+    it('reports the deployment name on a non-production build', () => {
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', 'dev')
+      expect(buildManifestFrom(ORIGIN, FACTS).environment).toBe('dev')
+    })
+
+    it('marks each supported chain as testnet or not, from the registry rather than a literal', () => {
+      // The registry carries a faucet ONLY for testnets (#2534); the manifest
+      // derives `testnet` from that so production — which lists Base Sepolia
+      // beside Base — never lets an agent read "production" as "real money on
+      // every chain listed".
+      const manifest = buildManifestFrom(ORIGIN, FACTS)
+      for (const entry of manifest.chains?.supported ?? []) {
+        expect(entry.testnet).toBe(getChainData(entry.id).faucetUrl !== undefined)
+      }
+      const byId = Object.fromEntries((manifest.chains?.supported ?? []).map((c) => [c.id, c.testnet]))
+      expect(byId[84532]).toBe(true)
+      expect(byId[8453]).toBe(false)
+      expect(byId[100]).toBe(false)
+    })
+
+    it('never answers unknown, even without backend facts', () => {
+      vi.stubEnv('NEXT_PUBLIC_HAVEN_ENV', '')
+      expect(buildManifestFrom(ORIGIN, null).environment).toBe('production')
+    })
   })
 
   it('degrades honestly when the backend is unreachable', () => {

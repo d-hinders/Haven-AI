@@ -24,6 +24,110 @@ const tokenSymbol = {
 } as const
 
 /**
+ * Shared between `TransactionBase` and `Transaction` (#2885). The two used to
+ * be `allOf`-composed (`Transaction: { allOf: [{ $ref: TransactionBase }, {...}] }`,
+ * #984) so the 25-odd shared fields were written once. That composition met
+ * `openapi/response-shape.ts` the wrong way round: `closeObjects` leaves
+ * inline `allOf` members open, but every component schema is registered
+ * ALREADY closed (`ajv.addSchema(closeObjects(definition))`), so the `$ref`'d
+ * `TransactionBase` rejected the four fields its sibling declared —
+ * `chainId`/`safeId`/`safeAddress`/`safeName` — on every feed row. The
+ * composed schema could not be asserted at all: a correct payload was a
+ * "must NOT have additional properties" failure, which is why the feed route
+ * carried no `expectMatchesSpec` and why `fxRateSek`/`fxSource` (#2871) could
+ * land undeclared. Spreading this object into two FLAT schemas keeps the
+ * source DRY without composing — `closeObjects` closes each one truthfully,
+ * so `expectMatchesSpec` passes on a correct row and fails on a drifted one.
+ */
+const transactionBaseProperties = {
+  hash: { type: 'string' },
+  type: { type: 'string', enum: ['native', 'erc20', 'internal'] },
+  // Deliberately NOT the `address` helper: Safe Transaction Service
+  // transfers with a null counterparty are emitted as '' (#984 spec
+  // correction — the old pattern rejected real responses).
+  from: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
+  to: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
+  value: { type: 'string' },
+  valueFormatted: { type: 'string' },
+  asset: { type: 'string', description: 'Token ticker where known; falls back to the raw contract address for unknown tokens.' },
+  decimals: { type: 'integer' },
+  direction: { type: 'string', enum: ['in', 'out'] },
+  timestamp: { type: 'integer' },
+  blockNumber: { type: 'integer', description: '0 for x402-synthesized rows with no on-chain receipt yet.' },
+  isError: { type: 'boolean' },
+  tokenAddress: address,
+  tokenSymbol: { type: 'string' },
+  source: { type: 'string', description: "Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values." },
+  x402ResourceUrl: { type: ['string', 'null'] },
+  x402MerchantAddress: { type: ['string', 'null'] },
+  paymentId: { type: 'string' },
+  paymentProofStatus: { type: ['string', 'null'] },
+  paymentFlowStatus: {
+    type: ['string', 'null'],
+    enum: ['paid', 'confirming_merchant', 'needs_attention', null],
+  },
+  paymentAttentionReason: {
+    type: ['string', 'null'],
+    enum: ['merchant_retry_rejected_after_payment', null],
+  },
+  activityType: { type: 'string', enum: ['delegate_sweep'] },
+  agentName: { type: 'string' },
+  // #2097: backend-recorded initiator classification — never derived
+  // in the frontend. `agent` = row carries agent attribution (confirmed
+  // x402 intents, delegate sweeps, raw transfers matched to a
+  // confirmed intent). `human` = reserved; no dashboard-initiated send
+  // path populates it (mpp demo & /send retired). `unknown` = outbound
+  // raw transfer with no matched intent. Absent for `direction: in`
+  // rows.
+  initiatedBy: {
+    type: 'string',
+    enum: ['agent', 'human', 'unknown'],
+    description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.',
+  },
+  // #1705 (epic #1704). Read from the intent's `machine_metadata`
+  // JSONB, which both delegation-rail branches already stamp
+  // (`modules/x402/delegation-authorize.ts`).
+  settlementScheme: {
+    type: ['string', 'null'],
+    enum: ['eip3009', 'erc7710', null],
+    description:
+      'Which settlement branch actually moved the money: `erc7710` (direct settlement, ' +
+      'account → merchant, no funding leg) or `eip3009` (funded transfer — the budget ' +
+      'delegation funds the delegate EOA, which then signs the standard EIP-3009 header). ' +
+      'This is the settlement SCHEME and is three-way distinct from its neighbours: ' +
+      '`source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account\'s ' +
+      '`execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy ' +
+      'AllowanceModule). Do not collapse them. Null when no scheme was recorded — ' +
+      'non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but ' +
+      'never stamp the key. Null-in-null-out: nothing is inferred or backfilled.',
+  },
+  // #984 spec correction: emitted on every enriched row (string | null),
+  // was missing while additionalProperties:false claimed completeness.
+  amountSek: { type: ['string', 'null'] },
+  /**
+   * The book-time FX rate `amountSek` was struck at, and where it came from
+   * (#2885 spec correction — emitted on every enriched row, string | null,
+   * same as `amountSek`, but was entirely absent from the contract).
+   * `modules/transactions/types.ts`'s `fxRateSek` / `fxSource`, surfaced for
+   * the CSV export (#2871). Null wherever `amountSek` is: they are written by
+   * the same pricing step, so a row never carries an amount without its rate.
+   */
+  fxRateSek: { type: ['string', 'null'] },
+  fxSource: { type: ['string', 'null'] },
+  // #2870: accounting-feed state joined from the sync ledger by
+  // `paymentId`. PRESENT only when the feed is available to the
+  // account, the user has a provider connection, and a sync row exists
+  // for the payment — otherwise the key is absent (never null). No
+  // `booked` field: the ledger stores no verify result.
+  accounting: { $ref: '#/components/schemas/TransactionAccounting' },
+} as const
+
+const transactionBaseRequired = [
+  'hash', 'type', 'from', 'to', 'value', 'valueFormatted', 'asset', 'decimals',
+  'direction', 'timestamp', 'blockNumber', 'isError',
+] as const
+
+/**
  * ── The two allowance amount shapes (#2295) ──────────────────────────────────
  *
  * `allowance_amount` carries TWO incompatible wire shapes under one field name,
@@ -421,7 +525,7 @@ const userIdentity = {
 
 // ── Bookkeeping building blocks (#1446, epics #462/#491) ─────────────────────
 
-/** One reporting-feed sync row, as the status route returns it. */
+/** One accounting-feed sync row, as the status route returns it. */
 const feedSyncRow = {
   type: 'object',
   required: ['id', 'user_id', 'provider', 'payment_id', 'external_ref', 'status', 'error', 'attempts', 'created_at', 'updated_at'],
@@ -432,10 +536,128 @@ const feedSyncRow = {
     payment_id: { type: 'string' },
     external_ref: { type: ['string', 'null'], description: 'The provider-side reference once pushed.' },
     status: { type: 'string', enum: ['pending', 'pushed', 'failed', 'skipped'] },
-    error: { type: ['string', 'null'] },
-    attempts: { type: 'integer' },
+    error: {
+      type: ['string', 'null'],
+      description:
+        'The provider message on a failed row, the reason on a skipped row, a non-fatal note on a pushed row. A `failed` row the retry sweep (#2866) has given up on starts with `exhausted:`.',
+    },
+    attempts: { type: 'integer', description: 'Claims so far; the background sweep stops at 8.' },
     created_at: { type: 'string', format: 'date-time' },
     updated_at: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+/** An accounting provider descriptor, as the registry lists it (#2862). */
+const accountingProvider = {
+  type: 'object',
+  required: ['id', 'displayName', 'authKind', 'capabilities', 'availability', 'requiredScopes', 'configured'],
+  properties: {
+    id: { type: 'string', examples: ['fortnox'] },
+    displayName: { type: 'string', examples: ['Fortnox'] },
+    authKind: { type: 'string', enum: ['oauth2', 'api_key'] },
+    capabilities: {
+      type: 'object',
+      required: ['attachments', 'verify', 'revoke', 'companyInfo'],
+      properties: {
+        attachments: { type: 'boolean' },
+        verify: { type: 'boolean' },
+        revoke: { type: 'boolean' },
+        companyInfo: { type: 'boolean' },
+      },
+    },
+    availability: {
+      type: 'string',
+      enum: ['live', 'coming_soon'],
+      description: 'Only a `live` provider accepts a connect; `coming_soon` ones are listed so the dashboard can show them.',
+    },
+    requiredScopes: { type: 'array', items: { type: 'string' } },
+    configured: {
+      type: 'boolean',
+      description: 'Whether THIS deployment can connect the provider (its connector is registered). A live provider without credentials configured is listed but refuses connect with 503.',
+    },
+  },
+} as const
+
+/**
+ * The user's per-connection settings (#2867), defaults applied — what
+ * `PATCH /accounting/connections/{provider}/settings` writes, read back.
+ */
+const accountingConnectionSettings = {
+  type: 'object',
+  required: ['suggestedAccount', 'autoFeed'],
+  properties: {
+    suggestedAccount: {
+      type: ['string', 'null'],
+      description:
+        'A hint for the accountant, carried on every pushed document ONLY in the connector\'s non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint.',
+    },
+    autoFeed: {
+      type: 'boolean',
+      description:
+        'Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push.',
+    },
+  },
+} as const
+
+/**
+ * One accounting connection — SAFE METADATA ONLY (#2862). Never the secrets
+ * blob, never a token or key; the route tests are written as redaction tests.
+ */
+const accountingConnection = {
+  type: 'object',
+  required: [
+    'provider', 'displayName', 'authKind', 'status', 'statusReason', 'isActiveDestination', 'feedFrom',
+    'grantedScope', 'missingScopes', 'tokenExpiresAt', 'externalCompanyId', 'externalCompanyName', 'baseCurrency', 'lastPushAt', 'lastError',
+    'connectedAt', 'updatedAt', 'settings',
+  ],
+  properties: {
+    provider: { type: 'string', examples: ['fortnox'] },
+    displayName: { type: 'string' },
+    authKind: { type: 'string', enum: ['oauth2', 'api_key'] },
+    status: {
+      type: 'string',
+      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
+      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
+    },
+    statusReason: { type: ['string', 'null'] },
+    isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
+    feedFrom: {
+      type: ['string', 'null'],
+      format: 'date-time',
+      description: 'Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.',
+    },
+    grantedScope: { type: ['string', 'null'] },
+    missingScopes: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        "#2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it.",
+    },
+    tokenExpiresAt: { type: ['string', 'null'], format: 'date-time', description: 'Access-token expiry (OAuth2 providers). Null for API-key providers.' },
+    externalCompanyId: {
+      type: ['string', 'null'],
+      description: "The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it.",
+    },
+    externalCompanyName: { type: ['string', 'null'], description: 'The company the connection points at, for "Connected to <Company AB>" (#2864).' },
+    baseCurrency: { type: ['string', 'null'], description: 'ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK.' },
+    lastPushAt: { type: ['string', 'null'], format: 'date-time' },
+    lastError: { type: ['string', 'null'] },
+    connectedAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+    settings: accountingConnectionSettings,
+  },
+} as const
+
+const providerRefusal = {
+  description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`) or the flow does not match its auth kind (`WRONG_AUTH_KIND`).',
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['error', 'error_code'],
+        properties: { error: { type: 'string' }, error_code: { type: 'string' } },
+      },
+    },
   },
 } as const
 
@@ -615,6 +837,21 @@ const errorResponse = {
       },
     },
   },
+} as const
+
+/**
+ * #2918: the accounting connection routes gate on `config.hosted &&
+ * config.accountingEnabled` — NOT the account entitlement, which stays the
+ * feed's gate (#2861). Same 404 body shape as `requireAccountingFeed`
+ * (`{ error: 'Not found' }`), so a deployment with the feature off does not
+ * advertise it by answering differently. `/accounting/providers` is exempt
+ * (it stays session-only so the Coming soon page, #2869, can still list
+ * platforms), and the OAuth callback never answers this — it redirects with
+ * `reason=feature_off` instead, documented on that route's 302.
+ */
+const accountingFeatureGate404 = {
+  ...errorResponse,
+  description: 'The deployment is not hosted, or the accounting feature flag is off.',
 } as const
 
 /**
@@ -2639,121 +2876,13 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/owners': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listUserOwners',
-        summary: 'The owner directory across every linked Safe, with aliases.',
-        description:
-          "Reads each linked Safe's owners LIVE from the chain and groups them by address, so one owner appearing on three accounts is one entry listing three. Aliases are looked up ONLY for the addresses just confirmed on-chain, which is what stops a removed owner's alias from reappearing. **A partial chain failure is reported, never hidden**: partialFailure/failedSafeIds name the Safes whose owners could not be read, so a caller can tell an incomplete directory from a complete one. Those two fields are camelCase, unlike the rest of this API — documented as-is rather than silently normalised.",
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '200': {
-            description: 'Owners grouped by address, plus the partial-failure report.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['owners', 'partialFailure', 'failedSafeIds'],
-                  properties: {
-                    owners: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        required: ['owner_address', 'name', 'accounts'],
-                        properties: {
-                          owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Lowercased for grouping.' },
-                          name: { type: ['string', 'null'], description: 'The stored alias, or null.' },
-                          accounts: {
-                            type: 'array',
-                            items: {
-                              type: 'object',
-                              required: ['id', 'safe_address', 'chain_id', 'name'],
-                              properties: {
-                                id: { type: 'string', format: 'uuid' },
-                                safe_address: address,
-                                chain_id: { type: 'integer' },
-                                name: { type: 'string' },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                    partialFailure: { type: 'boolean' },
-                    failedSafeIds: { type: 'array', items: { type: 'string' } },
-                  },
-                },
-              },
-            },
-          },
-          '401': errorResponse,
-        },
-      },
-    },
-    '/user/owners/{ownerAddress}': {
-      put: {
-        tags: ['Dashboard'],
-        operationId: 'setOwnerAlias',
-        summary: 'Name an owner address.',
-        description:
-          "An alias is a label, never a grant — naming an address confers no authority over any Safe. The address must be a CURRENT owner of a linked account, checked against the live directory: an unknown address is a 404, but if the chain read partially failed the answer is **503 rather than 404**, because 'not an owner' and 'could not check' must not look the same.",
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['name'],
-                properties: { name: { type: 'string', minLength: 1, maxLength: 80 } },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'The stored alias.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['owner_address', 'name'],
-                  properties: {
-                    owner_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
-                    name: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': { ...errorResponse, description: 'Not a current owner of any linked account.' },
-          '503': { ...errorResponse, description: 'Owners could not be verified — distinct from "not an owner".' },
-        },
-      },
-      delete: {
-        tags: ['Dashboard'],
-        operationId: 'deleteOwnerAlias',
-        summary: "Remove an owner's alias.",
-        description: 'Drops the label only. Idempotent — removing an alias that does not exist still succeeds, and no ownership check is needed because no authority is involved either way.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'ownerAddress', in: 'path', required: true, schema: address, description: 'Owner address; matched case-insensitively (stored lowercase).' }],
-        responses: {
-          '200': {
-            description: 'Alias removed (or was already absent).',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-        },
-      },
-    },
+    // #2847 (epic #1440): the /user/owners directory is deleted. It probed
+    // each linked account's owners over the Safe ABI and answered
+    // { owners: [], partialFailure: true } on every delegation account, and
+    // the alias writes behind it served no surviving surface.
     // ── Bookkeeping: export, reconcile, categories (#1446, epic #462) ───────
     // Read-only over settled-payment data. No custody surface: nothing here
-    // moves money, and the reporting feed below is deliberately NON-ASSERTING
+    // moves money, and the accounting feed below is deliberately NON-ASSERTING
     // (#491) — it hands the accounting tool a draft, never a booked verdict.
     '/accounting/export': {
       get: {
@@ -2761,7 +2890,7 @@ export const openapiSpec = {
         operationId: 'exportAccounting',
         summary: 'Legacy SIE export — GATED OFF by default.',
         description:
-          "Superseded by the non-asserting reporting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.",
+          "Superseded by the non-asserting accounting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'format', in: 'query', schema: { type: 'string', enum: ['sie'] }, description: "Defaults to 'sie'; anything else is a 400." },
@@ -2780,7 +2909,7 @@ export const openapiSpec = {
           },
           '400': errorResponse,
           '401': errorResponse,
-          '410': { ...errorResponse, description: 'The default: SIE export is retired in favour of the reporting feed.' },
+          '410': { ...errorResponse, description: 'The default: SIE export is retired in favour of the accounting feed.' },
         },
       },
     },
@@ -2932,13 +3061,13 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/reporting/status': {
+    '/accounting/feed/status': {
       get: {
         tags: ['Dashboard'],
-        operationId: 'getReportingStatus',
-        summary: 'Whether the reporting feed is available, connected, and live — plus recent syncs.',
+        operationId: 'getAccountingFeedStatus',
+        summary: 'Whether the accounting feed is available, connected, and live — plus recent syncs.',
         description:
-          'Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.',
+          'Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error. #2869: it answers 200 in every off state — `hosted:false` is "not available on self-hosted", `hosted:true, enabled:false` is "Coming soon" (visible in production by owner decision), and `enabled:true, entitled:false` is the add-on state; the gated actions 404 in all three.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -2947,14 +3076,62 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['hosted', 'flagEnabled', 'liveSyncReady', 'available', 'connected', 'syncs'],
+                  required: ['hosted', 'enabled', 'flagEnabled', 'liveSyncReady', 'entitled', 'entitlementMode', 'available', 'connected', 'companyName', 'destination', 'missingScopes', 'syncs', 'counts'],
                   properties: {
-                    hosted: { type: 'boolean' },
-                    flagEnabled: { type: 'boolean' },
+                    hosted: { type: 'boolean', description: 'This deployment is the hosted Haven (`HAVEN_HOSTED`). False on a self-hosted box, where the feed is not available and never "coming soon" (#2869).' },
+                    enabled: { type: 'boolean', description: '#2869: the `HAVEN_ACCOUNTING_ENABLED` flag. `hosted && !enabled` is the "Coming soon" state the dashboard shows in production.' },
+                    flagEnabled: { type: 'boolean', deprecated: true, description: 'Deprecated — same value as `enabled`; removed one release after #2869.' },
                     liveSyncReady: { type: 'boolean', description: 'A real provider adapter is registered.' },
-                    available: { type: 'boolean', description: 'The caller is entitled to the feed.' },
+                    entitled: {
+                      type: 'boolean',
+                      description:
+                        '#2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `enabled` is false, so the UI can tell "feature off" from "not entitled" without a second call.',
+                    },
+                    entitlementMode: {
+                      type: 'string',
+                      enum: ['granted', 'all'],
+                      description: 'How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.',
+                    },
+                    available: { type: 'boolean', description: 'hosted AND enabled AND entitled — the one field a caller needs to decide whether to render the feed.' },
                     connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
+                    companyName: {
+                      type: ['string', 'null'],
+                      description: 'The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, when the grant could not read it (`scope_missing`), or when the feed is unavailable.',
+                    },
+                    destination: {
+                      type: ['object', 'null'],
+                      required: ['provider', 'displayName', 'status', 'companyName', 'lastPushAt'],
+                      description:
+                        '#2869: the connection flagged as the feed destination WHATEVER its status — the page summary line ("Feeding Fortnox · Company AB · last push …") and the sidebar attention badge read it. A `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` destination is the attention state. Metadata only, never secrets. Null when there is no destination row or the feed is unavailable.',
+                      properties: {
+                        provider: { type: 'string', examples: ['fortnox'] },
+                        displayName: { type: 'string' },
+                        status: {
+                          type: 'string',
+                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
+                        },
+                        companyName: { type: ['string', 'null'] },
+                        lastPushAt: { type: ['string', 'null'], format: 'date-time' },
+                      },
+                    },
+                    missingScopes: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description:
+                        '#2865: the scopes the DESTINATION connection lacks (the row flagged as destination, whatever its status — a `scope_missing` destination reports `connected:false` and names them here), so the UI can say which scope a reconnect adds. Empty when nothing is missing or there is no destination; always present.',
+                    },
                     syncs: { type: 'array', items: feedSyncRow },
+                    counts: {
+                      type: 'object',
+                      required: ['pending', 'failed', 'exhausted'],
+                      description:
+                        '#2866: sync rows by retry state, over ALL of the caller\'s rows (the `syncs` list is capped). `pending` is in flight (or a stale claim the sweep will release), `failed` is retryable — the background sweep re-feeds it with backoff — and `exhausted` is a `failed` row at the attempt cap (8) that the sweep has given up on; its `error` starts with `exhausted:` until a manual "Sync now" re-claims it (a later failure then carries the plain reason while `attempts` keeps it in this count). "Sync now" still retries exhausted rows. Zeros when the feed is unavailable.',
+                      properties: {
+                        pending: { type: 'integer' },
+                        failed: { type: 'integer' },
+                        exhausted: { type: 'integer' },
+                      },
+                    },
                   },
                 },
               },
@@ -2964,10 +3141,10 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/reporting/sync': {
+    '/accounting/feed/sync': {
       post: {
         tags: ['Dashboard'],
-        operationId: 'syncReportingFeed',
+        operationId: 'syncAccountingFeed',
         summary: 'Backfill and retry the feed for the caller.',
         description:
           'Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.',
@@ -2986,14 +3163,14 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '404': { ...errorResponse, description: 'The accounting feed is not available for this caller.' },
         },
       },
     },
-    '/accounting/reporting/verify/{paymentId}': {
+    '/accounting/feed/verify/{paymentId}': {
       get: {
         tags: ['Dashboard'],
-        operationId: 'verifyReportingInvoice',
+        operationId: 'verifyAccountingFeedInvoice',
         summary: "Read back a pushed invoice from the provider's own records.",
         description:
           'Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.',
@@ -3005,7 +3182,7 @@ export const openapiSpec = {
             content: { 'application/json': { schema: invoiceVerification } },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '404': { ...errorResponse, description: 'The accounting feed is not available for this caller.' },
           '409': {
             description: 'Not verifiable — not pushed, not connected, or no invoice reference.',
             content: {
@@ -3025,10 +3202,10 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/reporting/reopen/{paymentId}': {
+    '/accounting/feed/reopen/{paymentId}': {
       post: {
         tags: ['Dashboard'],
-        operationId: 'reopenReportingPush',
+        operationId: 'reopenAccountingFeedPush',
         summary: 'Reopen a pushed row for retry — only when the provider confirms the invoice is gone.',
         description:
           "The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.",
@@ -3052,9 +3229,9 @@ export const openapiSpec = {
             },
           },
           '401': errorResponse,
-          '404': { ...errorResponse, description: 'The reporting feed is not available for this caller.' },
+          '404': { ...errorResponse, description: 'The accounting feed is not available for this caller.' },
           '409': {
-            description: 'Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us.',
+            description: 'Refused, nothing written — the invoice still exists, the row is not pushed, it moved under us, or (#2864, `previous_company`) the row was delivered into the company the connection pointed at BEFORE its latest company switch: its record lives in that company, "missing" in the current one is the correct verdict, and reopening would re-feed the previous company\'s history into the new one.',
             content: {
               'application/json': {
                 schema: {
@@ -3062,8 +3239,9 @@ export const openapiSpec = {
                   required: ['error', 'error_code'],
                   properties: {
                     error: { type: 'string' },
-                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref', 'invoice_exists'] },
+                    error_code: { type: 'string', enum: ['not_pushed', 'not_connected', 'no_invoice_ref', 'invoice_exists', 'previous_company'] },
                     invoice_number: { type: 'integer' },
+                    switched_at: { type: 'string', format: 'date-time', description: 'With `previous_company`: when the connection switched company.' },
                   },
                 },
               },
@@ -3072,52 +3250,38 @@ export const openapiSpec = {
         },
       },
     },
-    // ── Fortnox OAuth connect + legacy voucher push (#1446, epic #462) ──────
-    // CREDENTIAL BOUNDARY: the OAuth access and refresh tokens live server-side
-    // only. NOTHING in this surface returns them — /status exposes the granted
-    // scope and an expiry timestamp and nothing else, and the callback
-    // redirects without echoing anything it received. Pinned by the route
-    // tests, which are written as redaction tests rather than shape tests.
+    // ── Accounting connections, provider-generic (#2862, epic #2858) ─────────
+    // Replaces `/accounting/fortnox/*`. CREDENTIAL BOUNDARY: OAuth tokens and
+    // API keys live server-side only, encrypted at rest. NOTHING in this
+    // surface returns them — every connection answer is metadata, the API-key
+    // route never echoes the key, and the callback redirects without echoing
+    // anything it received. Pinned by the route tests, written as redaction
+    // tests rather than shape tests.
     //
     // This router is registered WITHOUT the global auth hook, deliberately:
-    // the callback is a browser redirect from Fortnox and carries no JWT, so
-    // every other route opts into authentication per-route instead.
-    '/accounting/fortnox/status': {
+    // the callback is a browser redirect from the provider and carries no JWT,
+    // so every other route opts into authentication per-route instead.
+    //
+    // Verify, reopen, sync and status keep their feed-scoped home under
+    // `/accounting/feed/*` (review, 2026-09-11): they act on the ACTIVE
+    // destination, so there is no provider-scoped duplicate of them here.
+    '/accounting/providers': {
       get: {
         tags: ['Dashboard'],
-        operationId: 'getFortnoxStatus',
-        summary: 'Whether Fortnox is configured on this deployment and connected for the caller.',
+        operationId: 'listAccountingProviders',
+        summary: 'The accounting providers Haven knows about, live or coming soon.',
         description:
-          "Returns SAFE METADATA ONLY: the granted scope and the token expiry, never the tokens themselves. Two shapes, deliberately: when the deployment has no Fortnox credentials the answer omits scope/expiresAt entirely (there is nothing to report), and when it is configured they are present but null until a connection exists. `legacyBookkeeping` tells the UI whether the asserting voucher-push surface below is reachable at all — off by default (#492).",
+          'Four today: Fortnox (`live`) and Accounted, Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
-            description: 'Connection metadata.',
+            description: 'The registry.',
             content: {
               'application/json': {
                 schema: {
-                  oneOf: [
-                    {
-                      type: 'object',
-                      required: ['configured', 'connected', 'legacyBookkeeping'],
-                      properties: {
-                        configured: { type: 'boolean', enum: [false] },
-                        connected: { type: 'boolean', enum: [false] },
-                        legacyBookkeeping: { type: 'boolean' },
-                      },
-                    },
-                    {
-                      type: 'object',
-                      required: ['configured', 'connected', 'scope', 'expiresAt', 'legacyBookkeeping'],
-                      properties: {
-                        configured: { type: 'boolean', enum: [true] },
-                        connected: { type: 'boolean' },
-                        scope: { type: ['string', 'null'], description: 'The granted OAuth scope. Null until connected.' },
-                        expiresAt: { type: ['string', 'null'], description: 'Access-token expiry. Null until connected.' },
-                        legacyBookkeeping: { type: 'boolean' },
-                      },
-                    },
-                  ],
+                  type: 'object',
+                  required: ['providers'],
+                  properties: { providers: { type: 'array', items: accountingProvider } },
                 },
               },
             },
@@ -3126,76 +3290,250 @@ export const openapiSpec = {
         },
       },
     },
-    '/accounting/fortnox/connect-url': {
+    '/accounting/connections': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listAccountingConnections',
+        summary: "The caller's accounting connections — metadata only, never secrets.",
+        description:
+          'One entry per provider the caller has ever connected; a disconnected one stays as `status: disconnected` (history stays, secrets cleared). Exactly one carries `isActiveDestination: true` while any is connected.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Connections.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['connections'],
+                  properties: { connections: { type: 'array', items: accountingConnection } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': accountingFeatureGate404,
+        },
+      },
+    },
+    '/accounting/connections/{provider}/connect-url': {
       post: {
         tags: ['Dashboard'],
-        operationId: 'getFortnoxConnectUrl',
-        summary: 'Get the Fortnox consent URL as JSON.',
+        operationId: 'getAccountingConnectUrl',
+        summary: 'Get the consent URL for a live OAuth2 provider, as JSON.',
         description:
-          "The JSON twin of /connect, and it exists for a concrete reason: a single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes and carries a purpose claim — see the callback.",
+          "A single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes, carries a purpose claim `authMiddleware` rejects, is bound to the provider, and is SINGLE-USE (a `jti` the callback consumes) — see the callback.",
         security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' }, description: 'Provider id from /accounting/providers.' }],
         responses: {
           '200': {
             description: 'The consent URL. Carries no token material.',
             content: {
               'application/json': {
+                schema: { type: 'object', required: ['url'], properties: { url: { type: 'string' } } },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
+          '409': providerRefusal,
+          '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
+        },
+      },
+    },
+    '/accounting/connections/{provider}/callback': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'accountingOAuthCallback',
+        summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
+        description:
+          "Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: \"Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers\" — nothing was stored; an existing connection is left as it was, and the user can pick another company). #2918: this route is NEVER the bare 404 the other connection routes answer when the feature is off — a consent can be mid-flight when the flag is flipped, so the off-path still redirects, named `connect=error&reason=feature_off`, and the `state`'s `jti` is consumed either way (a state cannot be banked while the flag is off and replayed after it comes back on).",
+        security: [],
+        parameters: [
+          { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'code', in: 'query', schema: { type: 'string' }, description: 'Authorization code from the provider.' },
+          { name: 'state', in: 'query', schema: { type: 'string' }, description: 'The signed, purpose-scoped, single-use state this flow issued.' },
+          { name: 'error', in: 'query', schema: { type: 'string' }, description: 'Present when the user declined consent.' },
+        ],
+        responses: {
+          '302': {
+            description: 'Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal, or `&reason=feature_off` (#2918) when the deployment is not hosted or the flag is off.',
+          },
+        },
+      },
+    },
+    '/accounting/connections/{provider}/api-key': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'connectAccountingApiKey',
+        summary: 'Connect a live API-key provider: validate the key at the provider, then store it encrypted.',
+        description:
+          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object', required: ['apiKey'], properties: { apiKey: { type: 'string' } } },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Connected. Metadata only.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', required: ['connection'], properties: { connection: accountingConnection } },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'Missing key, or the provider rejected it.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
+          '409': {
+            ...providerRefusal,
+            description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored).',
+          },
+          '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
+        },
+      },
+    },
+    '/accounting/connections/{provider}': {
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'disconnectAccountingProvider',
+        summary: 'Disconnect a provider for the caller.',
+        description:
+          'Clears the stored secrets and marks the connection `disconnected` — the row stays because sync history references it (owner decision). When the provider declares the `revoke` capability the grant is revoked at the provider first. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '204': { description: 'Disconnected (or was never connected).' },
+          '401': errorResponse,
+          '404': accountingFeatureGate404,
+        },
+      },
+    },
+    '/accounting/connections/{provider}/activate': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'activateAccountingConnection',
+        summary: 'Make this connection the feed destination; feed_from = now.',
+        description:
+          "Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (`POST /accounting/connections/{provider}/backfill`, #2867). Only a `connected` connection can be activated.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'The now-active connection.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', required: ['connection'], properties: { connection: accountingConnection } },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
+          '409': { ...errorResponse, description: 'The connection is not in the `connected` state.' },
+        },
+      },
+    },
+    '/accounting/connections/{provider}/backfill': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'backfillAccountingConnection',
+        summary: 'Include history: move feed_from EARLIER to `since` and run one bounded sync.',
+        description:
+          "The user's explicit choice to feed payments settled before the connection became the destination (#2867). Every connection gets `feedFrom = now` at connect and at activate, so nothing is re-fed unasked; this is the ONE call that moves it earlier. `since` must be an ISO date in the past and not before 2020-01-01 (400 `SINCE_INVALID`), and EARLIER than the current `feedFrom` (400 `SINCE_NOT_EARLIER` — a backfill only ever includes more history; moving the floor forward is activate's job; a connection with no floor already feeds everything and is refused the same way). Only the active, `connected` destination can be backfilled (409 `NOT_ACTIVE`). The choice is recorded on the connection and one sync runs, bounded to 200 payments and resumable — press Sync now for the rest. Ignores `autoFeed: false`: this is a manual action.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['since'],
+                properties: { since: { type: 'string', format: 'date-time', description: 'ISO date or date-time; the new feed-from floor.', examples: ['2026-01-01'] } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The new floor and how many payments this call fed (0 is normal when the history is already pushed or empty).',
+            content: {
+              'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['url'],
-                  properties: { url: { type: 'string' } },
+                  required: ['feedFrom', 'fed'],
+                  properties: {
+                    feedFrom: { type: 'string', format: 'date-time', description: 'The connection\'s feed-from after the move — `since`, normalised.' },
+                    fed: { type: 'integer', description: 'Payments fed by this call (at most 200).' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: '`SINCE_INVALID` (not a date, in the future, before 2020-01-01) or `SINCE_NOT_EARLIER` (not earlier than the current feed-from, or the connection has no floor).' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
+          '409': { ...errorResponse, description: 'The connection is not the active `connected` destination (`NOT_ACTIVE`).' },
+        },
+      },
+    },
+    '/accounting/connections/{provider}/settings': {
+      patch: {
+        tags: ['Dashboard'],
+        operationId: 'updateAccountingConnectionSettings',
+        summary: 'Per-connection settings: suggested account and auto-feed.',
+        description:
+          'Exactly two keys, each optional (#2867). `suggested_account`: for Fortnox a four-digit BAS account (`^[1-8]\\d{3}$`), for other providers a non-empty string of at most 32 characters, `null` to clear; it reaches the ledger only as the connector\'s non-asserting hint, never as an account field. `auto_feed`: `false` makes the settlement hook and the retry sweep skip this user while Sync now and the backfill still push; absent = `true`. Any other key, or an invalid value, is a 400 that names the key. Other stored connection state (the company-switch log, the backfill record) is preserved — the write is a merge. Supplier strategy is not a setting (one supplier per merchant, fixed).',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  suggested_account: { type: ['string', 'null'], description: 'Fortnox: a four-digit BAS account. Null clears.', examples: ['6540'] },
+                  auto_feed: { type: 'boolean', description: 'False = manual only.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The connection with its settings after the merge.',
+            content: {
+              'application/json': {
+                schema: { type: 'object', required: ['connection'], properties: { connection: accountingConnection } },
+              },
+            },
+          },
+          '400': {
+            description: 'An unknown key or an invalid value; `key` names it.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code', 'key'],
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', enum: ['INVALID_SETTING'] },
+                    key: { type: ['string', 'null'], description: 'The offending setting, or null when the body itself is not an object.' },
+                  },
                 },
               },
             },
           },
           '401': errorResponse,
-          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
-        },
-      },
-    },
-    '/accounting/fortnox/connect': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'startFortnoxConnect',
-        summary: 'Redirect the browser to Fortnox consent.',
-        description: 'The redirect twin of /connect-url, for a navigation that can carry the session. Same signed, 10-minute, purpose-scoped state.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '302': { description: 'Redirect to the Fortnox consent screen.' },
-          '401': errorResponse,
-          '503': { ...errorResponse, description: 'Fortnox is not configured on this deployment.' },
-        },
-      },
-    },
-    '/accounting/fortnox/callback': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'fortnoxOAuthCallback',
-        summary: 'PUBLIC OAuth callback — authenticated by the signed state, not by a session.',
-        description:
-          "Hit by a browser redirect from Fortnox, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, and it must carry the fortnox_oauth PURPOSE claim — an ordinary session token is rejected here, so a valid Haven token cannot be replayed as OAuth state. **Every outcome is a redirect, never JSON**, and every failure collapses to the same `?fortnox=error` regardless of cause: a bad state, a failed code exchange and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `?fortnox=denied` because that is the user's own action, not a failure to hide.",
-        security: [],
-        parameters: [
-          { name: 'code', in: 'query', schema: { type: 'string' }, description: 'Authorization code from Fortnox.' },
-          { name: 'state', in: 'query', schema: { type: 'string' }, description: 'The signed, purpose-scoped state this flow issued.' },
-          { name: 'error', in: 'query', schema: { type: 'string' }, description: 'Present when the user declined consent.' },
-        ],
-        responses: {
-          '302': {
-            description: 'Always a redirect to the settings page: ?fortnox=connected, ?fortnox=denied, or ?fortnox=error.',
-          },
-        },
-      },
-    },
-    '/accounting/fortnox': {
-      delete: {
-        tags: ['Dashboard'],
-        operationId: 'disconnectFortnox',
-        summary: 'Disconnect Fortnox for the caller.',
-        description: 'Deletes the stored connection, tokens included. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.',
-        security: [{ DashboardJwt: [] }],
-        responses: {
-          '204': { description: 'Disconnected (or was never connected).' },
-          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
         },
       },
     },
@@ -3205,7 +3543,7 @@ export const openapiSpec = {
         operationId: 'pushFortnoxVouchers',
         summary: 'Legacy asserting voucher push — GATED OFF by default.',
         description:
-          "The asserting counterpart to the reporting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
+          "The one Fortnox-shaped path left after #2862 replaced `/accounting/fortnox/*` with the provider-generic connections above: it is provider-specific by nature. The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
@@ -3699,54 +4037,9 @@ export const openapiSpec = {
       },
     },
     '/passkeys': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'registerPasskey',
-        summary: 'Enroll a passkey signer for the caller.',
-        description:
-          "Derives the Safe passkey-signer address from the P256 public key and records it. **A second passkey on the same chain is allowed and is the point** (#1229): it is a BACKUP SIGNER, and this rail's only recovery — refusing it used to lock out exactly the users who most needed protection. Only a duplicate credential_id is refused. HONEST LIMITATION: the attestation object is persisted for future verification but is NOT cryptographically verified yet, so a bad enrollment harms only the enrolling user. The response is NARROWER than the list read below — an id, the credential, the derived signer address and the chain, never the public-key coordinates or the stored attestation.",
-        security: [{ DashboardJwt: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['credential_id', 'public_key_x', 'public_key_y', 'chain_id'],
-                properties: {
-                  credential_id: { type: 'string', description: 'Non-empty base64url.' },
-                  public_key_x: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
-                  public_key_y: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: '32-byte 0x-hex.' },
-                  chain_id: { type: 'integer' },
-                  raw_attestation_object: { type: 'string', description: 'Optional base64url attestation. Stored, not yet verified.' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '201': {
-            description: 'Passkey enrolled.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['id', 'credential_id', 'signer_address', 'chain_id'],
-                  properties: {
-                    id: { type: 'string', format: 'uuid' },
-                    credential_id: { type: 'string' },
-                    signer_address: { type: 'string', description: 'Derived from the public key; stored lowercase.' },
-                    chain_id: { type: 'integer' },
-                  },
-                },
-              },
-            },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '409': { ...errorResponse, description: 'This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict.' },
-        },
-      },
+      // #2847 (epic #1440): POST — the Safe WebAuthn signer enrolment — is
+      // deleted with the Safe rail. The list read stays: AuthContext reads it
+      // every session.
       get: {
         tags: ['Dashboard'],
         operationId: 'listPasskeys',
@@ -4686,7 +4979,8 @@ export const openapiSpec = {
           'bridge (agent-EOA payTo + merchantPayTo) is the fallback and is the only shape that ' +
           'still funds anything. #2105: there is no approval branch — spend authority is the ' +
           'agent\'s budget delegation, refused up front with 403 when the amount exceeds the live ' +
-          'remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. ' +
+          'remaining budget (#2082, extended to this endpoint\'s EIP-3009 funding leg by #2706) and ' +
+          'enforced on-chain by the caveat enforcers at redemption. ' +
           'Preserve the original merchant session and the x402 details. The client ' +
           'performs the merchant retry itself; nothing mid-flow waits for a resume ' +
           'signal. #2145: if the process dies after the funding leg confirms, a later ' +
@@ -4722,7 +5016,7 @@ export const openapiSpec = {
           // enforcer at redemption) instead of queuing an approval.
           '400': errorResponse,
           '401': errorResponse,
-          '403': { ...errorResponse, description: 'Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082) the erc7710 direct-settlement amount exceeds that delegation\'s live remaining period budget. The over-budget refusal is PRE-FUNDING — no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. It is a fail-fast convenience, not the gate: the budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds).' },
+          '403': { ...errorResponse, description: 'Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation\'s live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules).' },
           '409': errorResponse,
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
@@ -5136,7 +5430,7 @@ export const openapiSpec = {
         summary: "Report the merchant's own receipt for a settled payment.",
         description:
           "Captures the receipt document the merchant handed back in the paid response (invoice number, VAT breakdown — facts Haven's own payment evidence cannot assert). " +
-          'The reporting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. ' +
+          'The accounting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. ' +
           'Provide either `url` (https, fetched at feed time under strict guards) or `json` (the inline receipt document, max 64KB).',
         security: [{ AgentApiKey: [] }],
         parameters: [
@@ -5336,6 +5630,47 @@ export const openapiSpec = {
         },
       },
     },
+    '/transactions/export.csv': {
+      get: {
+        tags: ['Transactions'],
+        operationId: 'exportTransactionsCsv',
+        summary: 'Download the filtered transaction list as a CSV file.',
+        description:
+          'Applies the same filters as `GET /transactions` over the whole ' +
+          'result set rather than one page, and adds `direction` and ' +
+          '`chainId`. UTF-8 with a byte-order mark and RFC 4180 quoting. ' +
+          'Bounded at 10 000 rows; above that the request is refused with 413 ' +
+          'rather than truncated.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'safeId', in: 'query', schema: uuid },
+          { name: 'agentId', in: 'query', schema: { type: 'string' } },
+          { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
+          { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] } },
+          { name: 'chainId', in: 'query', schema: { type: 'integer', examples: [8453] } },
+          { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'The CSV file.',
+            headers: {
+              'Content-Disposition': {
+                schema: { type: 'string' },
+                description: 'attachment; filename="haven-transactions-YYYYMMDD.csv"',
+              },
+              'X-Export-Row-Count': {
+                schema: { type: 'string' },
+                description: 'Rows written, excluding the header.',
+              },
+            },
+            content: { 'text/csv': { schema: { type: 'string' } } },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '413': errorResponse,
+        },
+      },
+    },
     '/transactions/filters': {
       get: {
         tags: ['Dashboard'],
@@ -5438,27 +5773,9 @@ export const openapiSpec = {
         },
       },
     },
-    '/safe/{safeAddress}/details': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'getSafeDetails',
-        summary: 'On-chain Safe details: owners, threshold, nonce.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' } },
-        ],
-        responses: {
-          '200': {
-            description: 'Safe details.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SafeDetails' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '403': errorResponse,
-        },
-      },
-    },
+    // #2847 (epic #1440): /safe/{safeAddress}/details is deleted — it read
+    // Safe getOwners/getThreshold and 409'd for every delegation account, so
+    // no surviving account type could ever be answered by it.
     '/contacts': {
       get: {
         tags: ['Contacts'],
@@ -5999,7 +6316,7 @@ export const openapiSpec = {
       },
       ApiRootDocument: {
         type: 'object',
-        required: ['name', 'openapi', 'auth', 'health'],
+        required: ['name', 'openapi', 'auth', 'health', 'manifest'],
         properties: {
           name: { type: 'string', enum: ['haven-api'] },
           description: { type: 'string' },
@@ -6011,6 +6328,11 @@ export const openapiSpec = {
               'names the dev backend and a request through the frontend proxy names the proxy.',
           },
           docs: { type: 'string', format: 'uri', description: 'Agent-readable product docs.' },
+          manifest: {
+            type: 'string',
+            format: 'uri',
+            description: 'Capability manifest on the configured dashboard origin.',
+          },
           auth: {
             type: 'object',
             required: ['agent', 'owner'],
@@ -6041,8 +6363,9 @@ export const openapiSpec = {
           openapi_url: { type: 'string', format: 'uri' },
           chains: {
             type: 'object',
-            required: ['deployable', 'supported'],
+            required: ['default', 'deployable', 'supported'],
             properties: {
+              default: { type: 'integer', description: 'Canonical Haven default chain id.' },
               deployable: { type: 'array', items: { type: 'integer' } },
               supported: { type: 'array', items: { type: 'integer' } },
             },
@@ -6083,7 +6406,7 @@ export const openapiSpec = {
       },
       HealthOpsResponse: {
         type: 'object',
-        required: ['relayer', 'passport', 'trustProxy'],
+        required: ['relayer', 'passport', 'trustProxy', 'accounting'],
         properties: {
           relayer: {
             type: 'array',
@@ -6152,6 +6475,27 @@ export const openapiSpec = {
             properties: {
               hops: { type: 'integer' },
               authRateLimitArmed: { type: 'boolean' },
+            },
+            additionalProperties: false,
+          },
+          accounting: {
+            type: 'object',
+            description:
+              'Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate ' +
+              'queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
+              'attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: ' +
+              'connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the ' +
+              "user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. " +
+              'The counters are the one database read on this payload: when the queries throw, both ' +
+              'are `null` and `unavailable` is `true` while the in-memory siblings still answer.',
+            required: ['exhaustedSyncs', 'connectionsNeedingAttention'],
+            properties: {
+              exhaustedSyncs: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+              connectionsNeedingAttention: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+              unavailable: {
+                type: 'boolean',
+                description: 'Present and `true` only when the counters could not be read; the two integers are then `null`.',
+              },
             },
             additionalProperties: false,
           },
@@ -7422,92 +7766,44 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       TransactionBase: {
-        description: 'Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`).',
+        description: 'Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above.',
         type: 'object',
-        required: ['hash', 'type', 'from', 'to', 'value', 'valueFormatted', 'asset', 'decimals', 'direction', 'timestamp', 'blockNumber', 'isError'],
+        required: [...transactionBaseRequired],
+        properties: { ...transactionBaseProperties },
+      },
+      TransactionAccounting: {
+        description:
+          'Accounting-feed state for one transaction (#2870), read from the sync ledger — no live ' +
+          'provider call. Present on a row only when the feed is available to the account, the ' +
+          'user has a provider connection, and the payment has a sync row; absent otherwise.',
+        type: 'object',
+        required: ['provider', 'status', 'externalRef', 'error'],
         properties: {
-          hash: { type: 'string' },
-          type: { type: 'string', enum: ['native', 'erc20', 'internal'] },
-          // Deliberately NOT the `address` helper: Safe Transaction Service
-          // transfers with a null counterparty are emitted as '' (#984 spec
-          // correction — the old pattern rejected real responses).
-          from: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
-          to: { type: 'string', description: 'Counterparty address, or the empty string when the explorer reported none.' },
-          value: { type: 'string' },
-          valueFormatted: { type: 'string' },
-          asset: { type: 'string', description: 'Token ticker where known; falls back to the raw contract address for unknown tokens.' },
-          decimals: { type: 'integer' },
-          direction: { type: 'string', enum: ['in', 'out'] },
-          timestamp: { type: 'integer' },
-          blockNumber: { type: 'integer', description: '0 for x402-synthesized rows with no on-chain receipt yet.' },
-          isError: { type: 'boolean' },
-          tokenAddress: address,
-          tokenSymbol: { type: 'string' },
-          source: { type: 'string', description: "Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values." },
-          x402ResourceUrl: { type: ['string', 'null'] },
-          x402MerchantAddress: { type: ['string', 'null'] },
-          paymentId: { type: 'string' },
-          paymentProofStatus: { type: ['string', 'null'] },
-          paymentFlowStatus: {
+          provider: { type: 'string', description: "Ledger provider key, e.g. 'fortnox'.", examples: ['fortnox'] },
+          status: { type: 'string', enum: ['pending', 'pushed', 'failed', 'skipped'] },
+          externalRef: {
             type: ['string', 'null'],
-            enum: ['paid', 'confirming_merchant', 'needs_attention', null],
+            description: "Provider-side reference once pushed ('fortnox:supplierinvoice:<n>'); null otherwise.",
           },
-          paymentAttentionReason: {
+          error: {
             type: ['string', 'null'],
-            enum: ['merchant_retry_rejected_after_payment', null],
+            description: 'Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean.',
           },
-          activityType: { type: 'string', enum: ['delegate_sweep'] },
-          agentName: { type: 'string' },
-          // #2097: backend-recorded initiator classification — never derived
-          // in the frontend. `agent` = row carries agent attribution (confirmed
-          // x402 intents, delegate sweeps, raw transfers matched to a
-          // confirmed intent). `human` = reserved; no dashboard-initiated send
-          // path populates it (mpp demo & /send retired). `unknown` = outbound
-          // raw transfer with no matched intent. Absent for `direction: in`
-          // rows.
-          initiatedBy: {
-            type: 'string',
-            enum: ['agent', 'human', 'unknown'],
-            description: 'Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.',
-          },
-          // #1705 (epic #1704). Read from the intent's `machine_metadata`
-          // JSONB, which both delegation-rail branches already stamp
-          // (`modules/x402/delegation-authorize.ts`).
-          settlementScheme: {
-            type: ['string', 'null'],
-            enum: ['eip3009', 'erc7710', null],
-            description:
-              'Which settlement branch actually moved the money: `erc7710` (direct settlement, ' +
-              'account → merchant, no funding leg) or `eip3009` (funded transfer — the budget ' +
-              'delegation funds the delegate EOA, which then signs the standard EIP-3009 header). ' +
-              'This is the settlement SCHEME and is three-way distinct from its neighbours: ' +
-              '`source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account\'s ' +
-              '`execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy ' +
-              'AllowanceModule). Do not collapse them. Null when no scheme was recorded — ' +
-              'non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but ' +
-              'never stamp the key. Null-in-null-out: nothing is inferred or backfilled.',
-          },
-          // #984 spec correction: emitted on every enriched row (string | null),
-          // was missing while additionalProperties:false claimed completeness.
-          amountSek: { type: ['string', 'null'] },
         },
+        additionalProperties: false,
       },
       Transaction: {
-        description: 'Aggregated-feed transaction: the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields.',
-        allOf: [
-          { $ref: '#/components/schemas/TransactionBase' },
-          {
-            type: 'object',
-            required: ['chainId', 'safeId', 'safeAddress', 'safeName'],
-            properties: {
-              chainId: { type: 'integer' },
-              safeId: uuid,
-              safeAddress: address,
-              safeName: { type: 'string' },
-              agentId: uuid,
-            },
-          },
-        ],
+        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
+        type: 'object',
+        required: [...transactionBaseRequired, 'chainId', 'safeId', 'safeAddress', 'safeName'],
+        properties: {
+          ...transactionBaseProperties,
+          chainId: { type: 'integer' },
+          safeId: uuid,
+          safeAddress: address,
+          safeName: { type: 'string' },
+          agentId: uuid,
+        },
       },
       TransactionsPageResponse: {
         description: 'Per-Safe paginated transaction list (`GET /transactions/{safeAddress}`). Items carry no Safe scope — the Safe is the path parameter.',
@@ -7607,17 +7903,6 @@ export const openapiSpec = {
           totalUsd: { type: 'number' },
           totalEur: { type: 'number' },
           breakdown: { type: 'array', items: { $ref: '#/components/schemas/PortfolioBreakdown' } },
-        },
-        additionalProperties: false,
-      },
-      SafeDetails: {
-        type: 'object',
-        required: ['address', 'owners', 'threshold', 'nonce'],
-        properties: {
-          address: { type: 'string', description: 'Echoed back as supplied — not re-checksummed.' },
-          owners: { type: 'array', items: address, description: 'Checksummed owner addresses from the contract.' },
-          threshold: { type: 'integer' },
-          nonce: { type: 'integer' },
         },
         additionalProperties: false,
       },
@@ -7944,7 +8229,16 @@ export const openapiSpec = {
       },
       TransactionsResponse: {
         type: 'object',
-        required: ['transactions', 'total', 'offset', 'limit', 'hasMore', 'partialFailure', 'failedSafeIds'],
+        required: [
+          'transactions',
+          'total',
+          'offset',
+          'limit',
+          'hasMore',
+          'partialFailure',
+          'failedSafeIds',
+          'truncated',
+        ],
         properties: {
           transactions: { type: 'array', items: { $ref: '#/components/schemas/Transaction' } },
           total: { type: 'integer' },
@@ -7953,6 +8247,14 @@ export const openapiSpec = {
           hasMore: { type: 'boolean' },
           partialFailure: { type: 'boolean' },
           failedSafeIds: { type: 'array', items: uuid },
+          truncated: {
+            type: 'boolean',
+            description:
+              'At least one account\'s explorer read stopped at the pagination ' +
+              'budget with the source still offering more, so these rows and ' +
+              '`total` are a capped view rather than the full history (#2884). ' +
+              'Independent of `partialFailure`.',
+          },
         },
         additionalProperties: false,
       },

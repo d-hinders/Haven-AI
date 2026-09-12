@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
   - packages/backend/src/rails/hybrid-signer-actions.ts
-last-verified: "2026-08-26" # #2068: the "any connected wallet is accepted by the UI; ownership fails on-chain" sentence was made false by the client-side owner match (pickSigningPath/useActiveSigner compare the connected address to owner_address before offering the EOA path) — rewritten to describe the new failure shape (silent fallback to passkey/QR or no-signer, never an on-chain failure). Rest of the walkthrough re-read against the diff; the connect-first and hint paragraphs stand. Prior: #1199: two-to-one passkey removal matches the existing one-signer posture
+last-verified: "2026-08-26"
 ---
 
 # Dev testing with a wallet signer

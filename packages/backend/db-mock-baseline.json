@@ -48,21 +48,21 @@
   "packages/backend/src/modules/passport/__tests__/passport-revocation.test.ts": {
     "db-mock": 1
   },
-  "packages/backend/src/modules/reporting/__tests__/feed-dedup.integration.test.ts": {
+  "packages/backend/src/modules/accounting/__tests__/feed-dedup.integration.test.ts": {
     "db-mock": 1
   },
-  "packages/backend/src/modules/reporting/__tests__/feed-sync.test.ts": {
+  "packages/backend/src/modules/accounting/__tests__/feed-sync.test.ts": {
     "db-mock": 1,
     "positional": 6
   },
-  "packages/backend/src/modules/reporting/__tests__/fortnox-connection.test.ts": {
+  "packages/backend/src/modules/accounting/__tests__/fortnox-connection.test.ts": {
     "db-mock": 1,
-    "positional": 5
-  },
-  "packages/backend/src/modules/reporting/__tests__/fortnox-connector.test.ts": {
     "positional": 2
   },
-  "packages/backend/src/modules/reporting/__tests__/receipt-underlag.test.ts": {
+  "packages/backend/src/modules/accounting/__tests__/fortnox-connector.test.ts": {
+    "positional": 2
+  },
+  "packages/backend/src/modules/accounting/__tests__/receipt-underlag.test.ts": {
     "db-mock": 1,
     "positional": 2
   },
@@ -161,10 +161,6 @@
     "db-mock": 1,
     "positional": 1
   },
-  "packages/backend/src/routes/__tests__/passkeys.test.ts": {
-    "db-mock": 1,
-    "positional": 2
-  },
   "packages/backend/src/routes/__tests__/passport-verify.test.ts": {
     "db-mock": 1,
     "positional": 8
@@ -179,14 +175,6 @@
   "packages/backend/src/routes/__tests__/portfolio.test.ts": {
     "db-mock": 1,
     "positional": 4
-  },
-  "packages/backend/src/routes/__tests__/safe-details.test.ts": {
-    "db-mock": 1,
-    "positional": 4
-  },
-  "packages/backend/src/routes/__tests__/safe-exec.test.ts": {
-    "db-mock": 1,
-    "positional": 12
   },
   "packages/backend/src/routes/__tests__/transactions.test.ts": {
     "positional": 11
@@ -208,7 +196,7 @@
   },
   "packages/backend/src/routes/__tests__/user.test.ts": {
     "db-mock": 1,
-    "positional": 13
+    "positional": 2
   },
   "packages/backend/src/routes/__tests__/x402-consolidation.characterization.test.ts": {
     "db-mock": 1,

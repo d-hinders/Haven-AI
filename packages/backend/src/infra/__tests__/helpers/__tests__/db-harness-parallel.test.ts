@@ -10,7 +10,7 @@
  * why BOTH files carry it on every run rather than one file trying to
  * orchestrate true simultaneity.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../../db.js'
 import { describeDb, initDbHarness, resetDb, WORKER_SCHEMA } from '../db-harness.js'
 
@@ -24,6 +24,19 @@ describeDb('db-harness parallel isolation (#1220)', () => {
          note TEXT
        )`,
     )
+  })
+
+  // This file CREATES a table in the worker schema, so it must remove it.
+  // TWO guards now say so, and they catch different halves: #2625's
+  // root-level `assertWorkerSchemaAtHead()` fails the file that LEAVES drift,
+  // and #2622's reservoir check compares this schema against the run's
+  // pristine reference at init, so a table left behind fails whichever
+  // DIFFERENT file draws the same ordinal on a later run. The isolation proof
+  // above needs the table only WHILE this file's tests run.
+  // `CREATE TABLE IF NOT EXISTS` is what made leaving it survivable, and
+  // therefore invisible.
+  afterAll(async () => {
+    await db.query('DROP TABLE IF EXISTS harness_smoke')
   })
 
   beforeEach(async () => {

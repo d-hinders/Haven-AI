@@ -1,6 +1,5 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
-import { apiBaseUrl } from './domain/request-origin.js'
 import { httpErrorHandler } from './infra/http-error-handler.js'
 
 import Fastify, { type FastifyRequest } from 'fastify'
@@ -12,18 +11,19 @@ import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware
 import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
 import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
+import { reencryptPlaintextSecretsAtBoot } from './modules/accounting/index.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
 import discoveryRoutes from './routes/discovery.js'
+import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
 import userRoutes from './routes/user.js'
 import balanceRoutes from './routes/balances.js'
 import transactionRoutes from './routes/transactions.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
-import safeDetailRoutes from './routes/safe-details.js'
 import agentRoutes from './routes/agents.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
@@ -58,7 +58,6 @@ import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
-import safeExecRoutes from './routes/safe-exec.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
@@ -66,11 +65,11 @@ import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
-import fortnoxRoutes from './routes/fortnox.js'
-import reportingRoutes from './routes/reporting.js'
-import { registerConnector } from './modules/reporting/index.js'
-import { FortnoxConnector } from './modules/reporting/index.js'
-import { fortnoxConfigured } from './modules/reporting/index.js'
+import accountingConnectionsRoutes from './routes/accounting-connections.js'
+import accountingFeedRoutes from './routes/accounting-feed.js'
+import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
+import { FortnoxConnector } from './modules/accounting/index.js'
+import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
   refreshCatalog,
   runCatalogIngestTick,
@@ -177,7 +176,13 @@ registerHealthRoutes(app, {
   getPassportStatus: passportReadiness,
   trustProxyHops: config.trustProxyHops,
   opsToken: config.opsToken,
+  getAccountingCounters: () => getAccountingOpsCounters(),
 })
+
+// The accounting module's ops events (#2872: `accounting.connection.needs_attention`)
+// go through the app logger like the retry sweep's, so every
+// `"event":"accounting.…"` line lands on one transport.
+setOpsEventSink((level, event) => app.log[level](event, event.event))
 
 /**
  * API root document (#2530).
@@ -196,25 +201,7 @@ registerHealthRoutes(app, {
  * The origin is derived from the request, not from a literal, so the dev
  * backend describes the dev backend.
  */
-app.get('/', async (request) => {
-  const base = apiBaseUrl(request.headers)
-  return {
-    name: 'haven-api',
-    description:
-      'Haven is the buy-side control layer for AI-agent payments: an agent spends within an ' +
-      'owner-set, on-chain-enforced budget. Haven never holds funds and the agent never holds a key.',
-    openapi: `${base}/openapi.json`,
-    // #2523 (B1) publishes `/for-agents.md`, the runbook written for the agent
-    // rather than the owner. Until it exists this points at `llms.txt`, which
-    // does — naming a path that 404s is the defect #2520 spent a PR removing.
-    docs: `${config.frontendUrl.replace(/\/+$/, '')}/llms.txt`,
-    auth: {
-      agent: 'Bearer sk_agent_… (or X-API-Key). Provision with `npx @haven_ai/connect@alpha`.',
-      owner: 'Dashboard session, or `haven login`.',
-    },
-    health: `${base}/health`,
-  }
-})
+app.get('/', async (request) => buildApiRootDocument(request.headers, config.frontendUrl))
 
 // Public chain config (#679): which chains this environment serves account
 // deploys on, so the onboarding / Add-account pickers offer only those. Not
@@ -262,7 +249,9 @@ await app.register(balanceRoutes, { prefix: '/balances' })
 await app.register(transactionRoutes, { prefix: '/transactions' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(dashboardRoutes, { prefix: '/dashboard' })
-await app.register(safeDetailRoutes, { prefix: '/safe' })
+// #2847 (epic #1440): `GET /safe/:addr/details` and `POST /safe/exec` are
+// deleted. `/safe` no longer mounts anything here but the safe-deploy
+// tombstone below — the prefix survives only because that 410 does.
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
@@ -282,14 +271,15 @@ await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
-await app.register(safeExecRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
-await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
-await app.register(reportingRoutes, { prefix: '/accounting/reporting' })
+// #2862: provider-generic connections (`/accounting/providers`,
+// `/accounting/connections/*`) replaced the Fortnox-shaped router.
+await app.register(accountingConnectionsRoutes, { prefix: '/accounting' })
+await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
 // #496: the live Fortnox feed adapter. Registering it flips hasLiveConnector()
 // → true, which removes the Reporting page's "preview" banner. Gated on env:
 // deployments without Fortnox credentials keep the feed inert (no-op), same
@@ -348,6 +338,12 @@ const start = async () => {
   try {
     await runMigrations()
     app.log.info('Database migrations complete')
+
+    // #2860: migration 080 copies provider secrets as plaintext (a migration
+    // reads no environment); this is where they get encrypted, on the first
+    // boot that has HAVEN_SECRETS_KEY. Inert without it, idempotent with it,
+    // and it never blocks listen().
+    await reencryptPlaintextSecretsAtBoot((m) => app.log.info(m))
 
     await app.listen({ port: config.port, host: '0.0.0.0' })
     app.log.info(`Haven backend running on port ${config.port}`)
@@ -594,6 +590,14 @@ const start = async () => {
     }
     void runPassportSweep()
     setInterval(runPassportSweep, PASSPORT_SWEEP_INTERVAL_MS).unref()
+
+    // Accounting feed retry sweep (#2866, epic #2858): re-feeds failed /
+    // skipped / stale-pending sync rows whose backoff has elapsed, one
+    // connection at a time under Fortnox's 25 / 5 s floor. The interval is
+    // registered (and `unref()`ed) inside `startRetrySweep`, which returns
+    // null — registering nothing — when `HAVEN_ACCOUNTING_ENABLED` is off.
+    // Leader-locked on its own key like every tick above.
+    startRetrySweep({ log: app.log })
   } catch (err) {
     app.log.error(err)
     process.exit(1)

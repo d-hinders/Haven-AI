@@ -1,8 +1,10 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import Providers from './providers'
 import DiscoverySourceCapture from '@/components/DiscoverySourceCapture'
+import { havenEnvironment } from '@/lib/env'
+import { INSTALLED_APP_VIEWPORT, installedAppMetadata } from '@/lib/installed-app'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -10,7 +12,17 @@ export const metadata: Metadata = {
   title: 'Haven, agent payments within your rules',
   description:
     'An account for your agents. You set the rules; they pay within them, never beyond. No raw keys, no shared cards.',
+  // Installed-app shell (#2729): the iOS title and `apple-mobile-web-app-capable`.
+  // The manifest link and the icon links come from the file conventions beside
+  // this layout (`manifest.ts`, `icon1.tsx`, `icon2.tsx`, `apple-icon.tsx`).
+  // `havenEnvironment()` is the same reading `EnvBadge` makes, so "Haven Dev"
+  // on the home screen and the DEV chip in the top bar cannot disagree.
+  ...installedAppMetadata(havenEnvironment()),
 }
+
+// `themeColor` for the status bar, with the default width/scale restated so
+// no mobile baseline moves (#2729). Safe-area insets are #2730's.
+export const viewport: Viewport = INSTALLED_APP_VIEWPORT
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -3,12 +3,11 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/package.json
-  - packages/frontend/src/lib/loop-harness/**
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
-  - docs/contributing/code-quality-loop.md
-last-verified: "2026-08-27" # #2103: the loop-shapes table's property/invariant EXAMPLE asserted "over-remaining intent => pending_approval, never executed" — an invariant template teaching contributors and agents to build a state no live rail produces (the queue died with #2055). Restated as declined-before-signable. The DIFFERENTIAL row is deliberately unchanged: computeEffectiveAllowance vs the AllowanceModule reset model is still a live differential, because allowance-math retains a legacy-display consumer. Scope: that one table cell; nothing else in this file re-verified. Prior: #2020: the backend loop-harness instance (LP-1) retired with its target; anatomy section now cites the frontend instance, dead covers glob dropped. The method itself is unchanged. Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+  - .agents/skills/quality-scan/references/discovery-method.md
+last-verified: "2026-09-11"
 ---
 
 # Loop Engineering (oracle-grounded automated loops)
@@ -16,7 +15,7 @@ last-verified: "2026-08-27" # #2103: the loop-shapes table's property/invariant 
 Last updated: 2026-07-18
 
 > **Disambiguation.** Haven uses “loop” in three ways:
-> [`code-quality-loop.md`](./code-quality-loop.md) is a human-curated discovery
+> [the quality-scan discovery method](../../.agents/skills/quality-scan/references/discovery-method.md) is a human-curated discovery
 > method whose actionable queue is GitHub Issues;
 > [`autonomous-pr-loop.md`](./autonomous-pr-loop.md) describes the issue-driven
 > `/loop /ship-next` workflow; and this doc is about
@@ -69,7 +68,7 @@ Same discipline, different oracle:
 
 | Shape | Oracle | Example in Haven |
 | --- | --- | --- |
-| **Differential** | a reference model / the real artifact | `computeEffectiveAllowance` vs the historical AllowanceModule reset model (frontend test-only) |
+| **Differential** | a reference model / the real artifact | the backend allowance-routing loop (withdrawn with its target, #2020) |
 | **Property / invariant** | an asserted rule over fuzzed inputs | "over-budget intent ⇒ declined before it becomes signable, never `executed`" |
 | **Eval** (future) | a grading rubric | an LLM-assisted feature graded against expected outputs |
 
@@ -77,9 +76,9 @@ This doc's worked examples are **differential** loops; the structure generalizes
 
 ## 4. Anatomy of a harness
 
-The template, as instantiated today by LP-2
-(`packages/frontend/src/lib/loop-harness/`; the backend instance retired with
-its target — see the index's LP-1 withdrawal, #2020):
+The template, shown as it was instantiated by the frontend allowance loop
+(retired with its target — see the index's LP-2 withdrawal, #2848; the backend
+instance retired the same way, #2020):
 
 ```
 loop-harness/
@@ -158,11 +157,11 @@ A loop has a terminal state, and the harness encodes it:
 
 ## 8. Running and scheduling
 
-- Focused run:
-  - Backend: `npm --prefix packages/backend run test:loop`
-  - Frontend: `npm --prefix packages/frontend test -- src/lib/loop-harness`
-- The harness lives under the package's normal test glob, so it runs whenever
-  CI's change detection selects that package's unit-test job.
+- Focused run: a harness lives under its package's normal test glob, so it
+  runs whenever CI's change detection selects that package's unit-test job,
+  and the index's Run line gives the focused command (the retired allowance
+  loops ran `npm --prefix <pkg> test -- src/lib/loop-harness` /
+  `run test:loop`).
 - As a recurring *active* campaign (only worth it while editing that surface or
   to widen coverage — re-running identical seeds on frozen code is a no-op):
   ```
@@ -208,6 +207,4 @@ behavior (reward-hacking) rather than independent truth.
 ## See also
 
 - [`loop-harness-index.md`](./loop-harness-index.md) — the portfolio of live loops.
-- `packages/backend/src/loop-harness/README.md`,
-  `packages/frontend/src/lib/loop-harness/README.md` — worked examples.
 - [`ai-agent-workflow.md`](./ai-agent-workflow.md) — the broader agentic delivery workflow.

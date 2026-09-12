@@ -22,7 +22,7 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../rails/allowance-module.js', () => ({
+vi.mock('../../infra/chain/relayer-reads.js', () => ({
   getProvider: (...args: unknown[]) => mockGetProvider(...args),
 }))
 

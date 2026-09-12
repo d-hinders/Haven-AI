@@ -126,11 +126,24 @@ describe('x402-erc7710-over-budget-rejected (#2082)', () => {
     expect(body.settlementScheme).toBeUndefined()
   })
 
-  it('asks for an amount ACTUALLY above the live remaining budget', async () => {
-    mockAuthorizeX402.mockResolvedValueOnce(SIGNABLE_ERC7710).mockResolvedValueOnce(BUDGET_403)
-    await x402Erc7710OverBudgetRejected.run(ctx)
-    const [body] = mockAuthorizeX402.mock.calls[1]
-    expect(BigInt(body.amount)).toBeGreaterThan(1_000_000n)
+  it('asks for an amount DERIVED from the live budget, not a constant above it', async () => {
+    // `> 1_000_000n` alone did not prove derivation: a hardcoded
+    // '999999999999' satisfies it, and a hardcoded over-budget constant is
+    // exactly the defect #2016 was filed about — it stops being over-budget
+    // the moment the account, the rail or the seed changes, and the refusal
+    // then proves nothing. So it is checked against the EXACT derivation at
+    // two different budgets: a constant cannot track both.
+    for (const remaining of ['1000000', '4734500']) {
+      mockGetAllowances.mockReset()
+      mockAuthorizeX402.mockReset()
+      mockGetAllowances.mockResolvedValue(allowances(remaining))
+      mockAuthorizeX402
+        .mockResolvedValueOnce(SIGNABLE_ERC7710)
+        .mockResolvedValueOnce({ ...BUDGET_403, data: { ...BUDGET_403.data, remaining_atomic: remaining } })
+      await x402Erc7710OverBudgetRejected.run(ctx)
+      const [body] = mockAuthorizeX402.mock.calls[1]
+      expect(body.amount).toBe((BigInt(remaining) + 1_000_000n).toString())
+    }
   })
 
   it('FAILS when the over-budget authorize IS turned into a signable intent', async () => {

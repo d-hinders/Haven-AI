@@ -1,11 +1,15 @@
 # CODEOWNERS — minimal money-path hard gate.
 #
-# Only DB migrations require a code-owner review in GitHub. Migrations are
-# irreversible in production, so they keep an independent second approval (from
-# a collaborator other than the PR author — GitHub's self-approval rule).
+# Only DB migration implementation files require a code-owner review in GitHub.
+# Migrations are irreversible in production, so they keep an independent second
+# approval (from a collaborator other than the PR author — GitHub's
+# self-approval rule). A single-star pattern deliberately matches only files
+# directly in this directory: migration test files in `__tests__/` are not
+# production schema changes and must not inherit this gate.
 #
 # All OTHER money-path changes (x402 / payments / machine-payments /
-# payment-coverage / allowance-module / agentAuth / release tooling) are NOT
+# payment-coverage / relayer-reads (ex-allowance-module) / agentAuth / release
+# tooling) are NOT
 # hard-gated here, and as of #1024 they are not gated in-session either.
 #
 # The pause that used to exist applied ONLY to PRs opened through ship-next; a
@@ -29,4 +33,4 @@
 #
 # See docs/contributing/autonomous-pr-loop.md ("Money-path safety model").
 
-/packages/backend/src/db/migrations/   @d-hinders @AntonioSaaranen @PhilipEriksson
+/packages/backend/src/db/migrations/*.ts   @d-hinders @AntonioSaaranen @PhilipEriksson

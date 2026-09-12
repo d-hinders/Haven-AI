@@ -18,7 +18,7 @@ const { mockQuery, allowanceMocks, sweepMocks } = vi.hoisted(() => ({
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)
 vi.mock('../../rails/sweep.js', () => sweepMocks)
 
 const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'

@@ -39,8 +39,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
  * they assert on the database and the relayer, not on Fastify's lifecycle.
  *
  * The same slice deleted the APPROVER surface, so this file also pins its
- * absence — a deletion nobody asserts is a deletion that comes back — and
- * pins that `POST /safe/exec` did NOT go with it.
+ * absence — a deletion nobody asserts is a deletion that comes back — and,
+ * since #2847, pins the same for `POST /safe/exec`: the last live Safe-rail
+ * execution route is gone, not tombstoned.
  */
 
 // db-mock-exempt: this suite's whole point is that the database is NEVER
@@ -73,7 +74,6 @@ vi.mock('../../db.js', () => ({
 // statement than a mock that was never called: there is nothing left to call.
 
 import safeDeployRoutes from '../safe-deploy.js'
-import safeExecRoutes from '../safe-exec.js'
 import userSafesRoutes from '../user-safes.js'
 import userRoutes from '../user.js'
 import { safeRailRetired } from '../../middleware/safe-inflow-retired.js'
@@ -90,7 +90,6 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(safeDeployRoutes, { prefix: '/safe' })
-    await app.register(safeExecRoutes, { prefix: '/safe' })
     await app.register(userSafesRoutes, { prefix: '/user/safes' })
     await app.register(userRoutes, { prefix: '/user' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
@@ -313,18 +312,27 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
   })
 
   /**
-   * The boundary #1986 set deliberately and #1988 holds: owner-signed Safe
-   * execution stays OPEN. It is owner authority, not the retired rail's agent
-   * authority, and it is how an owner still moves funds out of an account they
-   * hold. Asserted as 401-not-404 with no credentials: 404 would mean the
-   * route is gone, and this suite would be the last thing to notice.
+   * #2847 deleted `POST /safe/exec` outright — the LAST live Safe-rail
+   * behaviour. #1986 had held it open on the #1986/#1988 boundary: owner-
+   * signed execution for an owner moving funds out of an account they hold.
+   * With the route deleted that boundary is gone from the backend; the card's
+   * owner decision (2026-09-10) is that the tombstone treatment the inflow
+   * got is NOT applied here — the route no longer exists. Asserted as 404
+   * WITH credentials too: the old assertion proved the route was there by an
+   * anonymous 401; this proves it is gone by BOTH statuses, since a 410-
+   * shaped tombstone would answer neither.
    */
-  describe('POST /safe/exec stays open (#1986 boundary, held by #1988)', () => {
-    it('is still registered — an anonymous caller is refused by AUTH, not by the router', async () => {
+  describe('POST /safe/exec is deleted (#2847)', () => {
+    it('no longer exists — the router answers 404', async () => {
       const res = await app.inject({ method: 'POST', url: '/safe/exec', payload: {} })
 
-      expect(res.statusCode).toBe(401)
-      expect(res.statusCode).not.toBe(404)
+      expect(res.statusCode).toBe(404)
+    })
+
+    it('answers 404, not 401, for an authenticated caller too — nothing is mounted there', async () => {
+      const res = await app.inject({ method: 'POST', url: '/safe/exec', headers: auth(), payload: {} })
+
+      expect(res.statusCode).toBe(404)
     })
   })
 })

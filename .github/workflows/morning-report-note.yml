@@ -1,0 +1,154 @@
+name: Morning report note
+
+# Posts a single heads-up from the weekday morning report onto an issue —
+# normally #1289, the standing agent coordination thread.
+#
+# ## Why a workflow instead of the routine commenting directly
+#
+# The report is written by a scheduled cloud routine, which has no write
+# credential of its own: its GITHUB_TOKEN is read-only, so any direct comment
+# would have to go through a connector acting as the OWNER'S account. Two
+# problems with that. Teammates cannot tell a machine's guess from Daniel
+# speaking, and autonomous sessions read this thread and act on what they find
+# — an owner instruction is exactly the wrong thing for a scheduled job to
+# impersonate. Routing through `workflow_dispatch` puts the comment under
+# `github-actions[bot]`, which is how every other automated comment in this
+# repository is attributed, and puts the logic in version control where it can
+# be reviewed.
+#
+# ## Why the note can be refused
+#
+# The caller is an LLM on a cron. When a condition persists — a stalled
+# promotion, an unreviewed PR — it will reach the same conclusion tomorrow and
+# try to say it again. `scripts/ci/morning-report-note.mjs` refuses that on two
+# axes, and it also refuses a note that could forge a coordination directive.
+#
+#   1. EXACT: the fingerprint of the note's normalised text, 7-day window.
+#   2. TOPIC: the set of issues the note cites, 2-day window, suppressing only
+#      when the citation sets overlap by MORE than half and both notes cite at
+#      least two issues.
+#
+# The second axis was added after the first proved insufficient in production:
+# the model restated the same fact in different words and both notes posted.
+# An earlier version of this comment argued against exactly that check, on the
+# grounds that a coarser signal would collapse notes about different issues and
+# that this channel should fail toward saying something twice rather than toward
+# silence. The second half of that still governs — it is why the topic window is
+# two days rather than seven, why the comparison is strict, and why an exactly
+# half-overlapping note posts. The first half was answered by changing the
+# signal rather than coarsening it: what a note CITES is not what a note SAYS.
+#
+# The cost is real and deliberate: a genuinely new note whose citations mostly
+# repeat yesterday's can be suppressed for a day. `topic_window_days` is the
+# dial if that starts costing more than the noise did.
+#
+# A refusal is a normal outcome: the job succeeds and says why.
+#
+# Comment only. This workflow never files, closes, assigns, labels or edits an
+# issue body, and `permissions` grants nothing that would let it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'Issue number to comment on (default 1289, the agent coordination thread)'
+        required: false
+        default: '1289'
+      body:
+        description: 'The heads-up. One or two sentences. Empty means nothing worth saying — the job will skip.'
+        required: true
+      window_days:
+        description: 'Suppress a BYTE-IDENTICAL note posted within this many days'
+        required: false
+        default: '7'
+      topic_window_days:
+        description: 'Suppress a note whose cited issues mostly repeat one posted within this many days'
+        required: false
+        default: '2'
+
+permissions:
+  contents: read
+  issues: write # comment only; nothing here creates, closes or relabels
+
+concurrency:
+  group: morning-report-note
+  cancel-in-progress: false # never drop a note mid-flight; they are cheap and rare
+
+jobs:
+  note:
+    name: Post coordination heads-up
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Decide and post
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+          NOTE_BODY: ${{ inputs.body }}
+          WINDOW_DAYS: ${{ inputs.window_days }}
+          TOPIC_WINDOW_DAYS: ${{ inputs.topic_window_days }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          case "$ISSUE" in
+            ''|*[!0-9]*) echo "::error::issue must be a number, got '$ISSUE'"; exit 1 ;;
+          esac
+          case "${WINDOW_DAYS:-7}" in
+            ''|*[!0-9]*) echo "::error::window_days must be a number, got '$WINDOW_DAYS'"; exit 1 ;;
+          esac
+          case "${TOPIC_WINDOW_DAYS:-2}" in
+            ''|*[!0-9]*) echo "::error::topic_window_days must be a number, got '$TOPIC_WINDOW_DAYS'"; exit 1 ;;
+          esac
+
+          # Assert POSITIVELY that the target is an issue, and let any API
+          # failure trip `set -e`. Asking `gh pr view` whether it is a PR and
+          # swallowing stderr fails OPEN: a network blip, a 5xx or a rate limit
+          # all look identical to "not a pull request", and every downstream
+          # call happily accepts a PR number — `gh issue view` and
+          # `gh issue comment` both operate on PRs through the shared issues
+          # API, so neither is a second gate.
+          IS_PR=$(gh api "repos/${GITHUB_REPOSITORY}/issues/$ISSUE" --jq '.pull_request.url // ""')
+          if [ -n "$IS_PR" ]; then
+            echo "::error::#$ISSUE is a pull request; this workflow comments on issues only"
+            exit 1
+          fi
+
+          # Only this bot's own notes can suppress a future note. Without the
+          # author filter, anyone able to comment here could pre-seed a marker
+          # and silence a note before it is written.
+          gh issue view "$ISSUE" --json comments \
+            --jq '[.comments[] | select(.author.login == "github-actions") | {body: .body, created_at: .createdAt}]' > comments.json
+
+          printf '%s' "$NOTE_BODY" > note.txt
+
+          node scripts/ci/morning-report-note.mjs \
+            --note note.txt --comments comments.json --out rendered.md \
+            --window-days "${WINDOW_DAYS:-7}" \
+            --topic-window-days "${TOPIC_WINDOW_DAYS:-2}" | tee decision.txt
+
+          # head -1: read only the FIRST match of each field, so a reason that
+          # ever quoted the note text could not inject a second `post=` line.
+          POST=$(sed -n 's/^post=//p' decision.txt | head -1)
+          REASON=$(sed -n 's/^reason=//p' decision.txt | head -1)
+
+          if [ "$POST" != "true" ]; then
+            echo "Skipped: $REASON"
+            echo "### Morning report note — skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REASON" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh issue comment "$ISSUE" --body-file rendered.md
+
+          echo "### Morning report note — posted to #$ISSUE" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat rendered.md >> "$GITHUB_STEP_SUMMARY"

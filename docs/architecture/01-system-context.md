@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/agents.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/domain/chains.ts
   - packages/core/src/chains.ts
@@ -15,18 +15,17 @@ covers:
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/rails/delegation-policy.ts
-  - packages/backend/src/routes/safe-exec.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/config.ts
   - packages/connect/src/runtime.ts
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/tools/**
   - packages/sdk/src/tool-descriptions.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/lib/signer.ts
-  - packages/frontend/src/lib/safe-tx.ts
-last-verified: "2026-09-07" # #2669: THREE "readable" claims re-read and EDITED — the trust-boundary sentence, the retired-baseline blockquote above the diagram, and the dashboard-composition bullet. Each read as a product-surface guarantee that #2413 ended; all three now qualified to a direct database query. Scope: those three sentences; nothing else in this file was re-verified. A later round narrowed "no Haven surface displays them" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row. A THIRD round corrected that narrowing where it had been relocated rather than removed: the clause listing what "no longer renders" still named transaction history, which DOES render — `LIST_BASIC_SAFES_FOR_USER_SQL` and `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` have no rail predicate, so legacy account and agent names still appear in the `/transactions` picklists. The exception is now named with BOTH halves; a first statement of it gave only the account half. Prior: #2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation. Prior: #1992: the "Two rails" callout said the legacy rail was "RETIRING ... existing accounts only", which reads as still-serving. It is retired: existing Safe accounts stay READABLE but cannot spend. Rewritten to frame the diagram below as the retired baseline. Scope: that callout. Prior: #1989: the "User-authorized execution" bullet linked `hooks/useSendTransaction.ts`, which this diff DELETES, and read as though a dashboard screen still composes an arbitrary Safe transfer. Corrected: the signing/relay path is unchanged and still runs, but only for the surviving agent-lifecycle transactions and for a direct `POST /safe/exec`. Scope: that bullet only; the rest of the doc was NOT re-read this pass. Prior: #1988: the "Owner authority remains on-chain" bullet described approver management as a live read of `getOwners()` plus stored metadata. Those routes are deleted; Haven now neither signs nor constructs an owner change, and the bullet says so — the custody claim gets STRONGER, not weaker, because owner management moves entirely to the user's own key. Scope: that bullet; the mermaid context diagram and the other invariants were not re-verified. Prior: #1984: same "import-only" correction — the legacy rail is now closed to new accounts entirely, by deploy AND by import. The context boundaries and actors re-read against the diff and unchanged: no new external system, no new trust edge. Prior: #1199: signer-removal recovery change re-verified; custody boundary unchanged
+last-verified: "2026-09-11"
 ---
 
 # Haven — System Context
@@ -43,10 +42,9 @@ keys. The agent's delegate key stays in
 its local signer or fully local MCP runtime.
 
 > **One live rail; this diagram is the retired baseline.** The diagram and notes
-> below describe the **legacy AllowanceModule rail**, which is **RETIRED** (#1440):
-> closed to new accounts (#1984), HTTP 410 on every payment and x402 entry point
-> (#1986), machinery deleted (#1987/#1988/#1989). Existing Safe rows stay readable to a
-> direct database query — though since #2413 no account, agent or dashboard surface displays them —
+> below describe the **legacy AllowanceModule rail**, which is **RETIRED** (#1440);
+> the closure sequence is in the [decision log](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440). Existing Safe rows stay readable to a
+> direct database query — though no account, agent or dashboard surface displays them —
 > and cannot spend through Haven's payment paths. All accounts that can spend run on the **delegation
 > rail** (epic #821, `account_type='delegator_hybrid'`), where the Haven wallet is
 > a MetaMask Hybrid DeleGator smart account and the policy is a signed delegation
@@ -145,7 +143,9 @@ flowchart LR
   payment headers. Direct SDK and fully local MCP integrations collapse some
   boxes in the diagram but preserve the same local-key boundary
   ([signer core](../../packages/signer/src/core.ts),
-  [hosted tools](../../packages/mcp-server/src/tools.ts)).
+  [hosted tools](../../packages/mcp-server/src/tools.ts) — since #2812 the
+  composition-only facade over the capability modules under
+  `src/tools/`, which own the handlers and their helpers)).
 - **API authentication is identity, not spending authority.** Agent creation
   accepts and stores a public `delegate_address`, not a private key. Payments
   require the corresponding delegate signature, and the AllowanceModule
@@ -155,10 +155,11 @@ flowchart LR
 - **Relayers pay gas but do not create spending authority.** Allowance transfers
   can use an isolated `RELAYER_PRIVATE_KEY_<chainId>` with a global fallback.
   The delegate signature is calldata verified by the AllowanceModule. The
-  passkey Safe-execution path currently uses the shared relayer only after the
-  Safe validates the user's complete signature package
-  ([allowance execution](../../packages/backend/src/rails/allowance-module.ts),
-  [passkey Safe execution](../../packages/backend/src/routes/safe-exec.ts)).
+  passkey Safe-execution path used the shared relayer only after the Safe
+  validated the user's complete signature package — and #2847 deleted that
+  relayed execution route with the last live Safe-rail behaviour, so the
+  relayer no longer submits anything on the legacy rail
+  ([shared chain reads](../../packages/backend/src/infra/chain/relayer-reads.ts)).
 - **Owner authority remains on-chain, and Haven no longer touches it at all.**
   Membership truth was always `getOwners()`; Haven stored only display metadata
   such as label and owner type, and it never signed an owner change. Since
@@ -170,15 +171,17 @@ flowchart LR
 - **User-authorized execution depends on signer type and threshold.** An EOA
   owner submits the Safe transaction through its connected wallet. A passkey
   signs locally and Haven relays the already-signed transaction. A Safe with a
-  threshold above one is proposed to the Safe Transaction Service for the
-  remaining signatures
-  ([Safe transaction execution](../../packages/frontend/src/lib/safe-tx.ts)).
+  threshold above one was proposed to the Safe Transaction Service for the
+  remaining signatures — that frontend signing plumbing (`lib/safe-tx.ts`) is
+  deleted since [#2848](https://github.com/d-hinders/Haven-AI/issues/2848)
+  (epic #1440).
   **Since [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) no
   dashboard screen composes an arbitrary Safe transfer** — the Send modal and
-  its `useSendTransaction` hook are deleted with the Safe rail. The signing and
-  relay path above is unchanged for owner-signed transactions posted directly
-  to `POST /safe/exec`; Haven no longer composes legacy Safe agent lifecycle
-  transactions in the dashboard. Legacy account rows persist but reach no
+  its `useSendTransaction` hook are deleted with the Safe rail. The relayed
+  route for owner-signed transactions (`POST /safe/exec`) stayed open after
+  #1988 as the last live Safe-rail behaviour; #2847 deleted it, so Haven no
+  longer composes OR relays legacy Safe transactions anywhere, and no Safe
+  transaction signing path survives in the product. Legacy account rows persist but reach no
   account, agent or dashboard screen since #2413 — the transactions picklists are the
   exception, having no rail predicate — while live agent setup and budget lifecycle runs
   through the delegation rail.

@@ -881,50 +881,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/user/owners": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * The owner directory across every linked Safe, with aliases.
-         * @description Reads each linked Safe's owners LIVE from the chain and groups them by address, so one owner appearing on three accounts is one entry listing three. Aliases are looked up ONLY for the addresses just confirmed on-chain, which is what stops a removed owner's alias from reappearing. **A partial chain failure is reported, never hidden**: partialFailure/failedSafeIds name the Safes whose owners could not be read, so a caller can tell an incomplete directory from a complete one. Those two fields are camelCase, unlike the rest of this API — documented as-is rather than silently normalised.
-         */
-        get: operations["listUserOwners"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/owners/{ownerAddress}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Name an owner address.
-         * @description An alias is a label, never a grant — naming an address confers no authority over any Safe. The address must be a CURRENT owner of a linked account, checked against the live directory: an unknown address is a 404, but if the chain read partially failed the answer is **503 rather than 404**, because 'not an owner' and 'could not check' must not look the same.
-         */
-        put: operations["setOwnerAlias"];
-        post?: never;
-        /**
-         * Remove an owner's alias.
-         * @description Drops the label only. Idempotent — removing an alias that does not exist still succeeds, and no ownership check is needed because no authority is involved either way.
-         */
-        delete: operations["deleteOwnerAlias"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/accounting/export": {
         parameters: {
             query?: never;
@@ -934,7 +890,7 @@ export type paths = {
         };
         /**
          * Legacy SIE export — GATED OFF by default.
-         * @description Superseded by the non-asserting reporting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.
+         * @description Superseded by the non-asserting accounting feed (#491): agent spend now syncs into the accounting tool as draft transactions instead of being exported as an asserting SIE file. **410 is the normal answer on a default deployment**; the route only serves when the legacy flag is on. Responds with a FILE, not JSON — Content-Disposition attachment, plus the custom headers X-Export-Entry-Count and X-Export-Skipped reporting how many entries were written and how many could not be.
          */
         get: operations["exportAccounting"];
         put?: never;
@@ -993,7 +949,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/status": {
+    "/accounting/feed/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -1001,10 +957,10 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * Whether the reporting feed is available, connected, and live — plus recent syncs.
-         * @description Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error.
+         * Whether the accounting feed is available, connected, and live — plus recent syncs.
+         * @description Deliberately NOT gated, unlike the actions below: the page must be able to tell whether to render the full UI, an upsell, or nothing at all, and a 404 here would make "not entitled" indistinguishable from "broken". `liveSyncReady` false means sync is a preview that delivers nowhere — the provider adapter is not configured on this deployment. When the feed is unavailable the answer is a complete, honest shape with available:false and an empty syncs list, not an error. #2869: it answers 200 in every off state — `hosted:false` is "not available on self-hosted", `hosted:true, enabled:false` is "Coming soon" (visible in production by owner decision), and `enabled:true, entitled:false` is the add-on state; the gated actions 404 in all three.
          */
-        get: operations["getReportingStatus"];
+        get: operations["getAccountingFeedStatus"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1013,7 +969,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/sync": {
+    "/accounting/feed/sync": {
         parameters: {
             query?: never;
             header?: never;
@@ -1026,14 +982,14 @@ export type paths = {
          * Backfill and retry the feed for the caller.
          * @description Pushes what has not been pushed and retries what failed. Gated: **404 when the feed is unavailable**, which is how an unentitled caller sees it. Returns how many rows were fed — 0 is a normal answer, not a failure.
          */
-        post: operations["syncReportingFeed"];
+        post: operations["syncAccountingFeed"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/verify/{paymentId}": {
+    "/accounting/feed/verify/{paymentId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1044,7 +1000,7 @@ export type paths = {
          * Read back a pushed invoice from the provider's own records.
          * @description Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.
          */
-        get: operations["verifyReportingInvoice"];
+        get: operations["verifyAccountingFeedInvoice"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1053,7 +1009,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/reporting/reopen/{paymentId}": {
+    "/accounting/feed/reopen/{paymentId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1066,14 +1022,14 @@ export type paths = {
          * Reopen a pushed row for retry — only when the provider confirms the invoice is gone.
          * @description The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.
          */
-        post: operations["reopenReportingPush"];
+        post: operations["reopenAccountingFeedPush"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox/status": {
+    "/accounting/providers": {
         parameters: {
             query?: never;
             header?: never;
@@ -1081,10 +1037,10 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * Whether Fortnox is configured on this deployment and connected for the caller.
-         * @description Returns SAFE METADATA ONLY: the granted scope and the token expiry, never the tokens themselves. Two shapes, deliberately: when the deployment has no Fortnox credentials the answer omits scope/expiresAt entirely (there is nothing to report), and when it is configured they are present but null until a connection exists. `legacyBookkeeping` tells the UI whether the asserting voucher-push surface below is reachable at all — off by default (#492).
+         * The accounting providers Haven knows about, live or coming soon.
+         * @description Four today: Fortnox (`live`) and Accounted, Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.
          */
-        get: operations["getFortnoxStatus"];
+        get: operations["listAccountingProviders"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1093,7 +1049,27 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox/connect-url": {
+    "/accounting/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's accounting connections — metadata only, never secrets.
+         * @description One entry per provider the caller has ever connected; a disconnected one stays as `status: disconnected` (history stays, secrets cleared). Exactly one carries `isActiveDestination: true` while any is connected.
+         */
+        get: operations["listAccountingConnections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/connect-url": {
         parameters: {
             query?: never;
             header?: never;
@@ -1103,37 +1079,17 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Get the Fortnox consent URL as JSON.
-         * @description The JSON twin of /connect, and it exists for a concrete reason: a single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes and carries a purpose claim — see the callback.
+         * Get the consent URL for a live OAuth2 provider, as JSON.
+         * @description A single-page app cannot carry its Bearer token through a plain browser navigation, so it fetches the URL here and navigates itself. The URL embeds a signed `state` that expires in 10 minutes, carries a purpose claim `authMiddleware` rejects, is bound to the provider, and is SINGLE-USE (a `jti` the callback consumes) — see the callback.
          */
-        post: operations["getFortnoxConnectUrl"];
+        post: operations["getAccountingConnectUrl"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox/connect": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Redirect the browser to Fortnox consent.
-         * @description The redirect twin of /connect-url, for a navigation that can carry the session. Same signed, 10-minute, purpose-scoped state.
-         */
-        get: operations["startFortnoxConnect"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/accounting/fortnox/callback": {
+    "/accounting/connections/{provider}/callback": {
         parameters: {
             query?: never;
             header?: never;
@@ -1142,9 +1098,9 @@ export type paths = {
         };
         /**
          * PUBLIC OAuth callback — authenticated by the signed state, not by a session.
-         * @description Hit by a browser redirect from Fortnox, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, and it must carry the fortnox_oauth PURPOSE claim — an ordinary session token is rejected here, so a valid Haven token cannot be replayed as OAuth state. **Every outcome is a redirect, never JSON**, and every failure collapses to the same `?fortnox=error` regardless of cause: a bad state, a failed code exchange and a failed save are indistinguishable to the browser by design. A user-declined consent is reported separately as `?fortnox=denied` because that is the user's own action, not a failure to hide.
+         * @description Hit by a browser redirect from the provider, which carries no JWT. The caller is authenticated by the `state` this flow issued: it must verify, carry the accounting_oauth PURPOSE claim (an ordinary session token is rejected), name THIS provider, and its `jti` must not have been seen before — the state is consumed before the code is exchanged, so a replay never reaches the provider. **Every outcome is a redirect to the accounting page, never JSON**, and every failure collapses to the same `connect=error` regardless of cause: a bad or replayed state, a failed code exchange, a missing secrets key and a failed save are indistinguishable to the browser by design. Two outcomes are named because the user can act on them: a user-declined consent is `connect=denied` (their own action, not a failure to hide), and a company that books in a currency Haven does not feed is `connect=error&reason=unsupported_currency` (#2864, widened by #2877: "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" — nothing was stored; an existing connection is left as it was, and the user can pick another company). #2918: this route is NEVER the bare 404 the other connection routes answer when the feature is off — a consent can be mid-flight when the flag is flipped, so the off-path still redirects, named `connect=error&reason=feature_off`, and the `state`'s `jti` is consumed either way (a state cannot be banked while the flag is off and replayed after it comes back on).
          */
-        get: operations["fortnoxOAuthCallback"];
+        get: operations["accountingOAuthCallback"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1153,7 +1109,27 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/accounting/fortnox": {
+    "/accounting/connections/{provider}/api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connect a live API-key provider: validate the key at the provider, then store it encrypted.
+         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.
+         */
+        post: operations["connectAccountingApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1164,13 +1140,73 @@ export type paths = {
         put?: never;
         post?: never;
         /**
-         * Disconnect Fortnox for the caller.
-         * @description Deletes the stored connection, tokens included. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.
+         * Disconnect a provider for the caller.
+         * @description Clears the stored secrets and marks the connection `disconnected` — the row stays because sync history references it (owner decision). When the provider declares the `revoke` capability the grant is revoked at the provider first. Answers **204 No Content** and returns no token material. Idempotent — disconnecting when nothing is connected still succeeds.
          */
-        delete: operations["disconnectFortnox"];
+        delete: operations["disconnectAccountingProvider"];
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make this connection the feed destination; feed_from = now.
+         * @description Exactly one connection is where settled payments go. Activating another sets its `feedFrom` to now, so switching destination never re-feeds history into the new ledger — the epic's feed-from rule. A user who wants history chooses a backfill (`POST /accounting/connections/{provider}/backfill`, #2867). Only a `connected` connection can be activated.
+         */
+        post: operations["activateAccountingConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Include history: move feed_from EARLIER to `since` and run one bounded sync.
+         * @description The user's explicit choice to feed payments settled before the connection became the destination (#2867). Every connection gets `feedFrom = now` at connect and at activate, so nothing is re-fed unasked; this is the ONE call that moves it earlier. `since` must be an ISO date in the past and not before 2020-01-01 (400 `SINCE_INVALID`), and EARLIER than the current `feedFrom` (400 `SINCE_NOT_EARLIER` — a backfill only ever includes more history; moving the floor forward is activate's job; a connection with no floor already feeds everything and is refused the same way). Only the active, `connected` destination can be backfilled (409 `NOT_ACTIVE`). The choice is recorded on the connection and one sync runs, bounded to 200 payments and resumable — press Sync now for the rest. Ignores `autoFeed: false`: this is a manual action.
+         */
+        post: operations["backfillAccountingConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/connections/{provider}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Per-connection settings: suggested account and auto-feed.
+         * @description Exactly two keys, each optional (#2867). `suggested_account`: for Fortnox a four-digit BAS account (`^[1-8]\d{3}$`), for other providers a non-empty string of at most 32 characters, `null` to clear; it reaches the ledger only as the connector's non-asserting hint, never as an account field. `auto_feed`: `false` makes the settlement hook and the retry sweep skip this user while Sync now and the backfill still push; absent = `true`. Any other key, or an invalid value, is a 400 that names the key. Other stored connection state (the company-switch log, the backfill record) is preserved — the write is a merge. Supplier strategy is not a setting (one supplier per merchant, fixed).
+         */
+        patch: operations["updateAccountingConnectionSettings"];
         trace?: never;
     };
     "/accounting/fortnox/push": {
@@ -1184,7 +1220,7 @@ export type paths = {
         put?: never;
         /**
          * Legacy asserting voucher push — GATED OFF by default.
-         * @description The asserting counterpart to the reporting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.
+         * @description The one Fortnox-shaped path left after #2862 replaced `/accounting/fortnox/*` with the provider-generic connections above: it is provider-specific by nature. The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.
          */
         post: operations["pushFortnoxVouchers"];
         delete?: never;
@@ -1386,11 +1422,7 @@ export type paths = {
          */
         get: operations["listPasskeys"];
         put?: never;
-        /**
-         * Enroll a passkey signer for the caller.
-         * @description Derives the Safe passkey-signer address from the P256 public key and records it. **A second passkey on the same chain is allowed and is the point** (#1229): it is a BACKUP SIGNER, and this rail's only recovery — refusing it used to lock out exactly the users who most needed protection. Only a duplicate credential_id is refused. HONEST LIMITATION: the attestation object is persisted for future verification but is NOT cryptographically verified yet, so a bad enrollment harms only the enrolling user. The response is NARROWER than the list read below — an id, the credential, the derived signer address and the chain, never the public-key coordinates or the stored attestation.
-         */
-        post: operations["registerPasskey"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1900,7 +1932,7 @@ export type paths = {
         put?: never;
         /**
          * Authorize an x402 funding payment.
-         * @description Creates or executes the Haven side of an x402 merchant request. Haven relays only independently signed payloads; it does not sign on behalf of the agent. The scheme follows the payTo shape: a merchant payTo builds an erc7710 settlement child delegation and settles account→merchant directly with NO funding leg; the EIP-3009 bridge (agent-EOA payTo + merchantPayTo) is the fallback and is the only shape that still funds anything. #2105: there is no approval branch — spend authority is the agent's budget delegation, refused up front with 403 when the amount exceeds the live remaining budget (#2082) and enforced on-chain by the caveat enforcers at redemption. Preserve the original merchant session and the x402 details. The client performs the merchant retry itself; nothing mid-flow waits for a resume signal. #2145: if the process dies after the funding leg confirms, a later GET /machine-payments/:id/status reports next_action retry_original_x402_request (funding confirmed, no merchant response ever recorded) — resume that payment instead of authorizing a new one.
+         * @description Creates or executes the Haven side of an x402 merchant request. Haven relays only independently signed payloads; it does not sign on behalf of the agent. The scheme follows the payTo shape: a merchant payTo builds an erc7710 settlement child delegation and settles account→merchant directly with NO funding leg; the EIP-3009 bridge (agent-EOA payTo + merchantPayTo) is the fallback and is the only shape that still funds anything. #2105: there is no approval branch — spend authority is the agent's budget delegation, refused up front with 403 when the amount exceeds the live remaining budget (#2082, extended to this endpoint's EIP-3009 funding leg by #2706) and enforced on-chain by the caveat enforcers at redemption. Preserve the original merchant session and the x402 details. The client performs the merchant retry itself; nothing mid-flow waits for a resume signal. #2145: if the process dies after the funding leg confirms, a later GET /machine-payments/:id/status reports next_action retry_original_x402_request (funding confirmed, no merchant response ever recorded) — resume that payment instead of authorizing a new one.
          */
         post: operations["authorizeX402Payment"];
         delete?: never;
@@ -2114,7 +2146,7 @@ export type paths = {
         put?: never;
         /**
          * Report the merchant's own receipt for a settled payment.
-         * @description Captures the receipt document the merchant handed back in the paid response (invoice number, VAT breakdown — facts Haven's own payment evidence cannot assert). The reporting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. Provide either `url` (https, fetched at feed time under strict guards) or `json` (the inline receipt document, max 64KB).
+         * @description Captures the receipt document the merchant handed back in the paid response (invoice number, VAT breakdown — facts Haven's own payment evidence cannot assert). The accounting feed attaches it verbatim next to the Haven-generated evidence document. Best-effort and idempotent: absence is the normal case, the first report wins, and nothing here affects the payment itself. Provide either `url` (https, fetched at feed time under strict guards) or `json` (the inline receipt document, max 64KB).
          */
         post: operations["reportMerchantReceipt"];
         delete?: never;
@@ -2200,6 +2232,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/transactions/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the filtered transaction list as a CSV file.
+         * @description Applies the same filters as `GET /transactions` over the whole result set rather than one page, and adds `direction` and `chainId`. UTF-8 with a byte-order mark and RFC 4180 quoting. Bounded at 10 000 rows; above that the request is refused with 413 rather than truncated.
+         */
+        get: operations["exportTransactionsCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/transactions/filters": {
         parameters: {
             query?: never;
@@ -2277,23 +2329,6 @@ export type paths = {
         };
         /** Fiat-valued portfolio breakdown for one Safe. */
         get: operations["getSafePortfolio"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/safe/{safeAddress}/details": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** On-chain Safe details: owners, threshold, nonce. */
-        get: operations["getSafeDetails"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2589,6 +2624,11 @@ export type components = {
              * @description Agent-readable product docs.
              */
             docs?: string;
+            /**
+             * Format: uri
+             * @description Capability manifest on the configured dashboard origin.
+             */
+            manifest: string;
             auth: {
                 /** @description How an agent credential is presented. */
                 agent: string;
@@ -2608,6 +2648,8 @@ export type components = {
             /** Format: uri */
             openapi_url: string;
             chains: {
+                /** @description Canonical Haven default chain id. */
+                default: number;
                 deployable: number[];
                 supported: number[];
             };
@@ -2665,6 +2707,13 @@ export type components = {
             trustProxy: {
                 hops: number;
                 authRateLimitArmed: boolean;
+            };
+            /** @description Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. The counters are the one database read on this payload: when the queries throw, both are `null` and `unavailable` is `true` while the in-memory siblings still answer. */
+            accounting: {
+                exhaustedSyncs: number | null;
+                connectionsNeedingAttention: number | null;
+                /** @description Present and `true` only when the counters could not be read; the two integers are then `null`. */
+                unavailable?: boolean;
             };
         };
         SuccessResponse: {
@@ -3541,7 +3590,7 @@ export type components = {
             explorer_url: string;
             idempotent_replay?: boolean;
         };
-        /** @description Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). */
+        /** @description Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above. */
         TransactionBase: {
             hash: string;
             /** @enum {string} */
@@ -3588,9 +3637,74 @@ export type components = {
              */
             settlementScheme?: "eip3009" | "erc7710" | null;
             amountSek?: string | null;
+            fxRateSek?: string | null;
+            fxSource?: string | null;
+            accounting?: components["schemas"]["TransactionAccounting"];
         };
-        /** @description Aggregated-feed transaction: the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. */
-        Transaction: components["schemas"]["TransactionBase"] & {
+        /** @description Accounting-feed state for one transaction (#2870), read from the sync ledger — no live provider call. Present on a row only when the feed is available to the account, the user has a provider connection, and the payment has a sync row; absent otherwise. */
+        TransactionAccounting: {
+            /**
+             * @description Ledger provider key, e.g. 'fortnox'.
+             * @example fortnox
+             */
+            provider: string;
+            /** @enum {string} */
+            status: "pending" | "pushed" | "failed" | "skipped";
+            /** @description Provider-side reference once pushed ('fortnox:supplierinvoice:<n>'); null otherwise. */
+            externalRef: string | null;
+            /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
+            error: string | null;
+        };
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        Transaction: {
+            hash: string;
+            /** @enum {string} */
+            type: "native" | "erc20" | "internal";
+            /** @description Counterparty address, or the empty string when the explorer reported none. */
+            from: string;
+            /** @description Counterparty address, or the empty string when the explorer reported none. */
+            to: string;
+            value: string;
+            valueFormatted: string;
+            /** @description Token ticker where known; falls back to the raw contract address for unknown tokens. */
+            asset: string;
+            decimals: number;
+            /** @enum {string} */
+            direction: "in" | "out";
+            timestamp: number;
+            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
+            blockNumber: number;
+            isError: boolean;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            tokenAddress?: string;
+            tokenSymbol?: string;
+            /** @description Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values. */
+            source?: string;
+            x402ResourceUrl?: string | null;
+            x402MerchantAddress?: string | null;
+            paymentId?: string;
+            paymentProofStatus?: string | null;
+            /** @enum {string|null} */
+            paymentFlowStatus?: "paid" | "confirming_merchant" | "needs_attention" | null;
+            /** @enum {string|null} */
+            paymentAttentionReason?: "merchant_retry_rejected_after_payment" | null;
+            /** @enum {string} */
+            activityType?: "delegate_sweep";
+            agentName?: string;
+            /**
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @enum {string}
+             */
+            initiatedBy?: "agent" | "human" | "unknown";
+            /**
+             * @description Which settlement branch actually moved the money: `erc7710` (direct settlement, account → merchant, no funding leg) or `eip3009` (funded transfer — the budget delegation funds the delegate EOA, which then signs the standard EIP-3009 header). This is the settlement SCHEME and is three-way distinct from its neighbours: `source` is the payment PROTOCOL (x402, mpp_crypto, …), and the account's `execution_rail` is the ACCOUNT ARCHITECTURE (delegation vs the legacy AllowanceModule). Do not collapse them. Null when no scheme was recorded — non-machine transfers, and legacy-rail rows, which are structurally EIP-3009 but never stamp the key. Null-in-null-out: nothing is inferred or backfilled.
+             * @enum {string|null}
+             */
+            settlementScheme?: "eip3009" | "erc7710" | null;
+            amountSek?: string | null;
+            fxRateSek?: string | null;
+            fxSource?: string | null;
+            accounting?: components["schemas"]["TransactionAccounting"];
             chainId: number;
             /** Format: uuid */
             safeId: string;
@@ -3672,14 +3786,6 @@ export type components = {
             totalUsd: number;
             totalEur: number;
             breakdown: components["schemas"]["PortfolioBreakdown"][];
-        };
-        SafeDetails: {
-            /** @description Echoed back as supplied — not re-checksummed. */
-            address: string;
-            /** @description Checksummed owner addresses from the contract. */
-            owners: string[];
-            threshold: number;
-            nonce: number;
         };
         TransactionFilterOptionsResponse: {
             safes: {
@@ -3890,6 +3996,8 @@ export type components = {
             hasMore: boolean;
             partialFailure: boolean;
             failedSafeIds: string[];
+            /** @description At least one account's explorer read stopped at the pagination budget with the source still offering more, so these rows and `total` are a capped view rather than the full history (#2884). Independent of `partialFailure`. */
+            truncated: boolean;
         };
     };
     responses: never;
@@ -7867,203 +7975,6 @@ export interface operations {
             };
         };
     };
-    listUserOwners: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Owners grouped by address, plus the partial-failure report. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        owners: {
-                            /** @description Lowercased for grouping. */
-                            owner_address: string;
-                            /** @description The stored alias, or null. */
-                            name: string | null;
-                            accounts: {
-                                /** Format: uuid */
-                                id: string;
-                                /** @example 0x1111111111111111111111111111111111111111 */
-                                safe_address: string;
-                                chain_id: number;
-                                name: string;
-                            }[];
-                        }[];
-                        partialFailure: boolean;
-                        failedSafeIds: string[];
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    setOwnerAlias: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Owner address; matched case-insensitively (stored lowercase). */
-                ownerAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The stored alias. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        owner_address: string;
-                        name: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Not a current owner of any linked account. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Owners could not be verified — distinct from "not an owner". */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    deleteOwnerAlias: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Owner address; matched case-insensitively (stored lowercase). */
-                ownerAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Alias removed (or was already absent). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     exportAccounting: {
         parameters: {
             query?: {
@@ -8125,7 +8036,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The default: SIE export is retired in favour of the reporting feed. */
+            /** @description The default: SIE export is retired in favour of the accounting feed. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -8369,7 +8280,7 @@ export interface operations {
             };
         };
     };
-    getReportingStatus: {
+    getAccountingFeedStatus: {
         parameters: {
             query?: never;
             header?: never;
@@ -8385,14 +8296,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description This deployment is the hosted Haven (`HAVEN_HOSTED`). False on a self-hosted box, where the feed is not available and never "coming soon" (#2869). */
                         hosted: boolean;
+                        /** @description #2869: the `HAVEN_ACCOUNTING_ENABLED` flag. `hosted && !enabled` is the "Coming soon" state the dashboard shows in production. */
+                        enabled: boolean;
+                        /**
+                         * @deprecated
+                         * @description Deprecated — same value as `enabled`; removed one release after #2869.
+                         */
                         flagEnabled: boolean;
                         /** @description A real provider adapter is registered. */
                         liveSyncReady: boolean;
-                        /** @description The caller is entitled to the feed. */
+                        /** @description #2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `enabled` is false, so the UI can tell "feature off" from "not entitled" without a second call. */
+                        entitled: boolean;
+                        /**
+                         * @description How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.
+                         * @enum {string}
+                         */
+                        entitlementMode: "granted" | "all";
+                        /** @description hosted AND enabled AND entitled — the one field a caller needs to decide whether to render the feed. */
                         available: boolean;
                         /** @description The caller has a live provider connection. */
                         connected: boolean;
+                        /** @description The company the ACTIVE connection points at, as the provider reported it (#2864) — "Connected to <Company AB>". Null when not connected, when the grant could not read it (`scope_missing`), or when the feed is unavailable. */
+                        companyName: string | null;
+                        /** @description #2869: the connection flagged as the feed destination WHATEVER its status — the page summary line ("Feeding Fortnox · Company AB · last push …") and the sidebar attention badge read it. A `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` destination is the attention state. Metadata only, never secrets. Null when there is no destination row or the feed is unavailable. */
+                        destination: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            companyName: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                        } | null;
+                        /** @description #2865: the scopes the DESTINATION connection lacks (the row flagged as destination, whatever its status — a `scope_missing` destination reports `connected:false` and names them here), so the UI can say which scope a reconnect adds. Empty when nothing is missing or there is no destination; always present. */
+                        missingScopes: string[];
                         syncs: {
                             /** Format: uuid */
                             id: string;
@@ -8405,13 +8345,21 @@ export interface operations {
                             external_ref: string | null;
                             /** @enum {string} */
                             status: "pending" | "pushed" | "failed" | "skipped";
+                            /** @description The provider message on a failed row, the reason on a skipped row, a non-fatal note on a pushed row. A `failed` row the retry sweep (#2866) has given up on starts with `exhausted:`. */
                             error: string | null;
+                            /** @description Claims so far; the background sweep stops at 8. */
                             attempts: number;
                             /** Format: date-time */
                             created_at: string;
                             /** Format: date-time */
                             updated_at: string;
                         }[];
+                        /** @description #2866: sync rows by retry state, over ALL of the caller's rows (the `syncs` list is capped). `pending` is in flight (or a stale claim the sweep will release), `failed` is retryable — the background sweep re-feeds it with backoff — and `exhausted` is a `failed` row at the attempt cap (8) that the sweep has given up on; its `error` starts with `exhausted:` until a manual "Sync now" re-claims it (a later failure then carries the plain reason while `attempts` keeps it in this count). "Sync now" still retries exhausted rows. Zeros when the feed is unavailable. */
+                        counts: {
+                            pending: number;
+                            failed: number;
+                            exhausted: number;
+                        };
                     };
                 };
             };
@@ -8432,7 +8380,7 @@ export interface operations {
             };
         };
     };
-    syncReportingFeed: {
+    syncAccountingFeed: {
         parameters: {
             query?: never;
             header?: never;
@@ -8467,7 +8415,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The reporting feed is not available for this caller. */
+            /** @description The accounting feed is not available for this caller. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8484,7 +8432,7 @@ export interface operations {
             };
         };
     };
-    verifyReportingInvoice: {
+    verifyAccountingFeedInvoice: {
         parameters: {
             query?: never;
             header?: never;
@@ -8539,7 +8487,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The reporting feed is not available for this caller. */
+            /** @description The accounting feed is not available for this caller. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8570,7 +8518,7 @@ export interface operations {
             };
         };
     };
-    reopenReportingPush: {
+    reopenAccountingFeedPush: {
         parameters: {
             query?: never;
             header?: never;
@@ -8611,7 +8559,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The reporting feed is not available for this caller. */
+            /** @description The accounting feed is not available for this caller. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8626,7 +8574,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Refused, nothing written — the invoice still exists, the row is not pushed, or it moved under us. */
+            /** @description Refused, nothing written — the invoice still exists, the row is not pushed, it moved under us, or (#2864, `previous_company`) the row was delivered into the company the connection pointed at BEFORE its latest company switch: its record lives in that company, "missing" in the current one is the correct verdict, and reopening would re-feed the previous company's history into the new one. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8635,14 +8583,19 @@ export interface operations {
                     "application/json": {
                         error: string;
                         /** @enum {string} */
-                        error_code: "not_pushed" | "not_connected" | "no_invoice_ref" | "invoice_exists";
+                        error_code: "not_pushed" | "not_connected" | "no_invoice_ref" | "invoice_exists" | "previous_company";
                         invoice_number?: number;
+                        /**
+                         * Format: date-time
+                         * @description With `previous_company`: when the connection switched company.
+                         */
+                        switched_at?: string;
                     };
                 };
             };
         };
     };
-    getFortnoxStatus: {
+    listAccountingProviders: {
         parameters: {
             query?: never;
             header?: never;
@@ -8651,27 +8604,35 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Connection metadata. */
+            /** @description The registry. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        /** @enum {boolean} */
-                        configured: false;
-                        /** @enum {boolean} */
-                        connected: false;
-                        legacyBookkeeping: boolean;
-                    } | {
-                        /** @enum {boolean} */
-                        configured: true;
-                        connected: boolean;
-                        /** @description The granted OAuth scope. Null until connected. */
-                        scope: string | null;
-                        /** @description Access-token expiry. Null until connected. */
-                        expiresAt: string | null;
-                        legacyBookkeeping: boolean;
+                        providers: {
+                            /** @example fortnox */
+                            id: string;
+                            /** @example Fortnox */
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            capabilities: {
+                                attachments: boolean;
+                                verify: boolean;
+                                revoke: boolean;
+                                companyInfo: boolean;
+                            };
+                            /**
+                             * @description Only a `live` provider accepts a connect; `coming_soon` ones are listed so the dashboard can show them.
+                             * @enum {string}
+                             */
+                            availability: "live" | "coming_soon";
+                            requiredScopes: string[];
+                            /** @description Whether THIS deployment can connect the provider (its connector is registered). A live provider without credentials configured is listed but refuses connect with 503. */
+                            configured: boolean;
+                        }[];
                     };
                 };
             };
@@ -8692,11 +8653,112 @@ export interface operations {
             };
         };
     };
-    getFortnoxConnectUrl: {
+    listAccountingConnections: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connections. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connections: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
+                        }[];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The deployment is not hosted, or the accounting feature flag is off. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAccountingConnectUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider id from /accounting/providers. */
+                provider: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -8727,7 +8789,34 @@ export interface operations {
                     };
                 };
             };
-            /** @description Fortnox is not configured on this deployment. */
+            /** @description Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`) or the flow does not match its auth kind (`WRONG_AUTH_KIND`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        error_code: string;
+                    };
+                };
+            };
+            /** @description The provider is live but not configured on this deployment. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -8744,21 +8833,121 @@ export interface operations {
             };
         };
     };
-    startFortnoxConnect: {
+    accountingOAuthCallback: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Authorization code from the provider. */
+                code?: string;
+                /** @description The signed, purpose-scoped, single-use state this flow issued. */
+                state?: string;
+                /** @description Present when the user declined consent. */
+                error?: string;
+            };
             header?: never;
-            path?: never;
+            path: {
+                provider: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to the Fortnox consent screen. */
+            /** @description Always a redirect to `/accounting?provider=<id>&connect=connected|denied|error`, with `&reason=unsupported_currency` on the one named refusal, or `&reason=feature_off` (#2918) when the deployment is not hosted or the flag is off. */
             302: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    connectAccountingApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    apiKey: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Connected. Metadata only. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connection: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description Missing key, or the provider rejected it. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Error response */
             401: {
@@ -8775,7 +8964,34 @@ export interface operations {
                     };
                 };
             };
-            /** @description Fortnox is not configured on this deployment. */
+            /** @description Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        error_code: string;
+                    };
+                };
+            };
+            /** @description The provider is live but not configured on this deployment. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -8792,36 +9008,13 @@ export interface operations {
             };
         };
     };
-    fortnoxOAuthCallback: {
-        parameters: {
-            query?: {
-                /** @description Authorization code from Fortnox. */
-                code?: string;
-                /** @description The signed, purpose-scoped state this flow issued. */
-                state?: string;
-                /** @description Present when the user declined consent. */
-                error?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Always a redirect to the settings page: ?fortnox=connected, ?fortnox=denied, or ?fortnox=error. */
-            302: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    disconnectFortnox: {
+    disconnectAccountingProvider: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                provider: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -8835,6 +9028,364 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The deployment is not hosted, or the accounting feature flag is off. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    activateAccountingConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The now-active connection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connection: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The connection is not in the `connected` state. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    backfillAccountingConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: date-time
+                     * @description ISO date or date-time; the new feed-from floor.
+                     * @example 2026-01-01
+                     */
+                    since: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new floor and how many payments this call fed (0 is normal when the history is already pushed or empty). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: date-time
+                         * @description The connection's feed-from after the move — `since`, normalised.
+                         */
+                        feedFrom: string;
+                        /** @description Payments fed by this call (at most 200). */
+                        fed: number;
+                    };
+                };
+            };
+            /** @description `SINCE_INVALID` (not a date, in the future, before 2020-01-01) or `SINCE_NOT_EARLIER` (not earlier than the current feed-from, or the connection has no floor). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The connection is not the active `connected` destination (`NOT_ACTIVE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    updateAccountingConnectionSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Fortnox: a four-digit BAS account. Null clears.
+                     * @example 6540
+                     */
+                    suggested_account?: string | null;
+                    /** @description False = manual only. */
+                    auto_feed?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The connection with its settings after the merge. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        connection: {
+                            /** @example fortnox */
+                            provider: string;
+                            displayName: string;
+                            /** @enum {string} */
+                            authKind: "oauth2" | "api_key";
+                            /**
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @enum {string}
+                             */
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            statusReason: string | null;
+                            /** @description Exactly one connection per user is where settled payments go. */
+                            isActiveDestination: boolean;
+                            /**
+                             * Format: date-time
+                             * @description Nothing settled before this is fed. Set to now by activate (#2862) and by a company switch (#2864); moved EARLIER only by the backfill (#2867). Null on a pre-#2862 row that feeds everything.
+                             */
+                            feedFrom: string | null;
+                            grantedScope: string | null;
+                            /** @description #2865: the provider's required scopes the grant does not carry — derived from `grantedScope` against the descriptor's `requiredScopes`, plus the scopes a push-time refusal named while the row is `scope_missing`. Empty when nothing is missing. Non-empty on a `connected` row means the grant predates a scope widening and will degrade at the first call that needs it; a re-consent clears it. */
+                            missingScopes: string[];
+                            /**
+                             * Format: date-time
+                             * @description Access-token expiry (OAuth2 providers). Null for API-key providers.
+                             */
+                            tokenExpiresAt: string | null;
+                            /** @description The provider's own tenant id (Fortnox: `DatabaseNumber`), read at connect (#2864). A reconnect that comes back with a different id is a company switch: the row is kept, the company fields are replaced, `feedFrom` moves to now and `statusReason` names the switch. Null until a grant with the company scope read it. */
+                            externalCompanyId: string | null;
+                            /** @description The company the connection points at, for "Connected to <Company AB>" (#2864). */
+                            externalCompanyName: string | null;
+                            /** @description ISO-4217 as the provider reported it at connect, and the currency the feed pushes in (#2877). A ledger outside the supported list — SEK, EUR, USD, DKK, NOK, GBP — is refused at connect with "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers" (#2864). Null when the provider cannot say; such a connection books in SEK. */
+                            baseCurrency: string | null;
+                            /** Format: date-time */
+                            lastPushAt: string | null;
+                            lastError: string | null;
+                            /** Format: date-time */
+                            connectedAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                            settings: {
+                                /** @description A hint for the accountant, carried on every pushed document ONLY in the connector's non-asserting hint field (Fortnox: `YourReference: "suggested account 6540"`) — never as an account field; the payload guard still bans `Account`. A per-merchant override, when one exists, wins over this. Fortnox: a four-digit BAS account. Null = no hint. */
+                                suggestedAccount: string | null;
+                                /** @description Default true. False = "manual only": the settlement hook and the background retry sweep leave this user alone; `POST /accounting/feed/sync` and the backfill still push. */
+                                autoFeed: boolean;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description An unknown key or an invalid value; `key` names it. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "INVALID_SETTING";
+                        /** @description The offending setting, or null when the body itself is not an object. */
+                        key: string | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No connection for this provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9993,92 +10544,6 @@ export interface operations {
             };
             /** @description Error response */
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    registerPasskey: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Non-empty base64url. */
-                    credential_id: string;
-                    /** @description 32-byte 0x-hex. */
-                    public_key_x: string;
-                    /** @description 32-byte 0x-hex. */
-                    public_key_y: string;
-                    chain_id: number;
-                    /** @description Optional base64url attestation. Stored, not yet verified. */
-                    raw_attestation_object?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Passkey enrolled. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        credential_id: string;
-                        /** @description Derived from the public key; stored lowercase. */
-                        signer_address: string;
-                        chain_id: number;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description This credential is already registered. Note: a SECOND passkey on the same chain is NOT a conflict. */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12277,7 +12742,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082) the erc7710 direct-settlement amount exceeds that delegation's live remaining period budget. The over-budget refusal is PRE-FUNDING — no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. It is a fail-fast convenience, not the gate: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds). */
+            /** @description Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation's live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13707,6 +14172,82 @@ export interface operations {
             };
         };
     };
+    exportTransactionsCsv: {
+        parameters: {
+            query?: {
+                safeId?: string;
+                agentId?: string;
+                tokenKey?: string;
+                direction?: "in" | "out";
+                chainId?: number;
+                fresh?: "1" | "true";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The CSV file. */
+            200: {
+                headers: {
+                    /** @description attachment; filename="haven-transactions-YYYYMMDD.csv" */
+                    "Content-Disposition"?: string;
+                    /** @description Rows written, excluding the header. */
+                    "X-Export-Row-Count"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     getTransactionFilterOptions: {
         parameters: {
             query?: {
@@ -13957,75 +14498,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    getSafeDetails: {
-        parameters: {
-            query?: {
-                chain_id?: number;
-            };
-            header?: never;
-            path: {
-                safeAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Safe details. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SafeDetails"];
                 };
             };
             /** @description Error response */

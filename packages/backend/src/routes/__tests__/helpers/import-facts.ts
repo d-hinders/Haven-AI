@@ -182,13 +182,13 @@ function collectStringLiteralTypes(type: ts.TypeNode, into: Set<string>): void {
  * deep the relative prefix is, and to a URL query/hash suffix.
  *
  * The suffix strip is not decoration: Node's ESM loader treats
- * `import('../rails/allowance-module.js?bust=1')` as a real load of that module
+ * `import('../infra/chain/relayer-reads.js?bust=1')` as a real load of that module
  * (the standard cache-busting idiom), so a specifier ending in a query would
  * otherwise slip a rule that only knew about `.js`. Mutation-proven, not
  * reasoned about (#2049).
  *
  * ⚠️ It normalizes an extension and a query/hash suffix, NOT a trailing
- * `/index`, so `…/allowance-module/index.js` would slip. Not expressible
+ * `/index`, so `…/module/index.js` would slip. Not expressible
  * today — every banned module is a FILE, so that path resolves to nothing —
  * but if one is ever re-created as a directory, this line is the reminder
  * that the normalization must learn `/index` first.

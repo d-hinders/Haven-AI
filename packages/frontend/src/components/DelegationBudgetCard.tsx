@@ -267,7 +267,8 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           <Input
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
-            placeholder="Recipient address (optional — leave blank for any)"
+            placeholder="Recipient address"
+            helperText="Optional — leave blank for any recipient."
             className="font-mono"
             aria-label="Recipient"
           />

@@ -38,7 +38,7 @@ const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() =>
 }))
 
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
-vi.mock('../../rails/allowance-module.js', () => allowanceMocks)
+vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 // Evidence recording moved into the mpp module's public entry point (#997);
 // the x402 legacy-rail orchestration imports it from there now.

@@ -16,13 +16,16 @@ covers:
   - packages/frontend/src/components/ui/Input.tsx
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
-  - packages/frontend/src/hooks/useReporting.ts
+  - packages/frontend/src/hooks/useAccountingFeed.ts
+  - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
+  - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
+  - packages/frontend/src/hooks/useTransactionsFeed.ts
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-07" # #2669: the connect-flow recipe's "Legacy Safe accounts remain readable, but the dashboard refuses this flow with a retired-rail notice" re-read and EDITED — the notice component is deleted and the accounts are not rendered, so the flow is unreachable rather than refused. Scope: that one sentence. A later round narrowed "no Haven surface displays them" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row. Prior: #2265: the Send Payment recipe had a LIVE subject (`DelegationSendModal.tsx`) and a retired Safe-rail shape — a separate review step, `Approve and send`/`Back`, "submitted for additional approval", and a multi-approval hold. Read against the live modal rather than the issue text: it is titled `Send`, single-step, `Cancel`/`Send`, with "Send from this account with one approval. No network fee for you." Recipe rebased on that, with a note recording what was removed and why, since a recipe is prescriptive — it was telling a contributor to rebuild a deleted screen. Its `/design-system` twin ("Manual payment review" → "Manual send") is rebased in the SAME change, per #2266's "fix both or neither". The retirement record's "answer HTTP 410" corrected to 404: #1986 made them 410, then #2055 deregistered the routes, and `index.ts` and 03-payment-sequence.md already said 404 — this was the last copy saying 410. DECIDED, not fixed: the "if the account needs more than one approval … submitted/waiting state" line sits INSIDE the "Approve Payment — RETIRED, kept as history" section under "Do not build against this recipe", so it is already correctly scoped and is left alone (this corrects my own earlier reading of it as live copy); and the Settings recipe's "approval"/"approve actions" wording is generic signing language, not queue framing, so it stays. Scope: the Send Payment recipe and that one retirement-record fact. NOT re-verified: the other recipes. Prior: #2357: two quoted example strings in this file were the SHIPPED row titles and stopped being so in the same diff that bumped this line — `paymentSourceTitle` no longer returns `x402 payment`. § Transaction History's terminology bullet listed it beside `Agent payment` as human event copy; it now lists `Machine payment`, the OTHER title that function returns (the retired-`mpp_demo` rows' one), rather than `Agent payment` twice. § Policy Violation's x402 collapse bullet quoted `x402 payment by [agent name]` as the merchant-facing row; it now quotes `Agent payment by [agent name]`, and gains the sentence naming what that costs — an x402 row and an ordinary agent payment now share a title, and `From -> To` plus the detail drawer are the disambiguation surface. That is an owner decision, recorded here so the next author reads the trade-off rather than re-litigating it. Found by haven-doc-reviewer; the coupling gate did not implicate this file, because it `covers:` `TransactionsTable.tsx` and not the `src/lib` module the strings actually live in. Scope: those two bullets only. NOT re-verified: any other recipe, the covered components, or this doc's other `covers:` files. Prior: #2258: Re-read the legacy Safe retirement, live delegation boundary, and covered claims for this implementation. Prior: #2097: the transaction-copy bullet in the Transaction History / terminology section — `Payment sent by you` is now human-initiated-only per the initiator-semantics invariant; the neutral `Payment sent` covers unattributed rows. Scope: that one line; no other recipe re-read. Prior: #1947: Agent Activity and Policy Violation recipes de-queued — "queued requests"/"required approval"/"blocked or queued" restated as declined-by-the-rules, the `Approval request` row-copy example replaced with `x402 payment`, and Policy Violation now states there is no queued state to present (rails/execution-rail.ts: the delegation rail is the only live rail; routes/payments.ts declines out-of-policy requests during prepare). Scope: those two recipes only; the Approve-Payment RETIRED block untouched. Prior: #1992: the money-and-risk bullet told designers to state a per-rail over-budget behaviour — "queued for approval on legacy Safe accounts". That branch does not exist: the approval queue died with the Safe rail (#1986/#1987), and a legacy account cannot mint a payment intent at all (HTTP 410), so there is no over-budget state for it to reach. Scope: that bullet; the rest of the agent-budget recipe was re-read and unchanged, and #1989's own corrections to the Approve-Payment recipe stand. Prior: #1989: the "Approve Payment" recipe documented `ApprovalQueue` / the `/approvals` route, both deleted here (and 410 server-side since #1986). No screen matches it on either rail. Marked RETIRED with the recipe kept verbatim in a details block, because its two-leg x402 money-and-risk guidance is the only written record of that presentation and the #946 bridge reintroduces a funding leg. Also dropped "and approvers" from the Account Detail advanced-details bullet, noting that `AccountSignersCard` is a different concept and not a substitute. Scope: those two places. Prior: #1701: adds the Replace An Agent Signing Key recipe — the point-of-no-return gate (name the irreversible step before it is taken, require an acknowledgement that names the consequence, say stopping is free up to the line, remove backdrop/Escape/close past it), tone escalation reserved for that step, and refuse-before-the-gate. Only the new recipe written; the existing recipes on this page were not re-read. Prior: #1852: the Receive Funds recipe's unresolved-network rule now names the QR code and the explorer link explicitly (a receive surface withholds them together with the address, or it is still instructing), adds the required-but-non-promising next action, and pins the account name as the one thing that stays. The unconditional "keep raw address visible" bullet is now conditioned on a confirmed network — it contradicted the #1844 bullet directly above it. Only the Receive Funds recipe re-read. Prior: #1844: the Receive Funds recipe gains the unresolved-network rule — a funding surface that cannot confirm the account's network names none, withholds the address and the on-ramp, and says so, rather than defaulting to Base mainnet. Only that recipe re-read. Prior: #1720: the Connect And Approve recipe no longer pairs a SELECTED runtime — the picker is gone and one setup prompt serves every environment; the bounded-wait step now points at the connector's output, which can refuse locally without Haven ever hearing about it. Other recipes on this page not re-read. Prior: #1684: the approval screen names the gate ONCE — the `Approve agent budget` card heading is gone on both rails, leaving the modal subtitle `Approve the agent budget`; the one-gate-one-name sequence and its per-viewport rule updated to match. Body re-read against the connect-agent components. Prior: #1572 named the gate `agent budget` end to end (recipe titles, primary actions, the one-gate-one-name rule); #1379 bounded pre-registration recovery re-verified alongside the existing Connect handoff and approval flow
+last-verified: "2026-09-12"
 ---
 
 # Haven Screen Recipes
@@ -379,6 +382,18 @@ Money and risk clarity:
 - Use external links for details, but do not make hashes the primary labels.
 - Use `TransactionActivityRow` for short non-sortable previews such as
   Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
+- **Never present a capped list as a complete one (#2882).** The feed reads a
+  bounded window per source per account — a fixed page budget (#2884) — so
+  `total` counts what was returned, not what the account holds. When the
+  response reports `truncated`, every
+  claim on the screen softens together — the page subtitle ("Recent activity"
+  rather than "All activity"), a caveat line inside the count row, and the
+  end-of-list string ("End of what's loaded" rather than "You've reached the
+  end"). Softening one and leaving the others is worse than softening none:
+  the louder claim is the one the reader believes. The same rule binds any
+  other surface fed by the same hook — the account detail page's transaction
+  count included. Hedge the wording ("may not be your full history"); the
+  detection is not exact on every provider, and the reason lives in the code.
 - Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
   one merchant-facing row such as `Agent payment by [agent name]`. Live
@@ -389,9 +404,17 @@ Money and risk clarity:
   resource hostname, so an x402 row and an ordinary agent payment read the same
   at the title and are told apart by those two surfaces.
 - Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
-- Keep amount in its own cell; date and the external-details link are separate
-  columns or controls.
+- Keep amount in its own cell **at `md` and up**; date and the external-details
+  link are separate columns or controls. Below `md` the amount column collapses
+  and the amount rides under the title inside the activity cell (#2734) — its
+  110px was coming straight off the title, which is the only flexible column,
+  and the title wrapped to three lines at 390px as a result.
 - Full history table sorting must use raw transaction values for amount sorting and `aria-sort` on sortable headers.
+- **Sorting is available at `md` and up only, and that is deliberate** (owner
+  decision 2026-09-09, #2790). Both sortable headers are `revealAt="md"` and
+  there is no sort control elsewhere, so a phone gets the default order —
+  newest first — and no way to change it. Do not read the absence as a defect,
+  and do not add a mobile sort control without taking it through #2736.
 - On mobile, preserve direction, activity/movement, amount, and the
   external-details link. Secondary columns, including date and initiator, may
   hide.
@@ -405,17 +428,25 @@ Structure:
 2. Balance card.
 3. Agent access or budgets connected to this account.
 4. Scoped transaction history.
-5. Advanced details section for Haven wallet address, explorer link and
-   required approval threshold. Show modules only if a real advanced
-   module-management surface exists. (An approver list belonged here until
-   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the
-   Approvers surface. The delegation rail's `AccountSignersCard` is a different
-   concept — the account's signer set, not a Safe owner threshold — and is not
-   a substitute for it.)
+5. Advanced details section for Haven wallet address and explorer link. Show
+   modules only if a real advanced module-management surface exists. (A
+   required-approval-threshold element belonged here until
+   [#2848](https://github.com/d-hinders/Haven-AI/issues/2848) removed it: the
+   approvers surface it described was already deleted by
+   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989), and no live
+   screen renders a threshold. The delegation rail's `AccountSignersCard` is a
+   different concept — the account's signer set, not a Safe owner threshold —
+   and is not a substitute for it.)
 
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.
 - Technical disclosure is allowed here, but label it gently and keep it visually subordinate.
+- The transaction count on this page comes from the same capped feed as
+  Transaction History, so it softens with it (#2882) — see that section's
+  rule. A preview card earns the shortened form ("N recent transactions",
+  the count marked "loaded") rather than the full caveat sentence: a
+  disclaimer longer than the thing it qualifies is worse than the terse one,
+  and `View all` carries the reader to the surface that explains itself.
 
 ## Recover Agent-Wallet Funds
 
@@ -501,12 +532,25 @@ Use for the guarded hosted reporting add-on. `/accounting` redirects here and
 is not a separate product recipe.
 
 Structure:
-1. Hide the route when the deployment is self-hosted or the feature flag is off.
-2. Show add-on availability before connection controls.
+1. Two distinct OFF states, two copies, never interchangeable (#2869, owner
+   decision 2026-09-11). **Hosted with the flag off** is *Coming soon*: the
+   route stays visible in production, the sidebar entry carries a muted *Soon*
+   pill (its accessible name, and its visible text below `lg`, is *Coming
+   soon*), and the page explains what the feed will do and which platforms
+   are being lined up — with no connect and no sync control reachable,
+   disabled ones included. The page header and the Settings card carry a
+   neutral one-liner in both off states; the product subtitle ("…your
+   accountant codes and confirms them") is earned by the feed that is on. **Self-hosted** is *not available on self-hosted*: the copy
+   must never read as coming soon (nothing is scheduled for that deployment),
+   the sidebar entry is hidden, and the Settings card lists no providers.
+2. Show add-on availability before connection controls (the flag-on,
+   not-entitled case).
 3. State whether live delivery is ready. A preview must say that nothing is
    being sent to Fortnox or another provider.
-4. Show connected/disconnected provider state and explicit connect/disconnect
-   actions.
+4. Show connected/disconnected provider state with ONE summary line at the
+   top of the feed — where spend is going, or what needs the user's hand and
+   where to fix it. The connect/disconnect actions themselves live in
+   Settings → Accounting (#2868); the feed page links there and offers none.
 5. Show draft transaction states with retry where supported. Only a live
    connector may say `Synced`. Preview/local tracking must say `Tracked`,
    `Prepared`, or `Not delivered`; it must not imply external delivery.
@@ -539,4 +583,5 @@ Money and risk clarity:
 - Use `sign-in method` and `approve actions`, not `signer` or `owner`.
 - Explain recovery limitations plainly without making the user feel at fault.
 - Keep personal profile details on `/profile`; Settings should focus on preferences, access, approvals, recovery, notifications, and data controls.
+- Accounting connections are a Settings section (owner decision 2026-09-11, #2868): one `SettingsRow` per provider (the page's own row, not `ui/Row` — `Row` truncates its title to one line and never wraps its trailing slot, which squeezed "Fortnox" to "Fortn…" beside two buttons at 390px) with a status chip and the one action that resolves the state; the feed settings open inline under the row (`Card.Section`-style block, never a nested filled card); Disconnect confirms and says history in Haven stays; the section header carries the responsibility line (data tooling, not accounting or tax advice — the accountant remains responsible for coding, correctness and filing); copy follows the accounting guardrail — a payment *appears in the ledger with payment evidence attached; the accountant books it*.
 - Avoid duplicating account summary facts already shown on Dashboard, Profile, or Account details.

@@ -8,7 +8,7 @@ const PRIVATE_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6
 const ADDRESS = addressFromKey(PRIVATE_KEY)
 const HASH = ethers.keccak256(ethers.toUtf8Bytes('haven-session-userop'))
 
-describe('signHash — raw ECDSA (AllowanceModule rail)', () => {
+describe('signHash — raw ECDSA (the live EIP-3009 signing leg)', () => {
   it('recovers via raw ecrecover over the hash', () => {
     const sig = signHash(PRIVATE_KEY, HASH)
     expect(ethers.recoverAddress(HASH, sig).toLowerCase()).toBe(ADDRESS.toLowerCase())

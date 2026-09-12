@@ -7,7 +7,7 @@ const { mockQuery, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
-    getBookTimeSekValue: vi.fn().mockResolvedValue(null),
+    getBookTimeCapture: vi.fn().mockResolvedValue(null),
   },
 }))
 
@@ -191,7 +191,7 @@ describe('payment routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     for (const mock of Object.values(fiatMocks)) mock.mockReset()
-    fiatMocks.getBookTimeSekValue.mockResolvedValue(null)
+    fiatMocks.getBookTimeCapture.mockResolvedValue(null)
   })
 
   // #2055: was "...from an approval request id" — `approval_requests` is
@@ -378,7 +378,7 @@ describe('payment routes', () => {
   // nothing claimed, nothing executed) BEFORE the claim CAS, the mpp_demo
   // gate, or the expiry check ever run, so these characterize the refusal
   // rather than the (now-unreachable) legacy execution/claim/expiry paths
-  // they originally proved. `rails/allowance-module.ts` and these cases are
+  // they originally proved. `infra/chain/relayer-reads.ts` and these cases are
   // scheduled for deletion in #1987.
   it('claims a pending signature intent before executing on-chain', async () => {
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
@@ -685,7 +685,7 @@ describe('payment routes', () => {
   // intent gate — `allowanceModuleRailRetired('account')`). That includes the
   // "delegation-rail intent" replay case: the INTENT is pinned `delegation`,
   // but the ACCOUNT's current rail is what the early gate reads, and this
-  // fixture never mocks it, so it 410s too. `rails/allowance-module.ts` and
+  // fixture never mocks it, so it 410s too. `infra/chain/relayer-reads.ts` and
   // these cases are scheduled for deletion in #1987.
   describe('POST /payments idempotency (#1207)', () => {
     const ONE_XDAI = 1_000_000_000_000_000_000n
@@ -937,8 +937,8 @@ describe('payment routes', () => {
   // #1986 (epic #1440 slice 3): `createRoutes` never mocks the account's
   // current execution rail, so `loadExecutionRailState` resolves it to
   // `null`, which now fail-closes to `retired_allowance` before the coverage
-  // decision this block characterizes is ever computed. `rails/
-  // allowance-module.ts` and these cases are scheduled for deletion in #1987.
+  // decision this block characterizes is ever computed. `infra/chain/
+  // relayer-reads.ts` and these cases are scheduled for deletion in #1987.
   describe('POST /payments (create)', () => {
     const ONE_XDAI = 1_000_000_000_000_000_000n // 1 xDAI, 18 decimals
 

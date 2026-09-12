@@ -1,5 +1,7 @@
 'use client'
 
+import { havenEnvironment, isProductionEnvironment } from '@/lib/env'
+
 /**
  * Small environment chip (e.g. "DEV") shown when NEXT_PUBLIC_HAVEN_ENV is set to
  * a non-production value. Renders nothing in production, so it never appears on
@@ -8,10 +10,14 @@
  * NEXT_PUBLIC_* vars are inlined at build time, so each deploy bakes in its own
  * value: the dev Vercel project sets NEXT_PUBLIC_HAVEN_ENV=dev, production leaves
  * it unset. The warning tone makes it unmistakable that you are not on prod.
+ *
+ * "Unset means production" is read through `lib/env.ts` (#2709) — the same
+ * helper the capability manifest reports `environment` from, so the chip and
+ * the manifest cannot disagree about which deployment this is.
  */
 export default function EnvBadge() {
-  const env = process.env.NEXT_PUBLIC_HAVEN_ENV?.trim()
-  if (!env || env === 'production' || env === 'prod') return null
+  if (isProductionEnvironment()) return null
+  const env = havenEnvironment()
 
   return (
     <span

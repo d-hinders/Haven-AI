@@ -144,7 +144,25 @@ describe('/for-agents.md (#2523)', () => {
     // holding its turn open for ten minutes. The served page is 10,224 bytes
     // with both #2617's channel text and #2618's no-wait text; the ceiling
     // clears it with headroom for the next small addition.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10300)
+    //
+    // 10300 -> 10600 for #2709 (the page is 10543 bytes at this commit). Step 2
+    // told the agent never to assume the chain and gave it nothing to read the
+    // deployment from; the manifest now answers `environment` honestly on
+    // production and marks each chain entry `testnet`, and the ~320 bytes tell
+    // the agent to read both before it writes the funding message — both,
+    // because production lists a testnet beside its mainnets, so `environment`
+    // alone would have let it call test funds real money (haven-design-reviewer
+    // on the first wording).
+    // 10600 -> 10700 for #2710 (the page is 10607 bytes at this commit).
+    // The manifest can name a deployment default, but a funded wallet is the
+    // authority for the actual receiving chain; this small clause says both
+    // instead of letting an agent turn a default into a transfer instruction.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10700)
+  })
+
+  it('treats chains.default as expected only and confirms funding after login', () => {
+    expect(served).toContain('`chains.default` as the deployment\'s expected chain')
+    expect(served).toContain('confirm that chain before you message your user')
   })
 
   it('states the rules in the SDK words the setup prompt also uses', () => {

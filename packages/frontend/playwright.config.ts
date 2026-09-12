@@ -1,6 +1,12 @@
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
-import { defineConfig, devices } from '@playwright/test'
+import { defineConfig, devices, expect } from '@playwright/test'
+import {
+  VISUAL_COMPARE,
+  VISUAL_SPECS_ENABLED,
+  VISUAL_STRUCTURE_ONLY,
+  visualModeRefusal,
+} from './e2e/support/visual-mode'
 
 /**
  * The port this run's app server owns — per worktree, and PROVEN free (#1816).
@@ -96,10 +102,102 @@ const SUITE_IGNORE = [
   // The unmocked live smoke (e2e/live) runs only via playwright.live.config.ts
   // against a real deployment — keep it out of the fast, fully-mocked suite.
   '**/live/**',
-  // Visual-regression specs run only under the dedicated CI job (Linux
-  // baselines) — VISUAL_REGRESSION=1 opts in. See #897.
-  ...(process.env.VISUAL_REGRESSION === '1' ? [] : ['**/*.visual.spec.ts']),
+  // Visual specs are out of the default suite because their PIXEL comparison
+  // needs Linux-rendered baselines — VISUAL_REGRESSION=1 opts into that (#897),
+  // and VISUAL_STRUCTURE_ONLY=1 admits them for their LOCATORS only (#2827). Both conditions live in
+  // e2e/support/visual-mode.ts, which is also where the five specs read their
+  // own `test.skip` from — one predicate, so a third mode cannot reach the
+  // config and miss a spec.
+  ...(VISUAL_SPECS_ENABLED ? [] : ['**/*.visual.spec.ts']),
 ]
+
+const VISUAL_MODE_REFUSAL = visualModeRefusal({
+  compare: VISUAL_COMPARE,
+  structureOnly: VISUAL_STRUCTURE_ONLY,
+  argv: process.argv,
+})
+if (VISUAL_MODE_REFUSAL) throw new Error(VISUAL_MODE_REFUSAL)
+
+if (VISUAL_STRUCTURE_ONLY) {
+  /**
+   * Replace the pixel comparison with the wait it already performs (#2827).
+   *
+   * Everything a spec does BEFORE the capture still runs: navigation, fixture
+   * setup, and its own structural assertions — every `toHaveCount(1)` in the
+   * five specs, which is what actually catches a broken locator. Dropping the
+   * comparison leaves all of that intact and removes the one thing that needs
+   * a Linux-rendered artefact.
+   *
+   * NOT "nothing platform-dependent is left" — that is false, and the exact
+   * over-claim a reader will stop believing the first time this flakes. Two
+   * text-METRIC assertions survive in `focus-visible.visual.spec.ts`:
+   * `expectRowControlsUnwrapped` (`lines === 1`), whose own failure
+   * message says "this can be GREEN on macOS and RED here — that asymmetry is
+   * #1909"; and the 390px overflow budget in the archived-row test. Both fail
+   * green-local/red-CI, because Linux metrics are the wider ones (#1873,
+   * #1909) — the safe direction. A NEW assertion of that kind has to be
+   * checked in that direction before it is added to a visual spec.
+   *
+   * Keeping the auto-wait here rather than passing unconditionally is the
+   * second net: a spec that screenshots a locator it never asserted on still
+   * has to resolve it. It inherits the caller's `timeout` so a broken locator
+   * reports against the expect timeout rather than running to the test
+   * timeout — the latter reads as the contention signature the frontend
+   * playbook teaches you to re-run rather than investigate.
+   *
+   * Overriding the built-in matcher rather than editing the five specs means
+   * there is no second copy of any locator to drift, and the specs stay
+   * readable as what they are: pixel gates.
+   *
+   * `expect.extend` at config module scope reaches the workers because each
+   * worker re-loads this config — the same mechanism the port/token stamp
+   * above relies on.
+   */
+  expect.extend({
+    async toHaveScreenshot(
+      this: { isNot?: boolean; timeout?: number },
+      subject: unknown,
+      ...args: unknown[]
+    ) {
+      // `.not.toHaveScreenshot()` has NO truthful answer here: this mode
+      // compares no pixels, so it cannot know whether a screenshot differs.
+      // Refuse rather than resolve it. Returning `pass: !this.isNot` — the
+      // obvious "honour .not" fix — makes the assertion pass SILENTLY, which
+      // on the one matcher whose whole design note is "a green that compared
+      // nothing is the catastrophe" is the worst of the three options.
+      // Proven by execution on this pull request — a probe spec calling
+      // `.not.toHaveScreenshot()` under this mode exited 1 with the message
+      // below — but NOT guarded by a test: nothing in the tree calls `.not`,
+      // and a spec that did could only run locally, never in the CI job where
+      // a deletion would actually merge.
+      if (this.isNot) {
+        throw new Error(
+          'VISUAL_STRUCTURE_ONLY=1 cannot evaluate .not.toHaveScreenshot(): it compares no pixels.',
+        )
+      }
+
+      // `toHaveScreenshot(name?, options?)`, where `name` may be a string OR an
+      // array of path segments — so an array must not be mistaken for the
+      // options object, or the caller's timeout is silently dropped.
+      const options = args.find(
+        (a): a is { timeout?: number } =>
+          typeof a === 'object' && a !== null && !Array.isArray(a),
+      )
+      const timeout = options?.timeout ?? this.timeout
+
+      // A Page subject has no locator to resolve; the assertion is purely
+      // about pixels, so structure-only has nothing left to check on it.
+      const locator = subject as { waitFor?: (opts: unknown) => Promise<void> }
+      if (typeof locator?.waitFor === 'function') {
+        await locator.waitFor({ state: 'visible', timeout })
+      }
+      return {
+        pass: true,
+        message: () => 'VISUAL_STRUCTURE_ONLY=1: locator resolved; pixels NOT compared',
+      }
+    },
+  })
+}
 
 export default defineConfig({
   testDir: './e2e',

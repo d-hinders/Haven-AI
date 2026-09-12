@@ -483,21 +483,33 @@ describe('TransactionBase settlementScheme (#1705)', () => {
     expect(matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: 7710 }))).not.toEqual([])
   })
 
-  it('the aggregated Transaction inherits it through the existing allOf', () => {
+  it('the aggregated Transaction shares the field with TransactionBase, not by allOf (#2885)', () => {
     const aggregated = openapiSpec.components.schemas.Transaction
+    const base = openapiSpec.components.schemas.TransactionBase
 
-    // The field is declared once, on the base — not restated on the aggregate.
-    expect(aggregated.allOf[0]).toEqual({ $ref: '#/components/schemas/TransactionBase' })
-    expect(asProperties(aggregated.allOf[1]).settlementScheme).toBeUndefined()
+    // Both schemas are flat objects, not `allOf`-composed (#2885): a `$ref`'d
+    // member is registered closed by `response-shape.ts`, so the composed
+    // `Transaction` rejected the four sibling-declared fields on every real
+    // row and could never be asserted. Flat schemas close truthfully, so the
+    // field is declared once in `transactionBaseProperties` (spec.ts) and
+    // spread into both — checked here as the properties agreeing by value.
+    expect('allOf' in aggregated).toBe(false)
+    expect(asProperties(aggregated).settlementScheme).toEqual(asProperties(base).settlementScheme)
 
-    // The base half of that composition is what carries the field, and it
-    // validates a real aggregated row's scheme value. The composed schema is
-    // NOT run through `matchSpec` here: the helper closes each component
-    // schema it registers, so a `$ref`'d member inside an `allOf` rejects the
-    // properties its siblings contribute (`safeId`, `chainId`, …) — the
-    // documented composition trap in `response-shape.ts`, not a spec defect.
+    // Being flat (not `allOf`), the aggregated schema validates the full
+    // Safe-scoped row directly through `matchSpec` — no composition trap to
+    // route around.
     expect(
-      matchSpec(TRANSACTION_BASE, transactionRow({ settlementScheme: 'erc7710' })),
+      matchSpec(
+        { $ref: '#/components/schemas/Transaction' },
+        {
+          ...transactionRow({ settlementScheme: 'erc7710' }),
+          chainId: 8453,
+          safeId: '11111111-1111-4111-8111-111111111111',
+          safeAddress: '0x3333333333333333333333333333333333333333',
+          safeName: 'Main',
+        },
+      ),
     ).toEqual([])
   })
 })

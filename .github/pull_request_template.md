@@ -34,7 +34,20 @@
 
 ## Intentionally Left Out
 
-- _List out-of-scope items or follow-ups._
+Every finding this PR did not fix goes under exactly one of the two lists below —
+the three dispositions and the five-check filing bar are in
+`.agents/skills/ship-next/SKILL.md` § *Filing bar* (#2767). Out-of-scope work the
+issue never asked for is a **Not filed** line too.
+
+### Not filed
+
+- _what — where — why it does not carry its weight (one line each; nits, doc
+  wording, counts, comments, guard-about-a-guard findings belong here)_
+
+### Filed
+
+- _#NNN — repro link (a command, a failing test or a screenshot at a SHA). An item
+  without a repro link is not filed above the bar; drop it or add the repro._
 
 ## Generated Artifacts And Handoffs
 

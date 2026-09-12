@@ -9,6 +9,8 @@
 
 import { CHAIN_REGISTRY, getChainData, resolveToken } from '@haven_ai/core'
 
+import { havenEnvironment } from './env'
+
 /**
  * Bumped when a key is REMOVED or changes meaning. Adding a key is not a
  * breaking change, which is what lets the omissions below land later without
@@ -47,7 +49,7 @@ export interface DiscoveryFacts {
   connector_package: string
   cli_package: string
   openapi_url: string
-  chains: { deployable: number[]; supported: readonly number[] }
+  chains: { default: number; deployable: number[]; supported: readonly number[] }
 }
 
 /**
@@ -71,6 +73,16 @@ export interface ManifestChainEntry {
   explorer_url: string
   /** The chain's USDC-family token contract (USDC, or USDC.e on Gnosis). */
   usdc_address: string
+  /**
+   * Whether the chain is a testnet (#2709). Derived from the registry, never
+   * asserted here: `@haven_ai/core` carries a faucet ONLY for testnets (#2534,
+   * "a mainnet carries no entry"), so a faucet's presence is the registry's
+   * own statement that the chain holds test funds. Production lists Base
+   * Sepolia beside Base, and an agent reading `environment: production` must
+   * not conclude that every listed chain carries real money — this is the
+   * field that says which do.
+   */
+  testnet: boolean
 }
 
 export interface CapabilityManifest {
@@ -79,13 +91,24 @@ export interface CapabilityManifest {
   summary: string
   human_only_steps: readonly string[]
   dashboard: Record<string, string>
-  api: { base: string | null; openapi: string | null; root: string | null }
+  api: { base: string | null; openapi: string | null; openapi_mirror: string | null; root: string | null }
   hosted_mcp: { url: string | null; note?: string; auth: string; signer: string }
   packages: Record<string, { name: string; channel?: string; one_liner?: string }>
-  chains: { deployable: number[]; supported: readonly ManifestChainEntry[] } | null
+  chains: {
+    default: number
+    deployable: number[]
+    supported: readonly ManifestChainEntry[]
+  } | null
   /** How an agent tags a hand-off link it drove, so the funnel can measure it. */
   attribution: { query: string; purpose: string }
   docs: Record<string, string>
+  /**
+   * Which deployment this is: `production`, or the deployment's own name
+   * (`dev`). Never `unknown` (#2709): production leaves the build variable
+   * unset by convention, and reporting that convention as ignorance told an
+   * agent nothing on exactly the deployment where real money is at stake.
+   * Read through `lib/env.ts`, the same helper the `DEV` badge uses.
+   */
   environment: string
 }
 
@@ -119,6 +142,7 @@ function manifestChainEntry(chainId: number): ManifestChainEntry | null {
     name: chain.name,
     explorer_url: chain.explorerUrl,
     usdc_address: usdc.address,
+    testnet: chain.faucetUrl !== undefined,
   }
 }
 
@@ -162,6 +186,9 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
       // an honest answer rather than a guessed URL.
       base: apiBase,
       openapi: facts?.openapi_url ?? null,
+      openapi_mirror: facts
+        ? 'The dashboard-relative /api/openapi.json is the same document, proxied from this backend URL.'
+        : null,
       root: apiBase,
     },
     hosted_mcp: {
@@ -193,6 +220,7 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
     // is worse than a shorter list.
     chains: facts
       ? {
+          default: facts.chains.default,
           deployable: facts.chains.deployable,
           supported: facts.chains.supported
             .map((id) => manifestChainEntry(id))
@@ -212,7 +240,7 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
       pay_402: '/402.md',
       exit: '/exit',
     },
-    environment: process.env.NEXT_PUBLIC_HAVEN_ENV ?? 'unknown',
+    environment: havenEnvironment(),
   }
 }
 

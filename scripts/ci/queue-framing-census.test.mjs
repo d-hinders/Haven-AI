@@ -36,7 +36,8 @@
  * Comments are stripped first, then banned PROSE phrases are matched against
  * what is left. That is deliberate: `status === 'pending_approval'` and the
  * `pending_approval` wire literal are retained fail-closed code (see
- * `isPendingApproval` in `packages/mcp-server/src/tools.ts` for the argued
+ * `isPendingApproval` in `packages/mcp-server/src/tools/support/quote-response.ts`
+ * for the argued
  * retention), and a maintainer comment may legitimately name the retired rail
  * to explain the retirement. What must not survive is an agent-visible or
  * reader-visible SENTENCE promising the queue.
@@ -45,7 +46,7 @@
  * from these files, not that every remaining sentence is true — that half is
  * the per-claim code citations in the shipping PR.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { strict as assert } from 'node:assert'
@@ -79,6 +80,51 @@ const GUARDED_FILES = [
   // #2101 — hosted MCP (the default topology) and the local MCP runtime
   'packages/mcp-server/src/server.ts',
   'packages/mcp-server/src/tools.ts',
+  // #2809 — the hosted tool surface stopped being one file. `tools.ts` was the
+  // whole of it when #2101 added the line above; since #2807/#2808/#2809 the
+  // agent-visible prose is spread across the contract seam (every
+  // `toolDescriptions` entry), the shared support modules, and the capability
+  // modules. The census kept passing over each move, silently, on an
+  // ever-smaller surface — a guard that shrinks with the thing it guards.
+  // Measured: a banned phrase planted in `tools/contracts.ts` passed this
+  // census GREEN before these lines existed.
+  //
+  // EVERY non-test source file under `src/tools/` is listed, not the three
+  // this slice happened to touch. A first pass added those three and
+  // haven-reviewer found `support/cap-price.ts` — which holds the cap and
+  // over-budget REFUSAL strings, the single place an agent is told why a
+  // payment was declined, and therefore the likeliest place a queue promise
+  // would ever be written — still outside. Each was verified clean against
+  // the phrase list before being added; a file that still tripped would have
+  // made this a red-CI change rather than a guard.
+  //
+  // The list below is hand-written, so enumerating it once would only have
+  // moved the shrink to the next module added — and #2810–#2812 are queued to
+  // add exactly those. `HOSTED_TOOL_MODULE_DIRS` and the completeness test at
+  // the bottom of this file are what make the membership a RULE instead of an
+  // act of memory: a new file under `src/tools/` fails this suite until it is
+  // listed here (haven-reviewer, #2809 round 3).
+  'packages/mcp-server/src/tools/catalog-purchase.ts',
+  'packages/mcp-server/src/tools/plain-http-x402.ts',
+  'packages/mcp-server/src/tools/contracts.ts',
+  'packages/mcp-server/src/tools/parsing.ts',
+  'packages/mcp-server/src/tools/registry.ts',
+  'packages/mcp-server/src/tools/state-direct-recovery.ts',
+  // #2812 — the final capability module (paid-MCP completion: the two
+  // settle/complete handlers and the merchant delivery/context-rehydration
+  // helpers #2808 parked in support until this slice moved them). Registered
+  // per the completeness rule below; the capability's TEST files stay out —
+  // the completeness scan deliberately covers non-test source only, exactly
+  // as for the #2809–#2811 siblings.
+  'packages/mcp-server/src/tools/paid-mcp-completion.ts',
+  'packages/mcp-server/src/tools/support/cap-price.ts',
+  'packages/mcp-server/src/tools/support/catalog-entry.ts',
+  'packages/mcp-server/src/tools/support/errors.ts',
+  'packages/mcp-server/src/tools/support/guidance.ts',
+  'packages/mcp-server/src/tools/support/index.ts',
+  'packages/mcp-server/src/tools/support/mcp-context.ts',
+  'packages/mcp-server/src/tools/support/quote-response.ts',
+  'packages/mcp-server/src/tools/support/signer-compat.ts',
   'packages/mcp-server/README.md',
   'packages/mcp/src/server.ts',
   'packages/mcp/src/tools.ts',
@@ -219,6 +265,27 @@ const GUARDED_FILES = [
  *   owner's one-time budget grant/revoke signature: those approvals are real
  *   and still happen (#1069, #1572).
  */
+/**
+ * Directories whose every non-test source file must appear in GUARDED_FILES.
+ *
+ * The census's failure mode is not a false negative on a listed file — it is a
+ * listed file set that stops covering the surface. That happened three times
+ * in one epic: #2807 moved every `toolDescriptions` entry out of the guarded
+ * `tools.ts` into `tools/contracts.ts`, #2808 moved the guidance builder into
+ * `tools/support/`, and #2809 moved ten handlers into a capability module.
+ * The census stayed green through all three, over less each time. Measured on
+ * this PR: a banned phrase planted in `tools/contracts.ts` passed GREEN before
+ * the #2809 entries existed.
+ *
+ * Only directories whose files are wholly agent-facing prose surfaces belong
+ * here. This is deliberately NOT the whole package: `src/*.ts` carries
+ * transport, auth and logging, where a phrase-level census would be noise.
+ */
+const HOSTED_TOOL_MODULE_DIRS = [
+  'packages/mcp-server/src/tools',
+  'packages/mcp-server/src/tools/support',
+]
+
 const QUEUE_CLAIMS = [
   // #2063's original list (frontend product copy)
   'waits for your approval',
@@ -373,4 +440,33 @@ test('POSITIVE CONTROL: comment stripping does not blind the scanner to real pro
     "const message = 'This payment is waiting for approval in Haven.'",
   ].join('\n')
   assert.deepEqual(findQueueClaims(mixed), ['waiting for approval'])
+})
+
+test('COMPLETENESS: every non-test source file under the hosted tool modules is guarded', () => {
+  // The guard against the guard shrinking. Without this, GUARDED_FILES is a
+  // list someone has to remember to extend — and the record of this epic is
+  // that nobody does, three moves running.
+  const missing = []
+  let scanned = 0
+  for (const dir of HOSTED_TOOL_MODULE_DIRS) {
+    const entries = readdirSync(resolve(repoRoot, dir), { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile()) continue
+      if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue
+      scanned += 1
+      const rel = `${dir}/${entry.name}`
+      if (!GUARDED_FILES.includes(rel)) missing.push(rel)
+    }
+  }
+  // Prove the scan looked at something before trusting its silence (#2444):
+  // an empty or mis-rooted readdir would otherwise report a clean pass.
+  assert.ok(
+    scanned >= 12,
+    `the completeness scan found only ${scanned} source file(s) under ${HOSTED_TOOL_MODULE_DIRS.join(', ')} — the probe is broken, not the surface clean`,
+  )
+  assert.deepEqual(
+    missing,
+    [],
+    `source files under the hosted tool modules that no census entry covers — add them to GUARDED_FILES (a new capability or support module is exactly the case this catches): ${missing.join(', ')}`,
+  )
 })

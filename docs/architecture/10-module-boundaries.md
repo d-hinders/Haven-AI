@@ -8,11 +8,11 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/db.ts
   - packages/backend/src/rails/execution-rail.ts
-  - packages/backend/src/modules/reporting/**
+  - packages/backend/src/modules/accounting/**
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-09-02" # #2411: the inline-SQL gauge row re-measured against `npm run lint:deps` on this branch — 39 call sites across 10 files (40 on `dev` before this diff moved the activation replace sweep into `infra/repositories/delegation-budgets.ts`), and the ceiling corrected from 68 to the 58 that `dep-lint-callsite-ceiling.json` actually holds; the row was stale at 49/11 since #2055. Scope: that row only; the dependency rules and the rest of the enforcement table were NOT re-verified in this pass. Prior: #2138: rule 3 gains a RECORDED EXCEPTION rather than a correction. `domain/passport-issuance-rail.ts` returns a SQL predicate string for `infra/repositories/agent-passports.ts` to interpolate, which the rule's prose ("no SQL string outside infra/repositories/") forbids and neither of its mechanical forms catches (`pg-only-in-infra` bans imports; the inline-SQL gauge counts `.query(` call sites) — so the doc's own "the lint config is authoritative" clause resolves it as permitted, and leaving that unwritten would be the kind of silent divergence this page exists to prevent. Noted under the security-properties section, where rule 3's meaning is already elaborated, together with why the tenant-isolation rationale does not reach it. Scope: that note only; the dependency rules, the enforcement table and the inline-SQL gauge were NOT re-measured in this pass (`npm run lint:deps` passes, and this diff adds no `.query(` call site). Prior: #2055: the inline-SQL gauge row re-measured against dep-lint (49 sites / 11 files; stale at 68/14 since the epic-#1440 deletions) — the ceiling and method are unchanged. Prior: #1714 (epic #1717): `modules/catalog/lifecycle.ts` joined the catalogue module (index.ts re-exports it), importing the catalog-submissions infra repository and the ownership/probe modules — inside the module's own boundary, no new cross-module edges, so the dependency rules were not re-verified in this pass (`npm run lint:deps` runs below); `index.ts` gained the `catalogIngest` leader-locked monitor, the same runIfLeader shape every other monitor here uses. The `infra/http/` note below is untouched — this slice added no new infra kind. Prior: #1712: `infra/http/` is a new KIND of infra — an SSRF-guarded outbound reader for untrusted, submitter-chosen hosts — and both enumerations of what infra/ holds (Target structure, and the "what belongs where" table) listed only repositories/chain clients/relayer/explorers, so each was incomplete rather than wrong. Both corrected, and the "rules 2 and 5 still await the `http/` directory" note disambiguated: that is the TOP-LEVEL routes directory, which still does not exist, not `infra/http/`, which now does — a reader skimming for "has http/ landed" would otherwise conflate them. Only the infra/ enumerations and that note were re-read; the dependency rules were NOT re-verified in this pass (they are unaffected — `npm run lint:deps` passes with zero violations and no new waiver). Prior: re-verified for #1251 (MPP seam refusal) — no claim here affected
+last-verified: "2026-09-02"
 ---
 
 # Module Boundaries
@@ -83,14 +83,15 @@ packages/backend/src/
   domain/     PURE: money, address, chains, policy, rail decision, taxonomy
               — no fastify, no pg, no ethers/viem
   modules/    accounts, agents, policy, payments, x402, mpp, reporting, fee
-  rails/      allowance-module/, delegation/, registry.ts
-  infra/      repositories (SQL lives here only), chain clients, relayer,
+  rails/      delegation/, execution-rail.ts, hybrid-*, sweep.ts
+  infra/      repositories (SQL lives here only), chain clients (the shared
+              chain reads live in infra/chain/relayer-reads.ts), relayer,
               explorers, outbound HTTP (the SSRF-guarded reader in
               infra/http/ — NOT the top-level http/ routes directory below)
   http/       thin fastify routes: validate -> call module -> serialize
 ```
 
-This is not invented from scratch. `modules/reporting/` and `modules/fee/`
+This is not invented from scratch. `modules/accounting/` (`modules/reporting/` until #2859) and `modules/fee/`
 (folded from `lib/reporting/` and `lib/fee/` by #998) already have this shape
 — a directory, an entry point, colocated tests — and they are visibly the
 most maintainable code in the backend. The target generalises them.

@@ -5,8 +5,9 @@
  * BASELINES ARE LINUX-RENDERED, exactly as `design-system.visual.spec.ts`'s,
  * `focus-visible.visual.spec.ts`'s and `agent-panel-states.visual.spec.ts`'s
  * are, and for the same reason: CI is the judge and macOS font rendering
- * differs. Skipped locally unless VISUAL_REGRESSION=1. Regenerate via the
- * **Update visual baselines** workflow on the branch — see
+ * differs. The pixel comparison is skipped locally unless VISUAL_REGRESSION=1;
+ * VISUAL_STRUCTURE_ONLY=1 runs the structural assertions anywhere (#2827).
+ * Regenerate via the **Update visual baselines** workflow on the branch — see
  * docs/contributing/ship-playbooks/frontend.md §4.
  *
  * ── Why this file exists ─────────────────────────────────────────────────────
@@ -189,6 +190,7 @@
  * hydrates a hybrid signer set, so neither hook had anything to mis-read.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { mockHavenApi, seedAuthenticatedSession, serveOwnerOnlyHybridSigners } from './fixtures/haven-api'
 import {
   SUPPORTED_CHAIN_ID_HEX,
@@ -299,11 +301,22 @@ const OTHER_STATE_NAMES = ['Connect wallet', 'Wrong network', 'Passkey'] as cons
  * and the very next read found nothing, which reads like a detached-element
  * flake and is actually a locator that silently moved.
  *
- * `role="banner"` is the fix and not merely a workaround: a `<header>` scoped
+ * `role="banner"` was the fix and not merely a workaround: a `<header>` scoped
  * inside sectioning content is NOT a banner, so exactly one node in this page
  * carries the role — the app bar. Measured at count 1 while both headers were
  * mounted. It is also semantic contract rather than a class string, which is
  * the handle `focus-visible.visual.spec.ts` and #1811/#1820 argue for.
+ *
+ * **#2819 moved this handle one level in, to `[data-app-bar]`, and the reason
+ * is the same defect one layer down.** `<header>` is now the whole chrome band
+ * — an opaque `[data-safe-area-band]` strip plus the blurred 56px
+ * `[data-app-bar]` — so `banner > div` stopped meaning "the bar's regions" and
+ * started meaning "[band, bar]", making `.last()` the whole bar rather than the
+ * wallet region. It still resolved to the right button, by DOM-order accident
+ * rather than by contract, which is precisely the silent move this block was
+ * written about. `[data-app-bar] > div` restores the original meaning: the
+ * attribute is a contract the component owns, like the role, not a class
+ * string.
  *
  * **A trap for whoever reuses this after a CLICK** (independent review): the
  * `.last()` holds only while the popover is closed. `WalletPopover` renders
@@ -314,7 +327,7 @@ const OTHER_STATE_NAMES = ['Connect wallet', 'Wrong network', 'Passkey'] as cons
  * popover open needs a different handle, not this one with a longer wait.
  */
 function walletControl(page: Page): Locator {
-  return page.getByRole('banner').locator('> div').last().locator('button').last()
+  return page.locator('[data-app-bar]').locator('> div').last().locator('button').last()
 }
 
 /**
@@ -568,8 +581,8 @@ async function gotoCollapsed(page: Page, path: string) {
 
 test.describe('WalletButton collapsed states', () => {
   test.skip(
-    process.env.VISUAL_REGRESSION !== '1',
-    'Linux-rendered baselines — run via the CI job (or VISUAL_REGRESSION=1 in a Linux container)',
+    !VISUAL_SPECS_ENABLED,
+    VISUAL_SKIP_REASON,
   )
 
   test.beforeEach(async ({ page }) => {

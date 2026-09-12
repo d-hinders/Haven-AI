@@ -90,6 +90,24 @@
  * `--scenario=<name>` (comma-separated); `--scenario=all` runs every one.
  * See SCENARIOS below for the registry.
  *
+ * ── Installed-shell metadata (#2735) ────────────────────────────────────────
+ * The run also proves the installed-app shell (#2729/#2765) survived whatever
+ * the branch changed: `/manifest.webmanifest` is fetched and its identity
+ * keys (id, name, display, start_url, scope) checked, and the root
+ * document's HTML is probed for the iOS meta tags
+ * (`apple-mobile-web-app-capable`, `apple-mobile-web-app-title`,
+ * `apple-mobile-web-app-status-bar-style`) plus the
+ * `viewport-fit=cover` viewport. This is the headless HALF of the
+ * installed-shell evidence — a missing tag or a wrong `id` fails the run —
+ * while everything Playwright structurally cannot attest (standalone
+ * launch, login persistence, safe-area compositing on a real notch) stays
+ * in the operator checklist in `docs/product/mobile-demo.md`.
+ * Expected values are read from `src/lib/installed-app.ts` through the
+ * environment the run actually captured (a fixture that hard-codes the
+ * manifest identity is a fixture that silently stops matching the shell
+ * the day `installedAppIdentity` moves). Recorded per-run in the capture
+ * manifest under `installed_shell`.
+ *
  * ── Browsers ────────────────────────────────────────────────────────────────
  * Uses Playwright's pre-installed Chromium. When the cached build does not
  * match the pinned Playwright version — the usual symptom is a launch error
@@ -119,6 +137,44 @@
  * real client bug; either way you want to see it, not silently ship a blank
  * screenshot.
  *
+ * ── Capturing a route SIGNED OUT (#2825) ─────────────────────────────────────
+ * The auth seed above is the DEFAULT, not a law — but being signed out is a
+ * property of the ROUTE, not of the run, so it is declared on the route's
+ * definition (`ROUTE_DEFINITIONS` below; `signedOut: true`), the way
+ * `scenario.seed()` is already conditional. A caller captures `/login` by
+ * passing `/login`: the harness reads the route's own definition, captures it
+ * WITHOUT the token/active-safe seed, and renders the route's real screen
+ * instead of its redirect target. No flag to remember, and one run still
+ * captures `/dashboard` and `/login` together: routes are PARTITIONED per
+ * viewport by their definitions — an authenticated context and a signed-out
+ * one, never one context wearing both. A signed-out context answers `/auth/me`
+ * with 401 — the same response an expired token earns — and keeps the data
+ * fixture; only the auth state changes.
+ *
+ * The registry decides, so a route NOT in it always captures authenticated:
+ * there is no "looks like a signed-out route" heuristic. `/onboarding` is the
+ * instructive entry: it is NOT a signed-out surface (its real render state is
+ * authenticated-and-account-less, which the shared fixture cannot produce),
+ * but BOTH of its capturable default states redirect — authenticated to
+ * `/dashboard` (which the byte-identity gate below refuses as mislabeled
+ * evidence) and signed out to `/login`. It is declared `signedOut: true` so
+ * the route captures at all, and its capture is the truthful signed-out
+ * redirect, reported ADVISORY as byte-identical to `/login`'s capture. Rendering the
+ * enrollment flow itself needs an account-less fixture state and is separate
+ * work. `/` (marketing) needs none of this — it has no auth guard at all.
+ *
+ * The guard that makes all of this trustworthy: ANY capture byte-identical to
+ * its viewport's `/dashboard` capture FAILS the run — signed-out or not,
+ * because the original finding was an AUTHENTICATED `/login` whose bytes were
+ * the dashboard's. An author who deletes a route's `signedOut` declaration
+ * (or captures a signed-out-only route that was never declared) hits the
+ * guard instead of silently re-shooting the redirect. The pre-fix failure
+ * cleared every other check the harness makes (it renders, dimensions are
+ * plausible, identity is proven, the content floor is met), so the comparison
+ * is the only guard that can see it. `signed_out_routes`, `signed_out_files`
+ * (with per-capture sha256), `redirect_captures` and `signed_out_duplicates`
+ * are recorded in capture-manifest.json.
+ *
  * ── The browser ──────────────────────────────────────────────────────────────
  * Uses Playwright's pre-installed Chromium (no `playwright install`). Override
  * with PLAYWRIGHT_CHROMIUM_PATH if the cached browser isn't auto-resolved.
@@ -132,6 +188,8 @@ import { chromium } from '@playwright/test'
 // registry moves.
 import { resolveToken } from '@haven_ai/core'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { rm, stat, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -157,6 +215,9 @@ import {
   worktreeIdentity,
   writeIdentityMarker,
 } from './capture-identity.mjs'
+// The EXPECTED installed-shell identity is transpiled from the app's own
+// source (#2735), never restated here — see the docblock section above.
+import { loadInstalledAppExpectations } from './installed-app-source.mjs'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
 const PUBLIC_DIR = path.join(ROOT, 'public')
@@ -184,6 +245,131 @@ export const SEED_STORAGE_KEYS = {
   activeSafe: 'haven_active_safe_id',
 }
 
+// ── Installed-shell metadata check (#2735) ───────────────────────────────────
+// The manifest identity and iOS meta the #2729 shell must serve. The EXPECTED
+// side is derived from the same pure functions the app ships
+// (`src/lib/installed-app.ts`), not restated as literals — restating them here
+// would let the harness pass while the shell drifted, the exact failure mode
+// the fixture section above warns about for contract addresses.
+
+/** The environment this run's server was built with (read from the served page). */
+function environmentFromHtml(html) {
+  const match = html.match(/<meta name="apple-mobile-web-app-title" content="([^"]*)"/)
+  if (!match) return null
+  // The title is "Haven" on production and "Haven <Env>" otherwise, and
+  // `titleCase` in installed-app.ts capitalizes each word — invert it. The
+  // environment itself is lower-case per `havenEnvironment()`.
+  const title = match[1]
+  if (title === 'Haven') return 'production'
+  return title.replace(/^Haven\s+/, '').toLowerCase() || null
+}
+
+/**
+ * Parse the served manifest + root HTML into the observed installed-shell
+ * state. Pure and exported so the verdict half can be tested without a
+ * browser or a dev server. `manifestBody` is the raw `/manifest.webmanifest`
+ * response text (or null when the route did not answer); `html` is the root
+ * document's HTML (or null).
+ */
+export function observeInstalledShell({ manifestBody, html }) {
+  const manifest = manifestBody == null ? null : (() => {
+    try {
+      return JSON.parse(manifestBody)
+    } catch {
+      return undefined // present but not JSON — a different defect from absent
+    }
+  })()
+  const meta = {}
+  if (html != null) {
+    for (const name of [
+      'apple-mobile-web-app-capable',
+      'apple-mobile-web-app-title',
+      'apple-mobile-web-app-status-bar-style',
+    ]) {
+      const m = html.match(new RegExp(`<meta name="${name}" content="([^"]*)"`, 'i'))
+      meta[name] = m ? m[1] : null
+    }
+    const viewport = html.match(/<meta name="viewport" content="([^"]*)"/i)
+    meta.viewport = viewport ? viewport[1] : null
+  }
+  return {
+    manifest_present: manifestBody != null,
+    manifest_parse_error: manifest === undefined,
+    manifest: manifest === undefined ? null : manifest,
+    environment: html != null ? environmentFromHtml(html) : null,
+    meta: html != null ? meta : null,
+  }
+}
+
+/**
+ * The verdict: what the observed state must satisfy for the run to call the
+ * installed-shell evidence green. Each failure names the tag/key it did not
+ * find, with the file that owns it — the same "the record says WHERE to look"
+ * shape the deletion report uses.
+ */
+export function installedShellProblems(observed, { expectedManifest, environment, expectedTitle }) {
+  const problems = []
+  if (!observed.manifest_present) {
+    problems.push(
+      'manifest: /manifest.webmanifest did not answer — the manifest route (packages/frontend/src/app/manifest.ts) is missing or the server is not the app shell',
+    )
+  } else if (observed.manifest_parse_error) {
+    problems.push('manifest: /manifest.webmanifest answered but is not JSON')
+  } else {
+    const m = observed.manifest
+    for (const [key, expected] of Object.entries(expectedManifest)) {
+      const actual = m?.[key]
+      const equal =
+        typeof expected === 'object' && expected !== null
+          ? JSON.stringify(actual) === JSON.stringify(expected)
+          : actual === expected
+      if (!equal) {
+        problems.push(
+          `manifest.${key}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual ?? null)} — identity is built in packages/frontend/src/lib/installed-app.ts (buildWebManifest)`,
+        )
+      }
+    }
+  }
+  if (observed.meta == null) {
+    problems.push(
+      'ios meta: the root document could not be read — cannot attest the installed-shell meta tags',
+    )
+  } else {
+    if (observed.environment !== environment) {
+      problems.push(
+        `ios meta (environment): expected "${environment}" from apple-mobile-web-app-title, got ${JSON.stringify(observed.environment)} — read via installedAppMetadata in packages/frontend/src/lib/installed-app.ts`,
+      )
+    }
+    for (const [name, expected] of [
+      ['apple-mobile-web-app-capable', 'yes'],
+      ['apple-mobile-web-app-status-bar-style', 'default'],
+    ]) {
+      if (observed.meta[name] !== expected) {
+        problems.push(
+          `ios meta: <meta name="${name}"> expected "${expected}", got ${JSON.stringify(observed.meta[name])} — emitted by installedAppMetadata in packages/frontend/src/lib/installed-app.ts`,
+        )
+      }
+      // The title IS the environment carrier on the home-screen label, so the
+      // inversion check above is not enough on its own: a title like "Haven
+      // Production" inverts back to `production` and would slip through while
+      // the label a phone actually shows has drifted. Compare the tag itself
+      // against the source-derived expectation too (#2735).
+      if (observed.meta['apple-mobile-web-app-title'] !== expectedTitle) {
+        problems.push(
+          `ios meta: <meta name="apple-mobile-web-app-title"> expected ${JSON.stringify(expectedTitle)}, got ${JSON.stringify(observed.meta['apple-mobile-web-app-title'])} — emitted by installedAppMetadata in packages/frontend/src/lib/installed-app.ts`,
+        )
+      }
+    }
+    const vp = observed.meta.viewport ?? ''
+    if (!/viewport-fit\s*=\s*cover/.test(vp) || !/width\s*=\s*device-width/.test(vp)) {
+      problems.push(
+        `viewport meta: expected device-width + viewport-fit=cover, got ${JSON.stringify(observed.meta.viewport)} — declared in INSTALLED_APP_VIEWPORT in packages/frontend/src/lib/installed-app.ts`,
+      )
+    }
+  }
+  return problems
+}
+
 // Always shoot the design system; add caller routes (comma-separated).
 // `--scenario=<name>` args are pulled out first so they are never mistaken
 // for a route.
@@ -203,6 +389,140 @@ const ROUTES = ['/design-system', ...extra]
 // the route parser above already ignores it. `--keep=0` is the pre-#1888
 // destructive behaviour, kept reachable for a disk-pinched machine.
 const KEEP_RUNS = resolveKeepRuns(ARGS, process.env)
+
+// ── Route definitions (#2825) ────────────────────────────────────────────────
+// Capture properties that belong to the ROUTE, declared once here so a caller
+// never has to remember them. `signedOut: true` marks a route that only
+// exists for a signed-out visitor: the harness captures it WITHOUT the auth
+// seed, in its own context, while every undeclared route in the same run
+// keeps the authenticated fixture. Scenarios are deliberately out of scope —
+// they exist to seed signed-IN states and always run authenticated.
+export const ROUTE_DEFINITIONS = {
+  '/login': {
+    description: 'The first screen an installed, signed-out app shows (#2729/#2730).',
+    signedOut: true,
+  },
+  '/signup': {
+    description: 'Account creation — signed-out-only by the same guard shape as /login.',
+    signedOut: true,
+  },
+  '/onboarding': {
+    // NOT a signed-out surface — its real render state is authenticated and
+    // account-less, which the shared fixture cannot produce (the fixture user
+    // holds a safe, so OnboardingClient redirects to /dashboard and the
+    // byte-identity gate would refuse the capture as mislabeled evidence).
+    // Declared signedOut so the route captures AT ALL: the signed-out state
+    // redirects to /login, which is truthful evidence of what a signed-out
+    // visitor sees here, reported ADVISORY as a duplicate. Rendering the
+    // enrollment flow itself needs an account-less fixture state — separate
+    // work, not this declaration.
+    description: 'Account enrolment; captures its signed-out redirect to /login (#2825).',
+    signedOut: true,
+  },
+}
+
+/**
+ * Which of `routes` are DEFINED signed out (#2825).
+ *
+ * Pure and exported so the resolution is pinned by `screenshot-fixture.test.ts`.
+ * Membership is read ONLY from the route's definition — there is no
+ * "unrecognised routes are signed out" heuristic, because the value of the
+ * authenticated default is that every other route captures populated rather
+ * than empty.
+ */
+export function signedOutRoutesFor(routes, definitions = ROUTE_DEFINITIONS) {
+  return routes.filter((r) => definitions[r]?.signedOut === true)
+}
+
+/**
+ * Split the run's routes by auth mode (#2825).
+ *
+ * A run that mixes `/dashboard` and `/login` must NOT capture both from one
+ * browser context: the seed is per-context (it has to land before any app
+ * code runs), so a context that seeds for the dashboard would redirect the
+ * login capture, and one that did not would render the dashboard empty. The
+ * partition is the mechanism behind "one run captures both".
+ *
+ * Exported and pure for the fixture test.
+ */
+export function resolveRouteAuthPartitions(routes, signedOutRoutes) {
+  const signedOut = new Set(signedOutRoutes)
+  const partitions = { authenticated: [], signed_out: [] }
+  for (const route of routes) (signedOut.has(route) ? partitions.signed_out : partitions.authenticated).push(route)
+  return partitions
+}
+
+/**
+ * Signed-out captures that are byte-identical to ANOTHER capture of the SAME
+ * viewport (#2825) — the redirect-capture shape the issue was filed about.
+ *
+ * Compare within the viewport only: `/login` at 390 must be judged against
+ * what else rendered at 390, never against a different width of another route
+ * and never across viewports of its own route. `/design-system` is excluded
+ * from the pool on purpose — its capture is a primitive catalogue and shares
+ * no pixels with a product route by design. The match is NAMED (`matches` is
+ * the route whose bytes are identical), never assumed: `/onboarding` signed
+ * out legitimately redirects to `/login`, and that pair is reported ADVISORY
+ * because a redirect is what the route does — the GATING half is the
+ * /dashboard identity check below. A mutual pair is one record, anchored at
+ * the first capture in run order. Exported and pure for the fixture test.
+ */
+export function findSignedOutDuplicates(signedOutFiles, allFiles) {
+  const pool = allFiles.filter((f) => f.route !== '/design-system')
+  // A mutual pair (X matches Y and Y matches X) is ONE duplicate, not two —
+  // the same bytes in the same viewport are one fact. Canonical pair key
+  // `viewport|sorted-routes`, anchored at whichever capture comes first in
+  // run order; the advisory is direction-agnostic (it names the twin, not a
+  // cause), so the anchor choice carries no claim about which route moved.
+  const seenPairs = new Set()
+  return signedOutFiles
+    .map((f) => {
+      const twin = pool.find((other) => other.viewport === f.viewport && other.route !== f.route && other.sha256 === f.sha256)
+      if (!twin) return null
+      const pairKey = `${f.viewport}|${[f.route, twin.route].sort().join('=')}`
+      if (seenPairs.has(pairKey)) return null
+      seenPairs.add(pairKey)
+      return { route: f.route, viewport: f.viewport, file: f.file, sha256: f.sha256, matches: twin.route }
+    })
+    .filter(Boolean)
+}
+
+/**
+ * Captures whose pixels are byte-identical to their viewport's `/dashboard`
+ * capture (#2825). GATING, and deliberately over EVERY capture — signed-out or
+ * not. The original finding was an AUTHENTICATED `/login` whose bytes were the
+ * dashboard's: an author who captures a signed-out-only route whose definition
+ * is missing (or has lost) its `signedOut: true` entry must hit this guard,
+ * not silently re-shoot the redirect, so scoping it to opted-in captures would
+ * leave the exact defect that started this open one axis over.
+ *
+ * The defect cleared every check the harness makes: the PNG rendered, had
+ * plausible dimensions, came from the identity-verified server, and met the
+ * content floor — it was the dashboard under `login-*.png`. No structural
+ * guard can see that; only comparing the bytes can. A route REDIRECTING is
+ * legitimate (that is what `/onboarding` does signed out, and `/login` does
+ * authenticated); a PNG NAMED for the route while showing the dashboard is
+ * not evidence. The remedy is stated in the failure: declare the route in
+ * ROUTE_DEFINITIONS, or drop it from the run.
+ *
+ * Exported and pure for the fixture test.
+ */
+export function findRedirectCaptures(files, dashboardByViewport) {
+  return files
+    .filter((f) => f.route !== '/dashboard')
+    .filter((f) => dashboardByViewport.has(f.viewport) && dashboardByViewport.get(f.viewport) === f.sha256)
+    .map((f) => ({
+      route: f.route,
+      viewport: f.viewport,
+      file: f.file,
+      sha256: f.sha256,
+      text:
+        `capture of ${f.route} is BYTE-IDENTICAL to /dashboard (${f.viewport}) — the route redirected and ` +
+        'the harness photographed the redirect target under this route\'s name (#2825). If the route only ' +
+        'exists for a signed-out visitor, declare it in ROUTE_DEFINITIONS with signedOut: true and re-run; ' +
+        'otherwise do not capture it alongside /dashboard.',
+    }))
+}
 
 /**
  * Turn a failed capture into a RECORD of the PNG that was removed (#1936/#1939/
@@ -317,14 +637,6 @@ export const FIXTURE_SAFE = {
   account_type: 'delegator_hybrid',
   created_at: '2026-05-01T10:00:00.000Z',
 }
-// #2017 approver-badge fixture addresses. Three owners, one per branch of
-// `classifyApprover`: an enrolled passkey, the user's own wallet, and an
-// address Haven holds no record of.
-export const APPROVER_PASSKEY = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
-export const APPROVER_WALLET = '0x5B1869D9A4C187F2Eaa108F3062412ECf0526B24'
-export const APPROVER_UNKNOWN = '0x9A7f6E2b1c4D8e05F3a2B9c6D1e8F40b3C5a7D91'
-
-
 export const FIXTURE_USER = {
   id: 'user-fixture',
   name: 'Screenshot Fixture',
@@ -389,12 +701,23 @@ const tx = (i, over = {}) => ({
   safeName: FIXTURE_SAFE.name,
   ...over,
 })
+// #2870: the accounting badge's three states on three agent rows — pushed
+// ("In Fortnox"), pending ("Feeding…"), failed ("Not fed", reason on hover).
+// The inbound rows and the plain ETH transfer carry none, which is the
+// fourth state the capture has to show: an unfed row renders no badge.
+const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
-  tx(1, { agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports' }),
+  tx(1, {
+    agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
+    paymentId: 'pay-1', accounting: accounting('pushed', { externalRef: 'fortnox:supplierinvoice:11' }),
+  }),
   tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_SAFE.safe_address, valueFormatted: '150.00', value: '150000000' }),
-  tx(3, { agentName: 'Ops agent' }),
+  tx(3, { agentName: 'Ops agent', paymentId: 'pay-3', accounting: accounting('pending') }),
   tx(4, { asset: 'ETH', tokenSymbol: undefined, type: 'native', decimals: 18, value: '12000000000000000', valueFormatted: '0.012' }),
-  tx(5, { isError: true, agentName: 'Research agent' }),
+  tx(5, {
+    isError: true, agentName: 'Research agent',
+    paymentId: 'pay-5', accounting: accounting('failed', { error: 'Fortnox answered 502 — will retry on the next sync' }),
+  }),
   tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_SAFE.safe_address, valueFormatted: '75.50', value: '75500000' }),
 ]
 
@@ -802,6 +1125,137 @@ const FIXTURE_CONTACTS = [
  * (already stripped of the `/api` prefix), or null to fall through to the
  * generic empty shape. Pure — unit-testable without a browser.
  */
+/**
+ * Accounting connections (#2868; backend #2862–#2867). The registry lists
+ * Fortnox live and three coming-soon providers exactly as
+ * `GET /accounting/providers` does; the connection row is the CONNECTED state
+ * with a company, a push and a suggested account — the row the Settings card
+ * renders by default. The other four states are stages of the
+ * `settings-accounting` scenario below, spread off this row, so the shape is
+ * declared once. `fixture-shape-parity` holds this and the e2e fixture's
+ * `accountingConnection` to the same keys.
+ */
+export const FIXTURE_ACCOUNTING_PROVIDERS = [
+  {
+    id: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2',
+    capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
+    availability: 'live', requiredScopes: ['bookkeeping', 'companyinformation', 'archive'], configured: true,
+  },
+  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+    id: displayName.toLowerCase(), displayName, authKind: 'oauth2',
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: false },
+    availability: 'coming_soon', requiredScopes: [], configured: false,
+  })),
+]
+export const FIXTURE_ACCOUNTING_CONNECTION = {
+  provider: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2',
+  status: 'connected', statusReason: null, isActiveDestination: true,
+  feedFrom: '2026-06-01T08:00:00.000Z',
+  grantedScope: 'bookkeeping companyinformation archive', missingScopes: [],
+  tokenExpiresAt: '2026-06-02T08:00:00.000Z',
+  externalCompanyId: '1234567', externalCompanyName: 'Ada Lovelace AB', baseCurrency: 'SEK',
+  // Absolute, so the rendered "Last fed 10 Jun 2026" is capture-stable.
+  lastPushAt: '2026-06-10T14:30:00.000Z', lastError: null,
+  connectedAt: '2026-06-01T08:00:00.000Z', updatedAt: '2026-06-10T14:30:00.000Z',
+  settings: { suggestedAccount: '6540', autoFeed: true },
+}
+
+/**
+ * `GET /accounting/feed/status` (#2903 review). `/accounting` returns null
+ * from its render unless `hosted && enabled`, so before this key the
+ * harness had no evidence of the feed page at all — under
+ * `SCREENSHOT_FIXTURE` it rendered nothing, and nothing looks like a capture
+ * of an empty page. Ready and entitled, connected to the same company as the
+ * connection row, one pushed row (with the invoice number the page extracts
+ * from `external_ref`) and one retryable failure so both chips and the
+ * Check-in-Fortnox action render. Keys mirror the e2e `accountingFeedStatus`;
+ * `fixture-shape-parity` holds them together.
+ */
+export const FIXTURE_ACCOUNTING_FEED_SYNC = {
+  id: '9d1f4c0a-6b2e-4f3a-9c8d-1e2f3a4b5c6d',
+  user_id: '11111111-1111-4111-8111-111111111111',
+  provider: 'fortnox',
+  payment_id: 'pay_01HZX8KQ4M2N3P5R7T9V1W3Y5A',
+  external_ref: 'fortnox:supplierinvoice:1042',
+  status: 'pushed',
+  error: null,
+  attempts: 1,
+  created_at: '2026-06-10T14:30:00.000Z',
+  updated_at: '2026-06-10T14:30:00.000Z',
+}
+export const FIXTURE_ACCOUNTING_FEED_STATUS = {
+  hosted: true,
+  // #2869: `enabled` is the flag on the wire, `flagEnabled` the older name
+  // for the same boolean — both required by the spec.
+  enabled: true,
+  flagEnabled: true,
+  liveSyncReady: true,
+  entitled: true,
+  entitlementMode: 'all',
+  available: true,
+  connected: true,
+  companyName: FIXTURE_ACCOUNTING_CONNECTION.externalCompanyName,
+  // #2869: the destination row the summary line and the sidebar marker read.
+  destination: {
+    provider: FIXTURE_ACCOUNTING_CONNECTION.provider,
+    displayName: FIXTURE_ACCOUNTING_CONNECTION.displayName,
+    status: FIXTURE_ACCOUNTING_CONNECTION.status,
+    companyName: FIXTURE_ACCOUNTING_CONNECTION.externalCompanyName,
+    lastPushAt: FIXTURE_ACCOUNTING_CONNECTION.lastPushAt,
+  },
+  missingScopes: [],
+  syncs: [
+    FIXTURE_ACCOUNTING_FEED_SYNC,
+    {
+      ...FIXTURE_ACCOUNTING_FEED_SYNC,
+      id: '2a7c9e1b-3d5f-4a6c-8e0b-2f4d6a8c0e1f',
+      payment_id: 'pay_01HZX8M0R6S8U0W2Y4A6C8E0G2',
+      external_ref: null,
+      status: 'failed',
+      error: 'Fortnox answered 503 — will retry',
+      attempts: 2,
+      created_at: '2026-06-11T11:00:00.000Z',
+      updated_at: '2026-06-11T11:05:00.000Z',
+    },
+  ],
+  counts: { pending: 0, failed: 1, exhausted: 0 },
+}
+
+/**
+ * The two OFF states (#2869). `hosted && !enabled` is Coming soon (visible
+ * in production by owner decision); `!hosted` is "not available on
+ * self-hosted" and must never read as coming soon. Spreads off the ready
+ * answer, so a renamed key cannot leave one of them behind.
+ */
+export const FIXTURE_ACCOUNTING_FEED_COMING_SOON = {
+  ...FIXTURE_ACCOUNTING_FEED_STATUS,
+  enabled: false,
+  flagEnabled: false,
+  liveSyncReady: false,
+  entitled: false,
+  available: false,
+  connected: false,
+  companyName: null,
+  destination: null,
+  syncs: [],
+  counts: { pending: 0, failed: 0, exhausted: 0 },
+}
+export const FIXTURE_ACCOUNTING_FEED_SELF_HOSTED = { ...FIXTURE_ACCOUNTING_FEED_COMING_SOON, hosted: false }
+
+/**
+ * The ATTENTION state (#2869 design review): the destination's sign-in has
+ * expired (still the destination, cannot push) and the sweep has given up on
+ * three rows. Raises the attention summary, the inline "Stopped retrying"
+ * explanation and the sidebar dot. Mirrors the e2e `accountingFeedAttention`.
+ */
+export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
+  ...FIXTURE_ACCOUNTING_FEED_STATUS,
+  connected: false,
+  companyName: null,
+  destination: { ...FIXTURE_ACCOUNTING_FEED_STATUS.destination, status: 'needs_reauthorisation', companyName: null, lastPushAt: null },
+  counts: { pending: 0, failed: 1, exhausted: 3 },
+}
+
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
@@ -815,6 +1269,9 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   // endpoint" this fixture used to claim stopped being true with the table
   // drop. Unkeyed paths fall through to FIXTURE_EMPTY_FALLBACK (#1993).
   if (pathname === '/contacts') return { contacts: FIXTURE_CONTACTS }
+  if (pathname === '/accounting/providers') return { providers: FIXTURE_ACCOUNTING_PROVIDERS }
+  if (pathname === '/accounting/connections') return { connections: [FIXTURE_ACCOUNTING_CONNECTION] }
+  if (pathname === '/accounting/feed/status') return FIXTURE_ACCOUNTING_FEED_STATUS
   if (pathname === '/agent-activity/feed') {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
   }
@@ -826,7 +1283,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions') {
     // The aggregated feed (useTransactionsFeed).
-    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [] }
+    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [], truncated: false }
   }
   if (pathname === '/transactions/filters') {
     return {
@@ -955,6 +1412,11 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // reads, which is why it looked covered. Found by haven-design-reviewer on
   // #2295 while trying to capture the surface that issue changes.
   entries: [],
+  // #2868: `useAccountingProviders` / `useAccountingConnections` do
+  // `setProviders(res.providers)` / `setConnections(res.connections)`; under
+  // `SCREENSHOT_FIXTURE=empty` the Settings page reads these, and a missing
+  // key is the #1075 `.map` crash one key over.
+  providers: [], connections: [],
 }
 
 function slug(route) {
@@ -1395,18 +1857,25 @@ export const STALE_BUSY_DECLARATIONS = []
  * with a failure instead (#1725); `delayedHttp` keeps it pending long enough
  * to capture a loading branch.
  */
-async function newFixtureContext(browser, vp, scenario) {
+async function newFixtureContext(browser, vp, scenario, { signedOut = false } = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
     deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
   })
 
-  // Auth fixture: seed the token before any app code runs.
-  await context.addInitScript((keys) => {
-    window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
-    window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
-  }, SEED_STORAGE_KEYS)
+  // Auth fixture: seed the token before any app code runs — UNLESS this
+  // context is signed out (#2825). The seed keeps its ordering guarantee when
+  // it lands at all, so the opt-out SKIPS the seed rather than clearing it
+  // after the fact. With no token, AuthContext takes its real signed-out
+  // branch (`setLoading(false)` with `user` null, no `/auth/me` call) and the
+  // route guards see exactly what a signed-out visitor's browser sees.
+  if (!signedOut) {
+    await context.addInitScript((keys) => {
+      window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
+      window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
+    }, SEED_STORAGE_KEYS)
+  }
 
   // Device-local state a scenario needs (#1856). Some gates read localStorage
   // rather than the API — `useSafeOperationGate` resolves the signer from the
@@ -1521,6 +1990,20 @@ async function newFixtureContext(browser, vp, scenario) {
       return json(scenarioBody)
     }
 
+    // Signed-out contexts (#2825): the auth session the fixture normally
+    // resolves does not exist here. 401 is the same answer an expired token
+    // earns from the real backend — `lib/api.ts` throws on it and
+    // AuthContext's catch clears the token and renders signed out. A
+    // signed-out context should never need this (with no seed there is no
+    // token and no call), but a route that fetches `/auth/me` unconditionally
+    // gets the truthful answer rather than a session it did not earn.
+    if (signedOut && api === '/auth/me') {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Unauthorized' }),
+      })
+    }
     if (api === '/auth/me') return json(FIXTURE_USER)
     if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
     const populated = fixtureFor(api + search)
@@ -1834,7 +2317,10 @@ function connectorRepairHintScenarios() {
       if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
         return {
           setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-1',
+          // #2733: was a phantom fixture id — an id no fixture ever served.
+          // This scenario describes the Research agent, so it keys on
+          // FIXTURE_AGENTS' own 'agent-research'.
+          agent_id: 'agent-research',
           status: 'connected_local',
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
@@ -1872,7 +2358,7 @@ function connectorRepairHintScenarios() {
           approval: { status: 'not_started', safe_tx_hash: null, tx_hash: null },
         }
       }
-      if (apiPath === '/agents/agent-fixture-1/account-signers') {
+      if (apiPath === '/agents/agent-research/account-signers') {
         return {
           account_address: FIXTURE_SAFE.safe_address,
           chain_id: FIXTURE_SAFE.chain_id,
@@ -1914,7 +2400,365 @@ function connectorRepairHintScenarios() {
   }
 }
 
+/**
+ * Settings → Accounting connection states (#2868). One scenario per surface,
+ * per the registry's convention; the five states are stages, each a spread
+ * off the shared CONNECTED row so only the fields that make the state differ
+ * are stated. `null` is "no row at all" — the very first visit, which the
+ * card renders as disconnected.
+ *
+ * Every value here is one the backend can produce (#2120):
+ *   needs-reauthorisation  `statusReason` as `token lifecycle` (#2863) writes it
+ *                          when the refresh is refused; `isActiveDestination`
+ *                          stays true — the row is still the destination, it
+ *                          just cannot push.
+ *   scope-missing          `missingScopes` derived against `requiredScopes`
+ *                          (#2865): the grant carries `bookkeeping` only.
+ *   revoked                #2863: the provider answered that the grant is gone.
+ *   disconnected           the row DELETE keeps (#2862): secrets cleared,
+ *                          settings kept for the reconnect, the flag dropped.
+ */
+const SETTINGS_ACCOUNTING_STAGES = {
+  connected: FIXTURE_ACCOUNTING_CONNECTION,
+  'needs-reauthorisation': {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'needs_reauthorisation',
+    statusReason: 'refresh token refused by Fortnox',
+    tokenExpiresAt: '2026-06-02T08:00:00.000Z',
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  'scope-missing': {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'scope_missing',
+    statusReason: 'granted scope is missing companyinformation, archive',
+    grantedScope: 'bookkeeping',
+    missingScopes: ['companyinformation', 'archive'],
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  revoked: {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'revoked_at_provider',
+    statusReason: 'Fortnox reports the grant as revoked',
+    isActiveDestination: false,
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  disconnected: {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    status: 'disconnected',
+    statusReason: 'disconnected by user',
+    isActiveDestination: false,
+    grantedScope: null,
+    tokenExpiresAt: null,
+    updatedAt: '2026-06-12T03:00:00.000Z',
+  },
+  // The OAuth return on a FIRST connect: connected, the destination, nothing
+  // pushed yet. `?provider=fortnox&connect=connected` on top of this row is
+  // what opens the backfill choice.
+  'first-connect': {
+    ...FIXTURE_ACCOUNTING_CONNECTION,
+    lastPushAt: null,
+    feedFrom: '2026-06-12T03:00:00.000Z',
+    connectedAt: '2026-06-12T03:00:00.000Z',
+    updatedAt: '2026-06-12T03:00:00.000Z',
+    settings: { suggestedAccount: null, autoFeed: true },
+  },
+  // The card's two OFF states (#2869): no connection row at all, and the
+  // FEED STATUS answer is what makes the state — `hosted && !enabled` lists
+  // every provider as Coming soon with no action; `!hosted` lists none.
+  'coming-soon': null,
+  'self-hosted': null,
+}
+/** The feed-status answer per OFF stage; every other stage falls through to the ON fixture. */
+const SETTINGS_ACCOUNTING_FEED_STAGES = {
+  'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
+  'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
+}
+let settingsAccountingStage = 'connected'
+function setSettingsAccountingStage(next) {
+  if (!(next in SETTINGS_ACCOUNTING_STAGES)) {
+    throw new Error(
+      `settings-accounting: unknown stage "${next}" — expected one of ` +
+        Object.keys(SETTINGS_ACCOUNTING_STAGES).join(', '),
+    )
+  }
+  settingsAccountingStage = next
+}
+
+/**
+ * The three feed states `/accounting` renders (#2869), keyed by the flag
+ * answer that produces each. The sidebar reads the same endpoint, so a
+ * capture also shows the Accounting entry's marker for that state.
+ */
+const ACCOUNTING_FEED_STAGES = {
+  on: FIXTURE_ACCOUNTING_FEED_STATUS,
+  attention: FIXTURE_ACCOUNTING_FEED_ATTENTION,
+  'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
+  'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
+}
+let accountingFeedStage = 'on'
+function setAccountingFeedStage(next) {
+  if (!(next in ACCOUNTING_FEED_STAGES)) {
+    throw new Error(
+      `accounting-feed: unknown stage "${next}" — expected one of ` + Object.keys(ACCOUNTING_FEED_STAGES).join(', '),
+    )
+  }
+  accountingFeedStage = next
+}
+
 export const SCENARIOS = {
+  'settings-accounting': {
+    description:
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), and the two feed OFF states — Coming soon and self-hosted (#2869)',
+    stages: SETTINGS_ACCOUNTING_STAGES,
+    /** Exposed so the fixture-contract test can pin each stage. */
+    stage: setSettingsAccountingStage,
+    api(apiPath) {
+      if (apiPath === '/accounting/connections') {
+        const row = SETTINGS_ACCOUNTING_STAGES[settingsAccountingStage]
+        return { connections: row ? [row] : [] }
+      }
+      if (apiPath === '/accounting/feed/status') return SETTINGS_ACCOUNTING_FEED_STAGES[settingsAccountingStage]
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // Module state, reset per viewport — see account-backup-recovery.
+      setSettingsAccountingStage('connected')
+
+      const heading = page.getByRole('heading', { name: 'Accounting', exact: true })
+      // The section root that owns the heading (`SettingsSection` renders
+      // `<section>`; the heading is its `Card.Header` h2). Rows are
+      // `SettingsRow`s, which stack their actions under the text below `sm`
+      // — the mobile capture shows that stacking, not a mobile layout.
+      const card = page.locator('section', { has: heading })
+      const fortnoxActions = card.getByTestId('connection-actions-fortnox')
+
+      const settle = async (navigate) => {
+        await navigate()
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+        await heading.waitFor({ timeout: 15_000 })
+        // The rows, not the heading: the card shows a skeleton until BOTH
+        // listings answer, and the heading renders over the skeleton too.
+        await fortnoxActions.waitFor({ timeout: 15_000 })
+      }
+      const openStage = async (stage, query = '') => {
+        setSettingsAccountingStage(stage)
+        await settle(() => page.goto(`${BASE_URL}/settings${query}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
+      }
+
+      await settle(() => page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle', timeout: 30_000 }))
+
+      // Each stage waits on its own distinguishing copy AND its action, and
+      // refuses the neighbouring states' actions — a stage that quietly
+      // rendered the previous one would otherwise file under the wrong name.
+      const expectState = async (stage, chip, action, refused) => {
+        await card.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
+        await fortnoxActions.getByRole('button', { name: action, exact: true }).waitFor({ timeout: 15_000 })
+        for (const name of refused) {
+          await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
+        }
+        // The coming-soon rows are part of every state.
+        await card.getByTestId('connection-row-igdrasil').getByText('Coming soon').waitFor({ timeout: 15_000 })
+        await card.scrollIntoViewIfNeeded()
+        await shoot(card, stage)
+      }
+
+      // ── connected ─────────────────────────────────────────────────────────
+      await card.getByText(/Connected to Ada Lovelace AB/).waitFor({ timeout: 15_000 })
+      await expectState('connected', 'Connected', 'Settings', ['Connect', 'Reconnect'])
+
+      // ── the inline feed settings, open ────────────────────────────────────
+      await fortnoxActions.getByRole('button', { name: 'Settings', exact: true }).click()
+      const form = card.getByTestId('connection-settings-fortnox')
+      await form.waitFor({ timeout: 15_000 })
+      await form.getByText(/It only suggests — it never books/).waitFor({ timeout: 15_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'settings-open')
+
+      // ── needs_reauthorisation ─────────────────────────────────────────────
+      await openStage('needs-reauthorisation')
+      await card.getByText(/Your Fortnox sign-in has expired/).waitFor({ timeout: 15_000 })
+      await expectState('needs-reauthorisation', 'Sign-in expired', 'Reconnect', ['Connect', 'Settings'])
+
+      // ── scope_missing ─────────────────────────────────────────────────────
+      await openStage('scope-missing')
+      // Human labels, not the raw identifiers (#2903 review).
+      await card.getByText(/\(company information, archive\)/).waitFor({ timeout: 15_000 })
+      await expectState('scope-missing', 'Needs more access', 'Reconnect', ['Connect', 'Settings'])
+
+      // ── revoked_at_provider ───────────────────────────────────────────────
+      await openStage('revoked')
+      await card.getByText(/Access was revoked in Fortnox/).waitFor({ timeout: 15_000 })
+      await expectState('revoked', 'Access revoked', 'Reconnect', ['Connect', 'Settings'])
+
+      // ── disconnected ──────────────────────────────────────────────────────
+      await openStage('disconnected')
+      await card.getByText(/What was fed earlier stays in Haven/).waitFor({ timeout: 15_000 })
+      await expectState('disconnected', 'Not connected', 'Connect', ['Reconnect', 'Settings', 'Disconnect'])
+
+      // ── the backfill choice on a first connect ────────────────────────────
+      await openStage('first-connect', '?provider=fortnox&connect=connected')
+      // The PANEL, not `role="dialog"`: in `ui/Modal` that role sits on the
+      // `fixed inset-0` wrapper, so a clip of it is the whole page (#2903).
+      const dialog = page.getByTestId('backfill-dialog')
+      await dialog.getByRole('heading', { name: 'Include earlier payments?' }).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('radio', { name: /Feed from now/ }).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('button', { name: 'Not now', exact: true }).waitFor({ timeout: 15_000 })
+      await shoot(dialog, 'backfill-dialog')
+
+      // ── the two OFF states (#2869) ────────────────────────────────────────
+      // No `fortnoxActions` to wait on here — the whole point is that no
+      // action renders — so these settle on the state's own test id.
+      const settleOff = async (stage, testId) => {
+        setSettingsAccountingStage(stage)
+        await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+        await heading.waitFor({ timeout: 15_000 })
+        await card.getByTestId(testId).waitFor({ timeout: 15_000 })
+        for (const name of ['Connect', 'Reconnect', 'Disconnect', 'Settings']) {
+          await refuseIfPresent(card.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
+        }
+        // The neutral description, never the product sentence above "Nothing can be connected yet."
+        await card.getByText("Your company's accounting tool.", { exact: true }).waitFor({ timeout: 15_000 })
+        await refuseIfPresent(card.getByText(/Connect the accounting tool your company uses/), `settings-accounting · ${stage} · product description`)
+        await card.scrollIntoViewIfNeeded()
+        await shoot(card, stage)
+      }
+      await settleOff('coming-soon', 'accounting-coming-soon')
+      await card.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByTestId('connection-row-fortnox').getByText('Coming soon').waitFor({ timeout: 15_000 })
+      await settleOff('self-hosted', 'accounting-self-hosted')
+      await card.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(card.getByTestId('connection-row-fortnox'), 'settings-accounting · self-hosted · provider row')
+      await refuseIfPresent(card.getByText('Coming soon', { exact: false }), 'settings-accounting · self-hosted · Coming soon')
+    },
+  },
+
+  /**
+   * The `/accounting` feed page after #2868 (#2903 review): the connection
+   * row that now only points at Settings, the Synced transactions list with
+   * a pushed row (invoice number + Check in Fortnox) and a failed one.
+   * Needs the feed-status fixture above — without `hosted && flagEnabled`
+   * the page renders null, which is exactly why there was no evidence.
+   */
+  'accounting-feed': {
+    description:
+      'The /accounting feed page in its four states (#2868, #2869): the feed with the connection summary line, the attention state (sign-in expired + exhausted rows, with the sidebar dot), the prod Coming soon state, and the self-hosted not-available copy',
+    stages: ACCOUNTING_FEED_STAGES,
+    /** Exposed so the fixture-contract test can pin each flag state. */
+    stage: setAccountingFeedStage,
+    api(apiPath) {
+      if (apiPath !== '/accounting/feed/status') return undefined
+      const status = ACCOUNTING_FEED_STAGES[accountingFeedStage]
+      // The summary line renders `lastPushAt` as a RELATIVE time ("2 minutes
+      // ago"), so a fixed ISO date would age the capture every month. Served
+      // two minutes before now, the line is stable run to run.
+      return status.destination
+        ? { ...status, destination: { ...status.destination, lastPushAt: new Date(Date.now() - 2 * 60_000).toISOString() } }
+        : status
+    },
+    async run({ page, vp, shoot }) {
+      // Module state, reset per viewport — see settings-accounting.
+      setAccountingFeedStage('on')
+
+      const main = page.locator('main').first()
+      const settle = async () => {
+        await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+      }
+      const openStage = async (stage) => {
+        setAccountingFeedStage(stage)
+        await settle()
+      }
+      /** No connect and no sync control is reachable in an OFF state (#2869). */
+      const refuseFeedControls = async (stage) => {
+        for (const name of ['Connect', 'Reconnect', 'Disconnect', 'Sync now', 'Check in Fortnox']) {
+          await refuseIfPresent(main.getByRole('button', { name, exact: true }), `accounting-feed · ${stage} · ${name}`)
+        }
+      }
+
+      // ── flag on: the summary line and the feed ────────────────────────────
+      await settle()
+      // Each claim the capture is evidence of, waited on: the summary line
+      // (#2869), the pointer to Settings (Connect / Disconnect ABSENT), both
+      // sync chips, the retry counts, and the invoice number the page
+      // extracts from `external_ref`.
+      await main.getByTestId('feed-summary').waitFor({ timeout: 15_000 })
+      await main.getByText('Feeding Fortnox · Ada Lovelace AB', { exact: false }).waitFor({ timeout: 15_000 })
+      await main.getByRole('link', { name: 'Open Settings', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Manage your accounting connection in Settings.').waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · Connect')
+      await refuseIfPresent(main.getByRole('button', { name: 'Disconnect', exact: true }), 'accounting-feed · Disconnect')
+      await main.getByRole('heading', { name: 'Synced transactions' }).waitFor({ timeout: 15_000 })
+      await main.getByTestId('feed-counts').waitFor({ timeout: 15_000 })
+      await main.getByText('Fortnox invoice 1042', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByRole('button', { name: 'Check in Fortnox', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Synced', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Failed', { exact: true }).waitFor({ timeout: 15_000 })
+      // The feed that is on carries the product subtitle; the off states do not.
+      await main.getByText(/your accountant codes and confirms them/).waitFor({ timeout: 15_000 })
+      await shoot(main, 'feed')
+
+      // ── attention: sign-in expired + exhausted rows ───────────────────────
+      // The summary flips to the attention state with its PRIMARY "Fix in
+      // Settings", the counts row shows the inline "Stopped retrying"
+      // explanation, and the sidebar entry carries its dot (#2869 review).
+      await openStage('attention')
+      const summary = main.getByTestId('feed-summary')
+      await summary.waitFor({ timeout: 15_000 })
+      await summary.getByText('Sign-in expired', { exact: true }).waitFor({ timeout: 15_000 })
+      await summary.getByText(/Your Fortnox sign-in has expired/).waitFor({ timeout: 15_000 })
+      await summary.getByRole('link', { name: 'Fix in Settings', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByTestId('feed-count-exhausted').getByText('3', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByTestId('feed-counts-exhausted-help').waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · attention · Connect')
+      await shoot(main, 'attention')
+      if (vp.width >= 1024) {
+        await page.getByTestId('nav-attention-accounting').waitFor({ timeout: 15_000 })
+        await shoot(page.locator('aside').first(), 'sidebar-attention')
+      }
+
+      // ── hosted, flag off: Coming soon ─────────────────────────────────────
+      await openStage('coming-soon')
+      await main.getByTestId('accounting-coming-soon').waitFor({ timeout: 15_000 })
+      await main.getByRole('heading', { name: 'Accounting feed', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Coming soon', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
+      // The neutral header line, never the product sentence above "Nothing can be connected yet."
+      await main.getByText('Accounting tool connections for agent spend.', { exact: true }).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByText(/your accountant codes and confirms them/), 'accounting-feed · coming-soon · product subtitle')
+      await refuseFeedControls('coming-soon')
+      await shoot(main, 'coming-soon')
+      // The sidebar reads the same answer: the Accounting entry stays, with
+      // its muted "Soon" pill. Desktop only — below `lg` the drawer is
+      // off-canvas and contributes nothing to a capture.
+      if (vp.width >= 1024) {
+        const entry = page.locator('nav[aria-label="All sections"] a[href="/accounting"]')
+        // Visible "Soon" on the rail; the full phrase is the accessible name.
+        await entry.getByText('Soon', { exact: true }).waitFor({ timeout: 15_000 })
+        await entry.locator('.sr-only', { hasText: 'Coming soon' }).waitFor({ state: 'attached', timeout: 15_000 })
+        await shoot(page.locator('aside').first(), 'sidebar-coming-soon')
+      }
+
+      // ── self-hosted: not available, and NEVER coming soon ─────────────────
+      await openStage('self-hosted')
+      await main.getByTestId('accounting-self-hosted').waitFor({ timeout: 15_000 })
+      await main.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByText('Coming soon', { exact: false }), 'accounting-feed · self-hosted · Coming soon')
+      await refuseIfPresent(main.getByText(/your accountant codes and confirms them/), 'accounting-feed · self-hosted · product subtitle')
+      await refuseFeedControls('self-hosted')
+      await shoot(main, 'self-hosted')
+      // Self-hosted: the entry is HIDDEN, not marked (#2869) — a marker would
+      // be the coming-soon reading the owner decision rules out.
+      await refuseIfPresent(page.locator('nav[aria-label="All sections"] a[href="/accounting"]'), 'accounting-feed · self-hosted · sidebar entry')
+    },
+  },
+
   /**
    * #2526: the /device approval screen's REVIEWING state — the one that shows
    * attacker-chosen text and the two decision buttons.
@@ -2073,6 +2917,67 @@ export const SCENARIOS = {
       await shoot(card, 'card')
     },
   },
+  /**
+   * #2882: the transactions page when the feed is capped at the explorer
+   * window. Unreachable by a plain route capture — the default fixture
+   * reports `truncated: false`, which is the honest default but leaves the
+   * one state this feature adds with no rendered evidence at all.
+   *
+   * Two frames, because the flag conditions three strings and they are not
+   * all on screen at once. `hasMore` is derived from the request's `offset`
+   * so the scenario can walk from page one to the end: page one carries the
+   * count row and the caveat; after Load more, `hasMore` goes false and the
+   * end-of-list footer renders in its place. A fixture pinned to
+   * `hasMore: true` would make the footer unreachable and the second frame a
+   * 20-second hang.
+   */
+  'transactions-truncated': {
+    description:
+      'The /transactions list reporting a capped feed — the caveat, the count it qualifies, and the end-of-list footer (#2882)',
+    api(apiPath) {
+      if (apiPath === '/transactions' || apiPath.startsWith('/transactions?')) {
+        const offset = Number(new URLSearchParams(apiPath.split('?')[1] ?? '').get('offset') ?? '0')
+        return {
+          transactions: FIXTURE_TXS,
+          total: FIXTURE_TXS.length + 25,
+          offset,
+          limit: 25,
+          // Page one has more; the page after it is the end of what is
+          // loaded — which is the only state the footer string exists in.
+          hasMore: offset === 0,
+          partialFailure: false,
+          failedSafeIds: [],
+          truncated: true,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      // Wait for the claim itself, not for the page: a capture that raced the
+      // feed would photograph the un-truncated branch and look like a pass.
+      await page
+        .getByText(/Counts and exports cover the transactions loaded here/i)
+        .first()
+        .waitFor({ timeout: 20_000 })
+      // Positive control: the count row the caveat qualifies really rendered.
+      await page.getByText(/Showing/).first().waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'list')
+
+      // `main` is a clipped scroll container, so the frame above holds only
+      // what is above the fold. The footer is both below it and in a state
+      // page one cannot reach, so walk to the end rather than scrolling.
+      await page.getByRole('button', { name: /Load more/i }).click()
+      const footer = page.getByText(/End of what.s loaded/i).first()
+      await footer.waitFor({ timeout: 20_000 })
+      await footer.scrollIntoViewIfNeeded()
+      await shoot(page.locator('main').first(), 'end-of-list')
+    },
+  },
+
   'account-backup-recovery': {
     description:
       'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
@@ -2302,78 +3207,6 @@ export const SCENARIOS = {
       // the same trap the Backup & recovery scenario documents above.
       await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
       await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
-
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'card')
-    },
-  },
-  'approver-type-badges': {
-    description:
-      'Approvers list on a legacy Safe — all three badge states in one PNG: Passkey, Wallet, and the Unknown that #2017 replaced an absence-inferred "Wallet" with',
-    // No route capture can show this. The SHARED fixture's account is
-    // `delegator_hybrid`, so `useSafeDetails` is deliberately passed null
-    // (#1107) and the Approvers section never renders at all. This scenario
-    // serves a LEGACY Safe with three owners chosen so each one lands in a
-    // different branch of `classifyApprover`, which is the whole point: a
-    // capture that could only ever show one badge state cannot evidence a
-    // change about the other two.
-    api(apiPath) {
-      const LEGACY_SAFE = { ...FIXTURE_SAFE, account_type: 'safe' }
-      const user = {
-        ...FIXTURE_USER,
-        wallet_address: APPROVER_WALLET,
-        safes: [LEGACY_SAFE],
-      }
-      if (apiPath === '/auth/me') return user
-      if (apiPath === '/user/safes') return { safes: [LEGACY_SAFE] }
-      // Keyed, not left to the empty fallback: the fallback serves
-      // `passkeys: []`, under which EVERY owner would render Unknown and the
-      // PNG would evidence nothing about the Passkey branch.
-      if (apiPath === '/passkeys') {
-        return {
-          passkeys: [
-            {
-              id: 'passkey-fixture',
-              credential_id: 'approver-badge-credential',
-              signer_address: APPROVER_PASSKEY,
-              chain_id: FIXTURE_SAFE.chain_id,
-              safe_address: FIXTURE_SAFE.safe_address,
-              created_at: '2026-03-03T12:00:00.000Z',
-            },
-          ],
-        }
-      }
-      if (apiPath === `/safe/${FIXTURE_SAFE.safe_address}/details`) {
-        return {
-          address: FIXTURE_SAFE.safe_address,
-          // Order is the render order, and it is deliberate: Passkey (known),
-          // Wallet (the user's own, positively matched), Unknown (an owner
-          // Haven holds no record for — a rotated passkey, one enrolled
-          // outside Haven, or a wallet; the badge no longer guesses which).
-          owners: [APPROVER_PASSKEY, APPROVER_WALLET, APPROVER_UNKNOWN],
-          threshold: 2,
-          nonce: 7,
-        }
-      }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
-      await dismissMobileSidebar(page, vp)
-
-      const heading = page.getByText('Approvers', { exact: true })
-      await heading.waitFor({ timeout: 15_000 })
-
-      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
-
-      // Wait on the BADGES, not the heading. The section renders as soon as
-      // `details.owners` is non-empty, so waiting on the heading alone would
-      // happily capture a half-settled list. All three are waited for
-      // explicitly, so a capture missing any state fails the run instead of
-      // becoming the evidence.
-      await card.getByText('Passkey', { exact: true }).waitFor({ timeout: 15_000 })
-      await card.getByText('Wallet', { exact: true }).waitFor({ timeout: 15_000 })
-      await card.getByText('Unknown', { exact: true }).waitFor({ timeout: 15_000 })
 
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'card')
@@ -2731,7 +3564,7 @@ export const SCENARIOS = {
       if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
         return {
           setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-1',
+          agent_id: 'agent-research',
           status: 'connected_local',
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
@@ -2773,7 +3606,7 @@ export const SCENARIOS = {
       }
       // A reachable signer, or `ready` is false and the screen shows the
       // connect-wallet fallback instead of the Approve button this issue is about.
-      if (apiPath === '/agents/agent-fixture-1/account-signers') {
+      if (apiPath === '/agents/agent-research/account-signers') {
         return {
           account_address: FIXTURE_SAFE.safe_address,
           chain_id: FIXTURE_SAFE.chain_id,
@@ -2894,7 +3727,7 @@ export const SCENARIOS = {
       if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
         return {
           setup_id: CONNECT_SETUP_ID,
-          agent_id: 'agent-fixture-1',
+          agent_id: 'agent-research',
           status: 'active',
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: null },
@@ -3600,6 +4433,11 @@ async function main() {
   // doing that after the dev server is spawned and the browser is launched
   // leaks both (the try/finally that cleans them up starts further down).
   const scenarios = resolveScenarios(SCENARIO_ARGS)
+  // Which routes this run captures WITHOUT the auth seed (#2825): read from
+  // the routes' OWN definitions, not the caller's memory. The capture loop
+  // partitions on this and the manifest block hashes those captures.
+  const routeAuthPartitions = resolveRouteAuthPartitions(ROUTES, signedOutRoutesFor(ROUTES))
+  const signedOutSet = new Set(routeAuthPartitions.signed_out)
 
   // The widths THIS run shoots (#2006). Same stance as the scenario check
   // above: a malformed `--viewport=` throws before a server or a browser is
@@ -3638,6 +4476,9 @@ async function main() {
         ? ' — the committed evidence set'
         : ` — OVERRIDE via ${viewportSource}, this run only; no baseline is affected`),
   )
+  if (signedOutSet.size > 0) {
+    console.log(`screenshot: signed-out captures for ${[...signedOutSet].join(', ')} (#2825) — signedOut on the route's definition in ROUTE_DEFINITIONS; no auth token seeded, every other route keeps the authenticated fixture`)
+  }
 
   // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
   // unconditionally — including the case that motivated #1888, a narrow
@@ -3674,6 +4515,12 @@ async function main() {
   // process holding this worktree's port.
   let server
   let port = null
+  // The installed-shell observation and its verdict (#2735), populated after
+  // the server identity is proven. Declared here because the capture manifest,
+  // the summary and the exit gate are all further down main(); empty `problems`
+  // means the served manifest and iOS meta matched what the app source declares.
+  let observedShell = null
+  let installedShellProblems_ = []
 
   // Sync on purpose: an awaited promise does not settle before the process
   // leaves on a throw or a signal, and the first refusal this guard ever
@@ -3740,6 +4587,20 @@ async function main() {
       identity.identity_verified = true
       console.log(`screenshot: server identity verified — ${BASE_URL} is this worktree's app`)
     }
+    // The installed-shell check runs against the PROVEN server, before any
+    // capture: the metadata is shell state, not capture state, and a run that
+    // failed it should not spend minutes shooting PNGs it will have to re-shoot
+    // once the tag is fixed (#2735).
+    const shellExpectations = await loadInstalledAppExpectations()
+    const [manifestResponse, rootResponse] = await Promise.all([
+      fetch(`${BASE_URL}/manifest.webmanifest`),
+      fetch(`${BASE_URL}/`),
+    ])
+    observedShell = observeInstalledShell({
+      manifestBody: manifestResponse.ok ? await manifestResponse.text() : null,
+      html: rootResponse.ok ? await rootResponse.text() : null,
+    })
+    installedShellProblems_ = installedShellProblems(observedShell, shellExpectations)
   } catch (err) {
     teardown()
     throw err
@@ -3758,6 +4619,13 @@ async function main() {
     throw err
   }
   const captured = []
+  // Every capture paired with the ROUTE it actually belongs to (#2825). The
+  // filename cannot be re-parsed for this: `slug('/design-system')` is
+  // `design-system`, which a first-hyphen split reads as route `/design`, and
+  // scenario captures (`<scenario>-<name>-<viewport>.png`) are not routes at
+  // all. The capture loop knows the truth; these records carry it to the
+  // signed-out guards and the manifest block.
+  const captureRecords = []
   const consoleErrors = []
   const gotoFailures = []
   const clipped = []
@@ -3785,20 +4653,37 @@ async function main() {
   const contentRaced = []
   try {
     for (const vp of captureViewports) {
-      const context = await newFixtureContext(browser, vp, null)
-      const page = await context.newPage()
-      // A red console on a fixture render is a fixture-shape gap or a real
-      // client bug — collect and summarise instead of shipping blank PNGs.
+      // ONE context per auth mode per viewport (#2825). The auth seed is
+      // per-context — it must land before any app code runs — so the context
+      // FOLLOWS the route's auth mode as the loop walks the caller's route
+      // order: a run mixing /dashboard and /login opens an
+      // authenticated context for the dashboard and a signed-out one for the
+      // login, never one context wearing both sessions. With no opt-out the
+      // flip never happens and this is the old single-context behaviour
+      // exactly: the authenticated default is unchanged, not relaxed.
+      let context = null
+      let contextIsSignedOut = null
+      let page = null
       let currentRoute = ROUTES[0]
-      page.on('console', (msg) => {
-        if (msg.type() === 'error') {
-          consoleErrors.push({ route: currentRoute, viewport: vp.name, text: msg.text().slice(0, 300) })
-        }
-      })
-      page.on('pageerror', (err) => {
-        consoleErrors.push({ route: currentRoute, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
-      })
+      const attachDiagnostics = (p) => {
+        p.on('console', (msg) => {
+          if (msg.type() === 'error') {
+            consoleErrors.push({ route: currentRoute, viewport: vp.name, text: msg.text().slice(0, 300) })
+          }
+        })
+        p.on('pageerror', (err) => {
+          consoleErrors.push({ route: currentRoute, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
+        })
+      }
       for (const routePath of ROUTES) {
+        const routeIsSignedOut = signedOutSet.has(routePath)
+        if (routeIsSignedOut !== contextIsSignedOut) {
+          if (context) await context.close()
+          context = await newFixtureContext(browser, vp, null, { signedOut: routeIsSignedOut })
+          contextIsSignedOut = routeIsSignedOut
+          page = await context.newPage()
+          attachDiagnostics(page)
+        }
         currentRoute = routePath
         // A swallowed navigation failure would screenshot the PREVIOUS route's
         // content under this route's filename — record it and mark the run.
@@ -3824,6 +4709,7 @@ async function main() {
             viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
           })
           captured.push(path.relative(ROOT, file))
+          captureRecords.push({ route: routePath, viewport: vp.name, file: path.relative(ROOT, file) })
           if (content) {
             contentSettles.push({
               route: routePath,
@@ -3922,7 +4808,7 @@ async function main() {
             await scenarioPage.waitForTimeout(200)
             // Re-measure BEFORE re-shooting. Growing the viewport only helps a
             // scroller whose cap is viewport-relative (`ui/Modal`'s
-            // `max-h-[calc(100vh-2rem)]`, `ui/SidePanel`'s full-height body). A
+            // `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]`, `ui/SidePanel`'s full-height body). A
             // box with its own fixed `max-h` keeps clipping however tall the
             // window gets, and the whole point of this change is that the
             // difference must be visible instead of assumed.
@@ -3968,6 +4854,45 @@ async function main() {
   // files is on the record rather than only on a console someone scrolled past.
   const viewportMismatches = findViewportMismatches(captured, captureViewports)
 
+  // Signed-out capture evidence (#2825): the auth opt-out is only trustworthy
+  // if its captures are PROVEN different, so captures are hashed and compared.
+  // The dashboard-identity half GATES over EVERY capture — the original
+  // finding was an authenticated /login whose bytes were the dashboard's, so
+  // forgetting the flag must fail the run rather than silently re-shoot the
+  // redirect. The duplicate half is ADVISORY, because a redirect IS what some
+  // routes legitimately do (/onboarding signed out redirects to /login). With
+  // no opt-out and no redirect the lists are empty.
+  const sha256 = (file) =>
+    createHash('sha256').update(readFileSync(file)).digest('hex')
+  // Route captures only, paired with their REAL route (#2825) — scenario
+  // captures and `-full` re-shoots stay out of these pools (they are not
+  // route evidence, and re-parsing their filenames would fabricate routes:
+  // `design-system-desktop.png` splits on the first hyphen into `/design`).
+  const allFiles = captureRecords.map((f) => ({ ...f, sha256: sha256(path.join(ROOT, f.file)) }))
+  const dashboardByViewport = new Map(
+    allFiles.filter((f) => f.route === '/dashboard').map((f) => [f.viewport, f.sha256]),
+  )
+  const signedOutFileRecords = allFiles.filter((f) => signedOutSet.has(f.route))
+  const redirectCaptures = findRedirectCaptures(allFiles, dashboardByViewport)
+  const signedOutDuplicates = findSignedOutDuplicates(signedOutFileRecords, allFiles)
+  if (redirectCaptures.length > 0) {
+    console.error(
+      `\n✗ ${redirectCaptures.length} capture(s) are BYTE-IDENTICAL to /dashboard — the route redirected ` +
+        'and the PNG shows the redirect target under the route\'s name (#2825):',
+    )
+    for (const m of redirectCaptures) {
+      console.error(`  ${m.file} == dashboard-${m.viewport}.png (${m.sha256.slice(0, 16)}…)`)
+      console.error(`    ${m.text}`)
+    }
+  }
+  if (signedOutDuplicates.length > 0) {
+    console.log(
+      `\n⚠ ${signedOutDuplicates.length} signed-out capture(s) are byte-identical to ANOTHER route's capture — ` +
+        'usually a redirect, which is what that route does signed out; advisory, not a failure:',
+    )
+    for (const d of signedOutDuplicates) console.log(`  ${d.file} == ${d.matches.replace(/^\//, '')}-${d.viewport}.png`)
+  }
+
   // Provenance an artifact can be traced by after the fact — which branch and
   // commit these PNGs actually show, and that the server was proven to be this
   // worktree's before they were taken.
@@ -3988,6 +4913,17 @@ async function main() {
         own_server: OWN_SERVER,
         identity_verified: identity.identity_verified === true,
         routes: ROUTES,
+        // The signed-out opt-out (#2825): which routes captured without the
+        // auth seed and which files they produced (with per-capture sha256 so
+        // a reviewer can compare without re-hashing), plus the two guards'
+        // verdicts. `redirect_captures` non-empty FAILS the run — over signed
+        // out AND authenticated captures alike, because the original finding
+        // was an authenticated /login whose bytes were the dashboard's;
+        // `signed_out_duplicates` is advisory (a redirect is legitimate).
+        signed_out_routes: [...signedOutSet],
+        signed_out_files: signedOutFileRecords,
+        redirect_captures: redirectCaptures,
+        signed_out_duplicates: signedOutDuplicates,
         // The widths these PNGs were ACTUALLY shot at, and where that came
         // from (#2006). Without this a 320px capture is indistinguishable from
         // a 390px one once the PNG is attached to a review thread.
@@ -4025,6 +4961,11 @@ async function main() {
           ? `${ARCHIVE_DIR_NAME}/${retention.archived}`
           : null,
         pruned_runs: retention.pruned,
+        // Installed-app shell evidence (#2735): what the served manifest and
+        // iOS meta actually were this run. Non-empty `problems` means the run
+        // FAILED even when every PNG is perfect — a screenshot of a phone
+        // that can no longer install the app is not evidence the demo works.
+        installed_shell: observedShell,
       },
       null,
       2,
@@ -4182,6 +5123,20 @@ async function main() {
       `captured from ${BASE_URL}${identity.identity_verified === true ? ' (identity verified)' : ' (identity NOT verified)'}.`,
   )
   console.log(`  Full record: ${path.relative(ROOT, MANIFEST)}`)
+  // Installed-shell metadata check (#2735) — the summary line the acceptance
+  // criterion names. The full observation sits in the capture manifest; the
+  // verdict prints here so a reader of the run log sees the shell state next
+  // to the captures it belongs to.
+  if (installedShellProblems_.length > 0) {
+    console.log(`\n✗ Installed-shell metadata check FAILED (${installedShellProblems_.length} problem(s)) — the screenshots show an app a phone may no longer install:`)
+    for (const problem of installedShellProblems_) console.log(`  ${problem}`)
+    console.log('  (expected identity is derived from packages/frontend/src/lib/installed-app.ts at run time;')
+    console.log('   operator-only shell checks live in the device checklist in docs/product/mobile-demo.md)')
+  } else {
+    console.log(
+      `✓ Installed-shell metadata check passed — manifest (id: ${observedShell.manifest?.id ?? 'n/a'}, display: ${observedShell.manifest?.display ?? 'n/a'}) and iOS meta match the app source (env: ${observedShell.environment ?? 'n/a'}).`,
+    )
+  }
   console.log('\nAttach these to the PR (or reference them in the Browser Verification section).')
   // Broken evidence must not exit 0 — a failed navigation means missing PNGs,
   // and a blank capture means the run produced something that LOOKS like
@@ -4198,6 +5153,12 @@ async function main() {
     viewportMismatches.length > 0 && `${viewportMismatches.length} PNG(s) not named after any resolved viewport`,
     gotoFailures.length > 0 && `${gotoFailures.length} route(s) failed to navigate`,
     deletedCaptures.length > 0 && `${deletedCaptures.length} capture(s) deleted as unusable`,
+    // GATING (#2825): ANY capture byte-identical to /dashboard is the
+    // redirect-capture defect itself — evidence that confidently names the
+    // wrong screen, authenticated or signed out. Advisory is exactly how this
+    // defect hid for the whole life of the harness.
+    redirectCaptures.length > 0 &&
+      `${redirectCaptures.length} capture(s) byte-identical to /dashboard (redirect photographed under the route's name)`,
     // GATING, not advisory — review of #2204 caught this as a should-fix and it
     // was the right call. The whole claim made for `BUSY_TOLERANT_CAPTURES` is
     // that it SELF-EXPIRES; a stale declaration that only prints to stdout and
@@ -4205,6 +5166,15 @@ async function main() {
     // code does not survive a pipe.
     STALE_BUSY_DECLARATIONS.length > 0 &&
       `${STALE_BUSY_DECLARATIONS.length} stale busy-tolerance declaration(s)`,
+    // Installed-shell metadata (#2735) — GATING, same reasoning: "npm run
+    // screenshot" is the artifact future PRs are told to read for the shell
+    // state; a run that exits 0 while the manifest id or an iOS meta tag has
+    // drifted records a green claim the manifest contradicts. The playwright-
+    // unattestable half (standalone launch, login persistence, safe-area
+    // compositing) stays in the operator checklist — this gate is only the
+    // metadata, which is exactly what the harness CAN see.
+    installedShellProblems_.length > 0 &&
+      `${installedShellProblems_.length} installed-shell metadata problem(s)`,
   ].filter(Boolean)
   if (failures.length > 0) {
     printRunResult(false, failures.join('; '))

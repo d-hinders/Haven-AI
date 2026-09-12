@@ -13,7 +13,6 @@
  *
  * The chain registry picks one per chain.
  */
-import { getAddress } from 'ethers'
 import { getChain } from '../domain/chains.js'
 
 // ── Normalized tx shapes (Etherscan-compatible) ───────────────────
@@ -117,8 +116,9 @@ async function fetchFromV1<T>(
 // ── Blockscout v2 client ───────────────────────────────────────────
 //
 // v2 is a REST API: GET /api/v2/addresses/{addr}/{resource}. The response
-// is { items, next_page_params }. We only fetch the first page (matching
-// the old Etherscan-style behavior of sort=desc + offset).
+// is { items, next_page_params }, and `next_page_params` is the cursor for
+// the following page. `fetchFromV2` walks that cursor up to
+// EXPLORER_MAX_PAGES pages per read (#2884).
 
 interface V2Page<T> {
   items: T[]
@@ -157,81 +157,127 @@ interface V2TokenTransfer {
   }
 }
 
-interface SafeTransferPage {
-  count: number
-  next: string | null
-  previous: string | null
-  results: SafeTransfer[]
-}
-
-export interface SafeTransfer {
-  type: 'ETHER_TRANSFER' | 'ERC20_TRANSFER' | 'ERC721_TRANSFER' | string
-  executionDate: string
-  blockNumber: number
-  transactionHash: string
-  from: string | null
-  to: string | null
-  value: string | null
-  tokenAddress: string | null
-  tokenInfo?: {
-    address: string
-    name: string
-    symbol: string
-    decimals: number
-  } | null
-}
-
 async function fetchFromV2<T>(
   chainId: number,
   resource: string,
   query: Record<string, string> = {},
-): Promise<T[]> {
+): Promise<{ items: T[]; hasNextPage: boolean }> {
   const chain = getChain(chainId)
   // explorerApiUrl ends in /api/v2. The caller owns the address, so the
   // caller passes `addresses/${addr}/${resource}`.
   const url = new URL(`${chain.explorerApiUrl.replace(/\/$/, '')}/${resource}`)
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
 
-  const response = await fetch(url.toString())
-  if (!response.ok) {
-    throw new Error(`Blockscout v2 error (chain ${chainId}): ${response.status}`)
+  const items: T[] = []
+  // #2884: follow the provider's own cursor until it is absent (exhausted)
+  // or the page budget is spent. `hasNextPage` stays honest about WHICH way
+  // the loop ended: a spent budget with the provider still offering a cursor
+  // is a capped read, an absent cursor is a complete one.
+  for (let page = 0; page < EXPLORER_MAX_PAGES; page++) {
+    const response = await fetch(url.toString())
+    if (!response.ok) {
+      throw new Error(`Blockscout v2 error (chain ${chainId}): ${response.status}`)
+    }
+    const data = (await response.json()) as V2Page<T>
+    items.push(...(data.items ?? []))
+    // The explorer's own answer, not an inference from how many rows it sent.
+    const next = data.next_page_params
+    if (next === null || next === undefined) {
+      return { items, hasNextPage: false }
+    }
+    // Blockscout echoes next-page query params; they replace this page's
+    // query wholesale. Same query object each hop — the cursor carries the
+    // position (block_number/index for transactions, token-transfer cursor).
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
+    for (const [k, v] of Object.entries(next as Record<string, unknown>)) {
+      url.searchParams.set(k, String(v))
+    }
   }
-  const data = (await response.json()) as V2Page<T>
-  return data.items ?? []
-}
-
-export async function fetchSafeServiceTransfers(
-  chainId: number,
-  address: string,
-  offset = 50,
-): Promise<SafeTransfer[]> {
-  const chain = getChain(chainId)
-  const checksumAddress = toChecksumAddress(address)
-  const url = new URL(
-    `${chain.safeTxServiceUrl.replace(/\/$/, '')}/api/v1/safes/${checksumAddress}/transfers/`,
-  )
-  url.searchParams.set('limit', String(offset))
-
-  const response = await fetch(url.toString())
-  if (!response.ok) {
-    throw new Error(`Safe Transaction Service error (chain ${chainId}): ${response.status}`)
-  }
-
-  const data = (await response.json()) as SafeTransferPage
-  return data.results ?? []
-}
-
-function toChecksumAddress(address: string): string {
-  try {
-    return getAddress(address)
-  } catch {
-    return address
-  }
+  return { items, hasNextPage: true }
 }
 
 function isoToUnix(iso: string): string {
   const ms = Date.parse(iso)
   return Number.isNaN(ms) ? '0' : String(Math.floor(ms / 1000))
+}
+
+/**
+ * Rows one leg requests per page. On the Etherscan-shaped v1 legs it is sent
+ * as the `offset` query parameter, so it is a genuine page size the provider
+ * honours. On the Blockscout v2 legs (Base, the default chain) the provider
+ * takes no page-size parameter and returns its own page; the value is only
+ * the historical size of the local slice there, and the page COUNT is the
+ * budget instead (`EXPLORER_MAX_PAGES`).
+ */
+export const EXPLORER_PAGE_SIZE = 50
+
+/**
+ * Pages one leg may read per call, the #2884 pagination budget.
+ *
+ * A fixed per-leg page cap, deliberately, and the same on every read path:
+ *
+ * - A row budget shared across legs would couple them — a token-heavy
+ *   account would starve the native leg — and a time box is not
+ *   deterministic enough to test the loop's shape. Pages are.
+ * - Worst case is 4 pages x 3 legs = 12 explorer requests per account per
+ *   uncached read, against 3 before. Both providers rate-limit, but the
+ *   fetchers retry 429/5xx with linear backoff, and the legs run sequentially
+ *   per account behind a 30-second per-account cache, which is what keeps the
+ *   dashboard fan-out (every account on every uncached load) inside the
+ *   free-tier budgets. Paginating only the export path would still put the
+ *   fan-out behind the dashboard's own Load more button, so the budget is
+ *   paid on the list route too and both paths see the same rows.
+ *
+ * When the budget is spent the leg reports `hasMore: true` — a capped read
+ * surfaces as `truncated` upstream (#2882) instead of silently claiming a
+ * completeness it did not check.
+ */
+export const EXPLORER_MAX_PAGES = 4
+
+/**
+ * The Etherscan-compatible legs have no cursor: the provider answers
+ * `page`/`offset` requests, and the only completion signal is a page that
+ * comes back SHORT — `offset` is requested explicitly, so exactly
+ * `offset` rows means "more exist". Walk pages until a short page or the
+ * budget; a full page at the budget is a capped read (`hasMore: true`).
+ *
+ * This replaces #2882's count-only hedge ("a full page MIGHT have more").
+ * The hedge existed because the first window was all the leg ever read;
+ * with pagination the short page is a real answer, and the flag errs the
+ * other way only once — exactly at the budget, where more provably remains.
+ */
+async function paginateEtherscanLeg<T>(
+  fetchPage: (page: number) => Promise<T[]>,
+): Promise<{ rows: T[]; hasMore: boolean }> {
+  const rows: T[] = []
+  for (let page = 1; page <= EXPLORER_MAX_PAGES; page++) {
+    const pageRows = await fetchPage(page)
+    rows.push(...pageRows)
+    if (pageRows.length < EXPLORER_PAGE_SIZE) {
+      return { rows, hasMore: false }
+    }
+  }
+  return { rows, hasMore: true }
+}
+
+/**
+ * One leg's rows plus whether the read was capped before the source ran out
+ * (#2882, paginated by #2884).
+ *
+ * `hasMore` is NOT `rows.length >= EXPLORER_PAGE_SIZE`, and the difference
+ * matters on the default chain. Blockscout v2 takes no page-size parameter —
+ * it returns its own page — so a count test there measures Blockscout's
+ * default rather than anything Haven asked for, and would start lying the
+ * day that default changed. Blockscout hands back `next_page_params` when
+ * there is another page, so that is what is read: the cursor followed to
+ * exhaustion or to `EXPLORER_MAX_PAGES`. The Etherscan-shaped v1 legs have
+ * no cursor, so the loop pages until a short page — the only honest
+ * completion signal where `offset` is requested explicitly — and reports
+ * `hasMore` only when the budget is spent on a full page.
+ */
+export interface ExplorerLeg<T> {
+  rows: T[]
+  hasMore: boolean
 }
 
 // ── Public fetchers (provider-aware) ──────────────────────────────
@@ -240,15 +286,15 @@ export async function fetchNormalTransactions(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
-): Promise<RawNormalTx[]> {
+  offset = EXPLORER_PAGE_SIZE,
+): Promise<ExplorerLeg<RawNormalTx>> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
-    const items = await fetchFromV2<V2Transaction>(
+    const { items, hasNextPage } = await fetchFromV2<V2Transaction>(
       chainId,
       `addresses/${address}/transactions`,
     )
-    return items.slice(0, offset).map((tx) => ({
+    const rows = items.map((tx) => ({
       blockNumber: String(tx.block_number),
       timeStamp: isoToUnix(tx.timestamp),
       hash: tx.hash,
@@ -260,61 +306,74 @@ export async function fetchNormalTransactions(
       isError: tx.status === 'error' ? '1' : '0',
       functionName: tx.method ?? '',
     }))
+    // No local slice: the page budget lives in `fetchFromV2` now, and the
+    // provider's cursor is the only "more exist" signal that means anything
+    // on a provider that sets its own page size.
+    return { rows, hasMore: hasNextPage }
   }
-  return fetchFromV1<RawNormalTx>(chainId, {
-    module: 'account',
-    action: 'txlist',
-    address,
-    startblock: '0',
-    endblock: '99999999',
-    page: String(_page),
-    offset: String(offset),
-    sort: 'desc',
-  })
+  const { rows, hasMore } = await paginateEtherscanLeg<RawNormalTx>((page) =>
+    fetchFromV1<RawNormalTx>(chainId, {
+      module: 'account',
+      action: 'txlist',
+      address,
+      startblock: '0',
+      endblock: '99999999',
+      page: String(page),
+      offset: String(offset),
+      sort: 'desc',
+    }),
+  )
+  return { rows, hasMore }
 }
 
 export async function fetchInternalTransactions(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
-): Promise<RawInternalTx[]> {
+  offset = EXPLORER_PAGE_SIZE,
+): Promise<ExplorerLeg<RawInternalTx>> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
     // Base Blockscout's v2 internal-transactions endpoint is unreliable
     // (times out with 524). Internal txs on fresh Safes are rare and also
     // surface via the normal tx list, so skipping here is the pragmatic
-    // tradeoff to keep the overall request fast.
-    return []
+    // tradeoff to keep the overall request fast. Skipped, not truncated —
+    // this leg must not make the feed claim a capped read.
+    return { rows: [], hasMore: false }
   }
   type BlockscoutInternal = RawInternalTx & { transactionHash?: string }
-  const raw = await fetchFromV1<BlockscoutInternal>(chainId, {
-    module: 'account',
-    action: 'txlistinternal',
-    address,
-    startblock: '0',
-    endblock: '99999999',
-    page: String(_page),
-    offset: String(offset),
-    sort: 'desc',
-  })
-  return raw.map((tx) => ({ ...tx, hash: tx.hash || tx.transactionHash || '' }))
+  const { rows: raw, hasMore } = await paginateEtherscanLeg<BlockscoutInternal>((page) =>
+    fetchFromV1<BlockscoutInternal>(chainId, {
+      module: 'account',
+      action: 'txlistinternal',
+      address,
+      startblock: '0',
+      endblock: '99999999',
+      page: String(page),
+      offset: String(offset),
+      sort: 'desc',
+    }),
+  )
+  return {
+    rows: raw.map((tx) => ({ ...tx, hash: tx.hash || tx.transactionHash || '' })),
+    hasMore,
+  }
 }
 
 export async function fetchERC20Transfers(
   chainId: number,
   address: string,
   _page = 1,
-  offset = 50,
-): Promise<RawERC20Transfer[]> {
+  offset = EXPLORER_PAGE_SIZE,
+): Promise<ExplorerLeg<RawERC20Transfer>> {
   const chain = getChain(chainId)
   if (chain.explorerApiProvider === 'blockscout-v2') {
-    const items = await fetchFromV2<V2TokenTransfer>(
+    const { items, hasNextPage } = await fetchFromV2<V2TokenTransfer>(
       chainId,
       `addresses/${address}/token-transfers`,
       { type: 'ERC-20' },
     )
-    return items.slice(0, offset).map((t) => ({
+    const rows = items.map((t) => ({
       blockNumber: String(t.block_number),
       timeStamp: isoToUnix(t.timestamp),
       hash: t.transaction_hash,
@@ -326,15 +385,19 @@ export async function fetchERC20Transfers(
       tokenSymbol: t.token.symbol ?? '',
       tokenDecimal: t.token.decimals ?? t.total?.decimals ?? '18',
     }))
+    return { rows, hasMore: hasNextPage }
   }
-  return fetchFromV1<RawERC20Transfer>(chainId, {
-    module: 'account',
-    action: 'tokentx',
-    address,
-    startblock: '0',
-    endblock: '99999999',
-    page: String(_page),
-    offset: String(offset),
-    sort: 'desc',
-  })
+  const { rows, hasMore } = await paginateEtherscanLeg<RawERC20Transfer>((page) =>
+    fetchFromV1<RawERC20Transfer>(chainId, {
+      module: 'account',
+      action: 'tokentx',
+      address,
+      startblock: '0',
+      endblock: '99999999',
+      page: String(page),
+      offset: String(offset),
+      sort: 'desc',
+    }),
+  )
+  return { rows, hasMore }
 }

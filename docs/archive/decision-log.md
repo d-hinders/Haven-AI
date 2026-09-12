@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: archived
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-09-07"
+last-verified: "2026-09-08"
 ---
 
 # Decision Log
@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-09-11 | Accounting connections: self-serve, provider-generic, dev-only; Fortnox hardened | #2858, #2872 |
 | 2026-09-04 | `latest` dist-tag moves onto every release, prereleases included | #2536, #2647 |
 | 2026-09-02 | Haven stops rendering legacy Safe accounts at all | #2413 |
 | 2026-08-27 | Agent Passport is issued on the delegation rail only | #2138 |
@@ -49,6 +50,83 @@ named where they belong below.
 | — | Historical: POC scope and phased roadmap | — |
 
 ---
+
+## 2026-09-11 — accounting connections: self-serve, provider-generic, dev-only (#2858)
+
+Planning session, owner + Claude, 2026-09-11; reviewed the same day by
+@AntonioSaaranen and @PhilipEriksson, every finding fixed in the tickets. The
+epic turned the Fortnox reporting feed — a demo that needed a hand-written SQL
+grant — into an **accounting module** a user sets up alone from Settings. The
+build was fourteen slices (#2859–#2872); this entry makes the owner decisions
+durable, as #2872 was asked to. The rules as they stand today are in
+[`docs/product/accounting-connections.md`](../product/accounting-connections.md)
+and [`docs/operations/accounting-feed.md`](../operations/accounting-feed.md);
+where those differ from this record, they and the code win.
+
+**Owner decisions recorded 2026-09-11** (verbatim in substance from the epic):
+
+- No paid tiers yet; every dev user is entitled (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all`);
+  the entitlement table stays for later tiers.
+- Prod shows the feature as *Coming soon*; exposing it needs a new manual
+  decision (#2876).
+- No organisation entity above the user yet; do not build multi-user, but key
+  the connection so an account id can replace the user id later.
+- Make the module generic and rename backend and database as needed: a full
+  rename from "reporting" to "accounting", not the connection table only.
+- Connections live in Settings; the feed page stays at `/accounting`.
+- Several connections allowed, exactly one active feed destination; switching
+  is first-class; old payments are not re-fed.
+- Backfill choice on connect: from now (default) or since a date.
+- Disconnect revokes at the provider where possible and keeps history.
+- Fortnox stays on user-consent OAuth for now; the service-account move is
+  part of prod enablement.
+- Accounted's paste-a-scoped-API-key auth is acceptable.
+- Settings: suggested account hint (non-asserting) and auto-feed only; the
+  supplier stays per merchant.
+- Non-asserting per provider: use the platform's native unbooked object where
+  one exists without asserting an account; otherwise document upload with
+  metadata. Decided per connector in its own issue.
+- SEK-only ledgers for now, with a follow-on for multi-currency (#2877)
+  because most payments are USDC.
+- Connection states, in-app status and sidebar badge; no email notifications
+  yet.
+- Background retry; encrypted secrets at rest.
+- Transactions page gets a badge and a CSV export inside this epic;
+  accounting-format exports are not free-tier.
+- Agents and MCP get nothing new; mobile browser must work, no
+  mobile-specific design.
+- Signing up for the Accounted sandbox is part of its issue; Light and
+  Igdrasil access is asked for separately by the owner.
+
+**Rules the review added, also owner-adopted the same day:**
+
+- **The feed-from rule binds every connector**: `feed_from = now` at connect
+  and at activation; only the explicit backfill choice moves it earlier.
+- **The epic's one data migration is schema-only and reads no environment**
+  (Antonio's B1): rows copied with `secrets_key_version = 0`, encrypted by a
+  boot-time job once `HAVEN_SECRETS_KEY` exists, new writes failing closed
+  without it. Prod's key moves to #2876.
+- **A post-push scope failure keeps the sync row `pushed`** and flips only the
+  connection (B2); `skipped` is reserved for a refusal on the create call
+  itself. Pinned in the connector conformance suite.
+- **Rename, not drop** (Philip): the old connection table was renamed
+  `fortnox_connections_retired` by #2860 and dropped by #2872 only after the
+  product verification — which is what made #2872 money-path.
+- Verify and reopen stay feed-scoped (`/accounting/feed/*`); no provider-scoped
+  duplicate. `Retry-After` is a courtesy, never load-bearing. "Adding a scope
+  forces re-consent" was overstated and corrected: existing grants keep
+  working without the new scope.
+
+**Kept unverified on purpose:** that the connecting Fortnox user must be a
+system administrator with an integration licence. Stated only in the runbook's
+*Provider notes*, labelled unverified; not in the product doc and not in
+external copy (review on #2905 removed it from the product doc).
+
+**Invariants preserved** (#491, `CLAUDE.md`): the feed never asserts VAT,
+accounts or rows; never blocks settlement; is idempotent on
+`(provider, payment_id, user_id)`; Haven never holds keys or moves funds
+through it; copy never claims "audit-ready" or "your books are done" (both
+banned by the copy lint since #2859).
 
 ## 2026-09-04 — `latest` follows every release, prerelease included (#2536)
 
@@ -175,6 +253,15 @@ cannot spend.
   410 interim); the INSERT helpers died with
   `infra/repositories/approval-requests.ts`; migration 070 dropped the
   `approval_requests` table itself.
+
+Two later closures are recorded ABOVE this section rather than in this list,
+because they were separate owner decisions and this log runs newest-first:
+**#2020** made `GET /machine-payments/allowances` answer 410, reversing #1986's
+left-readable half, and **#2413** stopped Haven rendering legacy accounts at all
+— both under [retirement is deletion, not
+accommodation](#2026-09-02--retirement-is-deletion-not-accommodation-2413). A
+reader sent to this anchor for "the closure sequence" needs those two as well
+(#2640).
 
 ### What deliberately survives, and why
 

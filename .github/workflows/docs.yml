@@ -29,6 +29,27 @@ name: Docs quality
 # happen (the #933 lesson, recorded in docs-coupling.yml). Both validators are
 # whole-repo and dependency-free, so running them unconditionally is cheap.
 # The `push:` trigger keeps its filter — nothing is waiting on those runs.
+#
+# ## `edited`, because one step's input is the pull request itself (#2839)
+#
+# The close-keyword guard reads the pull-request BODY and TITLE. Everything
+# else here reads the repository, and every change to the repository arrives as
+# `synchronize` — but a body or title is edited without a push, and `edited` is
+# NOT in the default type list (`opened`, `synchronize`, `reopened`). So the
+# guard could pass, the body could then be rewritten, and the merge would act
+# on text no check had ever read. A green REQUIRED check describing text that
+# no longer exists is worse than no check: #2819, an `operator-verify` issue,
+# was closed exactly that way — the guard blocked the keyword in a commit
+# message, and the same keyword went into the body afterwards while describing
+# the fix.
+#
+# `advisory` opts OUT of `edited` instead of the trigger staying narrow,
+# because its inputs are entirely in the repository: re-running lychee over
+# ~130 external URLs because someone reworded a description is waste, and the
+# job's whole reason for existing is that those network steps are slow. It is
+# not a required check, so a skipped run reports as skipped and blocks nothing
+# — the #933 hazard applies to `validate`, which is why `validate` does not
+# opt out.
 
 on:
   push:
@@ -43,6 +64,9 @@ on:
       - 'scripts/docs/**'
       - '.github/workflows/docs.yml'
   pull_request:
+    # `edited` is not a default type. It is here for the close-keyword guard —
+    # see the note above.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: docs-${{ github.event.pull_request.number || github.ref }}
@@ -65,22 +89,20 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      # A shallow clone is enough: the #1843 chain-integrity check that read
+      # the merge base was retired by #2681, and none of the five `docs:check`
+      # scripts reads git history (two call `git ls-files`, which reads the
+      # index, not history).
       - uses: actions/checkout@v4
-        with:
-          # `docs:check` now includes the #1843 chain-integrity check, which
-          # compares each changed doc's `last-verified` line against the merge
-          # base. A shallow clone has no base commit to read, and the check
-          # fails closed in CI rather than reporting a clean bill of health.
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
 
-      # Every doc has valid front-matter, every `covers` glob resolves, no
-      # changed doc dropped an entry from its `last-verified` chain, portable
-      # agent skills plus client adapters stay aligned, and — since #2657 — no
-      # live doc sentence restates either UI merge-gate rule #2636 retired.
+      # Every doc has valid front-matter, every `covers` glob resolves, no doc
+      # names a file its `covers:` cannot reach (#2679), portable agent skills
+      # plus client adapters stay aligned, and — since #2657 — no live doc
+      # sentence restates either UI merge-gate rule #2636 retired.
       # Dependency-free, so no `npm ci` is needed.
       #
       # #2657 hangs off `docs:check` rather than off a new workflow or a new
@@ -91,17 +113,14 @@ jobs:
       # like its neighbours, and this job has no `paths:` filter on
       # `pull_request`, so it sees every PR.
       #
-      # BASE_SHA/HEAD_SHA are set only for `pull_request`. On a `push` to
-      # main/dev the chain check sees neither and skips loudly: there is no
-      # base to compare against and nobody to act on a finding. Adding it to this job
-      # rather than to a new one is deliberate: **Docs front-matter & agent
-      # skills** is already a required check, so the rule is enforced the day
-      # it merges instead of the day someone remembers to edit the ruleset
-      # (the #933 shape, one step removed).
+      # No step here reads a base commit any more: BASE_SHA/HEAD_SHA fed the
+      # #1843 chain check, retired by #2681, and none of the five current
+      # scripts consults them. Adding a rule to this job rather than to a new
+      # one stays deliberate: **Docs front-matter & agent skills** is already a
+      # required check, so the rule is enforced the day it merges instead of
+      # the day someone remembers to edit the ruleset (the #933 shape, one
+      # step removed).
       - name: Validate docs and agent skills
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npm run docs:check
 
       # Unit tests for the documentation and agent-skill validators.
@@ -114,7 +133,7 @@ jobs:
       # could only ever be prose — and it lost the first time it was used, on
       # the merge of PR #2272. The rule now has a mechanism.
       #
-      # It lives on THIS job for the reason the chain check above does: **Docs
+      # It lives on THIS job for the reason the step above gives: **Docs
       # front-matter & agent skills** is already a required status check, so the
       # rule is enforced the day it merges rather than the day someone remembers
       # to edit the ruleset. `Repo CI config checks` — where the rest of
@@ -149,6 +168,23 @@ jobs:
     name: Docs links & style (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Nothing here reads the pull request itself, so a reworded description
+    # cannot change any verdict below. Skipping keeps ~130 external URL checks
+    # off every description tweak. Safe to skip precisely because this job is
+    # advisory — see the `edited` note in the header.
+    #
+    # It can DELETE one, though, and that is worth knowing: this workflow's
+    # concurrency group is shared with `cancel-in-progress: true`, so editing a
+    # description while a `synchronize` run is in flight cancels it, and the
+    # replacement run skips this job. The lychee/markdownlint/Vale verdict for
+    # that commit is then gone until the next push, and Vale's
+    # `github-pr-check` annotations go stale rather than refreshing. Advisory
+    # output, so nothing is blocked — but "cannot change any verdict" is a
+    # claim about content, not about existence.
+    #
+    # Written as a deny-list of one on purpose: `types:` above could gain a
+    # member tomorrow, and this job should run for it without being edited.
+    if: github.event.action != 'edited'
 
     steps:
       - uses: actions/checkout@v4

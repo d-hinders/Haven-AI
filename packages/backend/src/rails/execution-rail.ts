@@ -24,8 +24,9 @@
  * by the dashboard: owner authority, not the retired rail's agent authority,
  * and #834 left the queue alone on that reasoning. It still holds for the
  * *authority* question — Haven cannot stop an owner signing their own Safe
- * transaction, and `POST /safe/exec` deliberately stays open because
- * approver management (#1229 recovery) rides on it. What changed is the
+ * transaction, and the owner-signed relayed execution route stayed open
+ * because approver management (#1229 recovery) rode on it, until #2847
+ * deleted that route. What changed is the
  * *scope*: #834 retired one rail among several that fed the queue, whereas
  * #1986 retires the only rail that ever fed it, so leaving `/approvals/:id/
  * approve` open would leave Haven manufacturing executable Safe payment

@@ -139,6 +139,43 @@ type Reading = {
 }
 
 /**
+ * #2833: every width this spec derives or asserts is only meaningful against a
+ * SETTLED page, and two things used to still be moving when it measured:
+ *
+ * 1. THE WEBFONT. `next/font` serves Inter and nothing waited for it, so under
+ *    load the canvas half and the layout half each measured the fallback —
+ *    green alone, red under contention, with the non-vacuity guard reporting
+ *    numbers from two different fonts (CI's `measures 273px against a 257px
+ *    row` at the 6-worker gate). The h3 renders the face, so its load is
+ *    already in flight by the time a heading exists and no
+ *    `document.fonts.load()` call is needed; on a settled document this
+ *    resolves immediately.
+ *
+ * 2. THE DYNAMIC CHROME. `AuthenticatedShell` loads the Sidebar through
+ *    `next/dynamic` (`ssr: false`), so it mounts only on hydration — and until
+ *    it does, `<main>` spans the full 1280px instead of 1040px and every row
+ *    on `/agents` is 24px wider than it will stay. Measured on unchanged dev:
+ *    row 277px at t+1825ms (pre-mount), 253px at t+1953ms (post-mount). A
+ *    width derived in the first state and asserted in the second fails the
+ *    band guard with `measures 269px against a 253px row` even with the font
+ *    long settled — reproduced locally, at ONE worker, on a cold dev-server
+ *    cache. The rendered `<aside>` is the mount's own signal: unique to the
+ *    Sidebar in this codebase, attached at every viewport (off-canvas fixed
+ *    below `lg`), and committed in the same frame that gives `<main>` its
+ *    final width.
+ *
+ * The wait rides INSIDE the measurement primitives rather than beside the
+ * navigation, so no read can ever observe a pre-settled layout — including
+ * the second-pass reads in `readSettled` and the reload in the band test.
+ * The font wait alone proved insufficient: the band test still reddened with
+ * byte-identical geometry until the chrome wait joined it.
+ */
+async function awaitPageSettled(page: Page): Promise<void> {
+  await page.evaluate(() => document.fonts.ready)
+  await page.locator('aside').first().waitFor({ state: 'attached', timeout: 15_000 })
+}
+
+/**
  * Anchor on the rendered agent name heading and measure its visible link —
  * never on a class string, since the class strings are what this fix changes.
  *
@@ -146,8 +183,13 @@ type Reading = {
  * adds classes, it does not restructure), so this probe reads the same element
  * under every mutation below — including the full revert, which is what lets
  * the numbers in the header be compared like for like.
+ *
+ * #2833: the settle wait rides INSIDE the primitive rather than beside the
+ * navigation, so no read can ever observe a pre-settled layout — including
+ * the second-pass reads in `readSettled` and the reload in the band test.
  */
 async function readCard(page: Page, agentName: string): Promise<Reading> {
+  await awaitPageSettled(page)
   return page.evaluate(
     ([label, minPill]) => {
       const heading = Array.from(document.querySelectorAll('h3')).find(
@@ -255,6 +297,10 @@ async function atWidth(page: Page, width: number) {
  * that lands wrong fails loudly with numbers instead of passing vacuously.
  */
 async function bandNameFor(page: Page, currentName: string, rowInner: number, slack = 4): Promise<string> {
+  // #2833: the canvas below reads the h3's OWN computed font — meaningless
+  // until that face has actually loaded, and the row width it cuts against is
+  // meaningless until the dynamic chrome has taken its 48px back.
+  await awaitPageSettled(page)
   return page.evaluate(
     ([label, stem, limit]) => {
       const heading = Array.from(document.querySelectorAll('h3')).find(

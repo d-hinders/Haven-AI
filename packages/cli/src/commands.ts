@@ -22,7 +22,7 @@ import {
 export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
-export const CLI_VERSION = '0.1.36-alpha.0'
+export const CLI_VERSION = '0.1.37-alpha.0'
 
 export interface RunDeps {
   sessionStore?: SessionStore
@@ -274,6 +274,7 @@ async function deviceLogin(args: ParsedArgs, d: ResolvedDeps, baseUrl: string): 
       verification_url: start.verification_url,
       user_code: start.user_code,
       device_code: start.device_code,
+      interval: start.interval,
       expires_at: new Date(deadline).toISOString(),
     },
     () =>
@@ -1079,7 +1080,7 @@ async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<num
 }
 
 function exportType(t: Txn): string {
-  if (t.activityType === 'delegate_sweep') return 'allowance funding'
+  if (t.activityType === 'delegate_sweep') return 'sweep'
   if (t.source === 'x402') return 'x402'
   if (t.source === 'mpp_demo') return 'mpp'
   return t.direction === 'in' ? 'receive' : 'send'

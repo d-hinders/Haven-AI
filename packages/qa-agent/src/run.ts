@@ -49,8 +49,14 @@ import { runPreflight, formatPreflight } from './lib/preflight.js'
 //                           circuit breaker is the caveat enforcer reverting
 //                           during gas estimation. Same invariant, different
 //                           shape — so a different name.
-//   x402-over-budget-rejected  driven on the EIP-3009 funding shape, where the
-//                           budget really is enforced at authorize.
+//   x402-over-budget-rejected  driven on the EIP-3009 funding shape. Since
+//                           #2706 the refusal is a typed 403 pre-check BEFORE
+//                           prepare, not the enforcer reverting in gas
+//                           estimation — so on a healthy budget read this leg
+//                           does not observe the chain, and no leg observes a
+//                           funding-leg redemption revert. The pre-check fails
+//                           OPEN, so a degraded read still reaches the enforcer
+//                           and this leg then goes red on the 502 (#2738).
 //
 //   x402-erc7710-over-budget-rejected  the same invariant on the PREFERRED
 //                           scheme, added by #2082. Until then, erc7710

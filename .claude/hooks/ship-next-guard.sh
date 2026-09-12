@@ -116,11 +116,12 @@ checks either way. What you take on is the judgement layer no check performs:
    are advisory, so this one is on you. Editing the doc yourself is not the
    same as reviewing it.
 
-3. MIGRATION MERGE ROUTING — a diff touching
-   /packages/backend/src/db/migrations/ needs an
-   INDEPENDENT code-owner approval (.github/CODEOWNERS). The PR AUTHOR'"'"'s own
-   approval does NOT satisfy it. (money-path no longer pauses the merge, #1024
-   — it selects money.md and its characterization-test bar.)
+3. MIGRATION MERGE ROUTING — a diff touching a direct migration implementation
+   file (/packages/backend/src/db/migrations/*.ts) needs an INDEPENDENT
+   code-owner approval (.github/CODEOWNERS). Files in `__tests__/` are not
+   migration implementations and do not need it. The PR AUTHOR'"'"'s own approval
+   does NOT satisfy it. (money-path no longer pauses the merge, #1024 — it
+   selects money.md and its characterization-test bar.)
 
 Not listed, because CI enforces them for you: docs:check / docs:test and
 design-system coupling (#1023), visual regression (#897), copy lint (#902),

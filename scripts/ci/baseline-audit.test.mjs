@@ -15,6 +15,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
+import { runGuard } from '../test-support/guard-cli.mjs'
 
 import {
   auditBaselines,
@@ -274,4 +275,70 @@ test('parseStatusZ leaves paths with spaces intact — `-z` does not quote them'
   // The reason `-z` is used at all: without it git quotes and escapes unusual
   // paths, and the audit would report a name that does not exist on disk.
   assert.deepEqual(parseStatusZ(' M a dir/b c.png\0'), [{ code: ' M', path: 'a dir/b c.png' }])
+})
+
+// ---------------------------------------------------------------------------
+// The CLI (#2722, slice 2 of epic #2720).
+//
+// `auditBaselines` is thoroughly tested above, but `main()` is what the
+// workflow runs, and the line that turns a refusing verdict into a red step —
+// `process.exitCode = result.exitCode` — is below the last export and never
+// executed by any case above it. Delete it and this file stays green while the
+// audit stops blocking anything.
+//
+// These cases run the shipped script as a process against a fixture repo the
+// test owns, so the baselines it audits are the ones the test wrote and not
+// whatever the real screenshot directory happens to contain.
+test('CLI: an undeclared full refresh exits non-zero and says so (#2722)', () => {
+  const { status, out, wrote } = runGuard('ci/baseline-audit.mjs', {
+    files: {
+      'packages/frontend/e2e/__screenshots__/dashboard.png': 'PNG-BYTES-v1\n',
+    },
+    gitInit: true,
+    env: {
+      UPDATE_MODE: 'all',
+      EXPECTED_BASELINES: '',
+      GITHUB_STEP_SUMMARY: 'summary.md',
+      GITHUB_OUTPUT: 'output.txt',
+    },
+    readBack: ['summary.md', 'output.txt'],
+  })
+  assert.equal(status, 1, out)
+  assert.match(out, /::error::Baseline audit blocked the commit \(undeclared-full-refresh\)/)
+  // Assert what it WROTE, not only what it printed: the step summary and the
+  // job output are the channels the workflow actually consumes, and a guard
+  // that prints correctly while writing nowhere is invisible in Actions.
+  assert.match(wrote['summary.md'] ?? '', /undeclared-full-refresh|Mode `all` rewrites a baseline/)
+  assert.match(wrote['output.txt'] ?? '', /^trailer=/m)
+})
+
+test('CLI: the same moved baseline under `changed` is reported and exits 0 (#2722)', () => {
+  const { status, out } = runGuard('ci/baseline-audit.mjs', {
+    files: {
+      'packages/frontend/e2e/__screenshots__/dashboard.png': 'PNG-BYTES-v1\n',
+    },
+    gitInit: true,
+    env: { UPDATE_MODE: 'changed', EXPECTED_BASELINES: '' },
+  })
+  // Without this the refusal case above passes just as well against a script
+  // that exits 1 on every input.
+  assert.equal(status, 0, out)
+  assert.doesNotMatch(out, /::error::/)
+})
+
+test('CLI: a crash inside main() is caught and still exits non-zero (#2722)', () => {
+  // No `gitInit`, so `collectChanges`'s `git status` is fatal. That reaches the
+  // top-level catch -- the guard's other refusal, and one this file claimed was
+  // unreachable without a seam until a review showed it is one line away.
+  //
+  // It also proves the `changed`-mode accept case above is not vacuous: that
+  // case passes because the audit ran and found nothing to block, not because
+  // the scan silently saw zero files.
+  const { status, out } = runGuard('ci/baseline-audit.mjs', {
+    files: { 'packages/frontend/e2e/__screenshots__/dashboard.png': 'PNG-BYTES-v1\n' },
+    env: { UPDATE_MODE: 'changed' },
+  })
+  assert.equal(status, 1, out)
+  assert.match(out, /::error::baseline-audit crashed:/)
+  assert.match(out, /not a git repository/)
 })

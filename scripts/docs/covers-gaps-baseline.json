@@ -1,0 +1,222 @@
+{
+  "AGENTS.md": [
+    "packages/frontend/src/app/globals.css",
+    "packages/frontend/tailwind.config.js"
+  ],
+  "CLAUDE.md": [
+    "scripts/docs/package-docs.mjs"
+  ],
+  "docs/architecture/02-identity-and-custody.md": [
+    "packages/backend/src/routes/agent-rekey.ts",
+    "packages/connect/src/rekey.ts"
+  ],
+  "docs/architecture/04-x402-payment-sequence.md": [
+    "packages/backend/src/infra/repositories/__tests__/erc7710-sweep-eligibility.test.ts",
+    "packages/backend/src/infra/repositories/payment-intents.ts",
+    "packages/backend/src/modules/mpp/reconciliation.ts",
+    "packages/backend/src/modules/payments/__tests__/status-domain.test.ts",
+    "packages/backend/src/rails/delegation-policy.ts",
+    "packages/core/src/machine-payment-lifecycle.ts",
+    "packages/sdk/src/payment-mappers.ts"
+  ],
+  "docs/architecture/07-edge-signer.md": [
+    "packages/mcp/src/consent.ts",
+    "packages/mcp/src/server.ts"
+  ],
+  "docs/architecture/08-local-vs-hosted-mcp.md": [
+    ".github/workflows/qa-dev.yml"
+  ],
+  "docs/architecture/10-module-boundaries.md": [
+    "packages/backend/dep-lint-callsite-ceiling.json",
+    "scripts/generate-api-types.mjs",
+    "scripts/release-bump.mjs"
+  ],
+  "docs/architecture/11-agent-passport-schema.md": [
+    "packages/backend/src/openapi/spec.ts"
+  ],
+  "docs/backlogs/README.md": [
+    ".github/money-path-globs.json"
+  ],
+  "docs/bug-reports/qa-explore-agent-onboarding-2026-09-06.md": [
+    "scripts/qa/discovery-reach.mjs"
+  ],
+  "docs/contributing/ai-agent-workflow.md": [
+    ".github/CODEOWNERS",
+    "packages/backend/src/routes/__tests__/payments.test.ts",
+    "packages/backend/src/routes/payments.ts",
+    "packages/frontend/src/app/globals.css",
+    "packages/frontend/src/components/EditAgentModal.tsx",
+    "packages/frontend/src/components/NetworkGate.tsx",
+    "packages/frontend/src/components/OnchainActionGate.tsx",
+    "packages/frontend/src/components/WalletButton.tsx",
+    "packages/frontend/src/components/haven/AgentBudgetCard.tsx",
+    "packages/frontend/tailwind.config.js",
+    "scripts/docs/coupling-gate.mjs"
+  ],
+  "docs/contributing/ai-review-patterns.md": [
+    "packages/frontend/src/components/WalletButton.tsx",
+    "scripts/docs/coupling-gate.mjs"
+  ],
+  "docs/contributing/autonomous-pr-loop.md": [
+    ".github/workflows/promotion-digest.yml",
+    ".github/workflows/release.yml",
+    "packages/backend/src/infra/__tests__/helpers/__tests__/harness-call-budget.test.ts",
+    "scripts/ci/operator-verify-close-guard.mjs",
+    "scripts/ci/qa-freshness.mjs"
+  ],
+  "docs/contributing/branch-and-release-flow.md": [
+    ".github/CODEOWNERS"
+  ],
+  "docs/contributing/docs-quality-system.md": [
+    ".github/money-path-globs.json",
+    "packages/backend/src/routes/payments.ts",
+    "packages/core/src/api-types.ts",
+    "packages/frontend/Dockerfile"
+  ],
+  "docs/contributing/pr-workflow-checklist.md": [
+    "packages/backend/src/db/advisory-lock.ts",
+    "scripts/ci/verify-merged-head.mjs",
+    "scripts/docs/coupling-gate.mjs",
+    "scripts/docs/ui-gate-wording-baseline.json",
+    "scripts/docs/ui-gate-wording.mjs"
+  ],
+  "docs/contributing/ship-playbooks/backend.md": [
+    ".github/money-path-globs.json",
+    "packages/backend/dep-lint-callsite-ceiling.json",
+    "packages/backend/scripts/db-schema-smoke.ts",
+    "packages/backend/src/db/migrate.ts",
+    "packages/core/src/api-types.ts",
+    "scripts/ci/money-path.test.mjs",
+    "scripts/dep-lint.mjs"
+  ],
+  "docs/contributing/ship-playbooks/frontend.md": [
+    ".github/workflows/update-visual-baselines.yml",
+    "packages/frontend/copy-lint-baseline.json",
+    "packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx",
+    "packages/frontend/src/app/(authenticated)/profile/ProfileClient.tsx",
+    "packages/frontend/src/components/AgentPanel.tsx",
+    "packages/frontend/src/components/BudgetGrantAction.tsx",
+    "packages/frontend/src/components/CatalogSubmitModal.tsx",
+    "packages/frontend/src/components/ConnectAgentModal.tsx",
+    "packages/frontend/src/components/DelegationBudgetCard.tsx",
+    "packages/frontend/src/components/DelegationSendModal.tsx",
+    "packages/frontend/src/components/EditAgentModal.tsx",
+    "packages/frontend/src/components/ErrorBoundary.tsx",
+    "packages/frontend/src/components/InfoModal.tsx",
+    "packages/frontend/src/components/ProtectedRoute.tsx",
+    "packages/frontend/src/components/ReceiveFundsModal.tsx",
+    "packages/frontend/src/components/agent-panel/AgentCard.tsx",
+    "packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx",
+    "packages/frontend/src/components/connect-agent/CopyBlock.tsx",
+    "packages/frontend/src/components/sidebar/Sidebar.tsx",
+    "packages/frontend/src/components/ui/EmptyState.tsx",
+    "packages/frontend/src/components/ui/Modal.tsx",
+    "packages/frontend/src/components/ui/SidePanel.tsx",
+    "packages/frontend/wire-type-baseline.json",
+    "scripts/ci/baseline-audit.mjs",
+    "scripts/ci/change-classifier.mjs",
+    "scripts/ci/e2e-workspace-deps.test.mjs",
+    "scripts/ci/verify-merged-head.mjs",
+    "scripts/ci/visual-baseline-inventory.mjs",
+    "scripts/frontend-copy-lint.mjs"
+  ],
+  "docs/contributing/ship-playbooks/money.md": [
+    "scripts/ci/money-path-restatement-scan.mjs",
+    "scripts/ci/money-path.test.mjs"
+  ],
+  "docs/contributing/ship-playbooks/README.md": [
+    ".github/labeler.yml",
+    ".github/workflows/labeler.yml",
+    ".github/workflows/labels.yml"
+  ],
+  "docs/contributing/ship-playbooks/sdk.md": [
+    ".github/workflows/publish.yml",
+    "packages/backend/src/openapi/spec.test.ts",
+    "scripts/release-bump.mjs"
+  ],
+  "docs/exit/README.md": [
+    "packages/backend/src/rails/delegation-contracts.ts"
+  ],
+  "docs/operations/agent-discovery-listings.md": [
+    "packages/frontend/src/components/AccountSignersCard.tsx",
+    "packages/frontend/src/components/onboarding/RecoveryNudge.tsx",
+    "packages/frontend/src/lib/__tests__/discovery-surfaces.test.ts"
+  ],
+  "docs/operations/agent-qa.md": [
+    "packages/backend/src/openapi/qa-seed-routes.test.ts",
+    "packages/demo-merchant-mcp/src/x402.ts",
+    "packages/frontend/e2e/fixtures/haven-api.ts",
+    "packages/mcp-server/src/server.ts",
+    "packages/signer/package.json",
+    "packages/signer/src/server.ts",
+    "scripts/ci/guard-freshness.mjs",
+    "scripts/ci/guard-freshness.test.mjs",
+    "scripts/ci/qa-freshness.mjs",
+    "scripts/release-bump.mjs"
+  ],
+  "docs/operations/backend-scaling.md": [
+    "packages/backend/src/db/migrate.ts"
+  ],
+  "docs/operations/catalog-ingestion.md": [
+    "packages/backend/src/infra/repositories/__tests__/catalog-lifecycle.test.ts"
+  ],
+  "docs/operations/dev-environment.md": [
+    "packages/backend/src/rails/delegation-contracts.ts",
+    "packages/demo-merchant-mcp/src/erc7710.test.ts",
+    "packages/frontend/src/components/TopBar.tsx",
+    "packages/qa-agent/src/scenarios/x402-erc7710-settle.ts"
+  ],
+  "docs/operations/mainnet-canary.md": [
+    "packages/backend/src/rails/delegation-contracts.ts",
+    "packages/demo-merchant-mcp/src/erc7710.test.ts"
+  ],
+  "docs/operations/mcp-runtime-compatibility.md": [
+    "packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts",
+    "packages/sdk/package.json",
+    "packages/sdk/src/agent-guidance.ts",
+    "packages/sdk/src/connector-channel.ts",
+    "packages/sdk/src/skill-content.ts",
+    "scripts/release-bump.test.mjs",
+    "scripts/verify-connect-bundle.mjs"
+  ],
+  "docs/operations/promoting-dev-to-main.md": [
+    "packages/backend/src/db/migrate.ts"
+  ],
+  "docs/operations/stuck-revoke-alarm.md": [
+    "packages/backend/src/index.ts",
+    "packages/backend/src/modules/passport/reanchor.ts"
+  ],
+  "docs/product/copy-guidelines.md": [
+    "packages/backend/src/modules/accounting/receipt-underlag.ts",
+    "packages/connect/src/runtime.ts",
+    "packages/frontend/copy-lint-baseline.json",
+    "packages/mcp-server/src/strict-tool-input.test.ts",
+    "packages/sdk/src/agent-guidance.test.ts",
+    "packages/sdk/src/skill-content.test.ts",
+    "scripts/frontend-copy-lint.test.mjs"
+  ],
+  "docs/product/design-review.md": [
+    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
+  ],
+  "docs/product/README.md": [
+    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
+  ],
+  "docs/product/screen-recipes.md": [
+    "packages/backend/src/index.ts",
+    "packages/frontend/src/components/AccountSignersCard.tsx",
+    "packages/frontend/src/components/DelegationSendModal.tsx"
+  ],
+  "docs/quality/scan-ledger.md": [
+    "packages/connect/src/runtime-manifest.ts",
+    "scripts/generate-api-types.mjs"
+  ],
+  "docs/regulatory/casp-risk-guardrails.md": [
+    ".github/money-path-globs.json",
+    "packages/backend/src/middleware/owner-cli.ts",
+    "packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts",
+    "packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts",
+    "scripts/ci/money-path.test.mjs",
+    "scripts/docs/coupling-gate.mjs",
+    "scripts/docs/coupling-gate.test.mjs"
+  ]
+}

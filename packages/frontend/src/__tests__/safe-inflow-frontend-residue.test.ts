@@ -39,9 +39,10 @@
  *    and `PUT /user/safes/:id`, both live).
  * 4. `.post` / `.put` call shape only, not a bare `fetch`. What makes that
  *    adequate TODAY is that `ApiClient.request` is private (`lib/api.ts`), so
- *    these are the frontend's only POST/PUT channel to the Haven backend — the
- *    sole raw `fetch` outside `api.ts` is `lib/safe-tx.ts`, which targets Safe's
- *    own transaction service. If that ever stops being true, widen this guard.
+ *    these are the frontend's only POST/PUT channel to the Haven backend. The
+ *    one raw `fetch` that used to sit outside `api.ts` (in `lib/safe-tx.ts`,
+ *    targeting Safe's transaction service) went with the retired rail in
+ *    #2848. If a second raw-fetch channel ever appears, widen this guard.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -128,10 +129,12 @@ describe('retired Safe inflow routes have no frontend caller (#2261, epic #1440)
     // matched nothing, the assertions below would be vacuous, which is the
     // exact failure mode this repo keeps finding in its own guards. These are
     // LIVE routes; the extractor that finds them would find a retired one.
+    // (`POST /safe/exec` belonged here too until #2847 deleted it — its
+    // disappearance from this list is the deletion working, and the retired
+    // set below is what would catch it coming back.)
     const all = files.flatMap((f) => literalPaths(sources.get(f)!, 'post'))
     expect(all).toContain('/accounts/hybrid')
     expect(all).toContain('/auth/signup')
-    expect(all).toContain('/safe/exec')
   })
 
   it('no frontend module POSTs to a retired inflow route', () => {

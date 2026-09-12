@@ -1,24 +1,11 @@
+import { isProductionEnvironment } from './env'
+
 const BASE_URL = '/api'
 const API_OVERRIDE_STORAGE_KEY = 'haven_api_base_url'
 
 interface ApiError {
   error: string
   statusCode?: number
-}
-
-export interface EnrollPasskeyBody {
-  credential_id: string
-  public_key_x: `0x${string}`
-  public_key_y: `0x${string}`
-  chain_id: number
-  raw_attestation_object?: string
-}
-
-export interface EnrollPasskeyResponse {
-  id: string
-  credential_id: string
-  signer_address: string
-  chain_id: number
 }
 
 export interface ListPasskeysResponse {
@@ -30,67 +17,6 @@ export interface ListPasskeysResponse {
     safe_address: string | null
     created_at: string
   }>
-}
-
-export interface OwnerAccount {
-  id: string
-  safe_address: string
-  chain_id: number
-  name: string
-}
-
-export interface OwnerAlias {
-  owner_address: string
-  name: string | null
-  accounts: OwnerAccount[]
-}
-
-export interface OwnersResponse {
-  owners: OwnerAlias[]
-  partialFailure: boolean
-  failedSafeIds: string[]
-}
-
-export interface UpdateOwnerAliasResponse {
-  owner_address: string
-  name: string
-}
-
-export interface ExecSafeBody {
-  chain_id: number
-  safe_address: string
-  to: string
-  value: string
-  data: string
-  operation: 0 | 1
-  safe_tx_gas: string
-  base_gas: string
-  gas_price: string
-  gas_token: string
-  refund_receiver: string
-  nonce: string
-  signatures: string
-  /** Which passkey signed — required once an account has a backup (#1229). */
-  credential_id?: string
-}
-
-export interface ExecSafeResponse {
-  tx_hash: string
-  chain_id: number
-  /**
-   * How the relay's own confirmation wait ended (#1754).
-   *
-   * `'confirmed'` — mined and successful, the 201 this route has always
-   * answered. `'pending'` — a 202: the transaction was broadcast, the relay
-   * stopped waiting after 120 s, and it may still confirm. That case used to
-   * be reported as `502 "Safe execution reverted on-chain"`, which invited a
-   * retry of an operation that may already have succeeded.
-   *
-   * Optional because a frontend deployed against an older backend will not
-   * receive it; absence means the same thing `'confirmed'` does, since the
-   * only pre-#1754 non-error response was the mined one.
-   */
-  status?: 'confirmed' | 'pending'
 }
 
 /**
@@ -106,8 +32,9 @@ export interface ExecSafeResponse {
  * it is unset) evaluates this to `false` and the override path is dead code.
  */
 function isApiOverrideEnabled(): boolean {
-  const env = process.env.NEXT_PUBLIC_HAVEN_ENV?.trim().toLowerCase()
-  return env != null && env !== '' && env !== 'production' && env !== 'prod'
+  // One reading of the convention (#2709): unset, empty, `production` and
+  // `prod` are all production, and production never honours an override.
+  return !isProductionEnvironment()
 }
 
 export function getResolvedApiBaseUrl(): string {
@@ -222,20 +149,21 @@ class ApiClient {
     })
   }
 
+  patch<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>(path, {
+      method: 'PATCH',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  }
+
   delete<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'DELETE' })
   }
 
-  enrollPasskey(body: EnrollPasskeyBody): Promise<EnrollPasskeyResponse> {
-    return this.post<EnrollPasskeyResponse>('/passkeys', body)
-  }
-
+  // POST /passkeys (the Safe signer enrolment) was deleted with the Safe rail
+  // in #2847; the list read stays — AuthContext loads it every session.
   listPasskeys(): Promise<ListPasskeysResponse> {
     return this.get<ListPasskeysResponse>('/passkeys')
-  }
-
-  execSafe(body: ExecSafeBody): Promise<ExecSafeResponse> {
-    return this.post<ExecSafeResponse>('/safe/exec', body)
   }
 
   rotateAgentKey(agentId: string): Promise<{ api_key: string; api_key_prefix: string }> {

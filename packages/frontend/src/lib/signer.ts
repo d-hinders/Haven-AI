@@ -13,10 +13,12 @@ export type HavenUserSigner = EoaSigner | PasskeySigner | DelegatorPasskeySigner
  * A Hybrid DeleGator account's signer set, resolvable on this device (#1079).
  *
  * EXPLICITLY a third variant rather than a widened PasskeySigner: a Hybrid
- * passkey cannot sign a Safe transaction, and the compiler must force every
- * call site to decide rather than fail late on a money path. Signing on this
- * rail stays in `delegationPasskeySigner` — this variant makes the GATES
- * honest; it never routes through `signSafeTx`.
+ * passkey signs Hybrid-account operations through `delegationPasskeySigner`
+ * and never through the retired Safe signing path (the Safe-rail signing
+ * helpers went with the rail; #2848 deleted the last of them from
+ * `lib/safe-tx.ts`). This variant exists so the compiler forces every call
+ * site to decide which signer set it holds rather than fail late on a money
+ * path.
  */
 export interface DelegatorPasskeySigner {
   type: 'delegator_passkey'
@@ -177,21 +179,6 @@ export function hybridPasskeyToSignWith<P extends HybridPasskeyLike>(signers: {
   passkeys: readonly P[]
 }): P | undefined {
   return hybridPasskeyOnDevice(signers) ?? signers.passkeys[0]
-}
-
-/**
- * Narrow to the signers that can produce a SAFE transaction signature (#1079).
- * A `delegator_passkey` signs Hybrid-account operations via
- * `delegationPasskeySigner` and can never sign a Safe tx — every Safe-shaped
- * call site names that exclusion through this guard instead of assuming the
- * union stops at two variants.
- */
-export type SafeCapableSigner = EoaSigner | PasskeySigner
-
-export function isSafeCapableSigner(
-  signer: HavenUserSigner | null,
-): signer is EoaSigner | PasskeySigner {
-  return signer !== null && signer.type !== 'delegator_passkey'
 }
 
 export function setStoredPasskeySigner(value: StoredPasskeySigner): void {

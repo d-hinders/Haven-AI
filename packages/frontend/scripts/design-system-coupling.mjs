@@ -24,10 +24,19 @@
 // workflow stricter than opening a PR by hand.
 //
 // Usage:
-//   node scripts/design-system-coupling.mjs                 # diff origin/dev...HEAD
+//   npm run design:coupling:strict -w packages/frontend     # what CI decides
+//   node scripts/design-system-coupling.mjs                 # advisory, same scope
 //   node scripts/design-system-coupling.mjs --changed-diff=<file>   # a diff on disk
-//   node scripts/design-system-coupling.mjs --strict        # exit 1 on findings
 //   BASE_SHA=… HEAD_SHA=… node scripts/design-system-coupling.mjs   # CI
+//
+// #2826: the local run reads the WORKING TREE, not just committed work. It
+// used to diff `origin/dev...HEAD` alone, so a primitive that had been written
+// but not yet committed produced "no undocumented primitives added" — and
+// ship-next runs this during review, BEFORE the commit. Every run now prints
+// the range it compared, because a gate whose scope depends on unset
+// environment variables must not be silent about which question it answered.
+// This is the same false green the docs coupling gate hit (#1076) and fixed
+// (#1077); scripts/docs/coupling-gate.mjs has carried the union since.
 import { readFileSync, writeFileSync, appendFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -145,6 +154,41 @@ export function undocumentedPrimitives(addedExports, pageSource) {
 }
 
 /**
+ * Collect exports from a run of CONSECUTIVE lines belonging to one file.
+ * Shared by the diff parser and the untracked-file scanner so both read a
+ * multi-line `export { … }` list the same way. `inBrace` state is scoped to
+ * the run, which is what makes a run boundary a hard reset.
+ */
+function collectExports(file, lines) {
+  const out = []
+  let inBrace = false
+  for (const line of lines) {
+    const exempt = EXEMPT_RE.test(line)
+    const code = codeOf(line)
+
+    if (inBrace) {
+      for (const part of code.split(',')) {
+        const name = pascalMember(part)
+        if (name) out.push({ file, symbol: name, exempt })
+      }
+      if (code.includes('}')) inBrace = false
+      continue
+    }
+
+    for (const symbol of exportedComponentsInLine(code)) {
+      // Anonymous `export default` → the primitive IS the file; use its
+      // basename (ui/haven files are named after their component).
+      const resolved =
+        symbol === DEFAULT_EXPORT ? path.basename(file).replace(/\.tsx?$/, '') : symbol
+      out.push({ file, symbol: resolved, exempt })
+    }
+    // Enter brace mode on an opening `export {` with no closing `}` on the line.
+    if (/^\s*export\s*\{/.test(code) && !code.includes('}')) inBrace = true
+  }
+  return out
+}
+
+/**
  * Parse a unified diff into added component exports. Tracks the current +++
  * target file across hunks; only added lines (`+`, not `+++`) in primitive
  * files are considered. Comment text is stripped before matching (so an
@@ -156,75 +200,147 @@ export function undocumentedPrimitives(addedExports, pageSource) {
 export function addedExportsFromDiff(diff) {
   const added = []
   let file = null
-  let inBrace = false // mid multi-line `export { … }` for the current file
-  const breakRun = () => {
-    inBrace = false
+  let run = [] // consecutive added lines in the current file
+  const flush = () => {
+    if (file && run.length && isPrimitiveFile(file)) added.push(...collectExports(file, run))
+    run = []
   }
   for (const raw of diff.split('\n')) {
     if (raw.startsWith('+++ ')) {
+      flush()
       const p = raw.slice(4).replace(/^b\//, '').trim()
       file = p === '/dev/null' ? null : pkgRelative(p)
-      breakRun()
       continue
     }
     // Any line that isn't a content addition breaks a multi-line export run.
     if (!raw.startsWith('+') || raw.startsWith('+++')) {
-      breakRun()
+      flush()
       continue
     }
-    if (!file || !isPrimitiveFile(file)) {
-      breakRun()
-      continue
-    }
-    const line = raw.slice(1)
-    const exempt = EXEMPT_RE.test(line)
-    const code = codeOf(line)
-
-    if (inBrace) {
-      for (const part of code.split(',')) {
-        const name = pascalMember(part)
-        if (name) added.push({ file, symbol: name, exempt })
-      }
-      if (code.includes('}')) inBrace = false
-      continue
-    }
-
-    for (const symbol of exportedComponentsInLine(code)) {
-      // Anonymous `export default` → the primitive IS the file; use its
-      // basename (ui/haven files are named after their component).
-      const resolved =
-        symbol === DEFAULT_EXPORT ? path.basename(file).replace(/\.tsx?$/, '') : symbol
-      added.push({ file, symbol: resolved, exempt })
-    }
-    // Enter brace mode on an opening `export {` with no closing `}` on the line.
-    if (/^\s*export\s*\{/.test(code) && !code.includes('}')) inBrace = true
+    run.push(raw.slice(1))
   }
+  flush()
   return added
 }
 
+const LOCAL_BASE = 'origin/dev'
+
+function git(args) {
+  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+}
+
+function gitDiff(revs) {
+  return git(['diff', '--unified=0', ...revs, '--', ...PRIMITIVE_DIRS])
+}
+
 /**
- * Compute the diff. Always THREE-DOT (merge-base) — a two-dot diff against a
- * moving base branch shows base-side drift as phantom `+` lines, so a stale PR
- * would be blamed for exports it never touched. Returns null when git fails:
- * the caller decides — fatal under --strict (a hard gate must not silently
- * pass on an unreadable diff), warn-and-exit-0 in advisory mode.
+ * Exported component symbols in a whole untracked file.
+ *
+ * An untracked file is the shape this gate exists to catch — a brand-new
+ * primitive — and it is invisible to every `git diff` form, `git diff HEAD`
+ * included. It is scanned DIRECTLY rather than rendered into diff text and fed
+ * back through addedExportsFromDiff, because that round trip is fail-open: the
+ * parser treats any line starting with `+++ ` as a file header, and prefixing
+ * every content line with `+` turns a source line beginning `++ ` into one.
+ * That re-points the parser at another path and silently drops the exports
+ * after it — a gate reporting green because of what a file happened to
+ * contain. Contrived in TSX, but this path carries WHOLE file contents rather
+ * than changed lines, and a gate must not have that shape at all.
+ */
+export function addedExportsInFile(file, contents) {
+  const rel = pkgRelative(file)
+  if (!isPrimitiveFile(rel)) return []
+  return collectExports(rel, contents.split('\n'))
+}
+
+/**
+ * Compute the diff, and say which range it is. Always THREE-DOT (merge-base) —
+ * a two-dot diff against a moving base branch shows base-side drift as phantom
+ * `+` lines, so a stale PR would be blamed for exports it never touched.
+ * Returns null when git fails: the caller decides — fatal under --strict (a
+ * hard gate must not silently pass on an unreadable diff), warn-and-exit-0 in
+ * advisory mode.
+ *
+ * Two scopes, and the difference is #2826's defect:
+ *   - CI sets BASE_SHA/HEAD_SHA and gets exactly the pull request's range.
+ *   - A local run has no such range, and a committed-only `origin/dev...HEAD`
+ *     answers a DIFFERENT question than CI will — it reports a clean bill on
+ *     work that is written but not committed, which is when ship-next runs it.
+ *     So the local scope is the union a reviewer would look at: committed
+ *     branch work, staged and unstaged tracked changes, and untracked files.
+ * The union can only ever be WIDER than CI's range, never narrower, so it
+ * cannot produce a green that CI turns red — the direction that matters.
  */
 function getDiff() {
   const fromFile = arg('changed-diff')
-  if (fromFile) return readFileSync(fromFile, 'utf8')
+  if (fromFile) return { diff: readFileSync(fromFile, 'utf8'), untracked: [], range: fromFile }
+
   const base = process.env.BASE_SHA
-  const head = process.env.HEAD_SHA || 'HEAD'
-  const range = base ? `${base}...${head}` : 'origin/dev...HEAD'
+  if (base) {
+    const range = `${base}...${process.env.HEAD_SHA || 'HEAD'}`
+    try {
+      return { diff: gitDiff([range]), untracked: [], range }
+    } catch (err) {
+      console.error(`design-system coupling: could not compute the diff (${range}):`, err.message)
+      return null
+    }
+  }
+
+  const range = `${LOCAL_BASE}...HEAD + working tree`
   try {
-    return execFileSync('git', ['diff', '--unified=0', range, '--', ...PRIMITIVE_DIRS], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-    })
+    const untracked = git([
+      'ls-files',
+      '--others',
+      '--exclude-standard',
+      '--full-name',
+      '--',
+      ...PRIMITIVE_DIRS,
+    ])
+      .split('\n')
+      .filter(Boolean)
+    const repoRoot = git(['rev-parse', '--show-toplevel']).trim()
+    return {
+      // Oldest first — dedupe() resolves a repeated export to its LAST entry.
+      diff: gitDiff([`${LOCAL_BASE}...HEAD`]) + gitDiff(['HEAD']), // committed, then staged + unstaged
+      // Untracked files are scanned directly (see addedExportsInFile), and
+      // filtered BEFORE being read: an unreadable file this gate would never
+      // look at — a dangling symlink, an editor artifact, a stray asset — must
+      // not take the whole run down and report the base as the cause.
+      untracked: untracked
+        .filter((f) => isPrimitiveFile(pkgRelative(f)))
+        .map((f) => ({ file: f, contents: readFileSync(path.join(repoRoot, f), 'utf8') })),
+      range,
+    }
   } catch (err) {
-    console.error(`design-system coupling: could not compute the diff (${range}):`, err.message)
+    console.error(`design-system coupling: could not read the local change (${range}):`, err.message)
     return null
   }
+}
+
+/**
+ * One entry per file+symbol, resolved to its NEWEST state.
+ *
+ * The union can see the same export twice — committed on the branch, and again
+ * in the working tree. The two can disagree about the `// design-system-exempt:`
+ * marker, and the working tree is the newest state, so the LAST occurrence
+ * wins. Callers must therefore build the union oldest-first: committed, then
+ * tracked working-tree changes, then untracked files.
+ *
+ * OR-ing the two instead was a fail-open, in the one direction this gate must
+ * not have: exempt-then-unexempted — commit the marker, then delete it in the
+ * working tree, the ordinary "a reviewer said that is not internal" move, made
+ * before the commit, which is the window this whole change exists to cover —
+ * resolved to exempt, so the local run printed `no undocumented primitives
+ * added` and exited 0 on a tree CI reddens.
+ */
+export function dedupe(added) {
+  const byKey = new Map()
+  for (const entry of added) {
+    // Replace rather than merge: a later occurrence is a newer state of the
+    // same export, and it is authoritative in BOTH directions.
+    byKey.set(`${entry.file}::${entry.symbol}`, { ...entry })
+  }
+  return [...byKey.values()]
 }
 
 function main() {
@@ -232,10 +348,12 @@ function main() {
   const outPath = arg('out') || 'design-system-coupling-comment.md'
   const pageSource = readFileSync(path.join(ROOT, PAGE), 'utf8')
 
-  const diff = getDiff()
-  if (diff === null) {
+  const computed = getDiff()
+  if (computed === null) {
     if (strict) {
-      console.error('--strict: refusing to pass on an uncomputable diff — fetch the base and retry.')
+      console.error(
+        '--strict: refusing to pass on a diff it could not read. See the cause above.',
+      )
       process.exit(1)
     }
     console.log('design-system coupling: skipped (diff unavailable; advisory mode).')
@@ -245,7 +363,16 @@ function main() {
     return
   }
 
-  const added = addedExportsFromDiff(diff)
+  // Say what was compared. A gate that silently changes scope on whether two
+  // environment variables happen to be set is exactly what made #2826's false
+  // green invisible: the run looked identical either way (#2826).
+  console.log(`design-system coupling: comparing ${computed.range}`)
+
+  const added = dedupe([
+    ...addedExportsFromDiff(computed.diff),
+    // Last, so an untracked file's state wins over any earlier occurrence.
+    ...computed.untracked.flatMap((u) => addedExportsInFile(u.file, u.contents)),
+  ])
   const findings = undocumentedPrimitives(added, pageSource)
   const hasFindings = findings.length > 0
 

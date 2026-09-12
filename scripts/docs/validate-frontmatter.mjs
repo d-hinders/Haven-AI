@@ -123,6 +123,24 @@ export function emptyCoversNote(raw) {
  * Deliberately minimal: handles scalar keys and a `covers` block-list or
  * inline `[]`, with `# comments` stripped from scalar lines.
  */
+/**
+ * The retired inline chain, if this doc still carries one (#2637).
+ *
+ * Matches a `#` comment on the `last-verified:` scalar itself. Deliberately
+ * not `indexOf('#')`: a date never contains one, but being explicit about the
+ * shape keeps this from firing on some future scalar that legitimately does.
+ */
+export function rawLastVerifiedComment(raw) {
+  if (!raw.startsWith('---')) return null
+  const lines = raw.split(/\r?\n/)
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') return null
+    const m = lines[i].match(/^last-verified:\s*"[^"]*"\s*(#.*)$/)
+    if (m) return m[1]
+  }
+  return null
+}
+
 export function parseFrontMatter(raw) {
   if (!raw.startsWith('---')) {
     return { ok: false, error: 'missing front-matter (file must start with `---`)' }
@@ -190,6 +208,9 @@ export function parseFrontMatter(raw) {
       i++
       continue
     }
+    if (key === 'verified') {
+      return { ok: false, error: '`verified:` is retired (#2681); historical entries live in docs/archive/last-verified-chains-2026-09.md' }
+    }
     // Scalar: strip a trailing comment and surrounding quotes.
     const hash = rest.indexOf(' #')
     if (hash !== -1) rest = rest.slice(0, hash)
@@ -230,6 +251,11 @@ async function main() {
     }
     if (!lastVerified) {
       errors.push(`${rel}: missing required key \`last-verified\``)
+    }
+    if (rawLastVerifiedComment(raw)) {
+      errors.push(
+        `${rel}: \`last-verified\` carries a retired inline annotation; historical entries belong in docs/archive/last-verified-chains-2026-09.md.`,
+      )
     } else if (!DATE_RE.test(lastVerified)) {
       errors.push(`${rel}: \`last-verified\` must be YYYY-MM-DD, got "${lastVerified}"`)
     }

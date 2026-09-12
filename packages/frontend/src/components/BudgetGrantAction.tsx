@@ -119,17 +119,30 @@ export default function BudgetGrantAction({
         </p>
       )}
 
-      <div className="flex items-center gap-3">
+      {/* #2733: the page form's row squeezed the "Set budget" pill at 390px
+          until its label wrapped onto two lines. BELOW `sm` (and only when
+          there is no leadingAction — the modal footer keeps its inline row)
+          the row stacks: button on its own line at full width, helper under
+          it; from `sm` up it is the same side-by-side row as before. Layout
+          only: the button, its disabled predicate and the helper text are
+          unchanged. */}
+      <div
+        className={
+          leadingAction
+            ? 'flex items-center gap-3'
+            : 'flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3'
+        }
+      >
         {leadingAction}
         <Button
           onClick={handleClick}
           disabled={busy || !ready || !input}
-          className={leadingAction ? 'flex-1' : undefined}
+          className={leadingAction ? 'flex-1' : 'sm:w-auto'}
         >
           {busy ? busyLabel : label}
         </Button>
         {helper && !leadingAction && (
-          <span className="text-xs text-[var(--v2-ink-muted)]">{helper}</span>
+          <span className="text-xs text-[var(--v2-ink-muted)] sm:ml-auto">{helper}</span>
         )}
       </div>
     </div>

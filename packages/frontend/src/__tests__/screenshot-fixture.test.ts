@@ -10,6 +10,11 @@ import {
   SCENARIOS,
   ScenarioHttpError,
   ScenarioHttpDelay,
+  ROUTE_DEFINITIONS,
+  findRedirectCaptures,
+  findSignedOutDuplicates,
+  resolveRouteAuthPartitions,
+  signedOutRoutesFor,
 } from '../../scripts/screenshot.mjs'
 import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
 
@@ -65,6 +70,24 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(fx('/agents')).toMatchObject({ agents: expect.any(Array) })
     expect(fx('/contacts')).toMatchObject({ contacts: expect.any(Array) })
     expect(fx('/chains')).toEqual({ deployable: [84532] })
+  })
+
+  it('answers /accounting/feed/status so the feed page renders at all (#2903)', () => {
+    // `AccountingPage` returns null unless `hosted && flagEnabled`, and hides
+    // the feed unless `available`; every row needs the fields the page reads.
+    const status = fx('/accounting/feed/status') as {
+      hosted: boolean; enabled: boolean; flagEnabled: boolean; available: boolean; connected: boolean; liveSyncReady: boolean
+      syncs: { payment_id: string; provider: string; status: string; external_ref: string | null; error: string | null; attempts: number }[]
+    }
+    expect(status).toMatchObject({ hosted: true, enabled: true, flagEnabled: true, available: true, connected: true, liveSyncReady: true })
+    expect(status.syncs.length).toBeGreaterThan(0)
+    for (const row of status.syncs) {
+      expect(row).toMatchObject({ payment_id: expect.any(String), provider: 'fortnox', attempts: expect.any(Number) })
+      expect(['pending', 'pushed', 'failed', 'skipped']).toContain(row.status)
+    }
+    // One pushed row whose external_ref the page turns into "Fortnox invoice <n>".
+    expect(status.syncs.some((r) => r.status === 'pushed' && /^fortnox:supplierinvoice:\d+$/.test(r.external_ref ?? ''))).toBe(true)
+    expect(fx('/accounting/feed/status', 'empty')).toBeNull()
   })
 
   it('distinguishes the three /transactions shapes', () => {
@@ -768,6 +791,132 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       }
     })
 
+    describe('settings-accounting (#2868)', () => {
+      const settings = scenarioWithApi('settings-accounting') as StagedScenarioShape
+      afterEach(() => settings.stage('connected'))
+      const rowOf = () =>
+        (settings.api('/accounting/connections', 'GET') as { connections: Record<string, unknown>[] }).connections[0]
+
+      it('serves every one of the five connection states, each under its own stage, plus the first-connect return and the two OFF states', () => {
+        const seen: Record<string, unknown> = {}
+        for (const stage of Object.keys(settings.stages)) {
+          settings.stage(stage)
+          seen[stage] = rowOf()?.status ?? null
+        }
+        expect(seen).toEqual({
+          connected: 'connected',
+          'needs-reauthorisation': 'needs_reauthorisation',
+          'scope-missing': 'scope_missing',
+          revoked: 'revoked_at_provider',
+          disconnected: 'disconnected',
+          'first-connect': 'connected',
+          // #2869: no row at all — the feed-status answer makes these states.
+          'coming-soon': null,
+          'self-hosted': null,
+        })
+      })
+
+      it('the two OFF stages switch the FEED STATUS answer, and only they do (#2869)', () => {
+        const statusOf = () => settings.api('/accounting/feed/status', 'GET') as { hosted: boolean; enabled: boolean } | undefined
+        settings.stage('coming-soon')
+        expect(statusOf()).toMatchObject({ hosted: true, enabled: false, available: false })
+        settings.stage('self-hosted')
+        expect(statusOf()).toMatchObject({ hosted: false, enabled: false, available: false })
+        for (const stage of ['connected', 'needs-reauthorisation', 'scope-missing', 'revoked', 'disconnected', 'first-connect']) {
+          settings.stage(stage)
+          // Falls through to the default (ON) fixture — the card renders its rows.
+          expect(statusOf(), stage).toBeUndefined()
+        }
+      })
+
+      it('the scope-missing stage NAMES the missing scopes, derived against requiredScopes (#2865)', () => {
+        settings.stage('scope-missing')
+        const row = rowOf() as { grantedScope: string; missingScopes: string[] }
+        const required = (fixtureFor('/accounting/providers') as { providers: { id: string; requiredScopes: string[] }[] })
+          .providers.find((p) => p.id === 'fortnox')!.requiredScopes
+        const granted = row.grantedScope.split(' ')
+        expect(row.missingScopes).toEqual(required.filter((scope) => !granted.includes(scope)))
+        expect(row.missingScopes.length).toBeGreaterThan(0)
+      })
+
+      it('the first-connect stage is connected, the destination, and has never pushed — what opens the backfill choice', () => {
+        settings.stage('first-connect')
+        expect(rowOf()).toMatchObject({ status: 'connected', isActiveDestination: true, lastPushAt: null })
+      })
+
+      it('a disconnected row keeps its settings for the reconnect and drops the active flag (#2862/#2867)', () => {
+        settings.stage('disconnected')
+        expect(rowOf()).toMatchObject({ isActiveDestination: false, grantedScope: null, tokenExpiresAt: null })
+        expect((rowOf() as { settings: unknown }).settings).toEqual({ suggestedAccount: '6540', autoFeed: true })
+      })
+
+      it('answers only the connections route (and, in the OFF stages, the feed status) in every stage', () => {
+        for (const stage of Object.keys(settings.stages)) {
+          settings.stage(stage)
+          expect(settings.api('/accounting/providers', 'GET'), stage).toBeUndefined()
+          expect(settings.api('/auth/me', 'GET'), stage).toBeUndefined()
+        }
+      })
+
+      it('refuses an unknown stage', () => {
+        expect(() => settings.stage('connected-with-company')).toThrow(/unknown stage/)
+      })
+    })
+
+    /**
+     * #2869: `/accounting` renders three different surfaces off ONE endpoint,
+     * so the scenario switches the flag answer per stage. The two OFF stages
+     * are what the Coming soon and self-hosted baselines photograph.
+     */
+    describe('accounting-feed (#2869)', () => {
+      const feed = scenarioWithApi('accounting-feed') as StagedScenarioShape
+      afterEach(() => feed.stage('on'))
+      const statusOf = () =>
+        feed.api('/accounting/feed/status', 'GET') as { hosted: boolean; enabled: boolean; available: boolean }
+
+      it('serves the three flag states plus the attention state, one per stage', () => {
+        const seen: Record<string, unknown> = {}
+        for (const stage of Object.keys(feed.stages)) {
+          feed.stage(stage)
+          const status = statusOf()
+          seen[stage] = { hosted: status.hosted, enabled: status.enabled, available: status.available }
+        }
+        expect(seen).toEqual({
+          on: { hosted: true, enabled: true, available: true },
+          attention: { hosted: true, enabled: true, available: true },
+          // The distinction the owner decision turns on: BOTH are off, and
+          // `hosted` is the only field that tells them apart.
+          'coming-soon': { hosted: true, enabled: false, available: false },
+          'self-hosted': { hosted: false, enabled: false, available: false },
+        })
+      })
+
+      it('the attention stage is what raises the summary, the inline explanation and the sidebar dot (#2869 review)', () => {
+        feed.stage('attention')
+        const status = feed.api('/accounting/feed/status', 'GET') as {
+          connected: boolean
+          destination: { status: string }
+          counts: { exhausted: number }
+        }
+        expect(status.destination.status).toBe('needs_reauthorisation')
+        expect(status.counts.exhausted).toBeGreaterThan(0)
+        // A dead grant is still the destination, but not an active `connected` one.
+        expect(status.connected).toBe(false)
+      })
+
+      it('answers only the feed-status route in every stage', () => {
+        for (const stage of Object.keys(feed.stages)) {
+          feed.stage(stage)
+          expect(feed.api('/accounting/connections', 'GET'), stage).toBeUndefined()
+          expect(feed.api('/auth/me', 'GET'), stage).toBeUndefined()
+        }
+      })
+
+      it('refuses an unknown stage', () => {
+        expect(() => feed.stage('off')).toThrow(/unknown stage/)
+      })
+    })
+
     it('refuses an unknown stage instead of serving the previous one (#1725)', () => {
       // A typo'd stage name that silently left the fixture where it was would
       // shoot the wrong state under the right filename — the exact
@@ -897,7 +1046,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           install_status: Record<string, unknown>
         }
         const second = approve.api(`/agent-connection-setups/${SETUP_ID}`, 'GET')
-        expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-fixture-1' })
+        expect(first).toMatchObject({ status: 'connected_local', agent_id: 'agent-research' })
         expect(first.install_status).toMatchObject({
           manual_credential_fallback: true,
           local_mcp_configured: false,
@@ -923,7 +1072,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // `pickSigningPath` returns null on an empty signer set, which flips
         // BudgetGrantAction to its not-ready branch — a capture of the wrong
         // screen under the approve screen's filename.
-        const signers = approve.api('/agents/agent-fixture-1/account-signers', 'GET') as {
+        const signers = approve.api('/agents/agent-research/account-signers', 'GET') as {
           passkeys: unknown[]
         }
         expect(signers.passkeys).toHaveLength(1)
@@ -950,5 +1099,194 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     // so the assertions went with them rather than being repointed — a fixture
     // contract for a scenario that no longer exists is the definition of a
     // guard over the empty set.
+  })
+})
+
+/**
+ * The signed-out opt-out (#2825).
+ *
+ * These are the GUARD half of the change. The pre-fix failure — a capture
+ * named `login-mobile.png` whose pixels were the dashboard — cleared every
+ * structural check the harness makes (it rendered, the dimensions were
+ * plausible, the identity probe confirmed the server, the content floor was
+ * met), so the only thing that can see that defect is a comparison of the
+ * capture bytes. Everything here is pure over file records so the guard is
+ * testable without booting a browser; the live run wires the same functions
+ * over the run's real captures.
+ */
+describe('signed-out capture opt-out (#2825)', () => {
+  /** A capture record in the shape main() builds. */
+  const rec = (route: string, viewport: string, sha256: string) => ({
+    route,
+    viewport,
+    file: `${route.slice(1)}-${viewport}.png`,
+    sha256,
+  })
+
+  describe('signedOutRoutesFor (the ROUTE_DEFINITIONS registry)', () => {
+    it('resolves signed-out membership from the route definition, not the caller', () => {
+      // Being signed out is a property of the ROUTE: a caller captures
+      // /login by passing /login, and the definition decides how.
+      expect(signedOutRoutesFor(['/design-system', '/dashboard', '/login', '/signup'])).toEqual([
+        '/login',
+        '/signup',
+      ])
+    })
+
+    it('keeps every undeclared route authenticated — no "looks signed-out" heuristic', () => {
+      // The value of the authenticated default is that every other route
+      // captures populated rather than empty.
+      expect(signedOutRoutesFor(['/design-system', '/dashboard', '/', '/settings'])).toEqual([])
+    })
+
+    it('declares exactly the routes the issue names, with /onboarding for its redirect', () => {
+      expect(Object.keys(ROUTE_DEFINITIONS).sort()).toEqual(['/login', '/onboarding', '/signup'])
+      for (const def of Object.values(ROUTE_DEFINITIONS)) expect(def.signedOut).toBe(true)
+    })
+  })
+
+  describe('resolveRouteAuthPartitions', () => {
+    it('splits a mixed run so a context never wears both sessions', () => {
+      const partitions = resolveRouteAuthPartitions(
+        ['/design-system', '/dashboard', '/login'],
+        ['/login'],
+      )
+      expect(partitions.authenticated).toEqual(['/design-system', '/dashboard'])
+      expect(partitions.signed_out).toEqual(['/login'])
+    })
+
+    it('an explicit opt-out wins for ANY named route, /design-system included', () => {
+      // The authenticated default for /design-system is guaranteed by
+      // composition — the harness always adds the route and no run needs to
+      // opt it out — not by a silent force-back, which would make an explicit
+      // instruction a lie. Nothing the partitioner does protects it, because
+      // nothing needs protecting.
+      const partitions = resolveRouteAuthPartitions(
+        ['/design-system', '/login', '/signup'],
+        ['/login', '/signup', '/design-system'],
+      )
+      expect(partitions.authenticated).toEqual([])
+      expect(partitions.signed_out).toEqual(['/design-system', '/login', '/signup'])
+    })
+
+    it('puts everything in the authenticated partition with no opt-out', () => {
+      const partitions = resolveRouteAuthPartitions(['/design-system', '/dashboard'], [])
+      expect(partitions.authenticated).toEqual(['/design-system', '/dashboard'])
+      expect(partitions.signed_out).toEqual([])
+    })
+  })
+
+  describe('findRedirectCaptures (the GATING guard)', () => {
+    it('flags a capture byte-identical to its viewport /dashboard — authenticated or signed out', () => {
+      // Mode-blind ON PURPOSE: the original finding was an AUTHENTICATED
+      // /login whose bytes were the dashboard's, so a guard scoped to
+      // opted-in captures would leave the founding defect open one flag over.
+      const sha = 'a'.repeat(64)
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', sha)],
+        new Map([['mobile', sha]]),
+      )
+      expect(mismatches).toHaveLength(1)
+      expect(mismatches[0].route).toBe('/login')
+      expect(mismatches[0].viewport).toBe('mobile')
+      // The run's own error printer names the file; a record without it
+      // prints `undefined == dashboard-*.png` (caught by the mutation run).
+      expect(mismatches[0].file).toBe('login-mobile.png')
+      expect(mismatches[0].text).toContain('BYTE-IDENTICAL to /dashboard')
+      expect(mismatches[0].text).toContain('ROUTE_DEFINITIONS')
+    })
+
+    it('never flags /dashboard itself', () => {
+      const sha = 'a'.repeat(64)
+      const mismatches = findRedirectCaptures(
+        [rec('/dashboard', 'mobile', sha)],
+        new Map([['mobile', sha]]),
+      )
+      expect(mismatches).toEqual([])
+    })
+
+    it('stays silent when the capture differs from /dashboard — the guard the live run must satisfy', () => {
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', 'a'.repeat(64)), rec('/signup', 'desktop', 'b'.repeat(64))],
+        new Map([
+          ['mobile', 'c'.repeat(64)],
+          ['desktop', 'd'.repeat(64)],
+        ]),
+      )
+      expect(mismatches).toEqual([])
+    })
+
+    it('does not compare across viewports', () => {
+      // /login at 390 must not be judged against /dashboard at 1280.
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', 'a'.repeat(64))],
+        new Map([['desktop', 'a'.repeat(64)]]),
+      )
+      expect(mismatches).toEqual([])
+    })
+
+    it('stays silent when no /dashboard was captured in the run', () => {
+      const mismatches = findRedirectCaptures(
+        [rec('/login', 'mobile', 'a'.repeat(64))],
+        new Map(),
+      )
+      expect(mismatches).toEqual([])
+    })
+  })
+
+  describe('findSignedOutDuplicates (the ADVISORY guard)', () => {
+    it('names the route a duplicate matches, not a hardcoded twin', () => {
+      const sha = 'a'.repeat(64)
+      // /onboarding signed out legitimately redirects to /login: a duplicate
+      // of /login is expected and must say so.
+      const duplicates = findSignedOutDuplicates(
+        [rec('/onboarding', 'mobile', sha)],
+        [rec('/login', 'mobile', sha), rec('/dashboard', 'mobile', 'b'.repeat(64))],
+      )
+      expect(duplicates).toHaveLength(1)
+      expect(duplicates[0].matches).toBe('/login')
+    })
+
+    it('ignores /design-system in the comparison pool', () => {
+      // The design-system capture is a primitive catalogue; no product route
+      // legitimately shares its bytes, and counting it would only manufacture
+      // noise.
+      const duplicates = findSignedOutDuplicates(
+        [rec('/login', 'mobile', 'a'.repeat(64))],
+        [rec('/design-system', 'mobile', 'a'.repeat(64))],
+      )
+      expect(duplicates).toEqual([])
+    })
+
+    it('never matches a route against itself, or bytes across viewports', () => {
+      const sha = 'a'.repeat(64)
+      expect(
+        findSignedOutDuplicates([rec('/login', 'mobile', sha)], [rec('/login', 'mobile', sha)]),
+      ).toEqual([])
+      expect(
+        findSignedOutDuplicates([rec('/login', 'mobile', sha)], [rec('/login', 'desktop', sha)]),
+      ).toEqual([])
+    })
+
+    it('reports a mutual duplicate pair ONCE, anchored at the first capture', () => {
+      const sha = 'a'.repeat(64)
+      // /onboarding signed out redirects to /login, so both captures share
+      // bytes and each matches the other — one pair, one advisory record.
+      const duplicates = findSignedOutDuplicates(
+        [rec('/login', 'mobile', sha), rec('/onboarding', 'mobile', sha)],
+        [rec('/login', 'mobile', sha), rec('/onboarding', 'mobile', sha)],
+      )
+      expect(duplicates).toHaveLength(1)
+      expect(duplicates[0].route).toBe('/login')
+      expect(duplicates[0].matches).toBe('/onboarding')
+    })
+
+    it('stays silent when every signed-out capture is unique', () => {
+      const duplicates = findSignedOutDuplicates(
+        [rec('/login', 'mobile', 'a'.repeat(64)), rec('/signup', 'desktop', 'b'.repeat(64))],
+        [rec('/dashboard', 'mobile', 'c'.repeat(64)), rec('/dashboard', 'desktop', 'd'.repeat(64))],
+      )
+      expect(duplicates).toEqual([])
+    })
   })
 })

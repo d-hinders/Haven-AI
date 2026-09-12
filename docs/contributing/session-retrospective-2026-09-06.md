@@ -14,7 +14,7 @@ covers:
   - docs/contributing/ai-agent-workflow.md
   - docs/contributing/ai-review-patterns.md
   - docs/bug-reports/qa-explore-agent-onboarding-2026-09-06.md
-last-verified: "2026-09-06" # New document. Every repository figure below was re-derived at `f8a7311c` while writing, and the command that produces it sits next to it. The four session counts (five rewrite defects, four instrument lies, three dangling half-sentences, two surviving mutations) are hand-counted from one session and say so; they are not derivable from the repository and are not presented as if they were. The one reproduction in § *The instrument lied* was run at `f8a7311c` and its output is quoted verbatim, with the caveat stated inline that a worktree list is machine-local and only the column disagreement generalises. NOT verified here: the pre-#2608 rejection behaviour of the five MCP tools, which is why § *Rewriting text you have just read* item 5 states the generalisation defect and not a per-tool count. One figure was REMOVED after review rather than caveated — a commit-count for the stale checkout in § *The instrument lied* item 3 — because it had no instrument, and the document's own H2 says an un-derived number does not get to stand next to derived ones. Four findings from the independent pass are folded in: the `covers:` gap on `design-reviewer.md` (this doc makes a claim about its content), the H2 row naming one home when the rule landed in three, two branch names quoted as substrings rather than in full, and that removed figure.
+last-verified: "2026-09-06"
 ---
 
 # The one-session retrospective (2026-09-06)

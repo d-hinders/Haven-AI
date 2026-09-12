@@ -118,7 +118,7 @@
  *
  * All three are logged as they age past the horizon, and all three are recorded
  * in `docs/architecture/04-x402-payment-sequence.md` and
- * `docs/operations/fortnox-reporting-feed.md`.
+ * `docs/operations/accounting-feed.md`.
  *
  * **None of the three is unrecoverable, and the log must not imply it is.**
  * What the sweep cannot do is attribute them WITHOUT BEING TOLD. An agent (or
@@ -178,7 +178,7 @@ import {
   type RedemptionIndex,
   type ScanRange,
 } from '../../infra/chain/redeemed-delegation-scanner.js'
-import { getProvider } from '../../rails/allowance-module.js'
+import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { observeErc7710Settlement } from './settlement-observed.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../mpp/index.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'

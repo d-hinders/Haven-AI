@@ -1,30 +1,51 @@
 /**
  * Per-Safe explorer-API aggregation + caching, extracted verbatim from
- * `routes/transactions.ts` (#992). Fans out to `lib/explorer-api.ts`
- * (normal/internal/ERC-20 transfers + Safe Transaction Service transfers),
- * normalizes every source into `Transaction`, sorts, dedupes, and caches the
- * per-Safe result under `buildTransactionCacheKey`. `lib/explorer-api.ts`
- * and `lib/gnosisscan.ts` stay in `lib/` per the #992 scope — this module
- * only consumes their public fetchers.
+ * `routes/transactions.ts` (#992). Fans out to `infra/explorer-api.ts`
+ * (normal/internal/ERC-20 transfers), normalizes every source into
+ * `Transaction`, sorts, dedupes, and caches the per-Safe result under
+ * `buildTransactionCacheKey`. `infra/explorer-api.ts` stays in `infra/` (the
+ * flat `lib/` was folded away by #998) — this module only consumes its public
+ * fetchers.
+ *
+ * #2849 (safe-retirement slice 3) removed the Safe Transaction Service leg:
+ * it was fetched unconditionally for every account, but a Hybrid DeleGator
+ * is unknown to that service, so the leg failed on every delegation-rail
+ * history read and permanently pinned `hadFailures` — the partial-failure
+ * signal was always on. Blockscout is the source for retired-rail rows too
+ * (#2669), so rows are unchanged; a healthy read now reports
+ * `hadFailures: false`.
  */
 import {
   fetchNormalTransactions,
   fetchInternalTransactions,
   fetchERC20Transfers,
-  fetchSafeServiceTransfers,
+  type RawERC20Transfer,
+  type RawInternalTx,
+  type RawNormalTx,
 } from '../../infra/explorer-api.js'
 import { getChain } from '../../domain/chains.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { createCache } from '../../platform/cache.js'
 import { buildTransactionCacheKey } from './cache-key.js'
-import { compareTransactions, transactionDedupKey, parseIsoTimestamp } from './ordering.js'
+import { compareTransactions, transactionDedupKey } from './ordering.js'
 import type {
   FetchSafeTransactionsParams,
   FetchSafeTransactionsResult,
   Transaction,
 } from './types.js'
 
-const txCache = createCache<Transaction[]>(30_000)
+/**
+ * Cached per account. The truncation flag rides WITH the rows (#2882) rather
+ * than beside them: it is a property of the read that produced them, so a
+ * cache hit that returned only the rows would report a capped read as a
+ * complete one for the rest of the TTL.
+ */
+interface CachedRead {
+  transactions: Transaction[]
+  truncated: boolean
+}
+
+const txCache = createCache<CachedRead>(30_000)
 const txInflight = new Map<string, Promise<FetchSafeTransactionsResult>>()
 
 export async function fetchSafeTransactions({
@@ -44,7 +65,7 @@ export async function fetchSafeTransactions({
 
   const cached = txCache.get(cacheKey)
   if (cached !== undefined) {
-    return { transactions: cached, hadFailures: false }
+    return { transactions: cached.transactions, hadFailures: false, truncated: cached.truncated }
   }
 
   const inflight = txInflight.get(cacheKey)
@@ -55,24 +76,29 @@ export async function fetchSafeTransactions({
   const requestPromise = (async () => {
     const addrLower = safeAddress.toLowerCase()
     let hadFailures = false
-    const logFail = (kind: string) => (err: unknown) => {
-      hadFailures = true
-      log.warn({ err, chainId, safeId, safeAddress, kind }, 'Explorer API fetch failed')
-      return []
-    }
+    const logFail =
+      <T,>(kind: string) =>
+      (err: unknown) => {
+        hadFailures = true
+        log.warn({ err, chainId, safeId, safeAddress, kind }, 'Explorer API fetch failed')
+        // A failed leg is unknown, not complete: it must not contribute a
+        // `hasMore: true` the feed would report as truncation, nor mask one.
+        return { rows: [] as T[], hasMore: false }
+      }
 
-    const normalTxs = await fetchNormalTransactions(chainId, safeAddress).catch(
-      logFail('normal'),
+    const normal = await fetchNormalTransactions(chainId, safeAddress).catch(
+      logFail<RawNormalTx>('normal'),
     )
-    const internalTxs = await fetchInternalTransactions(chainId, safeAddress).catch(
-      logFail('internal'),
+    const internal = await fetchInternalTransactions(chainId, safeAddress).catch(
+      logFail<RawInternalTx>('internal'),
     )
-    const erc20Txs = await fetchERC20Transfers(chainId, safeAddress).catch(
-      logFail('erc20'),
+    const erc20 = await fetchERC20Transfers(chainId, safeAddress).catch(
+      logFail<RawERC20Transfer>('erc20'),
     )
-    const safeTransfers = await fetchSafeServiceTransfers(chainId, safeAddress).catch(
-      logFail('safe-transfers'),
-    )
+
+    const normalTxs = normal.rows
+    const internalTxs = internal.rows
+    const erc20Txs = erc20.rows
 
     const transactions: Transaction[] = []
 
@@ -137,53 +163,6 @@ export async function fetchSafeTransactions({
       })
     }
 
-    for (const transfer of safeTransfers) {
-      if (transfer.type === 'ETHER_TRANSFER') {
-        if (!transfer.value || transfer.value === '0') continue
-
-        transactions.push({
-          hash: transfer.transactionHash,
-          type: 'native',
-          from: transfer.from ?? '',
-          to: transfer.to ?? '',
-          value: transfer.value,
-          valueFormatted: formatTokenValue(transfer.value, nativeToken.decimals),
-          asset: nativeToken.symbol,
-          decimals: nativeToken.decimals,
-          direction: transfer.to?.toLowerCase() === addrLower ? 'in' : 'out',
-          timestamp: parseIsoTimestamp(transfer.executionDate),
-          blockNumber: transfer.blockNumber,
-          isError: false,
-        })
-      }
-
-      if (transfer.type === 'ERC20_TRANSFER') {
-        if (!transfer.value || !transfer.tokenAddress) continue
-
-        const knownToken = chain.tokenByAddress[transfer.tokenAddress.toLowerCase()]
-        const symbol =
-          knownToken?.symbol ?? transfer.tokenInfo?.symbol ?? transfer.tokenAddress
-        const decimals = knownToken?.decimals ?? transfer.tokenInfo?.decimals ?? 18
-
-        transactions.push({
-          hash: transfer.transactionHash,
-          type: 'erc20',
-          from: transfer.from ?? '',
-          to: transfer.to ?? '',
-          value: transfer.value,
-          valueFormatted: formatTokenValue(transfer.value, decimals),
-          asset: symbol,
-          decimals,
-          direction: transfer.to?.toLowerCase() === addrLower ? 'in' : 'out',
-          timestamp: parseIsoTimestamp(transfer.executionDate),
-          blockNumber: transfer.blockNumber,
-          isError: false,
-          tokenAddress: transfer.tokenAddress,
-          tokenSymbol: symbol,
-        })
-      }
-    }
-
     transactions.sort(compareTransactions)
 
     const seen = new Set<string>()
@@ -194,11 +173,21 @@ export async function fetchSafeTransactions({
       return true
     })
 
-    txCache.set(cacheKey, deduped)
+    // Each leg pages to exhaustion or to EXPLORER_MAX_PAGES and reports which
+    // (#2884): Blockscout by following its `next_page_params` cursor, the
+    // Etherscan-shaped legs by walking pages until one comes back short. A
+    // leg that stopped at the budget sets `hasMore`, and a failed leg is
+    // unknown, not capped (logFail above pins it to `hasMore: false`), so
+    // `truncated` still means exactly "this read was capped" — only now the
+    // cap is the page budget, four windows deep, rather than the first one.
+    const truncated = normal.hasMore || internal.hasMore || erc20.hasMore
+
+    txCache.set(cacheKey, { transactions: deduped, truncated })
 
     return {
       transactions: deduped,
       hadFailures,
+      truncated,
     }
   })().finally(() => {
     txInflight.delete(cacheKey)

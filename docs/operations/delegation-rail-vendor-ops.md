@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-09-04" # chain-reset(#2542): scoped re-verification of reconciliation-probe tooling; prior notes remain in git history.
+last-verified: "2026-09-04"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)

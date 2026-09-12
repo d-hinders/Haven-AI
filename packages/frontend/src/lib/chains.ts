@@ -1,9 +1,9 @@
 /**
  * Frontend chain configuration — client construction over the shared registry.
  *
- * The per-chain FACTS (identity, explorer/Safe URLs, contracts, passkey,
- * token data) live in `@haven_ai/core` (#986) — ONE definition shared with
- * the backend. This module adds what only the frontend owns: viem chain
+ * The per-chain FACTS (identity, explorer URLs, passkey, token data) live in
+ * `@haven_ai/core` (#986) — ONE definition shared with the backend. This
+ * module adds what only the frontend owns: viem chain
  * objects, the offered-chains policy (pickers), the build-time default
  * chain, and the frontend's token Record representation (keyed by display
  * symbol, in picker order).
@@ -32,13 +32,6 @@ export interface FrontendChainConfig {
   shortName: string
   viemChain: typeof gnosis | typeof base | typeof baseSepolia
   explorerUrl: string
-  safeTxServiceUrl: string
-  contracts: {
-    safeProxyFactory: Address
-    safeSingletonL2: Address
-    fallbackHandler: Address
-    multiSendCallOnly: Address
-  }
   passkey: {
     /** P-256 verifier the Safe passkey signer will call. */
     verifier: Address
@@ -74,8 +67,6 @@ function buildFrontendChain(chainId: number): FrontendChainConfig {
     shortName: core.shortName,
     viemChain: layer.viemChain,
     explorerUrl: core.explorerUrl,
-    safeTxServiceUrl: core.safeTxServiceUrl,
-    contracts: core.contracts as FrontendChainConfig['contracts'],
     passkey: { verifier: core.passkey.verifier as Address },
     tokens,
   }
@@ -182,4 +173,25 @@ export function getExplorerUrl(
 
 export function getTokensForChain(chainId: number): Record<string, FrontendTokenConfig> {
   return getChainConfig(chainId).tokens
+}
+
+/**
+ * Token config projected to address + decimals, keyed by display symbol —
+ * the shape token pickers and address→symbol/decimals lookups read.
+ *
+ * Moved here from `lib/safe-tx.ts` (#2848, epic #1440): it was that file's
+ * one shared export, a generic per-chain token list with nothing Safe about
+ * it, and the rest of the file was retired Safe signing plumbing deleted
+ * with the rail. Consumers: `DelegationSendModal`, `useAgentConnectionSetup`,
+ * and `agent-panel/agent-display` — the chain-aware `tokenSymbol`/
+ * `tokenDecimals` display helpers read it directly, and `tokenDecimals` is the
+ * address-scan fallback behind `formatConfiguredAllowance`'s decimals.
+ */
+export function getChainTokens(chainId: number): Record<string, { address: Address | null; decimals: number }> {
+  const tokens = getChainConfig(chainId).tokens
+  const result: Record<string, { address: Address | null; decimals: number }> = {}
+  for (const [key, cfg] of Object.entries(tokens)) {
+    result[key] = { address: cfg.address as Address | null, decimals: cfg.decimals }
+  }
+  return result
 }

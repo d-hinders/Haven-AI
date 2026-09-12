@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { HavenClient } from '@haven_ai/sdk'
 import { hostedConnectorRerunCommand } from './connector-channel.js'
 import {
+  assertHostedToolRegistry,
   createToolHandlers,
   toolDescriptions,
   toolInputSchema,
@@ -11,7 +12,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.1.36-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.1.37-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -155,6 +156,13 @@ export function buildHostedMcpServer(haven: HavenClient): McpServer {
   )
 
   const handlers = createToolHandlers(haven)
+  // #2807: fail loud BEFORE registration if the contract registry is
+  // incomplete — a tool without a schema, description, input-policy decision
+  // or handler cannot boot. Compile-time exhaustiveness (the Record
+  // annotations and the input-policy sentinels) is the first instrument; this
+  // runtime twin is the second, because vitest does not type-check and tsc
+  // does not see a registry assembled at import time (#2349's rule).
+  assertHostedToolRegistry(handlers)
   // #2312: `registerTool`, NOT the fluent `.tool(name, description, schema,
   // handler)` overload it replaced. The difference is load-bearing rather than
   // stylistic: `.tool`'s schema position accepts only a raw shape and throws

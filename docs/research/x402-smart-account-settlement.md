@@ -4,10 +4,10 @@ status: research
 covers:
   - packages/sdk/src/x402.ts
   - packages/backend/src/routes/x402.ts
-  - packages/backend/src/rails/allowance-module.ts
+  - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/**
-last-verified: "2026-08-31" # #2313: the LIVE #1450 banner — not the archived investigation below it — asserted "the legacy AllowanceModule rail is unchanged: EIP-3009 is not a preference there, it is the only scheme", presenting the retired two-leg as a live scheme choice. It is not unchanged and it has no scheme: #1986 answers 410 at `POST /x402/authorize` and `POST /x402` above the funding leg, #1987 deleted the orchestration and executor behind them, #2055 dropped `approval_requests` so the over-coverage middle branch has nothing to write. Both banner sentences corrected and the sections below explicitly scoped to past tense. Scope: the Outcome/Superseded banner only. NOT re-verified: §1-§8 of the investigation, which the doc's own banner already scopes as a decision record, nor the Permit2 or prototype-spec sections. Prior: #1992: the Outcome block said EIP-3009 "remains the default on the legacy AllowanceModule rail (import-only)" and the body called that rail "now import-only" — both present-tense false. The rail is RETIRED (#1440): #1984 410s import too, #1986 fail-closes spending, #1987 deleted the executor. Marked in place per the #1451 precedent for this doc (mark supersession in the Outcome block, do not rewrite a dated investigation). Scope: those two sentences; the 2026-07 investigation itself is unchanged and was NOT re-verified. Prior: #1451: §1's "keep EIP-3009 as the production default" is superseded on the delegation rail by the #1450 owner decision (prefer erc7710 when the merchant advertises it); marked in the Outcome block rather than rewriting the historical investigation. Prior: re-verified for #1355 (payment_id-only signing: payment_required persisted in machine_metadata + re-served by sign-context; grep-checked: no claim here names the sign-call argument shape; sequence/authority claims unaffected)
+last-verified: "2026-08-31"
 ---
 
 # Research — Smart-account-native x402 settlement (removing the funding leg)
@@ -115,7 +115,8 @@ sequence below no longer runs; kept as the investigation's record) is
 3. Backend validates allowance / token / amount / network / policy and **funds
    the delegate EOA from the Safe via the AllowanceModule** for the exact amount
    ([`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts),
-   [`packages/backend/src/rails/allowance-module.ts`](../../packages/backend/src/rails/allowance-module.ts)).
+   [`packages/backend/src/infra/chain/relayer-reads.ts`](../../packages/backend/src/infra/chain/relayer-reads.ts) —
+   the shared chain reads; `rails/allowance-module.ts` before #2850 renamed it).
 4. SDK retries with `X-PAYMENT`; merchant/facilitator settles delegate → merchant.
 
 Two implementation details that exist *only because of the funding leg* and are

@@ -143,6 +143,7 @@ export default function AccountDetailClient() {
     error: txError,
     total,
     hasMore,
+    truncated,
     refresh: refetchTx,
   } = useTransactionsFeed({ safeId }, 10)
 
@@ -577,11 +578,21 @@ export default function AccountDetailClient() {
             <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
               {txLoading
                 ? 'Loading activity...'
-                : `${total} transaction${total !== 1 ? 's' : ''} for this Haven wallet`}
+                : truncated
+                  ? // #2882: `total` is what the explorers returned, not what
+                    // the wallet holds — each source is capped at a window.
+                    // The flat count is a stronger completeness claim than
+                    // anything on /transactions, so it must not be made here
+                    // when the feed is capped.
+                    `${total} recent transaction${total !== 1 ? 's' : ''} for this Haven wallet`
+                  : `${total} transaction${total !== 1 ? 's' : ''} for this Haven wallet`}
             </p>
           </div>
           {!txLoading && transactions.length > 0 ? (
-            <p className="text-xs text-[var(--v2-ink-3)]">Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span></p>
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              Showing <span className="v2-tabular">{transactions.length}</span> of <span className="v2-tabular">{total}</span>
+              {truncated ? ' loaded' : null}
+            </p>
           ) : null}
         </div>
         <Card hover={false}>
@@ -694,7 +705,11 @@ function RenameModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center">
+    // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has
+    // never had one, so every side is exactly its safe-area inset — 0 in any
+    // browser without a notch, and the clearance the home indicator needs in
+    // the installed shell.
+    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
       <div
         ref={panelRef}

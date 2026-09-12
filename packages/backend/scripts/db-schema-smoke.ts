@@ -56,19 +56,40 @@ import {
   INSERT_PAYMENT_FEE_SQL,
 } from '../src/infra/repositories/payment-fees.js'
 import {
-  DELETE_FORTNOX_CONNECTION_SQL,
-  GET_FORTNOX_CONNECTION_SQL,
-  UPSERT_FORTNOX_CONNECTION_SQL,
-} from '../src/infra/repositories/fortnox-connections.js'
+  CLEAR_ACTIVE_DESTINATION_SQL,
+  COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL,
+  DELETE_ACCOUNTING_CONNECTION_SQL,
+  DISCONNECT_ACCOUNTING_CONNECTION_SQL,
+  GET_ACCOUNTING_CONNECTION_SQL,
+  GET_ACTIVE_ACCOUNTING_CONNECTION_SQL,
+  LIST_ACCOUNTING_CONNECTIONS_SQL,
+  LIST_PLAINTEXT_CONNECTIONS_SQL,
+  LOCK_ACCOUNTING_CONNECTION_SQL,
+  MERGE_CONNECTION_SETTINGS_SQL,
+  RECORD_BACKFILL_SQL,
+  RECORD_COMPANY_SWITCH_SQL,
+  SET_ACCOUNTING_STATUS_SQL,
+  SET_ACTIVE_DESTINATION_SQL,
+  SET_COMPANY_INFO_SQL,
+  SET_FEED_FROM_SQL,
+  STAMP_FEED_FROM_IF_UNSET_SQL,
+  UPDATE_ACCOUNTING_SECRETS_SQL,
+  UPSERT_ACCOUNTING_CONNECTION_SQL,
+} from '../src/infra/repositories/accounting-connections.js'
 import {
   CLAIM_SYNC_INSERT_SQL,
   CLAIM_SYNC_RECLAIM_FAILED_SQL,
+  COUNT_EXHAUSTED_SYNCS_SQL,
+  COUNT_SYNCS_FOR_USER_SQL,
   GET_SYNC_STATE_SQL,
+  LIST_DUE_RETRY_SYNCS_SQL,
+  MARK_SYNC_EXHAUSTED_SQL,
+  RELEASE_STALE_PENDING_SQL,
   LIST_SYNCS_FOR_USER_SQL,
   LIST_UNPUSHED_PAYMENT_IDS_SQL,
   MARK_SYNC_FAILED_SQL,
   MARK_SYNC_PUSHED_SQL,
-} from '../src/infra/repositories/reporting-feed-syncs.js'
+} from '../src/infra/repositories/accounting-feed-syncs.js'
 import {
   FIND_PASSKEY_FOR_SAFE_SQL,
   INSERT_USER_PASSKEY_SQL,
@@ -276,11 +297,6 @@ import {
   UPDATE_USER_WALLET_ADDRESS_SQL,
 } from '../src/infra/repositories/users.js'
 import {
-  DELETE_OWNER_ALIAS_SQL,
-  LIST_OWNER_ALIASES_SQL,
-  UPSERT_OWNER_ALIAS_SQL,
-} from '../src/infra/repositories/owner-aliases.js'
-import {
   FIND_PORTFOLIO_SNAPSHOTS_SQL,
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
@@ -402,10 +418,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'outbound: list unmined for the bump worker', sql: LIST_UNMINED_OUTBOUND_TXS_SQL },
   { name: 'outbound: claim an orphaned queued row (#1558)', sql: CLAIM_ORPHANED_OUTBOUND_TX_SQL },
   { name: 'outbound: count lane attempts at a nonce (#1558)', sql: COUNT_LANE_ATTEMPTS_AT_NONCE_SQL },
-  // Owner-alias aggregate (#1167). IMPORTED — verbatim from routes/user.ts.
-  { name: 'owner-aliases: list for confirmed owners', sql: LIST_OWNER_ALIASES_SQL },
-  { name: 'owner-aliases: upsert', sql: UPSERT_OWNER_ALIAS_SQL },
-  { name: 'owner-aliases: delete', sql: DELETE_OWNER_ALIAS_SQL },
+  // Owner-alias aggregate (#1167) is GONE: routes/user.ts and the
+  // owner-aliases repository were deleted in #2847 (epic #1440), so the
+  // smoke list no longer carries those three statements.
   // Dashboard overview aggregate (#1167). IMPORTED — verbatim from
   // routes/dashboard.ts.
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_SAFES_SQL },
@@ -559,20 +574,44 @@ const QUERIES: SmokeQuery[] = [
     sql: HAS_IN_FLIGHT_REKEYS_FOR_SAFE_SQL,
   },
   // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
-  // Fortnox connection, reporting-feed dedup ledger, user passkeys, safe
+  // Fortnox connection, accounting-feed dedup ledger, user passkeys, safe
   // ownership-with-type, receipt underlag. All IMPORTED.
   { name: 'fees: idempotent settled-fee insert (#386)', sql: INSERT_PAYMENT_FEE_SQL },
   { name: 'fees: recorded-fee read (#386)', sql: GET_RECORDED_FEE_SQL },
-  { name: 'fortnox: connection upsert (#465)', sql: UPSERT_FORTNOX_CONNECTION_SQL },
-  { name: 'fortnox: connection read (#465)', sql: GET_FORTNOX_CONNECTION_SQL },
-  { name: 'fortnox: connection delete (#465)', sql: DELETE_FORTNOX_CONNECTION_SQL },
-  { name: 'reporting feed: claim insert (first writer wins, #497)', sql: CLAIM_SYNC_INSERT_SQL },
-  { name: 'reporting feed: re-claim failed row (#497)', sql: CLAIM_SYNC_RECLAIM_FAILED_SQL },
-  { name: 'reporting feed: mark pushed (note #498)', sql: MARK_SYNC_PUSHED_SQL },
-  { name: 'reporting feed: mark failed (#497)', sql: MARK_SYNC_FAILED_SQL },
-  { name: 'reporting feed: sync state read (#497)', sql: GET_SYNC_STATE_SQL },
-  { name: 'reporting feed: per-user listing (#500)', sql: LIST_SYNCS_FOR_USER_SQL },
-  { name: 'reporting feed: unpushed payment ids (#499)', sql: LIST_UNPUSHED_PAYMENT_IDS_SQL },
+  // #2860: one provider-generic table replaces fortnox_connections. Eleven
+  // statements, every one the repository exports, so the smoke list and the
+  // code cannot drift apart.
+  { name: 'accounting connections: upsert / reconnect (#2860)', sql: UPSERT_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: read one (#2860)', sql: GET_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: read active destination (#2860)', sql: GET_ACTIVE_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: list (#2860)', sql: LIST_ACCOUNTING_CONNECTIONS_SQL },
+  { name: 'accounting connections: update secrets (#2860)', sql: UPDATE_ACCOUNTING_SECRETS_SQL },
+  { name: 'accounting connections: set status (#2860)', sql: SET_ACCOUNTING_STATUS_SQL },
+  { name: 'accounting connections: clear active destination (#2860)', sql: CLEAR_ACTIVE_DESTINATION_SQL },
+  { name: 'accounting connections: set active destination (#2860)', sql: SET_ACTIVE_DESTINATION_SQL },
+  { name: 'accounting connections: disconnect keeping history (#2860)', sql: DISCONNECT_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: delete (#2860)', sql: DELETE_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: plaintext worklist for re-encrypt (#2860)', sql: LIST_PLAINTEXT_CONNECTIONS_SQL },
+  { name: 'accounting connections: stamp feed_from on activate (#2862)', sql: SET_FEED_FROM_SQL },
+  { name: 'accounting connections: company info at connect (#2862)', sql: SET_COMPANY_INFO_SQL },
+  { name: 'accounting connections: feed_from on a first connect that took the flag (#2862)', sql: STAMP_FEED_FROM_IF_UNSET_SQL },
+  { name: 'accounting connections: per-connection refresh lock (#2863)', sql: LOCK_ACCOUNTING_CONNECTION_SQL },
+  { name: 'accounting connections: company switch on reconnect (#2864)', sql: RECORD_COMPANY_SWITCH_SQL },
+  { name: 'accounting connections: settings merge (#2867)', sql: MERGE_CONNECTION_SETTINGS_SQL },
+  { name: 'accounting connections: backfill moves feed_from earlier (#2867)', sql: RECORD_BACKFILL_SQL },
+  { name: 'accounting feed: claim insert (first writer wins, #497)', sql: CLAIM_SYNC_INSERT_SQL },
+  { name: 'accounting feed: re-claim failed row (#497)', sql: CLAIM_SYNC_RECLAIM_FAILED_SQL },
+  { name: 'accounting feed: mark pushed (note #498)', sql: MARK_SYNC_PUSHED_SQL },
+  { name: 'accounting feed: mark failed (#497)', sql: MARK_SYNC_FAILED_SQL },
+  { name: 'accounting feed: sync state read (#497)', sql: GET_SYNC_STATE_SQL },
+  { name: 'accounting feed: per-user listing (#500)', sql: LIST_SYNCS_FOR_USER_SQL },
+  { name: 'accounting feed: unpushed payment ids (#499)', sql: LIST_UNPUSHED_PAYMENT_IDS_SQL },
+  { name: 'accounting feed: due retry rows (#2866)', sql: LIST_DUE_RETRY_SYNCS_SQL },
+  { name: 'accounting feed: release stale pending claim (#2866)', sql: RELEASE_STALE_PENDING_SQL },
+  { name: 'accounting feed: guarded terminal exhausted write (#2866)', sql: MARK_SYNC_EXHAUSTED_SQL },
+  { name: 'accounting feed: sync counts (#2866)', sql: COUNT_SYNCS_FOR_USER_SQL },
+  { name: 'accounting feed: /health/ops exhausted counter (#2872)', sql: COUNT_EXHAUSTED_SYNCS_SQL },
+  { name: 'accounting connections: /health/ops needs-attention counter (#2872)', sql: COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL },
   { name: 'passkeys: enrollment insert', sql: INSERT_USER_PASSKEY_SQL },
   { name: 'passkeys: per-user listing', sql: LIST_USER_PASSKEYS_SQL },
   { name: 'passkeys: safe-exec ownership read', sql: FIND_PASSKEY_FOR_SAFE_SQL },

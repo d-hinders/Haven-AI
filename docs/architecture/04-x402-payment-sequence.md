@@ -22,15 +22,27 @@ covers:
   - packages/sdk/src/merchant-discovery.ts
   - packages/mcp/src/tools.ts
   - packages/mcp-server/src/tools.ts
+  - packages/mcp-server/src/tools/**
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
+  - packages/mcp-server/src/tools.test.ts
+  - packages/mcp-server/src/tools/state-direct-recovery.test.ts
+  - packages/mcp-server/src/tools/catalog-purchase.test.ts
+  - packages/mcp-server/src/tools/plain-http-x402.test.ts
+  - packages/mcp-server/src/tools/paid-mcp-completion.test.ts
+  - packages/mcp-server/src/strict-tool-input.test.ts
+  - packages/backend/src/__tests__/x402-resume-producer-pin.test.ts
+  - packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts
+  - packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts
+  - packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts
+  - packages/backend/src/infra/chain/delegation-budget-reader.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-07" # #2669: "Accounts, balances and history stay readable" re-read and EDITED — true of the rows, false of any Haven surface since #2413. Scope: that one sentence. A later round narrowed "no Haven surface displays them" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row. A THIRD round corrected that narrowing where it had been relocated rather than removed: the clause listing what "no longer renders" still named transaction history, which DOES render — `LIST_BASIC_SAFES_FOR_USER_SQL` and `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` have no rail predicate, so legacy account and agent names still appear in the `/transactions` picklists. The exception is now named with BOTH halves; a first statement of it gave only the account half. Prior: #2530: the Guided Catalog Purchase Preflight discovery paragraph gains the unauthenticated shape — `GET /catalog` now answers without a credential in a reduced form, so "the existing rail plus agent-chain scoping still apply" needed the qualifier that the public path has no agent to scope by. The read-only and never-authorizes claims are re-read against the diff and unchanged. Scope: that one paragraph; the scheme-selection, header-semantics, resume and erc7710 sections were NOT re-verified. Prior: #2265: FIVE sites, and two of the issue's five findings were ALREADY FIXED on dev and are deliberately untouched — the "Standard SDK / Local MCP Flow" heading now reads "Historical … retired AllowanceModule rail" (its own banner treatment, the choice the issue asked to be stated), and the opening two-leg is already below the ⚠️ banner with the live scheme-split above it. What was still live: the Guided Catalog Purchase Preflight bullet 6, in a section carrying NO banner, described a two-rail split whose legacy half was false on every clause ("the resulting funding intent queues for wallet-owner approval") — a legacy account cannot reach that preflight (410, #1986), `approval_requests` is dropped (#2055), and nothing constructs a queued payment on any rail; it was the last live doc text saying a Haven payment can queue. Rewritten to the one live behaviour with the removed claim recorded rather than silently deleted. Three type-vs-reachability notes added: #1306's `allowance` block and #1310's post-purchase summary both declare a `'legacy'`/`'allowance_module'` arm that is unreachable (`GET /machine-payments/allowances` 410s for a retired-rail account since #2020; the summary additionally requires a settled x402 payment such an account cannot have). Deliberately NOT annotated: `GET /machine-payments/agent`'s additive `execution_rail: 'legacy' | 'delegation'` — that route is UNGATED (verified in `routes/machine-payments.ts`), so `'legacy'` is genuinely reachable there and the doc is correct. The Differences-table "Payment authority" row lost "on-chain allowance" for the delegation redemption it actually describes, and one "(AllowanceModule or the active delegation's caveat enforcers)" parenthetical lost its retired half. Scope: those five sites only. NOT re-verified: the challenge/header semantics, the hosted flows, resume, the erc7710 sections, or this doc's `covers:` files. Prior: #2361: re-verified, EDITED — the v2 payment envelope now echoes the challenge's `resource`/`extensions` verbatim (spec MUST for extensions; live-bisected as a strict facilitator's rejection cause, #2360): the #1064 erc7710-header paragraph gains the echo paragraph, with the erc7710 source being the #1355 stored challenge at settle. The same pass fixed three #2341-stale claims that still said the paid retry sends BOTH header names unconditionally (the Challenge And Header Semantics sentence, the erc7710 quote-flow diagram, the Differences table row) — erc7710 sends PAYMENT-SIGNATURE alone since #2341. Scope: those five spots; the rest of the body NOT re-verified in this pass. Prior: #2274: the retired-rail gate paragraph in "Settlement-scheme reality and the EIP-3009 bridge" corrected — it named token resolution as still preceding the rail 410, which #2274 moved below the gate on this route and on POST /payments together. Scope: that paragraph only; the surrounding scheme-selection and 3009-mode prose was re-read against the code and is accurate as written. Full analysis in docs/regulatory/casp-changelog/2026-08-31-2274.md. Prior: #2291: corrected the #2290 paragraph in "Resuming An Authorized Payment", which named haven_sign_x402 -> haven_x402_sign_header as the working remedy — a sequence the one-shot's spent binding cannot serve. Scope: that paragraph. The rest of the section, and the decomposed/recommended flows elsewhere in this doc, were re-read against the corrected contract and are accurate as written. Prior: chain-reset(#1496): verification notes live in docs/regulatory/casp-changelog/ shards (satisfied-by above) — this line is date-only from now on; per-change history is in the shards and git log
+last-verified: "2026-09-11"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -50,8 +62,9 @@ The live delegation-rail merchant x402 flow is scheme-specific:
    retries the merchant/resource request.
 
 > ⚠️ **The legacy AllowanceModule two-leg described below NO LONGER RUNS.**
-> Under epic #1440 the Safe rail was closed to new accounts by #1984 and then
-> **fail-closed for spending by #1986**: `POST /x402/authorize`, `POST /x402`,
+> Under epic #1440 the Safe rail was closed and then fail-closed for spending
+> (sequence in the [decision log](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440)):
+> `POST /x402/authorize`, `POST /x402`,
 > `POST /payments`, `POST /payments/:id/sign` and `POST /machine-payments/send`
 > all answer **HTTP 410** for an `allowance_module` account — nothing written,
 > no Safe→delegate funding transfer, no delegate hot balance. The sequence
@@ -118,7 +131,9 @@ Source of truth:
   the settlement *compiler* (typed-data / header assembly primitives), not
   route orchestration.
 - [`packages/mcp/src/tools.ts`](../../packages/mcp/src/tools.ts)
-- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts)
+- [`packages/mcp-server/src/tools.ts`](../../packages/mcp-server/src/tools.ts) — the hosted facade: since #2812 a composition-only facade (no handler, no tool-specific branching; every hosted tool is owned by a capability module under [`src/tools/`](../../packages/mcp-server/src/tools/paid-mcp-completion.ts))
+- [`packages/mcp-server/src/tools/state-direct-recovery.ts`](../../packages/mcp-server/src/tools/state-direct-recovery.ts) — the hosted state, direct-payment and recovery handlers since #2809, including `haven_submit`'s settlement-scheme branch and both expiry mappings
+- [`packages/mcp-server/src/tools/paid-mcp-completion.ts`](../../packages/mcp-server/src/tools/paid-mcp-completion.ts) — the hosted paid-MCP completion since #2812: `haven_complete_mcp_tool` and `haven_settle_mcp_tool` plus the merchant delivery / context-rehydration helpers, carrying the #2282 resolve-before-relay ordering
 - [`packages/backend/src/modules/mpp/reconciliation.ts`](../../packages/backend/src/modules/mpp/reconciliation.ts) — `POST /machine-payments/reconciliation-events`, and the #2292 acceptance-is-terminal precedence rule.
 - [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
 
@@ -307,9 +322,15 @@ sequenceDiagram
 >
 > What actually happens on the branch is a **refusal, and it is rail- and
 > scheme-specific**: on the EIP-3009 shape drawn here the delegation rail
-> estimates the redemption, so the caveat enforcer's refusal surfaces as a
-> `502` **with no intent row**; on erc7710 authorize pre-checks the live
-> remaining budget and answers `403 delegation_budget_exceeded`
+> estimates the redemption, and the caveat enforcer's refusal surfaces as a
+> typed `403 delegation_budget_exceeded` (#2082, extended to this leg by
+> [#2706](https://github.com/d-hinders/Haven-AI/issues/2706)) when the
+> authorize-time pre-check read the live budget — the fail-open posture is
+> inherited verbatim, so a degraded budget read (`fromChain: false`) or a
+> thrown one proceeds to prepare, where the enforcer's revert still surfaces
+> as the `502` **with no intent row** that this branch used to answer with
+> for every refusal; on erc7710 authorize pre-checks the live remaining
+> budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a
 > `payment_id` to poll. The `pending_approval` branch retained in the hosted
@@ -614,8 +635,10 @@ Sequence:
    sequential calls stay fresh reads), and `createX402Intent` accepts the
    already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
    successful preflight makes exactly ONE call per Haven surface — catalog,
-   agent, allowances, `POST /x402` — enforced by round-trip-count unit tests
-   (deterministic, unlike wall-clock); per-step wall-clock telemetry rides the
+   agent, allowances, `POST /x402` — pinned by
+   [`packages/mcp-server/src/tools.test.ts`](../../packages/mcp-server/src/tools.test.ts)
+   ("ROUND-TRIP BUDGET", #1348), which counts every stubbed fetch per surface;
+   per-step wall-clock telemetry rides the
    promotion-gating QA scenario's pass detail.
 4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
    this IS the guided path, so there is no `cap_warning`
@@ -630,7 +653,9 @@ Sequence:
 
    **Two spellings, one cap (#1351).** `max_amount` is atomic units;
    `max_amount_human` is the same cap in whole tokens, so `"1"` means 1 USDC
-   rather than 0.000001 USDC. Exactly one may be sent. The human form is
+   rather than 0.000001 USDC. Exactly one may be sent — pinned by
+   [`packages/mcp-server/src/strict-tool-input.test.ts`](../../packages/mcp-server/src/strict-tool-input.test.ts)
+   ("Both max_amount", #2349). The human form is
    converted using the decimals of the **selected option's own** asset
    (`resolveTokenFromAddress(option.asset, option.network)` inside
    `priceSelectedOption` — the same address→token binding that produces
@@ -806,7 +831,10 @@ id. Local MCP normalizes most fields to camelCase while retaining
 beneath them) are gated by `assertCanResumeX402`
 ([`packages/sdk/src/x402-protocol.ts`](../../packages/sdk/src/x402-protocol.ts)),
 which hard-requires `nextAction === retry_original_x402_request` and throws
-otherwise. That value now has exactly one producer, and it is server-side:
+otherwise. That value now has exactly one producer, and it is server-side
+(pinned by
+[`packages/backend/src/__tests__/x402-resume-producer-pin.test.ts`](../../packages/backend/src/__tests__/x402-resume-producer-pin.test.ts),
+#2680):
 
 1. The backend's status projection
    ([`modules/payments/agent-payment-status.ts`](../../packages/backend/src/modules/payments/agent-payment-status.ts),
@@ -889,7 +917,9 @@ drew it for a caller-asserted settlement hash:
   cannot move funds, cannot change the intent's status, amount or recipient,
   cannot confirm a `submitted` erc7710 intent (that has no Haven tx hash and is
   refused here — the on-chain-verified seam in `attachMachinePaymentEvidence`
-  stays the only door), and cannot block or unblock a sweep, which is driven by
+  stays the only door, pinned by an importer census
+  ([`packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts`](../../packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts),
+  #2680)), and cannot block or unblock a sweep, which is driven by
   the delegate's on-chain balance. A false `accepted` additionally triggers the
   server's own post-settlement residue read, which re-flags stranded funds
   independently.
@@ -931,8 +961,10 @@ it reads the *same* predicate over the *same* derived row:
 `isFundedX402AwaitingMerchantLeg` is exported from `agent-payment-status.ts`
 and called by both `intentStateFor` and `getX402SignContext`
 ([`modules/x402/sign-context.ts`](../../packages/backend/src/modules/x402/sign-context.ts)),
-so a published remedy and the permission to act on it cannot drift apart. A
-real-Postgres test asserts that biconditional across nine evidence states.
+so a published remedy and the permission to act on it cannot drift apart. That
+two-site roster is pinned by
+[`packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts`](../../packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts)
+(#2680). A real-Postgres test asserts that biconditional across nine evidence states.
 Everything else still refuses: erc7710, a reported merchant leg, a
 client-reported rejection (whose remedy stays `sweep_stranded_funds`), an
 intent inside the grace window, absent scheme metadata, and a pending intent
@@ -1050,8 +1082,10 @@ The flow is a two-call variant of `/x402/authorize`:
    refused an over-budget redemption before this check existed and refuses one
    now, and nothing here widens what the chain will allow. What changed is
    *when* Haven says no. Previously this branch prepared nothing at authorize —
-   unlike `POST /payments` and the EIP-3009 shape, which estimate a redemption
-   and so surface the enforcer's refusal as a `502` with no intent row — so an
+   unlike `POST /payments` and, at the time, the EIP-3009 shape, which
+   estimated a redemption and so surfaced the enforcer's refusal as a `502`
+   with no intent row (the 3009 shape gained the same pre-check in #2706, so
+   today only `POST /payments` reaches the enforcer unconditionally) — so an
    over-budget erc7710 request came back `201 pending_signature` **with**
    `sign_data`, and the refusal only landed after the agent had signed, settled,
    and retried the merchant. Since [#1450](https://github.com/d-hinders/Haven-AI/issues/1450)
@@ -1063,9 +1097,23 @@ The flow is a two-call variant of `/x402/authorize`:
    can speak for, and a fallback number never refuses a payment. Refusing on a
    degraded RPC read would turn a transient outage into a stopped agent, which
    is the same posture as #1145's fallback and #1319's `remaining_is_from_chain`
-   honesty flag. The EIP-3009 branch is deliberately untouched — it already
-   refuses at authorize, and a second pre-check there would be a second source
-   of truth for one condition.
+   honesty flag.
+
+   **This paragraph used to close with "The EIP-3009 branch is deliberately
+   untouched — it already refuses at authorize, and a second pre-check there
+   would be a second source of truth for one condition."** That was #2082's
+   reasoning and #2706 overturned it: the 3009 branch now carries exactly that
+   second pre-check (`delegation-authorize.ts`, the block above
+   `prepareDelegationPayment`). The reason is #2706's own and differs from
+   #2082's, because the two legs started from different places: #2082 argued
+   about WHEN the refusal arrives (on erc7710 it landed four round trips later,
+   after the agent had signed and settled), while the 3009 leg already refused
+   at authorize — so what #2706 bought there is COST, "one extra indexed read
+   ahead of a bundler call that costs orders of magnitude more" in that block's
+   own words. The "second source of truth" worry was
+   answered by the fail-open posture rather than by abstaining: on a degraded
+   read the pre-check yields and the enforcer still rules, so there is one
+   authority and one convenience, not two authorities (#2756).
 
    Before the intent is created, authorize also **deploys the child's delegator —
    the delegate hybrid account — if it is still counterfactual**
@@ -1127,8 +1175,9 @@ scheme, so nothing flipped it to `confirmed` and it never acquired a
 `recordMachinePaymentEvidenceBase` (book-time FX in `amount_sek`, the
 fee-ledger row, and `feedSettledPaymentBestEffort`), `GET /receipts`,
 `POST /machine-payments/:id/merchant-receipt`, and dashboard transaction
-history. erc7710 payments were therefore absent from the Fortnox reporting
-feed and from the UI, while EIP-3009 payments reached both.
+history. erc7710 payments were therefore absent from the Fortnox accounting
+feed (named the "reporting feed" until #2859) and from the UI, while EIP-3009
+payments reached both.
 
 The completion seam is **scheme-agnostic by construction**: no consumer knows
 about schemes. `POST /machine-payments/evidence` — the call the SDK already
@@ -1154,7 +1203,9 @@ cannot be mined outside `authorize .. authorize + 600s`).
 
 Since [#2094](https://github.com/d-hinders/Haven-AI/issues/2094) there is a
 check 8, and it is the only one about WHICH payment rather than what shape it
-had: when the transaction carries `RedeemedDelegation` logs from the **pinned**
+had (the eight-check roster is pinned by
+[`packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts`](../../packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts),
+#2680): when the transaction carries `RedeemedDelegation` logs from the **pinned**
 DelegationManager, the emitted `Delegation` struct is re-hashed with the
 framework's own `hashDelegation` and this intent's stored `delegation_hash`
 must be among them; if it is not, the transaction demonstrably settled a

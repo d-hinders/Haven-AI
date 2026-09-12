@@ -82,6 +82,13 @@ export const LEADER_LOCK_KEYS = {
    * does not depend on it (the confirm is a CAS serialized per hash).
    */
   settlementSweep: 811009,
+  /**
+   * Accounting feed retry sweep (#2866, epic #2858) — re-feeds failed /
+   * skipped / stale-pending sync rows under per-tenant pacing. Leader-gated
+   * because the pacing is per process: two replicas sweeping the same
+   * tenant would each believe they were under Fortnox's 25 / 5 s floor.
+   */
+  accountingRetrySweep: 811010,
 } as const
 
 /**

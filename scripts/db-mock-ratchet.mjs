@@ -31,7 +31,16 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { join, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { newViolations, hasShrunk, writeBaseline, readBaseline } from './lib/ratchet.mjs'
+import {
+  newViolations,
+  hasShrunk,
+  writeBaseline,
+  loadBaseline,
+  updateRefusals,
+  ACCEPT_NEW_BASELINE_FLAG,
+  firstRunRefusalMessage,
+  runGate,
+} from './lib/ratchet.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const BASELINE_PATH = join(REPO_ROOT, 'packages', 'backend', 'db-mock-baseline.json')
@@ -86,7 +95,8 @@ function totals(counts) {
 
 async function main() {
   const counts = await scanAll()
-  const baseline = readBaseline(BASELINE_PATH)
+  const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
+  const acceptNew = process.argv.includes(ACCEPT_NEW_BASELINE_FLAG)
   const t = totals(counts)
   console.log(
     `db-mock gauge: ${t.dbMocks} db.js mock(s) and ${t.positional} positional ` +
@@ -94,10 +104,14 @@ async function main() {
   )
 
   if (process.argv.includes('--update')) {
-    const violations = newViolations(counts, baseline)
-    if (Object.keys(baseline).length > 0 && violations.length > 0) {
+    // #2728: `Object.keys(baseline).length > 0` was the wrong key. `{}` is both
+    // "no baseline yet" AND what this gate writes once its debt reaches zero,
+    // so the refusal switched itself off on the first successful cleanup.
+    const violations = updateRefusals(counts, baseline, { firstRun, acceptNew })
+    if (violations.length > 0) {
       console.error('✗ --update refuses to RAISE the baseline. Grown:')
       for (const v of violations) console.error(`  ${v.file} [${v.key}]: ${v.allowed} → ${v.count}`)
+      if (firstRun) console.error(firstRunRefusalMessage(firstRun))
       console.error(
         'Growth is a reviewed decision: use the real-DB harness instead, or add a ' +
           '`// db-mock-exempt: <reason>` with a defensible reason.',
@@ -134,5 +148,5 @@ async function main() {
 
 // Run only as a CLI (the pure scanner is imported by tests).
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  await main()
+  runGate('db-mock-ratchet', main)
 }

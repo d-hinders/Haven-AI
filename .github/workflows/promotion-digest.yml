@@ -5,13 +5,39 @@ name: Pending promotion digest
 # dev → main promotion: it keeps a single always-current "📦 Pending promotion"
 # issue listing the commits on dev that aren't in prod (main) yet.
 # See docs/contributing/autonomous-pr-loop.md.
+#
+# ## Why `push` to `dev` is load-bearing
+#
+# This digest counts what is on `dev` and not on `main`. It used to refresh only
+# on a push to `main` plus a Monday cron — so the count went stale in exactly the
+# condition it exists to report: promotion stalling. A stalled promotion means no
+# push to `main` by definition, leaving a week-old number that UNDERSTATES the
+# backlog and reads as reassuring. On 2026-09-11 it showed 28 while the real
+# figure was 50.
+#
+# A push to `dev` is the trigger that cannot go quiet while the problem is
+# growing, because the problem IS `dev` moving. `guard-freshness.yml` documents
+# the same principle for the same reason: a cron watching a cron dies with it.
+#
+# Since #2767 the digest also prints two figures over the trailing 7 days, each
+# with the command that reproduces it (scripts/ci/promotion-digest-metrics.mjs):
+# issues filed per issue closed (target < 0.3) and product PRs as a share of
+# merges to dev (target > 60 %). They are the trend line for the filing bar
+# ship-next § Filing bar introduced; the rule is there, not here.
 
 on:
   push:
-    branches: [main]       # a promotion just landed — the digest is now stale in
-                           # the worst direction (claims commits pending that shipped)
+    branches: [main, dev]  # BOTH halves of the number move it, so both refresh it:
+                           # `main` because a promotion just landed and the digest
+                           # now over-claims, `dev` because every merge adds a
+                           # commit to the pending count. See the note above on why
+                           # the cron cannot be the mechanism.
   schedule:
-    - cron: '13 8 * * 1'   # Mondays 08:13 UTC — catches drift accumulating on dev
+    - cron: '13 8 * * *'   # 08:13 UTC daily. Every trigger recomputes the
+                           # trailing-7-day figures; this one matters because on a
+                           # day with NO pushes it is the only one that fires, and
+                           # those figures age with wall-clock time rather than
+                           # with pushes. Weekly let them drift a week out of date.
   workflow_dispatch:
 
 permissions:
@@ -33,6 +59,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
       - name: Build and upsert the digest issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,13 +71,25 @@ jobs:
           git fetch --quiet origin main dev
 
           count=$(git rev-list --count --first-parent origin/main..origin/dev)
-          list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev)
+          # Cap the list: GitHub rejects an issue body over 65,536 characters, and
+          # `set -euo pipefail` would turn that 422 into a failed step — the digest
+          # going silent exactly in the extreme case it exists to report. At ~25
+          # first-parent commits a day a long stall reaches that ceiling in weeks.
+          list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev | head -100)
+          if [ "$count" -gt 100 ]; then
+            list=$(printf '%s\n- _…and %s more — see the `main..dev` compare._' "$list" "$((count - 100))")
+          fi
           ts=$(date -u +%FT%TZ)
 
+          # #2767: the two filing-bar figures, trailing 7 days, each with its
+          # reproducing command. Failure here must not lose the digest itself.
+          metrics=$(node scripts/ci/promotion-digest-metrics.mjs --days=7 --ref=origin/dev 2>&1) \
+            || metrics="_promotion-digest-metrics failed — see the run log_"
+
           if [ "$count" -eq 0 ]; then
-            body=$(printf '✅ **dev and main are in sync** — nothing awaiting promotion.\n\n_Updated %s by the promotion-digest workflow._' "$ts")
+            body=$(printf '✅ **dev and main are in sync** — nothing awaiting promotion.\n\n## Filing bar (#2767), trailing 7 days\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$metrics" "$ts")
           else
-            body=$(printf '**%s commit(s) on `dev` not yet in prod (`main`).** Promote with a `dev → main` PR.\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$count" "$list" "$ts")
+            body=$(printf '**%s commit(s) on `dev` not yet in prod (`main`).** Promote with a `dev → main` PR.\n\n%s\n\n## Filing bar (#2767), trailing 7 days\n\n%s\n\n_Updated %s by the promotion-digest workflow._' "$count" "$list" "$metrics" "$ts")
           fi
 
           # Self-heal the label so the workflow works even before labels.yml syncs.

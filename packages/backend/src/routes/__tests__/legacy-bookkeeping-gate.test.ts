@@ -25,15 +25,16 @@ vi.mock('../../middleware/auth.js', () => ({
 }))
 
 import accountingRoutes from '../accounting.js'
-import fortnoxRoutes from '../fortnox.js'
 
 describe('legacy bookkeeping gate (#492)', () => {
   let app: FastifyInstance
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #2862: the legacy voucher push lives in `routes/accounting.ts` now
+    // (`routes/fortnox.ts` was replaced by the provider-generic surface);
+    // its path and gate are unchanged.
     await app.register(accountingRoutes, { prefix: '/accounting' })
-    await app.register(fortnoxRoutes, { prefix: '/accounting/fortnox' })
   })
   afterAll(async () => { await app.close() })
   beforeEach(() => {
@@ -63,13 +64,5 @@ describe('legacy bookkeeping gate (#492)', () => {
     const res = await app.inject({ method: 'POST', url: '/accounting/fortnox/push' })
     expect(res.statusCode).not.toBe(410)
     expect(res.statusCode).toBe(400) // "Fortnox is not connected"
-  })
-
-  it('fortnox status reports the legacy flag for the UI', async () => {
-    const off = await app.inject({ method: 'GET', url: '/accounting/fortnox/status' })
-    expect(off.json().legacyBookkeeping).toBe(false)
-    mockConfig.legacyBookkeepingEnabled = true
-    const on = await app.inject({ method: 'GET', url: '/accounting/fortnox/status' })
-    expect(on.json().legacyBookkeeping).toBe(true)
   })
 })

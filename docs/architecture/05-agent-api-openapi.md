@@ -5,6 +5,7 @@ covers:
   - packages/backend/src/openapi/**
   - packages/backend/src/index.ts
   - packages/backend/src/routes/openapi.ts
+  - packages/backend/src/routes/root-document.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/catalog.ts
@@ -28,12 +29,11 @@ covers:
   - packages/backend/src/routes/dashboard.ts
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
-  - packages/backend/src/routes/safe-details.ts
   - packages/backend/src/domain/request-origin.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-07" # #2669: "Existing Safe accounts stay READABLE" re-read and EDITED — qualified to the database rows; #2413 removed the rendering. Scope: that one sentence; the OpenAPI contract claims around it were not re-verified. A later round narrowed "no Haven surface displays them" to the six account/agent/dashboard list queries: review found the transaction aggregation (`LIST_BASIC_SAFES_FOR_USER_SQL`) carries no rail predicate, so `GET /transactions` still spans every account row. Prior: #2530: new § *Discoverability from a bare URL* — the three unauthenticated surfaces, the request-derived `servers[0]`, the two things the origin helper deliberately does NOT do (the trust-gated host with an UNgated scheme, and the path prefix it cannot infer because the frontend rewrite strips `/api` before the backend sees it — measured as a 404, not assumed), the 401 `hint` with the two constraints it must not break (#1640 body identity; the uniform invalid-key string), and the public catalogue allow-list. CI then caught two more, both mine: the generated `packages/core/src/api-types.ts` was stale against the spec fields this PR adds (regenerated), and `domain/request-origin.ts` imported Fastify, violating `domain-stays-pure` — fixed by taking headers rather than a request, which is recorded in the section above. Four new `covers:` entries — `packages/frontend/next.config.ts` added on review, since the path-prefix claim in this section is made true by that rewrite and nothing would have re-implicated the doc if it changed. The forwarded-header paragraph was also corrected on review: it claimed parity with `authRateLimit`, which gates on the same variable but hands SELECTION to `proxy-addr` counting from the right — the host now indexes from the trusted end for that reason, the scheme deliberately does not, and the accepted residue is stated rather than implied. Scope: that section and the front matter — the coverage tables, the drift check and the authority-boundaries section were not re-read. Prior: chain-reset(#2542): scoped re-count after the documented health routes; prior notes remain in git history.
+last-verified: "2026-09-11"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -54,12 +54,12 @@ a credential:
 
 | Surface | What it gives |
 | --- | --- |
-| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, which credential each door wants, and the health path. |
+| `GET /` | The root document: what this service is, the absolute URL of its OpenAPI spec, the capability-manifest URL, which credential each door wants, and the health path. The manifest URL uses configured dashboard origin rather than request headers, so it remains the deployment's dashboard endpoint even when the API is reached through another host. |
 | `GET /openapi.json` | The machine-readable contract. |
 | `GET /catalog` | The merchant catalogue, in a reduced public shape — see below. |
 
 **The root document is deliberately thin.** Names, paths, and credential
-guidance — no version, build identifier or environment name. A service banner
+guidance, plus the configured-origin manifest pointer — no version, build identifier or environment name. A service banner
 that fingerprints the deployment is a gift to a scanner and buys an agent
 nothing.
 
@@ -326,15 +326,36 @@ spec's back.
 A schema composed with `allOf` is also left open, on purpose. `additionalProperties`
 only sees the properties declared at its own level, so closing one `allOf` member
 makes it reject the properties its siblings contribute — a valid payload would be
-reported as a spec violation. The spec has such shapes (`mpp`,
-`AgentConnectionAllowance`); none is on an asserted route yet, which is exactly why
-this is guarded by a test now rather than rediscovered as a baffling false failure
-during the #1446 backfill.
+reported as a spec violation. That protection covers *inline* members only:
+a `$ref`'d member points at a component schema, and every component is
+registered already closed. An `allOf` over a `$ref` therefore rejects the
+sibling-declared fields on every real payload — a false failure, not an open
+schema — while an `allOf` over an inline, open member can hide an undeclared
+field. Both halves are guarded by tests in `openapi/spec.test.ts`.
 
-Coverage is deliberately partial: four assertions today (`GET /agents`,
-`GET /agents/{id}`, `POST /agents/{id}/archive`,
-`GET /machine-payments/agent`). Widening it is per-route work that belongs with
-the #1446 backfill rather than a big-bang sweep.
+**`Transaction` used to be the `$ref` case, and it could not be asserted at all
+(#2885).** `Transaction` (`GET /transactions`, the aggregated feed) was
+`allOf: [{ $ref: TransactionBase }, { chainId, safeId, safeAddress, safeName }]`
+— composed so the ~25 shared fields were written once (#984). Because the
+`$ref`'d `TransactionBase` was closed, every feed row failed on the four fields
+the sibling declared, so the route carried no `expectMatchesSpec`, and
+`fxRateSek`/`fxSource` (#2871) landed with no assertion able to notice they were
+undeclared. `TransactionBase` and `Transaction` are now two flat object schemas
+sharing one TypeScript object (`transactionBaseProperties` /
+`transactionBaseRequired` in `openapi/spec.ts`) instead of composing via `$ref`
++ `allOf` — same DRY source, but each closes truthfully, and both routes now
+assert their full payload. Other `allOf` shapes remain: `CreateAgentResponse`
+(over an open inline `Agent`, on an asserted route — the hiding case),
+`X402SignablePayment`, `AgentConnectionAllowance` and
+`AgentPaymentStatus.mpp` (over closed `$ref`s, not on asserted routes — the
+false-failure case once they are). Flattening them the same way is follow-up
+work.
+
+Coverage: `expectMatchesSpec` is asserted per route (count the call sites under
+`packages/backend/src/**/__tests__` rather than trusting a number here — an
+earlier figure in this paragraph was stale by an order of magnitude). Widening it
+further is per-route work that belongs with the #1446 backfill rather than a
+big-bang sweep.
 
 ### Four Contract Corrections The Type Migration Surfaced (#1445)
 
@@ -442,8 +463,10 @@ on-chain budget delegation = enforcement
 ```
 
 This restates the `AgentApiKey` security-scheme description, which is attached
-to every agent-authenticated operation — 26 of the document's 134, the rest
-being `DashboardJwt`, `SetupToken` or public. (The description itself is prose;
+to every agent-authenticated operation — 26 of the document's operations, the
+rest being `DashboardJwt`, `SetupToken` or public. (The denominator is left
+unstated deliberately: it moves with every route added, and was already wrong
+by four before #2871 touched it.) (The description itself is prose;
 the block above is a three-line paraphrase of its middle sentence.) #2105 moved
 the third clause off
 the retired primitive: it read `on-chain Safe allowance = enforcement`, naming
@@ -460,10 +483,9 @@ authority.
 ### Delegation rail
 
 The enforcement clause above named the **legacy AllowanceModule rail** until
-#2105 corrected it. That rail is **RETIRED** (#1440): closed to new
-accounts (#1984), HTTP 410 on every payment and x402 entry point (#1986), and its
-machinery deleted (#1987/#1988/#1989). Existing Safe rows stay readable to a direct
-database query — though since #2413 no account, agent or dashboard surface displays them — and cannot
+#2105 corrected it. That rail is **RETIRED** (#1440) — the closure sequence is
+in the [decision log](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440). Existing Safe rows stay readable to a direct
+database query — though no account, agent or dashboard surface displays them — and cannot
 spend through Haven's retired payment/API paths; any residual AllowanceModule
 permission remains outside Haven until the Safe owner revokes it externally. The Smart Sessions
 session rail is retired too (#834) — `session_key` accounts get HTTP 410 from
@@ -570,7 +592,7 @@ allowlist is now empty. Deep model:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
 **How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-08-24 for #1988):**
-131 registered routes, **2 of them undocumented** — only safe-deploy.ts and safe-exec.ts, deliberately, under the #1440 Safe-rail retirement. Re-counted 2026-09-04 after #2542 added documented public `/health` and operator-only `/health/ops` routes; the live delegation-rail x402 routes remain registered. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
+129 registered routes, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes. Re-counted 2026-09-11 at #2847; the count was 131/2 before the cut (re-counted 2026-09-04 after #2542 added documented public `/health` and operator-only `/health/ops` routes; the live delegation-rail x402 routes remain registered). (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
 (#1446 is working the backfill one domain at a time: `contacts.ts` came off the
 list first, then the whole `agent-delegations.ts` lifecycle — grant, activate,
 per-hash and batch revocation, signer management — then the x402 demo-resource

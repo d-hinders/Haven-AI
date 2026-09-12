@@ -4,6 +4,7 @@ import { type ReactNode } from 'react'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { Amount } from '@/components/haven'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import { getExplorerUrl } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { parseX402Hostname } from '@/lib/transaction-labels'
@@ -212,6 +213,19 @@ export default function TransactionDetailPanel({
           <DetailRow label="To" value={addr(tx.to)} />
           <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
           {tx.agentName ? <DetailRow label="Agent" value={tx.agentName} /> : null}
+        </Section>
+      ) : null}
+
+      {/* #2870: only when the list joined a sync row for this payment — the
+          same absence contract as the table badge. */}
+      {tx.accounting ? (
+        <Section title="Accounting">
+          <DetailRow label="Feed" value={<AccountingBadge accounting={tx.accounting} />} />
+          {/* The failure reason as plain text: the badge's tooltip has no
+              tab stop inside the row and no hover on touch (review, #2893). */}
+          {(tx.accounting.status === 'failed' || tx.accounting.status === 'skipped') && tx.accounting.error ? (
+            <DetailRow label="Reason" value={tx.accounting.error} />
+          ) : null}
         </Section>
       ) : null}
 

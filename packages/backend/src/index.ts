@@ -67,7 +67,7 @@ import analyticsRoutes from './routes/analytics.js'
 import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
-import { registerConnector, startRetrySweep } from './modules/accounting/index.js'
+import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
@@ -176,7 +176,13 @@ registerHealthRoutes(app, {
   getPassportStatus: passportReadiness,
   trustProxyHops: config.trustProxyHops,
   opsToken: config.opsToken,
+  getAccountingCounters: () => getAccountingOpsCounters(),
 })
+
+// The accounting module's ops events (#2872: `accounting.connection.needs_attention`)
+// go through the app logger like the retry sweep's, so every
+// `"event":"accounting.…"` line lands on one transport.
+setOpsEventSink((level, event) => app.log[level](event, event.event))
 
 /**
  * API root document (#2530).

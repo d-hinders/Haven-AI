@@ -1,6 +1,7 @@
 import { listUnpushedPaymentIds, countSyncsForUser, type FeedSyncCounts } from '../../infra/repositories/accounting-feed-syncs.js'
-import { connectionSettings, getActiveConnection, listConnections, setStatus, type ConnectionSettings } from '../../infra/repositories/accounting-connections.js'
+import { connectionSettings, getActiveConnection, listConnections, type ConnectionSettings } from '../../infra/repositories/accounting-connections.js'
 import { DEFAULT_LEDGER_CURRENCY, type LedgerCurrency, ledgerCurrencyOrDefault } from '../../domain/ledger-currency.js'
+import { flagConnectionStatus } from './ops-signals.js'
 import { accountingFeedAvailable } from '../agents/index.js'
 import { buildAccountingEntryForPayment } from './entry.js'
 import { toFeedTransaction } from './feed-transaction.js'
@@ -199,7 +200,7 @@ export async function feedSettledPayment(userId: string, paymentId: string, opts
       // MUTATION TARGET (scope-missing.db.test.ts "exactly one POST"): marking
       // the row skipped here makes the sweep create a second invoice.
       if (result.connectionStatus) {
-        await setStatus(userId, connector.provider, result.connectionStatus, degradedReason(result))
+        await flagConnectionStatus(userId, connector.provider, result.connectionStatus, degradedReason(result))
       }
       return { outcome: 'pushed' }
     } else if (result.status === 'skipped') {
@@ -220,7 +221,7 @@ export async function feedSettledPayment(userId: string, paymentId: string, opts
       // MUTATION TARGET (scope-missing.db.test.ts "pre-push"): without this
       // flip the connection stays connected and the sweep retries the refusal.
       if (result.connectionStatus) {
-        await setStatus(userId, connector.provider, result.connectionStatus, degradedReason(result))
+        await flagConnectionStatus(userId, connector.provider, result.connectionStatus, degradedReason(result))
       }
       return { outcome: 'skipped', reason }
     } else {

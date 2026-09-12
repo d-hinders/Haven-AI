@@ -95,7 +95,9 @@ test.describe('settings accounting connection states', () => {
     ])
     const card = await openSettings(page)
     await expect(card.getByText('Needs more access', { exact: true })).toHaveCount(1)
-    await expect(card.getByText(/\(companyinformation, archive\)/)).toHaveCount(1)
+    // Human labels for the scope identifiers, never the raw ids (#2903 review).
+    await expect(card.getByText(/\(company information, archive\)/)).toHaveCount(1)
+    await expect(card.getByText(/companyinformation/)).toHaveCount(0)
     await expect(card.getByTestId('connection-actions-fortnox').getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(1)
     await expect(card).toHaveScreenshot('settings-accounting-scope-missing-desktop.png', SNAPSHOT_OPTIONS)
   })
@@ -125,10 +127,15 @@ test.describe('settings accounting connection states', () => {
   test('first connect — the backfill choice on the OAuth return', async ({ page }) => {
     await serveConnections(page, [{ ...accountingConnection, lastPushAt: null, settings: { suggestedAccount: null, autoFeed: true } }])
     await openSettings(page, '?provider=fortnox&connect=connected')
-    const dialog = page.getByRole('dialog')
+    await expect(page.getByRole('dialog')).toHaveCount(1)
+    // The PANEL, not `role="dialog"`: `ui/Modal` puts that role on its
+    // `fixed inset-0` wrapper, so a clip of it is the whole page behind the
+    // modal (#2903 review). `panelTestId` is the handle for the box itself.
+    const dialog = page.getByTestId('backfill-dialog')
     await expect(dialog).toHaveCount(1)
     await expect(dialog.getByRole('heading', { name: 'Include earlier payments?' })).toHaveCount(1)
     await expect(dialog.getByRole('radio', { name: /Feed from now/ })).toBeChecked()
+    await expect(dialog.getByRole('button', { name: 'Not now', exact: true })).toHaveCount(1)
     await expect(dialog).toHaveScreenshot('settings-accounting-backfill-dialog-desktop.png', SNAPSHOT_OPTIONS)
   })
 })

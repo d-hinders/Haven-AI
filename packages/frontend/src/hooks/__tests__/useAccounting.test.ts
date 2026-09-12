@@ -91,6 +91,34 @@ describe('accounting hooks on the generic routes (#2862)', () => {
     expect(mockApiPost).toHaveBeenCalledWith('/accounting/connections/fortnox/activate')
   })
 
+  it('only the FIRST listing is `loading`; a later re-list is `refreshing` and keeps the rows (#2903)', async () => {
+    let releaseRelist: ((v: unknown) => void) | null = null
+    mockApiGet.mockImplementation(routeGet)
+    mockApiDelete.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useAccountingConnections())
+    expect(result.current.loading).toBe(true)
+    expect(result.current.refreshing).toBe(false)
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    mockApiGet.mockImplementation((url: string) =>
+      url === '/accounting/connections' ? new Promise((resolve) => { releaseRelist = resolve }) : routeGet(url),
+    )
+    let done: Promise<void> | undefined
+    act(() => { done = result.current.disconnect('fortnox') })
+    await waitFor(() => expect(result.current.refreshing).toBe(true))
+    // Mid-refetch: not `loading`, and the rows the caller had are still there.
+    expect(result.current.loading).toBe(false)
+    expect(result.current.connections).toHaveLength(1)
+
+    await act(async () => {
+      releaseRelist!({ connections: [] })
+      await done
+    })
+    expect(result.current.refreshing).toBe(false)
+    expect(result.current.loading).toBe(false)
+    expect(result.current.connections).toEqual([])
+  })
+
   it('updateSettings PATCHes …/settings with the snake_case body and swaps the returned row in place', async () => {
     mockApiGet.mockImplementation(routeGet)
     const merged = { ...CONNECTED.connections[0], settings: { suggestedAccount: '6540', autoFeed: false } }

@@ -13,11 +13,14 @@ import { Card } from '@/components/ui/Card'
 export function SettingsSection({
   title,
   description,
+  note,
   children,
   className = '',
 }: {
   title: string
   description?: string
+  /** A quieter second paragraph under the description — a responsibility line, not a second description. */
+  note?: string
   children: ReactNode
   className?: string
 }) {
@@ -28,6 +31,7 @@ export function SettingsSection({
         {description ? (
           <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{description}</p>
         ) : null}
+        {note ? <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
       </Card.Header>
       <div className="divide-y divide-[var(--v2-border)]">{children}</div>
     </section>

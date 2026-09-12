@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiOperations, ApiPaths } from '@haven_ai/core'
 import { api, ApiRequestError } from '@/lib/api'
 
@@ -168,10 +168,17 @@ export function useAccountingProviders() {
 export function useAccountingConnections() {
   const [connections, setConnections] = useState<AccountingConnection[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const settledOnce = useRef(false)
 
+  // `loading` is the FIRST listing only; every later `load` (after Disconnect,
+  // a backfill, `refetch`) is a `refreshing` pass that keeps the rows the
+  // caller already has, so the list does not collapse to a skeleton on each
+  // action (#2903 review).
   const load = useCallback(async (isCancelled: () => boolean = () => false) => {
-    setLoading(true)
+    if (settledOnce.current) setRefreshing(true)
+    else setLoading(true)
     setError(null)
     try {
       const res = await api.get<{ connections: AccountingConnection[] }>('/accounting/connections')
@@ -179,7 +186,11 @@ export function useAccountingConnections() {
     } catch {
       if (!isCancelled()) setError('We could not load your accounting connections.')
     } finally {
-      if (!isCancelled()) setLoading(false)
+      if (!isCancelled()) {
+        settledOnce.current = true
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [])
 
@@ -247,6 +258,7 @@ export function useAccountingConnections() {
   return {
     connections,
     loading,
+    refreshing,
     error,
     connect,
     connectWithApiKey,

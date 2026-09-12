@@ -77,13 +77,23 @@ export const sv: Messages = {
       title: 'Bokföring',
       description:
         'Anslut bokföringsprogrammet ditt företag använder. Avklarade agentbetalningar dyker upp där med betalningsunderlag bifogat; din redovisningskonsult bokför dem.',
+      disclaimer:
+        'Haven tillhandahåller dataverktyg, inte bokförings- eller skatterådgivning. Betalningar matas som utkast — du och din redovisningskonsult ansvarar fortfarande för kontering, riktighet och inlämning.',
       loadError: 'Vi kunde inte läsa in bokföringskopplingar. Försök igen om en stund.',
       comingSoonDescription: {
-        accounted: 'Svensk bokföring online. Går inte att ansluta ännu.',
-        light: 'Bokföring för små företag. Går inte att ansluta ännu.',
-        igdrasil: 'Bokföring och fakturering. Går inte att ansluta ännu.',
-        generic: 'Går inte att ansluta ännu.',
-      },
+        accounted: 'Svensk bokföring online.',
+        light: 'Bokföring för små företag.',
+        igdrasil: 'Bokföring och fakturering.',
+      } as Record<string, string>,
+      scopeLabels: {
+        companyinformation: 'företagsinformation',
+        connectfile: 'filbilagor',
+        inbox: 'inkorg',
+        supplierinvoice: 'leverantörsfakturor',
+        supplier: 'leverantörer',
+        archive: 'arkiv',
+        bookkeeping: 'bokföring',
+      } as Record<string, string>,
       notConfigured: 'Inte tillgängligt i den här installationen ännu.',
       status: {
         connected: 'Ansluten',
@@ -104,6 +114,7 @@ export const sv: Messages = {
         scopeMissingUnnamed: (provider: string) =>
           `${provider} behöver mer åtkomst än vad som beviljades. Återanslut för att ge den.`,
         revoked: (provider: string) => `Åtkomsten återkallades i ${provider}. Återanslut för att mata igen.`,
+        notConnected: (provider: string) => `Anslut för att mata avklarade betalningar till ${provider}.`,
         disconnected: (provider: string) =>
           `Inget matas till ${provider}. Det som matats tidigare finns kvar i Haven.`,
       },
@@ -151,6 +162,7 @@ export const sv: Messages = {
           'Tidigare betalningar matas också, upp till 200 åt gången — tryck på Synka nu på bokföringssidan för resten.',
         sinceLabel: 'Datum (ÅÅÅÅ-MM-DD)',
         confirm: 'Fortsätt',
+        notNow: 'Inte nu',
         working: 'Matar…',
         done: (n: number) => `${n} tidigare betalning${n === 1 ? '' : 'ar'} matade.`,
         close: 'Klart',

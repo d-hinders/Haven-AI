@@ -4,7 +4,7 @@
  * Settings → Accounting: the connections card (#2868, epic #2858).
  *
  * Owner decision 2026-09-11: connections live in Settings. This card lists
- * every provider from `GET /accounting/providers` as a `Row` — Fortnox live,
+ * every provider from `GET /accounting/providers` as a `SettingsRow` — Fortnox live,
  * the rest Coming soon — joined with the caller's connections, and owns
  * Connect / Reconnect / Disconnect / Settings. The feed page (`/accounting`)
  * keeps the sync rows and points here.
@@ -25,6 +25,13 @@
  * (`lastPushAt === null`) — a re-consent on a connection with history keeps
  * its floor and gets no dialog, while a reconnect that never fed is asked
  * again, which is harmless (the default is a no-op).
+ *
+ * The outcome is CONSUMED ONCE. `byProvider` changes on every later refetch
+ * or in-place row swap (Save on the inline settings replaces the row; the
+ * backfill call re-lists), and a first-connect row keeps `lastPushAt === null`
+ * until something is fed — so an effect that only looked at the row would
+ * re-open the dialog after "Feed from now" the moment Settings was saved.
+ * `askedRef` remembers which outcome the dialog was opened for.
  *
  * Surface hierarchy: the card is a `SettingsSection` (white, grey header
  * band) whose body is a hairline-divided row list; the inline settings are
@@ -81,6 +88,7 @@ export function ConnectionsCard() {
   const {
     connections,
     loading: connectionsLoading,
+    refreshing: connectionsRefreshing,
     error: connectionsError,
     connect,
     disconnect,
@@ -94,7 +102,12 @@ export function ConnectionsCard() {
   const [pendingDisconnect, setPendingDisconnect] = useState<AccountingProvider | null>(null)
   const [backfillFor, setBackfillFor] = useState<AccountingProvider | null>(null)
   const [outcome, setOutcome] = useState<ConnectOutcome | null>(null)
+  /** The outcome the backfill dialog has already been opened for — asked once, never re-asked. */
+  const askedRef = useRef<ConnectOutcome | null>(null)
 
+  // First load only: a refetch (after Disconnect, a backfill) keeps the rows
+  // rendered — `refreshing` marks the region busy instead of collapsing it
+  // to a skeleton.
   const loading = providersLoading || connectionsLoading
   const byProvider = useMemo(() => new Map(connections.map((c) => [c.provider, c])), [connections])
 
@@ -119,8 +132,12 @@ export function ConnectionsCard() {
   // decide whether this was a first connect, and the provider's display name.
   useEffect(() => {
     if (loading || !outcome || outcome.connect !== 'connected') return
+    if (askedRef.current === outcome) return
     const provider = providers.find((p) => p.id === outcome.provider)
-    if (provider && isFirstSuccessfulConnect(byProvider.get(outcome.provider))) setBackfillFor(provider)
+    if (provider && isFirstSuccessfulConnect(byProvider.get(outcome.provider))) {
+      askedRef.current = outcome
+      setBackfillFor(provider)
+    }
   }, [loading, outcome, providers, byProvider])
 
   const run = useCallback(async (providerId: string, fn: () => Promise<unknown>, failure: string) => {
@@ -148,7 +165,7 @@ export function ConnectionsCard() {
   const listError = providersError || connectionsError ? copy.loadError : null
 
   return (
-    <SettingsSection title={copy.title} description={copy.description}>
+    <SettingsSection title={copy.title} description={copy.description} note={copy.disclaimer}>
       {outcomeLine || actionError ? (
         <div className="space-y-2 px-6 py-3" data-testid="accounting-outcome">
           {outcomeLine ? (
@@ -174,34 +191,40 @@ export function ConnectionsCard() {
           <InlineAlert>{listError}</InlineAlert>
         </div>
       ) : (
-        providers.map((provider) => {
-          const connection = byProvider.get(provider.id) ?? null
-          const settingsOpen = openSettings === provider.id && connection?.status === 'connected'
-          return (
-            <div key={provider.id}>
-              <ConnectionRow
-                provider={provider}
-                connection={connection}
-                busy={busyProvider === provider.id}
-                settingsOpen={settingsOpen}
-                onConnect={() => void run(provider.id, () => connect(provider.id), copy.connectError(provider.displayName))}
-                onDisconnect={() => setPendingDisconnect(provider)}
-                onToggleSettings={() => setOpenSettings((open) => (open === provider.id ? null : provider.id))}
-              />
-              {settingsOpen && connection ? (
-                // `Card.Section divided`: a hairline above the inline form so
-                // it reads as the row's own subsection — white on white, never
-                // a nested filled card.
-                <Card.Section divided>
-                  <ConnectionSettings
-                    connection={connection}
-                    onSave={(patch) => updateSettings(provider.id, patch)}
-                  />
-                </Card.Section>
-              ) : null}
-            </div>
-          )
-        })
+        <div
+          className="divide-y divide-[var(--v2-border)]"
+          data-testid="connection-list"
+          aria-busy={connectionsRefreshing || undefined}
+        >
+          {providers.map((provider) => {
+            const connection = byProvider.get(provider.id) ?? null
+            const settingsOpen = openSettings === provider.id && connection?.status === 'connected'
+            return (
+              <div key={provider.id}>
+                <ConnectionRow
+                  provider={provider}
+                  connection={connection}
+                  busy={busyProvider === provider.id}
+                  settingsOpen={settingsOpen}
+                  onConnect={() => void run(provider.id, () => connect(provider.id), copy.connectError(provider.displayName))}
+                  onDisconnect={() => setPendingDisconnect(provider)}
+                  onToggleSettings={() => setOpenSettings((open) => (open === provider.id ? null : provider.id))}
+                />
+                {settingsOpen && connection ? (
+                  // `Card.Section divided`: a hairline above the inline form so
+                  // it reads as the row's own subsection — white on white, never
+                  // a nested filled card.
+                  <Card.Section divided>
+                    <ConnectionSettings
+                      connection={connection}
+                      onSave={(patch) => updateSettings(provider.id, patch)}
+                    />
+                  </Card.Section>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
       )}
 
       {pendingDisconnect ? (

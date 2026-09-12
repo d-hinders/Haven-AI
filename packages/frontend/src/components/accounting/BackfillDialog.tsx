@@ -21,6 +21,10 @@
  *
  * One call feeds at most 200 payments; the success line says how many, and
  * the intro points at Sync now for the rest.
+ *
+ * The footer has a way out of its own — "Not now", a ghost beside Continue
+ * that does exactly what "Feed from now" does (closes, no request) — so the
+ * dialog is never backdrop-or-Escape only.
  */
 import { useState } from 'react'
 import { useT } from '@/context/LocaleContext'
@@ -43,6 +47,9 @@ function todayIsoDate(): string {
 }
 
 type Choice = 'now' | 'since'
+
+/** The panel's test id — a clip of the dialog scopes to this, never to `role="dialog"`. */
+export const BACKFILL_DIALOG_TEST_ID = 'backfill-dialog'
 
 export interface BackfillDialogProps {
   open: boolean
@@ -87,6 +94,9 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
     }
   }
 
+  const sinceInvalid = error !== null && choice === 'since'
+  const errorId = 'backfill-since-error'
+
   const radioClass =
     'mt-0.5 h-4 w-4 shrink-0 accent-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]'
 
@@ -98,11 +108,17 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
       subtitle={copy.intro(providerName)}
       closeOnBackdrop={!busy}
       closeOnEscape={!busy}
+      panelTestId={BACKFILL_DIALOG_TEST_ID}
       footer={
         fed === null ? (
-          <Button onClick={() => void confirm()} disabled={busy} aria-busy={busy}>
-            {busy ? copy.working : copy.confirm}
-          </Button>
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
+              {copy.notNow}
+            </Button>
+            <Button onClick={() => void confirm()} disabled={busy} aria-busy={busy}>
+              {busy ? copy.working : copy.confirm}
+            </Button>
+          </>
         ) : (
           <Button onClick={onClose}>{copy.close}</Button>
         )
@@ -152,12 +168,13 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
                     setError(null)
                   }}
                   disabled={busy}
-                  invalid={error !== null && choice === 'since'}
+                  invalid={sinceInvalid}
+                  aria-describedby={sinceInvalid ? errorId : undefined}
                 />
               </span>
             </span>
           </label>
-          {error ? <InlineAlert>{error}</InlineAlert> : null}
+          {error ? <InlineAlert id={errorId}>{error}</InlineAlert> : null}
         </fieldset>
       ) : (
         <p role="status" className="text-[var(--v2-ink)]">

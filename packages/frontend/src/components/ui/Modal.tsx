@@ -52,6 +52,7 @@ export function Modal({
   width = 'md',
   maxHeight = 'default',
   bodyClassName = '',
+  panelTestId,
 }: {
   open: boolean
   onClose: () => void
@@ -69,6 +70,13 @@ export function Modal({
   width?: ModalWidth
   maxHeight?: ModalMaxHeight
   bodyClassName?: string
+  /**
+   * `data-testid` for the PANEL — the bordered box — not the `role="dialog"`
+   * wrapper, which is `fixed inset-0` and therefore the whole viewport. A
+   * visual baseline of `getByRole('dialog')` is a screenshot of the page
+   * behind the modal; this is the handle a clip should use (#2903 review).
+   */
+  panelTestId?: string
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -162,6 +170,7 @@ export function Modal({
 
       <div
         ref={panelRef}
+        data-testid={panelTestId}
         className={`relative flex w-full flex-col overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-white shadow-modal ${maxHeightClasses[maxHeight]} ${widthClasses[width]}`}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--v2-border)] px-5 py-4">

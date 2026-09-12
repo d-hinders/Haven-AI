@@ -15,6 +15,10 @@
  * shape check (`^[1-8]\d{3}$` for Fortnox) runs first so the common typo
  * never leaves the browser. A refused patch applies nothing — the form keeps
  * the user's draft rather than snapping back.
+ *
+ * The shape check is SHOWN on blur and on submit, not on every keystroke: a
+ * field that turns red at "65" on the way to "6540" is shouting at someone
+ * who has not finished. Once shown, it clears the moment the value is valid.
  */
 import { useState, type FormEvent } from 'react'
 import { useT } from '@/context/LocaleContext'
@@ -38,6 +42,11 @@ export function isValidSuggestedAccount(provider: string, value: string): boolea
   return trimmed.length <= 32
 }
 
+/** The inline region's element id — the row's Settings button points its `aria-controls` here. */
+export function connectionSettingsRegionId(provider: string): string {
+  return `connection-settings-${provider}`
+}
+
 export interface ConnectionSettingsProps {
   connection: AccountingConnection
   onSave: (patch: AccountingConnectionSettingsPatch) => Promise<unknown>
@@ -51,13 +60,16 @@ export function ConnectionSettings({ connection, onSave }: ConnectionSettingsPro
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  /** The account field has been left (blur) or submitted — only then is its shape check shown. */
+  const [accountTouched, setAccountTouched] = useState(false)
 
-  const accountInvalid = !isValidSuggestedAccount(connection.provider, account)
+  const accountInvalid = accountTouched && !isValidSuggestedAccount(connection.provider, account)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setSaved(false)
-    if (accountInvalid) {
+    setAccountTouched(true)
+    if (!isValidSuggestedAccount(connection.provider, account)) {
       setError(copy.invalidSuggestedAccount)
       return
     }
@@ -84,14 +96,17 @@ export function ConnectionSettings({ connection, onSave }: ConnectionSettingsPro
   }
 
   const accountId = `suggested-account-${connection.provider}`
+  const helpId = `${accountId}-help`
   const errorId = `${accountId}-error`
+  const regionId = connectionSettingsRegionId(connection.provider)
 
   return (
     <form
+      id={regionId}
       onSubmit={(event) => void submit(event)}
       className="space-y-4 px-6 py-4"
       aria-label={copy.title}
-      data-testid={`connection-settings-${connection.provider}`}
+      data-testid={regionId}
     >
       <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{copy.title}</h3>
 
@@ -106,11 +121,13 @@ export function ConnectionSettings({ connection, onSave }: ConnectionSettingsPro
             setAccount(event.target.value)
             setSaved(false)
           }}
+          onBlur={() => setAccountTouched(true)}
           placeholder={copy.suggestedAccountPlaceholder}
           inputMode="numeric"
           invalid={accountInvalid}
-          aria-describedby={error ? errorId : undefined}
+          aria-describedby={error ? `${errorId} ${helpId}` : helpId}
           helperText={copy.suggestedAccountHelp}
+          helperTextId={helpId}
           className="mt-1"
         />
       </div>

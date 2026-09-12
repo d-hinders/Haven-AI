@@ -41,6 +41,22 @@ describe('BackfillDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('"Not now" in the footer is a way out that behaves exactly like "Feed from now" — even with "since" chosen (#2903)', () => {
+    const { onClose, onBackfill } = renderDialog()
+    fireEvent.click(sinceRadio())
+    fireEvent.change(dateField(), { target: { value: '2026-01-01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    expect(onBackfill).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('the panel carries the test id a clip scopes to — not the role="dialog" wrapper', () => {
+    renderDialog()
+    const panel = screen.getByTestId('backfill-dialog')
+    expect(panel).not.toHaveAttribute('role', 'dialog')
+    expect(screen.getByRole('dialog')).toContainElement(panel)
+  })
+
   it('"Include payments since" sends `since` as the exact YYYY-MM-DD the field holds, then reports how many were fed', async () => {
     const { onBackfill, onClose } = renderDialog()
     fireEvent.click(sinceRadio())
@@ -68,6 +84,13 @@ describe('BackfillDialog', () => {
     fireEvent.click(go())
     expect(await screen.findByRole('alert')).toHaveTextContent('Enter a past date as YYYY-MM-DD')
     expect(onBackfill).not.toHaveBeenCalled()
+    // The date field is marked invalid and points at that sentence.
+    expect(dateField()).toHaveAttribute('aria-invalid', 'true')
+    expect(dateField()).toHaveAttribute('aria-describedby', screen.getByRole('alert').id)
+    // Typing clears it.
+    fireEvent.change(dateField(), { target: { value: '2026-01-01' } })
+    expect(dateField()).not.toHaveAttribute('aria-invalid')
+    expect(dateField()).not.toHaveAttribute('aria-describedby')
   })
 
   it.each([

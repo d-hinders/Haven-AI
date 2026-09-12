@@ -82,6 +82,42 @@ describe('ConnectionsCard', () => {
     }
     expect(screen.getByRole('heading', { name: 'Accounting' })).toBeInTheDocument()
     expect(screen.getByText(/appear there with payment evidence attached; your accountant books them/)).toBeInTheDocument()
+    // The responsibility line the feed page's connect card carried, kept
+    // under the section header (#2903 review).
+    expect(
+      screen.getByText(/Haven provides data tooling, not accounting or tax advice\..*you and your accountant remain responsible for coding, correctness, and filing/),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps the rows rendered during a refetch — the skeleton is for the first load only (#2903)', async () => {
+    serve([connection()])
+    // The DELETE resolves at once; the re-list it triggers is held open so
+    // the refetch window is observable.
+    let releaseRelist: (() => void) | null = null
+    mockApi.delete.mockResolvedValue(undefined)
+    renderCard()
+    await screen.findByText(/Connected to Ada Lovelace AB/)
+    mockApi.get.mockImplementation((url: string) => {
+      if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
+      if (url === '/accounting/connections') {
+        return new Promise((resolve) => {
+          releaseRelist = () => resolve({ connections: [connection({ status: 'disconnected', isActiveDestination: false })] })
+        })
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`))
+    })
+    fireEvent.click(within(fortnoxActions()).getByRole('button', { name: 'Disconnect' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Disconnect' }))
+    await waitFor(() => expect(mockApi.delete).toHaveBeenCalledWith('/accounting/connections/fortnox'))
+    await waitFor(() => expect(releaseRelist).not.toBeNull())
+    // Mid-refetch: the rows are still there, no skeleton, and the region says it is busy.
+    expect(screen.getByTestId('connection-row-fortnox')).toBeInTheDocument()
+    expect(screen.getByTestId('connection-row-igdrasil')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { busy: true })).toBeNull()
+    expect(screen.getByTestId('connection-list')).toHaveAttribute('aria-busy', 'true')
+    releaseRelist!()
+    expect(await screen.findByText(/What was fed earlier stays in Haven/)).toBeInTheDocument()
+    expect(screen.getByTestId('connection-list')).not.toHaveAttribute('aria-busy')
   })
 
   it('Connect fetches the consent URL for the provider', async () => {
@@ -164,6 +200,35 @@ describe('ConnectionsCard', () => {
       await waitFor(() =>
         expect(mockApi.post).toHaveBeenCalledWith('/accounting/connections/fortnox/backfill', { since: '2026-01-01' }),
       )
+    })
+
+    it('the backfill choice is asked ONCE: "Feed from now", then Save in Settings does not re-open it (#2903)', async () => {
+      // Reproduced on the PR: `outcome` was never consumed, so any later
+      // change to the connection list — here the in-place row swap a Save
+      // does — re-ran the effect against a row that still had
+      // `lastPushAt === null` and brought the dialog back.
+      searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=connected')
+      serve([connection({ lastPushAt: null })])
+      mockApi.patch.mockResolvedValue({
+        connection: connection({ lastPushAt: null, settings: { suggestedAccount: '6540', autoFeed: true }, updatedAt: '2026-09-12T10:00:00.000Z' }),
+      })
+      renderCard()
+      const dialog = await screen.findByRole('dialog')
+      expect(dialog).toHaveTextContent('Include earlier payments?')
+      expect(within(dialog).getByRole('radio', { name: /Feed from now/ })).toBeChecked()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(mockApi.post).not.toHaveBeenCalled()
+
+      fireEvent.click(within(fortnoxActions()).getByRole('button', { name: 'Settings' }))
+      const form = screen.getByTestId('connection-settings-fortnox')
+      fireEvent.change(within(form).getByLabelText('Suggested account'), { target: { value: '6540' } })
+      fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+      expect(await within(form).findByRole('status')).toHaveTextContent('Saved.')
+      // The row was swapped (still never pushed) — and the dialog stays gone.
+      expect(screen.queryByRole('dialog')).toBeNull()
+      // The outcome sentence itself is still on screen: consumed is not erased.
+      expect(screen.getByText('Fortnox is connected.')).toBeInTheDocument()
     })
 
     it('connect=connected on a connection that already fed is a re-consent: no dialog', async () => {

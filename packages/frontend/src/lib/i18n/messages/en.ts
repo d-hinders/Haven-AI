@@ -89,14 +89,38 @@ export const en = {
       title: 'Accounting',
       description:
         'Connect the accounting tool your company uses. Settled agent payments appear there with payment evidence attached; your accountant books them.',
+      /**
+       * Carried over from the feed page's connect card, which this section
+       * replaced: the responsibility line the accounting guardrail requires.
+       */
+      disclaimer:
+        'Haven provides data tooling, not accounting or tax advice. Payments are fed as drafts — you and your accountant remain responsible for coding, correctness, and filing.',
       loadError: 'We could not load accounting connections. Try again in a moment.',
-      /** One line per coming-soon provider — listed, never endorsed. */
+      /**
+       * One line per coming-soon provider — listed, never endorsed. The chip
+       * and the disabled action already say it is not connectable, so the
+       * line does not repeat that. A provider without a line gets none.
+       */
       comingSoonDescription: {
-        accounted: 'Swedish online accounting. Not connectable yet.',
-        light: 'Accounting for small companies. Not connectable yet.',
-        igdrasil: 'Bookkeeping and invoicing. Not connectable yet.',
-        generic: 'Not connectable yet.',
-      },
+        accounted: 'Swedish online accounting.',
+        light: 'Accounting for small companies.',
+        igdrasil: 'Bookkeeping and invoicing.',
+      } as Record<string, string>,
+      /**
+       * Human labels for the provider scope identifiers `missingScopes`
+       * carries (Fortnox's, today). An identifier without a label is shown
+       * raw rather than hidden — the sentence must still name what a
+       * reconnect adds.
+       */
+      scopeLabels: {
+        companyinformation: 'company information',
+        connectfile: 'file attachments',
+        inbox: 'inbox',
+        supplierinvoice: 'supplier invoices',
+        supplier: 'suppliers',
+        archive: 'archive',
+        bookkeeping: 'bookkeeping',
+      } as Record<string, string>,
       notConfigured: 'Not available on this deployment yet.',
       status: {
         connected: 'Connected',
@@ -117,6 +141,9 @@ export const en = {
         scopeMissingUnnamed: (provider: string) =>
           `${provider} needs more access than it granted. Reconnect to grant it.`,
         revoked: (provider: string) => `Access was revoked in ${provider}. Reconnect to resume feeding.`,
+        /** Never connected: guide the action. */
+        notConnected: (provider: string) => `Connect to feed settled payments to ${provider}.`,
+        /** Disconnected after a connection: say what happened to the history. */
         disconnected: (provider: string) =>
           `Nothing is fed to ${provider}. What was fed earlier stays in Haven.`,
       },
@@ -164,6 +191,8 @@ export const en = {
           'Earlier payments are fed too, up to 200 at a time — press Sync now on the Accounting page for the rest.',
         sinceLabel: 'Date (YYYY-MM-DD)',
         confirm: 'Continue',
+        /** The footer's way out — the same no-op as "Feed from now". */
+        notNow: 'Not now',
         working: 'Feeding…',
         done: (n: number) => `${n} earlier payment${n === 1 ? '' : 's'} fed.`,
         close: 'Done',

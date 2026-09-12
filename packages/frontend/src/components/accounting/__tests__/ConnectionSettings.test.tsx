@@ -66,7 +66,28 @@ describe('ConnectionSettings', () => {
     fireEvent.click(save())
     expect(await screen.findByRole('alert')).toHaveTextContent('Enter a four-digit account between 1000 and 8999')
     expect(onSave).not.toHaveBeenCalled()
-    expect(accountField()).toHaveAttribute('aria-describedby', expect.stringContaining('error'))
+    // The field is marked invalid for assistive tech and points at the error AND its helper.
+    expect(accountField()).toHaveAttribute('aria-invalid', 'true')
+    const describedBy = accountField().getAttribute('aria-describedby') ?? ''
+    expect(describedBy).toContain(screen.getByRole('alert').id)
+    expect(describedBy).toContain(screen.getByText(/It only suggests — it never books/).id)
+  })
+
+  it('validates on blur and submit, not on every keystroke: "65" on the way to "6540" is not red (#2903)', () => {
+    renderSettings()
+    // Idle: described by the helper, not invalid.
+    expect(accountField()).not.toHaveAttribute('aria-invalid')
+    expect(accountField()).toHaveAttribute('aria-describedby', screen.getByText(/It only suggests — it never books/).id)
+
+    fireEvent.change(accountField(), { target: { value: '65' } })
+    expect(accountField()).not.toHaveAttribute('aria-invalid')
+
+    fireEvent.blur(accountField())
+    expect(accountField()).toHaveAttribute('aria-invalid', 'true')
+
+    // Once shown, it clears the moment the value is valid — no second blur needed.
+    fireEvent.change(accountField(), { target: { value: '6540' } })
+    expect(accountField()).not.toHaveAttribute('aria-invalid')
   })
 
   it('a 400 INVALID_SETTING from the route surfaces inline, naming the key, and keeps the draft', async () => {

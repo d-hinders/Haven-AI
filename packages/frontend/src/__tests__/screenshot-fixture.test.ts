@@ -72,6 +72,24 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(fx('/chains')).toEqual({ deployable: [84532] })
   })
 
+  it('answers /accounting/feed/status so the feed page renders at all (#2903)', () => {
+    // `AccountingPage` returns null unless `hosted && flagEnabled`, and hides
+    // the feed unless `available`; every row needs the fields the page reads.
+    const status = fx('/accounting/feed/status') as {
+      hosted: boolean; flagEnabled: boolean; available: boolean; connected: boolean; liveSyncReady: boolean
+      syncs: { payment_id: string; provider: string; status: string; external_ref: string | null; error: string | null; attempts: number }[]
+    }
+    expect(status).toMatchObject({ hosted: true, flagEnabled: true, available: true, connected: true, liveSyncReady: true })
+    expect(status.syncs.length).toBeGreaterThan(0)
+    for (const row of status.syncs) {
+      expect(row).toMatchObject({ payment_id: expect.any(String), provider: 'fortnox', attempts: expect.any(Number) })
+      expect(['pending', 'pushed', 'failed', 'skipped']).toContain(row.status)
+    }
+    // One pushed row whose external_ref the page turns into "Fortnox invoice <n>".
+    expect(status.syncs.some((r) => r.status === 'pushed' && /^fortnox:supplierinvoice:\d+$/.test(r.external_ref ?? ''))).toBe(true)
+    expect(fx('/accounting/feed/status', 'empty')).toBeNull()
+  })
+
   it('distinguishes the three /transactions shapes', () => {
     // The aggregated feed (useTransactionsFeed):
     expect(fx('/transactions?offset=0&limit=25')).toMatchObject({ hasMore: false, failedSafeIds: [] })

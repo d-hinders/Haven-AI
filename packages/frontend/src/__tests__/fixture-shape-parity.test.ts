@@ -21,6 +21,7 @@ import {
   FIXTURE_TXS,
   FIXTURE_ACCOUNTING_PROVIDERS,
   FIXTURE_ACCOUNTING_CONNECTION,
+  FIXTURE_ACCOUNTING_FEED_STATUS,
 } from '../../scripts/screenshot.mjs'
 import {
   testUser,
@@ -30,6 +31,7 @@ import {
   dashboardTransaction,
   accountingProviders,
   accountingConnection,
+  accountingFeedStatus,
 } from '../../e2e/fixtures/haven-api'
 
 /** Sorted top-level keys of an object. */
@@ -96,6 +98,27 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
       expect(row).toMatchObject({ status: 'connected', isActiveDestination: true, baseCurrency: 'SEK' })
       expect(typeof row.externalCompanyName).toBe('string')
     }
+  })
+
+  /**
+   * #2903 review: `/accounting` renders null unless the feed status says
+   * `hosted && flagEnabled`, so both harnesses must answer it — and with the
+   * same keys, including every sync row's.
+   */
+  it('accounting feed status aligns structurally, and both render the feed page', () => {
+    expect(keysOf(FIXTURE_ACCOUNTING_FEED_STATUS)).toEqual(keysOf(accountingFeedStatus))
+    expect(keysOf(FIXTURE_ACCOUNTING_FEED_STATUS.counts)).toEqual(keysOf(accountingFeedStatus.counts))
+    expect(FIXTURE_ACCOUNTING_FEED_STATUS.syncs.length).toBe(accountingFeedStatus.syncs.length)
+    for (const [i, row] of FIXTURE_ACCOUNTING_FEED_STATUS.syncs.entries()) {
+      expect(keysOf(row)).toEqual(keysOf(accountingFeedStatus.syncs[i]))
+    }
+    for (const status of [FIXTURE_ACCOUNTING_FEED_STATUS, accountingFeedStatus]) {
+      expect(status).toMatchObject({ hosted: true, flagEnabled: true, available: true, connected: true })
+      expect(status.syncs.map((s) => s.status).sort()).toEqual(['failed', 'pushed'])
+    }
+    // The connection row and the feed status agree on the company.
+    expect(FIXTURE_ACCOUNTING_FEED_STATUS.companyName).toBe(FIXTURE_ACCOUNTING_CONNECTION.externalCompanyName)
+    expect(accountingFeedStatus.companyName).toBe(accountingConnection.externalCompanyName)
   })
 })
 

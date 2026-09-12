@@ -239,6 +239,54 @@ export const accountingConnection = {
   settings: { suggestedAccount: '6540', autoFeed: true },
 }
 
+/**
+ * `GET /accounting/feed/status` (#2903 review): the `/accounting` feed page
+ * renders NOTHING unless `hosted && flagEnabled`, so a harness without this
+ * answer has no evidence of that page at all. Ready, entitled, connected to
+ * the company above, with one pushed row and one retryable failure so both
+ * chips render. The screenshot harness carries the same shape —
+ * `fixture-shape-parity` holds the two together.
+ */
+export const accountingFeedSync = {
+  id: '9d1f4c0a-6b2e-4f3a-9c8d-1e2f3a4b5c6d',
+  user_id: '11111111-1111-4111-8111-111111111111',
+  provider: 'fortnox',
+  payment_id: 'pay_01HZX8KQ4M2N3P5R7T9V1W3Y5A',
+  external_ref: 'fortnox:supplierinvoice:1042',
+  status: 'pushed',
+  error: null as string | null,
+  attempts: 1,
+  created_at: '2026-05-02T09:15:00.000Z',
+  updated_at: '2026-05-02T09:15:00.000Z',
+}
+
+export const accountingFeedStatus = {
+  hosted: true,
+  flagEnabled: true,
+  liveSyncReady: true,
+  entitled: true,
+  entitlementMode: 'all',
+  available: true,
+  connected: true,
+  companyName: accountingConnection.externalCompanyName as string | null,
+  missingScopes: [] as string[],
+  syncs: [
+    accountingFeedSync,
+    {
+      ...accountingFeedSync,
+      id: '2a7c9e1b-3d5f-4a6c-8e0b-2f4d6a8c0e1f',
+      payment_id: 'pay_01HZX8M0R6S8U0W2Y4A6C8E0G2',
+      external_ref: null,
+      status: 'failed',
+      error: 'Fortnox answered 503 — will retry',
+      attempts: 2,
+      created_at: '2026-05-03T11:00:00.000Z',
+      updated_at: '2026-05-03T11:05:00.000Z',
+    },
+  ],
+  counts: { pending: 0, failed: 1, exhausted: 0 },
+}
+
 type JsonValue = Record<string, unknown> | unknown[]
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {
@@ -580,6 +628,11 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path === '/accounting/connections') {
       await fulfillJson(route, { connections: [accountingConnection] })
+      return
+    }
+
+    if (method === 'GET' && path === '/accounting/feed/status') {
+      await fulfillJson(route, accountingFeedStatus)
       return
     }
 

@@ -1160,6 +1160,56 @@ export const FIXTURE_ACCOUNTING_CONNECTION = {
   settings: { suggestedAccount: '6540', autoFeed: true },
 }
 
+/**
+ * `GET /accounting/feed/status` (#2903 review). `/accounting` returns null
+ * from its render unless `hosted && flagEnabled`, so before this key the
+ * harness had no evidence of the feed page at all — under
+ * `SCREENSHOT_FIXTURE` it rendered nothing, and nothing looks like a capture
+ * of an empty page. Ready and entitled, connected to the same company as the
+ * connection row, one pushed row (with the invoice number the page extracts
+ * from `external_ref`) and one retryable failure so both chips and the
+ * Check-in-Fortnox action render. Keys mirror the e2e `accountingFeedStatus`;
+ * `fixture-shape-parity` holds them together.
+ */
+export const FIXTURE_ACCOUNTING_FEED_SYNC = {
+  id: '9d1f4c0a-6b2e-4f3a-9c8d-1e2f3a4b5c6d',
+  user_id: '11111111-1111-4111-8111-111111111111',
+  provider: 'fortnox',
+  payment_id: 'pay_01HZX8KQ4M2N3P5R7T9V1W3Y5A',
+  external_ref: 'fortnox:supplierinvoice:1042',
+  status: 'pushed',
+  error: null,
+  attempts: 1,
+  created_at: '2026-06-10T14:30:00.000Z',
+  updated_at: '2026-06-10T14:30:00.000Z',
+}
+export const FIXTURE_ACCOUNTING_FEED_STATUS = {
+  hosted: true,
+  flagEnabled: true,
+  liveSyncReady: true,
+  entitled: true,
+  entitlementMode: 'all',
+  available: true,
+  connected: true,
+  companyName: FIXTURE_ACCOUNTING_CONNECTION.externalCompanyName,
+  missingScopes: [],
+  syncs: [
+    FIXTURE_ACCOUNTING_FEED_SYNC,
+    {
+      ...FIXTURE_ACCOUNTING_FEED_SYNC,
+      id: '2a7c9e1b-3d5f-4a6c-8e0b-2f4d6a8c0e1f',
+      payment_id: 'pay_01HZX8M0R6S8U0W2Y4A6C8E0G2',
+      external_ref: null,
+      status: 'failed',
+      error: 'Fortnox answered 503 — will retry',
+      attempts: 2,
+      created_at: '2026-06-11T11:00:00.000Z',
+      updated_at: '2026-06-11T11:05:00.000Z',
+    },
+  ],
+  counts: { pending: 0, failed: 1, exhausted: 0 },
+}
+
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
@@ -1175,6 +1225,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/contacts') return { contacts: FIXTURE_CONTACTS }
   if (pathname === '/accounting/providers') return { providers: FIXTURE_ACCOUNTING_PROVIDERS }
   if (pathname === '/accounting/connections') return { connections: [FIXTURE_ACCOUNTING_CONNECTION] }
+  if (pathname === '/accounting/feed/status') return FIXTURE_ACCOUNTING_FEED_STATUS
   if (pathname === '/agent-activity/feed') {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
   }
@@ -2453,7 +2504,8 @@ export const SCENARIOS = {
 
       // ── scope_missing ─────────────────────────────────────────────────────
       await openStage('scope-missing')
-      await card.getByText(/\(companyinformation, archive\)/).waitFor({ timeout: 15_000 })
+      // Human labels, not the raw identifiers (#2903 review).
+      await card.getByText(/\(company information, archive\)/).waitFor({ timeout: 15_000 })
       await expectState('scope-missing', 'Needs more access', 'Reconnect', ['Connect', 'Settings'])
 
       // ── revoked_at_provider ───────────────────────────────────────────────
@@ -2468,10 +2520,46 @@ export const SCENARIOS = {
 
       // ── the backfill choice on a first connect ────────────────────────────
       await openStage('first-connect', '?provider=fortnox&connect=connected')
-      const dialog = page.getByRole('dialog')
+      // The PANEL, not `role="dialog"`: in `ui/Modal` that role sits on the
+      // `fixed inset-0` wrapper, so a clip of it is the whole page (#2903).
+      const dialog = page.getByTestId('backfill-dialog')
       await dialog.getByRole('heading', { name: 'Include earlier payments?' }).waitFor({ timeout: 15_000 })
       await dialog.getByRole('radio', { name: /Feed from now/ }).waitFor({ timeout: 15_000 })
+      await dialog.getByRole('button', { name: 'Not now', exact: true }).waitFor({ timeout: 15_000 })
       await shoot(dialog, 'backfill-dialog')
+    },
+  },
+
+  /**
+   * The `/accounting` feed page after #2868 (#2903 review): the connection
+   * row that now only points at Settings, the Synced transactions list with
+   * a pushed row (invoice number + Check in Fortnox) and a failed one.
+   * Needs the feed-status fixture above — without `hosted && flagEnabled`
+   * the page renders null, which is exactly why there was no evidence.
+   */
+  'accounting-feed': {
+    description:
+      'The /accounting feed page — connection pointer to Settings, synced transactions with a pushed and a failed row (#2868, #2903)',
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.evaluate(() => document.fonts.ready)
+      await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+      await dismissMobileSidebar(page, vp)
+
+      const main = page.locator('main').first()
+      // Each claim the capture is evidence of, waited on: the pointer to
+      // Settings (Connect / Disconnect must be ABSENT), both sync chips, and
+      // the invoice number the page extracts from `external_ref`.
+      await main.getByRole('link', { name: 'Open Settings', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Manage your accounting connection in Settings.').waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · Connect')
+      await refuseIfPresent(main.getByRole('button', { name: 'Disconnect', exact: true }), 'accounting-feed · Disconnect')
+      await main.getByRole('heading', { name: 'Synced transactions' }).waitFor({ timeout: 15_000 })
+      await main.getByText('Fortnox invoice 1042', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByRole('button', { name: 'Check in Fortnox', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Synced', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByText('Failed', { exact: true }).waitFor({ timeout: 15_000 })
+      await shoot(main, 'feed')
     },
   },
 

@@ -9,7 +9,8 @@
  *
  *   status                 chip                 primary action   secondary
  *   ──────────────────────────────────────────────────────────────────────
- *   (no row) / disconnected  Not connected      Connect          —
+ *   (no row)               Not connected      Connect          —
+ *   disconnected           Not connected      Connect          —
  *   connected                Connected          Settings         Disconnect
  *   needs_reauthorisation    Sign-in expired    Reconnect        Disconnect
  *   scope_missing            Needs more access  Reconnect        Disconnect
@@ -20,10 +21,18 @@
  * and the sync history) — the label differs because the user's situation
  * does. `scope_missing` names `missingScopes` when the backend has them;
  * the array may be empty (a scope refusal the provider did not name), and
- * that case gets the unnamed sentence rather than "()".
+ * that case gets the unnamed sentence rather than "()". The identifiers are
+ * shown as human labels (`companyinformation` → "company information") where
+ * the catalog has one, raw otherwise.
+ *
+ * No row and `disconnected` share a chip and an action but not a sentence:
+ * a first visit gets the one that guides the action ("Connect to feed…"),
+ * a disconnected row the one that says what happened to its history.
  *
  * A `coming_soon` provider is listed with a one-line description and a
- * disabled Connect — listing is a product decision, not an endorsement.
+ * disabled Connect — listing is a product decision, not an endorsement. The
+ * chip and the disabled button already say it cannot be connected, so the
+ * description does not repeat it.
  *
  * ── Why `SettingsRow`, not `ui/Row` ──────────────────────────────────────
  * `ui/Row` truncates its title and subtitle to one line and never wraps its
@@ -41,6 +50,7 @@ import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
 import type { AccountingConnection, AccountingConnectionStatus, AccountingProvider } from '@/hooks/useAccounting'
 import type { Locale } from '@/lib/i18n'
+import { connectionSettingsRegionId } from './ConnectionSettings'
 
 export type ConnectionAction = 'connect' | 'reconnect' | 'settings'
 
@@ -107,7 +117,6 @@ export function ConnectionRow({
   const name = provider.displayName
 
   if (provider.availability !== 'live') {
-    const descriptions = copy.comingSoonDescription as Record<string, string>
     return (
       <SettingsRow
         data-testid={`connection-row-${provider.id}`}
@@ -117,7 +126,7 @@ export function ConnectionRow({
             <StatusBadge tone="neutral">{t.common.comingSoon}</StatusBadge>
           </span>
         }
-        detail={descriptions[provider.id] ?? copy.comingSoonDescription.generic}
+        detail={copy.comingSoonDescription[provider.id]}
         action={
           <span className="flex items-center gap-2" data-testid={`connection-actions-${provider.id}`}>
             <Button size="sm" variant="ghost" disabled>
@@ -150,7 +159,7 @@ export function ConnectionRow({
       detail = copy.detail.needsReauthorisation(name)
       break
     case 'scope_missing': {
-      const scopes = connection?.missingScopes ?? []
+      const scopes = (connection?.missingScopes ?? []).map((scope) => copy.scopeLabels[scope] ?? scope)
       detail = scopes.length > 0 ? copy.detail.scopeMissing(name, scopes.join(', ')) : copy.detail.scopeMissingUnnamed(name)
       break
     }
@@ -158,14 +167,22 @@ export function ConnectionRow({
       detail = copy.detail.revoked(name)
       break
     case 'disconnected':
-      detail = provider.configured ? copy.detail.disconnected(name) : copy.notConfigured
+      if (!provider.configured) detail = copy.notConfigured
+      else detail = connection ? copy.detail.disconnected(name) : copy.detail.notConnected(name)
       break
   }
 
   const canConnect = provider.configured
   const primary =
     action === 'settings' ? (
-      <Button size="sm" variant="ghost" onClick={onToggleSettings} disabled={busy}>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={onToggleSettings}
+        disabled={busy}
+        aria-expanded={settingsOpen}
+        aria-controls={connectionSettingsRegionId(provider.id)}
+      >
         {settingsOpen ? copy.actions.hideSettings : copy.actions.settings}
       </Button>
     ) : (

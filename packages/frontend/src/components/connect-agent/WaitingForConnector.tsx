@@ -11,7 +11,7 @@ import { ChevronRight } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { CopyBlock } from './CopyBlock'
-import { SegmentedControl } from './SegmentedControl'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { InlineErrorNote } from './SetupNotices'
 import { formatAbsoluteDate } from './setup-copy'
 
@@ -227,7 +227,7 @@ export function WaitingForConnector({
           ) : (
             <div className="space-y-3">
               <SegmentedControl
-                label="Credential format"
+                ariaLabel="Credential format"
                 options={[
                   { value: 'env', label: '.env' },
                   { value: 'prompt', label: 'Agent workspace prompt' },

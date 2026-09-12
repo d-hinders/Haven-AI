@@ -1,1 +1,83 @@
-{}
+{
+  "src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
+    "white-or-black-class": 2
+  },
+  "src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx": {
+    "white-or-black-class": 2
+  },
+  "src/app/(authenticated)/contacts/page.tsx": {
+    "white-or-black-class": 2
+  },
+  "src/app/(authenticated)/dashboard/DashboardClient.tsx": {
+    "white-or-black-class": 3
+  },
+  "src/app/(authenticated)/profile/page.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/app/(authenticated)/settings/SettingsClient.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/app/(authenticated)/settings/page.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/app/login/page.tsx": {
+    "white-or-black-class": 2
+  },
+  "src/app/onboarding/OnboardingClient.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/app/signup/page.tsx": {
+    "white-or-black-class": 3
+  },
+  "src/components/AddFundsModal.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/AgentPanel.tsx": {
+    "white-or-black-class": 2
+  },
+  "src/components/CatalogPanel.tsx": {
+    "white-or-black-class": 3
+  },
+  "src/components/DashboardActionPickerModal.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/DashboardOnboardingGuide.tsx": {
+    "white-or-black-class": 4
+  },
+  "src/components/DelegationSendModal.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/EditAgentModal.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/ErrorBoundary.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/NetworkGate.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/PasskeyOtherDeviceNotice.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/PaymentCredentialsModal.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/ReceiveFundsModal.tsx": {
+    "white-or-black-class": 3
+  },
+  "src/components/WalletButton.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/connect-agent/WaitingForConnector.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/onboarding/RecoveryNudge.tsx": {
+    "white-or-black-class": 1
+  },
+  "src/components/sidebar/Sidebar.tsx": {
+    "white-or-black-class": 2
+  },
+  "src/components/transactions/FilterBar.tsx": {
+    "white-or-black-class": 7
+  }
+}

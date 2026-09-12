@@ -15,9 +15,17 @@ describe('design-lint scanner (#855)', () => {
     expect(hits[0].rule).toBe('raw-palette')
   })
 
-  it('does not flag token-routed colours, white/black, or v2 utilities', () => {
-    const src = '<div className="text-[var(--v2-ink)] bg-white border-black v2-tabular" />'
+  it('does not flag token-routed colours or v2 utilities; white/black classes ARE flagged now (#2927)', () => {
+    const src = '<div className="text-[var(--v2-ink)] bg-[var(--v2-bg)] border-[var(--v2-border)] v2-tabular" />'
     expect(scan('src/components/X.tsx', src)).toEqual([])
+    // #2927 moved the primitives off white/black: the classes stay legal to
+    // Tailwind but the gate counts them in product surfaces (shrink-only
+    // ratchet, seeded at the post-slice count).
+    expect(scan('src/components/X.tsx', '<div className="bg-white text-black ring-white/80" />').map((h) => h.rule)).toEqual([
+      'white-or-black-class',
+      'white-or-black-class',
+      'white-or-black-class',
+    ])
   })
 
   it('flags hardcoded hex colours with line numbers', () => {
@@ -64,9 +72,9 @@ describe('design-lint scanner (#855)', () => {
     // comment opener — that blinded ALL rules to the rest of any line with a
     // URL on it. Same line, with and without the href, must agree.
     const withUrl =
-      'const x = <a href="https://haven.example" className="bg-white text-[#123456] rounded-lg">go</a>'
+      'const x = <a href="https://haven.example" className="bg-[var(--v2-bg)] text-[#123456] rounded-lg">go</a>'
     const withoutUrl =
-      'const x = <a className="bg-white text-[#123456] rounded-lg">go</a>'
+      'const x = <a className="bg-[var(--v2-bg)] text-[#123456] rounded-lg">go</a>'
     expect(scan('src/components/X.tsx', withUrl)).toEqual(
       scan('src/components/X.tsx', withoutUrl),
     )
@@ -93,8 +101,13 @@ describe('design-lint scanner (#855)', () => {
   })
 
   it('structural rules do not false-positive on lookalikes (code review 2026-07-13)', () => {
-    // border-black is NOT a bottom border — `border-b` must not match inside it:
-    expect(scan('src/components/X.tsx', '<div className="border-black/10 bg-[var(--v2-surface)] rounded" />')).toEqual([])
+    // border-black is NOT a bottom border — `border-b` must not match inside
+    // it. (#2927: the class itself is now counted by white-or-black-class,
+    // but the STRUCTURAL header-band rule must still not fire on it.)
+    const borderBlack = '<div className="border-black bg-[var(--v2-surface)] rounded" />'
+    expect(scan('src/components/X.tsx', borderBlack).map((h) => h.rule)).toEqual([
+      'white-or-black-class',
+    ])
     // Array previews and generic suffixes are NOT address truncation:
     expect(scan('src/components/X.tsx', 'const preview = agents.slice(0, 6)')).toEqual([])
     expect(scan('src/components/X.tsx', 'const last = id.slice(-4)')).toEqual([])

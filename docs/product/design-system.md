@@ -3,6 +3,11 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/frontend/src/app/globals.css
+  - packages/frontend/src/context/ThemeContext.tsx
+  - packages/frontend/src/lib/theme-bootstrap.ts
+  - packages/frontend/src/lib/theme-tokens.ts
+  - packages/frontend/scripts/contrast-check.mjs
+  - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/AuthenticatedShell.tsx
@@ -105,41 +110,56 @@ The production authenticated app and `/design-system` are the live references fo
 
 All tokens live as CSS custom properties at `:root` in `packages/frontend/src/app/globals.css`. Core color, radius, and shadow tokens are mirrored in `packages/frontend/tailwind.config.js` so they are usable as `bg-bg`, `text-ink`, `border-border`, `shadow-card`, etc. Since [#1945](https://github.com/d-hinders/Haven-AI/issues/1945) that mirror covers the **whole** elevation scale — raised cards and popovers were the two tiers still missing, which is exactly why their call sites reached for the arbitrary-value form that turned out to paint nothing (§ Shadows). Typography utilities, the modal backdrop and the brand gradient remain CSS variables/classes only, deliberately: the first is a set of composite classes and the last two have no Tailwind utility family to join.
 
+**Every colour token has a dark value ([#2927](https://github.com/d-hinders/Haven-AI/issues/2927)).** The tables below carry a dark column alongside the light value. Mechanically: the light palette is the bare `:root` block; the dark values are re-declared in TWO byte-identical blocks —
+
+```css
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { /* dark values */ }
+}
+:root[data-theme="dark"] { /* the same dark values */ }
+```
+
+— so an un-stamped document (the `system` preference) follows the OS while an explicit choice beats the OS in both directions. `color-scheme` is declared in all three blocks so native form controls, scrollbars and the date picker match the active palette. The invariants (every colour token redeclared in both dark blocks, the two blocks byte-identical, `THEME_TOKENS` in `src/lib/theme-tokens.ts` pinned to the CSS) are enforced by `src/lib/__tests__/theme-tokens.test.ts`; `/design-system` → *Colour tokens* renders both palettes and the measured contrast table side by side. The two blocks must be edited together — the test reds on the first drift.
+
 ### Surfaces
 
-| Token | Value | Use |
-|---|---|---|
-| `--v2-bg` | `#ffffff` | Page background |
-| `--v2-surface` | `#f6f9fc` | Alternating section bands, card hover backgrounds |
-| `--v2-surface-2` | `#eef2f7` | Disabled states, deeper card stacking |
-| `--v2-surface-code` | `#0b1120` | Dark code blocks on light pages (Stripe pattern) |
-| `--v2-surface-hover` | `#f0f4f9` | Sidebar/user-menu row hover and subtle interactive shells |
-| `--v2-modal-backdrop` | `rgba(26, 31, 54, 0.66)` | Overlay dim for Modal and SidePanel — solid, deliberately **no** blur (see § Layering) |
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `--v2-bg` | `#ffffff` | `#12151c` | Page background |
+| `--v2-surface` | `#f6f9fc` | `#191d26` | Alternating section bands, card hover backgrounds |
+| `--v2-surface-2` | `#eef2f7` | `#20252f` | Disabled states, deeper card stacking |
+| `--v2-surface-code` | `#0b1120` | `#0b1120` | Dark code blocks (deliberately **not** re-tinted in dark — content keeps its own colours) |
+| `--v2-surface-hover` | `#f0f4f9` | `#232837` | Sidebar/user-menu row hover and subtle interactive shells |
+| `--v2-modal-backdrop` | `rgba(26, 31, 54, 0.66)` | `rgba(0, 0, 0, 0.6)` | Overlay dim for Modal and SidePanel — solid, deliberately **no** blur (see § Layering) |
+
+Dark surfaces step **lighter** with elevation (`bg` < `surface` < `surface-2` < `surface-hover`) and borders sit lighter than the surface they divide — dark UIs elevate by lightening, not by shadow.
 
 ### Ink (text)
 
-| Token | Value | Use |
-|---|---|---|
-| `--v2-ink` | `#1a1f36` | Headings, primary text, amounts |
-| `--v2-ink-2` | `#525f7f` | Body text, secondary information |
-| `--v2-ink-3` | `#5d6c85` | Tertiary text, eyebrows, captions — AA-safe (≥4.5:1) on white and all tinted surfaces |
-| `--v2-ink-on-brand` | `#ffffff` | Text on brand‑colored or dark surfaces |
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `--v2-ink` | `#1a1f36` | `#f0f3f8` | Headings, primary text, amounts |
+| `--v2-ink-2` | `#525f7f` | `#b3bdcd` | Body text, secondary information |
+| `--v2-ink-3` | `#5d6c85` | `#8f9cb0` | Tertiary text, eyebrows, captions — AA-safe (≥4.5:1) on white/all tinted surfaces in **both** themes |
+| `--v2-ink-on-brand` | `#ffffff` | `#1a1f36` | Text on brand‑colored fills (dark brand is a light fill, so the ink flips) |
 
 ### Borders
 
-| Token | Value | Use |
-|---|---|---|
-| `--v2-border` | `#e6ebf1` | Default hairline (cards, dividers) |
-| `--v2-border-strong` | `#d6dbe3` | Hover, ghost button borders, flow arrows, the local-hint marker's left rule (§ 3) |
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `--v2-border` | `#e6ebf1` | `#2b3140` | Default hairline (cards, dividers) |
+| `--v2-border-strong` | `#d6dbe3` | `#3a4152` | Hover, ghost button borders, flow arrows, the local-hint marker's left rule (§ 3) |
 
 ### Brand
 
-| Token | Value | Use |
-|---|---|---|
-| `--v2-brand` | `#4f46e5` (indigo‑600) | Primary CTA bg, links, accents, brand mark |
-| `--v2-brand-strong` | `#4338ca` (indigo‑700) | Primary CTA hover |
-| `--v2-brand-soft` | `#eef2ff` | Brand‑tinted card backgrounds, focus rings |
-| `--v2-brand-gradient` | `linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)` | Gradient wordmark or one restrained brand accent |
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `--v2-brand` | `#4f46e5` (indigo‑600) | `#a5acff` | Primary CTA bg, links, accents, brand mark |
+| `--v2-brand-strong` | `#4338ca` (indigo‑700) | `#b7bcff` | Primary CTA hover |
+| `--v2-brand-soft` | `#eef2ff` | `#262b3f` | Brand‑tinted card backgrounds, focus rings |
+| `--v2-brand-gradient` | `linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)` | not re-declared (#2929 sweep) | Gradient wordmark or one restrained brand accent |
+
+Dark brand is **lightened and desaturated**, not inverted: `#4f46e5` is ~3.9:1 on a dark ground and fails AA, while `#a5acff` clears it — and because the dark accent is a light fill, `--v2-ink-on-brand` flips to the deep ink.
 
 Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do not use the gradient for buttons, badges, large panels, or repeated decoration.
 
@@ -147,16 +167,16 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 
 ### Semantic
 
-| Token | Value | Soft variant | Use |
-|---|---|---|---|
-| `--v2-success` | `#047857` | `--v2-success-soft` `#ecfdf5` | Settled, confirmed, incoming |
-| `--v2-debit` | `#0369a1` | `--v2-debit-soft` `#f0f9ff` | Outgoing / sent money (sibling to success; never a warning) |
-| `--v2-warning` | `#b54708` | `--v2-warning-soft` `#fef3c7` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge; a paused agent's status markers — `AgentCard`'s header pill (`:146`) and bot tile (`:94`), the same fact on two surfaces (#2764) |
-| `--v2-danger` | `#b42318` | `--v2-danger-soft` `#fef2f2` | Failed, destructive |
+| Token | Light | Dark | Soft variant (light / dark) | Use |
+|---|---|---|---|---|
+| `--v2-success` | `#047857` | `#34d399` | `--v2-success-soft` `#ecfdf5` / `#12312a` | Settled, confirmed, incoming |
+| `--v2-debit` | `#0369a1` | `#38bdf8` | `--v2-debit-soft` `#f0f9ff` / `#0e2a3a` | Outgoing / sent money (sibling to success; never a warning) |
+| `--v2-warning` | `#b54708` | `#fcd34d` | `--v2-warning-soft` `#fef3c7` / `#33260e` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge; a paused agent's status markers — `AgentCard`'s header pill (`:146`) and bot tile (`:94`), the same fact on two surfaces (#2764) |
+| `--v2-danger` | `#b42318` | `#f87171` | `--v2-danger-soft` `#fef2f2` / `#3a1512` | Failed, destructive |
 
 Same rule as v1: **never repurpose a semantic color**.
 
-**Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover). Guarded by `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, that test tells you whether it still clears the bar.
+**Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover) — in BOTH themes since [#2927](https://github.com/d-hinders/Haven-AI/issues/2927) (every `ink*`-on-ground pair ≥ 4.5:1, `ink-on-brand` on brand ≥ 4.5:1, each `-soft` tint vs its foreground ≥ 3:1). Guarded per theme by `packages/frontend/scripts/contrast-check.mjs` (run in the unit suite via `src/lib/__tests__/theme-tokens.test.ts`, table on `/design-system`) on top of `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, the tests tell you whether it still clears the bar, in both palettes.
 
 ### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
 

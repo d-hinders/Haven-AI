@@ -229,14 +229,16 @@ describe('server-side credential path (#2482)', () => {
       'HAVEN_MCP_URL=',
     ]
     // Default format is .env with the prose prompt available as the switch.
-    const envTab = getByRole('button', { name: '.env' })
-    expect(envTab.getAttribute('aria-pressed')).toBe('true')
+    // #2927: the control is the promoted ui/SegmentedControl — radio
+    // semantics (`aria-checked`), not buttons with `aria-pressed`.
+    const envTab = getByRole('radio', { name: '.env' })
+    expect(envTab.getAttribute('aria-checked')).toBe('true')
     for (const key of FIVE) expect(server.textContent).toContain(key)
-    expect(getByRole('button', { name: 'Agent workspace prompt' })).toBeDefined()
+    expect(getByRole('radio', { name: 'Agent workspace prompt' })).toBeDefined()
 
     // Switching to the prose format keeps all five values — no info dropped.
-    fireEvent.click(getByRole('button', { name: 'Agent workspace prompt' }))
-    expect(envTab.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(getByRole('radio', { name: 'Agent workspace prompt' }))
+    expect(envTab.getAttribute('aria-checked')).toBe('false')
     for (const key of FIVE) expect(server.textContent).toContain(key)
     expect(server.textContent).toContain('Manual Haven credential for Research Agent')
   })

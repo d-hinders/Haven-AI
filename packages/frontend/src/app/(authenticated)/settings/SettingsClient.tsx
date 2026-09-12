@@ -6,62 +6,12 @@ import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useT } from '@/context/LocaleContext'
+import { useTheme, type ThemePreference } from '@/context/ThemeContext'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { SettingsSection as Section, SettingsRow as SettingRow } from './SettingsSection'
 import { ConnectionsCard } from '@/components/accounting/ConnectionsCard'
-
-
-/**
- * Inline segmented control — the canonical Settings toggle. Currency is its
- * only user since #2926 removed the language row; it is kept as the page's
- * toggle pattern (dark mode, #2927, is the next one). One tinted track
- * (`--v2-surface`) with a white, shadowed
- * thumb on the active option; matches the design-system surface rules (no
- * nested filled cards — the track is a control surface, not a grouping card).
- */
-function SegmentedControl<T extends string>({
-  options,
-  value,
-  onChange,
-  disabled = false,
-  ariaLabel,
-}: {
-  options: ReadonlyArray<{ value: T; label: string }>
-  value: T
-  onChange: (value: T) => void
-  disabled?: boolean
-  ariaLabel: string
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label={ariaLabel}
-      className="flex rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] p-1"
-    >
-      {options.map((option) => {
-        const active = value === option.value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(option.value)}
-            disabled={disabled}
-            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-              active
-                ? 'bg-white text-[var(--v2-ink)] shadow-sm'
-                : 'text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]'
-            } disabled:opacity-50`}
-          >
-            {option.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
 
 function StatusPill({
   children,
@@ -103,6 +53,7 @@ function ComingSoonToggle({ label, comingSoonText }: { label: string; comingSoon
 export default function SettingsClient() {
   const { passkeys = [] } = useAuth()
   const { currency, setCurrency, saving } = usePreferences()
+  const { preference, setPreference } = useTheme()
   const t = useT()
 
   const hasPasskey = passkeys.length > 0
@@ -136,6 +87,28 @@ export default function SettingsClient() {
                 options={[
                   { value: 'USD', label: '$ USD' },
                   { value: 'EUR', label: '€ EUR' },
+                ]}
+              />
+            )}
+          />
+          {/*
+            Appearance (#2927): the theme preference. Same row shape the
+            language row used before #2926 removed it, on the promoted
+            ui/SegmentedControl. `system` (the default) stamps nothing and
+            lets the OS decide; explicit choices stamp `data-theme`.
+          */}
+          <SettingRow
+            label={t.settings.theme.label}
+            detail={t.settings.theme.detail}
+            action={(
+              <SegmentedControl
+                ariaLabel={t.settings.theme.label}
+                value={preference}
+                onChange={(next: ThemePreference) => setPreference(next)}
+                options={[
+                  { value: 'light', label: t.settings.theme.light },
+                  { value: 'dark', label: t.settings.theme.dark },
+                  { value: 'system', label: t.settings.theme.system },
                 ]}
               />
             )}

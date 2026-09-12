@@ -5,6 +5,7 @@ import Providers from './providers'
 import DiscoverySourceCapture from '@/components/DiscoverySourceCapture'
 import { havenEnvironment } from '@/lib/env'
 import { INSTALLED_APP_VIEWPORT, installedAppMetadata } from '@/lib/installed-app'
+import { THEME_BOOTSTRAP_SCRIPT } from '@/lib/theme-bootstrap'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -26,8 +27,22 @@ export const viewport: Viewport = INSTALLED_APP_VIEWPORT
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // `suppressHydrationWarning`: the bootstrap script may have stamped
+    // `data-theme` on this element before React hydrates — a fact the server
+    // render could not know. The warning suppression is scoped to <html>
+    // itself; the bootstrap script (lib/theme-bootstrap.ts, unit-tested)
+    // touches ONLY that attribute, so nothing else can hide behind it.
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/*
+          No-flash theme bootstrap (#2927). Runs BEFORE any stylesheet paints:
+          reads `haven.theme` and stamps `data-theme` on <html> so the first
+          paint already carries the right token block. It is the app's only
+          inline script; its content is the unit-tested constant
+          THEME_BOOTSTRAP_SCRIPT (parse + jsdom behaviour in
+          src/lib/__tests__/theme-bootstrap.test.ts).
+        */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
         {/*
           Agent-discovery hooks (#2521). An agent that fetches this page can now
           find the agent-readable artifacts from the HTML instead of guessing the

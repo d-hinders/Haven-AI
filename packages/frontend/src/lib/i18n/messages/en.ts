@@ -24,6 +24,13 @@ export const en = {
     title: 'Accounting',
     subtitle:
       'Your agent spend appears in your accounting tool as draft transactions — your accountant codes and confirms them.',
+    /**
+     * The header line in the two OFF states (#2869 design review): the
+     * product subtitle above says something happens, and it sat directly
+     * above "Nothing can be connected yet." Neutral — names the area, claims
+     * nothing.
+     */
+    subtitleOff: 'Accounting tool connections for agent spend.',
     manageInSettings: 'Manage your accounting connection in Settings.',
     openSettings: 'Open Settings',
     /**
@@ -57,9 +64,9 @@ export const en = {
     comingSoon: {
       title: 'Accounting feed',
       body:
-        'Settled agent payments will appear in your accounting tool as drafts with the payment evidence attached. Your accountant codes and books them; Haven asserts nothing.',
+        'Settled agent payments will appear in your accounting tool as drafts with the payment evidence attached — your accountant codes and books them. Haven does not decide accounts or VAT.',
       platformsTitle: 'Platforms being lined up',
-      platformsBody: 'Listed, not endorsed. Which ones go live is a separate decision.',
+      platformsBody: 'Which of these go live has not been decided.',
       notYet: 'Nothing can be connected yet.',
     },
     /**
@@ -80,7 +87,9 @@ export const en = {
        * The marker on the nav entry while the feed is off. Short on purpose:
        * the 240px rail cannot hold "Accounting" and "Coming soon" side by
        * side at 13px (the first #2869 capture truncated the label to
-       * "Accoun…"); the full phrase is the pill's `title`.
+       * "Accoun…"). The full phrase (`common.comingSoon`) is the pill's
+       * accessible name and its visible text below `lg`, where the drawer
+       * is full-width.
        */
       comingSoon: 'Soon',
     },
@@ -150,6 +159,8 @@ export const en = {
       title: 'Accounting',
       description:
         'Connect the accounting tool your company uses. Settled agent payments appear there with payment evidence attached; your accountant books them.',
+      /** The card's line in the two OFF states — neutral, above "Nothing can be connected yet." / "Not available on self-hosted" (#2869). */
+      descriptionOff: "Your company's accounting tool.",
       /**
        * Carried over from the feed page's connect card, which this section
        * replaced: the responsibility line the accounting guardrail requires.

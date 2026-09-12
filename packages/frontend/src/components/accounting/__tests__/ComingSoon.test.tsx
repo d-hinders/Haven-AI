@@ -55,6 +55,19 @@ describe('ComingSoon (hosted, flag off)', () => {
     expectNoActions()
   })
 
+  it('speaks to the user in the non-asserting register, not to the owner (#2869 design review)', () => {
+    renderIn(<ComingSoon />)
+    const text = document.body.textContent ?? ''
+    // What the accountant does and what Haven does not decide — said to the user.
+    expect(text).toContain('your accountant codes and books them')
+    expect(text).toContain('Haven does not decide accounts or VAT')
+    expect(text).toContain(en.accountingPage.comingSoon.platformsBody)
+    // The owner-facing phrasing the first cut carried.
+    expect(text).not.toContain('Haven asserts nothing')
+    expect(text).not.toContain('Listed, not endorsed')
+    expect(text).not.toContain('separate decision')
+  })
+
   it('lists the live providers when the registry answers', async () => {
     renderIn(<ComingSoon />)
     await waitFor(() => expect(screen.getByText('Fortnox')).toBeInTheDocument())

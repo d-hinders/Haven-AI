@@ -93,6 +93,11 @@ export function ConnectionsCard() {
   // card would offer Connect on a deployment whose feed is switched off.
   const { status: feedStatus, loading: feedLoading } = useAccountingFeed()
   const feedOff = accountingFeedOffState(feedStatus)
+  // Fail CLOSED (#2869 review): with no status answer the card cannot tell a
+  // flagged-off deployment from a hosted one, and the connection routes are
+  // reachable either way until #2918 gates them server-side — so a failed
+  // read shows the load error and NO controls, never the Connect UI.
+  const feedUnknown = !feedLoading && !feedStatus
   const {
     connections,
     loading: connectionsLoading,
@@ -170,10 +175,18 @@ export function ConnectionsCard() {
     return { tone: 'error' as const, text: copy.outcome.error(name) }
   })()
 
-  const listError = providersError || connectionsError ? copy.loadError : null
+  const listError = providersError || connectionsError || feedUnknown ? copy.loadError : null
 
   return (
-    <SettingsSection title={copy.title} description={copy.description} note={copy.disclaimer}>
+    <SettingsSection
+      title={copy.title}
+      // #2869 design review: the product description ("Connect the accounting
+      // tool your company uses…") sat directly above "Nothing can be connected
+      // yet." — the off states, and the renders before the status is known,
+      // get the neutral line.
+      description={feedStatus && !feedOff ? copy.description : copy.descriptionOff}
+      note={copy.disclaimer}
+    >
       {outcomeLine || actionError ? (
         <div className="space-y-2 px-6 py-3" data-testid="accounting-outcome">
           {outcomeLine ? (

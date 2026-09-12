@@ -194,10 +194,11 @@ off**, and the two off states read differently — exposure (flipping
 | **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** |
 
 In both off states the page header and the Settings card carry a neutral
-one-liner ("Feeding agent spend to your accounting tool." / "Your company's
-accounting tool.") — the non-asserting product subtitle ("…your accountant
-codes and confirms them") is shown only when the feed is on, so nothing
-above "Nothing can be connected yet" asserts that something happens.
+one-liner ("Accounting tool connections for agent spend." / "Your company's
+accounting tool.") — the product subtitle ("…your accountant codes and
+confirms them") and the card's product description are shown only when the
+feed is on, so nothing above "Nothing can be connected yet." asserts that
+something happens.
 
 `hosted` is the outer question: a self-hosted box with the flag set is still
 self-hosted, which is what `accountingFeedAvailability` already does. The

@@ -1162,7 +1162,7 @@ export const FIXTURE_ACCOUNTING_CONNECTION = {
 
 /**
  * `GET /accounting/feed/status` (#2903 review). `/accounting` returns null
- * from its render unless `hosted && flagEnabled`, so before this key the
+ * from its render unless `hosted && enabled`, so before this key the
  * harness had no evidence of the feed page at all — under
  * `SCREENSHOT_FIXTURE` it rendered nothing, and nothing looks like a capture
  * of an empty page. Ready and entitled, connected to the same company as the
@@ -1241,6 +1241,20 @@ export const FIXTURE_ACCOUNTING_FEED_COMING_SOON = {
   counts: { pending: 0, failed: 0, exhausted: 0 },
 }
 export const FIXTURE_ACCOUNTING_FEED_SELF_HOSTED = { ...FIXTURE_ACCOUNTING_FEED_COMING_SOON, hosted: false }
+
+/**
+ * The ATTENTION state (#2869 design review): the destination's sign-in has
+ * expired (still the destination, cannot push) and the sweep has given up on
+ * three rows. Raises the attention summary, the inline "Stopped retrying"
+ * explanation and the sidebar dot. Mirrors the e2e `accountingFeedAttention`.
+ */
+export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
+  ...FIXTURE_ACCOUNTING_FEED_STATUS,
+  connected: false,
+  companyName: null,
+  destination: { ...FIXTURE_ACCOUNTING_FEED_STATUS.destination, status: 'needs_reauthorisation', companyName: null, lastPushAt: null },
+  counts: { pending: 0, failed: 1, exhausted: 3 },
+}
 
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
@@ -2448,6 +2462,16 @@ const SETTINGS_ACCOUNTING_STAGES = {
     updatedAt: '2026-06-12T03:00:00.000Z',
     settings: { suggestedAccount: null, autoFeed: true },
   },
+  // The card's two OFF states (#2869): no connection row at all, and the
+  // FEED STATUS answer is what makes the state — `hosted && !enabled` lists
+  // every provider as Coming soon with no action; `!hosted` lists none.
+  'coming-soon': null,
+  'self-hosted': null,
+}
+/** The feed-status answer per OFF stage; every other stage falls through to the ON fixture. */
+const SETTINGS_ACCOUNTING_FEED_STAGES = {
+  'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
+  'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
 }
 let settingsAccountingStage = 'connected'
 function setSettingsAccountingStage(next) {
@@ -2467,6 +2491,7 @@ function setSettingsAccountingStage(next) {
  */
 const ACCOUNTING_FEED_STAGES = {
   on: FIXTURE_ACCOUNTING_FEED_STATUS,
+  attention: FIXTURE_ACCOUNTING_FEED_ATTENTION,
   'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
 }
@@ -2483,14 +2508,16 @@ function setAccountingFeedStage(next) {
 export const SCENARIOS = {
   'settings-accounting': {
     description:
-      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868)',
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), and the two feed OFF states — Coming soon and self-hosted (#2869)',
     stages: SETTINGS_ACCOUNTING_STAGES,
     /** Exposed so the fixture-contract test can pin each stage. */
     stage: setSettingsAccountingStage,
     api(apiPath) {
       if (apiPath === '/accounting/connections') {
-        return { connections: [SETTINGS_ACCOUNTING_STAGES[settingsAccountingStage]] }
+        const row = SETTINGS_ACCOUNTING_STAGES[settingsAccountingStage]
+        return { connections: row ? [row] : [] }
       }
+      if (apiPath === '/accounting/feed/status') return SETTINGS_ACCOUNTING_FEED_STAGES[settingsAccountingStage]
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -2579,6 +2606,34 @@ export const SCENARIOS = {
       await dialog.getByRole('radio', { name: /Feed from now/ }).waitFor({ timeout: 15_000 })
       await dialog.getByRole('button', { name: 'Not now', exact: true }).waitFor({ timeout: 15_000 })
       await shoot(dialog, 'backfill-dialog')
+
+      // ── the two OFF states (#2869) ────────────────────────────────────────
+      // No `fortnoxActions` to wait on here — the whole point is that no
+      // action renders — so these settle on the state's own test id.
+      const settleOff = async (stage, testId) => {
+        setSettingsAccountingStage(stage)
+        await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        await page.evaluate(() => document.fonts.ready)
+        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await dismissMobileSidebar(page, vp)
+        await heading.waitFor({ timeout: 15_000 })
+        await card.getByTestId(testId).waitFor({ timeout: 15_000 })
+        for (const name of ['Connect', 'Reconnect', 'Disconnect', 'Settings']) {
+          await refuseIfPresent(card.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
+        }
+        // The neutral description, never the product sentence above "Nothing can be connected yet."
+        await card.getByText("Your company's accounting tool.", { exact: true }).waitFor({ timeout: 15_000 })
+        await refuseIfPresent(card.getByText(/Connect the accounting tool your company uses/), `settings-accounting · ${stage} · product description`)
+        await card.scrollIntoViewIfNeeded()
+        await shoot(card, stage)
+      }
+      await settleOff('coming-soon', 'accounting-coming-soon')
+      await card.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
+      await card.getByTestId('connection-row-fortnox').getByText('Coming soon').waitFor({ timeout: 15_000 })
+      await settleOff('self-hosted', 'accounting-self-hosted')
+      await card.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(card.getByTestId('connection-row-fortnox'), 'settings-accounting · self-hosted · provider row')
+      await refuseIfPresent(card.getByText('Coming soon', { exact: false }), 'settings-accounting · self-hosted · Coming soon')
     },
   },
 
@@ -2591,7 +2646,7 @@ export const SCENARIOS = {
    */
   'accounting-feed': {
     description:
-      'The /accounting feed page in its three states (#2868, #2869): the feed with the connection summary line, the prod Coming soon state, and the self-hosted not-available copy',
+      'The /accounting feed page in its four states (#2868, #2869): the feed with the connection summary line, the attention state (sign-in expired + exhausted rows, with the sidebar dot), the prod Coming soon state, and the self-hosted not-available copy',
     stages: ACCOUNTING_FEED_STAGES,
     /** Exposed so the fixture-contract test can pin each flag state. */
     stage: setAccountingFeedStage,
@@ -2645,7 +2700,28 @@ export const SCENARIOS = {
       await main.getByRole('button', { name: 'Check in Fortnox', exact: true }).waitFor({ timeout: 15_000 })
       await main.getByText('Synced', { exact: true }).waitFor({ timeout: 15_000 })
       await main.getByText('Failed', { exact: true }).waitFor({ timeout: 15_000 })
+      // The feed that is on carries the product subtitle; the off states do not.
+      await main.getByText(/your accountant codes and confirms them/).waitFor({ timeout: 15_000 })
       await shoot(main, 'feed')
+
+      // ── attention: sign-in expired + exhausted rows ───────────────────────
+      // The summary flips to the attention state with its PRIMARY "Fix in
+      // Settings", the counts row shows the inline "Stopped retrying"
+      // explanation, and the sidebar entry carries its dot (#2869 review).
+      await openStage('attention')
+      const summary = main.getByTestId('feed-summary')
+      await summary.waitFor({ timeout: 15_000 })
+      await summary.getByText('Sign-in expired', { exact: true }).waitFor({ timeout: 15_000 })
+      await summary.getByText(/Your Fortnox sign-in has expired/).waitFor({ timeout: 15_000 })
+      await summary.getByRole('link', { name: 'Fix in Settings', exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByTestId('feed-count-exhausted').getByText('3', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByTestId('feed-counts-exhausted-help').waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · attention · Connect')
+      await shoot(main, 'attention')
+      if (vp.width >= 1024) {
+        await page.getByTestId('nav-attention-accounting').waitFor({ timeout: 15_000 })
+        await shoot(page.locator('aside').first(), 'sidebar-attention')
+      }
 
       // ── hosted, flag off: Coming soon ─────────────────────────────────────
       await openStage('coming-soon')
@@ -2653,14 +2729,19 @@ export const SCENARIOS = {
       await main.getByRole('heading', { name: 'Accounting feed', exact: true }).waitFor({ timeout: 15_000 })
       await main.getByText('Coming soon', { exact: true }).waitFor({ timeout: 15_000 })
       await main.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
+      // The neutral header line, never the product sentence above "Nothing can be connected yet."
+      await main.getByText('Accounting tool connections for agent spend.', { exact: true }).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByText(/your accountant codes and confirms them/), 'accounting-feed · coming-soon · product subtitle')
       await refuseFeedControls('coming-soon')
       await shoot(main, 'coming-soon')
       // The sidebar reads the same answer: the Accounting entry stays, with
-      // its muted Coming soon marker. Desktop only — below `lg` the drawer is
+      // its muted "Soon" pill. Desktop only — below `lg` the drawer is
       // off-canvas and contributes nothing to a capture.
       if (vp.width >= 1024) {
         const entry = page.locator('nav[aria-label="All sections"] a[href="/accounting"]')
+        // Visible "Soon" on the rail; the full phrase is the accessible name.
         await entry.getByText('Soon', { exact: true }).waitFor({ timeout: 15_000 })
+        await entry.locator('.sr-only', { hasText: 'Coming soon' }).waitFor({ state: 'attached', timeout: 15_000 })
         await shoot(page.locator('aside').first(), 'sidebar-coming-soon')
       }
 
@@ -2669,6 +2750,7 @@ export const SCENARIOS = {
       await main.getByTestId('accounting-self-hosted').waitFor({ timeout: 15_000 })
       await main.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
       await refuseIfPresent(main.getByText('Coming soon', { exact: false }), 'accounting-feed · self-hosted · Coming soon')
+      await refuseIfPresent(main.getByText(/your accountant codes and confirms them/), 'accounting-feed · self-hosted · product subtitle')
       await refuseFeedControls('self-hosted')
       await shoot(main, 'self-hosted')
       // Self-hosted: the entry is HIDDEN, not marked (#2869) — a marker would

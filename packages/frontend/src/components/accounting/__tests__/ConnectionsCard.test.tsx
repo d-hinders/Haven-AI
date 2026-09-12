@@ -287,6 +287,10 @@ describe('ConnectionsCard', () => {
       for (const name of [/^connect$/i, /reconnect/i, /disconnect/i, /^settings$/i]) {
         expect(screen.queryByRole('button', { name })).toBeNull()
       }
+      // The neutral description, not "Connect the accounting tool your
+      // company uses" above "Nothing can be connected yet." (#2869 design review).
+      expect(screen.getByText(en.settings.accounting.descriptionOff)).toBeInTheDocument()
+      expect(screen.queryByText(en.settings.accounting.description)).toBeNull()
     })
 
     it('self-hosted: the not-available copy, no providers, and never the coming-soon string', async () => {
@@ -297,6 +301,40 @@ describe('ConnectionsCard', () => {
       expect(screen.queryByTestId('connection-row-fortnox')).toBeNull()
       expect(document.body.textContent).not.toContain(en.common.comingSoon)
       expect(screen.queryByRole('button', { name: /^connect$/i })).toBeNull()
+      expect(screen.getByText(en.settings.accounting.descriptionOff)).toBeInTheDocument()
+      expect(screen.queryByText(en.settings.accounting.description)).toBeNull()
+    })
+
+    it('the feed that is on carries the product description', async () => {
+      serve([connection()])
+      renderCard()
+      await screen.findByTestId('connection-list')
+      expect(screen.getByText(en.settings.accounting.description)).toBeInTheDocument()
+      expect(screen.queryByText(en.settings.accounting.descriptionOff)).toBeNull()
+    })
+
+    /**
+     * Fail CLOSED (#2869 review): a failed status read cannot tell a
+     * flagged-off deployment from a hosted one, and the connection routes
+     * answer either way until #2918 gates them — so no controls, not the
+     * full Connect UI.
+     */
+    it('a failed feed-status read shows the load error and NO controls, even though the listings answered', async () => {
+      mockApi.get.mockImplementation((url: string) => {
+        if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
+        if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
+        if (url === '/accounting/feed/status') return Promise.reject(new Error('502'))
+        return Promise.reject(new Error(`unexpected GET ${url}`))
+      })
+      renderCard()
+      expect(await screen.findByRole('alert')).toHaveTextContent(en.settings.accounting.loadError)
+      expect(screen.queryByTestId('connection-list')).toBeNull()
+      expect(screen.queryByTestId('connection-row-fortnox')).toBeNull()
+      for (const name of [/^connect$/i, /reconnect/i, /disconnect/i, /^settings$/i]) {
+        expect(screen.queryByRole('button', { name })).toBeNull()
+      }
+      expect(screen.queryByTestId('accounting-coming-soon')).toBeNull()
+      expect(screen.queryByTestId('accounting-self-hosted')).toBeNull()
     })
   })
 })

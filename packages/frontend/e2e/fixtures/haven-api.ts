@@ -320,6 +320,27 @@ export const accountingFeedComingSoon = {
 
 export const accountingFeedSelfHosted = { ...accountingFeedComingSoon, hosted: false }
 
+/**
+ * The ATTENTION state (#2869 design review): the destination's sign-in has
+ * expired — still the destination, cannot push — and the retry sweep has
+ * given up on three rows (`counts.exhausted`, #2866). This is what raises
+ * the attention summary on `/accounting`, the inline "Stopped retrying"
+ * explanation, and the sidebar dot. `connected` is false: it means an active
+ * `connected` destination, which a dead grant is not.
+ */
+export const accountingFeedAttention = {
+  ...accountingFeedStatus,
+  connected: false,
+  companyName: null,
+  destination: {
+    ...(accountingFeedStatus.destination as Record<string, unknown>),
+    status: 'needs_reauthorisation',
+    companyName: null,
+    lastPushAt: null,
+  } as Record<string, unknown> | null,
+  counts: { pending: 0, failed: 1, exhausted: 3 },
+}
+
 type JsonValue = Record<string, unknown> | unknown[]
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {

@@ -534,10 +534,13 @@ is not a separate product recipe.
 Structure:
 1. Two distinct OFF states, two copies, never interchangeable (#2869, owner
    decision 2026-09-11). **Hosted with the flag off** is *Coming soon*: the
-   route stays visible in production, the sidebar entry carries a Coming soon
-   marker, and the page explains what the feed will do and which platforms are
-   being lined up — with no connect and no sync control reachable, disabled
-   ones included. **Self-hosted** is *not available on self-hosted*: the copy
+   route stays visible in production, the sidebar entry carries a muted *Soon*
+   pill (its accessible name, and its visible text below `lg`, is *Coming
+   soon*), and the page explains what the feed will do and which platforms
+   are being lined up — with no connect and no sync control reachable,
+   disabled ones included. The page header and the Settings card carry a
+   neutral one-liner in both off states; the product subtitle ("…your
+   accountant codes and confirms them") is earned by the feed that is on. **Self-hosted** is *not available on self-hosted*: the copy
    must never read as coming soon (nothing is scheduled for that deployment),
    the sidebar entry is hidden, and the Settings card lists no providers.
 2. Show add-on availability before connection controls (the flag-on,

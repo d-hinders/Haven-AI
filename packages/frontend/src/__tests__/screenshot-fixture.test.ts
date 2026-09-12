@@ -797,11 +797,11 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const rowOf = () =>
         (settings.api('/accounting/connections', 'GET') as { connections: Record<string, unknown>[] }).connections[0]
 
-      it('serves every one of the five connection states, each under its own stage, plus the first-connect return', () => {
+      it('serves every one of the five connection states, each under its own stage, plus the first-connect return and the two OFF states', () => {
         const seen: Record<string, unknown> = {}
         for (const stage of Object.keys(settings.stages)) {
           settings.stage(stage)
-          seen[stage] = rowOf().status
+          seen[stage] = rowOf()?.status ?? null
         }
         expect(seen).toEqual({
           connected: 'connected',
@@ -810,7 +810,23 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           revoked: 'revoked_at_provider',
           disconnected: 'disconnected',
           'first-connect': 'connected',
+          // #2869: no row at all — the feed-status answer makes these states.
+          'coming-soon': null,
+          'self-hosted': null,
         })
+      })
+
+      it('the two OFF stages switch the FEED STATUS answer, and only they do (#2869)', () => {
+        const statusOf = () => settings.api('/accounting/feed/status', 'GET') as { hosted: boolean; enabled: boolean } | undefined
+        settings.stage('coming-soon')
+        expect(statusOf()).toMatchObject({ hosted: true, enabled: false, available: false })
+        settings.stage('self-hosted')
+        expect(statusOf()).toMatchObject({ hosted: false, enabled: false, available: false })
+        for (const stage of ['connected', 'needs-reauthorisation', 'scope-missing', 'revoked', 'disconnected', 'first-connect']) {
+          settings.stage(stage)
+          // Falls through to the default (ON) fixture — the card renders its rows.
+          expect(statusOf(), stage).toBeUndefined()
+        }
       })
 
       it('the scope-missing stage NAMES the missing scopes, derived against requiredScopes (#2865)', () => {
@@ -834,7 +850,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect((rowOf() as { settings: unknown }).settings).toEqual({ suggestedAccount: '6540', autoFeed: true })
       })
 
-      it('answers only the connections route in every stage', () => {
+      it('answers only the connections route (and, in the OFF stages, the feed status) in every stage', () => {
         for (const stage of Object.keys(settings.stages)) {
           settings.stage(stage)
           expect(settings.api('/accounting/providers', 'GET'), stage).toBeUndefined()
@@ -858,7 +874,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const statusOf = () =>
         feed.api('/accounting/feed/status', 'GET') as { hosted: boolean; enabled: boolean; available: boolean }
 
-      it('serves the three flag states, one per stage', () => {
+      it('serves the three flag states plus the attention state, one per stage', () => {
         const seen: Record<string, unknown> = {}
         for (const stage of Object.keys(feed.stages)) {
           feed.stage(stage)
@@ -867,11 +883,25 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         }
         expect(seen).toEqual({
           on: { hosted: true, enabled: true, available: true },
+          attention: { hosted: true, enabled: true, available: true },
           // The distinction the owner decision turns on: BOTH are off, and
           // `hosted` is the only field that tells them apart.
           'coming-soon': { hosted: true, enabled: false, available: false },
           'self-hosted': { hosted: false, enabled: false, available: false },
         })
+      })
+
+      it('the attention stage is what raises the summary, the inline explanation and the sidebar dot (#2869 review)', () => {
+        feed.stage('attention')
+        const status = feed.api('/accounting/feed/status', 'GET') as {
+          connected: boolean
+          destination: { status: string }
+          counts: { exhausted: number }
+        }
+        expect(status.destination.status).toBe('needs_reauthorisation')
+        expect(status.counts.exhausted).toBeGreaterThan(0)
+        // A dead grant is still the destination, but not an active `connected` one.
+        expect(status.connected).toBe(false)
       })
 
       it('answers only the feed-status route in every stage', () => {

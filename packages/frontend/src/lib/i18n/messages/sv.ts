@@ -18,6 +18,7 @@ export const sv: Messages = {
     title: 'Bokföring',
     subtitle:
       'Dina agenters betalningar dyker upp i ditt bokföringsprogram som utkast — din redovisningskonsult konterar och bekräftar dem.',
+    subtitleOff: 'Kopplingar till bokföringsprogram för agentutgifter.',
     manageInSettings: 'Hantera din bokföringskoppling under Inställningar.',
     openSettings: 'Öppna Inställningar',
     summary: {
@@ -37,9 +38,9 @@ export const sv: Messages = {
     comingSoon: {
       title: 'Bokföringsflöde',
       body:
-        'Avslutade agentbetalningar kommer att dyka upp i ditt bokföringsprogram som utkast med betalningsbevis bifogat. Din redovisningskonsult konterar och bokför dem; Haven påstår ingenting.',
+        'Avslutade agentbetalningar kommer att dyka upp i ditt bokföringsprogram som utkast med betalningsbevis bifogat — din redovisningskonsult konterar och bokför dem. Haven avgör inte konton eller moms.',
       platformsTitle: 'Plattformar som förbereds',
-      platformsBody: 'Listade, inte rekommenderade. Vilka som går live är ett separat beslut.',
+      platformsBody: 'Vilka av dessa som går live är inte bestämt.',
       notYet: 'Inget kan kopplas ännu.',
     },
     selfHosted: {
@@ -111,6 +112,7 @@ export const sv: Messages = {
       title: 'Bokföring',
       description:
         'Anslut bokföringsprogrammet ditt företag använder. Avklarade agentbetalningar dyker upp där med betalningsunderlag bifogat; din redovisningskonsult bokför dem.',
+      descriptionOff: 'Ditt företags bokföringsprogram.',
       disclaimer:
         'Haven tillhandahåller dataverktyg, inte bokförings- eller skatterådgivning. Betalningar matas som utkast — du och din redovisningskonsult ansvarar fortfarande för kontering, riktighet och inlämning.',
       loadError: 'Vi kunde inte läsa in bokföringskopplingar. Försök igen om en stund.',

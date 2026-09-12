@@ -161,6 +161,29 @@ describe('/accounting off states (#2869)', () => {
     expectNoFeedControls()
   })
 
+  /**
+   * #2869 design review: the product subtitle ("…appears in your accounting
+   * tool as draft transactions") asserted something directly above "Nothing
+   * can be connected yet." Both off states — and the loading render — get
+   * the neutral line; the product sentence is for the feed that is on.
+   */
+  it.each([
+    ['coming soon', OFF_COMING_SOON],
+    ['self-hosted', OFF_SELF_HOSTED],
+  ])('%s: the header carries the neutral subtitle, never the product sentence', (_name, overrides) => {
+    withStatus(overrides)
+    renderPage()
+    expect(screen.getByText(en.accountingPage.subtitleOff)).toBeInTheDocument()
+    expect(screen.queryByText(en.accountingPage.subtitle)).toBeNull()
+  })
+
+  it('while the status loads, the header is neutral too — the product sentence is earned by the answer', () => {
+    mockFeed.mockReturnValue(feed({ status: null, loading: true }))
+    renderPage()
+    expect(screen.getByText(en.accountingPage.subtitleOff)).toBeInTheDocument()
+    expect(screen.queryByText(en.accountingPage.subtitle)).toBeNull()
+  })
+
   it('self-hosted wins over a set flag — hosted is the outer question', () => {
     withStatus({ ...OFF_SELF_HOSTED, enabled: true, flagEnabled: true })
     renderPage()
@@ -191,6 +214,18 @@ describe('/accounting with the feed on (#2869)', () => {
     expect(summary).toHaveAttribute('data-status', 'connected')
     expect(summary.textContent).toContain('Feeding Fortnox')
     expect(screen.getByRole('button', { name: 'Sync now' })).toBeInTheDocument()
+    // The feed that is on earns the product sentence (#2869 design review).
+    expect(screen.getByText(en.accountingPage.subtitle)).toBeInTheDocument()
+    expect(screen.queryByText(en.accountingPage.subtitleOff)).toBeNull()
+  })
+
+  it('"Sync now" is wrapped so it stays content-width in the stacked mobile header (#2869 design review)', () => {
+    renderPage()
+    const button = screen.getByRole('button', { name: 'Sync now' })
+    // A direct child of the `flex-col` header stretches full-width below `sm`;
+    // the wrapper is what keeps it the same width as the page's other actions.
+    expect(button.parentElement?.className).toContain('shrink-0')
+    expect(button.parentElement?.parentElement?.className).toContain('flex-col')
   })
 
   it('the summary carries the attention state and its way to Settings', () => {
@@ -203,11 +238,42 @@ describe('/accounting with the feed on (#2869)', () => {
     expect(screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })).toHaveAttribute('href', '/settings')
   })
 
-  it('renders the retry counts from the status (#2866)', () => {
+  it('renders the retry counts from the status (#2866), with the exhausted explanation INLINE', () => {
     withStatus({ counts: { pending: 2, failed: 3, exhausted: 1 } })
     renderPage()
     expect(screen.getByTestId('feed-count-pending')).toHaveTextContent('2')
     expect(screen.getByTestId('feed-count-failed')).toHaveTextContent('3')
     expect(screen.getByTestId('feed-count-exhausted')).toHaveTextContent('1')
+    // #2869 design review: a `title` is unreachable on touch and to a screen
+    // reader — the sentence is rendered, and nothing in the row hides in a title.
+    expect(screen.getByTestId('feed-counts-exhausted-help')).toHaveTextContent(en.accountingPage.counts.exhaustedHelp)
+    expect(screen.getByTestId('feed-counts').querySelector('[title]')).toBeNull()
+  })
+
+  it('the exhausted explanation is absent while nothing has exhausted', () => {
+    withStatus({ counts: { pending: 2, failed: 3, exhausted: 0 } })
+    renderPage()
+    expect(screen.getByTestId('feed-counts')).toBeInTheDocument()
+    expect(screen.queryByTestId('feed-counts-exhausted-help')).toBeNull()
+    expect(screen.queryByText(en.accountingPage.counts.exhaustedHelp)).toBeNull()
+  })
+
+  it('hides the counts row when every count is zero and nothing is listed — three zeros over an empty list say nothing', () => {
+    withStatus({ counts: { pending: 0, failed: 0, exhausted: 0 }, syncs: [] })
+    renderPage()
+    expect(screen.queryByTestId('feed-counts')).toBeNull()
+    expect(screen.getByText(/Nothing synced yet/)).toBeInTheDocument()
+  })
+
+  it('keeps the counts row when the counts are zero but rows are listed', () => {
+    withStatus({
+      counts: { pending: 0, failed: 0, exhausted: 0 },
+      syncs: [{
+        id: 's1', user_id: 'u1', provider: 'fortnox', payment_id: 'pay_1', external_ref: 'fortnox:supplierinvoice:7',
+        status: 'pushed', error: null, attempts: 1, created_at: '2026-09-12T09:00:00.000Z', updated_at: '2026-09-12T09:00:00.000Z',
+      }],
+    })
+    renderPage()
+    expect(screen.getByTestId('feed-counts')).toBeInTheDocument()
   })
 })

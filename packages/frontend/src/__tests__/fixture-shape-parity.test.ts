@@ -24,6 +24,7 @@ import {
   FIXTURE_ACCOUNTING_FEED_STATUS,
   FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
+  FIXTURE_ACCOUNTING_FEED_ATTENTION,
 } from '../../scripts/screenshot.mjs'
 import {
   testUser,
@@ -36,6 +37,7 @@ import {
   accountingFeedStatus,
   accountingFeedComingSoon,
   accountingFeedSelfHosted,
+  accountingFeedAttention,
 } from '../../e2e/fixtures/haven-api'
 
 /** Sorted top-level keys of an object. */
@@ -155,6 +157,25 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
     expect(accountingFeedComingSoon.hosted).toBe(true)
     expect(FIXTURE_ACCOUNTING_FEED_SELF_HOSTED.hosted).toBe(false)
     expect(accountingFeedSelfHosted.hosted).toBe(false)
+  })
+
+  /**
+   * #2869 design review: the attention state — a destination needing a
+   * reconnect plus exhausted rows — is what the attention summary, the inline
+   * "Stopped retrying" explanation and the sidebar dot photograph. Both
+   * harnesses carry it, same keys, same raising fields.
+   */
+  it('the accounting ATTENTION state aligns structurally, and raises the same signals', () => {
+    expect(keysOf(FIXTURE_ACCOUNTING_FEED_ATTENTION)).toEqual(keysOf(accountingFeedAttention))
+    expect(keysOf(FIXTURE_ACCOUNTING_FEED_ATTENTION)).toEqual(keysOf(FIXTURE_ACCOUNTING_FEED_STATUS))
+    for (const status of [FIXTURE_ACCOUNTING_FEED_ATTENTION, accountingFeedAttention]) {
+      expect(status).toMatchObject({ hosted: true, enabled: true, available: true, connected: false })
+      expect(keysOf(status.destination as Record<string, unknown>)).toEqual(
+        ['provider', 'displayName', 'status', 'companyName', 'lastPushAt'].sort(),
+      )
+      expect((status.destination as { status: string }).status).toBe('needs_reauthorisation')
+      expect(status.counts.exhausted).toBe(3)
+    }
   })
 })
 

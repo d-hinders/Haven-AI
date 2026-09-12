@@ -15,6 +15,9 @@
  *   revoked_at_provider        Access revoked · "Access was revoked in Fortnox…"     Fix in Settings
  *   disconnected / no row      Not connected · "Connect your accounting tool…"       Open Settings
  *
+ * The three attention rows get the `primary` button — theirs is the one
+ * action that resolves the state; the two steady rows only point (ghost).
+ *
  * The attention sentences and chips are the Settings card's own
  * (`settings.accounting.status` / `.detail`), so the summary and the row the
  * user lands on say the same thing. The connection itself is managed in
@@ -28,7 +31,7 @@ import { useLocale, useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
-import type { AccountingFeedStatus } from '@/hooks/useAccountingFeed'
+import { ATTENTION_STATUSES, type AccountingFeedStatus } from '@/hooks/useAccountingFeed'
 import type { Locale } from '@/lib/i18n'
 
 /** Where the connection is managed (#2868): Settings owns Connect / Reconnect / Disconnect. */
@@ -100,12 +103,16 @@ export function FeedSummary({ status }: { status: AccountingFeedStatus }) {
       break
     case 'disconnected':
     default:
+      // No `detail` here: the line already says "in Settings" and the action
+      // is "Open Settings" — a third mention was the #2869 design review's nit.
       chip = copy.notConnected
       line = copy.notConnectedDetail
-      detail = t.accountingPage.manageInSettings
       action = t.accountingPage.openSettings
       break
   }
+  // The attention states carry the one action that resolves them; the
+  // steady states only point (#2869 design review: primary, not ghost).
+  const attention = ATTENTION_STATUSES.includes(state)
 
   return (
     <Card className="p-5" hover={false}>
@@ -127,7 +134,7 @@ export function FeedSummary({ status }: { status: AccountingFeedStatus }) {
           {detail ? <p className="text-xs text-[var(--v2-ink-3)]">{detail}</p> : null}
         </div>
         <div className="shrink-0">
-          <Button variant="ghost" href={ACCOUNTING_SETTINGS_HREF}>
+          <Button variant={attention ? 'primary' : 'ghost'} href={ACCOUNTING_SETTINGS_HREF}>
             {action}
           </Button>
         </div>

@@ -194,15 +194,34 @@ describe('Sidebar', () => {
       expect(attentionDot()).toBeNull()
     })
 
-    it('hosted with the flag off: the entry stays, carrying a Coming soon marker and no dot', () => {
+    it('hosted with the flag off: the entry stays, carrying the Soon pill (accessible name Coming soon) and no dot', () => {
       mockAccountingFeed.mockReturnValue(
         feed(feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null })),
       )
       render(<LocaleProvider><Sidebar /></LocaleProvider>)
       expect(accountingLink()).not.toBeNull()
       expect(accountingLink()!.textContent).toContain(en.accountingPage.nav.comingSoon)
-      // The abbreviated pill carries the full phrase as its title.
-      expect(accountingLink()!.querySelector(`[title="${en.common.comingSoon}"]`)).not.toBeNull()
+      // The abbreviation is visual only (#2869 design review): the full
+      // phrase is the accessible name — an `sr-only` node, not a `title` —
+      // and the visible "Soon" is hidden from assistive tech.
+      expect(accountingLink()!.querySelector('[title]')).toBeNull()
+      const srOnly = accountingLink()!.querySelector('.sr-only:not([aria-hidden])')
+      expect(srOnly?.textContent?.trim()).toBe(en.common.comingSoon)
+      // jsdom's accname joins inline children without a separator; a browser
+      // separates flex children. Either way the full phrase is in the name
+      // and the abbreviation is not.
+      expect(screen.getByRole('link', { name: new RegExp(`^Accounting\\s*${en.common.comingSoon}$`) })).toBe(accountingLink())
+      expect(screen.queryByRole('link', { name: new RegExp(`Accounting\\s*${en.accountingPage.nav.comingSoon}$`) })).toBeNull()
+      const abbreviated = Array.from(accountingLink()!.querySelectorAll('span')).find(
+        (el) => el.textContent === en.accountingPage.nav.comingSoon,
+      )
+      expect(abbreviated?.getAttribute('aria-hidden')).toBe('true')
+      // Below `lg` the full-width drawer shows the full phrase instead.
+      const mobilePhrase = Array.from(accountingLink()!.querySelectorAll('span[aria-hidden="true"]')).find(
+        (el) => el.textContent === en.common.comingSoon,
+      )
+      expect(mobilePhrase?.className).toContain('lg:hidden')
+      expect(abbreviated?.className).toContain('lg:inline')
       expect(attentionDot()).toBeNull()
     })
 
@@ -219,8 +238,27 @@ describe('Sidebar', () => {
       expect(navText).not.toContain(en.accountingPage.nav.comingSoon)
     })
 
-    it('before the status answers: the entry renders plain, with no marker it has not earned', () => {
+    it('before the status answers: NO entry at all — nothing paints that a self-hosted answer would remove (#2869 review)', () => {
       mockAccountingFeed.mockReturnValue({ ...feed(null), loading: true })
+      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).toBeNull()
+      expect(attentionDot()).toBeNull()
+      // Positive control: the rest of the Admin cluster does not wait.
+      expect(document.querySelector('nav[aria-label="All sections"] a[href="/custody"]')).not.toBeNull()
+    })
+
+    it('the status answers after mount: the entry appears once, in its final state', () => {
+      mockAccountingFeed.mockReturnValue({ ...feed(null), loading: true })
+      const { rerender } = render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).toBeNull()
+      mockAccountingFeed.mockReturnValue(feed(feedStatus()))
+      rerender(<LocaleProvider><Sidebar /></LocaleProvider>)
+      expect(accountingLink()).not.toBeNull()
+      expect(attentionDot()).toBeNull()
+    })
+
+    it('a FAILED status read renders the plain entry — never a marker it has not earned', () => {
+      mockAccountingFeed.mockReturnValue({ ...feed(null), error: 'We could not load accounting status.' })
       render(<LocaleProvider><Sidebar /></LocaleProvider>)
       expect(accountingLink()).not.toBeNull()
       expect(attentionDot()).toBeNull()

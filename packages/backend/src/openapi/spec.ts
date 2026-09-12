@@ -3065,19 +3065,19 @@ export const openapiSpec = {
                   properties: {
                     hosted: { type: 'boolean', description: 'This deployment is the hosted Haven (`HAVEN_HOSTED`). False on a self-hosted box, where the feed is not available and never "coming soon" (#2869).' },
                     enabled: { type: 'boolean', description: '#2869: the `HAVEN_ACCOUNTING_ENABLED` flag. `hosted && !enabled` is the "Coming soon" state the dashboard shows in production.' },
-                    flagEnabled: { type: 'boolean', description: 'The same boolean as `enabled`, kept for callers that read the older name.' },
+                    flagEnabled: { type: 'boolean', deprecated: true, description: 'Deprecated — same value as `enabled`; removed one release after #2869.' },
                     liveSyncReady: { type: 'boolean', description: 'A real provider adapter is registered.' },
                     entitled: {
                       type: 'boolean',
                       description:
-                        '#2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `flagEnabled` is false, so the UI can tell "feature off" from "not entitled" without a second call.',
+                        '#2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `enabled` is false, so the UI can tell "feature off" from "not entitled" without a second call.',
                     },
                     entitlementMode: {
                       type: 'string',
                       enum: ['granted', 'all'],
                       description: 'How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.',
                     },
-                    available: { type: 'boolean', description: 'hosted AND flagEnabled AND entitled — the one field a caller needs to decide whether to render the feed.' },
+                    available: { type: 'boolean', description: 'hosted AND enabled AND entitled — the one field a caller needs to decide whether to render the feed.' },
                     connected: { type: 'boolean', description: 'The caller has a live provider connection.' },
                     companyName: {
                       type: ['string', 'null'],

@@ -60,7 +60,16 @@ describe('FeedSummary', () => {
     expect(line).toHaveAttribute('data-status', status)
     expect(screen.getByText(chip)).toBeInTheDocument()
     expect(screen.getByText(sentence)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })).toHaveAttribute('href', '/settings')
+    const fix = screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })
+    expect(fix).toHaveAttribute('href', '/settings')
+    // The one action that resolves the state is the primary one (#2869 design review).
+    expect(fix.className).toContain('bg-[var(--v2-brand)]')
+  })
+
+  it('connected: the pointer to Settings is a ghost link, not a call to action', () => {
+    renderSummary()
+    const open = screen.getByRole('link', { name: en.accountingPage.openSettings })
+    expect(open.className).not.toContain('bg-[var(--v2-brand)]')
   })
 
   it('scope_missing names the missing scopes as human labels', () => {
@@ -87,6 +96,10 @@ describe('FeedSummary', () => {
     expect(screen.getByText(en.accountingPage.summary.notConnected)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: en.accountingPage.openSettings })).toHaveAttribute('href', '/settings')
     expect(screen.queryByRole('button', { name: /^connect$/i })).toBeNull()
+    // "Settings" once in the line and once on the action — not a third time
+    // as a detail (#2869 design review).
+    expect(screen.queryByText(en.accountingPage.manageInSettings)).toBeNull()
+    expect((line.textContent?.match(/Settings/g) ?? []).length).toBe(2)
   })
 })
 

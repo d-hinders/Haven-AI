@@ -8300,18 +8300,21 @@ export interface operations {
                         hosted: boolean;
                         /** @description #2869: the `HAVEN_ACCOUNTING_ENABLED` flag. `hosted && !enabled` is the "Coming soon" state the dashboard shows in production. */
                         enabled: boolean;
-                        /** @description The same boolean as `enabled`, kept for callers that read the older name. */
+                        /**
+                         * @deprecated
+                         * @description Deprecated — same value as `enabled`; removed one release after #2869.
+                         */
                         flagEnabled: boolean;
                         /** @description A real provider adapter is registered. */
                         liveSyncReady: boolean;
-                        /** @description #2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `flagEnabled` is false, so the UI can tell "feature off" from "not entitled" without a second call. */
+                        /** @description #2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `enabled` is false, so the UI can tell "feature off" from "not entitled" without a second call. */
                         entitled: boolean;
                         /**
                          * @description How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.
                          * @enum {string}
                          */
                         entitlementMode: "granted" | "all";
-                        /** @description hosted AND flagEnabled AND entitled — the one field a caller needs to decide whether to render the feed. */
+                        /** @description hosted AND enabled AND entitled — the one field a caller needs to decide whether to render the feed. */
                         available: boolean;
                         /** @description The caller has a live provider connection. */
                         connected: boolean;

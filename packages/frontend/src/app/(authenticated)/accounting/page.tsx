@@ -74,29 +74,47 @@ function StatusChip({ status }: { status: AccountingSyncStatus }) {
 function FeedCounts({ counts }: { counts: AccountingFeedStatus['counts'] }) {
   const t = useT()
   const copy = t.accountingPage.counts
-  const cells: Array<{ key: keyof typeof counts; label: string; help?: string }> = [
+  const cells: Array<{ key: keyof typeof counts; label: string }> = [
     { key: 'pending', label: copy.pending },
     { key: 'failed', label: copy.failed },
-    { key: 'exhausted', label: copy.exhausted, help: copy.exhaustedHelp },
+    { key: 'exhausted', label: copy.exhausted },
   ]
+  const exhausted = counts.exhausted > 0
   return (
-    <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs" data-testid="feed-counts">
-      {cells.map(({ key, label, help }) => {
-        const attention = key === 'exhausted' && counts[key] > 0
-        return (
-          <div key={key} className="flex items-center gap-1.5" title={help}>
-            <dt className="text-[var(--v2-ink-3)]">{label}</dt>
-            <dd
-              className={`v2-tabular font-semibold ${attention ? 'text-[var(--v2-warning)]' : 'text-[var(--v2-ink)]'}`}
-              data-testid={`feed-count-${key}`}
-            >
-              {counts[key]}
-            </dd>
-          </div>
-        )
-      })}
-    </dl>
+    <div data-testid="feed-counts">
+      <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
+        {cells.map(({ key, label }) => {
+          const attention = key === 'exhausted' && exhausted
+          return (
+            <div key={key} className="flex items-center gap-1.5">
+              <dt className="text-[var(--v2-ink-3)]">{label}</dt>
+              <dd
+                className={`v2-tabular font-semibold ${attention ? 'text-[var(--v2-warning)]' : 'text-[var(--v2-ink)]'}`}
+                data-testid={`feed-count-${key}`}
+              >
+                {counts[key]}
+              </dd>
+            </div>
+          )
+        })}
+      </dl>
+      {/*
+        The explanation is INLINE, and only when it applies (#2869 design
+        review): a `title` is unreachable on touch and to a screen reader,
+        and "Stopped retrying" is the one count that needs the user.
+      */}
+      {exhausted ? (
+        <p className="mt-1 text-xs text-[var(--v2-warning)]" data-testid="feed-counts-exhausted-help">
+          {copy.exhaustedHelp}
+        </p>
+      ) : null}
+    </div>
   )
+}
+
+/** Nothing to count and nothing listed — the row would be three zeros over an empty list. */
+function hasFeedActivity(status: Pick<AccountingFeedStatus, 'counts' | 'syncs'>): boolean {
+  return status.syncs.length > 0 || Object.values(status.counts).some((n) => n > 0)
 }
 
 /** "fortnox:supplierinvoice:123" → 123 (the number shown in Fortnox's UI). */
@@ -187,7 +205,18 @@ export default function AccountingPage() {
     </Suspense>
   )
 
-  const header = <PageHeader title={t.accountingPage.title} subtitle={t.accountingPage.subtitle} />
+  // #2869 design review: the product subtitle ("…appears in your accounting
+  // tool as draft transactions") sat directly above "Nothing can be connected
+  // yet." / "Not available on self-hosted". The off states — and the two
+  // renders before the status is known — get the neutral line; the product
+  // sentence is shown only once the feed is on.
+  const off = accountingFeedOffState(status)
+  const header = (
+    <PageHeader
+      title={t.accountingPage.title}
+      subtitle={status && !off ? t.accountingPage.subtitle : t.accountingPage.subtitleOff}
+    />
+  )
 
   if (loading) {
     return (
@@ -214,7 +243,6 @@ export default function AccountingPage() {
   // self-hosted box can never read as coming soon; `hosted && !enabled` is
   // Coming soon, visible in production. Neither offers a connect or sync
   // control. The add-on card below is the third case: flag on, not entitled.
-  const off = accountingFeedOffState(status)
   if (off === 'self_hosted') {
     return (
       <div className="max-w-3xl">
@@ -275,17 +303,26 @@ export default function AccountingPage() {
               <div className="min-w-0">
                 <h2 className="v2-text-h3 text-[var(--v2-ink)]">Synced transactions</h2>
                 <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Drafts fed to your accounting tool. Failures retry on sync.</p>
-                <div className="mt-2">
-                  <FeedCounts counts={status.counts} />
-                </div>
+                {hasFeedActivity(status) ? (
+                  <div className="mt-2">
+                    <FeedCounts counts={status.counts} />
+                  </div>
+                ) : null}
               </div>
-              <Button
-                variant="ghost"
-                onClick={() => run('sync', sync)}
-                disabled={busy !== null || !status.connected}
-              >
-                {busy === 'sync' ? 'Syncing…' : 'Sync now'}
-              </Button>
+              {/*
+                Wrapped (#2869 design review): as a direct child of the
+                `flex-col` header the button stretched full-width below `sm`
+                while the other actions on the page stay content-width.
+              */}
+              <div className="shrink-0">
+                <Button
+                  variant="ghost"
+                  onClick={() => run('sync', sync)}
+                  disabled={busy !== null || !status.connected}
+                >
+                  {busy === 'sync' ? 'Syncing…' : 'Sync now'}
+                </Button>
+              </div>
             </div>
 
             {error ? (

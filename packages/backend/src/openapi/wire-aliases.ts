@@ -92,6 +92,37 @@ export function withFailedAccountIdsAlias<T extends { failedSafeIds: string[] }>
   return { ...body, failedAccountIds: body.failedSafeIds }
 }
 
+interface ActivityPaymentSafeScoped {
+  safe_id: string | null
+  safe_address: string | null
+  safe_name: string | null
+}
+
+/** `activityPayment` (`GET /agents/{id}/activity` and the feed). */
+export function withActivityPaymentAccountAlias<T extends ActivityPaymentSafeScoped>(
+  payment: T,
+): T & { account_id: string | null; account_address: string | null; account_name: string | null } {
+  return {
+    ...payment,
+    account_id: payment.safe_id,
+    account_address: payment.safe_address,
+    account_name: payment.safe_name,
+  }
+}
+
+/**
+ * The `safes` envelope key (`GET /user/safes`, `GET /user/safes/{id}/funding`
+ * response bodies, and the session `User.safes` array) -> an `accounts` twin
+ * key carrying the exact same array. Generic over the element type: the array
+ * itself is not remapped again here (its elements are already twinned by
+ * `withAccountAddressAlias`/`withAgentAccountAlias` etc. at the call site).
+ */
+export function withAccountsEnvelopeAlias<T extends { safes: unknown[] }>(
+  body: T,
+): T & { accounts: T['safes'] } {
+  return { ...body, accounts: body.safes }
+}
+
 /** `sessionUser.safe_address` -> `.account_address`, same value. */
 export function withSessionAccountAddressAlias<T extends { safe_address: string | null }>(
   user: T,

@@ -13,7 +13,7 @@ import {
 import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { getChain } from '../domain/chains.js'
-import { withAccountAddressAlias } from '../openapi/wire-aliases.js'
+import { withAccountAddressAlias, withAccountsEnvelopeAlias } from '../openapi/wire-aliases.js'
 import {
   formatTokenAmount,
   getFaucetUrl,
@@ -42,7 +42,8 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
 
     const safes = (await listAccountsForUser(sub)).map(withAccountAddressAlias)
 
-    return { safes }
+    // #2907: `accounts` twins the `safes` envelope key, same array.
+    return withAccountsEnvelopeAlias({ safes })
   })
 
   // POST /user/safes/deploy — TOMBSTONE (#1984 closed it, #1988 deleted the

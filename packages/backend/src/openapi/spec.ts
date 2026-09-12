@@ -542,7 +542,8 @@ const userProfile = {
     name: { type: ['string', 'null'] },
     email: { type: 'string' },
     wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
-    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', deprecated: true, description: deprecatedSafeAlias('account_address') },
+    account_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
     currency_preference: { type: ['string', 'null'] },
     created_at: { type: 'string', format: 'date-time' },
   },
@@ -561,7 +562,8 @@ const userIdentity = {
     name: { type: ['string', 'null'] },
     email: { type: 'string' },
     wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
-    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', deprecated: true, description: deprecatedSafeAlias('account_address') },
+    account_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
   },
 } as const
 
@@ -800,6 +802,11 @@ const sessionUser = {
     account_address: { type: ['string', 'null'] },
     currency_preference: { type: 'string' },
     safes: { type: 'array', items: sessionSafe },
+    // #2907: `accounts` twins `safes`, same array; items use the
+    // account-vocabulary `sessionAccount` shape (identical wire object to
+    // `sessionSafe`) so `sessionAccount` — otherwise defined and never
+    // referenced — reaches `packages/core/src/api-types.ts`.
+    accounts: { type: 'array', items: sessionAccount },
   },
 } as const
 
@@ -833,9 +840,12 @@ const activityPayment = {
     x402_merchant_address: { type: ['string', 'null'] },
     chain_id: { type: ['integer', 'null'] },
     token_address: { type: ['string', 'null'] },
-    safe_id: { type: ['string', 'null'] },
-    safe_address: { type: ['string', 'null'] },
-    safe_name: { type: ['string', 'null'] },
+    safe_id: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_id') },
+    safe_address: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_address') },
+    safe_name: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_name') },
+    account_id: { type: ['string', 'null'] },
+    account_address: { type: ['string', 'null'] },
+    account_name: { type: ['string', 'null'] },
     explorer_url: { type: ['string', 'null'], description: 'Null exactly when tx_hash is null.' },
     execution_rail: { type: ['string', 'null'], description: 'Which on-chain mechanism moved the money (#799).' },
     delegation_hash: { type: ['string', 'null'], description: 'Which delegation authorized a delegation-rail payment (#829).' },
@@ -2647,7 +2657,11 @@ export const openapiSpec = {
                 schema: {
                   type: 'object',
                   required: ['safes'],
-                  properties: { safes: { type: 'array', items: userSafe } },
+                  properties: {
+                    safes: { type: 'array', items: userSafe },
+                    // #2907: `accounts` twins `safes`, same array, same items.
+                    accounts: { type: 'array', items: userSafe },
+                  },
                 },
               },
             },
@@ -2703,7 +2717,11 @@ export const openapiSpec = {
                 schema: {
                   type: 'object',
                   required: ['safes'],
-                  properties: { safes: { type: 'array', items: account } },
+                  properties: {
+                    safes: { type: 'array', items: account },
+                    // #2907: `accounts` twins `safes`, same array, same items.
+                    accounts: { type: 'array', items: account },
+                  },
                 },
               },
             },
@@ -4349,6 +4367,8 @@ export const openapiSpec = {
                     safe_address: { ...userProfile.properties.safe_address, deprecated: true, description: deprecatedSafeAlias('account_address') },
                     account_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
                     safes: { type: 'array', items: sessionSafe },
+                    // #2907: `accounts` twins `safes`, same array.
+                    accounts: { type: 'array', items: sessionAccount },
                   },
                 },
               },
@@ -4388,7 +4408,8 @@ export const openapiSpec = {
                           credential_id: { type: 'string' },
                           signer_address: { type: 'string' },
                           chain_id: { type: 'integer' },
-                          safe_address: { type: ['string', 'null'], description: 'Null until the passkey is bound to a Safe.' },
+                          safe_address: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_address') },
+                          account_address: { type: ['string', 'null'], description: 'Null until the passkey is bound to an account.' },
                           created_at: { type: 'string', format: 'date-time' },
                         },
                       },
@@ -6707,13 +6728,15 @@ export const openapiSpec = {
       AgentPaymentNextAction: {
         type: 'string',
         // #2907 (naming P0): `fund_account_or_raise_allowance` is additive —
-        // accepted on input and documented here, but the server KEEPS
-        // EMITTING the old `fund_safe_or_raise_allowance` through this
-        // window. One field cannot carry two values at once; an old
-        // mcp-server switching on the compiled literal would otherwise drop
-        // the over-budget guidance it needs to act on (owner review on
-        // #2906). The flip to emitting the new value is #2914 — pinned by
-        // `agent-payment-next-action-account-alias.test.ts`.
+        // listed in the served enum so clients can switch on it, but the
+        // server KEEPS EMITTING the old `fund_safe_or_raise_allowance`
+        // through this window. One field cannot carry two values at once; an
+        // old mcp-server switching on the compiled literal would otherwise
+        // drop the over-budget guidance it needs to act on (owner review on
+        // #2906). No route takes `AgentNextStep`/`AgentPaymentNextAction` as
+        // request input at all — this is a response-only enum. The flip to
+        // emitting the new value is #2914 — pinned by
+        // `agent-next-action-account-alias.test.ts`.
         enum: [...Object.values(AgentPaymentNextAction), FUND_ACCOUNT_OR_RAISE_ALLOWANCE] as string[],
         description: 'Stable next action an agent should take for a Haven payment state.',
         'x-enumDescriptions': {
@@ -6721,8 +6744,8 @@ export const openapiSpec = {
           [FUND_ACCOUNT_OR_RAISE_ALLOWANCE]:
             'Account-vocabulary twin of `fund_safe_or_raise_allowance` (#2907), same meaning: ' +
             'stop and tell the user that the account needs to be funded or the agent budget ' +
-            'raised before the payment can succeed. Accepted on input; the server still only ' +
-            'emits `fund_safe_or_raise_allowance` until #2914.',
+            'raised before the payment can succeed. Listed in the enum so clients can switch on ' +
+            'it; the server still only emits `fund_safe_or_raise_allowance` until #2914.',
         },
       },
       AgentPaymentRail: {
@@ -7450,7 +7473,12 @@ export const openapiSpec = {
           name: { type: 'string', minLength: 1 },
           description: { type: 'string' },
           delegate_address: address,
-          safe_id: uuid,
+          safe_id: { ...uuid, deprecated: true, description: deprecatedSafeAlias('account_id') },
+          account_id: {
+            ...uuid,
+            description:
+              "#2907 input twin of 'safe_id'; either is accepted alone. Both given and disagreeing is a 400 naming both keys.",
+          },
           allowances: {
             type: 'array',
             maxItems: 0,
@@ -7475,7 +7503,8 @@ export const openapiSpec = {
         required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address', 'sweep_min_usdc'],
         properties: {
           delegate_address: { type: 'string' },
-          safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }], deprecated: true, description: deprecatedSafeAlias('account_address') },
+          account_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           chain_id: { type: 'integer' },
           eth: { type: 'string' },
           eth_atomic: { type: 'string' },
@@ -7949,7 +7978,8 @@ export const openapiSpec = {
           id: uuid,
           name: { type: 'string' },
           status: { type: 'string' },
-          safe_address: address,
+          safe_address: { ...address, deprecated: true, description: deprecatedSafeAlias('account_address') },
+          account_address: address,
           delegate_address: address,
           /**
            * #1472: the counterfactual Hybrid account the signing EOA owns —
@@ -7980,7 +8010,8 @@ export const openapiSpec = {
         required: ['agent_id', 'safe_address', 'delegate_address', 'chain_id', 'allowances'],
         properties: {
           agent_id: uuid,
-          safe_address: address,
+          safe_address: { ...address, deprecated: true, description: deprecatedSafeAlias('account_address') },
+          account_address: address,
           delegate_address: address,
           chain_id: { type: 'integer' },
           allowances: {

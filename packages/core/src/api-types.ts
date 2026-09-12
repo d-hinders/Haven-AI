@@ -3195,8 +3195,17 @@ export type components = {
             description?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description Deprecated — same value as `account_id`; removed in the release after #2908.
+             */
             safe_id?: string;
+            /**
+             * Format: uuid
+             * @description #2907 input twin of 'safe_id'; either is accepted alone. Both given and disagreeing is a 400 naming both keys.
+             */
+            account_id?: string;
             /** @description RETIRED (#1440/#2020): per-token allowances died with the Safe rail. A non-empty array is refused with 400 — grant the agent a budget delegation after creation instead. The field survives (empty-only) so older clients sending `allowances: []` keep working. */
             allowances?: {
                 [key: string]: unknown;
@@ -3204,7 +3213,12 @@ export type components = {
         };
         DelegateBalance: {
             delegate_address: string;
+            /**
+             * @deprecated
+             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+             */
             safe_address: string | null;
+            account_address?: string | null;
             chain_id: number;
             eth: string;
             eth_atomic: string;
@@ -3626,8 +3640,14 @@ export type components = {
             id: string;
             name: string;
             status: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @deprecated
+             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             safe_address: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            account_address?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             delegate_account_address: string | null;
@@ -3641,8 +3661,14 @@ export type components = {
         AllowanceSummary: {
             /** Format: uuid */
             agent_id: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @deprecated
+             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             safe_address: string;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            account_address?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             chain_id: number;
@@ -7494,6 +7520,25 @@ export interface operations {
                             /** Format: date-time */
                             created_at: string;
                         }[];
+                        accounts?: {
+                            /** Format: uuid */
+                            id: string;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                             * @example 0x1111111111111111111111111111111111111111
+                             */
+                            safe_address: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            account_address?: string;
+                            chain_id: number;
+                            /** @description Display label; defaults to 'My account' when none is given. */
+                            name: string;
+                            /** @description The first account a user links becomes the default. */
+                            is_default: boolean;
+                            /** Format: date-time */
+                            created_at: string;
+                        }[];
                     };
                 };
             };
@@ -7583,6 +7628,25 @@ export interface operations {
                 content: {
                     "application/json": {
                         safes: {
+                            /** Format: uuid */
+                            id: string;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                             * @example 0x1111111111111111111111111111111111111111
+                             */
+                            safe_address?: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            account_address: string;
+                            chain_id: number;
+                            /** @description Display label; defaults to 'My account' when none is given. */
+                            name: string;
+                            /** @description The first account a user links becomes the default. */
+                            is_default: boolean;
+                            /** Format: date-time */
+                            created_at: string;
+                        }[];
+                        accounts?: {
                             /** Format: uuid */
                             id: string;
                             /**
@@ -8425,7 +8489,12 @@ export interface operations {
                         name: string | null;
                         email: string;
                         wallet_address: string | null;
+                        /**
+                         * @deprecated
+                         * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                         */
                         safe_address: string | null;
+                        account_address?: string | null;
                         currency_preference: string | null;
                         /** Format: date-time */
                         created_at: string;
@@ -8507,7 +8576,12 @@ export interface operations {
                         name: string | null;
                         email: string;
                         wallet_address: string | null;
+                        /**
+                         * @deprecated
+                         * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                         */
                         safe_address: string | null;
+                        account_address?: string | null;
                     };
                 };
             };
@@ -11096,6 +11170,28 @@ export interface operations {
                                 /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                                 needs_backup_recommendation: boolean | null;
                             }[];
+                            accounts?: {
+                                /** Format: uuid */
+                                id: string;
+                                /**
+                                 * @deprecated
+                                 * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                                 * @example 0x1111111111111111111111111111111111111111
+                                 */
+                                safe_address?: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                account_address: string;
+                                chain_id: number;
+                                name: string;
+                                is_default: boolean;
+                                /** Format: date-time */
+                                created_at: string;
+                                account_type: string | null;
+                                /** @description Derived from the chain — is real value at stake here. */
+                                value_bearing_chain: boolean;
+                                /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
+                                needs_backup_recommendation: boolean | null;
+                            }[];
                         };
                     };
                 };
@@ -11206,6 +11302,28 @@ export interface operations {
                                 /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                                 needs_backup_recommendation: boolean | null;
                             }[];
+                            accounts?: {
+                                /** Format: uuid */
+                                id: string;
+                                /**
+                                 * @deprecated
+                                 * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                                 * @example 0x1111111111111111111111111111111111111111
+                                 */
+                                safe_address?: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                account_address: string;
+                                chain_id: number;
+                                name: string;
+                                is_default: boolean;
+                                /** Format: date-time */
+                                created_at: string;
+                                account_type: string | null;
+                                /** @description Derived from the chain — is real value at stake here. */
+                                value_bearing_chain: boolean;
+                                /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
+                                needs_backup_recommendation: boolean | null;
+                            }[];
                         };
                     };
                 };
@@ -11283,10 +11401,10 @@ export interface operations {
                          * @description Deprecated — same value as `account_address`; removed in the release after #2908.
                          */
                         safe_address: string | null;
+                        account_address?: string | null;
                         currency_preference: string | null;
                         /** Format: date-time */
                         created_at: string;
-                        account_address?: string | null;
                         safes: {
                             /** Format: uuid */
                             id: string;
@@ -11298,6 +11416,28 @@ export interface operations {
                             safe_address: string;
                             /** @example 0x1111111111111111111111111111111111111111 */
                             account_address?: string;
+                            chain_id: number;
+                            name: string;
+                            is_default: boolean;
+                            /** Format: date-time */
+                            created_at: string;
+                            account_type: string | null;
+                            /** @description Derived from the chain — is real value at stake here. */
+                            value_bearing_chain: boolean;
+                            /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
+                            needs_backup_recommendation: boolean | null;
+                        }[];
+                        accounts?: {
+                            /** Format: uuid */
+                            id: string;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                             * @example 0x1111111111111111111111111111111111111111
+                             */
+                            safe_address?: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            account_address: string;
                             chain_id: number;
                             name: string;
                             is_default: boolean;
@@ -11366,8 +11506,13 @@ export interface operations {
                             credential_id: string;
                             signer_address: string;
                             chain_id: number;
-                            /** @description Null until the passkey is bound to a Safe. */
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                             */
                             safe_address: string | null;
+                            /** @description Null until the passkey is bound to an account. */
+                            account_address?: string | null;
                             /** Format: date-time */
                             created_at: string;
                         }[];
@@ -11436,9 +11581,24 @@ export interface operations {
                             x402_merchant_address?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_id`; removed in the release after #2908.
+                             */
                             safe_id?: string | null;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                             */
                             safe_address?: string | null;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_name`; removed in the release after #2908.
+                             */
                             safe_name?: string | null;
+                            account_id?: string | null;
+                            account_address?: string | null;
+                            account_name?: string | null;
                             /** @description Null exactly when tx_hash is null. */
                             explorer_url?: string | null;
                             /** @description Which on-chain mechanism moved the money (#799). */
@@ -11616,9 +11776,24 @@ export interface operations {
                             x402_merchant_address?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_id`; removed in the release after #2908.
+                             */
                             safe_id?: string | null;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
+                             */
                             safe_address?: string | null;
+                            /**
+                             * @deprecated
+                             * @description Deprecated — same value as `account_name`; removed in the release after #2908.
+                             */
                             safe_name?: string | null;
+                            account_id?: string | null;
+                            account_address?: string | null;
+                            account_name?: string | null;
                             /** @description Null exactly when tx_hash is null. */
                             explorer_url?: string | null;
                             /** @description Which on-chain mechanism moved the money (#799). */

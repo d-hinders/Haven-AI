@@ -193,6 +193,8 @@ describe('GET /agents/:id/delegate-balance', () => {
     expect(body.eth_atomic).toBe('1000000000000000000')
     expect(body.usdc_atomic).toBe('2000000')
     expect(body.sweep_min_usdc).toBe('0.01')
+    // #2907: DelegateBalance.account_address twins safe_address, request-level.
+    expect(body.account_address).toBe(body.safe_address)
     await app.close()
   })
 

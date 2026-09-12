@@ -503,6 +503,88 @@ describe('agent creation — passport opt-in never breaks creation', () => {
     expect(mockQuery.mock.calls.some(([sql]) => /FROM agent_delegations/.test(String(sql)))).toBe(false)
   })
 
+  // #2907: `account_id` is the input twin of `safe_id` on POST /agents — P1
+  // (#2908) will make the SDK send `account_id`; this is what unblocks it.
+  describe('POST /agents: account_id input twin of safe_id', () => {
+    it('old-only (safe_id alone) still creates the agent against that account', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().safe_id).toBe(SAFE_UUID)
+      expect(
+        mockQuery.mock.calls.some(
+          ([sql, params]) =>
+            /SELECT id FROM user_safes/.test(String(sql)) &&
+            Array.isArray(params) &&
+            params.includes(SAFE_UUID),
+        ),
+      ).toBe(true)
+    })
+
+    it('new-only (account_id alone, no safe_id) creates the agent against that account', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, account_id: SAFE_UUID },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().safe_id).toBe(SAFE_UUID)
+      // Distinguishes "account_id was actually read" from "the default-safe
+      // fallback happened to return the same id": FIND_USER_SAFE_ID_FOR_USER_SQL
+      // takes TWO params (the requested id, then the user); the default-safe
+      // lookup takes only one. Without the `?? account_id` fallback in the
+      // route, account_id-only would silently fall through to the
+      // one-param default query instead.
+      expect(
+        mockQuery.mock.calls.some(
+          ([sql, params]) =>
+            /SELECT id FROM user_safes/.test(String(sql)) &&
+            Array.isArray(params) &&
+            params.length === 2 &&
+            params[0] === SAFE_UUID,
+        ),
+      ).toBe(true)
+    })
+
+    it('both given and equal creates the agent normally', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID, account_id: SAFE_UUID },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().safe_id).toBe(SAFE_UUID)
+    })
+
+    it('both given and disagreeing is a 400 naming both keys, with no INSERT attempted', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+      const OTHER_UUID = '9f8e7d6c-5b4a-3c2d-1e0f-a1b2c3d4e5f6'
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID, account_id: OTHER_UUID },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toContain('safe_id')
+      expect(res.json().error).toContain('account_id')
+      expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO agents/.test(String(sql)))).toBe(false)
+    })
+  })
+
   it('skips the opt-in on an unsupported chain instead of creating a doomed row', async () => {
     const app = Fastify({ logger: false })
     await app.register(agentRoutes, { prefix: '/agents' })

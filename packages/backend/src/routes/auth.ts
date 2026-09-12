@@ -26,7 +26,7 @@ import {
 } from '../infra/repositories/users.js'
 import { listSessionAccountsForUser } from '../infra/repositories/smart-accounts.js'
 import { sessionSafePayload } from '../modules/accounts/index.js'
-import { withAccountAddressAlias, withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
+import { withAccountAddressAlias, withAccountsEnvelopeAlias, withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
 
 const SALT_ROUNDS = 10
 
@@ -158,7 +158,7 @@ export default async function authRoutes(
 
     return reply.code(201).send({
       token,
-      user: withSessionAccountAddressAlias({
+      user: withAccountsEnvelopeAlias(withSessionAccountAddressAlias({
         id: user.id,
         name: user.name,
         email: user.email,
@@ -166,7 +166,7 @@ export default async function authRoutes(
         safe_address: null,
         currency_preference: 'USD',
         safes: [],
-      }),
+      })),
     })
   })
 
@@ -202,7 +202,7 @@ export default async function authRoutes(
 
     return {
       token,
-      user: withSessionAccountAddressAlias({
+      user: withAccountsEnvelopeAlias(withSessionAccountAddressAlias({
         id: user.id,
         name: user.name,
         email: user.email,
@@ -210,7 +210,7 @@ export default async function authRoutes(
         safe_address: user.safe_address,
         currency_preference: user.currency_preference ?? 'USD',
         safes,
-      }),
+      })),
     }
   })
 
@@ -228,7 +228,7 @@ export default async function authRoutes(
 
     const safes = (await listSessionAccountsForUser(sub)).map(sessionSafePayload).map(withAccountAddressAlias)
 
-    return withSessionAccountAddressAlias({ ...profile, safes })
+    return withAccountsEnvelopeAlias(withSessionAccountAddressAlias({ ...profile, safes }))
   })
   /**
    * Device-authorization flow (#2526, RFC 8628 shaped).

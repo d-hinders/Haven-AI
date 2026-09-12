@@ -318,6 +318,8 @@ describe('machine payment routes', () => {
       name: AGENT.name,
       status: AGENT.status,
       safe_address: AGENT.safe_address,
+      // #2907: account_address twins safe_address, request-level asserted.
+      account_address: AGENT.safe_address,
       delegate_address: AGENT.delegate_address,
       // #1472: null here BECAUSE the fixture buckets into legacy — the
       // delegate account only exists on the delegation rail.
@@ -421,6 +423,7 @@ describe('machine payment routes', () => {
       expect(response.json()).toEqual({
         agent_id: AGENT.id,
         safe_address: AGENT.safe_address,
+        account_address: AGENT.safe_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
         allowances: [{
@@ -559,6 +562,7 @@ describe('machine payment routes', () => {
       expect(response.json()).toEqual({
         agent_id: AGENT.id,
         safe_address: AGENT.safe_address,
+        account_address: AGENT.safe_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
         allowances: [],

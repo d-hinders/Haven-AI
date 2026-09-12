@@ -80,9 +80,12 @@ describe('GET /user/safes — list invariants', () => {
 
     expect(res.statusCode).toBe(200)
     // #2907: the route dual-emits `account_address` alongside `safe_address`
-    // (same value) — the account-vocabulary twin, additive for one release.
+    // (same value) — the account-vocabulary twin, additive for one release —
+    // and dual-emits the whole envelope under `accounts` too.
+    const twinnedSafes = rows.map((row) => ({ ...row, account_address: row.safe_address }))
     expect(res.json()).toEqual({
-      safes: rows.map((row) => ({ ...row, account_address: row.safe_address })),
+      safes: twinnedSafes,
+      accounts: twinnedSafes,
     })
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockPoolQuery.mock.calls[0]

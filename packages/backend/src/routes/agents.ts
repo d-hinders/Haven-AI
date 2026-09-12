@@ -47,6 +47,13 @@ interface CreateAgentBody {
   delegate_address: string
   safe_id?: string
   /**
+   * #2907 input twin of `safe_id` (P1/#2908 will make the SDK send this
+   * instead of `safe_id`). Either wins if the other is absent; both present
+   * and disagreeing is a 400 naming both keys — silently preferring one would
+   * hide a caller bug where the two were meant to name the same account.
+   */
+  account_id?: string
+  /**
    * Opt in to an L0 Agent Passport at creation time (#972). Absent/false is the
    * DEFAULT and the normal case: a basic agent has no passport and behaves
    * exactly as before. Issuance is fire-and-forget — it can never fail or delay
@@ -160,6 +167,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     return {
       delegate_address: delegate,
       safe_address: agent.safe_address,
+      // #2907: DelegateBalance.account_address twins safe_address (nullable —
+      // agent.safe_address can be null pre-linking, so the generic
+      // withAccountAddressAlias<SafeAddressed> mapper, which requires a
+      // string, does not apply here).
+      account_address: agent.safe_address,
       chain_id: chainId,
       eth: formatTokenValue(ethAtomic.toString(), 18),
       eth_atomic: ethAtomic.toString(),
@@ -177,7 +189,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   // granted separately as a delegation (#1440/#2020)
   app.post<{ Body: CreateAgentBody }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { name, description, delegate_address, safe_id, allowances, issue_passport } = request.body
+    const { name, description, delegate_address, safe_id, account_id, allowances, issue_passport } =
+      request.body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return reply.code(400).send({ error: 'Name is required' })
@@ -185,6 +198,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (!delegate_address || !isValidAddress(delegate_address)) {
       return reply.code(400).send({ error: 'Valid delegate address is required' })
     }
+    // #2907: account_id is the input twin of safe_id. Either wins alone; both
+    // given and disagreeing is a 400 naming both keys rather than silently
+    // preferring one.
+    if (safe_id && account_id && safe_id !== account_id) {
+      return reply.code(400).send({
+        error: 'safe_id and account_id disagree — send only one, or make them match',
+      })
+    }
+    const requestedAccountId = safe_id ?? account_id
     // #2020: the allowance mirror is retired with the Safe rail. Refuse rather
     // than silently drop — a caller passing allowances believes it is granting
     // authority, and nothing here grants anything any more.
@@ -195,14 +217,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // Validate safe_id belongs to the user (if provided)
+    // Validate the requested account (safe_id or its account_id twin) belongs
+    // to the user, if either was provided.
     let resolvedSafeId: string | null = null
-    if (safe_id) {
-      const ownedSafeId = await findUserAccountIdForUser(safe_id, sub)
+    if (requestedAccountId) {
+      const ownedSafeId = await findUserAccountIdForUser(requestedAccountId, sub)
       if (!ownedSafeId) {
         return reply.code(400).send({ error: 'Invalid Safe — not found or not yours' })
       }
-      resolvedSafeId = safe_id
+      resolvedSafeId = requestedAccountId
     } else {
       resolvedSafeId = await findDefaultUserAccountId(sub)
     }

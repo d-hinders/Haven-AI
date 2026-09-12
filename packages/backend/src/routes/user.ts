@@ -8,6 +8,7 @@ import {
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
+import { withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 
@@ -67,7 +68,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Enter a name using 80 characters or fewer' })
     }
 
-    return (await updateUserName(normalizedName, sub)) ?? userRowVanished()
+    const updated = await updateUserName(normalizedName, sub)
+    if (!updated) return userRowVanished()
+    // #2907: userProfile.account_address twins safe_address, same value.
+    return withSessionAccountAddressAlias(updated)
   })
 
   // PUT /user/wallet
@@ -79,7 +83,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid Ethereum address' })
     }
 
-    return (await updateUserWalletAddress(wallet_address, sub)) ?? userRowVanished()
+    const updated = await updateUserWalletAddress(wallet_address, sub)
+    if (!updated) return userRowVanished()
+    // #2907: userIdentity.account_address twins safe_address, same value.
+    return withSessionAccountAddressAlias(updated)
   })
 
   // PUT /user/safe — TOMBSTONE (#1984 closed it, #1988 deleted the body).

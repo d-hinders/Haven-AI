@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   withAccountAddressAlias,
+  withActivityPaymentAccountAlias,
   withAgentAccountAlias,
   withDashboardAgentAccountAlias,
   withFailedAccountIdsAlias,
@@ -70,6 +71,23 @@ describe('#2907 wire-alias mappers — old === new, old untouched', () => {
     const out = withFailedAccountIdsAlias(body)
     expect(out.failedAccountIds).toEqual(out.failedSafeIds)
     expect(out.failedAccountIds).toEqual(['id-1', 'id-2'])
+  })
+
+  it('withActivityPaymentAccountAlias', () => {
+    const payment = { safe_id: 'id-1', safe_address: '0xabc', safe_name: 'My account', id: 'p-1' }
+    const out = withActivityPaymentAccountAlias(payment)
+    expect(out.account_id).toBe(payment.safe_id)
+    expect(out.account_address).toBe(payment.safe_address)
+    expect(out.account_name).toBe(payment.safe_name)
+    expect(out.id).toBe('p-1')
+  })
+
+  it('withActivityPaymentAccountAlias — null-safe payment dual-emits null', () => {
+    const payment = { safe_id: null, safe_address: null, safe_name: null }
+    const out = withActivityPaymentAccountAlias(payment)
+    expect(out.account_id).toBeNull()
+    expect(out.account_address).toBeNull()
+    expect(out.account_name).toBeNull()
   })
 
   it('withSessionAccountAddressAlias', () => {

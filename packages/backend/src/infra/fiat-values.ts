@@ -29,6 +29,12 @@ export async function getFiatValuesForTokenAmount(
 /** Where a captured FX rate came from. Spot at settlement for now (open Q #1). */
 export const FX_SOURCE_SPOT = 'coingecko_spot'
 
+/**
+ * The SEK half of a book-time capture (migration 026). Kept as a named type
+ * because the evidence row still stores it in its own columns; #2877 folded
+ * the FUNCTION that produced it into `getBookTimeCapture`, so one price read
+ * serves both halves and they cannot disagree about when they were taken.
+ */
 export interface BookTimeSekValue {
   /** SEK value of the token amount at capture time. */
   amountSek: number
@@ -38,12 +44,7 @@ export interface BookTimeSekValue {
   fxSource: string
 }
 
-/**
- * Book-time token→ledger-currency rates, one per currency that had a usable
- * quote. A currency missing from the map had no quote at settlement; the feed
- * for a connection booking in it stays unfed and backfillable, exactly as a
- * null SEK amount behaves.
- */
+/** Book-time token→ledger-currency rates, one per currency with a usable quote. */
 export interface BookTimeLedgerRates {
   rates: Partial<Record<LedgerCurrency, number>>
   fxSource: string
@@ -53,28 +54,6 @@ export interface BookTimeLedgerRates {
 export interface BookTimeCapture extends BookTimeLedgerRates {
   /** Null when the SEK half was not usable (bad amount, or no SEK quote). */
   sek: BookTimeSekValue | null
-}
-
-/**
- * The book-time SEK value of a settled token amount — captured once at
- * settlement and then frozen (see migration 026). Returns `null` when no usable
- * rate is available, so the caller persists nulls (backfillable) rather than a
- * bogus zero, and so a pricing outage never blocks settlement.
- */
-export async function getBookTimeSekValue(
-  tokenSymbol: string,
-  amountHuman: string,
-): Promise<BookTimeSekValue | null> {
-  const amount = Number(amountHuman)
-  if (!Number.isFinite(amount) || amount <= 0) return null
-
-  try {
-    const price = await getTokenPrice(tokenSymbol)
-    if (!Number.isFinite(price.sek) || price.sek <= 0) return null
-    return { amountSek: amount * price.sek, fxRate: price.sek, fxSource: FX_SOURCE_SPOT }
-  } catch {
-    return null
-  }
 }
 
 /**

@@ -8,14 +8,12 @@ import {
 
 const {
   mockQuery,
-  mockGetBookTimeSekValue,
-  mockGetBookTimeLedgerRates,
+  mockGetBookTimeCapture,
   mockRecordSettledFee,
   mockFeedSettledPaymentBestEffort,
 } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  mockGetBookTimeSekValue: vi.fn(),
-  mockGetBookTimeLedgerRates: vi.fn(),
+  mockGetBookTimeCapture: vi.fn(),
   mockRecordSettledFee: vi.fn(),
   mockFeedSettledPaymentBestEffort: vi.fn(),
 }))
@@ -27,8 +25,7 @@ vi.mock('../../../db.js', () => ({
 }))
 
 vi.mock('../../../infra/fiat-values.js', () => ({
-  getBookTimeSekValue: (...args: unknown[]) => mockGetBookTimeSekValue(...args),
-  getBookTimeLedgerRates: (...args: unknown[]) => mockGetBookTimeLedgerRates(...args),
+  getBookTimeCapture: (...args: unknown[]) => mockGetBookTimeCapture(...args),
 }))
 
 vi.mock('../../fee/index.js', () => ({
@@ -92,12 +89,8 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-06-19T10:01:02.003Z'))
   mockQuery.mockResolvedValue({ rows: [] })
-  mockGetBookTimeSekValue.mockResolvedValue({
-    amountSek: 132.5,
-    fxRate: 10.6,
-    fxSource: 'coingecko_spot',
-  })
-  mockGetBookTimeLedgerRates.mockResolvedValue({
+  mockGetBookTimeCapture.mockResolvedValue({
+    sek: { amountSek: 132.5, fxRate: 10.6, fxSource: 'coingecko_spot' },
     rates: { SEK: 10.6, EUR: 0.92, DKK: 6.87 },
     fxSource: 'coingecko_spot',
   })
@@ -126,11 +119,14 @@ describe('recordMachinePaymentEvidenceBase', () => {
     expect(sql).toContain(
       'fx_at = COALESCE(machine_payment_evidence.fx_at, EXCLUDED.fx_at)',
     )
-    // #2877: the ledger-currency rate map freezes by the same mechanism as
-    // the four SEK columns above. MUTATION TARGET: drop the COALESCE and a
-    // re-settlement overwrites a book-time rate with a feed-time one.
+    // #2877: the rate map freezes WITH its timestamp, not independently —
+    // the proof-attach path re-runs this write weeks later, and a per-column
+    // COALESCE would let it fill a NULL map with a rate taken that day while
+    // fx_at still said settlement. MUTATION TARGET: replace the CASE with a
+    // plain COALESCE and the real-database test in
+    // modules/accounting/__tests__/ledger-currency.db.test.ts goes red.
     expect(sql).toContain(
-      'fx_rates = COALESCE(machine_payment_evidence.fx_rates, EXCLUDED.fx_rates)',
+      'WHEN machine_payment_evidence.fx_at IS NULL THEN EXCLUDED.fx_rates',
     )
 
     const excludedColumns = [
@@ -163,7 +159,7 @@ describe('recordMachinePaymentEvidenceBase', () => {
       'coingecko_spot',
       '2026-06-19T10:01:02.003Z',
     ])
-    expect(mockGetBookTimeSekValue).toHaveBeenCalledWith('USDC', '12.5')
+    expect(mockGetBookTimeCapture).toHaveBeenCalledWith('USDC', '12.5')
     expect(mockRecordSettledFee).toHaveBeenCalledOnce()
     expect(mockFeedSettledPaymentBestEffort).toHaveBeenCalledWith(
       '22222222-2222-2222-2222-222222222222',
@@ -172,12 +168,9 @@ describe('recordMachinePaymentEvidenceBase', () => {
   })
 
   it('writes evidence with null SEK fields when book-time pricing is unavailable', async () => {
-    mockGetBookTimeSekValue.mockResolvedValueOnce(null)
-    // #2877: the two captures fail together — one price fetch, one outage.
-    // Plain `mockResolvedValue`, not `…Once`: `beforeEach` re-applies the
-    // default for every test, so there is no positional chain to keep in
-    // step here (and the db-mock ratchet counts those chains).
-    mockGetBookTimeLedgerRates.mockResolvedValue(null)
+    // #2877: one capture, so one outage — the SEK columns and the rate map
+    // can no longer disagree about whether a price was available.
+    mockGetBookTimeCapture.mockResolvedValueOnce(null)
 
     await recordMachinePaymentEvidenceBase(payment())
 
@@ -213,8 +206,7 @@ describe('recordMachinePaymentEvidenceBase', () => {
       await recordMachinePaymentEvidenceBase(payment(overrides))
     }
 
-    expect(mockGetBookTimeSekValue).not.toHaveBeenCalled()
-    expect(mockGetBookTimeLedgerRates).not.toHaveBeenCalled()
+    expect(mockGetBookTimeCapture).not.toHaveBeenCalled()
     expect(mockQuery).not.toHaveBeenCalled()
     expect(mockRecordSettledFee).not.toHaveBeenCalled()
     expect(mockFeedSettledPaymentBestEffort).not.toHaveBeenCalled()

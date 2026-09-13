@@ -63,7 +63,7 @@ describe('needsBackupSignerRecommendation (#1153, was the #908 gate)', () => {
 describe('sessionAccountPayload (#1205 — the production call site)', () => {
   const base = {
     id: 's1',
-    safe_address: '0x' + 'aa'.repeat(20),
+    account_address: '0x' + 'aa'.repeat(20),
     chain_id: 8453,
     name: null,
     is_default: true,

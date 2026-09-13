@@ -78,7 +78,7 @@ export interface SignerFloorCheck {
  * predicate would hide the recommendation from precisely the users who had
  * already said "I know" once — and the risk is ongoing, not a thing you
  * acknowledge away. The column is still written where an acknowledgement is
- * given (`user_safes.single_signer_waiver_at`), as history.
+ * given (`smart_accounts.single_signer_waiver_at`), as history.
  */
 export function needsBackupSignerRecommendation(check: SignerFloorCheck): boolean {
   if (!isValueBearingChain(check.chainId)) return false

@@ -38,8 +38,8 @@ let seq = 0
  * admits exactly `allowance_module | session_key | delegation` (migrations
  * 036/041). So a null rail cannot exist in the COLUMN — the `string | null` on
  * `VerificationRow`/`findAgentChain` comes from the LEFT JOIN against
- * `user_safes`, which yields null when an agent has no bound account at all
- * (`agents.safe_id` is nullable). Pass `rail: null` here to seed that case.
+ * `smart_accounts`, which yields null when an agent has no bound account at all
+ * (`agents.account_id` is nullable). Pass `rail: null` here to seed that case.
  *
  * Worth stating because the issue framed null as "the legacy population". The
  * truer statement is that the column's DEFAULT is the legacy rail; null means
@@ -58,14 +58,14 @@ async function seedAgentOnRail(
   let accountId: string | null = null
   if (rail !== null) {
     const safe = await db.query<{ id: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
        VALUES ($1, $2, 84532, $3, $4) RETURNING id`,
       [userId, `0x${String(seq).padStart(40, 'a')}`, rail, accountType ?? 'safe'],
     )
     accountId = safe.rows[0].id
   }
   const agent = await db.query<{ id: string }>(
-    `INSERT INTO agents (user_id, name, safe_id, status)
+    `INSERT INTO agents (user_id, name, account_id, status)
      VALUES ($1, 'passport agent', $2, $3) RETURNING id`,
     [userId, accountId, agentStatus],
   )

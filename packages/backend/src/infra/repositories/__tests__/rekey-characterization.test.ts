@@ -38,14 +38,14 @@ async function seedAgent(): Promise<Seeded> {
   )
   const userId = user.rows[0].id
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
+    `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
      VALUES ($1, $2, 84532, 'delegation', 'delegator_hybrid') RETURNING id`,
     [userId, `0x${String(n).padStart(40, 'a')}`],
   )
   const accountId = safe.rows[0].id
   const apiKeyHash = `hash-old-${n}`
   const agent = await db.query<{ id: string }>(
-    `INSERT INTO agents (user_id, safe_id, name, delegate_address, api_key_hash, api_key_prefix, status)
+    `INSERT INTO agents (user_id, account_id, name, delegate_address, api_key_hash, api_key_prefix, status)
      VALUES ($1, $2, 'Rekey agent', $3, $4, 'sk_agent_old', 'active') RETURNING id`,
     [userId, accountId, OLD_DELEGATE, apiKeyHash],
   )
@@ -71,7 +71,7 @@ async function seedPendingIntent(
 ): Promise<string> {
   const result = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at)
      VALUES ($1, $2, '0xsafe', 'USDC', $3, '0xmerchant', '1000', '0.001', $4, 0,

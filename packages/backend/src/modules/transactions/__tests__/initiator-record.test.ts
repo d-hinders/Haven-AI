@@ -25,7 +25,7 @@ import type { EnrichedTransaction } from '../types.js'
 
 const USER_SAFE = {
   id: 'safe-1',
-  safe_address: '0xsafe',
+  account_address: '0xsafe',
   chain_id: 8453,
   name: 'Main',
 }
@@ -60,8 +60,8 @@ const X402_ROW: X402PaymentIntentRow = {
   tx_hash: '0xabc',
   agent_id: 'agent-1',
   agent_name: 'Alice',
-  safe_id: 'safe-1',
-  safe_address: '0xsafe',
+  account_id: 'safe-1',
+  account_address: '0xsafe',
   safe_name: 'Main',
   chain_id: 8453,
   token_symbol: 'USDC',
@@ -85,7 +85,7 @@ const X402_ROW: X402PaymentIntentRow = {
 const PI_ROW: PaymentIntentAgentRow = {
   id: 'pi-2',
   tx_hash: '0xmatched',
-  safe_id: 'safe-1',
+  account_id: 'safe-1',
   chain_id: 8453,
   agent_id: 'agent-2',
   agent_name: 'Bob',
@@ -103,7 +103,7 @@ const PI_ROW: PaymentIntentAgentRow = {
 const SWEEP_ROW: DelegateSweepAgentRow = {
   id: 'sweep-1',
   tx_hash: '0xsweep',
-  safe_id: 'safe-1',
+  account_id: 'safe-1',
   chain_id: 8453,
   agent_id: 'agent-3',
   agent_name: 'Carol',

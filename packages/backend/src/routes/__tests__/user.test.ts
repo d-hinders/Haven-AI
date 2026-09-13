@@ -16,7 +16,7 @@ import { buildApp } from '../../__tests__/helpers.js'
 
 /** users.id is a UUID column; fixtures must look like one (#1446). */
 const USER_UUID = '4f6c2b18-7d90-4a35-9e81-2c5b7f3a0d64'
-/** user_safes.id likewise. */
+/** smart_accounts.id likewise. */
 const SAFE_UUID_A = 'b7e1d0c4-3a52-4f68-8c91-5d2e7a4b0f31'
 const SAFE_UUID_B = '1c93a6f8-2e40-4b57-9d83-6f0a5c1e8b72'
 
@@ -52,7 +52,7 @@ describe('User routes', () => {
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: null,
-          safe_address: null,
+          account_address: null,
           currency_preference: 'USD',
           created_at: '2025-01-01T00:00:00.000Z',
         }],
@@ -73,7 +73,7 @@ describe('User routes', () => {
       // #2907: request-level twin === old, not just the mapper's own unit
       // test — mutation-proven by dropping the withSessionAccountAddressAlias
       // call at this route.
-      expect(body.account_address).toBe(body.safe_address)
+      expect(body.safe_address).toBe(body.account_address)
     })
 
     it('returns 400 for invalid name', async () => {
@@ -113,7 +113,7 @@ describe('User routes', () => {
           id: 'user-1',
           email: 'test@example.com',
           wallet_address: walletAddress,
-          safe_address: null,
+          account_address: null,
         }],
       })
 
@@ -129,7 +129,7 @@ describe('User routes', () => {
       expect(body.id).toBe('user-1')
       expect(body.wallet_address).toBe(walletAddress)
       // #2907: request-level twin === old.
-      expect(body.account_address).toBe(body.safe_address)
+      expect(body.safe_address).toBe(body.account_address)
     })
 
     it('returns 400 for invalid address', async () => {
@@ -160,7 +160,7 @@ describe('User routes', () => {
 
   // --- PUT /user/safe ---
   // INFLOW CLOSED (#1984, epic #1440). This route linked a Safe into
-  // `user_safes` and emitted the `safe_imported` funnel event — it is an
+  // `smart_accounts` and emitted the `safe_imported` funnel event — it is an
   // import, so it is retired with the rail. The behavioural cases that used
   // to live here (200 on a valid address, 400 on a bad one, the Base
   // chain_id default, the #1178 vanished-row 404) all exercised a handler
@@ -209,7 +209,7 @@ describe('User routes', () => {
                 credential_id: 'cred-1',
                 signer_address: '0x1111111111111111111111111111111111111111',
                 chain_id: 8453,
-                safe_address: '0x2222222222222222222222222222222222222222',
+                account_address: '0x2222222222222222222222222222222222222222',
                 created_at: '2026-05-25T12:00:00.000Z',
               }],
             })
@@ -227,7 +227,7 @@ describe('User routes', () => {
       expectMatchesSpec('GET', '/passkeys', body)
       // Mutation-proven: dropping the withSessionAccountAddressAlias call in
       // routes/passkeys.ts leaves this undefined, failing the equality below.
-      expect(body.passkeys[0].account_address).toBe(body.passkeys[0].safe_address)
+      expect(body.passkeys[0].safe_address).toBe(body.passkeys[0].account_address)
       expect(body.passkeys[0].account_address).toBe('0x2222222222222222222222222222222222222222')
     })
 
@@ -241,7 +241,7 @@ describe('User routes', () => {
                 credential_id: 'cred-1',
                 signer_address: '0x1111111111111111111111111111111111111111',
                 chain_id: 8453,
-                safe_address: null,
+                account_address: null,
                 created_at: '2026-05-25T12:00:00.000Z',
               }],
             })

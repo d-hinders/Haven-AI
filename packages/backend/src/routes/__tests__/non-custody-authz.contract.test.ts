@@ -75,7 +75,7 @@ const AGENT = {
   user_id: '22222222-2222-2222-2222-222222222222',
   name: 'Payment Agent',
   delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-  safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
   chain_id: 100,
   status: 'active',
 }
@@ -86,7 +86,7 @@ const USEROP_SIGNATURE = `0x${'ab'.repeat(97)}` // >=100 hex chars, passes the d
 const TX_HASH = `0x${'cd'.repeat(32)}`
 const DELEGATION_HASH = `0x${'12'.repeat(32)}`
 const PREPARED_USER_OP = {
-  sender: AGENT.safe_address,
+  sender: AGENT.account_address,
   nonce: 123456789012345678901234567890n,
   callData: '0xdeadbeef',
 }
@@ -112,7 +112,7 @@ function legacyIntentRow(overrides: Record<string, unknown> = {}) {
     id: PAYMENT_ID,
     agent_id: AGENT.id,
     user_id: AGENT.user_id,
-    safe_address: AGENT.safe_address,
+    account_address: AGENT.account_address,
     chain_id: AGENT.chain_id,
     token_symbol: 'xDAI',
     token_address: '0x0000000000000000000000000000000000000000',

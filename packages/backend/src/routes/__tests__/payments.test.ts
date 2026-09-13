@@ -30,7 +30,7 @@ const AGENT = {
   user_id: '22222222-2222-2222-2222-222222222222',
   name: 'Payment Agent',
   delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-  safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
   chain_id: 100,
   status: 'active',
 }
@@ -75,7 +75,7 @@ function pendingIntent(overrides: Record<string, unknown> = {}) {
     id: PAYMENT_ID,
     agent_id: AGENT.id,
     user_id: AGENT.user_id,
-    safe_address: AGENT.safe_address,
+    account_address: AGENT.account_address,
     chain_id: AGENT.chain_id,
     token_symbol: 'xDAI',
     token_address: TOKEN,
@@ -856,14 +856,14 @@ describe('payment routes', () => {
       // in this describe that stays GREEN, and it is a positive control for
       // the whole slice. It only ever pinned the INTENT's rail; the ACCOUNT's
       // rail (`FIND_EXECUTION_RAIL_FOR_AGENT_SQL`, the LEFT JOIN through
-      // `agents.safe_id`) was never mocked and defaulted to null. That was
+      // `agents.account_id`) was never mocked and defaulted to null. That was
       // invisible while null meant "legacy" and legacy still paid; after the
       // retirement null means RETIRED, and leaving the fixture alone would
       // have silently turned a delegation-replay test into a third copy of
       // the refusal. The account rail is now mocked to match the intent.
       primeDb(
         AUTH,
-        [/LEFT JOIN user_safes/, () => ({ rows: [{ execution_rail: 'delegation' }] })],
+        [/LEFT JOIN smart_accounts/, () => ({ rows: [{ execution_rail: 'delegation' }] })],
         intentKeyLookup([
           sendReplayRow({
             execution_rail: 'delegation',

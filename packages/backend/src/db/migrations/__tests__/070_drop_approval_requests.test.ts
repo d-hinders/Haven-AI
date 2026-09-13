@@ -45,7 +45,7 @@ async function seedUserAgent(n: number): Promise<{ userId: string; agentId: stri
   )
   const userId = user.rows[0].id
   const agent = await db.query<{ id: string }>(
-    `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
+    `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, account_id)
      VALUES ($1, 'a', null, $2, 'h', 'sk_agent_070', NULL) RETURNING id`,
     [userId, '0x' + String(n).padStart(40, '7')],
   )

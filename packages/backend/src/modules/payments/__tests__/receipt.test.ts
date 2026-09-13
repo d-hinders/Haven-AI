@@ -13,7 +13,7 @@ const SIGN_HASH = `0x${'ab'.repeat(32)}`
 function row(over: Partial<PaymentReceiptRow> = {}): PaymentReceiptRow {
   return {
     id: 'pi1',
-    safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+    account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
     chain_id: 100,
     token_symbol: 'xDAI',
     token_address: '0x0000000000000000000000000000000000000000',
@@ -49,7 +49,7 @@ describe('buildPaymentReceipt (backend DB mapping)', () => {
   // #2907: payment.account twins payment.safe (same value) — additive,
   // outside the SDK's typed PaymentReceipt['payment'] shape, so asserted at
   // the JS-object level rather than through the TS type. Mutation-proven by
-  // dropping the `account: row.safe_address` line in receipt.ts.
+  // dropping the `account: row.account_address` line in receipt.ts.
   it('#2907: payment.account is a same-value twin of payment.safe', () => {
     const r = buildPaymentReceipt(row({ signature: '0xsig' })) as unknown as {
       payment: { safe: string; account: string }

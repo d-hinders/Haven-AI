@@ -18,7 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-12"
+last-verified: "2026-09-13"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -140,6 +140,13 @@ this section describes. Re-verified again 2026-09-12 against #2910 (phase
 `resolveUserSafe` helper to `resolveAccountForSetup` and the `safeId` field
 it constructs on the `NewSetup`/`insertPendingAgent` inputs to `accountId` —
 again identifiers only, nowhere near `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
+`config.connectorChannel`, or `/discovery`. Re-verified again 2026-09-13
+against #2911 (phase 3, the schema rename): that PR's only touch to
+`routes/agent-connection-setups.ts` is a one-line fix keeping
+`request.body.safe_id` reading the wire INPUT field name it always read
+(a stray mechanical rename briefly turned it into `.account_id`, which
+`CreateSetupBody` does not declare — caught by `tsc`, reverted before
+merge) — no change to `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
 `config.connectorChannel`, or `/discovery`:
 
 ```bash

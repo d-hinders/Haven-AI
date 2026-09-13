@@ -24,7 +24,7 @@
  *    contract** — `log.address === intent.token_address`. A `Transfer` event
  *    from some other contract with the same signature proves nothing about
  *    USDC.
- * 4. **…whose `from` is the payer smart account** (`intent.safe_address`).
+ * 4. **…whose `from` is the payer smart account** (`intent.account_address`).
  *    This is the anti-fabrication binding: without it an agent could point at
  *    ANY third party's transfer of the right size to the right merchant.
  * 5. **…whose `to` is the expected merchant `payTo`** (`intent.to_address`).

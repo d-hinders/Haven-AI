@@ -12,7 +12,7 @@
  * preview join carrying `safe_name`/`safe_chain_id` — folding them into the
  * owning repositories would either widen those statements for every caller or
  * leave near-duplicates sitting next to each other. #999 recorded the specific
- * version of that trap: `agents.test.ts` pins every `user_safes` JOIN in
+ * version of that trap: `agents.test.ts` pins every `smart_accounts` JOIN in
  * `agents.ts` to select `account_type`, so a non-payload join added there
  * acquires a test contract it was never meant to answer to.
  *
@@ -39,7 +39,7 @@ export type { Executor }
 
 export interface DashboardAccountRow {
   id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   name: string
   is_default: boolean
@@ -49,7 +49,7 @@ export interface DashboardAgentRow {
   id: string
   name: string
   status: string
-  safe_id: string | null
+  account_id: string | null
   safe_name: string | null
   safe_chain_id: number | null
   account_type: string | null
@@ -83,15 +83,15 @@ export interface MonthlySpendRow {
 // agents in "Connected agents" LINKING to /agents/:id — a link that 404s,
 // because the list AgentDetailClient reads from is filtered. An inconsistent
 // funnel is worse than an unfiltered one.
-export const LIST_DASHBOARD_ACCOUNTS_SQL = `SELECT id, safe_address, chain_id, name, is_default
-         FROM user_safes
+export const LIST_DASHBOARD_ACCOUNTS_SQL = `SELECT id, account_address, chain_id, name, is_default
+         FROM smart_accounts
          WHERE user_id = $1 AND account_type = 'delegator_hybrid'
          ORDER BY created_at ASC`
 
-export const LIST_DASHBOARD_AGENTS_SQL = `SELECT a.id, a.name, a.status, a.safe_id, us.name AS safe_name, us.chain_id AS safe_chain_id,
+export const LIST_DASHBOARD_AGENTS_SQL = `SELECT a.id, a.name, a.status, a.account_id, us.name AS safe_name, us.chain_id AS safe_chain_id,
                 us.account_type
          FROM agents a
-         LEFT JOIN user_safes us ON us.id = a.safe_id
+         LEFT JOIN smart_accounts us ON us.id = a.account_id
          WHERE a.user_id = $1 AND us.account_type = 'delegator_hybrid'
            AND a.status IN ('active', 'paused')
          ORDER BY

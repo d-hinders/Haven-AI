@@ -30,12 +30,12 @@ const HYBRID = '0x' + 'cd'.repeat(20)
 function mockDb(opts: { existing?: boolean; count?: string } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
-    if (/SELECT id FROM user_safes/.test(s)) {
+    if (/SELECT id FROM smart_accounts/.test(s)) {
       return Promise.resolve({ rows: opts.existing ? [{ id: 'acct-0' }] : [] })
     }
     if (/COUNT\(\*\)/.test(s)) return Promise.resolve({ rows: [{ count: opts.count ?? '1' }] })
-    if (/INSERT INTO user_safes/.test(s)) {
-      // user_safes.id is a UUID column, so 'acct-1' described a row the
+    if (/INSERT INTO smart_accounts/.test(s)) {
+      // smart_accounts.id is a UUID column, so 'acct-1' described a row the
       // database cannot produce (#1446).
       return Promise.resolve({ rows: [{ id: '5a2f8d31-6c04-4e97-b183-9e7d2c6a0f58', created_at: '2026-07-10T00:00:00Z' }] })
     }
@@ -70,7 +70,7 @@ describe('POST /accounts/hybrid (#825)', () => {
       deployed: false,
     })
     expectMatchesSpec('POST', '/accounts/hybrid', res.json(), '201')
-    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))!
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))!
     expect(String(insert[0])).toContain("'delegator_hybrid'")
     expect(String(insert[0])).toContain("'delegation'")
   })
@@ -115,7 +115,7 @@ describe('POST /accounts/hybrid (#825)', () => {
   it('first account becomes the default', async () => {
     mockDb({ count: '0' })
     await app.inject({ method: 'POST', url: '/accounts/hybrid', payload: { owner_address: OWNER } })
-    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))!
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))!
     expect(insert[1][4]).toBe(true) // is_default
   })
 
@@ -154,7 +154,7 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     })
     expect(res.statusCode).toBe(201)
     // …and no waiver is ever recorded on a testnet row:
-    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))
     expect(insert?.[1]?.[6]).toBeNull() // single_signer_waiver_at param
   })
 
@@ -179,7 +179,7 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
       method: 'POST', url: '/accounts/hybrid',
       payload: { chain_id: 8453, passkeys: [PASSKEY] },
     })
-    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))
     expect(insert?.[1]?.[6]).toBeNull()
   })
 
@@ -249,7 +249,7 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
       },
     })
     expect(res.statusCode).toBe(201)
-    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO user_safes/.test(String(c[0])))
+    const insert = mockQuery.mock.calls.find((c) => /INSERT INTO smart_accounts/.test(String(c[0])))
     expect(insert?.[1]?.[6]).toBeNull()
   })
 

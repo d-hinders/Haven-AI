@@ -55,7 +55,7 @@ describe('lost-result recovery (#1043)', () => {
   const FACTS = {
     rows: [{
       delegate_address: '0x' + 'a'.repeat(40), agent_status: 'active',
-      chain_id: 84532, safe_address: '0x' + 'b'.repeat(40),
+      chain_id: 84532, account_address: '0x' + 'b'.repeat(40),
       // #2138: these tests exercise lost-result recovery on the LIVE rail;
       // issuance is delegation-rail only, so the facts must say so.
       account_type: 'delegator_hybrid', execution_rail: 'delegation',

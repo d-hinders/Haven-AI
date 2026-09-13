@@ -27,7 +27,7 @@ const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const FED_PAYMENT = 'pi-fed'
 const UNFED_PAYMENT = 'pi-unfed'
 
-const SAFES = [{ id: BASE_SAFE_ID, safe_address: BASE_SAFE, chain_id: 8453, name: 'Base account' }]
+const SAFES = [{ id: BASE_SAFE_ID, account_address: BASE_SAFE, chain_id: 8453, name: 'Base account' }]
 
 function jsonResponse(body: unknown) {
   return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response)
@@ -54,8 +54,8 @@ function x402Rows() {
     tx_hash: `0x${(i + 1).toString(16).padStart(64, '0')}`,
     agent_id: AGENT_ID,
     agent_name: 'Buyer',
-    safe_id: BASE_SAFE_ID,
-    safe_address: BASE_SAFE,
+    account_id: BASE_SAFE_ID,
+    account_address: BASE_SAFE,
     safe_name: 'Base account',
     chain_id: 8453,
     token_symbol: 'USDC',
@@ -99,7 +99,7 @@ function routeDbQueries({ entitled = true, connected = true, syncs = [FED_SYNC_R
   const spy = vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown, params?: unknown[]) => {
       const text = String(sql)
-      if (text.includes('FROM user_safes')) return { rows: SAFES }
+      if (text.includes('FROM smart_accounts')) return { rows: SAFES }
       if (text.includes('FROM payment_intents')) return { rows: x402Rows() }
       if (text.includes('FROM account_entitlements')) return { rows: entitled ? [{ '?column?': 1 }] : [] }
       if (text.includes('FROM accounting_connections')) {
@@ -247,7 +247,7 @@ describe('GET /transactions — accounting badge (#2870)', () => {
     spy.mockImplementation(
       (async (sql: unknown) => {
         const text = String(sql)
-        if (text.includes('FROM user_safes')) return { rows: SAFES }
+        if (text.includes('FROM smart_accounts')) return { rows: SAFES }
         if (text.includes('FROM accounting_feed_syncs')) ledgerReads.push([])
         return { rows: [] }
       }) as never,

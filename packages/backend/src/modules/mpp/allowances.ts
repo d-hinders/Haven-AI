@@ -84,7 +84,7 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
       statusCode: 200,
       body: withAccountAddressAlias({
         agent_id: agent.id,
-        safe_address: agent.safe_address,
+        safe_address: agent.account_address,
         delegate_address: agent.delegate_address,
         chain_id: agent.chain_id,
         allowances: budgets.map((b) => {

@@ -58,12 +58,12 @@ describe('GET /user/safes — list invariants', () => {
   // `is_default`/`created_at` sees exactly what it saw before.
   it('returns the caller-scoped Safes under a { safes } envelope', async () => {
     const rows = [
-      // A real row: user_safes.id is a UUID and safe_address is a full
+      // A real row: smart_accounts.id is a UUID and safe_address is a full
       // 20-byte address, so 's1'/'0xabc' described a response the table
       // cannot produce (#1446).
       {
         id: 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6',
-        safe_address: '0x' + 'ab'.repeat(20),
+        account_address: '0x' + 'ab'.repeat(20),
         chain_id: 8453,
         name: 'Main',
         is_default: true,
@@ -82,7 +82,7 @@ describe('GET /user/safes — list invariants', () => {
     // #2907: the route dual-emits `account_address` alongside `safe_address`
     // (same value) — the account-vocabulary twin, additive for one release —
     // and dual-emits the whole envelope under `accounts` too.
-    const twinnedSafes = rows.map((row) => ({ ...row, account_address: row.safe_address }))
+    const twinnedSafes = rows.map((row) => ({ ...row, safe_address: row.account_address }))
     expect(res.json()).toEqual({
       safes: twinnedSafes,
       accounts: twinnedSafes,

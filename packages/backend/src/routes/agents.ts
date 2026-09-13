@@ -39,6 +39,24 @@ import {
   updateAgentProfile,
 } from '../infra/repositories/agents.js'
 
+/**
+ * #2911 (schema rename, epic #2906 phase 3): `withAgentAccountAlias`'s input
+ * type (`SafeIdentified`, `openapi/wire-aliases.ts`) still names its fields
+ * `safe_id`/`safe_address` — that file is the wire contract and is
+ * deliberately untouched by this migration (it dual-emits both wire names
+ * from whatever it is handed; it does not care where the value came from).
+ * The repository row it used to read those two fields directly off of is
+ * renamed (`account_id`/`account_address`), so this shim re-derives the
+ * `SafeIdentified` shape from the renamed fields at the call site — the
+ * "prefer renaming the read" choice, applied consistently: the read changes,
+ * the wire mapper and its output do not.
+ */
+function toSafeIdentified<T extends { account_id: string | null; account_address: string | null }>(
+  row: T,
+): T & { safe_id: string | null; safe_address: string | null } {
+  return { ...row, safe_id: row.account_id, safe_address: row.account_address }
+}
+
 // ── Types ──────────────────────────────────────────────────────────
 
 interface CreateAgentBody {
@@ -99,7 +117,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
 
     const agents = agentRows.map((agent) => ({
-      ...withAgentAccountAlias(agent),
+      ...withAgentAccountAlias(toSafeIdentified(agent)),
       allowances:
         agent.account_type === 'delegator_hybrid'
           ? (derivedByAgent.get(agent.id) ?? [])
@@ -123,12 +141,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (agent.account_type === 'delegator_hybrid') {
       // Live budget = the active delegations, not an onboarding mirror (#1090).
       const derived = await deriveDelegationAllowances([id])
-      return { ...withAgentAccountAlias(agent), allowances: derived.get(id) ?? [] }
+      return { ...withAgentAccountAlias(toSafeIdentified(agent)), allowances: derived.get(id) ?? [] }
     }
 
     // Legacy rail retired (#1440/#2020): no allowance config to show.
     return {
-      ...withAgentAccountAlias(agent),
+      ...withAgentAccountAlias(toSafeIdentified(agent)),
       allowances: [],
     }
   })
@@ -166,12 +184,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       delegate_address: delegate,
-      safe_address: agent.safe_address,
+      safe_address: agent.account_address,
       // #2907: DelegateBalance.account_address twins safe_address (nullable —
-      // agent.safe_address can be null pre-linking, so the generic
+      // agent.account_address can be null pre-linking, so the generic
       // withAccountAddressAlias<SafeAddressed> mapper, which requires a
       // string, does not apply here).
-      account_address: agent.safe_address,
+      account_address: agent.account_address,
       chain_id: chainId,
       eth: formatTokenValue(ethAtomic.toString(), 18),
       eth_atomic: ethAtomic.toString(),
@@ -293,7 +311,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       return reply.code(201).send({
-        ...withAgentAccountAlias({ ...agent, ...accountInfo }),
+        ...withAgentAccountAlias(toSafeIdentified({ ...agent, ...accountInfo })),
         api_key: apiKey,
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.
@@ -338,7 +356,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
           : []
 
       return {
-        ...withAgentAccountAlias(updated),
+        ...withAgentAccountAlias(toSafeIdentified(updated)),
         allowances,
       }
     },

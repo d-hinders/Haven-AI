@@ -39,7 +39,7 @@ const { handleGetAllowances } = await import('../allowances.js')
 const AGENT = {
   id: 'agt_1',
   execution_rail: 'delegation',
-  safe_address: '0xsafe',
+  account_address: '0xsafe',
   delegate_address: '0xdelegate',
   chain_id: 84532,
 } as never

@@ -659,7 +659,7 @@ describe('retired-rail residue in the published contract (#2105)', () => {
     user_id: '00000000-0000-4000-8000-000000000002',
     name: 'guard',
     delegate_address: '0x' + '11'.repeat(20),
-    safe_address: '0x' + '22'.repeat(20),
+    account_address: '0x' + '22'.repeat(20),
     chain_id: 8453,
     status: 'active',
     execution_rail: executionRail,

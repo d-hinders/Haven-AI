@@ -66,7 +66,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       id: agent.id,
       name: agent.name,
       status: agent.status,
-      safe_address: agent.safe_address,
+      safe_address: agent.account_address,
       delegate_address: agent.delegate_address,
       delegate_account_address: delegateAccountAddress,
       chain_id: agent.chain_id,

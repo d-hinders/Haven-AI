@@ -22,7 +22,7 @@
  *   no exception in this file: the one `user_id`-scoped statement moved to
  *   `approval-requests.ts`, where the aggregate that owns it lives.
  * - Safe identity is joined on the payment's STORED `safe_address` + chain,
- *   not through `agents.safe_id`. A payment keeps the account it was made
+ *   not through `agents.account_id`. A payment keeps the account it was made
  *   from even after the agent is re-pointed or the Safe unlinked; joining
  *   through the agent would silently re-label historical rows.
  * - The evidence joins are LEFT and narrowly filtered (`status = 'open'`, one
@@ -44,8 +44,8 @@ export type { Executor }
 
 export interface ActivityPaymentRow {
   id: string
-  safe_id: string | null
-  safe_address: string | null
+  account_id: string | null
+  account_address: string | null
   safe_name: string | null
   chain_id: number
   token_symbol: string
@@ -81,8 +81,8 @@ export interface AgentSpendStatsRow {
 // ── Single-agent activity ────────────────────────────────────────────────────
 
 export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, pi.safe_address) AS safe_address,
+              us.id AS account_id,
+              COALESCE(us.account_address, pi.account_address) AS account_address,
               us.name AS safe_name,
               COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
@@ -105,9 +105,9 @@ export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
-       LEFT JOIN user_safes us
+       LEFT JOIN smart_accounts us
          ON us.user_id = pi.user_id
-        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+        AND LOWER(us.account_address) = LOWER(pi.account_address)
         AND pi.chain_id IS NOT NULL
         AND us.chain_id = pi.chain_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
@@ -145,8 +145,8 @@ export async function listAgentPayments(
 
 export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
               pi.agent_id,
-              us.id AS safe_id,
-              COALESCE(us.safe_address, pi.safe_address) AS safe_address,
+              us.id AS account_id,
+              COALESCE(us.account_address, pi.account_address) AS account_address,
               us.name AS safe_name,
               COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
@@ -169,9 +169,9 @@ export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
               pi.confirmed_at,
               mpre.event_type AS payment_reconciliation_event_type
        FROM payment_intents pi
-       LEFT JOIN user_safes us
+       LEFT JOIN smart_accounts us
          ON us.user_id = pi.user_id
-        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+        AND LOWER(us.account_address) = LOWER(pi.account_address)
         AND pi.chain_id IS NOT NULL
         AND us.chain_id = pi.chain_id
        LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id

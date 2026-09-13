@@ -127,7 +127,7 @@ function stubEtherscan(safe: string, nativeRows: number) {
 function routeDbQueries(safes: unknown[]) {
   return vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown) => {
-      if (String(sql).includes('FROM user_safes')) return { rows: safes }
+      if (String(sql).includes('FROM smart_accounts')) return { rows: safes }
       return { rows: [] }
     }) as never,
   )
@@ -164,7 +164,7 @@ describe('GET /transactions — truncation signal (#2882)', () => {
       rows: [
         {
           id: `11111111-1111-4111-8111-${counter.toString().padStart(12, '0')}`,
-          safe_address: address,
+          account_address: address,
           chain_id: chainId,
           name: 'Account',
         },

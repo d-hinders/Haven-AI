@@ -185,7 +185,7 @@ describeDb('migration 071: drop allowance_nonce_watermarks (#2084)', () => {
     )
     const intent = await db.query<{ allowance_nonce: number }>(
       `INSERT INTO payment_intents
-         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+         (agent_id, user_id, account_address, token_symbol, token_address, to_address,
           amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
           status, expires_at)
        VALUES ($1, $2, '0x00000000000000000000000000000000000000f1', 'USDC',

@@ -50,7 +50,7 @@ const AGENT = {
   user_id: '22222222-2222-2222-2222-222222222222',
   name: 'Payment Agent',
   delegate_address: sessionWallet.address,
-  safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
   chain_id: 84532,
   status: 'active',
 }
@@ -63,7 +63,7 @@ const TX_HASH = `0x${'ef'.repeat(32)}`
 const DELEGATION_HASH = `0x${'12'.repeat(32)}`
 
 const PREPARED_USER_OP = {
-  sender: AGENT.safe_address,
+  sender: AGENT.account_address,
   nonce: 123456789012345678901234567890n,
   callData: '0xdeadbeef',
   maxFeePerGas: 1_000_000n,
@@ -79,7 +79,7 @@ function intentRow(overrides: Record<string, unknown> = {}) {
     id: PAYMENT_ID,
     agent_id: AGENT.id,
     user_id: AGENT.user_id,
-    safe_address: AGENT.safe_address,
+    account_address: AGENT.account_address,
     chain_id: AGENT.chain_id,
     token_symbol: 'USDC',
     token_address: USDC,

@@ -189,7 +189,7 @@ export async function upsertEvidenceBase(
 // ── Evidence source reads (payment_intents / approval_requests projections) ──
 
 export const FIND_INTENT_EVIDENCE_SOURCE_SQL = `SELECT 'payment_intent'::TEXT AS kind,
-            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+            id, agent_id, user_id, account_address, chain_id, token_symbol, token_address,
             to_address, amount_raw, amount_human, tx_hash, status, source,
             x402_resource_url, x402_merchant_address, x402_idempotency_key,
             payment_rail, payment_resource_url, merchant_address,
@@ -215,7 +215,7 @@ export interface EvidenceSourceRow {
   id: string
   agent_id: string
   user_id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   token_symbol: string
   token_address: string
@@ -266,7 +266,7 @@ export async function findIntentEvidenceSource(
 }
 
 export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS kind,
-            id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+            id, agent_id, user_id, account_address, chain_id, token_symbol, token_address,
             to_address, amount_raw, amount_human, tx_hash, status, source,
             x402_resource_url, x402_merchant_address, x402_idempotency_key,
             payment_rail, payment_resource_url, merchant_address,
@@ -695,13 +695,13 @@ export interface NewPreparedSweep {
 }
 
 export interface AgentAccountBindingRow {
-  safe_address: string | null
+  account_address: string | null
 }
 
 /** The same agent-row lock used by Safe unlink, so recovery cannot use stale binding data. */
-export const LOCK_AGENT_ACCOUNT_BINDING_SQL = `SELECT us.safe_address
+export const LOCK_AGENT_ACCOUNT_BINDING_SQL = `SELECT us.account_address
        FROM agents a
-       LEFT JOIN user_safes us ON us.id = a.safe_id
+       LEFT JOIN smart_accounts us ON us.id = a.account_id
        WHERE a.id = $1 AND a.user_id = $2
        FOR UPDATE OF a`
 
@@ -743,7 +743,7 @@ export async function insertPreparedSweepForBoundAgent(
 ): Promise<boolean> {
   return withTransaction(db, async (tx) => {
     const binding = await lockAgentAccountBinding(input.agentId, input.userId, tx)
-    if (!matchesAccountAddress(binding?.safe_address ?? null, input.toAddress)) return false
+    if (!matchesAccountAddress(binding?.account_address ?? null, input.toAddress)) return false
     await tx.query(INSERT_PREPARED_SWEEP_SQL, [
       input.agentId,
       input.userId,
@@ -824,7 +824,7 @@ export async function claimPreparedSweepForBoundAgent(
 ): Promise<BoundSweepClaim> {
   return withTransaction(db, async (tx) => {
     const binding = await lockAgentAccountBinding(agentId, userId, tx)
-    if (!matchesAccountAddress(binding?.safe_address ?? null, accountAddress)) return 'not_bound'
+    if (!matchesAccountAddress(binding?.account_address ?? null, accountAddress)) return 'not_bound'
     const result = await tx.query<{ id: string }>(CLAIM_PREPARED_SWEEP_SQL, [sweepId])
     return result.rows.length > 0 ? 'claimed' : 'already_claimed'
   })

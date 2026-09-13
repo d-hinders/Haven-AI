@@ -67,7 +67,7 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     ['findOwnedAccountAddress', findOwnedAccountAddress],
     ['findOwnedAccountDefaultFlag', findOwnedAccountDefaultFlag],
   ] as const)('%s: another tenant gets null for an existing safe', async (_name, fn) => {
-    const db = tenantExecutor({ id: 'safe-1', safe_address: '0xabc', chain_id: 8453, is_default: false })
+    const db = tenantExecutor({ id: 'safe-1', account_address: '0xabc', chain_id: 8453, is_default: false })
     expect(await fn('safe-1', ATTACKER, db)).toBeNull()
     expect(await fn('safe-1', OWNER, db)).not.toBeNull()
   })
@@ -109,7 +109,7 @@ describe('transaction functions keep their statement order and scope', () => {
       query: async (sql: string, values?: unknown[]) => {
         calls.push([sql, values])
         if (sql === FIND_OLDEST_ACCOUNT_FOR_USER_SQL) {
-          return { rows: [{ id: 'safe-2', safe_address: '0xnext' }], rowCount: 1 }
+          return { rows: [{ id: 'safe-2', account_address: '0xnext' }], rowCount: 1 }
         }
         return { rows: [], rowCount: 0 }
       },

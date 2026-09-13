@@ -103,7 +103,7 @@ function controlsOf(row: VerificationRow): ControlSummary | null {
   return {
     rail: row.execution_rail,
     policyEnforcedOnchain: row.execution_rail === 'delegation',
-    treasuryBound: row.safe_address !== null,
+    treasuryBound: row.account_address !== null,
   }
 }
 

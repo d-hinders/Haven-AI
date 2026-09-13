@@ -107,7 +107,7 @@ function redeemedLog(child: Record<string, unknown>) {
 let seq = 0
 
 const INSERT_INTENT = `INSERT INTO payment_intents
-   (id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+   (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
     amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
     status, tx_hash, confirmed_at, expires_at, source, payment_rail, execution_rail,
     machine_metadata, x402_resource_url, payment_resource_url, merchant_address,

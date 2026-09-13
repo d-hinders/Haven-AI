@@ -22,6 +22,21 @@ import {
   UUID_RE,
 } from '@haven_ai/core'
 
+/**
+ * #2911 (schema rename, epic #2906 phase 3): `withAccountAddressAlias`'s
+ * input type (`SafeAddressed`, `openapi/wire-aliases.ts`) still names its
+ * field `safe_address` — that file is the wire contract and is deliberately
+ * untouched here (it dual-emits both wire names from whatever it is handed).
+ * The repository row it used to read that field directly off of is renamed
+ * (`account_address`), so this shim re-derives the `SafeAddressed` shape at
+ * the call site — the read changes, the wire mapper and its output do not.
+ */
+function toSafeAddressed<T extends { account_address: string }>(
+  row: T,
+): T & { safe_address: string } {
+  return { ...row, safe_address: row.account_address }
+}
+
 // ── Types ─────────────────────────────────────────────────────────
 
 interface RenameAccountBody {
@@ -40,7 +55,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const safes = (await listAccountsForUser(sub)).map(withAccountAddressAlias)
+    const safes = (await listAccountsForUser(sub)).map(toSafeAddressed).map(withAccountAddressAlias)
 
     // #2907: `accounts` twins the `safes` envelope key, same array.
     return withAccountsEnvelopeAlias({ safes })
@@ -76,7 +91,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      return withAccountAddressAlias(renamed)
+      return withAccountAddressAlias(toSafeAddressed(renamed))
     },
   )
 
@@ -93,7 +108,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
         return reply.code(404).send({ error: 'Safe not found' })
       }
 
-      await setDefaultAccountForUser(accountId, owned.safe_address, sub)
+      await setDefaultAccountForUser(accountId, owned.account_address, sub)
 
       return { success: true }
     },
@@ -184,9 +199,9 @@ app.get<{ Params: { safeId: string } }>(
     const erc20Tokens = tokens.filter((t) => t.address !== null)
 
     const results = await Promise.allSettled([
-      client.getNativeBalance(chainId, owned.safe_address),
+      client.getNativeBalance(chainId, owned.account_address),
       ...erc20Tokens.map((token) =>
-        client.getTokenBalance(chainId, token.address!, owned.safe_address),
+        client.getTokenBalance(chainId, token.address!, owned.account_address),
       ),
     ])
 
@@ -216,7 +231,7 @@ app.get<{ Params: { safeId: string } }>(
     })
 
     const response: FundingResponse = {
-      account_address: owned.safe_address,
+      account_address: owned.account_address,
       chain: { id: chainId, name: chain.name, explorer_url: chain.explorerUrl },
       tokens: fundingTokens,
       native: {

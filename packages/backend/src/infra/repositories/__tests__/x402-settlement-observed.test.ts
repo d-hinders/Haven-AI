@@ -59,7 +59,7 @@ async function seedIntent(seed: IntentSeed): Promise<string> {
     seed.scheme === null ? null : JSON.stringify({ settlement_scheme: seed.scheme ?? 'erc7710' })
   const result = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, source, payment_rail, execution_rail, machine_metadata, tx_hash,
         delegation_hash, created_at)

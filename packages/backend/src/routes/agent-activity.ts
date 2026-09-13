@@ -73,8 +73,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           x402_merchant_address: p.x402_merchant_address,
           chain_id: p.chain_id,
           token_address: p.token_address,
-          safe_id: p.safe_id,
-          safe_address: p.safe_address,
+          safe_id: p.account_id,
+          safe_address: p.account_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
           // #799: which on-chain mechanism moved the money, and (session rail)
@@ -206,8 +206,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           x402_merchant_address: p.x402_merchant_address,
           chain_id: p.chain_id,
           token_address: p.token_address,
-          safe_id: p.safe_id,
-          safe_address: p.safe_address,
+          safe_id: p.account_id,
+          safe_address: p.account_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
           // #799: which on-chain mechanism moved the money, and (session rail)

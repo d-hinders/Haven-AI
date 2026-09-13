@@ -41,8 +41,8 @@ function mockDb(opts: {
       passport = { agent_id: params[0], chain_id: params[1], status: 'pending', assurance_level: 0, attestation_uid: null, tx_hash: null, attempts: 0, last_error: null }
       return { rows: [], rowCount: 1 }
     }
-    if (/FROM agents a/.test(sql) && /LEFT JOIN user_safes/.test(sql)) {
-      return { rows: opts.agent === undefined ? [{ delegate_address: EOA, chain_id: 84532, safe_address: TREASURY, execution_rail: 'delegation', account_type: 'delegator_hybrid' }] : opts.agent ? [opts.agent] : [] }
+    if (/FROM agents a/.test(sql) && /LEFT JOIN smart_accounts/.test(sql)) {
+      return { rows: opts.agent === undefined ? [{ delegate_address: EOA, chain_id: 84532, account_address: TREASURY, execution_rail: 'delegation', account_type: 'delegator_hybrid' }] : opts.agent ? [opts.agent] : [] }
     }
     if (/SET anchoring_started_at = NOW\(\)/.test(sql)) {
       // Mirrors the real partial UPDATE: only one caller can win the claim.
@@ -265,7 +265,7 @@ describe('anchoring', () => {
     let recorded = ''
     mockDb({
       passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
-      agent: { delegate_address: EOA, chain_id: 84532, safe_address: null },
+      agent: { delegate_address: EOA, chain_id: 84532, account_address: null },
       onUpdate: (sql, p) => { if (/failed/.test(sql)) recorded = String(p[1]) },
     })
     setAnchor(async () => ({ attestationUid: UID, txHash: '0x1' }))
@@ -336,7 +336,7 @@ describe('delegation-rail agents bind their smart account (reviewer finding #3)'
       agent: {
         delegate_address: EOA,
         chain_id: 84532,
-        safe_address: TREASURY,
+        account_address: TREASURY,
         account_type: 'delegator_hybrid',
         execution_rail: 'delegation',
       },
@@ -366,7 +366,7 @@ describe('delegation-rail agents bind their smart account (reviewer finding #3)'
     // than removed — deleting it is a separate judgement, not this issue's.
     mockDb({
       passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
-      agent: { delegate_address: EOA, chain_id: 84532, safe_address: TREASURY, account_type: null, execution_rail: 'allowance_module' },
+      agent: { delegate_address: EOA, chain_id: 84532, account_address: TREASURY, account_type: null, execution_rail: 'allowance_module' },
     })
     const anchor = vi.fn(async () => ({ attestationUid: UID, txHash: '0x1' }))
     setAnchor(anchor)

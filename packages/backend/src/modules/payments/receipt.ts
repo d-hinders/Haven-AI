@@ -18,7 +18,7 @@ export type { PaymentReceipt, ReceiptVerification }
 
 export interface PaymentReceiptRow {
   id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   token_symbol: string
   token_address: string
@@ -58,8 +58,8 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
       amount: row.amount_human,
       amountSek: row.amount_sek,
       recipient: row.to_address,
-      safe: row.safe_address,
-      account: row.safe_address,
+      safe: row.account_address,
+      account: row.account_address,
       chainId: row.chain_id,
       settledAt: row.confirmed_at,
       resourceUrl: row.resource_url,

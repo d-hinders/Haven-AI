@@ -157,7 +157,7 @@ function mockDb(opts: {
       return Promise.resolve({ rows: opts.reusable ? [opts.reusable] : [] })
     }
     // loadHybridOwnerConfig (#885): the account row, then its passkey set.
-    if (/SELECT id, owner_address, single_signer_waiver_at FROM user_safes/.test(s)) {
+    if (/SELECT id, owner_address, single_signer_waiver_at FROM smart_accounts/.test(s)) {
       // owner === null AND no passkeys → account row still exists (so the
       // config loader can look up passkeys); a truly-missing row is opts.owner
       // === undefined with no passkeys handled below via the null return.
@@ -1416,7 +1416,7 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
       if (/FROM agents a/.test(s)) {
         return Promise.resolve({ rows: opts.agent === null ? [] : [opts.agent ?? agentRow()] })
       }
-      if (/SELECT id, owner_address, single_signer_waiver_at FROM user_safes/.test(s)) {
+      if (/SELECT id, owner_address, single_signer_waiver_at FROM smart_accounts/.test(s)) {
         const ownerAddr = opts.owner === undefined ? OWNER : opts.owner
         return Promise.resolve({ rows: [{ id: 'safe-1', owner_address: ownerAddr }] })
       }

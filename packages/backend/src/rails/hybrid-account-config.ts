@@ -2,7 +2,7 @@
  * Reconstruct a Hybrid account's owner configuration from storage (#885,
  * epic #836).
  *
- * The account address in user_safes was derived from EXACTLY this config at
+ * The account address in smart_accounts was derived from EXACTLY this config at
  * provisioning time (owner_address + the hybrid_account_passkeys rows). The
  * deploy (#860) and revoke paths rebuild it from here so a pure-passkey
  * account — which has no owner_address — can still be deployed and operated.

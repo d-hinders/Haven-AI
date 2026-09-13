@@ -21,7 +21,7 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
 
     // #2907: account_address twins safe_address on each passkey (same value).
     const passkeys = (await listUserPasskeys(sub)).map((p) =>
-      withSessionAccountAddressAlias({ ...p, safe_address: p.safe_address ?? null }),
+      withSessionAccountAddressAlias({ ...p, safe_address: p.account_address ?? null }),
     )
     return { passkeys }
   })

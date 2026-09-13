@@ -22,11 +22,12 @@
  * opposite of fail-closed.
  */
 import { readFileSync } from 'node:fs'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb, withMigrationReverted } from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../075_drop_inert_safe_rail_schema.js'
 import { down as down083, up as up083 } from '../083_drop_dead_safe_rail_tables.js'
+import { down as down084, up as up084 } from '../084_rename_user_safes_to_smart_accounts.js'
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -85,13 +86,37 @@ describeDb('migration 075: drop the inert Safe-rail schema (#2263)', () => {
 
   afterAll(async () => {
     // Leave the shared worker schema in the migrated (post-075) state,
-    // whatever an individual test did — the #2020 leak lesson.
+    // whatever an individual test did — the #2020 leak lesson. 075's own
+    // `up()` hardcodes `ALTER TABLE user_safes` (immutable history), so it
+    // only runs against the pre-#2911 name — revert the rename around it,
+    // same as every per-test wrap below.
     const client = await db.connect()
     try {
-      await up(client)
+      await down084(client)
+      try {
+        await up(client)
+      } finally {
+        await up084(client)
+      }
     } finally {
       client.release()
     }
+  })
+
+  // #2911 (schema rename, epic #2906 phase 3): 075's own `up()`/`down()`
+  // hardcode `ALTER TABLE user_safes` (migrations are immutable history), and
+  // several tests below insert into `user_safes`/`safe_address` directly.
+  // Post-#2911 the table is `smart_accounts` at head, so every test in this
+  // file needs 084's rename reverted for its duration — the same
+  // "a later migration renamed what an earlier test asserted" shape the
+  // existing `withMigrationReverted(down083, …)` calls below carry for 083's
+  // drops, one layer up here because it is EVERY test, not just the ones that
+  // also need the pre-083 shape (those nest `down083`/`up083` inside this).
+  beforeEach(async () => {
+    await down084(db as never)
+  })
+  afterEach(async () => {
+    await up084(db as never)
   })
 
   beforeEach(async () => {

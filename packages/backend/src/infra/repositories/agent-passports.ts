@@ -69,7 +69,7 @@ export interface AgentPassportFacts {
   delegate_address: string | null
   chain_id: number | null
   /** The TREASURY the agent spends from — not the agent's own smart account. */
-  safe_address: string | null
+  account_address: string | null
   account_type: string | null
   execution_rail: string | null
   agent_status: string
@@ -100,9 +100,9 @@ export async function findAgentFacts(
 ): Promise<AgentPassportFacts | null> {
   const { rows } = await db.query<AgentPassportFacts>(
     `SELECT a.delegate_address, a.status AS agent_status,
-            s.chain_id, s.safe_address, s.account_type, s.execution_rail
+            s.chain_id, s.account_address, s.account_type, s.execution_rail
        FROM agents a
-       LEFT JOIN user_safes s ON s.id = a.safe_id
+       LEFT JOIN smart_accounts s ON s.id = a.account_id
       WHERE a.id = $1 AND a.user_id = $2`,
     [agentId, userId],
   )
@@ -187,7 +187,7 @@ export async function findAgentChain(
 } | null> {
   // #2138: the rail comes back so the route can refuse a legacy account with a
   // reason, instead of accepting the request and silently never issuing. Both
-  // columns are NOT NULL in `user_safes`; they arrive null here only when the
+  // columns are NOT NULL in `smart_accounts`; they arrive null here only when the
   // LEFT JOIN misses — the agent has no bound account.
   const { rows } = await db.query<{
     chain_id: number | null
@@ -197,7 +197,7 @@ export async function findAgentChain(
   }>(
     `SELECT s.chain_id, a.status, s.execution_rail, s.account_type
        FROM agents a
-       LEFT JOIN user_safes s ON s.id = a.safe_id
+       LEFT JOIN smart_accounts s ON s.id = a.account_id
       WHERE a.id = $1 AND a.user_id = $2`,
     [agentId, userId],
   )
@@ -308,7 +308,7 @@ export async function listRetryable(
     `SELECT p.agent_id, a.user_id, p.attempts
        FROM agent_passports p
        JOIN agents a ON a.id = p.agent_id
-       LEFT JOIN user_safes s ON s.id = a.safe_id
+       LEFT JOIN smart_accounts s ON s.id = a.account_id
       WHERE p.status <> 'anchored'
         AND a.status <> 'revoked'
         -- #2138: a legacy-rail row can never succeed - issuePassport refuses
@@ -391,7 +391,7 @@ export interface VerificationRow {
   current_delegate_address: string | null
   execution_rail: string | null
   /** Presence only — the verifier reports "treasury-bound", never the address. */
-  safe_address: string | null
+  account_address: string | null
 }
 
 /**
@@ -424,10 +424,10 @@ const VERIFICATION_SELECT = `
          p.revocation_status, p.revocation_confirmed_at,
          p.agent_eoa, p.smart_account, p.chain_id,
          a.delegate_address AS current_delegate_address,
-         s.execution_rail, s.safe_address
+         s.execution_rail, s.account_address
     FROM agent_passports p
     JOIN agents a ON a.id = p.agent_id
-    LEFT JOIN user_safes s ON s.id = a.safe_id
+    LEFT JOIN smart_accounts s ON s.id = a.account_id
    WHERE p.status = 'anchored'`
 
 /**

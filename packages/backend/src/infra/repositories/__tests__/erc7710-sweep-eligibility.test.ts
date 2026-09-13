@@ -91,7 +91,7 @@ async function seedIntent(seed: IntentSeed): Promise<string> {
   const createdOffset = seed.createdOffsetSec ?? -(SWEEP_MIN_AGE_SECONDS + 60)
   const result = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, chain_id, source, payment_rail, execution_rail,
         machine_metadata, tx_hash, delegation_hash, created_at)
@@ -306,7 +306,7 @@ describeDb('erc7710 sweep eligibility (#2117 candidate query, absorbed from #213
       amount_human: '0.10',
     })
     for (const column of [
-      'safe_address',
+      'account_address',
       'to_address',
       'token_address',
       'delegation_hash',
@@ -402,7 +402,7 @@ describeDb('erc7710 sweep eligibility (#2117 candidate query, absorbed from #213
       agent: {
         id: agentId,
         user_id: userId,
-        safe_address: '0x00000000000000000000000000000000000000f1',
+        account_address: '0x00000000000000000000000000000000000000f1',
         chain_id: 84532,
         delegate_address: '0x00000000000000000000000000000000000000d1',
       },

@@ -1,7 +1,7 @@
 /**
  * Data access for a Hybrid DeleGator's signer set (#1081).
  *
- * `hybrid_account_passkeys` + `user_safes.owner_address` are what the deploy
+ * `hybrid_account_passkeys` + `smart_accounts.owner_address` are what the deploy
  * and signing paths rebuild an account's owner config from (#885), so these
  * writes must track the chain exactly — they run only after a signer-change
  * UserOperation has actually landed.
@@ -27,7 +27,7 @@ export async function addAccountPasskey(
   executor: Executor = pool,
 ): Promise<void> {
   await executor.query(
-    `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
+    `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT DO NOTHING`,
     [userSafeId, passkey.keyId, passkey.x, passkey.y],
@@ -41,7 +41,7 @@ export async function removeAccountPasskey(
   executor: Executor = pool,
 ): Promise<void> {
   await executor.query(
-    `DELETE FROM hybrid_account_passkeys WHERE user_safe_id = $1 AND LOWER(key_id) = LOWER($2)`,
+    `DELETE FROM hybrid_account_passkeys WHERE account_id = $1 AND LOWER(key_id) = LOWER($2)`,
     [userSafeId, keyId],
   )
 }
@@ -53,7 +53,7 @@ export async function setAccountOwnerAddress(
   executor: Executor = pool,
 ): Promise<void> {
   await executor.query(
-    `UPDATE user_safes SET owner_address = $1 WHERE id = $2`,
+    `UPDATE smart_accounts SET owner_address = $1 WHERE id = $2`,
     [ownerAddress.toLowerCase(), userSafeId],
   )
 }
@@ -64,7 +64,7 @@ export async function clearAccountOwnerAddress(
   executor: Executor = pool,
 ): Promise<void> {
   await executor.query(
-    `UPDATE user_safes SET owner_address = NULL WHERE id = $1`,
+    `UPDATE smart_accounts SET owner_address = NULL WHERE id = $1`,
     [userSafeId],
   )
 }
@@ -73,7 +73,7 @@ export async function clearAccountOwnerAddress(
 
 export const LIST_ACCOUNT_PASSKEYS_SQL = `SELECT key_id, public_key_x, public_key_y, created_at
      FROM hybrid_account_passkeys
-     WHERE user_safe_id = $1
+     WHERE account_id = $1
      ORDER BY created_at ASC`
 
 export interface AccountPasskeyRow {
@@ -117,3 +117,9 @@ export function passkeyEnrollmentDates(rows: AccountPasskeyRow[]): Map<string, s
   }
   return byKey
 }
+
+// Lifted verbatim from routes/hybrid-accounts.ts (#2911 review) so the schema
+// smoke PREPAREs the statement the signup path runs, not a pasted copy.
+export const INSERT_HYBRID_ACCOUNT_PASSKEY_SQL = `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (account_id, key_id) DO NOTHING`

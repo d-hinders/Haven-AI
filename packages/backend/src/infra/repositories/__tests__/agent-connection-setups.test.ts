@@ -34,7 +34,7 @@ async function seedUserAndSafe(): Promise<{ userId: string; accountId: string }>
     [`acs-${++seq}-${Date.now()}@test.example`],
   )
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, name, chain_id)
+    `INSERT INTO smart_accounts (user_id, account_address, name, chain_id)
      VALUES ($1, $2, 'Main account', 84532) RETURNING id`,
     [user.rows[0].id, ADDR(String(seq % 10))],
   )
@@ -91,7 +91,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     const row = await findSetupForUser(setup.id, userId)
     expect(row).not.toBeNull()
     expect(row!.status).toBe('awaiting_connection')
-    expect(row!.safe_chain_id).toBe(84532) // the user_safes join carries the wallet
+    expect(row!.safe_chain_id).toBe(84532) // the smart_accounts join carries the wallet
     expect(await listSetupAllowances(setup.id)).toHaveLength(2)
   })
 
@@ -353,7 +353,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     const setup = newSetup(userId, accountId)
     await insertSetupWithAllowances(setup, [])
     await db.query(
-      `UPDATE agent_connection_setups SET status = 'awaiting_wallet_approval', safe_tx_hash = '0xsafe' WHERE id = $1`,
+      `UPDATE agent_connection_setups SET status = 'awaiting_wallet_approval', account_tx_hash = '0xsafe' WHERE id = $1`,
       [setup.id],
     )
 

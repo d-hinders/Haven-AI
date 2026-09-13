@@ -99,7 +99,7 @@ export default async function dashboardRoutes(
     }
 
     const currentPortfolio = await Promise.all(
-      safes.map((safe) => fetchPortfolioForAccount(safe.chain_id, safe.safe_address)),
+      safes.map((safe) => fetchPortfolioForAccount(safe.chain_id, safe.account_address)),
     )
 
     const totalUsd = currentPortfolio.reduce((sum, item) => sum + item.totalUsd, 0)
@@ -137,7 +137,7 @@ export default async function dashboardRoutes(
       safes.map(async (safe) => {
         const { transactions } = await fetchAccountTransactions({
           accountId: safe.id,
-          accountAddress: safe.safe_address,
+          accountAddress: safe.account_address,
           chainId: safe.chain_id,
           log: request.log,
         })
@@ -146,7 +146,7 @@ export default async function dashboardRoutes(
           ...tx,
           chainId: safe.chain_id,
           safeId: safe.id,
-          safeAddress: safe.safe_address,
+          safeAddress: safe.account_address,
           safeName: safe.name,
         }))
       }),
@@ -217,7 +217,7 @@ export default async function dashboardRoutes(
           id: agent.id,
           name: agent.name,
           status: agent.status,
-          safeId: agent.safe_id,
+          safeId: agent.account_id,
           safeName: agent.safe_name,
           safeChainId: agent.safe_chain_id,
           allowances: (allowancesByAgent.get(agent.id) ?? []).map((allowance) => ({

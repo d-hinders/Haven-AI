@@ -19,7 +19,7 @@ async function seedSmartAccount(): Promise<string> {
     [`hs${++seq}-${Date.now()}@test.example`],
   )
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, chain_id, name, account_type, execution_rail)
+    `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, account_type, execution_rail)
      VALUES ($1, $2, 84532, 'Test account', 'delegator_hybrid', 'delegation')
      RETURNING id`,
     [user.rows[0].id, `0x${String(seq).padStart(40, '0')}`],
@@ -48,7 +48,7 @@ describeDb('hybrid_account_passkeys reads (#1679)', () => {
     await addAccountPasskey(accountId, { keyId: '0x' + '11'.repeat(32), x: '0x1', y: '0x2' })
     // Backdate the second row so ordering is proven by created_at, not insert order.
     await db.query(
-      `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y, created_at)
+      `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y, created_at)
        VALUES ($1, $2, '0x3', '0x4', NOW() - INTERVAL '1 day')`,
       [accountId, '0x' + '22'.repeat(32)],
     )

@@ -7,9 +7,14 @@
  * `IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '…')` and no
  * `connamespace` predicate. `conname` is not unique across schemas, so once
  * `public` held a name, every schema migrated afterwards skipped its own copy.
- * Measured before the fix: 185 schemas with `user_safes`, zero with
+ * Measured before the fix: 185 schemas with `user_safes` (renamed to
+ * `smart_accounts` by #2911), zero with
  * `user_safes_user_id_safe_address_chain_id_key` or
- * `user_safes_account_type_check`.
+ * `user_safes_account_type_check` — both later renamed by the same migration
+ * to `smart_accounts_user_id_account_address_chain_id_key` and
+ * `smart_accounts_account_type_check`; this file asserts the constraints
+ * under their CURRENT (post-#2911) names, since it guards schema-local
+ * resolution at head, not the pre-rename vocabulary.
  *
  * This asserts the constraints EXIST rather than asserting the SQL text, on
  * purpose: the defect was invisible precisely because the migration ran, said
@@ -25,7 +30,7 @@ async function constraintsOnUserSafes(): Promise<string[]> {
     `SELECT c.conname
        FROM pg_constraint c
        JOIN pg_namespace n ON n.oid = c.connamespace
-      WHERE n.nspname = $1 AND c.conrelid = ($1 || '.user_safes')::regclass
+      WHERE n.nspname = $1 AND c.conrelid = ($1 || '.smart_accounts')::regclass
       ORDER BY c.conname`,
     [WORKER_SCHEMA],
   )
@@ -39,13 +44,13 @@ describeDb('migrations create their constraints in THIS schema (#2702)', () => {
 
   it('the UNIQUE constraint 000/079 declare is present in this worker schema', async () => {
     // Missing in all 185 worker schemas on one machine before the fix, while
-    // `public` had it — so a duplicate (user_id, safe_address, chain_id) that
+    // `public` had it — so a duplicate (user_id, account_address, chain_id) that
     // production rejects was accepted by every test.
-    expect(await constraintsOnUserSafes()).toContain('user_safes_user_id_safe_address_chain_id_key')
+    expect(await constraintsOnUserSafes()).toContain('smart_accounts_user_id_account_address_chain_id_key')
   })
 
   it('the account_type CHECK constraint 041/079 declare is present in this worker schema', async () => {
-    expect(await constraintsOnUserSafes()).toContain('user_safes_account_type_check')
+    expect(await constraintsOnUserSafes()).toContain('smart_accounts_account_type_check')
   })
 
   it('POSITIVE CONTROL: the query can see a constraint that was never affected', async () => {
@@ -53,7 +58,7 @@ describeDb('migrations create their constraints in THIS schema (#2702)', () => {
     // regclass, a typo — would fail the two assertions above and read as the
     // defect still being live. `execution_rail_check` is on the same table and
     // 041 re-adds it unconditionally, so it was present throughout.
-    expect(await constraintsOnUserSafes()).toContain('user_safes_execution_rail_check')
+    expect(await constraintsOnUserSafes()).toContain('smart_accounts_execution_rail_check')
   })
 
   it('the XOR constraint 018/079 declare is present, and enforced', async () => {
@@ -104,7 +109,7 @@ describeDb('migrations create their constraints in THIS schema (#2702)', () => {
     // A REAL user row, not a synthetic uuid. Two earlier attempts failed for
     // reasons that had nothing to do with the constraint under test — a text
     // id tripped the `uuid` column type, then a free-floating uuid tripped
-    // `user_safes_user_id_fkey` — and either would have read as this test
+    // `smart_accounts_user_id_fkey` — and either would have read as this test
     // finding something when it had not reached the assertion at all.
     const { rows } = await db.query<{ id: string }>(
       `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
@@ -113,19 +118,19 @@ describeDb('migrations create their constraints in THIS schema (#2702)', () => {
     const userId = rows[0].id
     const address = '0x0000000000000000000000000000000000002702'
     await db.query(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id) VALUES ($1, $2, $3)`,
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id) VALUES ($1, $2, $3)`,
       [userId, address, 8453],
     )
     try {
       await expect(
-        db.query(`INSERT INTO user_safes (user_id, safe_address, chain_id) VALUES ($1, $2, $3)`, [
+        db.query(`INSERT INTO smart_accounts (user_id, account_address, chain_id) VALUES ($1, $2, $3)`, [
           userId,
           address,
           8453,
         ]),
       ).rejects.toMatchObject({ code: '23505' })
     } finally {
-      await db.query(`DELETE FROM user_safes WHERE user_id = $1`, [userId])
+      await db.query(`DELETE FROM smart_accounts WHERE user_id = $1`, [userId])
       await db.query(`DELETE FROM users WHERE id = $1`, [userId])
     }
   })

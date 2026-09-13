@@ -49,7 +49,7 @@ const AGENT = {
   id: '11111111-1111-1111-1111-111111111111',
   user_id: '22222222-2222-2222-2222-222222222222',
   delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-  safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
   chain_id: 100,
   status: 'active',
 }
@@ -65,7 +65,7 @@ const DELEGATION_HASH = `0x${'12'.repeat(32)}`
 // The recipient/amount/token the agent actually signed for — baked into
 // callData on the delegation rail, which the relay must forward UNCHANGED.
 const PREPARED_USER_OP = {
-  sender: AGENT.safe_address,
+  sender: AGENT.account_address,
   nonce: 42n,
   // Opaque bytes standing in for the calldata that encodes SIGNED_TOKEN /
   // SIGNED_RECIPIENT / SIGNED_AMOUNT — what matters for this proof is that
@@ -92,7 +92,7 @@ function legacySignedIntent(overrides: Record<string, unknown> = {}) {
     id: PAYMENT_ID,
     agent_id: AGENT.id,
     user_id: AGENT.user_id,
-    safe_address: AGENT.safe_address,
+    account_address: AGENT.account_address,
     chain_id: AGENT.chain_id,
     token_symbol: 'xDAI',
     token_address: SIGNED_TOKEN,

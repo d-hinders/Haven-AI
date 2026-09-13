@@ -66,7 +66,7 @@ async function seedPasskey(seed: {
 
 /** The Safe binding is set by the deploy path, not at enrolment. */
 async function bindDirect(credentialId: string, accountAddress: string): Promise<void> {
-  await db.query('UPDATE user_passkeys SET safe_address = $2 WHERE credential_id = $1', [
+  await db.query('UPDATE user_passkeys SET account_address = $2 WHERE credential_id = $1', [
     credentialId,
     accountAddress,
   ])
@@ -138,7 +138,7 @@ describeDb('user-passkeys repository (#1229)', () => {
     expect(await bindPasskeyToAccount(user, credentialId, SAFE_B)).toBe(false)
 
     const row = await findUserPasskeyByCredential(user, BASE, credentialId)
-    expect(row?.safe_address).toBe(SAFE_A)
+    expect(row?.account_address).toBe(SAFE_A)
   })
 
   it('never binds another user\'s passkey', async () => {
@@ -147,7 +147,7 @@ describeDb('user-passkeys repository (#1229)', () => {
     const { credentialId } = await seedPasskey({ userId: theirs })
 
     expect(await bindPasskeyToAccount(mine, credentialId, SAFE_A)).toBe(false)
-    expect((await findUserPasskeyByCredential(theirs, BASE, credentialId))?.safe_address).toBeNull()
+    expect((await findUserPasskeyByCredential(theirs, BASE, credentialId))?.account_address).toBeNull()
   })
 
   it('finds a Safe-bound passkey case-blind, and only for its own Safe', async () => {

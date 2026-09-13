@@ -50,7 +50,7 @@ import dashboardRoutes from '../dashboard.js'
 
 const SAFE = {
   id: 'safe-1',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 8453,
   name: 'Main account',
   is_default: true,
@@ -60,7 +60,7 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
-  safe_id: SAFE.id,
+  account_id: SAFE.id,
   safe_name: SAFE.name,
   safe_chain_id: SAFE.chain_id,
   account_type: null,
@@ -87,7 +87,7 @@ function installQueryMock(overrides: {
     if (sql.includes('AS has_first_agent_payment')) {
       return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
     }
-    if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
+    if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
       return Promise.resolve({ rows: overrides.safes ?? [SAFE] })
     }
     if (sql.includes('FROM agents a')) {

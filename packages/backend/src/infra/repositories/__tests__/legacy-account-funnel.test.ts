@@ -40,7 +40,7 @@ async function seedUser(): Promise<string> {
 // the parameter is deliberately not nullable: there is no third state to seed.
 async function seedSafe(userId: string, accountType: 'safe' | 'delegator_hybrid'): Promise<string> {
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, name, chain_id, account_type)
+    `INSERT INTO smart_accounts (user_id, account_address, name, chain_id, account_type)
      VALUES ($1, $2, $3, 8453, $4) RETURNING id`,
     [userId, `0x${String(++n).padStart(40, '0')}`, `acct-${accountType}`, accountType],
   )
@@ -49,7 +49,7 @@ async function seedSafe(userId: string, accountType: 'safe' | 'delegator_hybrid'
 
 async function seedAgent(userId: string, accountId: string | null, name: string): Promise<void> {
   await db.query(
-    `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, safe_id)
+    `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, account_id)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [userId, name, `0x${String(++n).padStart(40, 'a')}`, `hash-${n}`, `sk_${n}`, accountId],
   )

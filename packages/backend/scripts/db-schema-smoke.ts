@@ -6,7 +6,7 @@
  *      that references a non-existent column fails here.
  *
  * This is the SQL counterpart to the env-drift test: mocked route tests never
- * validate SQL against the real schema, so `agents.safe_address` (a join on a
+ * validate SQL against the real schema, so `agents.account_address` (a join on a
  * column that does not exist) reached dev and 500ed every session payment
  * (#757). PREPARE would have caught it in CI.
  *
@@ -315,6 +315,13 @@ import {
   LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
 } from '../src/infra/repositories/agent-tool-invocations.js'
 import { LIST_AGENT_NAMES_FOR_USER_SQL } from '../src/infra/repositories/agents.js'
+import {
+  COUNT_ACCOUNTS_FOR_USER_SQL,
+  FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
+  FIND_OWNED_HYBRID_ACCOUNT_SQL,
+  INSERT_HYBRID_ACCOUNT_SQL,
+} from '../src/infra/repositories/smart-accounts.js'
+import { INSERT_HYBRID_ACCOUNT_PASSKEY_SQL } from '../src/infra/repositories/hybrid-signers.js'
 
 interface SmokeQuery {
   name: string
@@ -380,8 +387,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'smart-accounts: list for user', sql: LIST_ACCOUNTS_FOR_USER_SQL },
   { name: 'smart-accounts: ownership check (id+address)', sql: FIND_OWNED_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: ownership check (id+is_default)', sql: FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL },
-  { name: 'smart-accounts: legacy users.safe_address mirror', sql: SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
-  { name: 'smart-accounts: legacy users.safe_address clear', sql: CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
+  { name: 'smart-accounts: legacy users.account_address mirror', sql: SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
+  { name: 'smart-accounts: legacy users.account_address clear', sql: CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: rename (tenant-scoped)', sql: RENAME_ACCOUNT_FOR_USER_SQL },
   { name: 'smart-accounts: clear defaults in set-default tx', sql: CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL },
   { name: 'smart-accounts: set default in set-default tx', sql: SET_ACCOUNT_DEFAULT_SQL },
@@ -495,17 +502,19 @@ const QUERIES: SmokeQuery[] = [
     sql: INSERT_RESIDUE_EVENT_SQL,
   },
   {
+    // IMPORTED since #2911 — was a pasted copy that had drifted from the source
+    // (the source also writes owner_address + single_signer_waiver_at).
     name: 'hybrid accounts: provisioning insert with rail + type (#825)',
-    sql: `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail)
-          VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation')
-          RETURNING id, created_at`,
+    sql: INSERT_HYBRID_ACCOUNT_SQL,
   },
   {
+    // IMPORTED since #2911 — was a pasted copy.
     name: 'hybrid accounts: passkey signer persist (#885)',
-    sql: `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT (user_safe_id, key_id) DO NOTHING`,
+    sql: INSERT_HYBRID_ACCOUNT_PASSKEY_SQL,
   },
+  { name: 'hybrid accounts: duplicate-address check (#2911)', sql: FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL },
+  { name: 'hybrid accounts: first-account gate (#2911)', sql: COUNT_ACCOUNTS_FOR_USER_SQL },
+  { name: 'hybrid accounts: ownership read (#2911)', sql: FIND_OWNED_HYBRID_ACCOUNT_SQL },
   {
     // IMPORTED since #999 — was a pasted copy.
     name: 'hybrid accounts: owner config round-trip — passkey set (#885)',
@@ -853,14 +862,14 @@ async function main(): Promise<void> {
     ).rows[0].id
     const safeId = (
       await fx.query<{ id: string }>(
-        `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail)
+        `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail)
          VALUES ($1, $2, 84532, 'smoke', false, 'delegator_hybrid', 'delegation') RETURNING id`,
         [userId, '0x' + 'cc'.repeat(20)],
       )
     ).rows[0].id
     const agentId = (
       await fx.query<{ id: string }>(
-        `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, safe_id)
+        `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, account_id)
          VALUES ($1, 'smoke-1060', $2, 'smoke-hash-1060', 'sk_smoke', $3) RETURNING id`,
         [userId, '0x' + 'dd'.repeat(20), safeId],
       )
@@ -916,7 +925,7 @@ async function main(): Promise<void> {
     if (userId) {
       await fx.query(`DELETE FROM agent_delegations WHERE agent_id IN (SELECT id FROM agents WHERE user_id = $1)`, [userId])
       await fx.query(`DELETE FROM agents WHERE user_id = $1`, [userId])
-      await fx.query(`DELETE FROM user_safes WHERE user_id = $1`, [userId])
+      await fx.query(`DELETE FROM smart_accounts WHERE user_id = $1`, [userId])
       await fx.query(`DELETE FROM users WHERE id = $1`, [userId])
     }
     fx.release()

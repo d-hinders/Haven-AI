@@ -15,6 +15,7 @@ covers:
   - packages/frontend/src/components/transactions/TransactionsTable.tsx
   - packages/frontend/src/components/ui/Input.tsx
   - packages/frontend/src/components/ui/PageHeader.tsx
+  - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
@@ -578,6 +579,7 @@ Structure:
 3. One concept per row group, with the current value and action on the same row when practical.
 4. Clear destructive or recovery actions with confirmation.
 5. Success/error states close to the affected setting.
+6. An Appearance row in Preferences ([#2927](https://github.com/d-hinders/Haven-AI/issues/2927)): the theme preference as a three-option `ui/SegmentedControl` (Light / Dark / System), `aria-label="Theme"`, radio semantics, and the detail line "System follows your device". Default is `system` — the OS decides until the user picks explicitly. The choice is device-local under `haven.theme` (same per-device rule the locale key followed), not account data.
 
 Money and risk clarity:
 - Use `sign-in method` and `approve actions`, not `signer` or `owner`.

@@ -30,11 +30,32 @@ import {
 const FRONTEND_ROOT = path.resolve(__dirname, '../../..')
 const GLOBALS_CSS = readFileSync(path.join(FRONTEND_ROOT, 'src/app/globals.css'), 'utf8')
 
+/** The `:root` (light palette) block of globals.css, comments stripped. */
+function rootBlock(): string {
+  const css = GLOBALS_CSS.replace(/\/\*[\s\S]*?\*\//g, ' ')
+  const open = css.indexOf(':root {')
+  if (open < 0) throw new Error('globals.css: :root block not found')
+  let depth = 0
+  const brace = css.indexOf('{', open)
+  for (let i = brace; i < css.length; i++) {
+    if (css[i] === '{') depth++
+    else if (css[i] === '}') {
+      depth--
+      if (depth === 0) return css.slice(brace + 1, i)
+    }
+  }
+  throw new Error('globals.css: unbalanced :root block')
+}
+
 function cssToken(name: string): string {
-  // Exactly one definition: the day a dark-mode block redefines a token, the
-  // manifest's single value is half the truth, and this is where that shows.
-  const matches = [...GLOBALS_CSS.matchAll(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`, 'g'))]
-  if (matches.length !== 1) throw new Error(`globals.css defines ${name} ${matches.length} times, expected once`)
+  // Exactly one definition INSIDE the :root (light) block: #2927 added two
+  // dark re-declaration blocks, so a whole-file search would find each colour
+  // token three times — and the manifest's value is the LIGHT one (the
+  // installed shell's theme_color is slice 2's OS-follow work). Scoping the
+  // parse to :root keeps "exactly once" meaningful: the day a token vanishes
+  // from the light palette, this is where that shows.
+  const matches = [...rootBlock().matchAll(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`, 'g'))]
+  if (matches.length !== 1) throw new Error(`globals.css :root defines ${name} ${matches.length} times, expected once`)
   return matches[0][1].toLowerCase()
 }
 

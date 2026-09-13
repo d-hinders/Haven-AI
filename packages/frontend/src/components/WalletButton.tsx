@@ -752,7 +752,7 @@ export default function WalletButton() {
                 aria-expanded={popoverOpen}
                 aria-label="Passkey"
                 title="Passkey"
-                className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+                className={`flex items-center gap-2 text-sm font-medium bg-[var(--v2-bg)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
               >
                 <AddressAvatar address={passkeySigner.address} />
                 <span className={LABEL_BELOW_SM}>Passkey</span>
@@ -826,7 +826,7 @@ export default function WalletButton() {
                 aria-expanded={popoverOpen}
                 aria-label="Passkey"
                 title="Passkey"
-                className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+                className={`flex items-center gap-2 text-sm font-medium bg-[var(--v2-bg)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
               >
                 <AddressAvatar address={delegatorSigner.accountAddress} />
                 <span className={LABEL_BELOW_SM}>Passkey</span>
@@ -867,7 +867,7 @@ export default function WalletButton() {
               // Offset against the page, as ui/Button does: on a brand-FILLED
               // control an un-offset brand ring composites brand-over-brand and
               // measures ~1.0:1 — invisible at any opacity (#1741).
-              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-button transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] sm:px-4 sm:py-2 ${COLLAPSE_BELOW_SM}`}
+              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-[var(--v2-ink-on-brand)] shadow-button transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] sm:px-4 sm:py-2 ${COLLAPSE_BELOW_SM}`}
             >
               <Icon icon={Wallet} className="h-4 w-4 shrink-0 sm:hidden" />
               <span className={LABEL_BELOW_SM}>Connect wallet</span>
@@ -923,7 +923,7 @@ export default function WalletButton() {
               className={
                 wrongWallet
                   ? `flex items-center gap-2 text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
-                  : `flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+                  : `flex items-center gap-2 text-sm font-medium bg-[var(--v2-bg)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
               }
             >
               {wrongWallet ? (

@@ -9,7 +9,7 @@
 // arrow turns this red; restoring the file turns it green, byte-identical.
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -92,6 +92,10 @@ function rawArrowFiles(): { file: string; line: number }[] {
     .filter((f) => /\.(ts|tsx)$/.test(f))
     .filter((f) => !/(__tests__|\.test\.|\.spec\.)/.test(f))
     .filter((f) => !isExemptSurface(f))
+    // Skip deleted-but-tracked files: `git ls-files` lists them until the
+    // deletion is committed, and a deleted file renders no arrow (#2927 hit
+    // this by deleting connect-agent/SegmentedControl.tsx).
+    .filter((f) => existsSync(join(REPO_ROOT, f)))
   const offenders: { file: string; line: number }[] = []
   for (const f of files) {
     maskComments(readFileSync(join(REPO_ROOT, f), 'utf8'))

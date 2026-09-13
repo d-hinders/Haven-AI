@@ -46,7 +46,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
@@ -69,11 +69,15 @@ const RETIRED_HELPER = 'deployPasskeySafe'
 function sourceFiles(): string[] {
   // Pathspec `src` plus an extension filter in JS, rather than a `src/**/*.ts`
   // glob: the glob form silently misses a file sitting directly in `src/`.
+  // Deleted-but-tracked files are skipped: `git ls-files` lists them until the
+  // deletion is committed, and a file that no longer exists cannot call a
+  // retired route (#2927 hit this by deleting connect-agent/SegmentedControl).
   const out = execFileSync('git', ['ls-files', 'src'], { cwd: ROOT, encoding: 'utf8' })
   return out
     .split('\n')
     .filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'))
     .filter((f) => f !== SELF)
+    .filter((f) => existsSync(path.join(ROOT, f)))
 }
 
 /** Literal string paths passed to `.post(...)` / `.post<T>(...)`, in order. */

@@ -107,6 +107,13 @@ export const en = {
       label: 'Preferred currency',
       detail: 'Used for balances, spending limits, and portfolio totals.',
     },
+    theme: {
+      label: 'Theme',
+      detail: 'System follows your device',
+      light: 'Light',
+      dark: 'Dark',
+      system: 'System',
+    },
     agentSpendAlerts: {
       label: 'Agent spend alerts',
       detail: 'Receive updates when agents use their budget.',

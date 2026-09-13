@@ -1,6 +1,8 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
+import { ThemeProvider } from '@/context/ThemeContext'
+import { THEME_STORAGE_KEY } from '@/lib/theme-bootstrap'
 
 const mockUseAuth = vi.fn()
 const mockUsePreferences = vi.fn()
@@ -79,7 +81,9 @@ import SettingsClient from '@/app/(authenticated)/settings/SettingsClient'
 function renderSettings() {
   return render(
     <LocaleProvider>
-      <SettingsClient />
+      <ThemeProvider>
+        <SettingsClient />
+      </ThemeProvider>
     </LocaleProvider>,
   )
 }
@@ -155,7 +159,49 @@ describe('SettingsClient', () => {
     expect(screen.queryByRole('radio', { name: 'Svenska' })).toBeNull()
     expect(screen.queryByRole('radio', { name: 'English' })).toBeNull()
     const currency = screen.getByRole('radiogroup', { name: 'Preferred currency' })
-    expect(screen.getAllByRole('radiogroup')).toEqual([currency])
+    // #2927: the Appearance row joins currency as the second radiogroup.
+    const theme = screen.getByRole('radiogroup', { name: 'Theme' })
+    expect(screen.getAllByRole('radiogroup')).toEqual([currency, theme])
+  })
+
+  /**
+   * #2927: the Appearance row — a three-way radio group (Light / Dark /
+   * System) on the promoted ui/SegmentedControl. Each choice writes
+   * `haven.theme` device-local; `system` (the default) writes the key too so
+   * a later `system` re-select is explicit rather than absent.
+   */
+  describe('Appearance (#2927)', () => {
+    it('renders the Theme row with the three options and System active by default', () => {
+      renderSettings()
+
+      expect(screen.getByText('Theme')).toBeInTheDocument()
+      expect(screen.getByText('System follows your device')).toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: 'System' })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      )
+      expect(screen.getByRole('radio', { name: 'Light' })).toHaveAttribute('aria-checked', 'false')
+      expect(screen.getByRole('radio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'false')
+    })
+
+    it('each choice writes the storage key', async () => {
+      renderSettings()
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Dark' }))
+      await waitFor(() =>
+        expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark'),
+      )
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Light' }))
+      await waitFor(() =>
+        expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light'),
+      )
+
+      fireEvent.click(screen.getByRole('radio', { name: 'System' }))
+      await waitFor(() =>
+        expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('system'),
+      )
+    })
   })
 
   /**

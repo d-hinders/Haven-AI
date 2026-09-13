@@ -69,7 +69,7 @@ export function ApprovalRequiredBanner({
     <div className={`${compact ? 'p-3' : 'p-4'} rounded-[10px] border ${styles.frame}`}>
       <div className="flex gap-3">
         <div
-          className={`${compact ? 'h-5 w-5' : 'h-6 w-6'} mt-0.5 flex flex-shrink-0 items-center justify-center rounded-full bg-white ${styles.badge}`}
+          className={`${compact ? 'h-5 w-5' : 'h-6 w-6'} mt-0.5 flex flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-bg)] ${styles.badge}`}
         >
           <Icon icon={styles.icon} className="h-3.5 w-3.5" />
         </div>

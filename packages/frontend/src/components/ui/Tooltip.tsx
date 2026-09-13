@@ -333,7 +333,7 @@ export function Tooltip({
             }}
             className={[
               'pointer-events-none z-[var(--v2-z-tooltip)]',
-              'bg-[var(--v2-ink)] text-white px-2.5 py-1.5 rounded-md',
+              'bg-[var(--v2-ink)] text-[var(--v2-bg)] px-2.5 py-1.5 rounded-md',
               'text-[12px] leading-tight',
               // A cap that is also viewport-relative: 20rem is comfortable on
               // desktop and still leaves a gutter at 390px. `break-words` only

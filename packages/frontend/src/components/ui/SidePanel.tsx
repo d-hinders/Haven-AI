@@ -41,7 +41,7 @@ export function SidePanel({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : 'Details'}
-        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-white shadow-modal pt-[var(--v2-safe-top)] pr-[var(--v2-safe-right)] pb-[var(--v2-safe-bottom)]"
+        className="v2-animate-panel-in relative flex h-full w-full max-w-md flex-col border-l border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal pt-[var(--v2-safe-top)] pr-[var(--v2-safe-right)] pb-[var(--v2-safe-bottom)]"
       >
         {/*
           The panel is flush to three screen edges by design (#2730), so a

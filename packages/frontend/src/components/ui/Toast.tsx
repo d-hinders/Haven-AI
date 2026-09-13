@@ -145,8 +145,8 @@ const TONE_STYLES: Record<Tone, { container: string; close: string; icon: React.
   // blue-500/50 on all three tones. #1708's guard only matched
   // `ring-[var(--v2-*)]/N`, so it did not catch this second dead shape (#1741).
   info: {
-    container: 'bg-[var(--v2-ink)] text-white',
-    close: 'text-white/50 hover:text-white focus-visible:ring-white/80',
+    container: 'bg-[var(--v2-ink)] text-[var(--v2-bg)]',
+    close: 'text-bg/50 hover:text-bg focus-visible:ring-bg/80',
     icon: <Icon icon={Info} className="h-4 w-4 flex-shrink-0" />,
   },
   success: {

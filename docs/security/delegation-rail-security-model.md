@@ -246,6 +246,21 @@ in-flight live operation cannot lose its Safe binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
 
+> **Re-verified #2911 (naming epic #2906, phase 3 — the schema rename):** this
+> diff touched twelve files in this document's `covers:` list (`routes/auth.ts`,
+> `routes/agents.ts`, `routes/user-safes.ts`, `routes/hybrid-accounts.ts`,
+> `infra/repositories/{agents,dashboard,transaction-history,smart-accounts,
+> hybrid-signers}.ts`, `rails/hybrid-account-config.ts`,
+> `modules/accounts/mainnet-gate.ts`) by SQL identifier only: `user_safes` →
+> `smart_accounts`, `safe_address` → `account_address`, `safe_id` →
+> `account_id`, `user_safe_id` → `account_id`, `safe_tx_hash` →
+> `account_tx_hash`, plus the row reads that follow. Every predicate, tenant
+> scope (`WHERE user_id = $1`), authority check, signer-set rule and signing
+> path in this document is unchanged; the four sentences above that named the
+> old table or columns now name the new ones with the old in parentheses. The
+> wire keys this document quotes (`safe_address`, `safe_id` on responses) are
+> still emitted — the #2907 alias mappers are untouched and fed by local shims.
+
 > **Re-verified #2851 (safe-retirement epic #1440, final slice):** the unlink
 > transaction in `infra/repositories/smart-accounts.ts` no longer nulls out
 > `self_sign_agents.safe_id` before deleting the account row — that step
@@ -389,7 +404,7 @@ names the consequence and asks for confirmation, and the API does not refuse
 
 **Read surface (#1079).** The signer set is additionally readable at account
 level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
-JWT + ownership check on `user_safes`) and returning **public-key material
+JWT + ownership check on `smart_accounts`, `user_safes` before #2911) and returning **public-key material
 plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
 `created_at` since #1679 — a timestamp the UI uses to label rows
 "Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
@@ -410,7 +425,7 @@ agents — and no longer duplicated on the agent page. The agent-scoped route
 stays live server-side (it is the same shared implementation below, just
 resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup
-versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
+versus an owner-scoped `(address, chain)` lookup on `smart_accounts`. Authority
 rules, the last-signer refusal (§7), the calldata encoding and the signed-op
 matching
 are **one implementation** (`rails/hybrid-signer-actions.ts`), because two copies
@@ -731,7 +746,8 @@ moment the user has nothing at risk and no context for what a backup protects.
   on the server's classification instead of re-deriving chain semantics
   client-side.
 - **The waiver column survives as history, not as an unblock.**
-  `user_safes.single_signer_waiver_at` (migration 046) is still written when an
+  `smart_accounts.single_signer_waiver_at` (migration 046; the table was
+  `user_safes` until #2911) is still written when an
   acknowledgement is sent, and nothing requires it to proceed. It no longer
   silences the recommendation either — it never made an account recoverable; it
   only recorded that someone had been told once, and the risk is ongoing.
@@ -866,7 +882,9 @@ compensating controls:
    confirms; without it every purchase against a ≥300 s-timeout merchant
    failed structurally); the delegate-balance monitor
    covers delegation-rail agents; the rail-agnostic sweep route recovers
-   residuals to the **treasury Hybrid** (`agent.safe_address`), with the
+   residuals to the **treasury Hybrid** (`agent.account_address` — the
+   `agents.account_id` → `smart_accounts.account_address` read, columns
+   renamed by #2911), with the
    0.01 USDC recoverability floor and sub-floor residuals visible in the ledger.
 2. **Budget meters at the funding hop, not at settlement.** Verify-without-
    settle strands the amount on the EOA → sweep reconciles it; the budget

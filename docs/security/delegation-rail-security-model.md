@@ -35,7 +35,7 @@ covers:
   - packages/frontend/src/hooks/useSafeOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-13"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -714,7 +714,7 @@ moment the user has nothing at risk and no context for what a backup protects.
   Since #1205 the predicate has its production call site: the session safes
   payload (`/auth/me`, login) carries the computed answer
   (`needs_backup_recommendation`) plus `value_bearing_chain`, mapped by
-  `sessionSafePayload` in the same module — so the dashboard's banner branches
+  `sessionAccountPayload` (`sessionSafePayload` before #2910) in the same module — so the dashboard's banner branches
   on the server's classification instead of re-deriving chain semantics
   client-side.
 - **The waiver column survives as history, not as an unblock.**
@@ -778,6 +778,48 @@ informed transitions while the account's on-chain last-signer guard remains the
 hard backstop.
 
 ## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
+
+> **Re-verified #2910 (naming epic #2906, phase 2b):** this diff touched six
+> files in this document's coverage list — `routes/auth.ts`,
+> `routes/agents.ts`, `routes/user-safes.ts`, `infra/repositories/agents.ts`,
+> `rails/hybrid-account-config.ts`, `modules/accounts/mainnet-gate.ts` — by
+> identifier rename only: locals and parameters `safeId`/`safeAddress` →
+> `accountId`/`accountAddress`, the object-literal fields `NewAgent.safeId` →
+> `accountId` and `CreatedAgent.safeInfo` → `accountInfo`, and
+> `sessionSafePayload` → `sessionAccountPayload` (the §6 sentence naming it
+> updated). Every SQL literal in the
+> touched repository files is byte-identical (64 literals, 0 differences), no
+> route path, wire key, tenant-scoping clause, signing path or authority
+> check changed, and the `RelayerOperation` union lost only its dead
+> `'safe_deploy'` member (historical `relayer_gas_events` rows still read —
+> pinned by test). Every claim in this document that names one of these
+> files still holds under the new identifiers; nothing else re-read.
+
+> **Re-verified #2907 (naming epic #2906, phase 0):** the funding-leg
+> `sign_data.components` object (`delegation-authorize.ts`, `replay.ts`) gains
+> a `payer_account` field — an additive, same-value twin of the deprecated
+> `safe` field, not a rename into `components.account` (which already means
+> the *delegate* account address on this shape, a different address). No
+> authority, signing path, or invariant mapping changes: `payer_account` is a
+> read-side label, mutation-tested equal to `safe`
+> (`openapi/payer-account-alias.test.ts`). `routes/user-safes.ts` also gained
+> an additive `/user/accounts` prefix registration of the same handler
+> module — §2's invariant mapping and this doc's route list are otherwise
+> unaffected: no new authority, no new signing path.
+>
+> **Review-findings correction, same PR:** that additive `/user/accounts`
+> mount was NOT reflected in `middleware/owner-cli.ts`'s `OWNER_CLI_ALLOWED_
+> ROUTES`, which named only the `/user/safes` literal — `routeAllowsOwnerCli`
+> compares the registered route's exact URL, so an `owner_cli` token that
+> could read `GET /user/safes` and `GET /user/safes/{safeId}/funding` got a
+> 401 on the identical `/user/accounts` / `/user/accounts/{safeId}/funding`
+> mount, for the same data, through the same handler. This is a REFUSAL gap,
+> not an authorization grant — the token already had this read through the
+> `/user/safes` prefix — so fixing it (adding the two twin entries) does not
+> widen the owner_cli surface §9 below describes; it makes the surface
+> actually reachable through both names, which is the whole point of an
+> additive rename. Proven with a parity test that fails 4 assertions when the
+> twin entries are removed.
 
 > **Re-verified #2850:** this diff touched two files in this document's
 > covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by

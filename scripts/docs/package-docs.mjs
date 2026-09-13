@@ -157,7 +157,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // own hints do; the Custody sentence points at that block instead of
     // repeating the tag. No custody, network or signing claim moved. Rest of
     // the README NOT re-verified.
-    'last-verified': '2026-09-04',
+    // #2908: EDITED, scope = the sweep-destination bullet's credential-key
+    // names (account_address first; safe_address/safeAddress read
+    // permanently; env HAVEN_ACCOUNT_ADDRESS then the two pre-#2908 names).
+    // Rest of the README NOT re-verified.
+    'last-verified': '2026-09-12',
   },
   {
     doc: 'packages/mcp/README.md',
@@ -176,7 +180,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // re-verified: the credential-file section, the Claude Desktop wiring, the
     // consent flow, the audit log, the manual sanity test, or the
     // non-custodial invariant.
-    'last-verified': '2026-09-06',
+    // #2908: EDITED, scope = the credential-file example (`account_address`,
+    // with the permanent `safe_address`/`safeAddress` read and the env-name
+    // window stated beneath it). Rest of the README NOT re-verified.
+    'last-verified': '2026-09-12',
   },
   {
     doc: 'packages/connect/README.md',
@@ -416,6 +423,15 @@ export const EXEMPT_PACKAGE_DOCS = {
     'Provenance index for the recorded Fortnox HTTP fixtures the conformance runner serves ' +
     '(#2862): a file-to-request table, not a description of behaviour. The runner that reads ' +
     'them is what catches drift — a renamed fixture fails the suite, not a doc gate.',
+  ...Object.fromEntries(
+    ['sdk', 'signer', 'mcp', 'connect', 'cli'].map((pkg) => [
+      `packages/${pkg}/CHANGELOG.md`,
+      'Per-release change record for a published package (#2908): an append-only log whose ' +
+        'entries describe what a RELEASE changed, dated by the release bump, not a description ' +
+        'of current behaviour that can drift. `npm pack` does not ship it (`release-scope.mjs`), ' +
+        'and the contract it feeds is the release shard under `docs/regulatory/casp-changelog/`.',
+    ]),
+  ),
 }
 
 /**

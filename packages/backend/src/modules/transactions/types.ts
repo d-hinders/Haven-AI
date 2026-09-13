@@ -111,15 +111,15 @@ export interface EnrichedTransaction extends Transaction {
 /** Re-exported so route/module callers share one name for the Safe projection. */
 export type SmartAccountRow = TransactionAccountRow
 
-export interface FetchSafeTransactionsParams {
-  safeId: string
-  safeAddress: string
+export interface FetchAccountTransactionsParams {
+  accountId: string
+  accountAddress: string
   chainId: number
   log: FastifyBaseLogger
   fresh?: boolean
 }
 
-export interface FetchSafeTransactionsResult {
+export interface FetchAccountTransactionsResult {
   transactions: Transaction[]
   hadFailures: boolean
   /**

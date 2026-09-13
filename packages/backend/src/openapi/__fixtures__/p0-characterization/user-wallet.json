@@ -1,0 +1,22 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "PUT /user/wallet",
+  "request": {
+    "method": "PUT",
+    "url": "/user/wallet",
+    "payload": {
+      "wallet_address": "0x1234567890abcdef1234567890abcdef12345678"
+    },
+    "authClaims": {
+      "sub": "user-1",
+      "email": "test@example.com"
+    }
+  },
+  "status": 200,
+  "body": {
+    "id": "user-1",
+    "email": "test@example.com",
+    "wallet_address": "0x1234567890abcdef1234567890abcdef12345678",
+    "safe_address": null
+  }
+}

@@ -182,7 +182,10 @@ export interface AgentIdentity {
   id: string
   name: string
   status: string
+  /** @deprecated #2908 — same value as `account_address`; the server drops it at #2914. */
   safe_address: string | null
+  /** #2908 — the account-vocabulary twin (not emitted by every server yet; read first, never required). */
+  account_address?: string | null
   delegate_address: string | null
   chain_id: number | null
   execution_rail: 'legacy' | 'delegation' | string

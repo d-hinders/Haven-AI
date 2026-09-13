@@ -1,0 +1,22 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "GET /machine-payments/agent",
+  "request": {
+    "method": "GET",
+    "url": "/machine-payments/agent",
+    "headers": {
+      "authorization": "Bearer sk_agent_test"
+    }
+  },
+  "status": 200,
+  "body": {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "name": "Payment Agent",
+    "status": "active",
+    "safe_address": "0x135a9215604711AC70d970e12Caa812c53537EF4",
+    "delegate_address": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+    "delegate_account_address": null,
+    "chain_id": 8453,
+    "execution_rail": "legacy"
+  }
+}

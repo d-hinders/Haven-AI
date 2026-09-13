@@ -148,6 +148,12 @@ describe('agent activity routes', () => {
       safe_name: 'Base wallet',
       chain_id: 8453,
     })
+    // #2907: request-level twin === old, not just the mapper's own unit
+    // test — mutation-proven by dropping the withActivityPaymentAccountAlias
+    // call at this emit site.
+    expect(body.activity[0].account_id).toBe(body.activity[0].safe_id)
+    expect(body.activity[0].account_address).toBe(body.activity[0].safe_address)
+    expect(body.activity[0].account_name).toBe(body.activity[0].safe_name)
 
     const paymentSql = String(
       mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM payment_intents pi'))?.[0],
@@ -196,6 +202,9 @@ describe('agent activity routes', () => {
       safe_address: SAFE_ADDRESS,
       chain_id: 8453,
     })
+    expect(body.activity[0].account_id).toBe(body.activity[0].safe_id)
+    expect(body.activity[0].account_address).toBe(body.activity[0].safe_address)
+    expect(body.activity[0].account_name).toBe(body.activity[0].safe_name)
     expect(mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql)))).toBe(false)
   })
 })

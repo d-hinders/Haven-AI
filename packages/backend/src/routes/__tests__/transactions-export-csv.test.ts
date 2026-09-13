@@ -377,6 +377,54 @@ describe('GET /transactions/export.csv', () => {
     expect(records[0][header.indexOf('tx_hash')]).toBe(IN_HASH)
   })
 
+  // #2907 AC #3: `?accountId=` is the account-vocabulary twin of `?safeId=`;
+  // both accept, both must actually filter. The failure mode this guards
+  // against is silent: Fastify ignores an unrecognised query key rather than
+  // erroring, so reverting the route's `accountFilterId` alias back to
+  // reading only `safeId` would make `?accountId=` a no-op that returns every
+  // account's rows with no error — this asserts the filtered count is
+  // strictly less than the unfiltered one, which a no-op cannot produce.
+  it('applies the ?accountId= filter, and its count differs from the unfiltered export', async () => {
+    stubExplorers()
+    routeDbQueries({ user_safes: BOTH_SAFES })
+    const unfiltered = await get('?fresh=1')
+    expect(unfiltered.statusCode).toBe(200)
+    expect(unfiltered.headers['x-export-row-count']).toBe('2')
+
+    stubExplorers()
+    routeDbQueries({ user_safes: BOTH_SAFES })
+    const filtered = await get(`?fresh=1&accountId=${BASE_SAFE_ID}`)
+    expect(filtered.statusCode).toBe(200)
+    expect(filtered.headers['x-export-row-count']).toBe('1')
+    const { header, records } = parseCsv(filtered.body.slice(1))
+    expect(records).toHaveLength(1)
+    expect(records[0][header.indexOf('tx_hash')]).toBe(IN_HASH)
+
+    expect(Number(filtered.headers['x-export-row-count'])).toBeLessThan(
+      Number(unfiltered.headers['x-export-row-count']),
+    )
+  })
+
+  it('?accountId= and ?safeId= for the same id produce the identical export', async () => {
+    stubExplorers()
+    routeDbQueries({ user_safes: BOTH_SAFES })
+    const bySafeId = await get(`?fresh=1&safeId=${BASE_SAFE_ID}`)
+
+    stubExplorers()
+    routeDbQueries({ user_safes: BOTH_SAFES })
+    const byAccountId = await get(`?fresh=1&accountId=${BASE_SAFE_ID}`)
+
+    expect(byAccountId.statusCode).toBe(bySafeId.statusCode)
+    expect(byAccountId.headers['x-export-row-count']).toBe(bySafeId.headers['x-export-row-count'])
+    expect(byAccountId.body).toBe(bySafeId.body)
+  })
+
+  it('400s an invalid ?accountId= the same way it does an invalid ?safeId=', async () => {
+    const response = await get('?accountId=not-a-uuid')
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'Invalid safeId' })
+  })
+
   it('resolves the counterparty name from the address book', async () => {
     stubExplorers()
     routeDbQueries({

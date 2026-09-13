@@ -1,0 +1,31 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "POST /agents",
+  "request": {
+    "method": "POST",
+    "url": "/agents",
+    "payload": {
+      "name": "A",
+      "delegate_address": "0x1111111111111111111111111111111111111111",
+      "safe_id": "b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16"
+    }
+  },
+  "status": 201,
+  "body": {
+    "id": "4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34",
+    "name": "A",
+    "description": null,
+    "delegate_address": "0x1111111111111111111111111111111111111111",
+    "safe_id": "b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16",
+    "api_key_prefix": "sk_a",
+    "status": "active",
+    "created_at": "2026-07-26T00:00:00.000Z",
+    "mcp_last_seen_at": null,
+    "safe_address": "0x2222222222222222222222222222222222222222",
+    "safe_name": "Main",
+    "safe_chain_id": 84532,
+    "api_key": "sk_agent_60f90e9471330e054cf240b8ad3ca2be3c6c25994563a0cc",
+    "allowances": [],
+    "passport_requested": false
+  }
+}

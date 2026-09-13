@@ -141,7 +141,7 @@ export const INSERT_DELEGATION_INTENT_SQL = `INSERT INTO payment_intents (
 export interface NewDelegationIntent {
   agentId: string
   userId: string
-  safeAddress: string
+  accountAddress: string
   chainId: number
   tokenSymbol: string
   tokenAddress: string
@@ -167,7 +167,7 @@ export async function insertDelegationIntent(
   db: Executor = pool,
 ): Promise<PaymentIntentRow> {
   const result = await db.query<PaymentIntentRow>(INSERT_DELEGATION_INTENT_SQL, [
-    input.agentId, input.userId, input.safeAddress, input.chainId,
+    input.agentId, input.userId, input.accountAddress, input.chainId,
     input.tokenSymbol, input.tokenAddress, input.toAddress,
     input.amountRaw, input.amountHuman, input.delegateAddress,
     input.allowanceNonce,
@@ -198,7 +198,7 @@ export const INSERT_SEND_INTENT_SQL = `INSERT INTO payment_intents (
 export interface NewSendIntent {
   agentId: string
   userId: string
-  safeAddress: string
+  accountAddress: string
   chainId: number
   tokenSymbol: string
   tokenAddress: string
@@ -230,7 +230,7 @@ export async function insertSendIntent(
   const result = await db.query<SendIntentRow>(INSERT_SEND_INTENT_SQL, [
     input.agentId,
     input.userId,
-    input.safeAddress,
+    input.accountAddress,
     input.chainId,
     input.tokenSymbol,
     input.tokenAddress,

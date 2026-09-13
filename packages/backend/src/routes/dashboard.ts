@@ -11,16 +11,17 @@ import {
   type MonthlySpendRow,
 } from '../infra/repositories/dashboard.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { fetchPortfolioForSafe } from '../modules/accounts/index.js'
+import { fetchPortfolioForAccount } from '../modules/accounts/index.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
   compareTransactions,
   type EnrichedTransaction,
   enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
-  fetchSafeTransactions,
+  fetchAccountTransactions,
   mergeX402Transactions,
 } from '../modules/transactions/index.js'
+import { withDashboardAgentAccountAlias, withTransactionAccountAlias } from '../openapi/wire-aliases.js'
 
 const AGENT_PREVIEW_LIMIT = 6
 const TRANSACTION_PREVIEW_LIMIT = 5
@@ -98,7 +99,7 @@ export default async function dashboardRoutes(
     }
 
     const currentPortfolio = await Promise.all(
-      safes.map((safe) => fetchPortfolioForSafe(safe.chain_id, safe.safe_address)),
+      safes.map((safe) => fetchPortfolioForAccount(safe.chain_id, safe.safe_address)),
     )
 
     const totalUsd = currentPortfolio.reduce((sum, item) => sum + item.totalUsd, 0)
@@ -134,9 +135,9 @@ export default async function dashboardRoutes(
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(
       safes.map(async (safe) => {
-        const { transactions } = await fetchSafeTransactions({
-          safeId: safe.id,
-          safeAddress: safe.safe_address,
+        const { transactions } = await fetchAccountTransactions({
+          accountId: safe.id,
+          accountAddress: safe.safe_address,
           chainId: safe.chain_id,
           log: request.log,
         })
@@ -159,7 +160,7 @@ export default async function dashboardRoutes(
 
       const safe = safes[index]
       request.log.warn(
-        { err: result.reason, safeId: safe.id, chainId: safe.chain_id },
+        { err: result.reason, accountId: safe.id, chainId: safe.chain_id },
         'Dashboard transaction aggregation failed',
       )
     })
@@ -211,44 +212,48 @@ export default async function dashboardRoutes(
       onboardingProgress: {
         hasFirstAgentPayment: firstAgentPayment,
       },
-      agents: agents.slice(0, AGENT_PREVIEW_LIMIT).map((agent) => ({
-        id: agent.id,
-        name: agent.name,
-        status: agent.status,
-        safeId: agent.safe_id,
-        safeName: agent.safe_name,
-        safeChainId: agent.safe_chain_id,
-        allowances: (allowancesByAgent.get(agent.id) ?? []).map((allowance) => ({
-          tokenSymbol: allowance.token_symbol,
-          allowanceAmount: allowance.allowance_amount,
-          resetPeriodMin: allowance.reset_period_min,
-        })),
-      })),
-      transactions: enrichedTransactions.slice(0, TRANSACTION_PREVIEW_LIMIT).map((tx) => ({
-        hash: tx.hash,
-        type: tx.type,
-        from: tx.from,
-        to: tx.to,
-        value: tx.value,
-        valueFormatted: tx.valueFormatted,
-        asset: tx.asset,
-        decimals: tx.decimals,
-        direction: tx.direction,
-        timestamp: tx.timestamp,
-        blockNumber: tx.blockNumber,
-        isError: tx.isError,
-        tokenAddress: tx.tokenAddress,
-        tokenSymbol: tx.tokenSymbol,
-        chainId: tx.chainId,
-        safeId: tx.safeId,
-        safeAddress: tx.safeAddress,
-        safeName: tx.safeName,
-        agentId: tx.agentId,
-        agentName: tx.agentName,
-        source: tx.source,
-        x402ResourceUrl: tx.x402ResourceUrl,
-        x402MerchantAddress: tx.x402MerchantAddress,
-      })),
+      agents: agents.slice(0, AGENT_PREVIEW_LIMIT).map((agent) =>
+        withDashboardAgentAccountAlias({
+          id: agent.id,
+          name: agent.name,
+          status: agent.status,
+          safeId: agent.safe_id,
+          safeName: agent.safe_name,
+          safeChainId: agent.safe_chain_id,
+          allowances: (allowancesByAgent.get(agent.id) ?? []).map((allowance) => ({
+            tokenSymbol: allowance.token_symbol,
+            allowanceAmount: allowance.allowance_amount,
+            resetPeriodMin: allowance.reset_period_min,
+          })),
+        }),
+      ),
+      transactions: enrichedTransactions.slice(0, TRANSACTION_PREVIEW_LIMIT).map((tx) =>
+        withTransactionAccountAlias({
+          hash: tx.hash,
+          type: tx.type,
+          from: tx.from,
+          to: tx.to,
+          value: tx.value,
+          valueFormatted: tx.valueFormatted,
+          asset: tx.asset,
+          decimals: tx.decimals,
+          direction: tx.direction,
+          timestamp: tx.timestamp,
+          blockNumber: tx.blockNumber,
+          isError: tx.isError,
+          tokenAddress: tx.tokenAddress,
+          tokenSymbol: tx.tokenSymbol,
+          chainId: tx.chainId,
+          safeId: tx.safeId,
+          safeAddress: tx.safeAddress,
+          safeName: tx.safeName,
+          agentId: tx.agentId,
+          agentName: tx.agentName,
+          source: tx.source,
+          x402ResourceUrl: tx.x402ResourceUrl,
+          x402MerchantAddress: tx.x402MerchantAddress,
+        }),
+      ),
     }
   })
 }

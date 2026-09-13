@@ -313,7 +313,7 @@ export const INSERT_SETUP_ALLOWANCE_SQL = `INSERT INTO agent_connection_setup_al
 export interface NewSetup {
   id: string
   userId: string
-  safeId: string
+  accountId: string
   name: string
   description: string | null
   runtime: string | null
@@ -353,7 +353,7 @@ export async function insertSetupWithAllowances(
     await tx.query(INSERT_SETUP_SQL, [
       setup.id,
       setup.userId,
-      setup.safeId,
+      setup.accountId,
       setup.name,
       setup.description,
       setup.runtime,
@@ -409,7 +409,7 @@ export async function insertPendingAgent(
     delegateAddress: string
     apiKeyHash: string
     apiKeyPrefix: string
-    safeId: string
+    accountId: string
     /**
      * #1878: the MCP server name the connector reported wiring this agent as.
      * NULL for every connector older than #1878 — a display aid, never keyed
@@ -426,7 +426,7 @@ export async function insertPendingAgent(
     input.delegateAddress,
     input.apiKeyHash,
     input.apiKeyPrefix,
-    input.safeId,
+    input.accountId,
     input.mcpServerName ?? null,
   ])
   return result.rows[0].id

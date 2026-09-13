@@ -595,7 +595,7 @@ async function executeConnect(
     apiKey: localApiKey,
     delegateKey: localKey.privateKey,
     delegateAddress: localKey.address,
-    safeAddress: setup.haven_wallet.address,
+    accountAddress: setup.haven_wallet.address,
     chainId: setup.haven_wallet.chain_id,
     network: setup.haven_wallet.network,
     agentBudget: setup.agent_budget.map((budget) => ({

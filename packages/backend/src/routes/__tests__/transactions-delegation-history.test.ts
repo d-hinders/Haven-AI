@@ -2,7 +2,7 @@
  * #2849 (safe-retirement slice 3) — the behavioural upside of dropping the
  * Safe Transaction Service leg from transaction history.
  *
- * Before #2849, `fetchSafeTransactions` called the Safe Transaction
+ * Before #2849, `fetchSafeTransactions` (now `fetchAccountTransactions`, #2910) called the Safe Transaction
  * Service's transfers endpoint unconditionally for every account. A Hybrid
  * DeleGator is unknown to that service, so the leg failed on every
  * delegation-rail history read, was swallowed into `logFail('safe-transfers')`,

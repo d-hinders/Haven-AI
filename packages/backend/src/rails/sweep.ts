@@ -48,7 +48,7 @@ export function generateSweepNonce(): string {
  */
 export function buildSweepAuthorization(params: {
   delegateAddress: string
-  safeAddress: string
+  accountAddress: string
   chainId: number
   valueAtomic: bigint
   nowSec?: number
@@ -57,7 +57,7 @@ export function buildSweepAuthorization(params: {
   const nowSec = params.nowSec ?? Math.floor(Date.now() / 1000)
   return {
     from: params.delegateAddress,
-    to: params.safeAddress,
+    to: params.accountAddress,
     value: params.valueAtomic.toString(),
     validAfter: '0',
     validBefore: String(nowSec + SWEEP_VALIDITY_SECONDS),

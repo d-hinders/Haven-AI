@@ -25,7 +25,8 @@ import {
   insertUser,
 } from '../infra/repositories/users.js'
 import { listSessionAccountsForUser } from '../infra/repositories/smart-accounts.js'
-import { sessionSafePayload } from '../modules/accounts/index.js'
+import { sessionAccountPayload } from '../modules/accounts/index.js'
+import { withAccountAddressAlias, withAccountsEnvelopeAlias, withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
 
 const SALT_ROUNDS = 10
 
@@ -157,7 +158,7 @@ export default async function authRoutes(
 
     return reply.code(201).send({
       token,
-      user: {
+      user: withAccountsEnvelopeAlias(withSessionAccountAddressAlias({
         id: user.id,
         name: user.name,
         email: user.email,
@@ -165,7 +166,7 @@ export default async function authRoutes(
         safe_address: null,
         currency_preference: 'USD',
         safes: [],
-      },
+      })),
     })
   })
 
@@ -197,11 +198,11 @@ export default async function authRoutes(
       { expiresIn: '7d' },
     )
 
-    const safes = (await listSessionAccountsForUser(user.id)).map(sessionSafePayload)
+    const safes = (await listSessionAccountsForUser(user.id)).map(sessionAccountPayload).map(withAccountAddressAlias)
 
     return {
       token,
-      user: {
+      user: withAccountsEnvelopeAlias(withSessionAccountAddressAlias({
         id: user.id,
         name: user.name,
         email: user.email,
@@ -209,7 +210,7 @@ export default async function authRoutes(
         safe_address: user.safe_address,
         currency_preference: user.currency_preference ?? 'USD',
         safes,
-      },
+      })),
     }
   })
 
@@ -225,9 +226,9 @@ export default async function authRoutes(
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    const safes = (await listSessionAccountsForUser(sub)).map(sessionSafePayload)
+    const safes = (await listSessionAccountsForUser(sub)).map(sessionAccountPayload).map(withAccountAddressAlias)
 
-    return { ...profile, safes }
+    return withAccountsEnvelopeAlias(withSessionAccountAddressAlias({ ...profile, safes }))
   })
   /**
    * Device-authorization flow (#2526, RFC 8628 shaped).

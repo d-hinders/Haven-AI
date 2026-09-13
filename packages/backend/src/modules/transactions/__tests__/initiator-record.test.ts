@@ -5,7 +5,7 @@
  * is agent-attributed by construction, while the SAME on-chain transfer also
  * shows up as a raw explorer / Safe-service transfer with no agent linkage.
  * The multi-Safe `mergeSortDedupeAndEnrich` and the per-Safe
- * `buildSafeTransactionsPage` are the two pipelines that must collapse the
+ * `buildAccountTransactionsPage` are the two pipelines that must collapse the
  * twin into exactly ONE row — the attributed x402 one.
  *
  * These tests mock the repository boundary (the pipeline's collaborator)
@@ -142,7 +142,7 @@ function mockModules({ x402Rows = [], piRows = [], sweepRows = [] }: RepoMockOpt
     findMachinePaymentEvidenceDetail: vi.fn(),
   }))
   vi.doMock('../aggregate.js', () => ({
-    fetchSafeTransactions: vi.fn().mockResolvedValue({
+    fetchAccountTransactions: vi.fn().mockResolvedValue({
       transactions: [RAW_TWIN],
       hadFailures: false,
     }),
@@ -180,11 +180,11 @@ describe('initiatedBy dedup guard (#2097)', () => {
   it('per-Safe page: x402 intent + raw twin collapse to ONE attributed row (initiatedBy=agent)', async () => {
     mockModules({ x402Rows: [X402_ROW] })
 
-    const { buildSafeTransactionsPage } = await import('../orchestration.js')
-    const page = await buildSafeTransactionsPage({
+    const { buildAccountTransactionsPage } = await import('../orchestration.js')
+    const page = await buildAccountTransactionsPage({
       userId: 'user-1',
-      safeId: 'safe-1',
-      safeAddress: '0xsafe',
+      accountId: 'safe-1',
+      accountAddress: '0xsafe',
       chainId: 8453,
       log,
       fresh: false,

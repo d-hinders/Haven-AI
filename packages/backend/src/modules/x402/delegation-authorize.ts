@@ -329,6 +329,13 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
           typed_data: fundingAuth.prepared.signingTypedData,
           components: {
             safe: agent.safe_address,
+            // #2907: payer_account is a same-value twin of the deprecated
+            // `safe` — NOT of `account` above, which already means the
+            // delegate account address here (a different address; owner
+            // review on #2906 rejected renaming into it, since the SDK's
+            // receipt-payer read at `sdk/src/x402-funding-leg.ts:312` would
+            // then resolve to the wrong address).
+            payer_account: agent.safe_address,
             account: fundingAuth.prepared.delegateAccountAddress,
             token: tokenAddress,
             to: payTo.toLowerCase(),

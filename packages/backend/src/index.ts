@@ -269,6 +269,12 @@ await app.register(paymentRoutes, { prefix: '/payments' })
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
 await app.register(userSafesRoutes, { prefix: '/user/safes' })
+// #2907 (naming P0): additive `account`-vocabulary twin of every
+// `/user/safes*` route — same handler module registered a second time under
+// the new prefix, so behavior is identical by construction (no second
+// implementation to drift). Old paths stay registered above, deprecated in
+// the spec, for exactly one release.
+await app.register(userSafesRoutes, { prefix: '/user/accounts' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })

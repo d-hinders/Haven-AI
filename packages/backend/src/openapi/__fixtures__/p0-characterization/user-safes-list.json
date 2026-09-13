@@ -1,0 +1,25 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "GET /user/safes",
+  "request": {
+    "method": "GET",
+    "url": "/user/safes",
+    "authClaims": {
+      "sub": "4f6c2b18-7d90-4a35-9e81-2c5b7f3a0d64",
+      "email": "ada@example.com"
+    }
+  },
+  "status": 200,
+  "body": {
+    "safes": [
+      {
+        "id": "d2c47f10-9a83-4e61-8b25-7c3f0e91a4d6",
+        "safe_address": "0xabababababababababababababababababababab",
+        "chain_id": 8453,
+        "name": "Main",
+        "is_default": true,
+        "created_at": "2026-01-01T00:00:00.000Z"
+      }
+    ]
+  }
+}

@@ -12,7 +12,7 @@ import {
   type TransactionFilterAgentRow,
 } from '../../infra/repositories/transaction-history.js'
 import { getChain } from '../../domain/chains.js'
-import { fetchSafeTransactions } from './aggregate.js'
+import { fetchAccountTransactions } from './aggregate.js'
 import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 import { enrichTransactionsWithAgents } from './enrichment.js'
 import { enrichTransactionsWithAccounting } from './accounting.js'
@@ -21,7 +21,7 @@ import type { EnrichedTransaction, ParsedTokenFilter, Transaction, SmartAccountR
 
 // ── GET / (paginated, filterable feed across every owned Safe) ─────────────
 
-export interface AggregateSafeTransactionsResult {
+export interface AggregateAccountTransactionsResult {
   merged: EnrichedTransaction[]
   failedSafeIds: string[]
   /**
@@ -41,21 +41,21 @@ export interface AggregateSafeTransactionsResult {
   truncated: boolean
 }
 
-/** Fans `fetchSafeTransactions` out across every Safe, tagging each transaction with its Safe. */
-export async function aggregateSafeTransactions(
+/** Fans `fetchAccountTransactions` out across every Safe, tagging each transaction with its Safe. */
+export async function aggregateAccountTransactions(
   safes: SmartAccountRow[],
   log: FastifyBaseLogger,
   fresh: boolean,
-): Promise<AggregateSafeTransactionsResult> {
+): Promise<AggregateAccountTransactionsResult> {
   const merged: EnrichedTransaction[] = []
   const failedSafeIds: string[] = []
   let truncated = false
 
   for (const safe of safes) {
     try {
-      const { transactions, hadFailures, truncated: safeTruncated } = await fetchSafeTransactions({
-        safeId: safe.id,
-        safeAddress: safe.safe_address,
+      const { transactions, hadFailures, truncated: safeTruncated } = await fetchAccountTransactions({
+        accountId: safe.id,
+        accountAddress: safe.safe_address,
         chainId: safe.chain_id,
         log,
         fresh,
@@ -81,7 +81,7 @@ export async function aggregateSafeTransactions(
     } catch (err) {
       failedSafeIds.push(safe.id)
       log.warn(
-        { err, safeId: safe.id, safeAddress: safe.safe_address, chainId: safe.chain_id },
+        { err, accountId: safe.id, accountAddress: safe.safe_address, chainId: safe.chain_id },
         'Safe transaction aggregation failed',
       )
     }
@@ -172,10 +172,10 @@ export function paginateByOffset<T>(items: T[], offset: number, limit: number): 
 
 // ── GET /:safeAddress (legacy single-Safe, page/limit pagination) ──────────
 
-export interface SafeTransactionsPageParams {
+export interface AccountTransactionsPageParams {
   userId: string
-  safeId: string
-  safeAddress: string
+  accountId: string
+  accountAddress: string
   chainId: number
   log: FastifyBaseLogger
   fresh: boolean
@@ -183,7 +183,7 @@ export interface SafeTransactionsPageParams {
   limit: number
 }
 
-export interface SafeTransactionsPage {
+export interface AccountTransactionsPage {
   /** Still carries `chainId`/`safeId`/`safeAddress`/`safeName`/`agentId` — the route strips those for serialization. */
   transactions: EnrichedTransaction[]
   total: number
@@ -196,21 +196,21 @@ export interface SafeTransactionsPage {
  * pagination here, unlike `mergeSortDedupeAndEnrich`, to avoid attributing
  * agents to rows that are never returned).
  */
-export async function buildSafeTransactionsPage(
-  params: SafeTransactionsPageParams,
-): Promise<SafeTransactionsPage> {
-  const { userId, safeId, safeAddress, chainId, log, fresh, page, limit } = params
-  const { transactions: allTransactions } = await fetchSafeTransactions({
-    safeId,
-    safeAddress,
+export async function buildAccountTransactionsPage(
+  params: AccountTransactionsPageParams,
+): Promise<AccountTransactionsPage> {
+  const { userId, accountId, accountAddress, chainId, log, fresh, page, limit } = params
+  const { transactions: allTransactions } = await fetchAccountTransactions({
+    accountId,
+    accountAddress,
     chainId,
     log,
     fresh,
   })
 
   const userSafe: SmartAccountRow = {
-    id: safeId,
-    safe_address: safeAddress,
+    id: accountId,
+    safe_address: accountAddress,
     chain_id: chainId,
     name: '',
   }
@@ -220,8 +220,8 @@ export async function buildSafeTransactionsPage(
     allTransactions.map((tx) => ({
       ...tx,
       chainId,
-      safeId,
-      safeAddress,
+      safeId: accountId,
+      safeAddress: accountAddress,
       safeName: '',
     })),
   )
@@ -284,9 +284,9 @@ export async function resolveTransactionFilters(
   const tokenResults = await Promise.all(
     safes.map(async (safe) => {
       try {
-        const { transactions } = await fetchSafeTransactions({
-          safeId: safe.id,
-          safeAddress: safe.safe_address,
+        const { transactions } = await fetchAccountTransactions({
+          accountId: safe.id,
+          accountAddress: safe.safe_address,
           chainId: safe.chain_id,
           log,
           fresh,
@@ -295,7 +295,7 @@ export async function resolveTransactionFilters(
         return { safe, transactions }
       } catch (err) {
         log.warn(
-          { err, safeId: safe.id, safeAddress: safe.safe_address, chainId: safe.chain_id },
+          { err, accountId: safe.id, accountAddress: safe.safe_address, chainId: safe.chain_id },
           'Transaction filter token collection failed',
         )
         return { safe, transactions: [] as Transaction[] }

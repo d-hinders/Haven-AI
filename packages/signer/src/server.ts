@@ -128,7 +128,7 @@ export function buildSignerMcpServer(
     audit: {
       auditPath: options.auditPath ?? defaultSigningAuditPath(credentialsPath),
       delegateAddress: signer.delegateAddress,
-      safeAddress: options.credentials?.safeAddress,
+      safeAddress: options.credentials?.accountAddress ?? options.credentials?.safeAddress,
       chainId: options.credentials?.chainId,
     },
     // #1263: the payment_id signing path — the ONLY network call this server
@@ -212,7 +212,7 @@ export async function runSignerConsentGate(
   return ensureSignerConsent(
     {
       delegateAddress: signer.delegateAddress,
-      safeAddress: credentials?.safeAddress,
+      safeAddress: credentials?.accountAddress ?? credentials?.safeAddress,
       agentId: credentials?.agentId,
       chainId: credentials?.chainId,
       network: credentials?.network,

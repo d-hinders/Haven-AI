@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { MobileTabBar } from './MobileTabBar'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { useAuth } from '@/context/AuthContext'
 import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
@@ -616,6 +617,27 @@ export default function Sidebar() {
             footer's two rows keep a shared right edge. `lg` needs none: the
             toggle is `lg:hidden` there. */}
         <div className="flex-shrink-0 border-t border-[var(--v2-border)] max-lg:pr-[calc(20%+var(--v2-safe-right))]">
+          {/* The quick theme toggle, in the sheet's control block — appearance
+              belongs with the app's own controls rather than in the account
+              rows below. `variant="row"`: the sheet is a list of full-width
+              rows and an icon button alone would read as a stray glyph. This
+              row is the mobile half of the toggle; the TopBar carries the
+              desktop half, gated `lg:` there so a phone never sees two of them
+              (#2928 — and #2731's five-tab discipline: one control per
+              surface). The gate has to be reciprocal, and that is what the
+              `lg:hidden` on the wrapper here is for: below `lg` this aside IS
+              the More sheet (#2820), but at `lg` it is the persistent desktop
+              column — so an ungated row would sit in this footer AND in the
+              top bar's right cluster on one 1280 screen, two answers to one
+              question. Each call site hides its half at the other's breakpoint
+              and nothing else decides it, which is the invariant
+              `Sidebar.test.tsx` pins on the className rather than on a
+              viewport (jsdom runs no media queries). It is NOT inert: the
+              #2819 idiom is for the drawer's illustrations, and a control that
+              is announced but unreachable fails no gate. */}
+          <div className="px-3 pt-2 lg:hidden">
+            <ThemeToggle variant="row" />
+          </div>
           {/* Settings */}
           <div className="px-3 py-2 max-lg:pr-0">
             <NavLink

@@ -114,6 +114,19 @@ export const en = {
       dark: 'Dark',
       system: 'System',
     },
+    /**
+     * The quick toggle (#2928, epic #2925 slice 2): the TopBar icon button and
+     * the More sheet's row. The accessible name states the current preference
+     * and the next one — "Theme: dark. Switch to system" — so a user can
+     * predict the three-way cycle from the name alone. The values arrive
+     * lower-case because the sentence reads them as values, not as button
+     * labels.
+     */
+    themeToggle: {
+      /** Visible label of the More-sheet row. */
+      label: 'Theme',
+      ariaLabel: (current: string, next: string) => `Theme: ${current}. Switch to ${next}`,
+    },
     agentSpendAlerts: {
       label: 'Agent spend alerts',
       detail: 'Receive updates when agents use their budget.',

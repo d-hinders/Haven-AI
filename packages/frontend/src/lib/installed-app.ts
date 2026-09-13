@@ -132,6 +132,36 @@ export function installedAppMetadata(
 }
 
 /**
+ * The `<meta name="theme-color">` pair the installed shell ships with, for
+ * the OS-decides case. A `themeColor` with `media` becomes two tags, and the
+ * browser picks by the device's palette — which is the only way a STATIC
+ * export can follow the theme: this object is evaluated at build time and no
+ * JavaScript runs before the first paint.
+ *
+ * Both values are the `--v2-bg` of their palette (#2927's dark block made the
+ * status bar the one surface that could not follow it; this is the fix):
+ * `BRAND_COLOURS.background` for light, `BRAND_COLOURS.darkBackground` for
+ * dark, each pinned to its token and re-parsed from `globals.css` by the
+ * unit test so neither string can drift from the palette it names.
+ *
+ * Two boundaries of this pair, both accepted in #2928's review and stated
+ * here so nobody files them:
+ *
+ *   - On Android the runtime override `ThemeProvider` writes replaces the
+ *     winning tag once the page has loaded, so the only moment the status bar
+ *     can still read the manifest's `theme_color` — brand indigo, which a
+ *     manifest cannot vary by scheme — is the splash.
+ *   - `system` is deliberately NOT modelled as a third entry. `system` means
+ *     "no stamp from the app"; removing the provider's override is what
+ *     restores the pair, and a unit test pins that restoring it is
+ *     idempotent.
+ */
+const THEME_COLOR_PAIR = [
+  { media: '(prefers-color-scheme: light)', color: BRAND_COLOURS.background },
+  { media: '(prefers-color-scheme: dark)', color: BRAND_COLOURS.darkBackground },
+] as const
+
+/**
  * The root layout's `viewport` export. `width` and `initialScale` restate
  * exactly what Next injects by default — the product already lays out at
  * device width on a phone, verified on the deployed dev app — so this moves
@@ -156,5 +186,5 @@ export const INSTALLED_APP_VIEWPORT: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: BRAND_COLOURS.brand,
+  themeColor: [...THEME_COLOR_PAIR],
 }

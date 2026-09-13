@@ -678,6 +678,36 @@
   }
 }
 
+/* Theme toggle icon swap (#2928, epic #2925 slice 2).
+
+   Same two-half shape as `.animate-check-pop` and `.animate-pending-pulse`
+   above: the keyframes sit in this file behind the media query, so a
+   preference expressed by the operating system is what decides whether the
+   animation exists at all. The reduce block is not decoration of the
+   no-preference block — it is the gate, and it is what a browser that
+   reports the preference without a reload honours.
+
+   The component does not rely on either block being the only gate: it reads
+   the same media query through matchMedia and withholds the class entirely
+   under `reduce` (ThemeToggle.tsx), which is what its unit test asserts live
+   rather than by recomputing. Belt and braces, and the belt is the tested
+   half; this half is what still holds if the class is ever applied by a
+   call-site that forgot the query. */
+@keyframes theme-swap {
+  0%   { opacity: 0; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-theme-swap {
+    animation: theme-swap 180ms ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-theme-swap { animation: none; }
+}
+
 /*
  * Content fade-in — used when a skeleton placeholder is replaced by real
  * content. Runs once on mount and softens the visual jolt of swap.

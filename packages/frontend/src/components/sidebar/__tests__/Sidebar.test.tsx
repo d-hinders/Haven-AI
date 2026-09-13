@@ -30,6 +30,7 @@ vi.mock('@/components/ui/Tooltip', () => ({
 
 import Sidebar from '@/components/sidebar/Sidebar'
 import { LocaleProvider } from '@/context/LocaleContext'
+import { ThemeProvider } from '@/context/ThemeContext'
 import { en } from '@/lib/i18n/messages/en'
 import type { AccountingFeedStatus } from '@/hooks/useAccountingFeed'
 
@@ -82,7 +83,7 @@ describe('Sidebar', () => {
   })
 
   it('renders three labeled clusters with the core money loop first (#858)', () => {
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     const labels = ['Money', 'Agent tools', 'Admin'].map((l) => screen.getByText(l))
     expect(labels).toHaveLength(3)
     // Core loop order and routes unchanged (scoped to the nav — the logo also links to /dashboard):
@@ -132,7 +133,7 @@ describe('Sidebar', () => {
       },
       logout: vi.fn(),
     })
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     expect(screen.queryByRole('link', { name: /Approvals/ })).toBeNull()
     // Scoped like the assertion above (#2731). This one was the more dangerous
     // of the two: it is a NEGATIVE assertion, so pointing it at the tab bar
@@ -162,7 +163,7 @@ describe('Sidebar', () => {
     const attentionDot = () => screen.queryByTestId('nav-attention-accounting')
 
     it('quiet feed: the entry renders with NO badge and NO attention dot', () => {
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).not.toBeNull()
       expect(attentionDot()).toBeNull()
       expect(accountingLink()!.textContent).not.toContain(en.accountingPage.nav.comingSoon)
@@ -176,7 +177,7 @@ describe('Sidebar', () => {
       mockAccountingFeed.mockReturnValue(
         feed(feedStatus({ destination: { provider: 'fortnox', displayName: 'Fortnox', status, companyName: null, lastPushAt: null } })),
       )
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).not.toBeNull()
       expect(attentionDot()).not.toBeNull()
       expect(attentionDot()!.textContent).toContain(en.accountingPage.nav.attention)
@@ -184,13 +185,13 @@ describe('Sidebar', () => {
 
     it('an exhausted sync raises the dot even on a healthy connection (#2866)', () => {
       mockAccountingFeed.mockReturnValue(feed(feedStatus({ counts: { pending: 0, failed: 3, exhausted: 1 } })))
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(attentionDot()).not.toBeNull()
     })
 
     it('retryable failures alone do NOT raise it — the sweep owns those', () => {
       mockAccountingFeed.mockReturnValue(feed(feedStatus({ counts: { pending: 2, failed: 5, exhausted: 0 } })))
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(attentionDot()).toBeNull()
     })
 
@@ -198,7 +199,7 @@ describe('Sidebar', () => {
       mockAccountingFeed.mockReturnValue(
         feed(feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null })),
       )
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).not.toBeNull()
       expect(accountingLink()!.textContent).toContain(en.accountingPage.nav.comingSoon)
       // The abbreviation is visual only (#2869 design review): the full
@@ -229,7 +230,7 @@ describe('Sidebar', () => {
       mockAccountingFeed.mockReturnValue(
         feed(feedStatus({ hosted: false, enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null })),
       )
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).toBeNull()
       // Positive control: the rest of the Admin cluster is untouched.
       expect(document.querySelector('nav[aria-label="All sections"] a[href="/custody"]')).not.toBeNull()
@@ -240,7 +241,7 @@ describe('Sidebar', () => {
 
     it('before the status answers: NO entry at all — nothing paints that a self-hosted answer would remove (#2869 review)', () => {
       mockAccountingFeed.mockReturnValue({ ...feed(null), loading: true })
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).toBeNull()
       expect(attentionDot()).toBeNull()
       // Positive control: the rest of the Admin cluster does not wait.
@@ -249,25 +250,83 @@ describe('Sidebar', () => {
 
     it('the status answers after mount: the entry appears once, in its final state', () => {
       mockAccountingFeed.mockReturnValue({ ...feed(null), loading: true })
-      const { rerender } = render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      const { rerender } = render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).toBeNull()
       mockAccountingFeed.mockReturnValue(feed(feedStatus()))
-      rerender(<LocaleProvider><Sidebar /></LocaleProvider>)
+      rerender(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).not.toBeNull()
       expect(attentionDot()).toBeNull()
     })
 
     it('a FAILED status read renders the plain entry — never a marker it has not earned', () => {
       mockAccountingFeed.mockReturnValue({ ...feed(null), error: 'We could not load accounting status.' })
-      render(<LocaleProvider><Sidebar /></LocaleProvider>)
+      render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).not.toBeNull()
       expect(attentionDot()).toBeNull()
       expect(accountingLink()!.textContent).not.toContain(en.accountingPage.nav.comingSoon)
     })
   })
 
+  /**
+   * The quick theme toggle's row, in the More sheet (#2928).
+   *
+   * The drawer IS the sheet below `lg` (#2820), so the row lives in the
+   * drawer's footer with the drawer's other controls — not in the tab bar
+   * (`MobileTabBar.test.tsx` holds the negative side of that boundary, and
+   * `TopBar.test.tsx` the desktop half of the control). Three claims here,
+   * each because the shape of the drawer is what makes them possible to get
+   * wrong:
+   *
+   *   1. the row is IN the footer — the region the fixed More/Close toggle
+   *      overlaps, so an interactive control placed outside the footer's
+   *      `max-lg:pr` yield would sit under its hit area (#1749's defect
+   *      class, which is exactly how the kebab had to be rescued in #2586);
+   *   2. it is not inert. #2819 established that an illustration inside the
+   *      drawer is `inert`, and an author reaching for that idiom here would
+   *      produce a row that is visible, announced, and unreachable — with no
+   *      console warning and no failing gate to notice it, the precise class
+   *      of silent break that #2819 documents; and
+   *   3. it is one control, not two: the desktop half is `lg:hidden` in the
+   *      TopBar and the mobile half is this row, so a phone that opened the
+   *      sheet would otherwise have two answers to one question.
+   */
+  it('carries the theme row in the sheet\'s footer, live and not inert (#2928)', () => {
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
+
+    const row = screen.getByRole('button', { name: /^Theme:/ })
+    expect(row).toBeTruthy()
+    // The footer is the bordered block that also holds Settings and the user
+    // card; the theme row must be inside it, not above the border line.
+    const footer = row.closest('div[class*="border-t"]')
+    expect(footer).not.toBeNull()
+    expect(footer?.textContent).toContain('Settings')
+    expect(footer?.textContent).toContain('Ada Lovelace')
+
+    // Not inert, and no inert ancestor: this row is a control, not a picture.
+    expect(row.hasAttribute('inert')).toBe(false)
+    expect(row.closest('[inert]')).toBeNull()
+
+    // The visible label is contained in the accessible name (WCAG 2.5.3), so
+    // the row reads as the other rows of the sheet do and a voice command
+    // naming the label activates it.
+    expect(row.textContent).toContain('Theme')
+
+    // The gate is reciprocal (#2928 review): the TopBar half is `hidden …
+    // lg:` and this half must be `lg:hidden`, or a 1280 screen carries the
+    // icon in the header AND the row in this sidebar's footer — two controls
+    // for one preference. jsdom has no media queries, so this is a className
+    // pin, not a layout claim; the live on-screen half of the invariant is
+    // the Playwright capture's `onScreenToggles` probe.
+    const rowGate = row.closest('div[class*="lg:hidden"]')
+    expect(rowGate, 'the More-sheet row must be lg:hidden — the top bar owns the desktop half').not.toBeNull()
+
+    // Exactly one theme control in the whole document at this width — the
+    // TopBar's half is gated away, the sheet's half is here.
+    expect(screen.queryAllByRole('button', { name: /^Theme:/ })).toHaveLength(1)
+  })
+
   it('opens profile from the bottom-left identity area', () => {
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
 
     const profileLink = screen.getByRole('link', { name: 'Open profile for Ada Lovelace' })
     expect(profileLink).toHaveAttribute('href', '/profile')
@@ -284,7 +343,7 @@ describe('Sidebar', () => {
       },
       logout,
     })
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
 
     await user.click(screen.getByRole('button', { name: 'User menu' }))
 
@@ -326,6 +385,18 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     snapshotted, and `change` is the only type that registers a listener.
   */
   const DESKTOP_QUERY = '(min-width: 1024px)'
+  // #2928: the drawer now renders the theme row, so these tests mount a real
+  // ThemeProvider and a real ThemeToggle on top of the mock. They ask two
+  // further questions of `matchMedia` — the provider the colour-scheme one, the
+  // toggle the motion one — and both are modelled here (answered, never
+  // driven: a width change must not reach their listeners, see
+  // addEventListener). The file's standing rule survives intact: a query in
+  // NONE of these three still fails loudly, which is what caught the two
+  // mutations this block was written for.
+  const COLOUR_SCHEME_QUERY = '(prefers-color-scheme: dark)'
+  const MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+  /** These tests model a light device with no motion preference. */
+  const NO_MATCH = false
   const listeners = new Set<(e: MediaQueryListEvent) => void>()
   let width = 1280
 
@@ -335,22 +406,43 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
       writable: true,
       configurable: true,
       value: (query: string) => {
-        // Not a soft assertion: a component asking a different question is a
-        // component this suite is not testing, and silently answering it is
-        // how the two mutations above passed.
-        expect(query, 'Sidebar asked matchMedia a query this mock does not model').toBe(
-          DESKTOP_QUERY,
-        )
+        // #2928: the drawer footer gained the theme row, so these tests now
+        // mount a real ThemeProvider and a real ThemeToggle on top of this
+        // mock. They ask two further questions of it — the provider the
+        // colour-scheme one, the toggle the motion one — and both are ANSWERED
+        // here (a light device with no motion preference) but never DRIVEN: a
+        // viewport resize fires this block's `listeners`, and a provider or
+        // toggle listener handed that width-derived event would be told "the OS
+        // switched to dark" by a resize. The standing rule of this mock is
+        // intact — a query in NONE of the three named constants still fails
+        // loudly, which is what caught the two mutations (#2586) this block was
+        // written for.
+        if (
+          query !== DESKTOP_QUERY &&
+          query !== COLOUR_SCHEME_QUERY &&
+          query !== MOTION_QUERY
+        ) {
+          expect(query, 'Sidebar asked matchMedia a query this mock does not model').toBe(
+            DESKTOP_QUERY,
+          )
+        }
         return {
           // A getter, so it tracks `width` the way a real MediaQueryList
           // tracks the viewport instead of freezing at construction.
           get matches() {
+            if (query === COLOUR_SCHEME_QUERY || query === MOTION_QUERY) return NO_MATCH
             return width >= 1024
           },
           media: query,
           onchange: null,
           addEventListener: (type: string, fn: (e: MediaQueryListEvent) => void) => {
-            if (type === 'change') listeners.add(fn)
+            // Registered by QUERY, not fanned out to every listener: this
+            // block's `setWidth` fires `listeners` with a width-derived
+            // `matches`, and a motion listener that received it would be told
+            // "the OS switched to reduce" by a viewport resize. The toggle's
+            // motion listener is therefore registered nowhere — these tests
+            // never flip motion, and a listener nobody drives is honest.
+            if (type === 'change' && query === DESKTOP_QUERY) listeners.add(fn)
           },
           removeEventListener: (type: string, fn: (e: MediaQueryListEvent) => void) => {
             if (type === 'change') listeners.delete(fn)
@@ -395,7 +487,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
   it('collapses when the viewport narrows past the breakpoint', () => {
     width = 1280
     Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
 
     // Mounted at desktop width: on screen, which is correct — at `lg` the
     // drawer is `static` and `collapsed` does not hide it.
@@ -415,7 +507,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // before it navigates and therefore only ever exercises this path.
     width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     expect(offScreen()).toBe(true)
   })
 
@@ -432,7 +524,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // covers the page from first paint.
     Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
     width = 390
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     expect(offScreen()).toBe(true)
   })
 
@@ -452,7 +544,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // width without ever crossing.
     width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     expect(offScreen()).toBe(true)
 
     act(() => {
@@ -467,7 +559,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
     // `lg:translate-x-0` pins the drawer open there.
     width = 390
     Object.defineProperty(window, 'innerWidth', { value: 390, writable: true, configurable: true })
-    render(<LocaleProvider><Sidebar /></LocaleProvider>)
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     expect(offScreen()).toBe(true)
 
     crossTo(false)

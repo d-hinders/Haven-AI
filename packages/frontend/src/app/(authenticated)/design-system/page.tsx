@@ -22,6 +22,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
@@ -710,6 +711,39 @@ export default function DesignSystemPage() {
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
               works without extra wiring. Never hand-roll a second control of this shape.
+            </p>
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Theme toggle</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <ThemeToggle />
+              <span className="text-xs text-[var(--v2-ink-3)]">
+                The icon button, as the top bar's right cluster renders it — one click
+                advances the ring from light to dark to system, and the accessible name says
+                what the click will do, not only what the icon is.
+              </span>
+            </div>
+            <div className="mt-3 rounded-lg border border-[var(--v2-border)] p-2">
+              <ThemeToggle variant="row" />
+              <span className="sr-only">The row variant shown outside the sheet it lives in</span>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              The one-gesture theme control, the quick half
+              (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
+              from the top bar and the mobile sheet's control block — Settings keeps its
+              three explicit choices on its own screen). The glyph answers what you are
+              (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code>,{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code>, or{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">Monitor</code> when the
+              device decides); the name answers where you are going
+              ("Theme: dark. Switch to system"), because a control whose label is only
+              its current state cannot be predicted. The swap cross-fades under{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">prefers-reduced-motion:
+              no-preference</code> and snaps otherwise, and the row variant's visible
+              label is a prefix of the name, so the label sits in the name. Never hand-roll
+              a second control of this shape; both surfaces here are the primitive's
+              variants, and the two call sites decide which one renders.
             </p>
           </Card>
 

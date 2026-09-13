@@ -3,7 +3,7 @@ import path from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { BRAND_COLOURS, BRAND_COLOUR_TOKENS } from '../brand-colours'
+import { BRAND_COLOURS, BRAND_COLOUR_TOKENS, DARK_BRAND_COLOUR_TOKENS } from '../brand-colours'
 import { PRODUCTION_ENVIRONMENT } from '../env'
 import {
   APP_ICONS,
@@ -59,16 +59,101 @@ function cssToken(name: string): string {
   return matches[0][1].toLowerCase()
 }
 
+/**
+ * The dark re-declaration block of globals.css, comments stripped (#2928).
+ *
+ * #2927 shipped TWO dark blocks — the `@media (prefers-color-scheme: dark)`
+ * one and the `:root[data-theme="dark"]` one — and its review verified them
+ * byte-identical (60 declarations each), so parsing either is correct. The
+ * media block is the one pinned here because it is what a browser with no
+ * `data-theme` stamp reads, and an unstamped document is exactly the state
+ * the OS-decides half of the status-bar pair describes. The selectors also
+ * occur in prose (the block's own docstring names them), so the comment
+ * strip runs before the search: a parser over the raw text would find each
+ * selector twice and have no way to tell the block from the prose about it.
+ */
+function darkBlock(): string {
+  const css = GLOBALS_CSS.replace(/\/\*[\s\S]*?\*\//g, ' ')
+  const atMedia = css.indexOf('@media (prefers-color-scheme: dark)')
+  if (atMedia < 0) throw new Error('globals.css: dark @media block not found')
+  // Brace-match the @media block itself, then its single inner rule. The
+  // brace count is asserted rather than assumed: a second rule inside the
+  // block (a nested @media, a second selector) would make "the inner block"
+  // a lie, and this is the test that says so.
+  let depth = 0
+  const blockOpen = css.indexOf('{', atMedia)
+  let i = blockOpen
+  for (; i < css.length; i++) {
+    if (css[i] === '{') depth++
+    else if (css[i] === '}') {
+      depth--
+      if (depth === 0) break
+    }
+  }
+  const body = css.slice(blockOpen + 1, i)
+  const braces = (body.match(/[{}]/g) ?? []).length
+  if (braces !== 2) throw new Error(`dark @media block holds ${braces} braces, expected one rule (2)`)
+  const open = body.indexOf('{')
+  depth = 0
+  for (let j = open; j < body.length; j++) {
+    if (body[j] === '{') depth++
+    else if (body[j] === '}') {
+      depth--
+      if (depth === 0) return body.slice(open + 1, j)
+    }
+  }
+  throw new Error('globals.css: unbalanced dark block rule')
+}
+
+function darkCssToken(name: string): string {
+  // Exactly one definition inside the block. The token is the same `--v2-bg`
+  // the light parser reads from `:root`; the two parsers disagree by design,
+  // because the status-bar pair (#2928) exists to carry both values.
+  const matches = [...darkBlock().matchAll(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`, 'g'))]
+  if (matches.length !== 1) {
+    throw new Error(`globals.css dark block defines ${name} ${matches.length} times, expected once`)
+  }
+  return matches[0][1].toLowerCase()
+}
+
 describe('brand colours are the globals.css tokens', () => {
-  it.each(Object.keys(BRAND_COLOURS) as Array<keyof typeof BRAND_COLOURS>)(
-    '%s is pinned to its --v2 token',
+  // The two maps are split by BLOCK, not by token: every entry here is a
+  // custom property read out of the stylesheet, and the file declares the
+  // colour tokens in three blocks (the light :root and the two dark
+  // re-declarations #2927 shipped). A key that asked the wrong block would
+  // get a real colour that is wrong for its purpose, and only the status bar
+  // would ever show it — on a phone. So light entries parse cssToken, dark
+  // entries darkCssToken, and the maps decide which.
+  it.each(Object.keys(BRAND_COLOUR_TOKENS) as Array<keyof typeof BRAND_COLOUR_TOKENS>)(
+    '%s is pinned to its --v2 token in the :root block',
     (key) => {
       expect(BRAND_COLOURS[key]).toBe(cssToken(BRAND_COLOUR_TOKENS[key]))
     },
   )
 
+  // #2928: the status-bar pair carries BOTH palettes' --v2-bg. The dark half
+  // is pinned to the dark block, because a "background" string copied from
+  // the light palette into the dark entry would be a white status bar above
+  // a dark app and no local gate but this one could see it.
+  it.each(Object.keys(DARK_BRAND_COLOUR_TOKENS) as Array<keyof typeof DARK_BRAND_COLOUR_TOKENS>)(
+    '%s is pinned to its --v2 token in the dark block',
+    (key) => {
+      expect(BRAND_COLOURS[key]).toBe(darkCssToken(DARK_BRAND_COLOUR_TOKENS[key]))
+    },
+  )
+
+  it('the dark background is the DARK one — the two halves of the pair differ', () => {
+    // The load-bearing assertion of the pair: if a refactor ever copies the
+    // light token into the dark entry, every other assertion here still
+    // passes (both are '#ffffff', both parse), and only the phone notices.
+    // This one catches it before the status bar shows it.
+    expect(BRAND_COLOURS.darkBackground).not.toBe(BRAND_COLOURS.background)
+    expect(darkCssToken('--v2-bg')).toBe(BRAND_COLOURS.darkBackground)
+  })
+
   it('the parser can say no — an unknown token throws rather than matching nothing', () => {
     expect(() => cssToken('--v2-no-such-token')).toThrow(/0 times/)
+    expect(() => darkCssToken('--v2-no-such-token')).toThrow(/0 times/)
   })
 })
 
@@ -141,13 +226,29 @@ describe('installedAppMetadata and viewport', () => {
     expect(installedAppMetadata(PRODUCTION_ENVIRONMENT).appleWebApp).toMatchObject({ title: 'Haven' })
   })
 
-  it('carries themeColor from the brand token, the default viewport, and viewport-fit (#2730)', () => {
+  it('carries the themeColor MEDIA PAIR, the default viewport, and viewport-fit (#2730, #2928)', () => {
+    // #2928 replaced the single brand colour with the two-query pair: the
+    // status bar follows the palette, and a manifest (build-time, one value)
+    // cannot. The pair is asserted WHOLE, not as a `toMatchObject`, so a third
+    // entry — a hand-written 'system' row, which would be wrong: system means
+    // "no stamp from the app", the pair already answers it — reddens here.
     expect(INSTALLED_APP_VIEWPORT).toEqual({
       width: 'device-width',
       initialScale: 1,
       viewportFit: 'cover',
-      themeColor: cssToken('--v2-brand'),
+      themeColor: [
+        { media: '(prefers-color-scheme: light)', color: BRAND_COLOURS.background },
+        { media: '(prefers-color-scheme: dark)', color: BRAND_COLOURS.darkBackground },
+      ],
     })
+    // And both entries are the tokens, read out of their OWN blocks by the
+    // parsers above — the light half from `:root`, the dark half from the dark
+    // re-declaration. `theme_color` in the manifest stays brand indigo (a
+    // manifest cannot vary by scheme); only the viewport meta follows.
+    const [light, dark] = INSTALLED_APP_VIEWPORT.themeColor as Array<{ media: string; color: string }>
+    expect(light).toEqual({ media: '(prefers-color-scheme: light)', color: cssToken('--v2-bg') })
+    expect(dark).toEqual({ media: '(prefers-color-scheme: dark)', color: darkCssToken('--v2-bg') })
+    expect(buildWebManifest(PRODUCTION_ENVIRONMENT).theme_color).toBe(cssToken('--v2-brand'))
   })
 
   it('viewport-fit and the safe-area rules are one change, and neither is safe alone (#2730)', () => {

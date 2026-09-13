@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 import { THEME_STORAGE_KEY } from '@/lib/theme-bootstrap'
+import { BRAND_COLOURS } from '@/lib/brand-colours'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
@@ -46,6 +47,58 @@ function stampDataTheme(preference: ThemePreference) {
   const root = document.documentElement
   if (preference === 'system') delete root.dataset.theme
   else root.dataset.theme = preference
+}
+
+/**
+ * Keep the installed shell's status bar in step with the palette for an
+ * EXPLICIT choice (#2928).
+ *
+ * The root layout ships `theme-color` as a media PAIR — each palette's `bg`
+ * under its `(prefers-color-scheme: …)` query — and that pair is the whole
+ * answer for `system`: two tags, the browser picks one, nothing to write at
+ * runtime. What the pair cannot do is answer an explicit choice, because its
+ * two media queries match the DEVICE and never the document: an app that
+ * picked `dark` over a light OS still owns a light-matching tag, and Android
+ * reads that tag as the status-bar colour — a white band above a dark app,
+ * the one place #2927's dark palette could not reach.
+ *
+ * So the provider writes one override tag, appended last in `<head>`. Of
+ * several `theme-color` tags the browser keeps the last whose `media`
+ * matches, and a tag with no `media` matches always, so an appended tag with
+ * none wins over both halves of the pair wherever it lands. `system` deletes
+ * it again: the pair is the fallback, and a fallback that survives its
+ * override needs no re-stamping — deletion from the end is exactly the
+ * restore, which is why this function has no "re-add the pair" path and
+ * would break if one were added (it would double the pair on every cycle).
+ *
+ * Idempotent by construction: the tag is keyed by `data-haven-theme-color`
+ * and updated in place, so N activations of the toggle write the head at
+ * most once per state, never once per click. A unit test pins both halves:
+ * the content after an explicit `dark`, and the byte-identical pair after a
+ * round through `system`.
+ *
+ * Inert in every gate the repository runs — headless Chromium has no status
+ * bar and reads the tag as nothing. It is not inert on an Android phone in
+ * standalone mode, which is where it is the whole feature; the handoff
+ * names it as the item no local test can see.
+ */
+function stampThemeColorMeta(preference: ThemePreference, resolved: ResolvedTheme) {
+  const existing = document.head.querySelector('meta[data-haven-theme-color]')
+  if (preference === 'system') {
+    existing?.remove()
+    return
+  }
+  const content = resolved === 'dark' ? BRAND_COLOURS.darkBackground : BRAND_COLOURS.background
+  if (existing) {
+    // In place, so repeated calls do not accumulate tags in the head.
+    existing.setAttribute('content', content)
+    return
+  }
+  const meta = document.createElement('meta')
+  meta.setAttribute('name', 'theme-color')
+  meta.setAttribute('content', content)
+  meta.setAttribute('data-haven-theme-color', '')
+  document.head.append(meta)
 }
 
 /**
@@ -102,10 +155,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Keep <html data-theme> in sync with the preference.
+  // Keep <html data-theme> in sync with the preference, and the installed
+  // shell's status-bar tag in sync with the palette the preference resolved
+  // to (#2928) — both are DOM stamps of the same decision, so they live in
+  // one effect and cannot diverge between renders.
   useEffect(() => {
     stampDataTheme(preference)
-  }, [preference])
+    stampThemeColorMeta(preference, resolved)
+  }, [preference, resolved])
 
   // While in `system`, follow the OS — including live changes. (No initial
   // read here: every path that ENTERS `system` — the mount adoption and

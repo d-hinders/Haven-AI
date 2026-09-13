@@ -164,9 +164,25 @@ describe('root layout wiring (#2729)', () => {
     expect(layout.metadata.appleWebApp).toMatchObject({ title: 'Haven Dev' })
   })
 
-  it('exports the viewport with the brand theme colour, and does not lose the existing title', async () => {
+  it('exports the viewport with the theme-color MEDIA PAIR, and does not lose the existing title (#2928)', async () => {
     const layout = await loadLayout(undefined)
-    expect(layout.viewport).toMatchObject({ themeColor: BRAND_COLOURS.brand, width: 'device-width', initialScale: 1 })
+    // #2928: the layout no longer hands Next a single brand colour. It hands
+    // the two-query pair, which is what puts BOTH palettes' `bg` into the
+    // document head as `<meta name="theme-color">` tags — the acceptance
+    // criterion for the installed shell's status bar. Read off the loaded
+    // module (the #2730 lesson): a layout that hand-wrote its own viewport
+    // would keep the constant green and ship the old single tag.
+    expect(layout.viewport).toMatchObject({
+      width: 'device-width',
+      initialScale: 1,
+      themeColor: [
+        { media: '(prefers-color-scheme: light)', color: BRAND_COLOURS.background },
+        { media: '(prefers-color-scheme: dark)', color: BRAND_COLOURS.darkBackground },
+      ],
+    })
+    // The brand indigo is the MANIFEST's theme_color and nothing else; a
+    // viewport that grew it back would put a violet band over a dark app.
+    expect(JSON.stringify(layout.viewport.themeColor)).not.toContain(BRAND_COLOURS.brand)
     expect(layout.metadata.title).toBe('Haven, agent payments within your rules')
   })
 

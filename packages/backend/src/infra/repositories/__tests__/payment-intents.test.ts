@@ -93,7 +93,7 @@ function machineInput(
     agent: {
       id: agent.agentId,
       user_id: agent.userId,
-      safe_address: '0x00000000000000000000000000000000000000f1',
+      account_address: '0x00000000000000000000000000000000000000f1',
       chain_id: 84532,
       delegate_address: '0x00000000000000000000000000000000000000d1',
     },

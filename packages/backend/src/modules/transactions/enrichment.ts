@@ -52,7 +52,7 @@ export async function enrichTransactionsWithAgents(
         reconciliationEventType: row.payment_reconciliation_event_type,
       })
       agentByTransactionIdentity.set(
-        paymentAgentIdentityKey(row.tx_hash, row.safe_id, row.chain_id),
+        paymentAgentIdentityKey(row.tx_hash, row.account_id, row.chain_id),
         {
           id: row.agent_id,
           name: row.agent_name,
@@ -76,7 +76,7 @@ export async function enrichTransactionsWithAgents(
 
     for (const row of sweepRows) {
       agentByTransactionIdentity.set(
-        paymentAgentIdentityKey(row.tx_hash, row.safe_id, row.chain_id),
+        paymentAgentIdentityKey(row.tx_hash, row.account_id, row.chain_id),
         {
           id: row.agent_id,
           name: row.agent_name,

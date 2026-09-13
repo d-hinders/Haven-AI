@@ -61,7 +61,7 @@ async function seedIntent(txHash: string | null): Promise<{ id: string; agentId:
   const agentId = agent.rows[0].id
   const intent = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, tx_hash, chain_id, source, payment_rail, execution_rail,
         machine_metadata)

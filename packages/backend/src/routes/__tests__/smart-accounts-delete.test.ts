@@ -63,7 +63,7 @@ describe('DELETE /user/safes/:safeId', () => {
     expect(response.json()).toEqual({ success: true })
 
     const sqls = mockClientQuery.mock.calls.map(([sql]) => String(sql))
-    const deleteIdx = sqls.findIndex((s) => /DELETE\s+FROM\s+user_safes/i.test(s))
+    const deleteIdx = sqls.findIndex((s) => /DELETE\s+FROM\s+smart_accounts/i.test(s))
 
     // self_sign_agents no longer exists as of migration
     // 083_drop_dead_safe_rail_tables.ts, so this statement must never run
@@ -105,7 +105,7 @@ describe('DELETE /user/safes/:safeId', () => {
     expect(response.statusCode).toBe(409)
     expect(response.json().error).toMatch(/pending or active budget delegation/)
     const sqls = mockClientQuery.mock.calls.map(([sql]) => String(sql))
-    expect(sqls.some((sql) => /UPDATE\s+agents\s+SET\s+safe_id\s*=\s*NULL/i.test(sql))).toBe(false)
-    expect(sqls.some((sql) => /DELETE\s+FROM\s+user_safes/i.test(sql))).toBe(false)
+    expect(sqls.some((sql) => /UPDATE\s+agents\s+SET\s+account_id\s*=\s*NULL/i.test(sql))).toBe(false)
+    expect(sqls.some((sql) => /DELETE\s+FROM\s+smart_accounts/i.test(sql))).toBe(false)
   })
 })

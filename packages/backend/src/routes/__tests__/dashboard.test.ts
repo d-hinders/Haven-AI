@@ -65,7 +65,7 @@ const DELEGATION_UUID = '9c2b7e11-5d4f-4a8c-b3e6-1f0a2d7c8e94'
 
 const SAFE = {
   id: 'safe-1',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 8453,
   name: 'Main account',
   is_default: true,
@@ -75,7 +75,7 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
-  safe_id: SAFE.id,
+  account_id: SAFE.id,
   safe_name: SAFE.name,
   safe_chain_id: SAFE.chain_id,
 }
@@ -115,7 +115,7 @@ describe('dashboard routes', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
       }
-      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
         return Promise.resolve({ rows: [SAFE] })
       }
       if (sql.includes('FROM agents a')) {
@@ -178,7 +178,7 @@ describe('dashboard routes', () => {
       hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
       type: 'native',
       from: '0x2222222222222222222222222222222222222222',
-      to: SAFE.safe_address,
+      to: SAFE.account_address,
       value: '1000000000000000000',
       valueFormatted: '1',
       asset: 'ETH',
@@ -247,7 +247,7 @@ describe('dashboard routes', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
       }
-      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
         return Promise.resolve({ rows: [gnosisSafe, baseSafe] })
       }
       if (sql.includes('FROM agents a')) {
@@ -270,7 +270,7 @@ describe('dashboard routes', () => {
       hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
       type: 'native',
       from: '0x2222222222222222222222222222222222222222',
-      to: SAFE.safe_address,
+      to: SAFE.account_address,
       value: '1000000000000000000',
       valueFormatted: '1',
       asset: 'ETH',
@@ -321,10 +321,10 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
-      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) return Promise.resolve({ rows: [SAFE] })
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) return Promise.resolve({ rows: [SAFE] })
       if (sql.includes('FROM agents a')) {
         return Promise.resolve({
-          rows: [{ ...AGENT, id: AGENT_UUID, safe_id: SAFE_UUID, account_type: 'delegator_hybrid' }],
+          rows: [{ ...AGENT, id: AGENT_UUID, account_id: SAFE_UUID, account_type: 'delegator_hybrid' }],
         })
       }
       if (sql.includes('FROM agent_allowances')) {

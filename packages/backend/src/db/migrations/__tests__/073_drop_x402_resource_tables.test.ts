@@ -16,6 +16,7 @@ import {
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../073_drop_x402_resource_tables.js'
+import { down as down084, up as up084 } from '../084_rename_user_safes_to_smart_accounts.js'
 
 const RESOURCE_TABLE = ['x402', 'resources'].join('_')
 const RECEIPT_TABLE = ['x402', 'receipts'].join('_')
@@ -90,9 +91,17 @@ describeDb('migration 073: drop merchant-resource tables (#2257)', () => {
     // the leak being *invented* in the first place: without it, a failing
     // expectation in this long block left both retired tables restored for
     // every test after it in this file, and for the run if the net itself threw.
+    //
+    // #2911 (schema rename, epic #2906 phase 3, later than this migration):
+    // 073's own `down()` hardcodes `REFERENCES user_safes(id)` (immutable
+    // history), so restoring `x402_resources` needs 084's rename reverted
+    // first — nested outside the existing `down()`/`up()` revert, same shape
+    // as 075's/083's `withMigrationReverted(down083, …)`.
     await withMigrationReverted(
-      () => down(db as never),
-      async () => {
+      () => down084(db as never),
+      () => withMigrationReverted(
+        () => down(db as never),
+        async () => {
         expect(await tableExists(RESOURCE_TABLE)).toBe(true)
         expect(await tableExists(RECEIPT_TABLE)).toBe(true)
         expect(await columnNames(RESOURCE_TABLE)).toEqual([
@@ -129,8 +138,10 @@ describeDb('migration 073: drop merchant-resource tables (#2257)', () => {
         // operator rolling back a rollback would run.
         await down(db as never)
         expect(await tableExists(RESOURCE_TABLE)).toBe(true)
-      },
-      () => up(db as never),
+        },
+        () => up(db as never),
+      ),
+      () => up084(db as never),
     )
     expect(await tableExists(RESOURCE_TABLE)).toBe(false)
     expect(await tableExists(RECEIPT_TABLE)).toBe(false)

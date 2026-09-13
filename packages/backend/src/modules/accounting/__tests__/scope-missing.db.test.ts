@@ -99,7 +99,7 @@ async function seedSettled(userId: string, agentId: string): Promise<string> {
   const id = randomUUID()
   await db.query(
     `INSERT INTO payment_intents
-       (id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+       (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash, status, tx_hash,
         confirmed_at, expires_at, created_at)
      VALUES ($1, $2, $3, $4, ${CHAIN}, 'USDC', $5, $6, '100000', '0.10',

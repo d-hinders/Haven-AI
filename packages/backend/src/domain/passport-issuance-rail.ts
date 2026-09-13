@@ -19,10 +19,10 @@
  *
  * ## What "null rail" actually means
  *
- * `user_safes.execution_rail` is **NOT NULL** with default `'allowance_module'`,
+ * `smart_accounts.execution_rail` is **NOT NULL** with default `'allowance_module'`,
  * and its CHECK admits exactly `allowance_module | session_key | delegation`
  * (migrations 036/041). So null never appears in the column — it appears from
- * the LEFT JOIN when an agent has **no bound account at all** (`agents.safe_id`
+ * the LEFT JOIN when an agent has **no bound account at all** (`agents.account_id`
  * is nullable). #2138 described null as "the legacy population"; the truer
  * statement is that the column's DEFAULT is the legacy rail. Both are refused
  * here either way, so the distinction does not change behaviour — only the
@@ -44,10 +44,10 @@ export const PASSPORT_ISSUABLE_RAIL = 'delegation'
 export const PASSPORT_ISSUABLE_ACCOUNT_TYPE = 'delegator_hybrid'
 
 /**
- * SQL predicate over a `user_safes` alias. Kept beside the TypeScript one so a
+ * SQL predicate over a `smart_accounts` alias. Kept beside the TypeScript one so a
  * reader cannot find one without the other.
  *
- * @param alias the `user_safes` alias in the surrounding query
+ * @param alias the `smart_accounts` alias in the surrounding query
  */
 export function passportIssuableRailSql(alias: string): string {
   // The alias is interpolated into raw SQL. One hardcoded call site today, but
@@ -72,7 +72,7 @@ export function isPassportIssuableAccount(
 
 /**
  * Whether the account is bound at all. Both columns are NOT NULL in
- * `user_safes`, so they are null together — only when the LEFT JOIN misses.
+ * `smart_accounts`, so they are null together — only when the LEFT JOIN misses.
  *
  * Callers use this to pick the more USEFUL refusal. An agent with no account
  * has no rail either, so the rail gate would fire first and report "this

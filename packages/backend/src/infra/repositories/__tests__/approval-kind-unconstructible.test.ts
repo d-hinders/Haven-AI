@@ -51,7 +51,7 @@ async function seedIntent(): Promise<{ paymentId: string; agentId: string }> {
   const agentId = agent.rows[0].id
   const intent = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, source, payment_rail, tx_hash)
      VALUES ($1, $2, '0x00000000000000000000000000000000000000f1', 'USDC',

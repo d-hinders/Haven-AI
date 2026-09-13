@@ -337,7 +337,7 @@ export default async function transactionRoutes(
     const contacts = await listContactsForUser(sub)
     const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
     const safeNames = new Map(
-      allSafes.map((safe) => [accountNameKey(safe.safe_address, safe.chain_id), safe.name]),
+      allSafes.map((safe) => [accountNameKey(safe.account_address, safe.chain_id), safe.name]),
     )
 
     const csv = transactionsToCsv(filtered, {
@@ -368,7 +368,7 @@ export default async function transactionRoutes(
       safes: safes.map((safe) => ({
         id: safe.id,
         name: safe.name,
-        address: safe.safe_address,
+        address: safe.account_address,
         chainId: safe.chain_id,
       })),
       agents,

@@ -66,7 +66,7 @@ const USDC_MINIMUM_ATOMIC = 5_000_000n
 function ownershipRow(overrides: Record<string, unknown> = {}) {
   return {
     id: SAFE_ID,
-    safe_address: SAFE_ADDRESS,
+    account_address: SAFE_ADDRESS,
     chain_id: 8453,
     ...overrides,
   }

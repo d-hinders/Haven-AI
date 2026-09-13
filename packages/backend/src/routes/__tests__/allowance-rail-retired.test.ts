@@ -167,7 +167,7 @@ function agentRow(executionRail: string | null) {
     user_id: '22222222-2222-2222-2222-222222222222',
     name: 'Payment Agent',
     delegate_address: DELEGATE,
-    safe_address: SAFE,
+    account_address: SAFE,
     chain_id: 84532,
     status: 'active',
     execution_rail: executionRail,
@@ -180,7 +180,7 @@ function intentRow(overrides: Record<string, unknown> = {}) {
     id: PAYMENT_ID,
     agent_id: agentRow(null).id,
     user_id: agentRow(null).user_id,
-    safe_address: SAFE,
+    account_address: SAFE,
     chain_id: 84532,
     token_symbol: 'USDC',
     token_address: USDC,
@@ -229,9 +229,9 @@ const authRoute = (rail: string | null): DbRoute => [
   /api_key_hash = \$1/,
   () => ({ rows: [agentRow(rail)] }),
 ]
-/** `FIND_EXECUTION_RAIL_FOR_AGENT_SQL` — the LEFT JOIN through `agents.safe_id`. */
+/** `FIND_EXECUTION_RAIL_FOR_AGENT_SQL` — the LEFT JOIN through `agents.account_id`. */
 const railRoute = (rail: string | null): DbRoute => [
-  /LEFT JOIN user_safes/,
+  /LEFT JOIN smart_accounts/,
   () => ({ rows: [{ execution_rail: rail }] }),
 ]
 const intentRoute = (overrides: Record<string, unknown> = {}): DbRoute => [
@@ -262,7 +262,7 @@ function expectNothingHappened() {
 }
 
 /**
- * The retired population. `user_safes.execution_rail` is
+ * The retired population. `smart_accounts.execution_rail` is
  * `NOT NULL DEFAULT 'allowance_module'` with a three-value CHECK, so `null`
  * here means the LEFT JOIN found no Safe row — the case the issue's own
  * `execution_rail='allowance_module'` phrasing does not name, and the one a

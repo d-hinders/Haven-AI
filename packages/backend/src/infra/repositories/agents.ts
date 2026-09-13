@@ -34,8 +34,8 @@ export interface AgentRow {
   name: string
   description: string | null
   delegate_address: string | null
-  safe_id: string | null
-  safe_address: string | null
+  account_id: string | null
+  account_address: string | null
   safe_name: string | null
   safe_chain_id: number | null
   account_type: string | null
@@ -64,7 +64,7 @@ export interface AgentAllowanceRow {
 }
 
 export interface AccountInfoRow {
-  safe_address: string | null
+  account_address: string | null
   safe_name: string | null
   safe_chain_id: number | null
 }
@@ -72,7 +72,7 @@ export interface AccountInfoRow {
 export interface DelegateAgentRow {
   delegate_address: string | null
   safe_chain_id: number | null
-  safe_address: string | null
+  account_address: string | null
 }
 
 export interface AgentIdStatusRow {
@@ -104,9 +104,9 @@ export async function loadOwnedDelegationAgent(
 ): Promise<DelegationAgentRow | null> {
   const result = await db.query<DelegationAgentRow>(
     `SELECT a.id AS agent_id, a.status, a.delegate_address, us.chain_id,
-            us.safe_address AS treasury_address, us.account_type
+            us.account_address AS treasury_address, us.account_type
      FROM agents a
-     LEFT JOIN user_safes us ON us.id = a.safe_id
+     LEFT JOIN smart_accounts us ON us.id = a.account_id
      WHERE a.id = $1 AND a.user_id = $2`,
     [agentId, userId],
   )
@@ -127,8 +127,8 @@ export async function lockOwnedNonRevokedDelegationAgent(
     `SELECT id, delegate_address FROM agents
      WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
        AND EXISTS (
-         SELECT 1 FROM user_safes us
-         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+         SELECT 1 FROM smart_accounts us
+         WHERE us.id = agents.account_id AND us.account_type = 'delegator_hybrid'
        )
      FOR UPDATE`,
     [agentId, userId],
@@ -161,8 +161,8 @@ export const LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL = `SELECT id, delegate_addre
      WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
        AND delegate_address IS NOT NULL
        AND EXISTS (
-         SELECT 1 FROM user_safes us
-         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+         SELECT 1 FROM smart_accounts us
+         WHERE us.id = agents.account_id AND us.account_type = 'delegator_hybrid'
        )
      FOR UPDATE`
 
@@ -193,8 +193,8 @@ export async function lockOwnedAgentForRekeyDelegation(
     `SELECT id FROM agents
      WHERE id = $1 AND user_id = $2 AND status <> 'revoked'
        AND EXISTS (
-         SELECT 1 FROM user_safes us
-         WHERE us.id = agents.safe_id AND us.account_type = 'delegator_hybrid'
+         SELECT 1 FROM smart_accounts us
+         WHERE us.id = agents.account_id AND us.account_type = 'delegator_hybrid'
        )
        AND EXISTS (
          SELECT 1 FROM agent_rekeys ar
@@ -254,7 +254,7 @@ export async function insertPendingDelegationForOwnedNonRevokedAgent(
  * The list read: NO status filter (#1069 — pending_approval agents included).
  */
 export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
-              a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
+              a.account_id, us.account_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
               a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
@@ -266,11 +266,11 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
                   AND mpre.status = 'open'
               ) AS has_stranded_funds
        FROM agents a
-       LEFT JOIN user_safes us ON a.safe_id = us.id
+       LEFT JOIN smart_accounts us ON a.account_id = us.id
        -- #2413: only agents on a live delegation account are listed, so every
        -- account_type branch in the agent UI becomes unreachable and deletable.
        --
-       -- This also drops ORPHANED agents (safe_id NULL, from an account
+       -- This also drops ORPHANED agents (account_id NULL, from an account
        -- unlink), which is an owner decision rather than a side effect: since
        -- #2331 such an agent gets 403 from agentAuth on every route, and the
        -- one exemption -- sweep recovery -- refuses them too, because
@@ -285,7 +285,7 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
  * The single read: NO status filter, same as the list (#1069).
  */
 export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
-              a.safe_id, us.safe_address, us.name as safe_name, us.chain_id AS safe_chain_id,
+              a.account_id, us.account_address, us.name as safe_name, us.chain_id AS safe_chain_id,
               us.account_type,
               a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
@@ -297,7 +297,7 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
                   AND mpre.status = 'open'
               ) AS has_stranded_funds
        FROM agents a
-       LEFT JOIN user_safes us ON a.safe_id = us.id
+       LEFT JOIN smart_accounts us ON a.account_id = us.id
        -- #2413: matches the list filter, so an agent dropped from the list
        -- cannot be read back individually through the single-record route.
        WHERE a.user_id = $1 AND a.id = $2 AND us.account_type = 'delegator_hybrid'
@@ -311,9 +311,9 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
  * exclusion made sweep reachable only while the agent was healthy, which is
  * when nobody needs it.
  */
-export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.safe_address, us.account_type
+export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.account_address, us.account_type
        FROM agents a
-       LEFT JOIN user_safes us ON a.safe_id = us.id
+       LEFT JOIN smart_accounts us ON a.account_id = us.id
        WHERE a.user_id = $1 AND a.id = $2
        LIMIT 1`
 
@@ -326,9 +326,9 @@ export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.c
 
 export const FIND_AGENT_DELEGATE_ADDRESS_SQL = `SELECT delegate_address FROM agents WHERE id = $1`
 
-export const FIND_USER_ACCOUNT_ID_FOR_USER_SQL = 'SELECT id FROM user_safes WHERE id = $1 AND user_id = $2'
+export const FIND_USER_ACCOUNT_ID_FOR_USER_SQL = 'SELECT id FROM smart_accounts WHERE id = $1 AND user_id = $2'
 
-export const FIND_DEFAULT_USER_ACCOUNT_ID_SQL = 'SELECT id FROM user_safes WHERE user_id = $1 AND is_default = true LIMIT 1'
+export const FIND_DEFAULT_USER_ACCOUNT_ID_SQL = 'SELECT id FROM smart_accounts WHERE user_id = $1 AND is_default = true LIMIT 1'
 
 export const FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL = 'SELECT id FROM agents WHERE user_id = $1 AND delegate_address = $2 AND status != $3'
 
@@ -341,7 +341,7 @@ export const FIND_AGENT_ID_STATUS_FOR_USER_SQL = 'SELECT id, status FROM agents 
  * #1167). ALL statuses — a revoked agent's past payments still need a name to
  * render against, so filtering here would relabel history "Unknown".
  *
- * Note there is no `user_safes` JOIN: this is a plain `agents` projection, so
+ * Note there is no `smart_accounts` JOIN: this is a plain `agents` projection, so
  * it does not fall under the contract `agents.test.ts` pins on the joined
  * statements in this file (#999).
  */
@@ -469,17 +469,17 @@ export async function findAgentIdStatusForUser(
 
 // ── Writes ───────────────────────────────────────────────────────────────────
 
-export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
+export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, account_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at,
+         RETURNING id, name, description, delegate_address, account_id, api_key_prefix, status, created_at,
                    NULL::timestamptz AS mcp_last_seen_at,
                    -- #1878: an agent created straight through the API was never
                    -- wired by the connector, so it has no MCP server name. NULL
                    -- here is the honest answer, not a placeholder.
                    NULL::text AS mcp_server_name`
 
-export const FIND_ACCOUNT_INFO_SQL = `SELECT safe_address, name AS safe_name, chain_id AS safe_chain_id
-             FROM user_safes WHERE id = $1`
+export const FIND_ACCOUNT_INFO_SQL = `SELECT account_address, name AS safe_name, chain_id AS safe_chain_id
+             FROM smart_accounts WHERE id = $1`
 
 export interface NewAgent {
   userId: string
@@ -498,7 +498,7 @@ export interface CreatedAgent {
     | 'name'
     | 'description'
     | 'delegate_address'
-    | 'safe_id'
+    | 'account_id'
     | 'api_key_prefix'
     | 'status'
     | 'created_at'
@@ -541,7 +541,7 @@ export async function createAgent(
       ? await tx.query<AccountInfoRow>(FIND_ACCOUNT_INFO_SQL, [input.accountId])
       : null
     const accountInfo = accountInfoResult?.rows[0] ?? {
-      safe_address: null,
+      account_address: null,
       safe_name: null,
       safe_chain_id: null,
     }
@@ -556,11 +556,11 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
                description = COALESCE($4, description),
                updated_at  = NOW()
            WHERE id = $1 AND user_id = $2
-           RETURNING id, name, description, delegate_address, safe_id, api_key_prefix, status, created_at,
+           RETURNING id, name, description, delegate_address, account_id, api_key_prefix, status, created_at,
                      mcp_server_name
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
-                updated.safe_id, us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                updated.account_id, us.account_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
                 us.account_type,
                 updated.api_key_prefix, updated.status, updated.created_at,
                 -- #1878/#1694: the display name is editable, the wiring name is
@@ -569,7 +569,7 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
                 updated.mcp_server_name,
                 (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = updated.id) AS mcp_last_seen_at
          FROM updated
-         LEFT JOIN user_safes us ON updated.safe_id = us.id`
+         LEFT JOIN smart_accounts us ON updated.account_id = us.id`
 
 /** `userId` is REQUIRED — the UPDATE is tenant-scoped in its WHERE clause. */
 export async function updateAgentProfile(
@@ -628,12 +628,12 @@ export const ARCHIVE_AGENT_SQL = `UPDATE agents
          AND (
            status = 'revoked'
            OR EXISTS (
-               SELECT 1 FROM user_safes us
-               WHERE us.id = agents.safe_id
+               SELECT 1 FROM smart_accounts us
+               WHERE us.id = agents.account_id
                  AND us.account_type IS DISTINCT FROM 'delegator_hybrid'
              )
            OR (
-             agents.safe_id IS NULL
+             agents.account_id IS NULL
              AND NOT EXISTS (
                SELECT 1 FROM agent_delegations ad_unlinked
                WHERE ad_unlinked.agent_id = agents.id
@@ -765,20 +765,20 @@ export async function resumeAgent(
  * rather than a pasted copy.
  *
  * `chain_id` falls back to the shared default when an agent has no linked
- * `user_safes` row. This value is not cosmetic: it becomes `agent.chain_id`,
+ * `smart_accounts` row. This value is not cosmetic: it becomes `agent.chain_id`,
  * which the machine-payment path uses for asset resolution, sweep-chain checks
  * and inserts (#990).
  */
 export const AGENT_BY_API_KEY_SQL = `
   SELECT a.id, a.user_id, a.name, a.delegate_address,
          a.status, a.archived_at,
-         COALESCE(us.safe_address, u.safe_address) as safe_address,
+         COALESCE(us.account_address, u.account_address) as account_address,
          COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
          us.execution_rail, us.account_type,
          (us.id IS NOT NULL) AS has_bound_safe
   FROM agents a
   JOIN users u ON a.user_id = u.id
-  LEFT JOIN user_safes us ON a.safe_id = us.id
+  LEFT JOIN smart_accounts us ON a.account_id = us.id
   WHERE a.api_key_hash = $1`
 
 export interface AgentAuthRow {
@@ -786,7 +786,7 @@ export interface AgentAuthRow {
   user_id: string
   name: string
   delegate_address: string | null
-  safe_address: string | null
+  account_address: string | null
   chain_id: number
   status: string
   archived_at: string | null
@@ -831,7 +831,7 @@ export async function touchAgentLastSeenRow(agentId: string, db: Executor = pool
 
 // NOTE: the execution-rail resolution and delegate-monitor reads deliberately
 // live elsewhere (`smart-accounts.ts`, `delegate-monitoring.ts`): a guard test
-// pins every `user_safes` JOIN in THIS file to select `account_type`, because
+// pins every `smart_accounts` JOIN in THIS file to select `account_type`, because
 // every query here feeds an agent API payload the dashboard branches on
 // (#1069/#1071). Those two reads return no payload, so they don't belong
 // under that pin.

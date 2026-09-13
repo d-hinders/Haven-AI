@@ -47,7 +47,7 @@ interface CreateHybridBody {
    * **Not required for anything.** It gated provisioning under #908; #1153
    * turned the signer floor into a post-funding recommendation, so nothing
    * refuses a single-signer account any more. Sending it records the
-   * acknowledgement durably (`user_safes.single_signer_waiver_at`) as history
+   * acknowledgement durably (`smart_accounts.single_signer_waiver_at`) as history
    * and changes no outcome; omitting it changes no outcome either. Kept on the
    * request shape so existing clients that send it keep working.
    */
@@ -125,8 +125,8 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
 
     const existing = await pool.query<{ id: string }>(
-      `SELECT id FROM user_safes
-       WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3`,
+      `SELECT id FROM smart_accounts
+       WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3`,
       [sub, accountAddress, chainId],
     )
     if (existing.rows.length > 0) {
@@ -134,7 +134,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
 
     const firstCheck = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM user_safes WHERE user_id = $1`,
+      `SELECT COUNT(*) AS count FROM smart_accounts WHERE user_id = $1`,
       [sub],
     )
     const isFirst = firstCheck.rows[0]?.count === '0'
@@ -146,7 +146,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       waiverAcknowledged && isValueBearingChain(chainId) && signerCount < 2
 
     const result = await pool.query<{ id: string; created_at: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, chain_id, name, is_default, account_type, execution_rail, owner_address, single_signer_waiver_at)
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail, owner_address, single_signer_waiver_at)
        VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6, $7)
        RETURNING id, created_at`,
       // owner_address: the EOA owner for treasury ops (#828 revoke). A pure-
@@ -160,9 +160,9 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     // can reconstruct the owner config for a pure-passkey account.
     for (const pk of parsedPasskeys) {
       await pool.query(
-        `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
+        `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_safe_id, key_id) DO NOTHING`,
+         ON CONFLICT (account_id, key_id) DO NOTHING`,
         [userSafeId, pk.keyId, `0x${pk.x.toString(16)}`, `0x${pk.y.toString(16)}`],
       )
     }
@@ -182,7 +182,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
   /**
    * Resolve an account the caller owns from (address, chain) — the
    * account-scoped counterpart to agent-delegations' `loadOwnedDelegationAgent`.
-   * Ownership is the `user_safes` row, so a caller can only ever reach their
+   * Ownership is the `smart_accounts` row, so a caller can only ever reach their
    * own account regardless of which address they name.
    */
   async function resolveOwnedHybridAccount(
@@ -201,11 +201,11 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       return { ok: false, status: 400, error: 'chain_id is required' }
     }
     // `SELECT 1`, matching the sibling GET verbatim — the provisioning route's
-    // duplicate check is a `SELECT id FROM user_safes`, and sharing that shape
+    // duplicate check is a `SELECT id FROM smart_accounts`, and sharing that shape
     // would make pattern-matched test mocks ambiguous between the two.
     const owned = await pool.query(
-      `SELECT 1 FROM user_safes
-       WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3
+      `SELECT 1 FROM smart_accounts
+       WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3
          AND account_type = 'delegator_hybrid'`,
       [userId, address, chainId],
     )

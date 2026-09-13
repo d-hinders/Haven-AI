@@ -55,7 +55,7 @@ function payment(overrides: Partial<MachinePaymentEvidenceSource> = {}): Machine
     kind: 'payment_intent',
     agent_id: '11111111-1111-1111-1111-111111111111',
     user_id: '22222222-2222-2222-2222-222222222222',
-    safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+    account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
     chain_id: 8453,
     token_symbol: 'USDC',
     token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',

@@ -75,9 +75,9 @@ export interface RekeyAgentRow {
 }
 
 export const FIND_OWNED_REKEY_AGENT_SQL = `SELECT a.id AS agent_id, a.delegate_address, a.status, us.chain_id,
-            us.safe_address AS treasury_address, us.account_type, us.execution_rail
+            us.account_address AS treasury_address, us.account_type, us.execution_rail
      FROM agents a
-     LEFT JOIN user_safes us ON us.id = a.safe_id
+     LEFT JOIN smart_accounts us ON us.id = a.account_id
      WHERE a.id = $1 AND a.user_id = $2`
 
 /** The agent joined to its account — owner-scoped, so another user's id misses. */

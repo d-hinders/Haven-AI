@@ -206,7 +206,7 @@ describe('Auth routes', () => {
           email: 'test@example.com',
           password_hash: testPasswordHash,
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: null,
+          account_address: null,
         }],
       })
       mockQuery.mockResolvedValueOnce({ rows: [] })
@@ -295,7 +295,7 @@ describe('Auth routes', () => {
           email: 'test@example.com',
           password_hash: testPasswordHash,
           wallet_address: null,
-          safe_address: null,
+          account_address: null,
         }],
       })
 
@@ -325,7 +325,7 @@ describe('Auth routes', () => {
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: null,
+          account_address: null,
           // FIND_USER_PROFILE_BY_ID_SQL selects currency_preference too, so a
           // real row always carries it (#1446).
           currency_preference: 'USD',
@@ -372,17 +372,17 @@ describe('Auth routes', () => {
               name: 'Ada Lovelace',
               email: 'test@example.com',
               wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-              safe_address: SAFE_ADDRESS,
+              account_address: SAFE_ADDRESS,
               currency_preference: 'USD',
               created_at: '2025-01-01T00:00:00.000Z',
             }],
           })
         }
-        if (text.includes('FROM user_safes')) {
+        if (text.includes('FROM smart_accounts')) {
           return Promise.resolve({
             rows: [{
               id: 'safe-1',
-              safe_address: SAFE_ADDRESS,
+              account_address: SAFE_ADDRESS,
               chain_id: 8453,
               name: 'Main',
               is_default: true,
@@ -401,10 +401,10 @@ describe('Auth routes', () => {
 
       expect(response.statusCode).toBe(200)
       const body = response.json()
-      expect(body.account_address).toBe(body.safe_address)
+      expect(body.safe_address).toBe(body.account_address)
       expect(body.account_address).toBe(SAFE_ADDRESS)
       expect(body.safes).toHaveLength(1)
-      expect(body.safes[0].account_address).toBe(body.safes[0].safe_address)
+      expect(body.safes[0].safe_address).toBe(body.safes[0].account_address)
     })
 
     it('returns 401 without token', async () => {
@@ -437,7 +437,7 @@ describe('safes payload carries the rail (#1069)', () => {
     // delegation accounts still dead-ended at the wallet approval. Pin the
     // field at the SOURCE the frontend actually consumes.
     //
-    // This guard used to scan `auth.ts` for `SELECT … FROM user_safes`. #1180
+    // This guard used to scan `auth.ts` for `SELECT … FROM smart_accounts`. #1180
     // moved that statement into the repository, which would have left the
     // scan matching NOTHING — a guard that silently policed an empty set. It
     // follows the SQL instead, and now asserts the constant directly rather
@@ -446,13 +446,13 @@ describe('safes payload carries the rail (#1069)', () => {
       '../../infra/repositories/smart-accounts.js'
     )
     expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toContain('account_type')
-    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toMatch(/FROM user_safes/)
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toMatch(/FROM smart_accounts/)
   })
 
   it('both session endpoints use that one statement — neither can drift alone', async () => {
     // The original bug was two SELECTs disagreeing about one column. Rather
     // than re-check each call site's text, assert there is only one statement
-    // left to get wrong: `auth.ts` holds no inline user_safes SQL at all.
+    // left to get wrong: `auth.ts` holds no inline smart_accounts SQL at all.
     //
     // COUNTING, not `toContain` — the promotion-batch review proved the old
     // form was satisfied by the IMPORT LINE alone. Switching only /auth/me to
@@ -461,13 +461,13 @@ describe('safes payload carries the rail (#1069)', () => {
     // grep passed. Both endpoints must CALL it.
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
-    expect(src).not.toMatch(/FROM user_safes/)
+    expect(src).not.toMatch(/FROM smart_accounts/)
 
     const calls = src.match(/listSessionAccountsForUser\(/g) ?? []
     expect(calls.length, 'both /auth/login and /auth/me must call it').toBe(2)
 
     // And no sibling projection may be reached from here: every other
-    // user_safes list omits account_type, which is the field #1069 is about.
+    // smart_accounts list omits account_type, which is the field #1069 is about.
     expect(src).not.toMatch(/listAccountsForUser\(|listAccountsWithTypeForUser\(/)
   })
 

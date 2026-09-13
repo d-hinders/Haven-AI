@@ -20,7 +20,7 @@ export interface AgentContext {
   user_id: string
   name: string
   delegate_address: string
-  safe_address: string
+  account_address: string
   chain_id: number
   status: string
   /** Present for API-key lookups; older in-process fixtures may omit it. */
@@ -146,7 +146,7 @@ export async function agentAuthMiddleware(
     return reply.code(401).send(AGENT_MISSING_KEY_BODY)
   }
 
-  // Look up agent + its linked Safe address (multi-Safe via user_safes)
+  // Look up agent + its linked Safe address (multi-Safe via smart_accounts)
   const row = await findAgentAuthRowByApiKeyHash(
     createHash('sha256').update(apiKey).digest('hex'),
   )
@@ -217,7 +217,7 @@ export async function agentAuthMiddleware(
     return reply.code(403).send({ error: 'Agent is no longer linked to a Haven wallet' })
   }
 
-  if (!row.safe_address) {
+  if (!row.account_address) {
     return reply.code(403).send({ error: 'No Safe deployed for this account' })
   }
 
@@ -226,7 +226,7 @@ export async function agentAuthMiddleware(
     user_id: row.user_id,
     name: row.name,
     delegate_address: row.delegate_address,
-    safe_address: row.safe_address,
+    account_address: row.account_address,
     chain_id: row.chain_id,
     status: row.status,
     archived_at: row.archived_at ?? null,

@@ -45,19 +45,19 @@ async function seedBoundAgent(): Promise<{ agentId: string; userId: string; acco
   const agent = await seedAgent()
   const accountAddress = ADDR(String(++seq).padStart(2, '0'))
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, chain_id, name, account_type, execution_rail)
+    `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, account_type, execution_rail)
      VALUES ($1, $2, 84532, 'Bound test account', 'delegator_hybrid', 'delegation')
      RETURNING id`,
     [agent.userId, accountAddress],
   )
-  await db.query(`UPDATE agents SET safe_id = $1 WHERE id = $2`, [safe.rows[0].id, agent.agentId])
+  await db.query(`UPDATE agents SET account_id = $1 WHERE id = $2`, [safe.rows[0].id, agent.agentId])
   return { ...agent, accountAddress }
 }
 
 async function seedIntent(agentId: string, userId: string): Promise<string> {
   const r = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, payment_rail)
      VALUES ($1, $2, $3, 'USDC', $4, $5, '100000', '0.10', $6, 1, $7,
@@ -384,7 +384,7 @@ describeDb('machine-payments repository (#1224)', () => {
 
     // Safe unlink orphans the agent row. A stale prepared request must not
     // claim against the old destination after that binding disappears.
-    await db.query(`UPDATE agents SET safe_id = NULL WHERE id = $1`, [agent.agentId])
+    await db.query(`UPDATE agents SET account_id = NULL WHERE id = $1`, [agent.agentId])
     expect(
       await claimPreparedSweepForBoundAgent(
         sweepId,

@@ -22,23 +22,23 @@ async function readSource(relativePath: string): Promise<string> {
 describe('#2907 — payer_account twins safe, not account', () => {
   it('delegation-authorize.ts: payer_account and safe are the same expression', async () => {
     const source = await readSource('../modules/x402/delegation-authorize.ts')
-    const componentsBlocks = source.match(/components:\s*\{[^}]*safe:\s*agent\.safe_address[^}]*\}/gs) ?? []
+    const componentsBlocks = source.match(/components:\s*\{[^}]*safe:\s*agent\.account_address[^}]*\}/gs) ?? []
     expect(componentsBlocks.length).toBeGreaterThan(0)
     for (const block of componentsBlocks) {
-      expect(block).toMatch(/payer_account:\s*agent\.safe_address/)
+      expect(block).toMatch(/payer_account:\s*agent\.account_address/)
       // `account:` must remain the delegate account address, never aliased
       // to the same expression as `safe`/`payer_account`.
-      expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.safe_address/)
+      expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.account_address/)
     }
   })
 
   it('replay.ts: payer_account and safe are the same expression', async () => {
     const source = await readSource('../modules/x402/replay.ts')
-    const componentsBlocks = source.match(/components:\s*\{[^}]*safe:\s*agent\.safe_address[^}]*\}/gs) ?? []
+    const componentsBlocks = source.match(/components:\s*\{[^}]*safe:\s*agent\.account_address[^}]*\}/gs) ?? []
     expect(componentsBlocks.length).toBeGreaterThan(0)
     for (const block of componentsBlocks) {
-      expect(block).toMatch(/payer_account:\s*agent\.safe_address/)
-      expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.safe_address/)
+      expect(block).toMatch(/payer_account:\s*agent\.account_address/)
+      expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.account_address/)
     }
   })
   it('routes/payments.ts (POST /payments idempotent replay): payer_account and safe are the same expression', async () => {
@@ -48,11 +48,11 @@ describe('#2907 — payer_account twins safe, not account', () => {
     // harness — the source assertion is the instrument here, the same one the
     // two x402 emitters get. A wrong value (e.g. the delegate address) fails.
     const source = await readSource('../routes/payments.ts')
-    const componentsBlocks = source.match(/components:\s*\{[^}]*safe:\s*agent\.safe_address[^}]*\}/gs) ?? []
+    const componentsBlocks = source.match(/components:\s*\{[^}]*safe:\s*agent\.account_address[^}]*\}/gs) ?? []
     expect(componentsBlocks.length).toBeGreaterThan(0)
     for (const block of componentsBlocks) {
-      expect(block).toMatch(/payer_account:\s*agent\.safe_address/)
-      expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.safe_address/)
+      expect(block).toMatch(/payer_account:\s*agent\.account_address/)
+      expect(block).not.toMatch(/(?<!payer_)\baccount:\s*agent\.account_address/)
       expect(block).not.toMatch(/payer_account:\s*agent\.delegate_address/)
     }
   })

@@ -129,7 +129,7 @@ export async function recordAll(deps: {
       rows: [
         {
           id: SAFE_UUID,
-          safe_address: SAFE_ADDRESS,
+          account_address: SAFE_ADDRESS,
           chain_id: 8453,
           name: 'Main',
           is_default: true,
@@ -156,7 +156,7 @@ export async function recordAll(deps: {
     const token = app.jwt.sign({ sub: USER_UUID, email: 'ada@example.com' })
 
     mockQuery.mockReset().mockResolvedValueOnce({
-      rows: [{ id: SAFE_UUID, safe_address: SAFE_ADDRESS, chain_id: 8453 }],
+      rows: [{ id: SAFE_UUID, account_address: SAFE_ADDRESS, chain_id: 8453 }],
     })
     mockGetChainClient.mockReset().mockReturnValue({
       getNativeBalance: async () => 0n,
@@ -191,8 +191,8 @@ export async function recordAll(deps: {
           name: 'Research Agent',
           description: null,
           delegate_address: VALID_DELEGATE,
-          safe_id: AGENT_SAFE_UUID,
-          safe_address: '0x2222222222222222222222222222222222222222',
+          account_id: AGENT_SAFE_UUID,
+          account_address: '0x2222222222222222222222222222222222222222',
           safe_name: 'Main wallet',
           safe_chain_id: 8453,
           api_key_prefix: 'sk_agent_abc',
@@ -221,8 +221,8 @@ export async function recordAll(deps: {
           name: 'Research Agent',
           description: null,
           delegate_address: VALID_DELEGATE,
-          safe_id: AGENT_SAFE_UUID,
-          safe_address: '0x2222222222222222222222222222222222222222',
+          account_id: AGENT_SAFE_UUID,
+          account_address: '0x2222222222222222222222222222222222222222',
           safe_name: 'Main wallet',
           safe_chain_id: 8453,
           api_key_prefix: 'sk_agent_abc',
@@ -245,7 +245,7 @@ export async function recordAll(deps: {
 
     mockQuery.mockReset().mockImplementation(async (sql: string) => {
       const s = String(sql)
-      if (/SELECT id FROM user_safes/.test(s)) return { rows: [{ id: AGENT_SAFE_UUID }] }
+      if (/SELECT id FROM smart_accounts/.test(s)) return { rows: [{ id: AGENT_SAFE_UUID }] }
       if (/INSERT INTO agents/.test(s)) {
         return {
           rows: [
@@ -254,7 +254,7 @@ export async function recordAll(deps: {
               name: 'A',
               description: null,
               delegate_address: VALID_DELEGATE,
-              safe_id: AGENT_SAFE_UUID,
+              account_id: AGENT_SAFE_UUID,
               api_key_prefix: 'sk_a',
               status: 'active',
               created_at: '2026-07-26T00:00:00.000Z',
@@ -263,11 +263,11 @@ export async function recordAll(deps: {
           ],
         }
       }
-      if (/SELECT safe_address, name AS safe_name/.test(s)) {
+      if (/SELECT account_address, name AS safe_name/.test(s)) {
         return {
           rows: [
             {
-              safe_address: '0x2222222222222222222222222222222222222222',
+              account_address: '0x2222222222222222222222222222222222222222',
               safe_name: 'Main',
               safe_chain_id: 84532,
             },
@@ -303,8 +303,8 @@ export async function recordAll(deps: {
             {
               id: 'payment-1',
               agent_id: 'agent-1',
-              safe_id: 'safe-base',
-              safe_address: SAFE_ADDRESS_ACTIVITY,
+              account_id: 'safe-base',
+              account_address: SAFE_ADDRESS_ACTIVITY,
               safe_name: 'Base wallet',
               chain_id: 8453,
               token_symbol: 'USDC',
@@ -352,7 +352,7 @@ export async function recordAll(deps: {
   {
     const row: PaymentReceiptRow = {
       id: 'pi1',
-      safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
       chain_id: 100,
       token_symbol: 'xDAI',
       token_address: '0x0000000000000000000000000000000000000000',
@@ -388,7 +388,7 @@ export async function recordAll(deps: {
           email: 'test@example.com',
           password_hash: '$2b$10$C1z6c6c6c6c6c6c6c6c6c.u6c6c6c6c6c6c6c6c6c6c6c6c6c6c6C',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: null,
+          account_address: null,
         },
       ],
     })
@@ -425,19 +425,19 @@ export async function recordAll(deps: {
               name: 'Ada Lovelace',
               email: 'test@example.com',
               wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-              safe_address: SAFE_ADDRESS_ME,
+              account_address: SAFE_ADDRESS_ME,
               currency_preference: 'USD',
               created_at: '2025-01-01T00:00:00.000Z',
             },
           ],
         })
       }
-      if (text.includes('FROM user_safes')) {
+      if (text.includes('FROM smart_accounts')) {
         return Promise.resolve({
           rows: [
             {
               id: 'safe-1',
-              safe_address: SAFE_ADDRESS_ME,
+              account_address: SAFE_ADDRESS_ME,
               chain_id: 8453,
               name: 'Main',
               is_default: true,
@@ -470,7 +470,7 @@ export async function recordAll(deps: {
           credential_id: 'cred-1',
           signer_address: '0x3333333333333333333333333333333333333333',
           chain_id: 8453,
-          safe_address: '0x4444444444444444444444444444444444444444',
+          account_address: '0x4444444444444444444444444444444444444444',
           created_at: '2026-02-01T00:00:00.000Z',
         },
       ],
@@ -495,7 +495,7 @@ export async function recordAll(deps: {
       user_id: '22222222-2222-2222-2222-222222222222',
       name: 'Payment Agent',
       delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-      safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
       chain_id: 8453,
       status: 'active',
     }
@@ -524,7 +524,7 @@ export async function recordAll(deps: {
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: null,
-          safe_address: null,
+          account_address: null,
           currency_preference: 'USD',
           created_at: '2025-01-01T00:00:00.000Z',
         },
@@ -548,7 +548,7 @@ export async function recordAll(deps: {
     const token = app.jwt.sign({ sub: 'user-1', email: 'test@example.com' }, { expiresIn: '1h' })
     const walletAddress = '0x1234567890abcdef1234567890abcdef12345678'
     mockQuery.mockReset().mockResolvedValueOnce({
-      rows: [{ id: 'user-1', email: 'test@example.com', wallet_address: walletAddress, safe_address: null }],
+      rows: [{ id: 'user-1', email: 'test@example.com', wallet_address: walletAddress, account_address: null }],
     })
     const injectOpts: InjectOptions = {
       method: 'PUT',

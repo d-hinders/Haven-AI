@@ -57,7 +57,7 @@ export interface MachinePaymentEvidenceSource {
   kind?: MachinePaymentReferenceKind
   agent_id: string
   user_id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   token_symbol: string
   token_address: string
@@ -295,7 +295,7 @@ export async function recordMachinePaymentEvidenceBase(
     chainId: intent.chain_id,
     resourceUrl,
     merchantAddress: merchantAddressForPayment(intent),
-    payerAddress: intent.safe_address,
+    payerAddress: intent.account_address,
     settlementAddress: intent.to_address,
     tokenSymbol: intent.token_symbol,
     tokenAddress: intent.token_address,

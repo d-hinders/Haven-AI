@@ -312,8 +312,8 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         status: intent.status,
         expires_at: intent.expires_at,
         chain_id: agent.chain_id,
-        safe_address: agent.safe_address,
-        payer: agent.safe_address,
+        safe_address: agent.account_address,
+        payer: agent.account_address,
         token: tokenConfig.symbol,
         amount: amountHuman,
         to: payTo.toLowerCase(),
@@ -328,14 +328,14 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
           // The account validates THIS typed data (not the bare 4337 hash).
           typed_data: fundingAuth.prepared.signingTypedData,
           components: {
-            safe: agent.safe_address,
+            safe: agent.account_address,
             // #2907: payer_account is a same-value twin of the deprecated
             // `safe` — NOT of `account` above, which already means the
             // delegate account address here (a different address; owner
             // review on #2906 rejected renaming into it, since the SDK's
             // receipt-payer read at `sdk/src/x402-funding-leg.ts:312` would
             // then resolve to the wrong address).
-            payer_account: agent.safe_address,
+            payer_account: agent.account_address,
             account: fundingAuth.prepared.delegateAccountAddress,
             token: tokenAddress,
             to: payTo.toLowerCase(),

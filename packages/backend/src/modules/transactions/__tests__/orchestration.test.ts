@@ -135,8 +135,8 @@ describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
 
     const result = await aggregateAccountTransactions(
       [
-        { id: 'safe-ok', safe_address: '0xok', chain_id: 8453, name: 'OK' },
-        { id: 'safe-fail', safe_address: '0xfail', chain_id: 100, name: 'Fail' },
+        { id: 'safe-ok', account_address: '0xok', chain_id: 8453, name: 'OK' },
+        { id: 'safe-fail', account_address: '0xfail', chain_id: 100, name: 'Fail' },
       ],
       log,
       false,
@@ -166,7 +166,7 @@ describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
     const log = { warn } as unknown as import('fastify').FastifyBaseLogger
 
     const result = await aggregateAccountTransactions(
-      [{ id: 'safe-1', safe_address: '0xa', chain_id: 8453, name: 'A' }],
+      [{ id: 'safe-1', account_address: '0xa', chain_id: 8453, name: 'A' }],
       log,
       false,
     )

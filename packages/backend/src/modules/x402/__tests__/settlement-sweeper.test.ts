@@ -156,7 +156,7 @@ async function unreportedPayment(
   })
   await db.query(
     `INSERT INTO payment_intents
-       (id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+       (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, source, payment_rail, execution_rail, machine_metadata,
         x402_resource_url, payment_resource_url, merchant_address, x402_merchant_address,
@@ -732,7 +732,7 @@ describeDb('passive erc7710 settlement sweep (#2117)', () => {
     const { agentId, userId } = await seedAgent()
     await db.query(
       `INSERT INTO payment_intents
-         (id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+         (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
           amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
           status, expires_at, source, payment_rail, execution_rail, machine_metadata,
           x402_resource_url, delegation_hash, created_at)

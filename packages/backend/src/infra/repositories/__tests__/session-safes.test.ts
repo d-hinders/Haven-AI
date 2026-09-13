@@ -27,7 +27,7 @@ async function seedSafe(
   fields: { accountType?: string | null; ownerAddress?: string | null; chainId?: number } = {},
 ): Promise<string> {
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, name, chain_id, account_type, owner_address)
+    `INSERT INTO smart_accounts (user_id, account_address, name, chain_id, account_type, owner_address)
      VALUES ($1, $2, 'Test safe', $3, $4, $5) RETURNING id`,
     [
       userId,
@@ -46,7 +46,7 @@ async function seedSafe(
 
 async function seedPasskey(userSafeId: string, keyId: string): Promise<void> {
   await db.query(
-    `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
+    `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
      VALUES ($1, $2, '0x1', '0x2')`,
     [userSafeId, keyId],
   )

@@ -79,8 +79,8 @@ describe('GET /agents — the #1069 pin: pending_approval agents are SURFACED', 
     name: 'Pending Agent',
     description: null,
     delegate_address: VALID_DELEGATE,
-    safe_id: 'safe-1',
-    safe_address: '0x2222222222222222222222222222222222222222',
+    account_id: 'safe-1',
+    account_address: '0x2222222222222222222222222222222222222222',
     safe_name: 'Main wallet',
     safe_chain_id: 8453,
     account_type: null,
@@ -157,7 +157,7 @@ describe('GET /agents/:id/delegate-balance', () => {
             rows: [{
               delegate_address: '0x1111111111111111111111111111111111111111',
               safe_chain_id: 84532,
-              safe_address: '0x2222222222222222222222222222222222222222',
+              account_address: '0x2222222222222222222222222222222222222222',
               account_type: 'delegator_hybrid',
             }],
           }
@@ -177,7 +177,7 @@ describe('GET /agents/:id/delegate-balance', () => {
       rows: [{
         delegate_address: VALID_DELEGATE,
         safe_chain_id: 8453,
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_address: '0x2222222222222222222222222222222222222222',
       }],
     })
     // First call: native ETH (zero address); second: USDC.
@@ -194,14 +194,14 @@ describe('GET /agents/:id/delegate-balance', () => {
     expect(body.usdc_atomic).toBe('2000000')
     expect(body.sweep_min_usdc).toBe('0.01')
     // #2907: DelegateBalance.account_address twins safe_address, request-level.
-    expect(body.account_address).toBe(body.safe_address)
+    expect(body.safe_address).toBe(body.account_address)
     await app.close()
   })
 
   it('422s when the agent has no delegate address', async () => {
     const app = await makeApp()
     mockQuery.mockResolvedValueOnce({
-      rows: [{ delegate_address: null, safe_chain_id: 8453, safe_address: null }],
+      rows: [{ delegate_address: null, safe_chain_id: 8453, account_address: null }],
     })
 
     const res = await app.inject({ method: 'GET', url: '/agents/agent-1/delegate-balance' })
@@ -224,7 +224,7 @@ describe('POST /agents — create-flow transaction sequence', () => {
   function mockHappyCreate() {
     mockQuery.mockImplementation(async (sql: string) => {
       const s = String(sql)
-      if (/SELECT id FROM user_safes WHERE id = \$1 AND user_id = \$2/.test(s)) {
+      if (/SELECT id FROM smart_accounts WHERE id = \$1 AND user_id = \$2/.test(s)) {
         return { rows: [{ id: 'safe-1' }] }
       }
       if (/SELECT id FROM agents WHERE user_id = \$1 AND delegate_address/.test(s)) {
@@ -234,14 +234,14 @@ describe('POST /agents — create-flow transaction sequence', () => {
         return {
           rows: [{
             id: 'agent-1', name: 'Research Agent', description: null,
-            delegate_address: VALID_DELEGATE, safe_id: 'safe-1',
+            delegate_address: VALID_DELEGATE, account_id: 'safe-1',
             api_key_prefix: 'sk_agent_abcd', status: 'active',
             created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
           }],
         }
       }
-      if (/SELECT safe_address, name AS safe_name/.test(s)) {
-        return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 8453 }] }
+      if (/SELECT account_address, name AS safe_name/.test(s)) {
+        return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 8453 }] }
       }
       return { rows: [] }
     })
@@ -257,15 +257,15 @@ describe('POST /agents — create-flow transaction sequence', () => {
     expect(body.id).toBe('agent-1')
     expect(body.api_key).toMatch(/^sk_agent_/)
     expect(body.allowances).toEqual([])
-    expect(body.safe_address).toBe('0x2222222222222222222222222222222222222222')
+    expect(body.account_address).toBe('0x2222222222222222222222222222222222222222')
 
     const sqls = mockQuery.mock.calls.map(([sql]) => String(sql))
     const idx = {
-      safeCheck: sqls.findIndex((s) => /SELECT id FROM user_safes WHERE id = \$1 AND user_id = \$2/.test(s)),
+      safeCheck: sqls.findIndex((s) => /SELECT id FROM smart_accounts WHERE id = \$1 AND user_id = \$2/.test(s)),
       dupCheck: sqls.findIndex((s) => /SELECT id FROM agents WHERE user_id = \$1 AND delegate_address/.test(s)),
       begin: sqls.findIndex((s) => s === 'BEGIN'),
       insertAgent: sqls.findIndex((s) => /INSERT INTO agents/.test(s)),
-      safeInfo: sqls.findIndex((s) => /SELECT safe_address, name AS safe_name/.test(s)),
+      safeInfo: sqls.findIndex((s) => /SELECT account_address, name AS safe_name/.test(s)),
       commit: sqls.findIndex((s) => s === 'COMMIT'),
     }
     expect(Object.values(idx).every((i) => i !== -1)).toBe(true)
@@ -285,7 +285,7 @@ describe('POST /agents — create-flow transaction sequence', () => {
     const app = await makeApp()
     mockQuery.mockImplementation(async (sql: string) => {
       const s = String(sql)
-      if (/SELECT id FROM user_safes WHERE id = \$1 AND user_id = \$2/.test(s)) {
+      if (/SELECT id FROM smart_accounts WHERE id = \$1 AND user_id = \$2/.test(s)) {
         return { rows: [{ id: 'safe-1' }] }
       }
       if (/SELECT id FROM agents WHERE user_id = \$1 AND delegate_address/.test(s)) {
@@ -304,7 +304,7 @@ describe('POST /agents — create-flow transaction sequence', () => {
     const app = await makeApp()
     mockQuery.mockImplementation(async (sql: string) => {
       const s = String(sql)
-      if (/SELECT id FROM user_safes WHERE id = \$1 AND user_id = \$2/.test(s)) {
+      if (/SELECT id FROM smart_accounts WHERE id = \$1 AND user_id = \$2/.test(s)) {
         return { rows: [{ id: 'safe-1' }] }
       }
       if (/INSERT INTO agents/.test(s)) {
@@ -334,8 +334,8 @@ describe('PUT /agents/:id', () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{
         id: 'agent-1', name: 'Renamed', description: 'new desc',
-        delegate_address: VALID_DELEGATE, safe_id: 'safe-1',
-        safe_address: '0x2222222222222222222222222222222222222222',
+        delegate_address: VALID_DELEGATE, account_id: 'safe-1',
+        account_address: '0x2222222222222222222222222222222222222222',
         safe_name: 'Main', safe_chain_id: 8453, account_type: null,
         api_key_prefix: 'sk_agent_abcd', status: 'active',
         created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
@@ -366,8 +366,8 @@ describe('PUT /agents/:id', () => {
         return {
           rows: [{
             id: 'agent-1', name: 'Renamed', description: null,
-            delegate_address: VALID_DELEGATE, safe_id: 'safe-1',
-            safe_address: '0x2222222222222222222222222222222222222222',
+            delegate_address: VALID_DELEGATE, account_id: 'safe-1',
+            account_address: '0x2222222222222222222222222222222222222222',
             safe_name: 'Main', safe_chain_id: 8453, account_type: 'delegator_hybrid',
             api_key_prefix: 'sk_agent_abcd', status: 'active',
             created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,

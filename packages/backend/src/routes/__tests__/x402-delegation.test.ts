@@ -43,7 +43,7 @@ vi.mock('../../middleware/agentAuth.js', () => ({
     request.agent = {
       id: 'agent-1', user_id: 'user-1', name: 'A',
       delegate_address: DELEGATE_SIGNER.address,
-      safe_address: '0x' + 'aa'.repeat(20),
+      account_address: '0x' + 'aa'.repeat(20),
       chain_id: 84532, status: 'active',
       execution_rail: 'delegation', account_type: 'delegator_hybrid',
     }
@@ -1505,7 +1505,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     token_address: USDC.toLowerCase(),
     token_symbol: 'USDC',
     chain_id: 84532,
-    safe_address: '0x' + 'aa'.repeat(20),
+    account_address: '0x' + 'aa'.repeat(20),
     machine_metadata: { network: 'eip155:84532', settlement_scheme: 'eip3009' },
   }
 
@@ -1789,7 +1789,7 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     token_address: USDC.toLowerCase(),
     token_symbol: 'USDC',
     chain_id: 84532,
-    safe_address: '0x' + 'aa'.repeat(20),
+    account_address: '0x' + 'aa'.repeat(20),
     machine_metadata: { network: 'eip155:84532', settlement_scheme: 'eip3009' },
   }
 
@@ -1975,7 +1975,7 @@ describe('x402 sign-context funded-but-unsettled resume (#2290)', () => {
     token_address: USDC.toLowerCase(),
     token_symbol: 'USDC',
     chain_id: 84532,
-    safe_address: '0x' + 'aa'.repeat(20),
+    account_address: '0x' + 'aa'.repeat(20),
     machine_metadata: {
       network: 'eip155:84532',
       settlement_scheme: 'eip3009',

@@ -68,7 +68,7 @@ async function seedFundedX402(confirmedMinutesAgo: number): Promise<Seeded> {
   const agentId = agentRow.rows[0].id
   const intent = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, tx_hash, confirmed_at, expires_at, source, payment_rail,
         x402_resource_url, x402_merchant_address, machine_metadata)
@@ -90,7 +90,7 @@ async function seedFundedX402(confirmedMinutesAgo: number): Promise<Seeded> {
       user_id: userId,
       name: 'reporting agent',
       delegate_address: '0x00000000000000000000000000000000000000d1',
-      safe_address: '0x00000000000000000000000000000000000000f1',
+      account_address: '0x00000000000000000000000000000000000000f1',
       chain_id: 84532,
       status: 'active',
     } as AgentContext,
@@ -288,7 +288,7 @@ describeDb('#2292 — agent-reported plain-HTTP merchant outcome', () => {
 
     const second = await db.query<{ id: string }>(
       `INSERT INTO payment_intents
-         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+         (agent_id, user_id, account_address, token_symbol, token_address, to_address,
           amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
           status, tx_hash, confirmed_at, expires_at, source, payment_rail,
           x402_resource_url, x402_merchant_address, machine_metadata)

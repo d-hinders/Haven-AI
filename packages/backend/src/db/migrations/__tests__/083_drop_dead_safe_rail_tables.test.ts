@@ -3,10 +3,20 @@
  * No mocks — #1219's rule.
  *
  * The harness applies the FULL migration set, so by the time a test body runs
- * the three dead tables are already gone and `user_safes.account_type`
- * already defaults to `'delegator_hybrid'`; that post-migration state is what
- * production will be in. Tests that need the pre-drop shape back call
- * `down()` first, which doubles as the structural-reversibility proof.
+ * the three dead tables are already gone and the account table's
+ * `account_type` column already defaults to `'delegator_hybrid'`; that
+ * post-migration state is what production will be in. Tests that need the
+ * pre-drop shape back call `down()` first, which doubles as the
+ * structural-reversibility proof.
+ *
+ * #2911 (schema rename, epic #2906 phase 3, later than this migration):
+ * 083's own `up()`/`down()` hardcode `ALTER TABLE user_safes` (migrations
+ * are immutable history — that text never changes), so every test below
+ * runs with 084's rename reverted for its duration (file-level
+ * `beforeEach`/`afterEach`) — otherwise `ALTER TABLE user_safes` 404s
+ * against a head schema where the table is `smart_accounts`. Inline SQL in
+ * this file still says `user_safes`/`safe_address` on purpose: within the
+ * revert window, that is genuinely the table's name.
  *
  * The load-bearing test is the DEFAULT one, same shape as 075's: an insert
  * that omits BOTH `execution_rail` and `account_type` is what a future
@@ -15,10 +25,11 @@
  * `account_type='safe'`). The three drops are inert by construction —
  * nothing reads them, so nothing can regress — proven by the absence checks.
  */
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../083_drop_dead_safe_rail_tables.js'
+import { down as down084, up as up084 } from '../084_rename_user_safes_to_smart_accounts.js'
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -70,13 +81,35 @@ describeDb('migration 083: drop the last dead Safe-rail tables (#2851)', () => {
 
   afterAll(async () => {
     // Leave the shared worker schema in the migrated (post-083) state,
-    // whatever an individual test did — the #2020 leak lesson.
+    // whatever an individual test did — the #2020 leak lesson. 083's own
+    // `up()` hardcodes `ALTER TABLE user_safes` (immutable history), so it
+    // only runs against the pre-#2911 name — revert the rename around it,
+    // same as every per-test wrap below.
     const client = await db.connect()
     try {
-      await up(client)
+      await down084(client)
+      try {
+        await up(client)
+      } finally {
+        await up084(client)
+      }
     } finally {
       client.release()
     }
+  })
+
+  // #2911 (schema rename, epic #2906 phase 3): 083's own `up()` hardcodes
+  // `ALTER TABLE user_safes ALTER COLUMN account_type SET DEFAULT …`
+  // (migrations are immutable history), and several tests below seed rows
+  // into `user_safes`/`safe_address` directly. Post-#2911 the table is
+  // `smart_accounts` at head, so every test in this file needs 084's rename
+  // reverted for its duration — the same "a later migration renamed what an
+  // earlier test asserted" shape as 075's file-level wrap.
+  beforeEach(async () => {
+    await down084(db as never)
+  })
+  afterEach(async () => {
+    await up084(db as never)
   })
 
   beforeEach(async () => {

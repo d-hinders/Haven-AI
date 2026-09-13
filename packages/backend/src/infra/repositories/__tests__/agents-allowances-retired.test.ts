@@ -45,7 +45,7 @@ async function seedSafe(
   accountType: 'safe' | 'delegator_hybrid',
 ): Promise<string> {
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
+    `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
      VALUES ($1, $2, 8453, $3, $4) RETURNING id`,
     [userId, addr, rail, accountType],
   )
@@ -54,7 +54,7 @@ async function seedSafe(
 
 async function seedAgent(userId: string, accountId: string, delegate: string): Promise<string> {
   const agent = await db.query<{ id: string }>(
-    `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, safe_id)
+    `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, account_id)
      VALUES ($1, 'a', null, $2, 'h', 'sk_agent_tst', $3) RETURNING id`,
     [userId, delegate, accountId],
   )

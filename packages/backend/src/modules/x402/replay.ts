@@ -50,8 +50,8 @@ export async function delegationReplay(
         status: existing.status,
         tx_hash: existing.tx_hash,
         chain_id: existing.chain_id ?? agent.chain_id,
-        safe_address: existing.safe_address,
-        payer: existing.safe_address,
+        safe_address: existing.account_address,
+        payer: existing.account_address,
         token: existing.token_symbol,
         amount: existing.amount_human,
         to: existing.to_address,
@@ -175,11 +175,11 @@ export async function rebuildDelegationSignContext(
         signature_scheme: 'eip712_userop',
         typed_data: userOpTypedData(state, accountAddress as `0x${string}`, intentChainId),
         components: {
-          safe: agent.safe_address,
+          safe: agent.account_address,
           // #2907: same-value twin of the deprecated `safe`, not of
           // `account` (a different address on this shape — see the sibling
           // comment in `delegation-authorize.ts`).
-          payer_account: agent.safe_address,
+          payer_account: agent.account_address,
           account: accountAddress,
           token: existing.token_address,
           to: existing.to_address,
@@ -244,8 +244,8 @@ export async function rebuildDelegationSignContext(
       status: existing.status,
       expires_at: expiresAt,
       chain_id: agent.chain_id,
-      safe_address: agent.safe_address,
-      payer: agent.safe_address,
+      safe_address: agent.account_address,
+      payer: agent.account_address,
       token: tokenSymbol,
       amount: existing.amount_human,
       to: existing.to_address,

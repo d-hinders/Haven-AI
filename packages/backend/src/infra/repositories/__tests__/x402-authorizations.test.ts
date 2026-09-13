@@ -57,7 +57,7 @@ interface IntentSeed {
 async function seedIntent(seed: IntentSeed): Promise<string> {
   const result = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
-       (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
         status, expires_at, source, payment_rail, x402_idempotency_key,
         machine_idempotency_key, signature, tx_hash, created_at, execution_rail)

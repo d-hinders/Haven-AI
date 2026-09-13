@@ -6,7 +6,7 @@
  * ## Why this test exists
  *
  * `controls.rail` was documented for years as "'delegation' or 'allowance'".
- * The emitter passes `user_safes.execution_rail` through verbatim, and that
+ * The emitter passes `smart_accounts.execution_rail` through verbatim, and that
  * column's CHECK domain is `allowance_module | session_key | delegation`
  * (migration 041, widening 036). So `'allowance'` was a value the published
  * contract named and the database could not hold — and the same string in

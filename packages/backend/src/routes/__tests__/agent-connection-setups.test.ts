@@ -53,7 +53,7 @@ vi.mock('../../modules/passport/index.js', () => ({
 
 const SAFE = {
   id: 'safe-1',
-  safe_address: '0x2222222222222222222222222222222222222222',
+  account_address: '0x2222222222222222222222222222222222222222',
   name: 'Main Haven wallet',
   chain_id: 100,
 }
@@ -62,7 +62,7 @@ const SETUP = {
   id: '11111111-1111-1111-1111-111111111111',
   user_id: 'user-1',
   agent_id: null,
-  safe_id: SAFE.id,
+  account_id: SAFE.id,
   name: 'Research Agent',
   description: 'Pays for research APIs',
   runtime: 'claude-code',
@@ -85,10 +85,10 @@ const SETUP = {
   connector_context: {},
   install_status: {},
   approval_status: 'not_started',
-  safe_tx_hash: null,
+  account_tx_hash: null,
   tx_hash: null,
   failure_reason: null,
-  safe_address: SAFE.safe_address,
+  account_address: SAFE.account_address,
   safe_name: SAFE.name,
   safe_chain_id: SAFE.chain_id,
 }
@@ -149,7 +149,7 @@ type SetupFixture = Omit<
   | 'api_key_prefix'
   | 'connector_version'
   | 'approval_status'
-  | 'safe_tx_hash'
+  | 'account_tx_hash'
   | 'tx_hash'
   | 'failure_reason'
 > & {
@@ -170,7 +170,7 @@ type SetupFixture = Omit<
    */
   run_mode?: string | null
   approval_status: string
-  safe_tx_hash: string | null
+  account_tx_hash: string | null
   tx_hash: string | null
   failure_reason: string | null
 }
@@ -223,7 +223,7 @@ function primeDb(...routes: DbRoute[]) {
 
 /** findAccountForSetup (POST / — explicit safe_id or the default-wallet fallback). */
 const safeLookup = (row: Record<string, unknown> = SAFE): DbRoute => [
-  /FROM user_safes/,
+  /FROM smart_accounts/,
   () => ({ rows: [row] }),
 ]
 /** findSetupByTokenHash (POST /resolve's token load). */
@@ -1028,7 +1028,7 @@ describe('agent connection setup routes', () => {
 
     mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) => {
       const text = String(sql)
-      if (text.includes('FROM user_safes')) {
+      if (text.includes('FROM smart_accounts')) {
         return { rows: [SAFE] }
       }
       if (text.includes('UPDATE agent_connection_setups')) {
@@ -1055,7 +1055,7 @@ describe('agent connection setup routes', () => {
           ...SETUP,
           id: String(params[0]),
           user_id: String(params[1]),
-          safe_id: String(params[2]),
+          account_id: String(params[2]),
           name: String(params[3]),
           description: params[4] as string | null,
           runtime: params[5] as string | null,
@@ -1119,7 +1119,7 @@ describe('agent connection setup routes', () => {
           status: String(params[2]),
           approval_status: String(params[3]),
           tx_hash: params[4] as string | null,
-          safe_tx_hash: params[5] as string | null,
+          account_tx_hash: params[5] as string | null,
           failure_reason: params[6] as string | null,
         }
         return { rows: [] }
@@ -1251,7 +1251,7 @@ describe('agent connection setup routes', () => {
       setup_id: SETUP.id,
       status: 'awaiting_connection',
       agent: { name: 'Research Agent' },
-      haven_wallet: { address: SAFE.safe_address, chain_id: 100 },
+      haven_wallet: { address: SAFE.account_address, chain_id: 100 },
       challenge: { id: SETUP.challenge_id, message: SETUP.challenge_message },
     })
     expect(JSON.stringify(response.json())).not.toMatch(/api_key|delegate_key|private_key/)
@@ -1805,7 +1805,7 @@ describe('agent connection setup routes', () => {
       String(sql).includes('UPDATE agent_connection_setups'),
     )
     expect(String(cancelUpdate?.[0])).toContain("status IN ('awaiting_connection', 'connected_local', 'awaiting_wallet_approval')")
-    expect(String(cancelUpdate?.[0])).toContain('safe_tx_hash IS NULL')
+    expect(String(cancelUpdate?.[0])).toContain('account_tx_hash IS NULL')
 
     await app.close()
   })
@@ -1819,7 +1819,7 @@ describe('agent connection setup routes', () => {
             ...CONNECTED_SETUP,
             status: 'proposed',
             approval_status: 'proposed',
-            safe_tx_hash: SAFE_TX_HASH,
+            account_tx_hash: SAFE_TX_HASH,
           }],
         }
       }
@@ -2069,7 +2069,7 @@ describe('setup allowance cap on the delegation rail (#1074)', () => {
   it('a single allowance on the delegation rail is accepted', async () => {
     const app = await buildApp()
     mockQuery.mockImplementation(async (sql: string) => {
-      if (String(sql).includes('FROM user_safes')) return { rows: [{ ...SAFE, account_type: 'delegator_hybrid' }] }
+      if (String(sql).includes('FROM smart_accounts')) return { rows: [{ ...SAFE, account_type: 'delegator_hybrid' }] }
       return { rows: [] }
     })
     const response = await app.inject({
@@ -2084,7 +2084,7 @@ describe('setup allowance cap on the delegation rail (#1074)', () => {
   it('the legacy Safe rail still accepts multiple allowances — unchanged', async () => {
     const app = await buildApp()
     mockQuery.mockImplementation(async (sql: string) => {
-      if (String(sql).includes('FROM user_safes')) return { rows: [{ ...SAFE, account_type: null }] }
+      if (String(sql).includes('FROM smart_accounts')) return { rows: [{ ...SAFE, account_type: null }] }
       return { rows: [] }
     })
     const response = await app.inject({
@@ -2417,7 +2417,7 @@ describe('data access characterization (#985)', () => {
 
     expect(response.statusCode).toBe(201)
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
-    expect(String(sql)).toContain('FROM user_safes')
+    expect(String(sql)).toContain('FROM smart_accounts')
     // The tenant predicate is asserted in the SQL, not merely in the params:
     // the params come from the CALL SITE and stay `['user-1']` even if the
     // `user_id` clause is deleted from the query — a mutation that silently
@@ -2840,7 +2840,7 @@ describe('GET /:setupId/connector-status (#1377 part D)', () => {
     user_id: 'user-1',
     name: 'Research Agent',
     delegate_address: DELEGATE_ADDRESS,
-    safe_address: SAFE.safe_address,
+    account_address: SAFE.account_address,
     chain_id: SAFE.chain_id,
     status: 'pending_approval',
     execution_rail: 'delegation',

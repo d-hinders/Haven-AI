@@ -196,7 +196,7 @@ describe('chain defaults go through DEFAULT_CHAIN_ID (#990)', () => {
       'if (!row.chain_id) row.chain_id = 8453',
       "const chainId = Number(req.query.chain_id ?? '8453')",
       'const chain = toChain(row.chain_id, 8453)',
-      'INSERT INTO user_safes (address, chain_id) VALUES ($1, 8453)',
+      'INSERT INTO smart_accounts (address, chain_id) VALUES ($1, 8453)',
     ]
     // The rate limits that the first version of this guard wrongly flagged, and
     // that #990's own premise misread as chain fallbacks. Regression case.

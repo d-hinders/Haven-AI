@@ -71,14 +71,14 @@ describeDb('delegation lifecycle owner read (#2025)', () => {
       [`grant-eligibility-${Date.now()}@test.example`],
     )
     const safe = await db.query<{ id: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
        VALUES ($1, '0x1111111111111111111111111111111111111111', 'Delegation account', true, 'delegator_hybrid')
        RETURNING id`,
       [user.rows[0].id],
     )
     const [revoked, active] = await Promise.all(['revoked', 'active'].map(async (status) => {
       const result = await db.query<{ id: string }>(
-        `INSERT INTO agents (user_id, safe_id, name, status, delegate_address)
+        `INSERT INTO agents (user_id, account_id, name, status, delegate_address)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
         [
           user.rows[0].id,
@@ -289,12 +289,12 @@ describeDb('agents archive (#1401, real DB)', () => {
       [`archive-legacy-u${++seq}-${Date.now()}@test.example`],
     )
     const safe = await db.query<{ id: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
        VALUES ($1, $2, 'Legacy account', true, 'safe') RETURNING id`,
       [user.rows[0].id, `0x${(++seq).toString(16).padStart(40, '0')}`],
     )
     const agent = await db.query<{ id: string }>(
-      `INSERT INTO agents (user_id, safe_id, name, status) VALUES ($1, $2, 'Legacy archive test', $3) RETURNING id`,
+      `INSERT INTO agents (user_id, account_id, name, status) VALUES ($1, $2, 'Legacy archive test', $3) RETURNING id`,
       [user.rows[0].id, safe.rows[0].id, status],
     )
     return { userId: user.rows[0].id, agentId: agent.rows[0].id }
@@ -326,7 +326,7 @@ describeDb('agents archive (#1401, real DB)', () => {
 
   it('archives a legacy record after its Safe was unlinked, without requiring revocation (#2258)', async () => {
     const { userId, agentId } = await seedLegacyAgent('active')
-    await db.query(`UPDATE agents SET safe_id = NULL WHERE id = $1`, [agentId])
+    await db.query(`UPDATE agents SET account_id = NULL WHERE id = $1`, [agentId])
 
     const archived = await archiveAgent(agentId, userId)
 
@@ -419,7 +419,7 @@ describeDb('agents archive (#1401, real DB)', () => {
     const { userId, agentId } = await seedAgent('revoked')
     await db.query(
       `INSERT INTO payment_intents
-         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+         (agent_id, user_id, account_address, token_symbol, token_address, to_address,
           amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash, status, expires_at)
        VALUES ($1, $2, '0x00000000000000000000000000000000000000s1', 'USDC',
                '0x036cbd53842c5426634e7929541ec2318f3dcf7e',

@@ -66,7 +66,7 @@ const AGENT = {
   user_id: '22222222-2222-2222-2222-222222222222',
   name: 'Payment Agent',
   delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-  safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
   chain_id: 8453,
   status: 'active',
 }
@@ -244,7 +244,7 @@ describe('machine payment routes', () => {
       status: 'pending_signature',
       expires_at: '2099-01-01T00:10:00.000Z',
       chain_id: 8453,
-      safe_address: AGENT.safe_address,
+      account_address: AGENT.account_address,
       token_symbol: 'USDC',
       token_address: USDC,
       amount_human: '0.01',
@@ -272,7 +272,7 @@ describe('machine payment routes', () => {
       kind: 'payment_intent',
       agent_id: AGENT.id,
       user_id: AGENT.user_id,
-      safe_address: AGENT.safe_address,
+      account_address: AGENT.account_address,
       chain_id: 8453,
       token_symbol: 'USDC',
       token_address: USDC,
@@ -317,9 +317,9 @@ describe('machine payment routes', () => {
       id: AGENT.id,
       name: AGENT.name,
       status: AGENT.status,
-      safe_address: AGENT.safe_address,
+      safe_address: AGENT.account_address,
       // #2907: account_address twins safe_address, request-level asserted.
-      account_address: AGENT.safe_address,
+      account_address: AGENT.account_address,
       delegate_address: AGENT.delegate_address,
       // #1472: null here BECAUSE the fixture buckets into legacy — the
       // delegate account only exists on the delegation rail.
@@ -422,8 +422,8 @@ describe('machine payment routes', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({
         agent_id: AGENT.id,
-        safe_address: AGENT.safe_address,
-        account_address: AGENT.safe_address,
+        safe_address: AGENT.account_address,
+        account_address: AGENT.account_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
         allowances: [{
@@ -561,8 +561,8 @@ describe('machine payment routes', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({
         agent_id: AGENT.id,
-        safe_address: AGENT.safe_address,
-        account_address: AGENT.safe_address,
+        safe_address: AGENT.account_address,
+        account_address: AGENT.account_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
         allowances: [],
@@ -618,7 +618,7 @@ describe('machine payment routes', () => {
           chain_id: 8453,
           resource_url: challenge.resource,
           merchant_address: RECIPIENT.toLowerCase(),
-          payer_address: AGENT.safe_address.toLowerCase(),
+          payer_address: AGENT.account_address.toLowerCase(),
           settlement_address: RECIPIENT.toLowerCase(),
           token_symbol: 'USDC',
           token_address: USDC,
@@ -663,7 +663,7 @@ describe('machine payment routes', () => {
         chain_id: 8453,
         resource_url: challenge.resource,
         merchant_address: RECIPIENT.toLowerCase(),
-        payer_address: AGENT.safe_address.toLowerCase(),
+        payer_address: AGENT.account_address.toLowerCase(),
         settlement_address: RECIPIENT.toLowerCase(),
         token_symbol: 'USDC',
         token_address: USDC,
@@ -1023,7 +1023,7 @@ describe('machine payment routes', () => {
           chain_id: 8453,
           resource_url: challenge.resource,
           merchant_address: RECIPIENT.toLowerCase(),
-          payer_address: AGENT.safe_address.toLowerCase(),
+          payer_address: AGENT.account_address.toLowerCase(),
           settlement_address: RECIPIENT.toLowerCase(),
           token_symbol: 'USDC',
           token_address: USDC.toLowerCase(),

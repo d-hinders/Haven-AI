@@ -145,7 +145,7 @@ it gives a wrong password, instead of becoming an enumeration oracle.
 
 A third lesson, and the one most likely to bite the next extraction: **a guard
 test that scans a route file for SQL must move with the SQL.** `auth.test.ts`
-policed `account_type` in every `SELECT … FROM user_safes` in `auth.ts` (#1069).
+policed `account_type` in every `SELECT … FROM smart_accounts` in `auth.ts` (#1069).
 Moving the statement would have left that regex matching an empty set — still
 green, policing nothing. It now asserts the exported constant directly, and a
-second test pins that `auth.ts` holds no inline `user_safes` SQL at all.
+second test pins that `auth.ts` holds no inline `smart_accounts` SQL at all.

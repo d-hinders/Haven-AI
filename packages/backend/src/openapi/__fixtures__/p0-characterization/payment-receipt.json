@@ -6,7 +6,7 @@
     "url": "buildPaymentReceipt(row)",
     "payload": {
       "id": "pi1",
-      "safe_address": "0x135a9215604711AC70d970e12Caa812c53537EF4",
+      "account_address": "0x135a9215604711AC70d970e12Caa812c53537EF4",
       "chain_id": 100,
       "token_symbol": "xDAI",
       "token_address": "0x0000000000000000000000000000000000000000",

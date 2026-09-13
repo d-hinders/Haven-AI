@@ -256,7 +256,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
       rows: [
         {
           id: 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6',
-          safe_address: '0x' + 'ab'.repeat(20),
+          account_address: '0x' + 'ab'.repeat(20),
           chain_id: 8453,
           name: 'Main',
           is_default: true,
@@ -278,7 +278,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
 
   it('GET /user/safes/{id}/funding — old path AND the /user/accounts/{id}/funding twin agree', async () => {
     const fixture = loadFixture('user-safes-funding')
-    const fundingRow = { id: 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6', safe_address: '0x' + 'ab'.repeat(20), chain_id: 8453 }
+    const fundingRow = { id: 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6', account_address: '0x' + 'ab'.repeat(20), chain_id: 8453 }
     const chainClient = { getNativeBalance: async () => 0n, getTokenBalance: async () => 5_000_000n }
 
     const app = Fastify({ logger: false })
@@ -327,8 +327,8 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
           name: 'Research Agent',
           description: null,
           delegate_address: '0x1111111111111111111111111111111111111111',
-          safe_id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16',
-          safe_address: '0x2222222222222222222222222222222222222222',
+          account_id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16',
+          account_address: '0x2222222222222222222222222222222222222222',
           safe_name: 'Main wallet',
           safe_chain_id: 8453,
           api_key_prefix: 'sk_agent_abc',
@@ -355,8 +355,8 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
           name: 'Research Agent',
           description: null,
           delegate_address: '0x1111111111111111111111111111111111111111',
-          safe_id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16',
-          safe_address: '0x2222222222222222222222222222222222222222',
+          account_id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16',
+          account_address: '0x2222222222222222222222222222222222222222',
           safe_name: 'Main wallet',
           safe_chain_id: 8453,
           api_key_prefix: 'sk_agent_abc',
@@ -377,7 +377,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
     const fixture = loadFixture('agents-create')
     mockQuery.mockImplementation(async (sql: string) => {
       const s = String(sql)
-      if (/SELECT id FROM user_safes/.test(s)) return { rows: [{ id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16' }] }
+      if (/SELECT id FROM smart_accounts/.test(s)) return { rows: [{ id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16' }] }
       if (/INSERT INTO agents/.test(s)) {
         return {
           rows: [
@@ -386,7 +386,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
               name: 'A',
               description: null,
               delegate_address: '0x1111111111111111111111111111111111111111',
-              safe_id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16',
+              account_id: 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16',
               api_key_prefix: 'sk_a',
               status: 'active',
               created_at: '2026-07-26T00:00:00.000Z',
@@ -395,11 +395,11 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
           ],
         }
       }
-      if (/SELECT safe_address, name AS safe_name/.test(s)) {
+      if (/SELECT account_address, name AS safe_name/.test(s)) {
         return {
           rows: [
             {
-              safe_address: '0x2222222222222222222222222222222222222222',
+              account_address: '0x2222222222222222222222222222222222222222',
               safe_name: 'Main',
               safe_chain_id: 84532,
             },
@@ -431,8 +431,8 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
             {
               id: 'payment-1',
               agent_id: 'agent-1',
-              safe_id: 'safe-base',
-              safe_address: '0x1111111111111111111111111111111111111111',
+              account_id: 'safe-base',
+              account_address: '0x1111111111111111111111111111111111111111',
               safe_name: 'Base wallet',
               chain_id: 8453,
               token_symbol: 'USDC',
@@ -490,7 +490,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
           email: 'test@example.com',
           password_hash: '$2b$10$C1z6c6c6c6c6c6c6c6c6c.u6c6c6c6c6c6c6c6c6c6c6c6c6c6c6C',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: null,
+          account_address: null,
         },
       ],
     })
@@ -510,19 +510,19 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
               name: 'Ada Lovelace',
               email: 'test@example.com',
               wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-              safe_address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              account_address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
               currency_preference: 'USD',
               created_at: '2025-01-01T00:00:00.000Z',
             },
           ],
         })
       }
-      if (text.includes('FROM user_safes')) {
+      if (text.includes('FROM smart_accounts')) {
         return Promise.resolve({
           rows: [
             {
               id: 'safe-1',
-              safe_address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              account_address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
               chain_id: 8453,
               name: 'Main',
               is_default: true,
@@ -548,7 +548,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
           credential_id: 'cred-1',
           signer_address: '0x3333333333333333333333333333333333333333',
           chain_id: 8453,
-          safe_address: '0x4444444444444444444444444444444444444444',
+          account_address: '0x4444444444444444444444444444444444444444',
           created_at: '2026-02-01T00:00:00.000Z',
         },
       ],
@@ -563,7 +563,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
       user_id: '22222222-2222-2222-2222-222222222222',
       name: 'Payment Agent',
       delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-      safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
       chain_id: 8453,
       status: 'active',
     }
@@ -587,7 +587,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: null,
-          safe_address: null,
+          account_address: null,
           currency_preference: 'USD',
           created_at: '2025-01-01T00:00:00.000Z',
         },
@@ -604,7 +604,7 @@ describe('#2907 AC #1 — old-name response characterization replay (base 6e3ea1
           id: 'user-1',
           email: 'test@example.com',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: null,
+          account_address: null,
         },
       ],
     })

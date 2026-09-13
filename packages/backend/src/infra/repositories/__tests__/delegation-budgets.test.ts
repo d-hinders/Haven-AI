@@ -476,12 +476,12 @@ describeDb('delegation build slot lock (#2613)', () => {
     )
     const userId = user.rows[0].id
     const safe = await db.query<{ id: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
        VALUES ($1, $2, 'Delegation account', true, 'delegator_hybrid') RETURNING id`,
       [userId, `0x${n.toString(16).padStart(40, '0')}`],
     )
     const agent = await db.query<{ id: string }>(
-      `INSERT INTO agents (user_id, safe_id, name, status, delegate_address)
+      `INSERT INTO agents (user_id, account_id, name, status, delegate_address)
        VALUES ($1, $2, 'Slot agent', 'active', $3) RETURNING id`,
       [userId, safe.rows[0].id, `0x${(n + 1000).toString(16).padStart(40, '0')}`],
     )

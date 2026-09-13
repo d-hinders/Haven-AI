@@ -55,7 +55,7 @@ export async function aggregateAccountTransactions(
     try {
       const { transactions, hadFailures, truncated: safeTruncated } = await fetchAccountTransactions({
         accountId: safe.id,
-        accountAddress: safe.safe_address,
+        accountAddress: safe.account_address,
         chainId: safe.chain_id,
         log,
         fresh,
@@ -74,14 +74,14 @@ export async function aggregateAccountTransactions(
           ...tx,
           chainId: safe.chain_id,
           safeId: safe.id,
-          safeAddress: safe.safe_address,
+          safeAddress: safe.account_address,
           safeName: safe.name,
         })
       }
     } catch (err) {
       failedSafeIds.push(safe.id)
       log.warn(
-        { err, accountId: safe.id, accountAddress: safe.safe_address, chainId: safe.chain_id },
+        { err, accountId: safe.id, accountAddress: safe.account_address, chainId: safe.chain_id },
         'Safe transaction aggregation failed',
       )
     }
@@ -210,7 +210,7 @@ export async function buildAccountTransactionsPage(
 
   const userSafe: SmartAccountRow = {
     id: accountId,
-    safe_address: accountAddress,
+    account_address: accountAddress,
     chain_id: chainId,
     name: '',
   }
@@ -286,7 +286,7 @@ export async function resolveTransactionFilters(
       try {
         const { transactions } = await fetchAccountTransactions({
           accountId: safe.id,
-          accountAddress: safe.safe_address,
+          accountAddress: safe.account_address,
           chainId: safe.chain_id,
           log,
           fresh,
@@ -295,7 +295,7 @@ export async function resolveTransactionFilters(
         return { safe, transactions }
       } catch (err) {
         log.warn(
-          { err, accountId: safe.id, accountAddress: safe.safe_address, chainId: safe.chain_id },
+          { err, accountId: safe.id, accountAddress: safe.account_address, chainId: safe.chain_id },
           'Transaction filter token collection failed',
         )
         return { safe, transactions: [] as Transaction[] }

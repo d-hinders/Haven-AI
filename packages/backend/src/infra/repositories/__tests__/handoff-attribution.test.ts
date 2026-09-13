@@ -26,7 +26,7 @@ let seq = 0
 
 async function seedSafe(userId: string): Promise<string> {
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, name, chain_id)
+    `INSERT INTO smart_accounts (user_id, account_address, name, chain_id)
      VALUES ($1, $2, 'Main account', 84532) RETURNING id`,
     [userId, `0x${String(++seq).padStart(40, '0')}`],
   )

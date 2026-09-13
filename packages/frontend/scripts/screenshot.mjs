@@ -4003,7 +4003,7 @@ export const SCENARIOS = {
     // this scenario timed out waiting for the button while the unresolved
     // counterpart found it, because a missing chain_id happens to route the
     // gate down a different branch. Putting the account on the Safe rail
-    // (`account_type: 'safe'`) leaves it with no stored passkey, i.e.
+    // (`account_type: 'legacy_safe'`) leaves it with no stored passkey, i.e.
     // `no_signer`, which is a hero that offers its actions. Nothing about the
     // modal under capture changes.
     //
@@ -4015,9 +4015,9 @@ export const SCENARIOS = {
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
     // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       // Same both-endpoints reasoning as the unresolved twin below.
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4066,7 +4066,7 @@ export const SCENARIOS = {
       // #2202: the rail is NAMED here too, exactly as its resolved twin names
       // it — the pair is only evidence about `chain_id` if `chain_id` is the
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'safe' }
+      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
       delete safeWithoutChain.chain_id
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
@@ -4088,12 +4088,12 @@ export const SCENARIOS = {
     description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
     // The resolved half of the #1852 pair. Same construction as `add-funds`
     // above and for the same reasons: the chain data is the shared fixture's
-    // (84532), and the ONE override is the rail marker (`account_type: 'safe'`,
+    // (84532), and the ONE override is the rail marker (`account_type: 'legacy_safe'`,
     // #2202 — see `add-funds` for why it is SET rather than dropped) so the
     // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4138,7 +4138,7 @@ export const SCENARIOS = {
       // #2202: the rail is NAMED here too, exactly as its resolved twin names
       // it — the pair is only evidence about `chain_id` if `chain_id` is the
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'safe' }
+      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
       delete safeWithoutChain.chain_id
       if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
@@ -4177,7 +4177,7 @@ export const SCENARIOS = {
     //    `activeStep === 3`). Funds and agents come from the shared fixture
     //    untouched, so steps 1 and 2 are genuinely complete and step 3 is
     //    genuinely the active one.
-    // 2. `account_type: 'safe'` on the account. Same override, same reason, as
+    // 2. `account_type: 'legacy_safe'` on the account. Same override, same reason, as
     //    the `add-funds` scenario above: the shared fixture's
     //    `delegator_hybrid` hydrates a signer set whose passkey is not on this
     //    device, so `requiresOtherDevice` is true — and that flag gates
@@ -4190,9 +4190,9 @@ export const SCENARIOS = {
         return { ...FIXTURE_OVERVIEW, onboardingProgress: { hasFirstAgentPayment: false } }
       }
       if (apiPath === '/auth/me') {
-        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {

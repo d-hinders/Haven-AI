@@ -299,7 +299,7 @@ describe('AccountDetailClient', () => {
           name: 'Historical agent',
           safe_id: 'safe-1',
           status: 'revoked',
-          account_type: 'safe',
+          account_type: 'legacy_safe',
           allowances: [],
         },
       ],

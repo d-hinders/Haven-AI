@@ -217,7 +217,8 @@ describe('DashboardClient', () => {
    * whose entire subject was the deleted row.
    *
    * #2459 — fixture decision, DELETED not kept: this test used to drive a
-   * legacy (`account_type: 'safe'`) account. #2413 filtered every account
+   * legacy account (the retired `account_type` value, renamed to
+   * `legacy_safe` by #2912). #2413 filtered every account
    * list query to `delegator_hybrid`
    * (`infra/repositories/{user-safes,agents,dashboard}.ts`), so that payload
    * can no longer occur on the wire, and DashboardClient no longer reads
@@ -539,9 +540,9 @@ describe('DashboardClient', () => {
             name: 'Ada',
             email: 'ada@example.com',
             wallet_address: null,
-            accounts: [{ ...SAFE, account_type: 'safe' as const }],
+            accounts: [{ ...SAFE, account_type: 'legacy_safe' as const }],
           },
-          activeAccount: { ...SAFE, account_type: 'safe' as const },
+          activeAccount: { ...SAFE, account_type: 'legacy_safe' as const },
           passkeys: [
             {
               id: 'passkey-1',
@@ -630,7 +631,7 @@ describe('DashboardClient', () => {
 
     it('does not show the nudge for a funded account that is not on the delegation rail', () => {
       // mockBaseState() defaults to the live delegation rail; legacy cases
-      // supply an explicit `account_type: 'safe'` fixture.
+      // supply an explicit `account_type: 'legacy_safe'` fixture.
       render(<DashboardClient />)
 
       expect(screen.queryByText('Add a backup soon')).not.toBeInTheDocument()

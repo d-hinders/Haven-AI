@@ -309,7 +309,7 @@ describe('delegation lifecycle API (#828)', () => {
     })
 
     it.each([
-      ['legacy account', { agent: agentRow({ account_type: 'safe' }) }, 409],
+      ['legacy account', { agent: agentRow({ account_type: 'legacy_safe' }) }, 409],
       ['missing delegate key', { agent: agentRow({ delegate_address: null }) }, 409],
       ['unknown agent', { agent: null }, 404],
     ])('rejects %s', async (_label, opts, code) => {
@@ -370,7 +370,7 @@ describe('delegation lifecycle API (#828)', () => {
       })
 
       it('an account that leaves the delegation rail mid-request reuses the rail wording', async () => {
-        mockDb({ agentSequence: [agentRow(), null, agentRow({ account_type: 'safe' })] })
+        mockDb({ agentSequence: [agentRow(), null, agentRow({ account_type: 'legacy_safe' })] })
         const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
         expect(res.statusCode).toBe(409)
         expect(res.json()).toEqual({ error: 'Agent account is not on the delegation rail' })

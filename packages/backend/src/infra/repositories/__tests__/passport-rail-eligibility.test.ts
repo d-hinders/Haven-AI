@@ -60,7 +60,7 @@ async function seedAgentOnRail(
     const safe = await db.query<{ id: string }>(
       `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
        VALUES ($1, $2, 84532, $3, $4) RETURNING id`,
-      [userId, `0x${String(seq).padStart(40, 'a')}`, rail, accountType ?? 'safe'],
+      [userId, `0x${String(seq).padStart(40, 'a')}`, rail, accountType ?? 'legacy_safe'],
     )
     accountId = safe.rows[0].id
   }
@@ -142,8 +142,8 @@ describeDb('passport issuance is delegation-rail only (#2138)', () => {
     // agent ids, which is what the loop's failure message needed anyway.
     const seeded: Array<{ label: string; agentId: string }> = []
     for (const [rail, accountType] of [
-      ['allowance_module', 'safe'],
-      ['session_key', 'safe'],
+      ['allowance_module', 'legacy_safe'],
+      ['session_key', 'legacy_safe'],
       [null, null], // no bound account at all — the LEFT JOIN's null
     ] as Array<[string | null, string | null]>) {
       const { agentId } = await seedAgentOnRail(rail, accountType)
@@ -178,7 +178,7 @@ describeDb('passport issuance is delegation-rail only (#2138)', () => {
     // Ordering is `requested_at ASC`, so a legacy row that is OLDER must not
     // occupy the batch and starve the eligible one behind it — the failure
     // shape #1043's own comment warns about for unisolated sweep failures.
-    const legacy = await seedAgentOnRail('allowance_module', 'safe')
+    const legacy = await seedAgentOnRail('allowance_module', 'legacy_safe')
     await seedRetryablePassport(legacy.agentId)
     const live = await seedAgentOnRail('delegation', 'delegator_hybrid')
     await db.query(
@@ -228,7 +228,7 @@ describeDb('passport issuance is delegation-rail only (#2138)', () => {
     // old `length === 1`.
     const seeded: Array<{ agentId: string; label: string; tsSaysEligible: boolean }> = []
     for (const rail of domain) {
-      for (const accountType of ['safe', 'delegator_hybrid']) {
+      for (const accountType of ['legacy_safe', 'delegator_hybrid']) {
         const { agentId } = await seedAgentOnRail(rail, accountType)
         await seedRetryablePassport(agentId)
         seeded.push({
@@ -259,7 +259,7 @@ describeDb('passport issuance is delegation-rail only (#2138)', () => {
     // Without this, the loop above would pass on a domain where every member
     // happened to answer the same way.
     const domain = railDomainFromMigration()
-    expect(domain.some((r) => isPassportIssuableAccount(r, 'safe'))).toBe(true)
-    expect(domain.some((r) => !isPassportIssuableAccount(r, 'safe'))).toBe(true)
+    expect(domain.some((r) => isPassportIssuableAccount(r, 'legacy_safe'))).toBe(true)
+    expect(domain.some((r) => !isPassportIssuableAccount(r, 'legacy_safe'))).toBe(true)
   })
 })

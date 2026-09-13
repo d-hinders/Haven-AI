@@ -956,7 +956,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // #2202: the rail is named, and it matches the resolved twin's — the
         // pair is evidence about `chain_id` only while `chain_id` is the one
         // field that differs between them.
-        expect(accounts[0].account_type).toBe('safe')
+        expect(accounts[0].account_type).toBe('legacy_safe')
       }
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
     })
@@ -979,7 +979,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // rendered differently (`railOf` is deleted since #2413). What this still pins is that the override is the SAME on
       // both halves of the pair, which is what makes `chain_id` the sole
       // variable.
-      expect(me.accounts[0].account_type).toBe('safe')
+      expect(me.accounts[0].account_type).toBe('legacy_safe')
       // Both safe endpoints must agree — a fixture where one says 84532 and the
       // other says nothing is a trap for the next scenario that reads the other.
       const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
@@ -1015,8 +1015,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // fixture, and both halves carry it, so `chain_id` is the sole variable.
         // #2202: named rather than absent — see the #1844 pair above. Both
         // halves carry it, which is the invariant this line is really for.
-        expect(rList?.[0].account_type).toBe('safe')
-        expect(uList?.[0].account_type).toBe('safe')
+        expect(rList?.[0].account_type).toBe('legacy_safe')
+        expect(uList?.[0].account_type).toBe('legacy_safe')
       }
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()

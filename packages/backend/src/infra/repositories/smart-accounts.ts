@@ -63,12 +63,16 @@ export interface AccountWithTypeRow {
  * those accounts nicely, the three account-list queries stop returning them
  * and every branch behind them becomes unreachable and deletable.
  *
- * `= 'delegator_hybrid'` is an equality test, not a `<> 'safe'` one, and that
- * is deliberate: it excludes any future value as well as `'safe'`. It does NOT
- * exclude NULL, because there is no NULL to exclude — `041_hybrid_accounts.ts`
- * added the column `NOT NULL DEFAULT 'safe'` under
- * `CHECK (account_type IN ('safe','delegator_hybrid'))`, so pre-existing rows
- * were backfilled to `'safe'` and the column's domain has exactly two values.
+ * `= 'delegator_hybrid'` is an equality test, not a `<> 'legacy_safe'` one,
+ * and that is deliberate: it excludes any future value as well as
+ * `'legacy_safe'`. It does NOT exclude NULL, because there is no NULL to
+ * exclude — `041_hybrid_accounts.ts` added the column `NOT NULL DEFAULT
+ * 'safe'` under a two-value CHECK naming that same retired literal, so
+ * pre-existing rows were backfilled to the retired value and the column's
+ * domain had exactly two values. `085_account_type_legacy_safe.ts` (#2912)
+ * later renamed that retired value to `'legacy_safe'` and tightened the CHECK
+ * to `('legacy_safe','delegator_hybrid')` — the domain is still exactly two
+ * values, the retired one just reads `'legacy_safe'` now.
  * (An earlier draft of this comment claimed legacy rows "carry NULL" and a
  * test asserted it; the insert failed the not-null constraint in CI, which is
  * where the claim was corrected.)

@@ -14,11 +14,20 @@
  * from the migration's own source — `079_schema_local_constraint_repair.ts`
  * is the record of what happens when a constraint's existence is inferred
  * instead of measured.
+ *
+ * #2912 (data migration, epic #2906 phase 3b, later than this one) tightens
+ * the `account_type` CHECK and renames the `'safe'` value to `'legacy_safe'`
+ * on top of this migration's rename. The two tests below that assert this
+ * migration's OWN untouched-content scope — the CHECK's exact definition and
+ * a `'safe'`-valued row surviving the rename — revert 085 for their
+ * duration so they keep testing 084 in isolation rather than drifting once
+ * 085 lands.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb, withMigrationReverted } from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../084_rename_user_safes_to_smart_accounts.js'
+import { down as down085, up as up085 } from '../085_account_type_legacy_safe.js'
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -209,17 +218,27 @@ describeDb('migration 084: rename user_safes to smart_accounts (#2911)', () => {
     expect(await constraintExists(table, newName)).toBe(true)
   })
 
-  // The CHECK constraints' CONTENT is untouched by this migration — only the
-  // name changes. The `'safe'` value and the IN-list are #2912's scope.
+  // The CHECK constraints' CONTENT is untouched by THIS migration — only the
+  // name changes. The `'safe'` value and the IN-list are #2912's scope, and
+  // #2912 tightened it (085) on top of this migration — so this test reverts
+  // 085 for its duration to assert 084's own scope in isolation, the same
+  // "a later migration renamed what an earlier test asserted" shape 075's
+  // file-level wrap uses for 083/084.
   it("the renamed account_type CHECK keeps its exact content — #2912's scope, not this one's", async () => {
-    const { rows } = await db.query<{ def: string }>(
-      `SELECT pg_get_constraintdef(c.oid) AS def
-       FROM pg_constraint c
-       WHERE c.conname = 'smart_accounts_account_type_check'
-         AND c.conrelid = (current_schema() || '.smart_accounts')::regclass`,
+    await withMigrationReverted(
+      () => down085(db as never),
+      async () => {
+        const { rows } = await db.query<{ def: string }>(
+          `SELECT pg_get_constraintdef(c.oid) AS def
+           FROM pg_constraint c
+           WHERE c.conname = 'smart_accounts_account_type_check'
+             AND c.conrelid = (current_schema() || '.smart_accounts')::regclass`,
+        )
+        expect(rows[0]?.def).toContain("'safe'")
+        expect(rows[0]?.def).toContain("'delegator_hybrid'")
+      },
+      () => up085(db as never),
     )
-    expect(rows[0]?.def).toContain("'safe'")
-    expect(rows[0]?.def).toContain("'delegator_hybrid'")
   })
 
   // ── The 083 default, carried forward under the new name ─────────────────
@@ -229,19 +248,28 @@ describeDb('migration 084: rename user_safes to smart_accounts (#2911)', () => {
     expect(value).toBe("'delegator_hybrid'::character varying")
   })
 
+  // 085 (#2912) tightens the CHECK to reject 'safe', so this test — which
+  // asserts 084's OWN scope (the rename touches no row) — reverts 085 for
+  // its duration, same reasoning as the CHECK-content test above.
   it('a legacy account_type=\'safe\' row survives the rename with its value untouched', async () => {
-    const userId = await seedUser()
-    const inserted = await db.query<{ id: string }>(
-      `INSERT INTO smart_accounts (user_id, account_address, chain_id, account_type)
-       VALUES ($1, '0x0000000000000000000000000000000000000084', 84532, 'safe')
-       RETURNING id`,
-      [userId],
+    await withMigrationReverted(
+      () => down085(db as never),
+      async () => {
+        const userId = await seedUser()
+        const inserted = await db.query<{ id: string }>(
+          `INSERT INTO smart_accounts (user_id, account_address, chain_id, account_type)
+           VALUES ($1, '0x0000000000000000000000000000000000000084', 84532, 'safe')
+           RETURNING id`,
+          [userId],
+        )
+        const { rows } = await db.query<{ account_type: string }>(
+          `SELECT account_type FROM smart_accounts WHERE id = $1`,
+          [inserted.rows[0].id],
+        )
+        expect(rows[0].account_type).toBe('safe')
+      },
+      () => up085(db as never),
     )
-    const { rows } = await db.query<{ account_type: string }>(
-      `SELECT account_type FROM smart_accounts WHERE id = $1`,
-      [inserted.rows[0].id],
-    )
-    expect(rows[0].account_type).toBe('safe')
   })
 
   // ── `agents.account_id` — rename only, still no FK ───────────────────────

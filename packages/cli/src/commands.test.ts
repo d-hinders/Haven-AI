@@ -292,7 +292,7 @@ describe('budget grant/revoke (#2539)', () => {
   })
 
   it('grant refuses an agent that is not on the delegation rail', async () => {
-    const api = grantApi({ account_type: 'safe' })
+    const api = grantApi({ account_type: 'legacy_safe' })
     const { deps, err } = harness({ makeApi: () => api })
     const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440'], deps)
     expect(code).not.toBe(0)

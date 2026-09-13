@@ -52,10 +52,12 @@
  * photographs of a retired screen.
  *
  * Measured against the code rather than the issue: **yes, on the live rail.**
- * The column is `CHECK (account_type IN ('safe','delegator_hybrid'))`
- * (migration 041) and only `delegator_hybrid` spends (every payment entry
- * point answers 410 for the rest, #1986). `useActiveSigner` resolves a
- * `delegator_passkey` for a hydrated set only when `passkeys.length > 0`
+ * The `account_type` column's two-value CHECK (migration 041) originally
+ * admitted the retired rail's literal alongside `delegator_hybrid`;
+ * `085_account_type_legacy_safe.ts` (#2912) tightened it to
+ * `('legacy_safe','delegator_hybrid')`, and only `delegator_hybrid` spends
+ * (every payment entry point answers 410 for the rest, #1986). `useActiveSigner`
+ * resolves a `delegator_passkey` for a hydrated set only when `passkeys.length > 0`
  * (`lib/signer.ts`), so an EOA-owned `delegator_hybrid` with ZERO enrolled
  * passkeys — provisionable as `POST /accounts/hybrid { owner_address }`, the
  * same account shape the #829 live proof signed with (an EOA owner and empty

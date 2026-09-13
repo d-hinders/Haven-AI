@@ -261,6 +261,20 @@ chain.
 > wire keys this document quotes (`safe_address`, `safe_id` on responses) are
 > still emitted — the #2907 alias mappers are untouched and fed by local shims.
 
+> **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
+> migration):** this diff touched one file in this document's coverage list,
+> `infra/repositories/smart-accounts.ts`, and only its comment: the retired
+> `account_type` value is renamed `'safe'` → `'legacy_safe'` by
+> `085_account_type_legacy_safe.ts`, and the CHECK is tightened to
+> `('legacy_safe','delegator_hybrid')` — no `DELETE`, no row removed, inert
+> history kept representable under its new name (epic #1440's decision,
+> restated on #2912's issue). `DELEGATION_RAIL_ONLY`'s equality test
+> (`= 'delegator_hybrid'`) is unaffected — it was never keyed on the retired
+> value's spelling — and the migration's own test asserts the real repository
+> query (`listAccountsWithTypeForUser`) still matches only the live-rail rows
+> after the rename. Every predicate, tenant scope, authority check and
+> signing path in this document is unchanged.
+
 > **Re-verified #2851 (safe-retirement epic #1440, final slice):** the unlink
 > transaction in `infra/repositories/smart-accounts.ts` no longer nulls out
 > `self_sign_agents.safe_id` before deleting the account row — that step

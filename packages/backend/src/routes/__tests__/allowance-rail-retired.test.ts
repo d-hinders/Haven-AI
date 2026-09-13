@@ -171,7 +171,7 @@ function agentRow(executionRail: string | null) {
     chain_id: 84532,
     status: 'active',
     execution_rail: executionRail,
-    account_type: executionRail === 'delegation' ? 'delegator_hybrid' : 'safe',
+    account_type: executionRail === 'delegation' ? 'delegator_hybrid' : 'legacy_safe',
   }
 }
 

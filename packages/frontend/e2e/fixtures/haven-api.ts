@@ -21,10 +21,15 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  * spec that wants a retired-rail page today has nothing to opt down TO — the
  * state does not exist on the wire.
  *
- * The value is `'safe'` / `'delegator_hybrid'` and never `null` or absent:
- * migration `041_hybrid_accounts.ts` declares the column `VARCHAR(32) NOT NULL
- * DEFAULT 'safe'` with `CHECK (account_type IN ('safe','delegator_hybrid'))`,
- * so an absent value is not a state the backend can serve (#2202).
+ * The value is `'legacy_safe'` / `'delegator_hybrid'` and never `null` or
+ * absent: migration `041_hybrid_accounts.ts` declared the column
+ * `VARCHAR(32) NOT NULL DEFAULT 'safe'` with `CHECK (account_type IN
+ * ('safe','delegator_hybrid'))`, so an absent value is not a state the
+ * backend can serve (#2202). `085_account_type_legacy_safe.ts` (#2912) later
+ * renamed the retired value to `'legacy_safe'` and tightened the CHECK to
+ * `('legacy_safe','delegator_hybrid')` — the historical migration text above
+ * is unchanged (migrations are immutable), but the value this fixture
+ * exercises is the CURRENT one.
  */
 export const testSafe = {
   id: 'safe-main',

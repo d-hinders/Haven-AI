@@ -38,7 +38,7 @@ async function seedUser(): Promise<string> {
 
 // `account_type` is NOT NULL with a two-value CHECK (041_hybrid_accounts), so
 // the parameter is deliberately not nullable: there is no third state to seed.
-async function seedSafe(userId: string, accountType: 'safe' | 'delegator_hybrid'): Promise<string> {
+async function seedSafe(userId: string, accountType: 'legacy_safe' | 'delegator_hybrid'): Promise<string> {
   const safe = await db.query<{ id: string }>(
     `INSERT INTO smart_accounts (user_id, account_address, name, chain_id, account_type)
      VALUES ($1, $2, $3, 8453, $4) RETURNING id`,
@@ -66,7 +66,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
   it('all three account-list queries return the delegation account and not the legacy one', async () => {
     const userId = await seedUser()
     await seedSafe(userId, 'delegator_hybrid')
-    await seedSafe(userId, 'safe')
+    await seedSafe(userId, 'legacy_safe')
 
     expect((await listAccountsForUser(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
     expect((await listAccountsWithTypeForUser(userId)).map((s) => s.name)).toEqual([
@@ -81,7 +81,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     // The accepted consequence, pinned rather than discovered: this user is
     // routed to onboarding, which provisions a Hybrid DeleGator.
     const userId = await seedUser()
-    await seedSafe(userId, 'safe')
+    await seedSafe(userId, 'legacy_safe')
 
     expect(await listSessionAccountsForUser(userId)).toEqual([])
   })
@@ -89,7 +89,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
   it('the agent list drops an agent bound to a legacy account and keeps a delegation one', async () => {
     const userId = await seedUser()
     const hybrid = await seedSafe(userId, 'delegator_hybrid')
-    const legacy = await seedSafe(userId, 'safe')
+    const legacy = await seedSafe(userId, 'legacy_safe')
     await seedAgent(userId, hybrid, 'delegation agent')
     await seedAgent(userId, legacy, 'legacy agent')
 
@@ -126,7 +126,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
   it('the dashboard overview lists neither legacy accounts nor their agents', async () => {
     const userId = await seedUser()
     const hybrid = await seedSafe(userId, 'delegator_hybrid')
-    const legacy = await seedSafe(userId, 'safe')
+    const legacy = await seedSafe(userId, 'legacy_safe')
     await seedAgent(userId, hybrid, 'delegation agent')
     await seedAgent(userId, legacy, 'legacy agent')
 
@@ -138,7 +138,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     // Otherwise the single-record route stays a way to reach an agent the list
     // refuses to show — the same inconsistency one layer down.
     const userId = await seedUser()
-    const legacy = await seedSafe(userId, 'safe')
+    const legacy = await seedSafe(userId, 'legacy_safe')
     await seedAgent(userId, legacy, 'legacy agent')
 
     const listed = await listAgentsForUserAllStatuses(userId)

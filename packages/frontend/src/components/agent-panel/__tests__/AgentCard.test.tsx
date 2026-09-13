@@ -292,7 +292,7 @@ describe('AgentCard action-row matrix (#1402)', () => {
     renderCard(
       agentFixture({
         status: 'active',
-        account_type: 'safe' as Agent['account_type'],
+        account_type: 'legacy_safe' as Agent['account_type'],
         archived_at: '2026-06-01T00:00:00Z',
       }),
     )

@@ -117,7 +117,7 @@ function ConnectedAgentsSection({
   onConnectAgent: () => void
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card overflow-hidden">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Connected agents"
@@ -401,7 +401,7 @@ function MetricCard({
   // translate) makes the affordance obvious and matches the Stripe-style
   // hover treatment used on the dashboard hero.
   const baseClass =
-    'group block rounded-[10px] border border-[var(--v2-border)] bg-white p-5 shadow-card transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
+    'group block rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5 shadow-card transition-all duration-200 ease-out motion-reduce:transition-none motion-reduce:hover:translate-y-0'
   const hoverClass =
     'hover:-translate-y-px hover:shadow-card-raised hover:border-[var(--v2-border-strong)]'
 
@@ -517,7 +517,7 @@ function TransactionsSection({
   resolveAddress: (address: string) => string | null
 }) {
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card overflow-hidden">
+    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Recent transactions"

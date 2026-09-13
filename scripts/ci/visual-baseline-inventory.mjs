@@ -46,6 +46,22 @@ import path from 'node:path'
 export const BASELINE_ROOT = 'packages/frontend/e2e/__screenshots__'
 
 /**
+ * The dark-scheme capture convention (#2929).
+ *
+ * A baseline is dark iff its name ends `-dark.png`; the light set carries no
+ * scheme marker, which is what keeps every pre-#2929 baseline name byte-stable.
+ * This is the naming contract between `design-system.visual.spec.ts` (which
+ * writes the suffix off `testInfo.project.name`) and the project list in
+ * `playwright.config.ts` — stated once HERE so the inventory and the spec read
+ * one rule, and so a reader of the tick can tell which palette a listed
+ * baseline belongs to. The project this comparison runs under is named in the
+ * summary as well: a count of baselines without its project is the #2318
+ * instrument/claim gap again.
+ */
+export const DARK_PROJECT = 'chromium-desktop-dark'
+export const isDarkBaseline = (name) => name.endsWith('-dark.png')
+
+/**
  * Every committed baseline, grouped by the spec file that owns it.
  *
  * Sorted at both levels so the summary is stable between runs — an unstable
@@ -73,10 +89,23 @@ export function collectBaselines(root) {
 
 export function renderSummary(groups) {
   const total = groups.reduce((n, g) => n + g.baselines.length, 0)
+  // #2929: the dark captures are real baselines but belong to the
+  // `chromium-desktop-dark` project (`test:visual:dark`), not to the light
+  // `test:visual` run this report annotates. Naming the split here is what
+  // stops a reader counting `-dark` PNGs and over-reading the light tick —
+  // the #2318 instrument/claim gap, one layer down.
+  const darkCount = groups.reduce(
+    (n, g) => n + g.baselines.filter(isDarkBaseline).length,
+    0,
+  )
+  const lightCount = total - darkCount
   const lines = [
     '## Visual regression — what was actually compared',
     '',
     `**${total}** committed baseline${total === 1 ? '' : 's'} across **${groups.length}** spec file${groups.length === 1 ? '' : 's'}:`,
+    '',
+    `- Light scheme: **${lightCount}**, compared by \`chromium-desktop\` (\`test:visual\`).`,
+    `- Dark scheme: **${darkCount}** (\`*-dark.png\`), compared by \`${DARK_PROJECT}\` (\`test:visual:dark\`) — same job, its own gate (#2929).`,
     '',
   ]
   for (const group of groups) {

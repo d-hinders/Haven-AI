@@ -44,7 +44,7 @@ function ComingSoonToggle({ label, comingSoonText }: { label: string; comingSoon
         aria-label={label}
         className="relative h-6 w-11 cursor-not-allowed rounded-full bg-[var(--v2-surface-2)] opacity-70"
       >
-        <span className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm" />
+        <span className="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--v2-bg)] shadow-sm" />
       </button>
     </div>
   )

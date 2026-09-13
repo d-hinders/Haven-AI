@@ -73,7 +73,10 @@ function AddressAvatar({ address }: { address: string }) {
   return (
     <span
       aria-hidden
-      className="h-5 w-5 shrink-0 overflow-hidden rounded-full border border-white/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)]"
+      // Sits on the generative avatar gradient — a fixed, theme-independent
+      // hash palette (see getAvatarStyle), so the rim is fixed too and lives
+      // with the other never-invert paints in `.v2-avatar-chrome` (#2929).
+      className="v2-avatar-chrome h-5 w-5 shrink-0 overflow-hidden rounded-full border"
       style={getAvatarStyle(address)}
     />
   )

@@ -331,6 +331,49 @@ the token exists to make continuation legible in one specific way, and it stops
 meaning that if it becomes a general-purpose edge shadow. See § *Modal* →
 scroll-continuation cue.
 
+#### Elevation on the dark ground (#2929)
+
+Dark UIs elevate by **surface**, not by shadow: each step sits lighter than the
+one below it (`--v2-bg` < `--v2-surface` < `--v2-surface-2`), and a light
+theme's grey shadow on `#12151c` reads as a smear rather than as height. So the
+five tiers above are **redeclared** in both dark blocks of `globals.css`, and a
+call site never needs to know which theme it is in — write `shadow-card`, never
+a theme-conditional shadow.
+
+The dark form of every tier leads with a translucent **white hairline**
+(`0 0 0 1px rgba(255,255,255,.04…)`) — the border the light theme gets for free
+against a white page — and carries its ambient shadow at a much lower alpha
+than the light tier's. `--v2-inset-highlight` is the dark companion to the light
+`--v2-shadow-button` inset. The two dark declaration blocks stay byte-identical;
+`src/lib/__tests__/theme-tokens.test.ts` holds them so.
+
+The rule for a primitive choosing its dark form: prefer the hairline for
+resting cards; keep a real (low-alpha) drop shadow only where the element
+floats OVER other content (modal, popover, tooltip, toast), because there the
+shadow separates it from the surface behind.
+
+### Do-not-invert surfaces (#2929)
+
+Some content is authored against **white** and must stay that way in both
+themes. Do not token-ise these; give them a fixed paint and opt the subtree out
+of the dark palette (`color-scheme: light`), so a native control or fallback
+paint inside one — a broken-image icon, a scrollbar corner, an input autofill —
+does not flip either.
+
+| Surface | Spelling | Why it must not flip |
+|---|---|---|
+| QR code (Receive/Deposit) | `.v2-light-surface` on the container | A scanner reads the module contrast, not the theme |
+| Receipt / raster with its own light background | `.v2-light-surface` | The image carries light pixels; a dark container would frame a light image |
+| Code blocks | `--v2-surface-code` (fixed near-black in both themes) | The code palette was authored dark; inverting the surface inverts the syntax colours |
+| Address avatar (`WalletButton`) | `.v2-avatar-chrome` | Its gradient is a hash-fixed identity palette, identical in both themes; a themed rim would vanish on one ground |
+
+The two utilities live in `globals.css` and carry `color-scheme: light` with a
+**fixed** white ground and hairline (`#ffffff` / `#e6ebf1`) — not
+`var(--v2-bg)`, which would flip to the dark ground exactly where the class
+exists to keep the content light. The fixed-dark code-surface rule is also why
+`design:lint`'s white/black rule exempts `ui/CodeBlock.tsx`: its `text-white/…`
+chrome is content-colour on a surface that never inverts.
+
 ### Safe areas — the notch and the home indicator ([#2730](https://github.com/d-hinders/Haven-AI/issues/2730))
 
 Four tokens, and the rule is that nothing calls `env()` directly:

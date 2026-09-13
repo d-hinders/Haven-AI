@@ -92,7 +92,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
             value={tokenSymbol}
             onChange={(e) => setTokenSymbol(e.target.value)}
             aria-label="Token"
-            className="rounded-md border border-[var(--v2-border-strong)] bg-white px-3 text-sm text-[var(--v2-ink)]"
+            className="rounded-md border border-[var(--v2-border-strong)] bg-[var(--v2-bg)] px-3 text-sm text-[var(--v2-ink)]"
           >
             {tokens.map((t) => (
               <option key={t.symbol} value={t.symbol}>

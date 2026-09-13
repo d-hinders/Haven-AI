@@ -151,6 +151,19 @@ up.
 
 ## 3. Delegation custody semantics (#828's contract)
 
+> **Re-verified #2929 (dark-mode epic #2925, slice 3/3):** the dark-token sweep
+> touched two files in this document's coverage list, `DelegationSendModal.tsx`
+> and `WalletButton.tsx`. Both edits are presentation-only, verified against the
+> diff at the base of this branch: the token-symbol input's and the modal
+> container's literal `bg-white` became `bg-[var(--v2-bg)]`, the avatar rim's
+> `border-white/70` moved to the fixed-paint `.v2-avatar-chrome` utility, and the
+> QR container's white box became the never-invert `.v2-light-surface`. No class
+> that carries a value a custody or authority statement rests on (the badge
+> tones, the `disabled` states) changed. No handler, fetch, signer call, key
+> read, caveat value, or user-visible claim about who signs, what may be spent,
+> or when revocation bites changed. A CSS token rename in a delegation-surface
+> file is not a semantics change: this paragraph is that re-verification record.
+
 **Where the signed delegation lives:** the agent receives it through the
 existing credential channel (same trust envelope as the agent API key).
 Haven stores a copy server-side for reconstruction, revocation targeting and

@@ -140,7 +140,7 @@ export default function SignupPage() {
 
       <div className="relative z-10">
         <SafeAreaBand />
-        <div className="border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
+        <div className="border-b border-[var(--v2-border)] bg-bg/80 backdrop-blur-md">
           <div className="max-w-6xl mx-auto px-6 h-14 flex items-center">
             <Link
               href="/"
@@ -155,7 +155,7 @@ export default function SignupPage() {
 
       <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-16">
         <div className="grid w-full max-w-4xl gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
-          <div className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-white p-6 shadow-card">
+          <div className="v2-animate-step-rise rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-6 shadow-card">
             <h1
               className="v2-animate-stagger text-2xl font-semibold tracking-tight text-[var(--v2-ink)] mb-2"
               style={{ ['--v2-stagger-delay' as string]: '40ms' }}
@@ -324,7 +324,7 @@ export default function SignupPage() {
           </div>
 
           <div
-            className="v2-animate-stagger rounded-[14px] border border-[var(--v2-border)] bg-white/85 p-6 shadow-card"
+            className="v2-animate-stagger rounded-[14px] border border-[var(--v2-border)] bg-bg/85 p-6 shadow-card"
             style={{ ['--v2-stagger-delay' as string]: '120ms' }}
           >
             <p

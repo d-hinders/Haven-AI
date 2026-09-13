@@ -102,6 +102,31 @@ test('the summary names every baseline it found, and says what the tick does NOT
   assert.ok(!summary.includes('gamma.png'))
 })
 
+test('the summary names the dark project and splits the count by scheme (#2929)', () => {
+  const summary = renderSummary([
+    {
+      spec: 'design-system.visual.spec.ts',
+      baselines: [
+        'design-system-sidebar-desktop.png',
+        'design-system-sidebar-desktop-dark.png',
+        'design-system-topbar-desktop.png',
+        'design-system-topbar-desktop-dark.png',
+      ],
+    },
+  ])
+  // The dark gate's identity has to be on the record: a reader counting the
+  // four PNGs must not read the light tick as covering all four (#2318).
+  assert.match(summary, /chromium-desktop-dark/)
+  assert.match(summary, /Light scheme: \*\*2\*\*/)
+  assert.match(summary, /Dark scheme: \*\*2\*\*/)
+  // Positive control: with no dark baseline the dark line reads zero — a
+  // function that printed a fixed count could not pass this.
+  const lightOnly = renderSummary([
+    { spec: 's.visual.spec.ts', baselines: ['a.png'] },
+  ])
+  assert.match(lightOnly, /Dark scheme: \*\*0\*\*/)
+})
+
 test('counts are pluralised off the real totals, not hardcoded', () => {
   const one = renderSummary([{ spec: 's.visual.spec.ts', baselines: ['a.png'] }])
   assert.match(one, /\*\*1\*\* committed baseline across \*\*1\*\* spec file:/)

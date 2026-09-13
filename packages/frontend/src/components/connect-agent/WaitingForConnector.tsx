@@ -166,7 +166,7 @@ export function WaitingForConnector({
           the dangerous route stays one click deeper than the harmless one.
 
           Design review: the first cut gave BOTH disclosures the Card recipe
-          (rounded + border + bg-white + p-3), so nesting them stacked three
+          (rounded + border + a white card fill + p-3), so nesting them stacked three
           identically-styled white boxes — a Card inside a Card inside a Card,
           which is the surface-hierarchy rule's "no nested filled cards" in its
           hand-rolled form (design-lint's structural rules only catch the

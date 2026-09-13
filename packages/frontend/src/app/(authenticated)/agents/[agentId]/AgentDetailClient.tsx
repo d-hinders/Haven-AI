@@ -387,7 +387,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   if (!agent) {
     return (
       <div className="max-w-3xl">
-        <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-8 text-center shadow-card">
+        <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-8 text-center shadow-card">
           <h1 className="text-xl font-semibold text-[var(--v2-ink)]">
             {agentsError ? 'Agent could not load' : 'Agent not found'}
           </h1>
@@ -530,7 +530,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 <DropdownMenuTrigger
                   aria-label="Agent options"
                   disabled={pendingAction !== null}
-                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Icon icon={EllipsisVertical} className="h-4 w-4" />
                 </DropdownMenuTrigger>

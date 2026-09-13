@@ -90,7 +90,7 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-funds-title"
-        className="relative mx-4 w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative mx-4 w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-4">

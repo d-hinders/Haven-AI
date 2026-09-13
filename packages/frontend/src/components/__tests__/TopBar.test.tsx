@@ -41,8 +41,8 @@ import TopBar from '../TopBar'
  *      that order — the cluster is where a `WalletButton` has always lived, and
  *      a toggle placed in the left one would sit against the account chip on a
  *      phone; and
- *   2. it is the one toggle, and it works: its name states the current
- *      preference and the next, and a press advances the ring.
+ *   2. it is the one toggle, and it works: its name states the palette on
+ *      screen and the one a click brings, and a press flips it (#2953).
  *
  * What the file does NOT assert is which of the two renderings is on screen at
  * a given width. `hidden lg:inline-flex` is a class string, and jsdom has no
@@ -82,12 +82,12 @@ describe('TopBar', () => {
     expect(toggle.compareDocumentPosition(wallet)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
 
     // The right cluster is the `ml-auto` flex row the toggle and the wallet
-    // share. The button sits two spans deeper than the cluster in the icon
-    // variant — the Tooltip's trigger wrapper, then this call site's gating
-    // span — so the shared ancestor is the button's great-grandparent, and
-    // the wallet button is a direct child of it. Identity, not a class
+    // share. The button sits one span deeper than the cluster in the icon
+    // variant — this call site's gating span; #2953 removed the Tooltip's
+    // trigger wrapper — so the shared ancestor is the button's grandparent,
+    // and the wallet button is a direct child of it. Identity, not a class
     // substring: the two elements must be the same node.
-    const cluster = toggle.parentElement?.parentElement?.parentElement
+    const cluster = toggle.parentElement?.parentElement
     expect(cluster).toBe(wallet.parentElement)
     // The `ml-auto` is what makes this THE right cluster rather than the left
     // one: it is the only thing pushing the row off the left edge of the bar,
@@ -99,19 +99,18 @@ describe('TopBar', () => {
 
   it.each([
     ['light', 'Theme: light. Switch to dark'],
-    ['dark', 'Theme: dark. Switch to system'],
-    ['system', 'Theme: system. Switch to light'],
+    ['dark', 'Theme: dark. Switch to light'],
   ] as const)(
     'announces its state and its next from %s in the bar',
     async (stored, name) => {
-      if (stored !== 'system') window.localStorage.setItem('haven.theme', stored)
+      window.localStorage.setItem('haven.theme', stored)
       renderBar()
       await waitFor(() => expect(screen.queryByRole('button', { name })).not.toBeNull())
       expect(screen.queryAllByRole('button', { name: /^Theme:/ })).toHaveLength(1)
     },
   )
 
-  it('cycles the theme from the bar with a single press', async () => {
+  it('flips the theme from the bar with a single press (#2953 two-state)', async () => {
     const user = userEvent.setup()
     window.localStorage.setItem('haven.theme', 'light')
     renderBar()
@@ -119,7 +118,7 @@ describe('TopBar', () => {
 
     await user.click(toggle)
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Theme: dark. Switch to system' })).toBeTruthy(),
+      expect(screen.getByRole('button', { name: 'Theme: dark. Switch to light' })).toBeTruthy(),
     )
     expect(window.localStorage.getItem('haven.theme')).toBe('dark')
     // The bar and the drawer read one store: the attribute that selects the

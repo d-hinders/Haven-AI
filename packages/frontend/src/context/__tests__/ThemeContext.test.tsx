@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider, useTheme } from '../ThemeContext'
 import { THEME_STORAGE_KEY } from '@/lib/theme-bootstrap'
+import { BRAND_COLOURS } from '@/lib/brand-colours'
 
 /**
  * The theme provider (#2927): default `system`, stored choices adopted after
@@ -76,6 +77,12 @@ describe('ThemeProvider', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     delete document.documentElement.dataset.theme
+    // The provider's status-bar tag (#2928) is a document.head side effect
+    // with no unmount cleanup — in the real app the provider never unmounts.
+    // Tests DO unmount, so an orphan tag would leak into the next case and
+    // make "system means no override" read as its opposite. Removing it here
+    // is the test seam, not app behaviour.
+    document.head.querySelector('meta[data-haven-theme-color]')?.remove()
   })
 
   it('defaults to system with no stored choice, and stamps nothing on <html>', async () => {
@@ -198,5 +205,76 @@ describe('ThemeProvider', () => {
       expect(document.documentElement.hasAttribute('data-theme-switching')).toBe(false),
     )
     expect(document.documentElement.dataset.theme).toBe('dark')
+  })
+
+  /**
+   * The installed shell's status-bar tag (#2928). The root layout ships the
+   * `theme-color` media PAIR (asserted over the exported viewport object in
+   * `lib/__tests__/installed-app.test.ts` — jsdom renders no `<head>` from a
+   * Next `viewport` export, so "in the document head" is proven where the
+   * pair is built). What lives HERE is the provider half: for an EXPLICIT
+   * choice the pair is wrong — its media queries read the device, never the
+   * document — so the provider stamps one override tag with the resolved
+   * palette's `bg`, and `system` removes it again so the pair answers.
+   */
+  const overrideMeta = () =>
+    document.head.querySelector('meta[data-haven-theme-color]') as HTMLMetaElement | null
+
+  it('stamps the dark bg on the theme-color override for an explicit dark choice', async () => {
+    renderTheme()
+    await waitFor(() => expect(screen.getByTestId('preference')).toHaveTextContent('system'))
+    // system: no override exists — the pair alone decides, and nothing may
+    // shadow it before the user has chosen.
+    expect(overrideMeta()).toBeNull()
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'choose dark' }).click()
+    })
+    await waitFor(() => expect(overrideMeta()?.content).toBe(BRAND_COLOURS.darkBackground))
+    expect(document.head.contains(overrideMeta())).toBe(true)
+    expect(overrideMeta()?.getAttribute('name')).toBe('theme-color')
+
+    // Explicit light flips the same tag in place — one tag per state, not a
+    // pile of them.
+    await act(async () => {
+      screen.getByRole('button', { name: 'choose light' }).click()
+    })
+    await waitFor(() => expect(overrideMeta()?.content).toBe(BRAND_COLOURS.background))
+    expect(document.head.querySelectorAll('meta[data-haven-theme-color]')).toHaveLength(1)
+
+    // Back to system: the override is GONE and the pair is the answer again.
+    // Deletion from the end is the restore, so the round trip leaves the head
+    // exactly as it started — this is the idempotence claim.
+    await act(async () => {
+      screen.getByRole('button', { name: 'choose system' }).click()
+    })
+    await waitFor(() => expect(overrideMeta()).toBeNull())
+    expect(document.head.querySelectorAll('meta[data-haven-theme-color]')).toHaveLength(0)
+  })
+
+  it('re-stamping is idempotent: N activations of the same preference write the head once', async () => {
+    renderTheme()
+    await waitFor(() => expect(screen.getByTestId('preference')).toHaveTextContent('system'))
+
+    const chooseDark = () => screen.getByRole('button', { name: 'choose dark' }).click()
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        chooseDark()
+      })
+    }
+    await waitFor(() => expect(overrideMeta()?.content).toBe(BRAND_COLOURS.darkBackground))
+    expect(document.head.querySelectorAll('meta[data-haven-theme-color]')).toHaveLength(1)
+
+    // And the tag survives a system excursion without duplicating:
+    // dark → system → dark lands one override, not three.
+    await act(async () => {
+      screen.getByRole('button', { name: 'choose system' }).click()
+    })
+    await waitFor(() => expect(overrideMeta()).toBeNull())
+    await act(async () => {
+      chooseDark()
+    })
+    await waitFor(() => expect(overrideMeta()?.content).toBe(BRAND_COLOURS.darkBackground))
+    expect(document.head.querySelectorAll('meta[data-haven-theme-color]')).toHaveLength(1)
   })
 })

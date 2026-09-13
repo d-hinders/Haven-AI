@@ -8,6 +8,7 @@ import NetworkSwitcher from './NetworkSwitcher'
 import { ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 
 interface TopBarProps {
   actionSlot?: React.ReactNode
@@ -153,11 +154,23 @@ export default function TopBar({ actionSlot }: TopBarProps) {
           </div>
         ) : null}
 
-        {/* Right region: wallet. The approval-notification bell was deleted
-            with the legacy Safe rail (#1989, epic #1440) — the delegation rail
-            enforces budgets on-chain and produces no approvals to notify
-            about. */}
+        {/* Right region: theme toggle (desktop) + wallet. The approval-
+            notification bell was deleted with the legacy Safe rail (#1989, epic
+            #1440) — the delegation rail enforces budgets on-chain and produces
+            no approvals to notify about.
+
+            The toggle is `hidden` until `lg` by construction, and that gate is
+            load-bearing rather than tidiness. Below `lg` the same control lives
+            as a row in the More sheet (`Sidebar`'s drawer), so an ungated
+            button here would put TWO theme controls on one 390px screen — the
+            #2731 lesson that the tab bar carries five tabs and the drawer
+            carries the sixth slot. Which half is on screen is decided by these
+            two call sites' breakpoints and never by the primitive, which takes
+            no position at all; see ThemeToggle's own docstring. */}
         <div className="ml-auto flex items-center gap-3">
+          <span className="hidden lg:inline-flex">
+            <ThemeToggle />
+          </span>
           <WalletButton />
         </div>
       </div>

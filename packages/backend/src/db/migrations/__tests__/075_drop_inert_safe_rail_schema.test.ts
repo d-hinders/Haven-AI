@@ -23,8 +23,9 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
-import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb, withMigrationReverted } from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../075_drop_inert_safe_rail_schema.js'
+import { down as down083, up as up083 } from '../083_drop_dead_safe_rail_tables.js'
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -119,20 +120,31 @@ describeDb('migration 075: drop the inert Safe-rail schema (#2263)', () => {
 
   // The mutation this pins: revert `up()`'s ALTER … SET DEFAULT and the two
   // tests above go red, because 036's `'allowance_module'` default comes back.
+  //
+  // Since 083 (#2851) dropped self_sign_agents, reverting 075's down() alone
+  // no longer works: 075's down() recreates self_sign_agent_allowances with a
+  // FK into self_sign_agents, which does not exist unless 083 is reverted
+  // first — the same nested-revert shape 080/081's test uses.
   it('down() restores the old default, proving the tests above are load-bearing', async () => {
     const client = await db.connect()
     try {
-      await down(client)
-      const userId = await seedUser()
-      const { rows } = await db.query<{ execution_rail: string }>(
-        `INSERT INTO user_safes (user_id, safe_address, chain_id, account_type)
-         VALUES ($1, '0x0000000000000000000000000000000000000076', 84532, 'delegator_hybrid')
-         RETURNING execution_rail`,
-        [userId],
+      await withMigrationReverted(
+        () => down083(client),
+        async () => {
+          await down(client)
+          const userId = await seedUser()
+          const { rows } = await db.query<{ execution_rail: string }>(
+            `INSERT INTO user_safes (user_id, safe_address, chain_id, account_type)
+             VALUES ($1, '0x0000000000000000000000000000000000000076', 84532, 'delegator_hybrid')
+             RETURNING execution_rail`,
+            [userId],
+          )
+          expect(rows[0].execution_rail).toBe('allowance_module')
+        },
+        () => up(client),
       )
-      expect(rows[0].execution_rail).toBe('allowance_module')
     } finally {
-      await up(client)
+      await up083(client)
       client.release()
     }
   })
@@ -184,32 +196,56 @@ describeDb('migration 075: drop the inert Safe-rail schema (#2263)', () => {
   it('down() restores every dropped object (structural reversibility)', async () => {
     const client = await db.connect()
     try {
-      await down(client)
-      for (const table of DROPPED_TABLES) expect(await tableExists(table)).toBe(true)
-      for (const [t, c] of DROPPED_COLUMNS) expect(await columnExists(t, c)).toBe(true)
+      await withMigrationReverted(
+        () => down083(client),
+        async () => {
+          await down(client)
+          for (const table of DROPPED_TABLES) expect(await tableExists(table)).toBe(true)
+          for (const [t, c] of DROPPED_COLUMNS) expect(await columnExists(t, c)).toBe(true)
 
-      // The restored shapes are usable, not just present — a `CREATE TABLE`
-      // that named the wrong columns would still satisfy `tableExists`.
-      const userId = await seedUser()
-      const agent = await db.query<{ id: string }>(
-        `INSERT INTO agents (user_id, name) VALUES ($1, 'drop075') RETURNING id`,
-        [userId],
-      )
-      await db.query(
-        `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount)
-         VALUES ($1, '0x0000000000000000000000000000000000000001', 'USDC', '1')`,
-        [agent.rows[0].id],
+          // The restored shapes are usable, not just present — a `CREATE TABLE`
+          // that named the wrong columns would still satisfy `tableExists`.
+          const userId = await seedUser()
+          const agent = await db.query<{ id: string }>(
+            `INSERT INTO agents (user_id, name) VALUES ($1, 'drop075') RETURNING id`,
+            [userId],
+          )
+          await db.query(
+            `INSERT INTO agent_allowances (agent_id, token_address, token_symbol, allowance_amount)
+             VALUES ($1, '0x0000000000000000000000000000000000000001', 'USDC', '1')`,
+            [agent.rows[0].id],
+          )
+        },
+        () => up(client),
       )
     } finally {
-      await up(client)
+      await up083(client)
       client.release()
     }
   })
 
   // ── What must NOT be dropped ───────────────────────────────────────────────
 
-  it('spares self_sign_agents — the live sibling of the dropped allowance table', async () => {
-    expect(await tableExists('self_sign_agents')).toBe(true)
+  it('spared self_sign_agents at the time this migration ran — dropped later, by 083, not by this one', async () => {
+    // At head today, self_sign_agents is gone (083_drop_dead_safe_rail_tables.ts,
+    // #2851). This migration's own contract was narrower — it deliberately did
+    // NOT touch self_sign_agents, only its allowance sibling — so prove that
+    // narrower contract by reverting 083 and checking the table comes back.
+    const client = await db.connect()
+    try {
+      await withMigrationReverted(
+        () => down083(client),
+        async () => {
+          expect(await tableExists('self_sign_agents')).toBe(true)
+        },
+        () => up083(client),
+      )
+    } finally {
+      client.release()
+    }
+    // And confirm head (083 applied) has it gone, so the two migrations'
+    // scopes do not silently overlap.
+    expect(await tableExists('self_sign_agents')).toBe(false)
   })
 
   it('keeps payment_intents.allowance_nonce — the #2263 decision, not an oversight', async () => {

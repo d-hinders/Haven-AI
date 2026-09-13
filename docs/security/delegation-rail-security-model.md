@@ -246,6 +246,18 @@ in-flight live operation cannot lose its Safe binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
 
+> **Re-verified #2851 (safe-retirement epic #1440, final slice):** the unlink
+> transaction in `infra/repositories/smart-accounts.ts` no longer nulls out
+> `self_sign_agents.safe_id` before deleting the account row — that step
+> existed only to satisfy `self_sign_agents`' own `RESTRICT` foreign key, and
+> the table itself is dropped by migration `083`. Nothing above depends on it:
+> the guards this section describes (live-delegation, open-sweep, in-flight
+> re-key refusal) are unaffected, no permission or chain state changes, and
+> the same migration's `account_type` default flip (`'safe'` →
+> `'delegator_hybrid'`) changes what an *omitting insert* gets, never the
+> `account_type = 'delegator_hybrid'` filter value the list queries above
+> compare against.
+
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database
 serialization guard only: it grants nothing, signs nothing, and touches no

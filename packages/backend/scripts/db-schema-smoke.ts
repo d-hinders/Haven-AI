@@ -249,7 +249,6 @@ import {
   LIST_ACCOUNTS_FOR_USER_SQL,
   LIST_ACCOUNTS_WITH_TYPE_FOR_USER_SQL,
   ORPHAN_AGENTS_FOR_ACCOUNT_SQL,
-  ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL,
   PROMOTE_ACCOUNT_TO_DEFAULT_SQL,
   RENAME_ACCOUNT_FOR_USER_SQL,
   SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL,
@@ -390,7 +389,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'smart-accounts: live delegation guard before unlink', sql: HAS_LIVE_DELEGATIONS_FOR_ACCOUNT_SQL },
   { name: 'smart-accounts: open recovery guard before unlink', sql: HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL },
   { name: 'smart-accounts: orphan agents in delete tx', sql: ORPHAN_AGENTS_FOR_ACCOUNT_SQL },
-  { name: 'smart-accounts: orphan self-sign agents in delete tx (RESTRICT FK)', sql: ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL },
+  // 'smart-accounts: orphan self-sign agents in delete tx (RESTRICT FK)' was
+  // removed here (#2851): self_sign_agents no longer exists as of migration
+  // 083_drop_dead_safe_rail_tables.ts.
   { name: 'smart-accounts: delete row', sql: DELETE_USER_ACCOUNT_SQL },
   { name: 'smart-accounts: oldest remaining safe for promotion', sql: FIND_OLDEST_ACCOUNT_FOR_USER_SQL },
   { name: 'smart-accounts: promote safe to default in delete tx', sql: PROMOTE_ACCOUNT_TO_DEFAULT_SQL },

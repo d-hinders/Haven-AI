@@ -249,7 +249,7 @@ chain.
 > **Re-verified #2851 (safe-retirement epic #1440, final slice):** the unlink
 > transaction in `infra/repositories/smart-accounts.ts` no longer nulls out
 > `self_sign_agents.safe_id` before deleting the account row — that step
-> existed only to satisfy `self_sign_agents`' own `RESTRICT` foreign key, and
+> existed only to satisfy `self_sign_agents`' own `NO ACTION` foreign key, and
 > the table itself is dropped by migration `083`. Nothing above depends on it:
 > the guards this section describes (live-delegation, open-sweep, in-flight
 > re-key refusal) are unaffected, no permission or chain state changes, and

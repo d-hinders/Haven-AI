@@ -1114,11 +1114,13 @@ async function readSchemaFingerprint(): Promise<TableFingerprint[]> {
  * - **Order.** `DELETE` enforces foreign keys, so referencing tables are
  *   emptied first (`planDeleteOrder`). `CASCADE` did that implicitly. Most of
  *   this schema's foreign keys are `ON DELETE CASCADE`, which would tolerate
- *   almost any order — but not all of them are: `agent_rekeys.initiated_by_user_id`
- *   (065) and `outbound_txs.replaced_by` (061) declare no action and so
- *   default to `NO ACTION`. Those two are the reason the ordering is
+ *   almost any order — but not all of them are: `payment_intents.agent_id`
+ *   and `payment_intents.user_id` (000), `agent_rekeys.initiated_by_user_id`
+ *   (065) and `agent_delegations.rekey_id` (065) declare no action and so
+ *   default to `NO ACTION`. Those are the reason the ordering is
  *   load-bearing rather than decorative. (`self_sign_agents.safe_id` (001)
- *   was a third example until #2851 dropped the table it lived on.)
+ *   was another until #2851 dropped the table it lived on; self-references
+ *   such as `outbound_txs.replaced_by` are skipped by `planDeleteOrder`.)
  * - **Sequences.** `RESTART IDENTITY` reset them; an explicit
  *   `ALTER SEQUENCE … RESTART` does it here, for the sequences that were
  *   actually advanced.

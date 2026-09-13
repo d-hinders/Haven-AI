@@ -116,6 +116,14 @@ describeDb('migration 083: drop the last dead Safe-rail tables (#2851)', () => {
         expect(await tableExists(table)).toBe(true)
       }
 
+      // The restored shape is the HEAD shape (001/002 as amended by 004/005),
+      // not the birth shape — review of #2851 caught a verbatim-from-001
+      // restore that resurrected `restrict_recipients` and lost the
+      // usd/eur columns. Pin both directions.
+      expect(await columnExists('self_sign_agents', 'restrict_recipients')).toBe(false)
+      expect(await columnExists('self_sign_payment_intents', 'usd_value')).toBe(true)
+      expect(await columnExists('self_sign_payment_intents', 'eur_value')).toBe(true)
+
       // Restored shapes are usable, not just present, and the child/parent FK
       // (self_sign_payment_intents.agent_id -> self_sign_agents(id)) works.
       const userId = await seedUser()
@@ -213,9 +221,17 @@ describeDb('migration 083: drop the last dead Safe-rail tables (#2851)', () => {
     expect(rows[0].account_type).toBe('safe')
   })
 
-  it('deletes no evidence rows — machine_payment_evidence is untouched', async () => {
-    const before = await db.query<{ n: string }>(
-      `SELECT COUNT(*)::text AS n FROM machine_payment_evidence`,
+  it('deletes no rows on a kept table — a seeded user_passkeys row survives a re-run of up()', async () => {
+    // `resetDb()` empties every table before each test, so a bare row count
+    // would compare 0 to 0 and could never fail (review of #2851). Seed a
+    // real row on a recorded keep first; only then is "untouched" a claim
+    // the test can lose.
+    const userId = await seedUser()
+    const seeded = await db.query<{ id: string }>(
+      `INSERT INTO user_passkeys (user_id, credential_id, public_key_x, public_key_y, signer_address, chain_id)
+       VALUES ($1, $2, '\\x01', '\\x02', '0x0000000000000000000000000000000000000083', 84532)
+       RETURNING id`,
+      [userId, `cred-083-${Date.now()}-${Math.random()}`],
     )
     const client = await db.connect()
     try {
@@ -223,9 +239,10 @@ describeDb('migration 083: drop the last dead Safe-rail tables (#2851)', () => {
     } finally {
       client.release()
     }
-    const after = await db.query<{ n: string }>(
-      `SELECT COUNT(*)::text AS n FROM machine_payment_evidence`,
+    const { rows } = await db.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM user_passkeys WHERE id = $1`,
+      [seeded.rows[0].id],
     )
-    expect(after.rows[0].n).toBe(before.rows[0].n)
+    expect(rows[0].n).toBe('1')
   })
 })

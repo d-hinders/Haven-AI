@@ -22,7 +22,7 @@ export const version = '083_drop_dead_safe_rail_tables'
  *   `self_sign_agents` was `ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL`
  *   (`infra/repositories/smart-accounts.ts`), which existed solely to null
  *   out `self_sign_agents.safe_id` inside the account-unlink transaction so
- *   its `RESTRICT` FK to `user_safes` would not block the delete — removed
+ *   its `NO ACTION` FK to `user_safes` (001 declares no action) would not block the delete — removed
  *   in the same change that lands this migration, along with the one
  *   `db-schema-smoke.ts` entry that named it. `self_sign_agents`' other two
  *   children, `self_sign_agent_allowances` and `self_sign_agent_recipients`,
@@ -55,7 +55,12 @@ export const version = '083_drop_dead_safe_rail_tables'
  * `user_safes` is still named `user_safes` as of this migration — P3 (#2911)
  * renames the table AFTER this lands. #2911's author: the `account_type`
  * default is already `'delegator_hybrid'` by the time you rename the table;
- * carry the default forward under the new name rather than re-deriving it.
+ * carry the default forward under the new name rather than re-deriving it,
+ * and drop the `self_sign_payment_intents.safe_address` /
+ * `self_sign_agents.safe_id` renames from your scope — both tables are gone.
+ * If #2911 lands FIRST instead, this file must be renumbered and re-targeted
+ * at `smart_accounts` in both `up()` and `down()` (`ALTER TABLE user_safes`
+ * and `REFERENCES user_safes(id)` would fail on the renamed table).
  *
  * ## Destructive scope, and what is NOT touched
  *
@@ -80,8 +85,11 @@ export async function up(client: PoolClient): Promise<void> {
 }
 
 /**
- * Structural restore only — verbatim shapes from `001`/`002`/`009` (the
- * table names this migration drops), plus the pre-existing `'safe'` default.
+ * Structural restore only — the three tables as the migration history left
+ * them at head (`001`/`002`/`009` as amended by `004`, which dropped
+ * `self_sign_agents.restrict_recipients`, and `005`, which added
+ * `self_sign_payment_intents.usd_value`/`eur_value` — the 075 convention:
+ * "as 004 left them"), plus the pre-existing `'safe'` default.
  * DATA is not restored: the dropped tables held no live rows a rollback
  * could meaningfully recreate, and this is retirement, not migration.
  */
@@ -94,7 +102,6 @@ export async function down(client: PoolClient): Promise<void> {
       description         TEXT,
       delegate_address    VARCHAR(42) NOT NULL,
       safe_id             UUID REFERENCES user_safes(id),
-      restrict_recipients BOOLEAN NOT NULL DEFAULT false,
       status              VARCHAR(20) NOT NULL DEFAULT 'active',
       created_at          TIMESTAMPTZ DEFAULT NOW(),
       updated_at          TIMESTAMPTZ DEFAULT NOW(),
@@ -122,6 +129,8 @@ export async function down(client: PoolClient): Promise<void> {
       status            VARCHAR(30) NOT NULL DEFAULT 'pending_signature',
       error_message     TEXT,
       reason            TEXT,
+      usd_value         NUMERIC(20,6),
+      eur_value         NUMERIC(20,6),
       created_at        TIMESTAMPTZ DEFAULT NOW(),
       signed_at         TIMESTAMPTZ,
       submitted_at      TIMESTAMPTZ,

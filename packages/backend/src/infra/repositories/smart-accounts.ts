@@ -302,7 +302,7 @@ export const CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL = `UPDATE users SET safe_addr
  * because a delegation, recovery sweep, or re-key is still in flight.
  *
  * Used to also orphan leftover `self_sign_agents` rows here, before the
- * delete, because their `RESTRICT` FK would otherwise block it. That step
+ * delete, because their `NO ACTION` FK would otherwise block it. That step
  * was removed (#2851): the table itself is gone as of migration `083`.
  */
 export async function deleteAccountForUser(

@@ -21,6 +21,7 @@
  * because silently promoting retired accounts onto the live rail is the
  * opposite of fail-closed.
  */
+import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb, withMigrationReverted } from '../../../infra/__tests__/helpers/db-harness.js'
@@ -226,11 +227,15 @@ describeDb('migration 075: drop the inert Safe-rail schema (#2263)', () => {
 
   // ── What must NOT be dropped ───────────────────────────────────────────────
 
-  it('spared self_sign_agents at the time this migration ran — dropped later, by 083, not by this one', async () => {
+  it('never dropped self_sign_agents itself — 083 did, and 083\'s down() brings it back', async () => {
     // At head today, self_sign_agents is gone (083_drop_dead_safe_rail_tables.ts,
     // #2851). This migration's own contract was narrower — it deliberately did
-    // NOT touch self_sign_agents, only its allowance sibling — so prove that
-    // narrower contract by reverting 083 and checking the table comes back.
+    // NOT touch self_sign_agents, only its allowance sibling. Two halves:
+    // (a) 075's own DDL names no DROP of self_sign_agents (source-pinned —
+    // migrations are immutable history, so this is the load-bearing half);
+    // (b) reverting 083 brings the table back, which pins 083's down(), not 075.
+    const source075 = readFileSync(new URL('../075_drop_inert_safe_rail_schema.ts', import.meta.url), 'utf8')
+    expect(source075).not.toMatch(/DROP TABLE[^;]*\bself_sign_agents\b/)
     const client = await db.connect()
     try {
       await withMigrationReverted(

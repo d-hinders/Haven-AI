@@ -247,7 +247,7 @@ REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
 
 > **Re-verified #2911 (naming epic #2906, phase 3 — the schema rename):** this
-> diff touched twelve files in this document's `covers:` list (`routes/auth.ts`,
+> diff touched twelve files in this document's coverage list (`routes/auth.ts`,
 > `routes/agents.ts`, `routes/user-safes.ts`, `routes/hybrid-accounts.ts`,
 > `infra/repositories/{agents,dashboard,transaction-history,smart-accounts,
 > hybrid-signers}.ts`, `rails/hybrid-account-config.ts`,

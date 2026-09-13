@@ -780,7 +780,7 @@ hard backstop.
 ## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
 
 > **Re-verified #2910 (naming epic #2906, phase 2b):** this diff touched six
-> files in this document's `covers:` list — `routes/auth.ts`,
+> files in this document's coverage list — `routes/auth.ts`,
 > `routes/agents.ts`, `routes/user-safes.ts`, `infra/repositories/agents.ts`,
 > `rails/hybrid-account-config.ts`, `modules/accounts/mainnet-gate.ts` — by
 > identifier rename only: locals and parameters `safeId`/`safeAddress` →

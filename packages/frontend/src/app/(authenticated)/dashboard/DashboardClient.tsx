@@ -13,8 +13,8 @@ import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useCountUp } from '@/hooks/useCountUp'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
-import { useSafeFunding } from '@/hooks/useSafeFunding'
-import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
+import { useAccountFunding } from '@/hooks/useAccountFunding'
+import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { timeAgo } from '@/lib/format'
@@ -588,7 +588,7 @@ function TransactionsSection({
             const recovery = transactionStatus(tx)
             return (
               <Link
-                key={`${tx.hash}-${tx.type}-${tx.safeId}`}
+                key={`${tx.hash}-${tx.type}-${tx.accountId}`}
                 href="/transactions"
                 className="block"
               >
@@ -616,9 +616,9 @@ function TransactionsSection({
 }
 
 export default function DashboardClient() {
-  const { user, activeSafe, passkeys: enrolledPasskeys } = useAuth()
+  const { user, activeAccount, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
-  const safes = user?.safes ?? []
+  const safes = user?.accounts ?? []
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
@@ -658,7 +658,7 @@ export default function DashboardClient() {
   // account" is just the first account.
   const delegationSafe = safes[0]
   const recoverySigners = getStoredHybridSigners({
-    safeAddress: delegationSafe?.safe_address as Address | undefined,
+    accountAddress: delegationSafe?.safe_address as Address | undefined,
     chainId: delegationSafe?.chain_id,
   })
   // #1205: the server now answers this question — computed by
@@ -701,7 +701,7 @@ export default function DashboardClient() {
   // instruction to show, and the hero/`hasFunds` state already settles the
   // checklist. The hook surfaces errors instead of throwing so the card keeps
   // its general copy when the read fails, exactly as the balance read does.
-  const { funding: safeFunding } = useSafeFunding(
+  const { funding: safeFunding } = useAccountFunding(
     !fundingStateKnown || hasFunds ? undefined : delegationSafe?.id,
   )
   const overviewInitialLoading = overviewLoading && !overview
@@ -716,14 +716,14 @@ export default function DashboardClient() {
     setupProgressReady && hasFunds && hasAgents && hasFirstAgentPayment
 
   const defaultSafe = useMemo(
-    () => activeSafe ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
-    [activeSafe, safes],
+    () => activeAccount ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
+    [activeAccount, safes],
   )
   const hasDelegationAccounts = safes.length > 0
   const agentSafe = useMemo(
     () =>
-      activeSafe ?? safes[0] ?? null,
-    [activeSafe, safes],
+      activeAccount ?? safes[0] ?? null,
+    [activeAccount, safes],
   )
 
   // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
@@ -828,8 +828,8 @@ export default function DashboardClient() {
   }, [])
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
-  const actionGate = useSafeOperationGate({
-    safeAddress: selectedActionSafe?.safe_address as Address | undefined,
+  const actionGate = useAccountOperationGate({
+    accountAddress: selectedActionSafe?.safe_address as Address | undefined,
     chainId: selectedActionSafe?.chain_id,
   })
   const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
@@ -902,8 +902,8 @@ export default function DashboardClient() {
     setReceiveOpen(true)
   }
 
-  function handleActionSafeSelected(safeId: string) {
-    setActionSafeId(safeId)
+  function handleActionSafeSelected(accountId: string) {
+    setActionSafeId(accountId)
     if (pickerAction === 'receive') setReceiveOpen(true)
     if (pickerAction === 'add-funds') setAddFundsOpen(true)
     setPickerAction(null)
@@ -1088,7 +1088,7 @@ export default function DashboardClient() {
         onClose={() => {
           setConnectAgentOpen(false)
         }}
-        safeId={agentSafe?.id ?? null}
+        accountId={agentSafe?.id ?? null}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}
@@ -1112,7 +1112,7 @@ export default function DashboardClient() {
       <AddFundsModal
         open={addFundsOpen}
         onClose={() => setAddFundsOpen(false)}
-        safeAddress={selectedActionSafe?.safe_address}
+        accountAddress={selectedActionSafe?.safe_address}
         chainId={selectedActionSafe?.chain_id}
         onReceive={() => {
           setHasOpenedReceive(true)

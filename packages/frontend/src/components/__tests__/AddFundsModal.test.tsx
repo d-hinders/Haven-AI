@@ -36,7 +36,7 @@ describe('AddFundsModal', () => {
   // states.
   it('names the network and offers the onramp when the chain resolves', () => {
     render(
-      <AddFundsModal open onClose={vi.fn()} safeAddress={SAFE_ADDRESS} chainId={BASE_SEPOLIA} />,
+      <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={BASE_SEPOLIA} />,
     )
 
     expect(
@@ -57,7 +57,7 @@ describe('AddFundsModal', () => {
         open
         onClose={vi.fn()}
         onReceive={vi.fn()}
-        safeAddress={SAFE_ADDRESS}
+        accountAddress={SAFE_ADDRESS}
         chainId={undefined}
       />,
     )
@@ -115,7 +115,7 @@ describe('AddFundsModal', () => {
   it('refuses rather than throwing when the chain is present but unregistered', () => {
     expect(() =>
       render(
-        <AddFundsModal open onClose={vi.fn()} safeAddress={SAFE_ADDRESS} chainId={999_999} />,
+        <AddFundsModal open onClose={vi.fn()} accountAddress={SAFE_ADDRESS} chainId={999_999} />,
       ),
     ).not.toThrow()
 

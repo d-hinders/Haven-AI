@@ -49,7 +49,7 @@ describe('getStoredPasskeySigner', () => {
 
     expect(
       getStoredPasskeySigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     ).toEqual({
@@ -83,7 +83,7 @@ describe('getStoredPasskeySigner', () => {
 
     expect(
       getStoredPasskeySigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     ).toBeNull()
@@ -118,7 +118,7 @@ describe('useActiveSigner', () => {
 
     const { result } = renderHook(() =>
       useActiveSigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )
@@ -138,7 +138,7 @@ describe('useActiveSigner', () => {
 
     const { result } = renderHook(() =>
       useActiveSigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )
@@ -172,7 +172,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({
@@ -198,7 +198,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: undefined })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({
@@ -217,7 +217,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current?.type).toBe('delegator_passkey')
@@ -234,7 +234,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: walletClient })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({ type: 'eoa', address: EOA_ADDRESS, walletClient })
@@ -252,7 +252,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current?.type).toBe('delegator_passkey')
@@ -271,7 +271,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: walletClient })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({ type: 'eoa', address: EOA_ADDRESS, walletClient })
@@ -284,7 +284,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toBeNull()
@@ -297,7 +297,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: { transport: {} } })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current?.type).toBe('delegator_passkey')
@@ -309,7 +309,7 @@ describe('useActiveSigner', () => {
     mockUseWalletClient.mockReturnValue({ data: undefined })
 
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useActiveSigner({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toBeNull()
@@ -324,7 +324,7 @@ describe('useActiveSigner', () => {
 
     // Different safe → legacy EOA fallback, untouched by the hybrid store.
     const { result } = renderHook(() =>
-      useActiveSigner({ safeAddress: SAFE_ADDRESS, chainId: 100 }),
+      useActiveSigner({ accountAddress: SAFE_ADDRESS, chainId: 100 }),
     )
 
     expect(result.current).toEqual({ type: 'eoa', address: EOA_ADDRESS, walletClient })

@@ -47,6 +47,8 @@ function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransacti
     isError: false,
     tokenSymbol: 'USDC',
     chainId: 8453,
+    accountId: 'safe-1',
+    accountAddress: '0x4444444444444444444444444444444444444444',
     safeId: 'safe-1',
     safeAddress: '0x4444444444444444444444444444444444444444',
     safeName: 'Main',

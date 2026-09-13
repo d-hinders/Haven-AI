@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
-  - packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx
+  - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
 last-verified: "2026-09-11"
 ---

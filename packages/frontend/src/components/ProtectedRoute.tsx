@@ -19,12 +19,12 @@ export default function ProtectedRoute({
   }, [loading, user, router])
 
   useEffect(() => {
-    if (!loading && user && (!user.safes || user.safes.length === 0) && !user.safe_address) {
+    if (!loading && user && (!user.accounts || user.accounts.length === 0) && !user.safe_address) {
       router.replace('/onboarding')
     }
   }, [loading, user, router])
 
-  const hasSafe = user && (user.safes?.length > 0 || user.safe_address)
+  const hasSafe = user && (user.accounts?.length > 0 || user.safe_address)
 
   if (loading) {
     return (

@@ -35,15 +35,15 @@ interface PrepareResponse {
   user_operation: Record<string, unknown>
 }
 
-export function useAccountSigners(safeAddress: string, chainId: number, userEmail: string) {
+export function useAccountSigners(accountAddress: string, chainId: number, userEmail: string) {
   const [signers, setSigners] = useState<AccountSigners | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState(false)
-  // Scope the signer lookup to the ACCOUNT (#1079) — without safeAddress the
+  // Scope the signer lookup to the ACCOUNT (#1079) — without accountAddress the
   // stored-passkey/hybrid branches are unreachable and `ready` would track
   // whatever wallet happens to be globally connected.
   const signer = useActiveSigner({
-    safeAddress: signers ? (signers.account_address as Address) : undefined,
+    accountAddress: signers ? (signers.account_address as Address) : undefined,
     chainId,
   })
 
@@ -52,14 +52,14 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
   const reload = useCallback(async () => {
     try {
       setSigners(
-        await api.get<AccountSigners>(`/accounts/hybrid/${safeAddress}/signers?chain_id=${chainId}`),
+        await api.get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`),
       )
       setLoadError(false)
     } catch {
       setSigners(null)
       setLoadError(true)
     }
-  }, [safeAddress, chainId])
+  }, [accountAddress, chainId])
 
   useEffect(() => {
     void reload()
@@ -84,14 +84,14 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
         // is shaped by the signature kind, and only the device knows what is
         // available.
         const prep = await api.post<PrepareResponse>(
-          `/accounts/hybrid/${safeAddress}/signers/prepare?chain_id=${chainId}`,
+          `/accounts/hybrid/${accountAddress}/signers/prepare?chain_id=${chainId}`,
           {
             ...body,
             signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
           },
         )
         const signature = await signPrepared(prep)
-        await api.post(`/accounts/hybrid/${safeAddress}/signers/submit?chain_id=${chainId}`, {
+        await api.post(`/accounts/hybrid/${accountAddress}/signers/submit?chain_id=${chainId}`, {
           ...body,
           signature,
           user_operation: prep.user_operation,
@@ -111,7 +111,7 @@ export function useAccountSigners(safeAddress: string, chainId: number, userEmai
         setBusy(false)
       }
     },
-    [safeAddress, chainId, reload, signPrepared, signingPath],
+    [accountAddress, chainId, reload, signPrepared, signingPath],
   )
 
   /** Enroll a backup passkey — a fresh WebAuthn credential on this device. */

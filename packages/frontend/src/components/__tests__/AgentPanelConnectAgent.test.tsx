@@ -41,7 +41,7 @@ import AgentPanel from '@/components/AgentPanel'
 describe('AgentPanel Connect Agent entry', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ activeSafe: SAFE })
+    mockUseAuth.mockReturnValue({ activeAccount: SAFE })
     mockUseAgents.mockReturnValue({
       agents: [],
       loading: false,

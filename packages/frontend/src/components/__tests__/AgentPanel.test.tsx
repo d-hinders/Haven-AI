@@ -68,7 +68,7 @@ function setAgents(agents: unknown[], extra: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockUseAuth.mockReturnValue({ activeSafe: SAFE })
+  mockUseAuth.mockReturnValue({ activeAccount: SAFE })
   setAgents([])
 })
 

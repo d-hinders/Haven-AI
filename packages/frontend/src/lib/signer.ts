@@ -59,14 +59,19 @@ export interface StoredPasskeySigner {
   credentialId: string
   publicKey?: { x: `0x${string}`; y: `0x${string}` }
   chainId: number
+  /**
+   * Persisted localStorage JSON field, legacy-named on purpose: renaming it
+   * would orphan every signer enrolled before #2913. The #2913 rename covers
+   * the function args (`accountAddress`), not this stored key.
+   */
   safeAddress: Address
   createdAt: number
 }
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/
 
-export function passkeyStorageKey(safeAddress: Address, chainId: number): string {
-  return `haven_passkey_${safeAddress.toLowerCase()}_${chainId}`
+export function passkeyStorageKey(accountAddress: Address, chainId: number): string {
+  return `haven_passkey_${accountAddress.toLowerCase()}_${chainId}`
 }
 
 function passkeyDeviceKey(credentialId: string): string {
@@ -117,11 +122,11 @@ export function setStoredHybridSigners(signers: HybridAccountSigners): void {
 }
 
 export function getStoredHybridSigners(args: {
-  safeAddress?: Address
+  accountAddress?: Address
   chainId?: number
 }): HybridAccountSigners | null {
-  if (typeof window === 'undefined' || !args.safeAddress || args.chainId === undefined) return null
-  const raw = window.localStorage.getItem(hybridSignersStorageKey(args.safeAddress, args.chainId))
+  if (typeof window === 'undefined' || !args.accountAddress || args.chainId === undefined) return null
+  const raw = window.localStorage.getItem(hybridSignersStorageKey(args.accountAddress, args.chainId))
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as HybridAccountSigners
@@ -197,12 +202,12 @@ export function setStoredPasskeySigner(value: StoredPasskeySigner): void {
 }
 
 export function clearStoredPasskeySigner(args: {
-  safeAddress: Address
+  accountAddress: Address
   chainId: number
 }): void {
   if (typeof window === 'undefined') return
 
-  const key = passkeyStorageKey(args.safeAddress, args.chainId)
+  const key = passkeyStorageKey(args.accountAddress, args.chainId)
   const oldValue = window.localStorage.getItem(key)
 
   window.localStorage.removeItem(key)
@@ -210,10 +215,13 @@ export function clearStoredPasskeySigner(args: {
 }
 
 export function getStoredPasskeySigner(args: {
-  safeAddress?: Address
+  accountAddress?: Address
   chainId?: number
 }): PasskeySigner | null {
-  const { safeAddress, chainId } = args
+  // Reads the legacy-named field from the STORED blob (`safeAddress` is the
+  // persisted localStorage JSON key — renaming it would orphan every enrolled
+  // signer), not a wire field: the arg was renamed to `accountAddress` (#2913).
+  const { accountAddress: safeAddress, chainId } = args
   if (!safeAddress || chainId === undefined) {
     return null
   }
@@ -272,21 +280,21 @@ function subscribe(onChange: () => void): () => void {
 }
 
 function getStoredPasskeySignerValue(args: {
-  safeAddress?: Address
+  accountAddress?: Address
   chainId?: number
 }): string | null {
-  if (typeof window === 'undefined' || !args.safeAddress || args.chainId === undefined) {
+  if (typeof window === 'undefined' || !args.accountAddress || args.chainId === undefined) {
     return null
   }
 
-  return window.localStorage.getItem(passkeyStorageKey(args.safeAddress, args.chainId))
+  return window.localStorage.getItem(passkeyStorageKey(args.accountAddress, args.chainId))
 }
 
 /**
- * Read the active human signer for a specific Safe.
+ * Read the active human signer for a specific account.
  *
  * Resolution order:
- *   1. If localStorage has Safe passkey signer metadata for the safeAddress + chainId, return it.
+ *   1. If localStorage has Safe passkey signer metadata for the accountAddress + chainId, return it.
  *   2. Otherwise, if a hydrated Hybrid signer set exists for the account,
  *      resolve WITHIN that set with `pickSigningPath`'s precedence
  *      (#1969/#2068): marker-matched passkey → connected EOA when the
@@ -297,7 +305,7 @@ function getStoredPasskeySignerValue(args: {
  *   4. Otherwise return null.
  */
 export function useActiveSigner(args: {
-  safeAddress?: Address
+  accountAddress?: Address
   chainId?: number
 }): HavenUserSigner | null {
   const { address } = useAccount()
@@ -307,12 +315,12 @@ export function useActiveSigner(args: {
     subscribe,
     // Both stores in one snapshot so a hybrid-signers hydration re-renders
     // consumers exactly like a Safe-passkey enrolment does (#1079).
-    () => `${getStoredPasskeySignerValue(args)}|${args.safeAddress && args.chainId !== undefined ? window.localStorage.getItem(hybridSignersStorageKey(args.safeAddress, args.chainId)) : null}`,
+    () => `${getStoredPasskeySignerValue(args)}|${args.accountAddress && args.chainId !== undefined ? window.localStorage.getItem(hybridSignersStorageKey(args.accountAddress, args.chainId)) : null}`,
     () => 'null|null',
   )
   const passkeySigner = useMemo(
     () => getStoredPasskeySigner(args),
-    [args.chainId, args.safeAddress, passkeySignerValue],
+    [args.chainId, args.accountAddress, passkeySignerValue],
   )
 
   if (passkeySigner) {
@@ -353,7 +361,7 @@ export function useActiveSigner(args: {
   // the EOA fallthrough below, which is for accounts WITHOUT a hydrated set
   // (legacy Safes, pre-hydration renders).
   const hybridSigners = getStoredHybridSigners(args)
-  if (hybridSigners && args.safeAddress && args.chainId !== undefined) {
+  if (hybridSigners && args.accountAddress && args.chainId !== undefined) {
     const hasPasskeys = hybridSigners.passkeys.length > 0
     const markerMatched = hasPasskeys && hybridPasskeyOnDevice(hybridSigners) !== null
     const connectedIsOwner = Boolean(
@@ -365,7 +373,7 @@ export function useActiveSigner(args: {
     if (hasPasskeys && (markerMatched || !connectedIsOwner)) {
       return {
         type: 'delegator_passkey',
-        accountAddress: args.safeAddress,
+        accountAddress: args.accountAddress,
         chainId: args.chainId,
         signers: hybridSigners,
       }

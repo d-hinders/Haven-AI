@@ -128,7 +128,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
     mockUseAuth.mockReturnValue({
       user: {
-        safes: [SAFE],
+        accounts: [SAFE],
       },
     })
     mockUseAgents.mockReturnValue({
@@ -802,7 +802,7 @@ describe('AgentDetailClient first-budget token options (#2473)', () => {
   beforeEach(() => {
     budgetCardTokens.length = 0
     mockUseAuth.mockReturnValue({
-      user: { safes: [{ ...SAFE, chain_id: 8453 }] },
+      user: { accounts: [{ ...SAFE, chain_id: 8453 }] },
     })
     mockUseAgents.mockReturnValue({
       agents: [

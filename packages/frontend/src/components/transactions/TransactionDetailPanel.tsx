@@ -23,7 +23,7 @@ interface Props {
   open: boolean
   onClose: () => void
   resolveAddress?: (address: string) => string | null
-  safeNamesByAddress?: Map<string, string>
+  accountNamesByAddress?: Map<string, string>
 }
 
 // ── Small presentational helpers ───────────────────────────────────
@@ -78,11 +78,11 @@ function counterpartyName(
   tx: AggregatedTransaction,
   address: string,
   resolveAddress?: (address: string) => string | null,
-  safeNamesByAddress?: Map<string, string>,
+  accountNamesByAddress?: Map<string, string>,
 ): string | null {
   return (
     resolveAddress?.(address) ??
-    safeNamesByAddress?.get(`${address.toLowerCase()}:${tx.chainId}`) ??
+    accountNamesByAddress?.get(`${address.toLowerCase()}:${tx.chainId}`) ??
     null
   )
 }
@@ -91,14 +91,14 @@ function AddressValue({
   tx,
   address,
   resolveAddress,
-  safeNamesByAddress,
+  accountNamesByAddress,
 }: {
   tx: AggregatedTransaction
   address: string
   resolveAddress?: (address: string) => string | null
-  safeNamesByAddress?: Map<string, string>
+  accountNamesByAddress?: Map<string, string>
 }) {
-  const name = counterpartyName(tx, address, resolveAddress, safeNamesByAddress)
+  const name = counterpartyName(tx, address, resolveAddress, accountNamesByAddress)
   return (
     <span className="inline-flex flex-col items-end gap-0.5">
       {name ? <span className="text-[var(--v2-ink)]">{name}</span> : null}
@@ -121,7 +121,7 @@ export default function TransactionDetailPanel({
   open,
   onClose,
   resolveAddress,
-  safeNamesByAddress,
+  accountNamesByAddress,
 }: Props) {
   if (!tx) return null
 
@@ -137,7 +137,7 @@ export default function TransactionDetailPanel({
       tx={tx}
       address={address}
       resolveAddress={resolveAddress}
-      safeNamesByAddress={safeNamesByAddress}
+      accountNamesByAddress={accountNamesByAddress}
     />
   )
 
@@ -232,7 +232,7 @@ export default function TransactionDetailPanel({
       <Section title="On-chain">
         <DetailRow label="Token" value={tx.tokenSymbol ?? tx.asset} />
         {tx.tokenAddress ? <DetailRow label="Token address" value={addr(tx.tokenAddress)} /> : null}
-        <DetailRow label="Account" value={addr(tx.safeAddress)} />
+        <DetailRow label="Account" value={addr(tx.accountAddress ?? tx.safeAddress)} />
         <DetailRow label="Network" value={`Chain ${tx.chainId}`} />
         <DetailRow label="Transaction" value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} />} />
         <DetailRow label="Date" value={new Date(tx.timestamp * 1000).toLocaleString()} />

@@ -5,7 +5,7 @@ import QRCode from 'qrcode'
 import { getExplorerUrl, resolveChainOrNull } from '@/lib/chains'
 import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import type { UserSafe } from '@/context/AuthContext'
+import type { SmartAccount } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
 import { Address, ApprovalRequiredBanner } from '@/components/haven'
 import { Card } from '@/components/ui/Card'
@@ -17,7 +17,7 @@ import { Icon } from '@/components/ui/Icon'
 
 interface Props {
   open: boolean
-  safe: UserSafe | null
+  safe: SmartAccount | null
   onClose: () => void
 }
 
@@ -67,7 +67,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
 
   if (!open || !safe) return null
 
-  const safeAddress = safe.safe_address
+  const accountAddress = safe.safe_address
   // #1852: was `getChainConfig(safe.chain_id)`, which THROWS for any id outside
   // the registry — including `undefined` — taking the whole screen down through
   // the error boundary. Both shapes of unresolved (absent id, present-but-
@@ -76,7 +76,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   const supportedTokens = chainConfig ? Object.values(chainConfig.tokens) : []
 
   function copyAddress() {
-    void navigator.clipboard.writeText(safeAddress)
+    void navigator.clipboard.writeText(accountAddress)
     setCopied(true)
     setTimeout(() => setCopied(false), 1800)
     toast.success('Address copied')
@@ -171,7 +171,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
               <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
                 <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
                 <p className="mt-2 break-all text-sm text-[var(--v2-ink)]">
-                  <Address value={safeAddress} truncate={false} />
+                  <Address value={accountAddress} truncate={false} />
                 </p>
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <Button onClick={copyAddress} size="sm">
@@ -183,7 +183,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    href={getExplorerUrl(safe.chain_id, 'address', safeAddress)}
+                    href={getExplorerUrl(safe.chain_id, 'address', accountAddress)}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -205,7 +205,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                       <Skeleton className="h-[220px] w-[220px] rounded-lg" />
                     )}
                     <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
-                      QR code for {truncate(safeAddress)}
+                      QR code for {truncate(accountAddress)}
                     </p>
                   </div>
                 </div>

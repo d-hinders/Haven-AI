@@ -261,7 +261,7 @@ test.describe('mobile viewport', () => {
 
     // A SECOND row, scoped to this test — see the block comment above.
     //
-    // The endpoint is `/dashboard/overview`, NOT `/transactions/{safeId}`.
+    // The endpoint is `/dashboard/overview`, NOT `/transactions/{accountId}`.
     // Worth naming because the plausible guess is wrong and fails silently:
     // an override on `**\/api/transactions/*` never matches, the page keeps
     // `mockHavenApi`'s single-row overview, and the only symptom is a row

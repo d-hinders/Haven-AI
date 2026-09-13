@@ -154,7 +154,7 @@ export default function SettingsClient() {
         {/*
           The Approvers section is DELETED (#1989, epic #1440). It hosted
           `ManageApprovers`, which built and relayed Safe owner-change
-          transactions through `POST /user/safes/:safeId/approvers/tx` — one of
+          transactions through `POST /user/safes/:accountId/approvers/tx` — one of
           five approver routes #1988 removed with the Safe rail. Left in place
           it would render a section whose every action 404s.
 

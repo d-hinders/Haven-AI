@@ -19,11 +19,11 @@ const SEPOLIA_SAFE = { id: 'sep-1', chain_id: 84532, name: 'Sepolia account' }
 
 const mockSetActiveSafe = vi.fn()
 
-function auth(activeSafe: unknown, safes: unknown[]) {
+function auth(activeAccount: unknown, safes: unknown[]) {
   mockUseAuth.mockReturnValue({
-    user: { safes },
-    activeSafe,
-    setActiveSafe: mockSetActiveSafe,
+    user: { accounts: safes },
+    activeAccount,
+    setActiveAccount: mockSetActiveSafe,
   })
 }
 

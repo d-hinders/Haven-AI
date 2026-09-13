@@ -43,7 +43,7 @@ const mockUser = {
   email: 'test@example.com',
   wallet_address: null,
   safe_address: null,
-  safes: [],
+  accounts: [],
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -151,7 +151,7 @@ describe('AuthContext', () => {
   it('hydrates stored passkeys for known device credentials on session restore', async () => {
     const userWithSafe = {
       ...mockUser,
-      safes: [
+      accounts: [
         {
           id: 'safe-1',
           safe_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -189,11 +189,11 @@ describe('AuthContext', () => {
     })
   })
 
-  it('clears stored passkey entries for all safes on logout', async () => {
+  it('clears stored passkey entries for all accounts on logout', async () => {
     mockApi.get.mockRejectedValue(new Error('no token'))
-    const userWithSafes = {
+    const userWithAccounts = {
       ...mockUser,
-      safes: [
+      accounts: [
         {
           id: 'safe-1',
           safe_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
@@ -213,7 +213,7 @@ describe('AuthContext', () => {
       ],
     }
 
-    mockApi.post.mockResolvedValue({ token: 'jwt-token', user: userWithSafes })
+    mockApi.post.mockResolvedValue({ token: 'jwt-token', user: userWithAccounts })
 
     const { result } = renderHook(() => useAuth(), { wrapper })
     await waitFor(() => expect(result.current.loading).toBe(false))

@@ -7,14 +7,14 @@ import { getChainConfig } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import type {
   TransactionFilterAgentOption,
-  TransactionFilterSafeOption,
+  TransactionFilterAccountOption,
   TransactionFilterState,
   TransactionFilterTokenOption,
 } from '@/types/transactions'
 
 interface FilterBarProps {
   filters: TransactionFilterState
-  safes: TransactionFilterSafeOption[]
+  safes: TransactionFilterAccountOption[]
   agents: TransactionFilterAgentOption[]
   tokens: TransactionFilterTokenOption[]
   loading: boolean
@@ -93,17 +93,17 @@ export default function FilterBar({
     return rank(a.status) - rank(b.status) || a.name.localeCompare(b.name)
   })
 
-  const selectedSafe = safes.find((safe) => safe.id === filters.safeId)
+  const selectedSafe = safes.find((safe) => safe.id === filters.accountId)
   const selectedAgent =
     filters.agentId === 'user'
       ? { id: 'user', name: 'User (manual)', status: 'manual' }
       : agents.find((agent) => agent.id === filters.agentId)
   const selectedToken = tokens.find((token) => token.key === filters.tokenKey)
 
-  type ChipKey = 'safeId' | 'agentId' | 'tokenKey' | 'direction'
+  type ChipKey = 'accountId' | 'agentId' | 'tokenKey' | 'direction'
   const chips = [
     selectedSafe
-      ? { key: 'safeId' as const, label: `Account: ${selectedSafe.name}` }
+      ? { key: 'accountId' as const, label: `Account: ${selectedSafe.name}` }
       : null,
     selectedAgent
       ? { key: 'agentId' as const, label: `Initiator: ${selectedAgent.name}` }
@@ -117,7 +117,7 @@ export default function FilterBar({
   ].filter((chip): chip is { key: ChipKey; label: string } => Boolean(chip))
 
   const clearFilter = (key: ChipKey) => {
-    if (key === 'safeId') onChange({ ...filters, safeId: undefined })
+    if (key === 'accountId') onChange({ ...filters, accountId: undefined })
     if (key === 'agentId') onChange({ ...filters, agentId: undefined })
     if (key === 'tokenKey') onChange({ ...filters, tokenKey: undefined })
     if (key === 'direction') onChange({ ...filters, direction: undefined })
@@ -133,7 +133,7 @@ export default function FilterBar({
               setOpen(open === 'safe' ? null : 'safe')
             }}
             disabled={safes.length <= 1}
-            className={triggerClasses(Boolean(filters.safeId), safes.length <= 1)}
+            className={triggerClasses(Boolean(filters.accountId), safes.length <= 1)}
           >
             <span>Account: {selectedSafe?.name ?? 'All'}</span>
             <Chevron open={open === 'safe'} />
@@ -141,9 +141,9 @@ export default function FilterBar({
           {open === 'safe' && safes.length > 1 && (
             <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
               <DropdownButton
-                active={!filters.safeId}
+                active={!filters.accountId}
                 onClick={() => {
-                  onChange({ ...filters, safeId: undefined })
+                  onChange({ ...filters, accountId: undefined })
                   setOpen(null)
                 }}
               >
@@ -152,9 +152,9 @@ export default function FilterBar({
               {safes.map((safe) => (
                 <DropdownButton
                   key={safe.id}
-                  active={filters.safeId === safe.id}
+                  active={filters.accountId === safe.id}
                   onClick={() => {
-                    onChange({ ...filters, safeId: safe.id })
+                    onChange({ ...filters, accountId: safe.id })
                     setOpen(null)
                   }}
                 >

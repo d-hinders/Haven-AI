@@ -22,19 +22,19 @@ import { Select } from '../ui/Select'
 export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
   return (
     <>
-      {flow.hasMultipleSafes && (
+      {flow.hasMultipleAccounts && (
         <div>
           <label htmlFor="connect-agent-safe" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
             Spend from
           </label>
           <Select
             id="connect-agent-safe"
-            value={flow.selectedSafeId ?? ''}
-            onChange={(event) => flow.setSelectedSafeId(event.target.value)}
+            value={flow.selectedAccountId ?? ''}
+            onChange={(event) => flow.setSelectedAccountId(event.target.value)}
           >
-            {flow.selectableSafes.map((safe) => (
-              <option key={safe.id} value={safe.id}>
-                {safe.name}
+            {flow.selectableAccounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
               </option>
             ))}
           </Select>
@@ -103,7 +103,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
         </Button>
         <Button
           onClick={() => flow.setStep('review')}
-          disabled={flow.allowances.length === 0 || (flow.hasMultipleSafes && !flow.selectedSafeId)}
+          disabled={flow.allowances.length === 0 || (flow.hasMultipleAccounts && !flow.selectedAccountId)}
           className="flex-1"
         >
           Review agent budget

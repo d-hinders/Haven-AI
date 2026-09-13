@@ -21,7 +21,7 @@ export function useContactChains(perSafeLimit = 100): {
   loading: boolean
 } {
   const { user } = useAuth()
-  const safes = user?.safes ?? []
+  const safes = user?.accounts ?? []
   // Re-derive when the set of (address, chain) pairs changes.
   const key = safes
     .map((s) => `${s.safe_address.toLowerCase()}:${s.chain_id}`)

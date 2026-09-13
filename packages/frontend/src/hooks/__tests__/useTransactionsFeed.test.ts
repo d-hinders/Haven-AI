@@ -12,7 +12,7 @@ vi.mock('@/lib/api', () => ({
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import type { AggregatedTransaction, TransactionsFeedResponse } from '@/types/transactions'
 
-function tx(hash: string, safeId: string): AggregatedTransaction {
+function tx(hash: string, accountId: string): AggregatedTransaction {
   return {
     hash,
     type: 'native',
@@ -27,7 +27,9 @@ function tx(hash: string, safeId: string): AggregatedTransaction {
     blockNumber: 45725826,
     isError: false,
     chainId: 8453,
-    safeId,
+    accountId,
+    safeId: accountId,
+    accountAddress: '0x1111111111111111111111111111111111111111',
     safeAddress: '0x1111111111111111111111111111111111111111',
     safeName: 'Base wallet',
   }
@@ -60,11 +62,11 @@ describe('useTransactionsFeed', () => {
       .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve }))
 
     const { result, rerender } = renderHook(
-      ({ safeId }) => useTransactionsFeed({ safeId }),
-      { initialProps: { safeId: 'safe-old' } },
+      ({ accountId }) => useTransactionsFeed({ accountId }),
+      { initialProps: { accountId: 'safe-old' } },
     )
 
-    rerender({ safeId: 'safe-new' })
+    rerender({ accountId: 'safe-new' })
 
     await act(async () => {
       resolveFirst(response([tx('0xold', 'safe-old')]))
@@ -79,10 +81,10 @@ describe('useTransactionsFeed', () => {
     await waitFor(() => expect(result.current.loadingInitial).toBe(false))
     expect(mockApiGet).toHaveBeenCalledTimes(2)
     expect(mockApiGet).toHaveBeenCalledWith(
-      '/transactions?safeId=safe-old&offset=0&limit=25',
+      '/transactions?accountId=safe-old&offset=0&limit=25',
     )
     expect(mockApiGet).toHaveBeenCalledWith(
-      '/transactions?safeId=safe-new&offset=0&limit=25',
+      '/transactions?accountId=safe-new&offset=0&limit=25',
     )
     expect(result.current.transactions[0]?.hash).toBe('0xnew')
   })

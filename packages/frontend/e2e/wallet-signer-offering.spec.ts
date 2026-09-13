@@ -78,7 +78,7 @@ async function mockHybridAccount(page: Page) {
  * targetless `injected()` connector reconnect on mount (`isAuthorized`
  * requires `injected.connected`, and `recentConnectorId` puts it first).
  * Everything above the provider — reconnect, `useAccount`,
- * `useSafeOperationGate`, `useActiveSigner`, the header render — is the
+ * `useAccountOperationGate`, `useActiveSigner`, the header render — is the
  * product's own code; nothing is forced by props.
  */
 async function installConnectedWallet(page: Page, address: string) {

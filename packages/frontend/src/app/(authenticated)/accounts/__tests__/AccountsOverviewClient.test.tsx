@@ -16,7 +16,7 @@ const {
 }))
 
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
-vi.mock('@/hooks/useUserSafes', () => ({ useUserSafes: () => mockUseUserSafes() }))
+vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseUserSafes() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))
 vi.mock('@/hooks/usePortfolio', () => ({
@@ -58,10 +58,10 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
     mockUseUserSafes.mockReturnValue({
-      safes: [BASE, SEPOLIA],
+      accounts: [BASE, SEPOLIA],
       loading: false,
     })
-    mockUseAuth.mockReturnValue({ activeSafe: BASE, setActiveSafe: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ activeAccount: BASE, setActiveAccount: mockSetActiveSafe })
   })
 
   it('marks the active account and offers Set active only on the others', () => {
@@ -116,12 +116,12 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
-    mockUseAuth.mockReturnValue({ activeSafe: BASE, setActiveSafe: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ activeAccount: BASE, setActiveAccount: mockSetActiveSafe })
   })
 
   it('offers no Add-account entry point when accounts exist', () => {
     mockUseUserSafes.mockReturnValue({
-      safes: [BASE, SEPOLIA],
+      accounts: [BASE, SEPOLIA],
       loading: false,
     })
 
@@ -137,7 +137,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
   })
 
   it('offers no Add-account entry point from the empty state either', () => {
-    mockUseUserSafes.mockReturnValue({ safes: [], loading: false })
+    mockUseUserSafes.mockReturnValue({ accounts: [], loading: false })
 
     render(<AccountsOverviewClient />)
 
@@ -190,7 +190,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
-    mockUseAuth.mockReturnValue({ activeSafe: BASE, setActiveSafe: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ activeAccount: BASE, setActiveAccount: mockSetActiveSafe })
   })
 
   /** Every control on the page whose accessible name or text mentions the word. */
@@ -202,7 +202,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
   }
 
   it('offers no set-default control with several accounts, while keeping the default badge', () => {
-    mockUseUserSafes.mockReturnValue({ safes: [BASE, SEPOLIA], loading: false })
+    mockUseUserSafes.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
 
     render(<AccountsOverviewClient />)
 
@@ -228,9 +228,9 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
 
   it('offers no set-default control for a lone NON-default account either', () => {
     const LONE = safe('lone1', 'Lone account', 8453, false)
-    mockUseUserSafes.mockReturnValue({ safes: [LONE], loading: false })
+    mockUseUserSafes.mockReturnValue({ accounts: [LONE], loading: false })
     /*
-      `activeSafe: null` — no account selected yet — and that is load-bearing
+      `activeAccount: null` — no account selected yet — and that is load-bearing
       rather than incidental. `haven-reviewer` found this arm's non-vacuity
       check proving less than it looked: with the lone account ALSO active,
       the card renders no button at all, so `controlsMentioning` had nothing
@@ -244,7 +244,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
       one account, `is_default: false`, so both badges are suppressed and
       `/accounts/<id>` hides its own set-default action.
     */
-    mockUseAuth.mockReturnValue({ activeSafe: null, setActiveSafe: mockSetActiveSafe })
+    mockUseAuth.mockReturnValue({ activeAccount: null, setActiveAccount: mockSetActiveSafe })
 
     render(<AccountsOverviewClient />)
 

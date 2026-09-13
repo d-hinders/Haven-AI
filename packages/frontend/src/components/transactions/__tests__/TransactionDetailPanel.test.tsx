@@ -23,6 +23,8 @@ function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransacti
     tokenAddress: '0x3333333333333333333333333333333333333333',
     tokenSymbol: 'USDC',
     chainId: 8453,
+    accountId: 'safe-1',
+    accountAddress: '0x4444444444444444444444444444444444444444',
     safeId: 'safe-1',
     safeAddress: '0x4444444444444444444444444444444444444444',
     safeName: 'Main',

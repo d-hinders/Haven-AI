@@ -61,7 +61,7 @@ interface TransactionsTableProps {
   error: string | null
   onRefresh: () => void
   resolveAddress?: (address: string) => string | null
-  safeNamesByAddress?: Map<string, string>
+  accountNamesByAddress?: Map<string, string>
   hasActiveFilters: boolean
   /**
    * Wires the empty-state "Clear filters" action when filters are active.
@@ -180,7 +180,7 @@ export default function TransactionsTable({
   error,
   onRefresh,
   resolveAddress,
-  safeNamesByAddress,
+  accountNamesByAddress,
   hasActiveFilters,
   onClearFilters,
   variant = 'page',
@@ -335,7 +335,7 @@ export default function TransactionsTable({
           </tr>
         ) : (
           sorted.map((tx, index) => {
-            const movement = transactionMovement(tx, resolveAddress, safeNamesByAddress)
+            const movement = transactionMovement(tx, resolveAddress, accountNamesByAddress)
             const initiator = transactionInitiator(tx)
             const lifecycleBadge = machinePaymentLifecyclePresentation(tx)
             const statusBadge = transactionStatus(tx) ?? lifecycleBadge ?? tx.statusBadge
@@ -344,7 +344,7 @@ export default function TransactionsTable({
 
             return (
               <tr
-                key={`${tx.safeId}:${tx.hash}:${tx.type}:${index}`}
+                key={`${tx.accountId}:${tx.hash}:${tx.type}:${index}`}
                 className={`transition-colors hover:bg-[var(--v2-table-row-hover)]${selectable ? ' cursor-pointer' : ''}`}
                 {...(selectable
                   ? {

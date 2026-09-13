@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const PASSKEY_ADDRESS = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
 const EOA_ADDRESS = '0x5555555555555555555555555555555555555555'
-const ACTIVE_SAFE = {
+const ACTIVE_ACCOUNT = {
   id: 'safe-1',
   safe_address: '0x1111111111111111111111111111111111111111',
   chain_id: 100,
@@ -37,13 +37,13 @@ const mocks = vi.hoisted(() => ({
   openConnectModal: vi.fn(),
   openConnectModalHook: vi.fn(),
   useActiveSigner: vi.fn(),
-  useSafeOperationGate: vi.fn(),
+  useAccountOperationGate: vi.fn(),
   useAuth: vi.fn(),
   writeText: vi.fn(),
 }))
 
-vi.mock('@/hooks/useSafeOperationGate', () => ({
-  useSafeOperationGate: (args: unknown) => mocks.useSafeOperationGate(args),
+vi.mock('@/hooks/useAccountOperationGate', () => ({
+  useAccountOperationGate: (args: unknown) => mocks.useAccountOperationGate(args),
 }))
 
 vi.mock('@rainbow-me/rainbowkit', () => ({
@@ -110,11 +110,11 @@ describe('WalletButton', () => {
     mocks.connectState.authenticationStatus = 'authenticated'
     mocks.disconnectAsync.mockResolvedValue(undefined)
     mocks.useAuth.mockReturnValue({
-      activeSafe: ACTIVE_SAFE,
+      activeAccount: ACTIVE_ACCOUNT,
       passkeys: [],
     })
     mocks.useActiveSigner.mockReturnValue(null)
-    mocks.useSafeOperationGate.mockReturnValue({ kind: 'no_signer' })
+    mocks.useAccountOperationGate.mockReturnValue({ kind: 'no_signer' })
 
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -226,7 +226,7 @@ describe('WalletButton', () => {
 
   it('renders the WRONG WALLET pill when the gate says the connected wallet is not the account owner (#2073)', () => {
     setConnectedWallet()
-    mocks.useSafeOperationGate.mockReturnValue({
+    mocks.useAccountOperationGate.mockReturnValue({
       kind: 'wrong_wallet',
       connectedAddress: EOA_ADDRESS,
       ownerAddress: '0x2222222222222222222222222222222222222222',
@@ -257,7 +257,7 @@ describe('WalletButton', () => {
 
   it('positive control: the healthy connected popover never renders the wrong-wallet note (#2073)', () => {
     setConnectedWallet()
-    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+    mocks.useAccountOperationGate.mockReturnValue({ kind: 'ready' })
 
     render(<WalletButton />)
 
@@ -270,7 +270,7 @@ describe('WalletButton', () => {
 
   it('positive control: a connected wallet with a non-wrong-wallet gate keeps the normal address pill (#2073)', () => {
     setConnectedWallet()
-    mocks.useSafeOperationGate.mockReturnValue({ kind: 'ready' })
+    mocks.useAccountOperationGate.mockReturnValue({ kind: 'ready' })
 
     render(<WalletButton />)
 
@@ -281,14 +281,14 @@ describe('WalletButton', () => {
   it('shows a passkey unavailable note in the connected-wallet dropdown', () => {
     setConnectedWallet()
     mocks.useAuth.mockReturnValue({
-      activeSafe: ACTIVE_SAFE,
+      activeAccount: ACTIVE_ACCOUNT,
       passkeys: [
         {
           id: 'passkey-1',
           credential_id: 'credential-1',
           signer_address: PASSKEY_ADDRESS,
-          chain_id: ACTIVE_SAFE.chain_id,
-          safe_address: ACTIVE_SAFE.safe_address,
+          chain_id: ACTIVE_ACCOUNT.chain_id,
+          safe_address: ACTIVE_ACCOUNT.safe_address,
           created_at: '2026-05-05T00:00:00.000Z',
         },
       ],

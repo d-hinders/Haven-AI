@@ -119,7 +119,7 @@
  *     npm run screenshot -w packages/frontend -- --scenario=connect-agent
  *
  * ── The fixture ──────────────────────────────────────────────────────────────
- * Auth: an `haven_token` + `haven_active_safe_id` are seeded in localStorage
+ * Auth: an `haven_token` + `haven_active_account_id` are seeded in localStorage
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, two
@@ -143,7 +143,7 @@
  * definition (`ROUTE_DEFINITIONS` below; `signedOut: true`), the way
  * `scenario.seed()` is already conditional. A caller captures `/login` by
  * passing `/login`: the harness reads the route's own definition, captures it
- * WITHOUT the token/active-safe seed, and renders the route's real screen
+ * WITHOUT the token/active-account seed, and renders the route's real screen
  * instead of its redirect target. No flag to remember, and one run still
  * captures `/dashboard` and `/login` together: routes are PARTITIONED per
  * viewport by their definitions — an authenticated context and a signed-out
@@ -242,7 +242,7 @@ const DEVICE_SCALE_FACTOR = 2
 // there must fail a test here, not silently capture logged-out screenshots.
 export const SEED_STORAGE_KEYS = {
   token: 'haven_token',
-  activeSafe: 'haven_active_safe_id',
+  activeAccount: 'haven_active_account_id',
 }
 
 // ── Installed-shell metadata check (#2735) ───────────────────────────────────
@@ -621,7 +621,7 @@ export function formatDeletionReport(deleted) {
 
 // Authenticated-session fixture — mirrors the e2e `testUser` shape so
 // `/auth/me` resolves and the app shell renders. No secrets, no live backend.
-export const FIXTURE_SAFE = {
+export const FIXTURE_ACCOUNT = {
   id: 'safe-fixture',
   name: 'Operating wallet',
   safe_address: '0x1111111111111111111111111111111111111111',
@@ -642,10 +642,10 @@ export const FIXTURE_USER = {
   name: 'Screenshot Fixture',
   email: 'fixture@haven.test',
   wallet_address: null,
-  safe_address: FIXTURE_SAFE.safe_address,
+  safe_address: FIXTURE_ACCOUNT.safe_address,
   // Delegation-rail on the `/auth/me`-shaped safes list only — so the account
   // page's Backup & recovery card (#1089) has something real to render,
-  // without perturbing FIXTURE_SAFE's identity shape (pinned against the e2e
+  // without perturbing FIXTURE_ACCOUNT's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
   //
   // #2413: the legacy account #2202 listed beside it is GONE, and this is a
@@ -656,7 +656,8 @@ export const FIXTURE_USER = {
   // Every screenshot taken from that would depict a screen production cannot
   // produce. The harness caught this itself ("a fixture-shape gap or a real
   // client bug"), which is what that check is for.
-  safes: [{ ...FIXTURE_SAFE, account_type: 'delegator_hybrid' }],
+  accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
+  safes: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -683,7 +684,7 @@ const T0 = Date.parse('2026-07-10T09:00:00.000Z') / 1000 // fixed anchor, in sec
 const tx = (i, over = {}) => ({
   hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
   type: 'erc20',
-  from: FIXTURE_SAFE.safe_address,
+  from: FIXTURE_ACCOUNT.safe_address,
   to: ADDR.recipient,
   value: '25000000',
   valueFormatted: '25.00',
@@ -695,10 +696,10 @@ const tx = (i, over = {}) => ({
   isError: false,
   tokenSymbol: 'USDC',
   // AggregatedTransaction extras (harmless on the plain Transaction shape):
-  chainId: FIXTURE_SAFE.chain_id,
-  safeId: FIXTURE_SAFE.id,
-  safeAddress: FIXTURE_SAFE.safe_address,
-  safeName: FIXTURE_SAFE.name,
+  chainId: FIXTURE_ACCOUNT.chain_id,
+  accountId: FIXTURE_ACCOUNT.id,
+  accountAddress: FIXTURE_ACCOUNT.safe_address,
+  safeName: FIXTURE_ACCOUNT.name,
   ...over,
 })
 // #2870: the accounting badge's three states on three agent rows — pushed
@@ -711,14 +712,14 @@ export const FIXTURE_TXS = [
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
     paymentId: 'pay-1', accounting: accounting('pushed', { externalRef: 'fortnox:supplierinvoice:11' }),
   }),
-  tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_SAFE.safe_address, valueFormatted: '150.00', value: '150000000' }),
+  tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_ACCOUNT.safe_address, valueFormatted: '150.00', value: '150000000' }),
   tx(3, { agentName: 'Ops agent', paymentId: 'pay-3', accounting: accounting('pending') }),
   tx(4, { asset: 'ETH', tokenSymbol: undefined, type: 'native', decimals: 18, value: '12000000000000000', valueFormatted: '0.012' }),
   tx(5, {
     isError: true, agentName: 'Research agent',
     paymentId: 'pay-5', accounting: accounting('failed', { error: 'Fortnox answered 502 — will retry on the next sync' }),
   }),
-  tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_SAFE.safe_address, valueFormatted: '75.50', value: '75500000' }),
+  tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_ACCOUNT.safe_address, valueFormatted: '75.50', value: '75500000' }),
 ]
 
 export const FIXTURE_AGENTS = [
@@ -758,9 +759,9 @@ export const FIXTURE_AGENTS = [
     //   `/agents/:id/delegate-balance` was unkeyed in `fixtureFor` and
     //   `FIXTURE_EMPTY_FALLBACK` has no `usdc_atomic`, making `undefined !== '0'`
     //   true. Both halves are fixed together, below and in `fixtureFor`.
-    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_SAFE.id,
-    safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
-    safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
+    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_ACCOUNT.id,
+    safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    safe_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
     created_at: '2026-06-02T10:00:00.000Z',
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
@@ -806,9 +807,9 @@ export const FIXTURE_AGENTS = [
     // state is a pre-column legacy artefact (`000_initial.ts:40`) rather than
     // something a current write path can produce: this agent is seeded with no
     // payment intents, so nothing else contradicts it.
-    delegate_address: null, safe_id: FIXTURE_SAFE.id,
-    safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
-    safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
+    delegate_address: null, safe_id: FIXTURE_ACCOUNT.id,
+    safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    safe_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_g7h8i9', status: 'paused',
     created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
     // #2106: a PAUSED agent whose on-chain delegation is still live. That
@@ -833,8 +834,8 @@ const FIXTURE_PORTFOLIO = {
 }
 const FIXTURE_BALANCES = {
   balances: [
-    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11,890.55', decimals: 6, chainId: FIXTURE_SAFE.chain_id },
-    { symbol: 'ETH', address: null, balance: '250000000000000000', formatted: '0.25', decimals: 18, chainId: FIXTURE_SAFE.chain_id },
+    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11,890.55', decimals: 6, chainId: FIXTURE_ACCOUNT.chain_id },
+    { symbol: 'ETH', address: null, balance: '250000000000000000', formatted: '0.25', decimals: 18, chainId: FIXTURE_ACCOUNT.chain_id },
   ],
 }
 export const FIXTURE_OVERVIEW = {
@@ -849,7 +850,7 @@ export const FIXTURE_OVERVIEW = {
   actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
   agents: FIXTURE_AGENTS.map((a) => ({
-    id: a.id, name: a.name, status: a.status, safeId: a.safe_id,
+    id: a.id, name: a.name, status: a.status, accountId: a.safe_id,
     safeName: a.safe_name, safeChainId: a.safe_chain_id,
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
@@ -873,8 +874,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     // rendered "Sent" here because the deleted APPROVAL_STATUS map caught it.
     reason: null, status: 'confirmed', tx_hash: `0x${'a1'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/reports',
-    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
     // #2126: BOTH fields were fabricated. `payment_proof_status` mirrors
     // `machine_payment_evidence.proof_status`, whose only constructible values
@@ -919,8 +920,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
     reason: null, status: 'failed', tx_hash: null, source: 'api',
-    x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: null, confirmed_at: null, payment_proof_status: null,
     payment_flow_status: null, payment_attention_reason: null,
     created_at: '2026-07-10T07:45:00.000Z',
@@ -931,8 +932,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
     reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
-    chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'b2'.repeat(32)}`,
     // #2126: null, not 'paid'. `source: 'api'` is not in
     // `MACHINE_PAYMENT_RAILS` (`x402 | mpp_demo | mpp_crypto | spt`,
@@ -1005,8 +1006,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     amount_raw: '8000000', amount: '8.00', to: ADDR.merchant,
     reason: null, status: 'confirmed', tx_hash: `0x${'c3'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/datasets',
-    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'c3'.repeat(32)}`,
     confirmed_at: '2026-07-09T09:16:00.000Z', payment_proof_status: 'payment_confirmed',
     payment_flow_status: 'needs_attention',
@@ -1083,13 +1084,13 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // The recoverable-funds incident, and the ONLY agent that renders the banner.
   'agent-research': {
     delegate_address: ADDR.researchDelegate,
-    safe_address: FIXTURE_SAFE.safe_address,
-    chain_id: FIXTURE_SAFE.chain_id,
+    safe_address: FIXTURE_ACCOUNT.safe_address,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
     eth: '0',
     eth_atomic: '0',
     usdc: STRANDED_INTENT.amount,
     usdc_atomic: STRANDED_INTENT.amount_raw,
-    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+    usdc_address: resolveToken(FIXTURE_ACCOUNT.chain_id, 'USDC').address,
     sweep_min_usdc: '0.01',
   },
   // A delegate that holds nothing — the ordinary steady state, and the
@@ -1259,7 +1260,7 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
-  if (pathname === '/chains') return { deployable: [FIXTURE_SAFE.chain_id] }
+  if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
@@ -1287,11 +1288,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions/filters') {
     return {
-      safes: [{ id: FIXTURE_SAFE.id, name: FIXTURE_SAFE.name, address: FIXTURE_SAFE.safe_address, chainId: FIXTURE_SAFE.chain_id }],
+      safes: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.safe_address, chainId: FIXTURE_ACCOUNT.chain_id }],
       agents: FIXTURE_AGENTS.map((a) => ({ id: a.id, name: a.name, status: a.status })),
       tokens: [
-        { key: `usdc:${FIXTURE_SAFE.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_SAFE.chain_id, isNative: false },
-        { key: `eth:${FIXTURE_SAFE.chain_id}`, symbol: 'ETH', address: null, chainId: FIXTURE_SAFE.chain_id, isNative: true },
+        { key: `usdc:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_ACCOUNT.chain_id, isNative: false },
+        { key: `eth:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'ETH', address: null, chainId: FIXTURE_ACCOUNT.chain_id, isNative: true },
       ],
     }
   }
@@ -1303,8 +1304,8 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
     // Backup & recovery card renders its "only one way to approve" state.
     return {
-      account_address: FIXTURE_SAFE.safe_address,
-      chain_id: FIXTURE_SAFE.chain_id,
+      account_address: FIXTURE_ACCOUNT.safe_address,
+      chain_id: FIXTURE_ACCOUNT.chain_id,
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
@@ -1333,7 +1334,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     if (pathname === `/agents/agent-research/delegations`) {
       return {
         delegations: [{
-          id: 'dlg-1', chain_id: FIXTURE_SAFE.chain_id,
+          id: 'dlg-1', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: ADDR.merchant,
           delegation_hash: '0x' + '4d'.repeat(32),
@@ -1348,7 +1349,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     if (pathname === `/agents/agent-retired/delegations`) {
       return {
         delegations: [{
-          id: 'dlg-2', chain_id: FIXTURE_SAFE.chain_id,
+          id: 'dlg-2', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
           delegation_hash: '0x' + '5e'.repeat(32),
@@ -1371,7 +1372,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
         passport: {
           status: 'anchored', assurance_level: 0,
           attestation_uid: '0x' + '22'.repeat(32),
-          tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_SAFE.chain_id,
+          tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_ACCOUNT.chain_id,
           attempts: 1, last_error: null,
           requested_at: '2026-06-02T10:05:00.000Z', anchored_at: '2026-06-02T10:05:12.000Z',
         },
@@ -1873,12 +1874,12 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
   if (!signedOut) {
     await context.addInitScript((keys) => {
       window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
-      window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
+      window.localStorage.setItem(keys.activeAccount, 'safe-fixture')
     }, SEED_STORAGE_KEYS)
   }
 
   // Device-local state a scenario needs (#1856). Some gates read localStorage
-  // rather than the API — `useSafeOperationGate` resolves the signer from the
+  // rather than the API — `useAccountOperationGate` resolves the signer from the
   // passkey store the app itself writes at enrolment, and no API answer can
   // put a credential on this device. `scenario.seed()` returns the same
   // key/value pairs that store holds, seeded before any app code runs, exactly
@@ -1899,7 +1900,7 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
   // A CONNECTED wallet, through the real wagmi path (#2073). Same posture as
   // `scenario.seed()` above: this stubs the BROWSER-side seam the product
   // reads (an EIP-1193 provider on `window.ethereum`), so wagmi's own
-  // `injected()` connector reconnect, `useAccount`, `useSafeOperationGate`
+  // `injected()` connector reconnect, `useAccount`, `useAccountOperationGate`
   // and the header render are all real. The two seeded wagmi keys are what
   // lets the targetless injected connector reconnect on mount
   // (`isAuthorized` requires `injected.connected`; `recentConnectorId` puts
@@ -1927,7 +1928,7 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
       },
       {
         addr: scenario.connectedWallet,
-        chainIdHex: `0x${FIXTURE_SAFE.chain_id.toString(16)}`,
+        chainIdHex: `0x${FIXTURE_ACCOUNT.chain_id.toString(16)}`,
       },
     )
   }
@@ -2005,7 +2006,7 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
       })
     }
     if (api === '/auth/me') return json(FIXTURE_USER)
-    if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
+    if (api === '/user/safes') return json({ safes: FIXTURE_USER.accounts })
     const populated = fixtureFor(api + search)
     // #2194: the SAME `instanceof` check the scenario branch above makes, for
     // the same reason and one layer down. `fixtureFor` can now seed a route's
@@ -2166,8 +2167,8 @@ const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_
  */
 const BACKUP_RECOVERY_STAGES = {
   healthy: {
-    account_address: FIXTURE_SAFE.safe_address,
-    chain_id: FIXTURE_SAFE.chain_id,
+    account_address: FIXTURE_ACCOUNT.safe_address,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
     owner_address: '0x' + 'ee'.repeat(20),
     // Both dates are noon UTC so the rendered day cannot slide either way with
     // the runner's timezone — the label IS the evidence here. March 3 is the
@@ -2184,8 +2185,8 @@ const BACKUP_RECOVERY_STAGES = {
   // this is the minimum that renders it — and `owner_address: null` rather
   // than an omitted key, because the absence is the claim.
   'one-way': {
-    account_address: FIXTURE_SAFE.safe_address,
-    chain_id: FIXTURE_SAFE.chain_id,
+    account_address: FIXTURE_ACCOUNT.safe_address,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
     owner_address: null,
     passkeys: [
       { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
@@ -2325,10 +2326,10 @@ function connectorRepairHintScenarios() {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           agent_budget: [
@@ -2360,8 +2361,8 @@ function connectorRepairHintScenarios() {
       }
       if (apiPath === '/agents/agent-research/account-signers') {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: null,
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
@@ -3077,7 +3078,7 @@ export const SCENARIOS = {
       }
 
       await settleOnStage(() =>
-        page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
+        page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, {
           waitUntil: 'networkidle',
           timeout: 30_000,
         }),
@@ -3173,7 +3174,7 @@ export const SCENARIOS = {
           passport: {
             status: 'anchored', assurance_level: 0,
             attestation_uid: '0x' + '22'.repeat(32),
-            tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_SAFE.chain_id,
+            tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_ACCOUNT.chain_id,
             attempts: 1, last_error: null,
             requested_at: '2026-06-02T10:05:00.000Z', anchored_at: '2026-06-02T10:05:12.000Z',
           },
@@ -3254,16 +3255,16 @@ export const SCENARIOS = {
       // otherwise have DELETED the refusal's only rendered evidence.
       if (apiPath === '/agents/agent-retired/account-signers') {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [],
         }
       }
       if (apiPath.endsWith('/account-signers')) {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [
             { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
@@ -3373,8 +3374,8 @@ export const SCENARIOS = {
     api(apiPath) {
       if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
@@ -3382,7 +3383,7 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
       await dismissMobileSidebar(page, vp)
 
       await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
@@ -3427,10 +3428,10 @@ export const SCENARIOS = {
         return {
           agent: { name: 'Research agent', description: null },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           agent_budget: [],
@@ -3458,10 +3459,10 @@ export const SCENARIOS = {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: null },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           agent_budget: [],
@@ -3569,10 +3570,10 @@ export const SCENARIOS = {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           // 25.00 USDC per day, atomic — the Budget row is the whole reason
@@ -3608,8 +3609,8 @@ export const SCENARIOS = {
       // connect-wallet fallback instead of the Approve button this issue is about.
       if (apiPath === '/agents/agent-research/account-signers') {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: null,
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
@@ -3732,10 +3733,10 @@ export const SCENARIOS = {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: null },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           // A REAL grant, in atomic units: 25.00 USDC per day. The screen's
@@ -3843,10 +3844,10 @@ export const SCENARIOS = {
               expires_at: '2099-01-01T00:00:00.000Z',
               agent: { name: 'Research agent', description: null },
               haven_wallet: {
-                id: FIXTURE_SAFE.id,
-                name: FIXTURE_SAFE.name,
-                address: FIXTURE_SAFE.safe_address,
-                chain_id: FIXTURE_SAFE.chain_id,
+                id: FIXTURE_ACCOUNT.id,
+                name: FIXTURE_ACCOUNT.name,
+                address: FIXTURE_ACCOUNT.safe_address,
+                chain_id: FIXTURE_ACCOUNT.chain_id,
                 network: 'Base Sepolia',
               },
               agent_budget: [
@@ -3916,7 +3917,7 @@ export const SCENARIOS = {
     // (`scenario.seed`) but not the second. `connectedWallet` (the #2073 seam
     // in `newFixtureContext`) is the missing input. Everything above the
     // stubbed provider is the product's own code: wagmi reconnects the
-    // injected connector, `useSafeOperationGate` compares the connected
+    // injected connector, `useAccountOperationGate` compares the connected
     // address to the set's `owner_address`, and the header renders the
     // mismatch. The signer set arrives through the REAL hydration path — the
     // api() override below is what `AuthContext` reads and writes to the
@@ -3927,8 +3928,8 @@ export const SCENARIOS = {
         // Owner-only set: an EOA owner, zero enrolled passkeys — #2068's
         // shape, where the connected wallet's identity is the whole answer.
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [],
         }
@@ -4014,9 +4015,9 @@ export const SCENARIOS = {
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
     // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
       // Same both-endpoints reasoning as the unresolved twin below.
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4057,7 +4058,7 @@ export const SCENARIOS = {
     // `chain_id` — and the pair is therefore evidence about the chain and
     // nothing else.
     // Both safe-serving endpoints are overridden even though the dashboard reads
-    // only `/auth/me` (`DashboardClient.tsx:633` → `user?.safes`). Deliberate,
+    // only `/auth/me` (`DashboardClient.tsx:633` → `user?.accounts`). Deliberate,
     // not over-mocking: a fixture whose two safe endpoints disagree about
     // whether an account HAS a chain is a trap for the next scenario that
     // reaches for the other one, and the disagreement would be invisible.
@@ -4065,9 +4066,9 @@ export const SCENARIOS = {
       // #2202: the rail is NAMED here too, exactly as its resolved twin names
       // it — the pair is only evidence about `chain_id` if `chain_id` is the
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
+      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'safe' }
       delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
       return undefined
     },
@@ -4091,8 +4092,8 @@ export const SCENARIOS = {
     // #2202 — see `add-funds` for why it is SET rather than dropped) so the
     // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4126,7 +4127,7 @@ export const SCENARIOS = {
     // endpoints for their whole run.
     //
     // The state is not reachable through the UI today (`chain_id` is
-    // non-nullable in `UserSafe`, and the hero only offers Receive when an
+    // non-nullable in `SmartAccount`, and the hero only offers Receive when an
     // account exists). What IS reachable is the wire condition: a safe that
     // arrives WITHOUT `chain_id`. That is what this serves — at the API
     // boundary, with no component code mutated — so the capture evidences the
@@ -4137,9 +4138,9 @@ export const SCENARIOS = {
       // #2202: the rail is NAMED here too, exactly as its resolved twin names
       // it — the pair is only evidence about `chain_id` if `chain_id` is the
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
+      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'safe' }
       delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
       return undefined
     },
@@ -4189,9 +4190,9 @@ export const SCENARIOS = {
         return { ...FIXTURE_OVERVIEW, onboardingProgress: { hasFirstAgentPayment: false } }
       }
       if (apiPath === '/auth/me') {
-        return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
       }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4254,7 +4255,7 @@ export const SCENARIOS = {
         const base = {
           category: 'media', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
           tool_arguments: null, asset_transfer_methods: null,
-          network: `eip155:${FIXTURE_SAFE.chain_id}`, status: 'active',
+          network: `eip155:${FIXTURE_ACCOUNT.chain_id}`, status: 'active',
           verified_at: '2026-08-30T09:00:00.000Z',
           source: 'operator', domain_verified: false, verified_payable: false,
         }

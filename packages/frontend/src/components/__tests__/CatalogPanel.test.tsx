@@ -173,7 +173,7 @@ describe('CatalogPanel', () => {
   beforeEach(() => {
     mockUseAgents.mockReturnValue({ agents: [activeAgent] })
     // Active chain = Base mainnet by default (the existing entries are on Base).
-    mockUseAuth.mockReturnValue({ activeSafe: { id: 's1', chain_id: 8453 } })
+    mockUseAuth.mockReturnValue({ activeAccount: { id: 's1', chain_id: 8453 } })
   })
 
   afterEach(() => {
@@ -301,7 +301,7 @@ describe('CatalogPanel', () => {
     expect(screen.queryByText('Sepolia service')).toBeNull()
 
     // Flip the active account to a Sepolia one — catalog follows.
-    mockUseAuth.mockReturnValue({ activeSafe: { id: 's2', chain_id: 84532 } })
+    mockUseAuth.mockReturnValue({ activeAccount: { id: 's2', chain_id: 84532 } })
     rerender(<CatalogPanel />)
     expect(screen.getByText('Sepolia service')).toBeDefined()
     expect(screen.queryByText('Base service')).toBeNull()
@@ -309,7 +309,7 @@ describe('CatalogPanel', () => {
 
   it('shows an escape hatch when the active chain has no services', () => {
     // Active chain = Gnosis (100), but the catalog only has Base entries.
-    mockUseAuth.mockReturnValue({ activeSafe: { id: 's3', chain_id: 100 } })
+    mockUseAuth.mockReturnValue({ activeAccount: { id: 's3', chain_id: 100 } })
     mockUseCatalog.mockReturnValue({
       entries: [entry({ id: 'base-1', name: 'Base service', network: 'eip155:8453' })],
       loading: false,
@@ -327,7 +327,7 @@ describe('CatalogPanel verification badge and filter (#1715)', () => {
   beforeEach(() => {
     mockUseAgents.mockReturnValue({ agents: [activeAgent] })
     // Active chain = Base mainnet, like the default fixture entries.
-    mockUseAuth.mockReturnValue({ activeSafe: { id: 's1', chain_id: 8453 } })
+    mockUseAuth.mockReturnValue({ activeAccount: { id: 's1', chain_id: 8453 } })
   })
 
   function mixedCatalog() {

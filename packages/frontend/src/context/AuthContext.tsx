@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api, type ListPasskeysResponse } from '@/lib/api'
-import { ACTIVE_SAFE_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
+import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY, migrateActiveAccountStorageKey } from '@/lib/auth-storage'
 import {
   PASSKEY_SCHEMA_VERSION,
   clearStoredPasskeySigner,
@@ -20,7 +20,12 @@ import {
 } from '@/lib/signer'
 import type { Address } from 'viem'
 
-export interface UserSafe {
+/**
+ * The session user's linked account. Type name per #2913 (naming epic
+ * #2906): the objects are MetaMask Hybrid DeleGator smart accounts, so the
+ * type matches the `smart_accounts` table and the backend type.
+ */
+export interface SmartAccount {
   id: string
   safe_address: string
   chain_id: number
@@ -50,7 +55,11 @@ export interface User {
   email: string
   wallet_address: string | null
   safe_address: string | null
-  safes: UserSafe[]
+  /**
+   * The list is read from the #2907 `accounts` envelope key, which the
+   * backend always emits alongside the deprecated `safes` twin (same array).
+   */
+  accounts: SmartAccount[]
   currency_preference?: 'USD' | 'EUR'
   created_at?: string
 }
@@ -64,9 +73,9 @@ interface AuthState {
   user: User | null
   token: string | null
   loading: boolean
-  activeSafe: UserSafe | null
+  activeAccount: SmartAccount | null
   passkeys: ListPasskeysResponse['passkeys']
-  setActiveSafe: (safe: UserSafe) => void
+  setActiveAccount: (account: SmartAccount) => void
   signup: (name: string, email: string, password: string, via?: string | null) => Promise<User>
   login: (email: string, password: string) => Promise<User>
   logout: () => void
@@ -76,42 +85,47 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null)
 
-function resolveActiveSafe(safes: UserSafe[]): UserSafe | null {
-  if (safes.length === 0) return null
+function resolveActiveAccount(accounts: SmartAccount[]): SmartAccount | null {
+  if (accounts.length === 0) return null
 
   // Check localStorage for a previous selection
-  const storedId = localStorage.getItem(ACTIVE_SAFE_STORAGE_KEY)
+  const storedId = localStorage.getItem(ACTIVE_ACCOUNT_STORAGE_KEY)
   if (storedId) {
-    const found = safes.find((s) => s.id === storedId)
+    const found = accounts.find((s) => s.id === storedId)
     if (found) return found
   }
 
-  // Fall back to the default Safe, or the first one
-  return safes.find((s) => s.is_default) ?? safes[0]
+  // Fall back to the default account, or the first one
+  return accounts.find((s) => s.is_default) ?? accounts[0]
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeSafe, setActiveSafeState] = useState<UserSafe | null>(null)
+  const [activeAccount, setActiveAccountState] = useState<SmartAccount | null>(null)
   const [passkeys, setPasskeys] = useState<ListPasskeysResponse['passkeys']>([])
 
-  const setActiveSafe = useCallback((safe: UserSafe) => {
-    setActiveSafeState(safe)
-    localStorage.setItem(ACTIVE_SAFE_STORAGE_KEY, safe.id)
+  const setActiveAccount = useCallback((account: SmartAccount) => {
+    setActiveAccountState(account)
+    localStorage.setItem(ACTIVE_ACCOUNT_STORAGE_KEY, account.id)
   }, [])
 
-  // Sync activeSafe when user changes (e.g., after refresh or safe add/remove)
-  const syncActiveSafe = useCallback((u: User) => {
-    const safes = u.safes ?? []
-    setActiveSafeState((prev) => {
-      // If the current active safe is still in the list, keep it
-      if (prev && safes.find((s) => s.id === prev.id)) {
+  // Sync activeAccount when user changes (e.g., after refresh or account
+  // add/remove).
+  const syncActiveAccount = useCallback((u: User) => {
+    const accounts = u.accounts ?? []
+    // #2913: run the storage-key migration against the fresh list, BEFORE the
+    // stored id is read — a pre-rename selection lands in the new key on the
+    // first boot and every read after this sees the new key only.
+    migrateActiveAccountStorageKey(accounts.map((s) => s.id))
+    setActiveAccountState((prev) => {
+      // If the current active account is still in the list, keep it
+      if (prev && accounts.find((s) => s.id === prev.id)) {
         // Update in case name changed
-        return safes.find((s) => s.id === prev.id)!
+        return accounts.find((s) => s.id === prev.id)!
       }
-      return resolveActiveSafe(safes)
+      return resolveActiveAccount(accounts)
     })
   }, [])
 
@@ -152,14 +166,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // #2413: every account the API returns is on the delegation rail, so the
     // filter that used to sit here selected all of them.
     await Promise.all(
-      (u.safes ?? []).map(async (safe) => {
+      (u.accounts ?? []).map(async (account) => {
         try {
           const signers = await api.get<HybridAccountSigners>(
-            `/accounts/hybrid/${safe.safe_address}/signers?chain_id=${safe.chain_id}`,
+            `/accounts/hybrid/${account.safe_address}/signers?chain_id=${account.chain_id}`,
           )
           setStoredHybridSigners(signers)
         } catch {
-          /* skipped silently — per-safe parity with the passkey loop */
+          /* skipped silently — per-account parity with the passkey loop */
         }
       }),
     )
@@ -169,17 +183,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const u = await api.get<User>('/auth/me')
       setUser(u)
-      syncActiveSafe(u)
+      syncActiveAccount(u)
       await hydratePasskeys(u)
     } catch {
       // Silently fail — token might be invalid
     }
-  }, [hydratePasskeys, syncActiveSafe])
+  }, [hydratePasskeys, syncActiveAccount])
 
   // On mount, check for existing token.
   // A cancelled ref guards against the effect re-running (e.g. in Strict Mode)
   // while an in-flight request is still pending — without it two overlapping
-  // /auth/me calls could both call setUser/syncActiveSafe in an undefined order.
+  // /auth/me calls could both call setUser/syncActiveAccount in an undefined order.
   useEffect(() => {
     let cancelled = false
 
@@ -196,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(async (u) => {
         if (cancelled) return
         setUser(u)
-        syncActiveSafe(u)
+        syncActiveAccount(u)
         await hydratePasskeys(u)
       })
       .catch(() => {
@@ -211,7 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
     return () => { cancelled = true }
-  }, [hydratePasskeys, syncActiveSafe])
+  }, [hydratePasskeys, syncActiveAccount])
 
   const signup = useCallback(
     // `via` is the #2522 agent hand-off marker. Optional and omitted when
@@ -228,11 +242,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
-      syncActiveSafe(res.user)
+      syncActiveAccount(res.user)
       await hydratePasskeys(res.user)
       return res.user
     },
-    [hydratePasskeys, syncActiveSafe],
+    [hydratePasskeys, syncActiveAccount],
   )
 
   const login = useCallback(
@@ -244,28 +258,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
-      syncActiveSafe(res.user)
+      syncActiveAccount(res.user)
       await hydratePasskeys(res.user)
       return res.user
     },
-    [hydratePasskeys, syncActiveSafe],
+    [hydratePasskeys, syncActiveAccount],
   )
 
   const logout = useCallback(() => {
-    const safes = user?.safes ?? []
-    for (const safe of safes) {
+    const accounts = user?.accounts ?? []
+    for (const account of accounts) {
       clearStoredPasskeySigner({
-        safeAddress: safe.safe_address as Address,
-        chainId: safe.chain_id,
+        accountAddress: account.safe_address as Address,
+        chainId: account.chain_id,
       })
     }
     localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
-    localStorage.removeItem(ACTIVE_SAFE_STORAGE_KEY)
+    localStorage.removeItem(ACTIVE_ACCOUNT_STORAGE_KEY)
     setToken(null)
     setUser(null)
     setPasskeys([])
-    setActiveSafeState(null)
-  }, [user?.safes])
+    setActiveAccountState(null)
+  }, [user?.accounts])
 
   const updateUser = useCallback((partial: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...partial } : null))
@@ -277,9 +291,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         token,
         loading,
-        activeSafe,
+        activeAccount,
         passkeys,
-        setActiveSafe,
+        setActiveAccount,
         signup,
         login,
         logout,

@@ -54,12 +54,12 @@ function ChainDot({ chainId }: { chainId: number }) {
 
 export default function NetworkSwitcher() {
   const router = useRouter()
-  const { user, activeSafe, setActiveSafe } = useAuth()
+  const { user, activeAccount, setActiveAccount } = useAuth()
   const activeChainId = useActiveChainId()
-  const safes = user?.safes ?? []
+  const safes = user?.accounts ?? []
 
   // The chip only makes sense once an account exists (onboarding has none).
-  if (!activeSafe) return null
+  if (!activeAccount) return null
 
   return (
     // `min-w-0` on the ROOT, plus truncating segments below (#1767). This chip
@@ -73,14 +73,14 @@ export default function NetworkSwitcher() {
     <DropdownMenu className="min-w-0">
       <DropdownMenuTrigger
         className="inline-flex min-w-0 items-center gap-2 rounded-full border border-[var(--v2-border)] bg-[var(--v2-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--v2-ink)] transition-colors hover:bg-[var(--v2-surface)]"
-        aria-label={`Active account ${activeSafe.name} on ${chainName(activeChainId)} — switch`}
+        aria-label={`Active account ${activeAccount.name} on ${chainName(activeChainId)} — switch`}
       >
         <ChainDot chainId={activeChainId} />
         {/* `title`: the name truncates below ~768px, and while the trigger's
             aria-label and the dropdown's own rows both carry it in full, a
             resized desktop window is a hover context with neither in reach. */}
-        <span className="min-w-0 max-w-[140px] truncate" title={activeSafe.name}>
-          {activeSafe.name}
+        <span className="min-w-0 max-w-[140px] truncate" title={activeAccount.name}>
+          {activeAccount.name}
         </span>
         {/* The chain segment is DROPPED on a phone rather than squeezed
             (#1767). Letting it share the squeeze measured 18px wide at 390px
@@ -98,11 +98,11 @@ export default function NetworkSwitcher() {
 
       <DropdownMenuContent align="left">
         {safes.map((safe) => (
-          <DropdownMenuItem key={safe.id} onSelect={() => setActiveSafe(safe)}>
+          <DropdownMenuItem key={safe.id} onSelect={() => setActiveAccount(safe)}>
             <ChainDot chainId={safe.chain_id} />
             <span className="flex-1 truncate">{safe.name}</span>
             <span className="text-xs text-[var(--v2-ink-3)]">{chainName(safe.chain_id)}</span>
-            {safe.id === activeSafe.id && (
+            {safe.id === activeAccount.id && (
               <Icon icon={Check} className="h-3.5 w-3.5 flex-shrink-0 text-[var(--v2-brand)]" />
             )}
           </DropdownMenuItem>

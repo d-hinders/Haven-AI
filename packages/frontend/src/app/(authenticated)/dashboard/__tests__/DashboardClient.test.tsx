@@ -43,8 +43,8 @@ vi.mock('@/hooks/useSafeDetails', () => ({
   useSafeDetails: () => mockUseSafeDetails(),
 }))
 
-vi.mock('@/hooks/useSafeOperationGate', () => ({
-  useSafeOperationGate: () => mockUseSafeOperationGate(),
+vi.mock('@/hooks/useAccountOperationGate', () => ({
+  useAccountOperationGate: () => mockUseSafeOperationGate(),
 }))
 
 
@@ -117,9 +117,9 @@ function mockBaseState() {
       name: 'Ada',
       email: 'ada@example.com',
       wallet_address: '0x5555555555555555555555555555555555555555',
-      safes: [SAFE],
+      accounts: [SAFE],
     },
-    activeSafe: SAFE,
+    activeAccount: SAFE,
   })
   mockUsePreferences.mockReturnValue({ currency: 'USD' })
   mockUseContacts.mockReturnValue({
@@ -237,9 +237,9 @@ describe('DashboardClient', () => {
         name: 'Ada',
         email: 'ada@example.com',
         wallet_address: '0x5555555555555555555555555555555555555555',
-        safes: [SAFE],
+        accounts: [SAFE],
       },
-      activeSafe: SAFE,
+      activeAccount: SAFE,
     })
     mockUseDashboardOverview.mockReturnValue({
       data: {
@@ -477,9 +477,9 @@ describe('DashboardClient', () => {
           name: 'Ada',
           email: 'ada@example.com',
           wallet_address: '0x5555555555555555555555555555555555555555',
-          safes: [DELEGATOR_SAFE],
+          accounts: [DELEGATOR_SAFE],
         },
-        activeSafe: DELEGATOR_SAFE,
+        activeAccount: DELEGATOR_SAFE,
       })
 
     it('shows the nudge for a funded, single-signer delegation-rail account', () => {
@@ -539,9 +539,9 @@ describe('DashboardClient', () => {
             name: 'Ada',
             email: 'ada@example.com',
             wallet_address: null,
-            safes: [{ ...SAFE, account_type: 'safe' as const }],
+            accounts: [{ ...SAFE, account_type: 'safe' as const }],
           },
-          activeSafe: { ...SAFE, account_type: 'safe' as const },
+          activeAccount: { ...SAFE, account_type: 'safe' as const },
           passkeys: [
             {
               id: 'passkey-1',
@@ -591,7 +591,7 @@ describe('DashboardClient', () => {
           wallet_address: '0x5555555555555555555555555555555555555555',
           safes: [DELEGATOR_SAFE],
         },
-        activeSafe: DELEGATOR_SAFE,
+        activeAccount: DELEGATOR_SAFE,
       })
       mockUseAggregatedBalances.mockReturnValue({
         balances: [],
@@ -614,7 +614,7 @@ describe('DashboardClient', () => {
           wallet_address: '0x5555555555555555555555555555555555555555',
           safes: [DELEGATOR_SAFE],
         },
-        activeSafe: DELEGATOR_SAFE,
+        activeAccount: DELEGATOR_SAFE,
       })
       mockUseAggregatedBalances.mockReturnValue({
         balances: [],

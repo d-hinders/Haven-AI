@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import {
   fixtureFor,
   FIXTURE_USER,
-  FIXTURE_SAFE,
+  FIXTURE_ACCOUNT,
   FIXTURE_AGENTS,
   FIXTURE_OVERVIEW,
   FIXTURE_TXS,
@@ -60,7 +60,7 @@ function expectKeySuperset(a: unknown, b: unknown, label: string) {
 describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
   it('user + safe identities carry the same fields', () => {
     expect(keysOf(FIXTURE_USER)).toEqual(keysOf(testUser))
-    expect(keysOf(FIXTURE_SAFE)).toEqual(keysOf(testSafe))
+    expect(keysOf(FIXTURE_ACCOUNT)).toEqual(keysOf(testSafe))
   })
 
   it('agents carry every field the e2e agent has', () => {
@@ -216,7 +216,7 @@ describe('the shared fixtures default to the LIVE rail (#2264)', () => {
   })
 
   it('the screenshot harness agrees, so the two cannot drift apart again', () => {
-    expect(FIXTURE_SAFE.account_type).toBe('delegator_hybrid')
+    expect(FIXTURE_ACCOUNT.account_type).toBe('delegator_hybrid')
   })
 
   it('the shared e2e fixture carries no legacy-rail account literal (#2459)', () => {
@@ -244,9 +244,9 @@ describe('the shared fixtures default to the LIVE rail (#2264)', () => {
 
   it('every account the session fixture serves states its rail', () => {
     // The failure mode was an OMISSION, so absence is what this checks: a safe
-    // added to `testUser.safes` without an `account_type` would be read as
+    // added to `testUser.accounts` without an `account_type` would be read as
     // legacy by `railOf` and nothing else would say so.
-    for (const safe of testUser.safes) {
+    for (const safe of testUser.accounts) {
       expect(
         (safe as { account_type?: string }).account_type,
         `every fixture account must name its rail explicitly; ${safe.id} does not`,

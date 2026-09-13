@@ -243,12 +243,13 @@ async function probeCard(page: Page, label: string): Promise<Probe> {
   }, label)
 }
 
-async function serveAccounts(page: Page, safes: unknown[]) {
+async function serveAccounts(page: Page, accounts: unknown[]) {
   await page.route('**/auth/me', async (route) => {
     await route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ...testUser, safes }),
+      // Both envelope keys: AuthContext reads `accounts`; `safes` remains the
+      // deprecated twin on the response until #2914 retires it.
+      body: JSON.stringify({ ...testUser, accounts, safes: accounts }),
     })
   })
 }
@@ -428,9 +429,9 @@ test('/accounts: the card offers no set-default control', async ({ page }) => {
  *
  * It used to tap the STAR, and it could assert two containment properties
  * because the star's effect (`setDefault` -> `PUT /user/safes/:id/default`)
- * was DISTINGUISHABLE from the card link's own effect (`setActiveSafe` ->
- * `localStorage['haven_active_safe_id']`). With the star gone the only control
- * left is "Set active", whose handler calls `setActiveSafe(safe)` — **the
+ * was DISTINGUISHABLE from the card link's own effect (`setActiveAccount` ->
+ * `localStorage['haven_active_account_id']`). With the star gone the only control
+ * left is "Set active", whose handler calls `setActiveAccount(safe)` — **the
  * identical call the card's own `onClick` makes, with the identical argument.**
  *
  * So `stopPropagation()` is no longer observable here: whether the card's
@@ -474,7 +475,7 @@ test('/accounts: a real tap on the visible "Set active" switches the account and
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   })
 
-  const activeSafeBefore = await page.evaluate(() => localStorage.getItem('haven_active_safe_id'))
+  const activeAccountBefore = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
   await page.evaluate(() => {
     const probe = { defaultPrevented: null as boolean | null }
     ;(window as unknown as { __tapProbe: typeof probe }).__tapProbe = probe
@@ -494,15 +495,15 @@ test('/accounts: a real tap on the visible "Set active" switches the account and
   const probe = await page.evaluate(
     () => (window as unknown as { __tapProbe: { defaultPrevented: boolean | null } }).__tapProbe,
   )
-  const activeSafeAfter = await page.evaluate(() => localStorage.getItem('haven_active_safe_id'))
+  const activeAccountAfter = await page.evaluate(() => localStorage.getItem('haven_active_account_id'))
 
   // Non-vacuity: the seeded id has to be readable AND has to be the other
   // account, or "it changed" is trivially true or trivially impossible.
-  expect(activeSafeBefore, 'no active safe was seeded — a change reading proves nothing').not.toBeNull()
+  expect(activeAccountBefore, 'no active safe was seeded — a change reading proves nothing').not.toBeNull()
   expect(
-    activeSafeAfter,
-    `tapping "Set active" left the active account at ${activeSafeAfter} — the visible control is a decoration`,
-  ).not.toBe(activeSafeBefore)
+    activeAccountAfter,
+    `tapping "Set active" left the active account at ${activeAccountAfter} — the visible control is a decoration`,
+  ).not.toBe(activeAccountBefore)
 
   expect(
     probe.defaultPrevented,

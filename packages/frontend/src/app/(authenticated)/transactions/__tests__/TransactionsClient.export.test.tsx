@@ -25,12 +25,14 @@ vi.mock('@/lib/transaction-csv', () => ({
 }))
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  // Reached through the account deep link, which seeds the account filter;
+  // the export request must carry the same key (#2913).
+  useSearchParams: () => new URLSearchParams('accountId=safe-1'),
 }))
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({
     user: {
-      safes: [
+      accounts: [
         { id: 'safe-1', safe_address: '0x' + 'aa'.repeat(20), chain_id: 8453, name: 'Main' },
       ],
     },
@@ -64,8 +66,8 @@ const TX = {
   blockNumber: 1,
   isError: false,
   chainId: 8453,
-  safeId: 'safe-1',
-  safeAddress: '0x' + 'aa'.repeat(20),
+  accountId: 'safe-1',
+  accountAddress: '0x' + 'aa'.repeat(20),
   safeName: 'Main',
 }
 
@@ -83,7 +85,7 @@ vi.mock('@/hooks/useTransactionsFeed', () => ({
     error: null,
     partialFailure: feedState.partialFailure,
     truncated: feedState.truncated,
-    failedSafeIds: [],
+    failedAccountIds: [],
     loadMore: vi.fn(),
     refresh: vi.fn(),
   }),
@@ -111,6 +113,9 @@ describe('TransactionsClient — CSV export (#2871)', () => {
 
     await waitFor(() => expect(mockDownloadCsv).toHaveBeenCalledTimes(1))
     expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('/transactions/export.csv'))
+    // The deep link and the export request both carry the renamed query key
+    // (#2913): `?accountId=`, read by the server from #2907 onward.
+    expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('accountId=safe-1'))
     expect(mockDownloadCsv).toHaveBeenCalledWith(
       '﻿settled_at\r\n"x"',
       'haven-transactions-20260911.csv',

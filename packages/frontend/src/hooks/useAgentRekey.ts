@@ -237,7 +237,7 @@ export function useAgentRekey(agentId: string, chainId: number) {
   const [issued, setIssued] = useState<IssueResult | null>(null)
 
   const signer = useActiveSigner({
-    safeAddress: signers ? (signers.account_address as Address) : undefined,
+    accountAddress: signers ? (signers.account_address as Address) : undefined,
     chainId,
   })
 

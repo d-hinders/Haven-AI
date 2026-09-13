@@ -51,11 +51,11 @@ vi.mock('@/context/AuthContext', () => ({
 }))
 
 vi.mock('@/hooks/useSafeDetails', () => ({
-  useSafeDetails: (safeAddress: string | null, options: unknown) => mockUseSafeDetails(safeAddress, options),
+  useSafeDetails: (accountAddress: string | null, options: unknown) => mockUseSafeDetails(accountAddress, options),
 }))
 
-vi.mock('@/hooks/useSafeOperationGate', () => ({
-  useSafeOperationGate: (args: unknown) => mockUseSafeOperationGate(args),
+vi.mock('@/hooks/useAccountOperationGate', () => ({
+  useAccountOperationGate: (args: unknown) => mockUseSafeOperationGate(args),
 }))
 
 vi.mock('@/hooks/useAgentConnectionSetupStatus', () => ({
@@ -263,7 +263,7 @@ describe('manual credential renderings (#2482)', () => {
 describe('resume from a hand-off link (#2522)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ user: { safes: [SAFE] }, activeSafe: SAFE })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
     mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })
     mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
     mockUsePublicClient.mockReturnValue({})
@@ -284,8 +284,8 @@ describe('resume from a hand-off link (#2522)', () => {
       useAgentConnectionSetup({
         open: true,
         onClose: vi.fn(),
-        safeAddress: SAFE.safe_address,
-        safeId: SAFE.id,
+        accountAddress: SAFE.safe_address,
+        accountId: SAFE.id,
         resumeSetupId,
       }),
     )
@@ -354,7 +354,7 @@ describe('resume from a hand-off link (#2522)', () => {
 describe('useAgentConnectionSetup — rail awareness without rendering the modal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockUseAuth.mockReturnValue({ user: { safes: [SAFE] }, activeSafe: SAFE })
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
     mockUseSafeDetails.mockReturnValue({
       details: { address: SAFE.safe_address, threshold: 1, owners: ['0x2222222222222222222222222222222222222222'] },
       loading: false,
@@ -385,8 +385,8 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
       useAgentConnectionSetup({
         open: true,
         onClose: vi.fn(),
-        safeAddress: SAFE.safe_address,
-        safeId: SAFE.id,
+        accountAddress: SAFE.safe_address,
+        accountId: SAFE.id,
       }),
     )
   }
@@ -397,8 +397,8 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
   // budget approval — which is still falsifiable.
   it('drives the delegation approval view (#1070)', async () => {
     mockUseAuth.mockReturnValue({
-      user: { safes: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
-      activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
+      user: { accounts: [{ ...SAFE, account_type: 'delegator_hybrid' }] },
+      activeAccount: { ...SAFE, account_type: 'delegator_hybrid' },
     })
     const { result } = renderFlow()
 

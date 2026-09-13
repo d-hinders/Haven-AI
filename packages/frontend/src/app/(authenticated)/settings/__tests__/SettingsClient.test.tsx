@@ -108,7 +108,7 @@ describe('SettingsClient', () => {
       saving: false,
     })
     mockUseAuth.mockReturnValue({
-      user: { name: null, email: 'passkey@example.com', wallet_address: null, safes: [] },
+      user: { name: null, email: 'passkey@example.com', wallet_address: null, accounts: [] },
       passkeys: [],
       logout: vi.fn(),
       updateUser: vi.fn(),

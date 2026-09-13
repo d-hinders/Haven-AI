@@ -15,7 +15,7 @@ const mockUseTransactionsFeed = vi.fn()
 const mockRouterPush = vi.fn()
 
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ safeId: 'safe-1' }),
+  useParams: () => ({ accountId: 'safe-1' }),
   useRouter: () => ({ push: mockRouterPush }),
 }))
 
@@ -23,8 +23,8 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }))
 
-vi.mock('@/hooks/useUserSafes', () => ({
-  useUserSafes: () => mockUseUserSafes(),
+vi.mock('@/hooks/useAccounts', () => ({
+  useAccounts: () => mockUseUserSafes(),
 }))
 
 vi.mock('@/hooks/usePreferences', () => ({
@@ -92,8 +92,8 @@ vi.mock('@/components/ConfirmDialog', () => ({
 }))
 
 vi.mock('@/components/AccountSignersCard', () => ({
-  default: (props: { safeAddress?: string; agentId?: string }) => (
-    <div data-testid="account-signers-card" data-safe-address={props.safeAddress} data-agent-id={props.agentId}>
+  default: (props: { accountAddress?: string; agentId?: string }) => (
+    <div data-testid="account-signers-card" data-safe-address={props.accountAddress} data-agent-id={props.agentId}>
       Backup &amp; recovery
     </div>
   ),
@@ -128,8 +128,8 @@ function txRow() {
     blockNumber: 1,
     isError: false,
     chainId: SAFE.chain_id,
-    safeId: SAFE.id,
-    safeAddress: SAFE.safe_address,
+    accountId: SAFE.id,
+    accountAddress: SAFE.safe_address,
     safeName: SAFE.name,
   }
 }
@@ -144,16 +144,16 @@ describe('AccountDetailClient', () => {
         name: 'Ada',
         email: 'ada@example.com',
         wallet_address: '0x5555555555555555555555555555555555555555',
-        safes: [SAFE],
+        accounts: [SAFE],
       },
-      activeSafe: SAFE,
-      setActiveSafe: vi.fn(),
+      activeAccount: SAFE,
+      setActiveAccount: vi.fn(),
       loading: false,
       passkeys: [],
     })
     mockUseUserSafes.mockReturnValue({
-      renameSafe: vi.fn(),
-      removeSafe: vi.fn(),
+      renameAccount: vi.fn(),
+      removeAccount: vi.fn(),
       loading: false,
     })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
@@ -376,7 +376,7 @@ describe('AccountDetailClient', () => {
   // as an unhandled promise rejection — the spinner stopped and nothing else
   // changed, so a refusal was indistinguishable from a dead button.
   it('keeps the account and says why when unlinking is refused', async () => {
-    const removeSafe = vi
+    const removeAccount = vi
       .fn()
       .mockRejectedValue(
         new ApiRequestError(
@@ -384,7 +384,7 @@ describe('AccountDetailClient', () => {
           409,
         ),
       )
-    mockUseUserSafes.mockReturnValue({ renameSafe: vi.fn(), removeSafe, loading: false })
+    mockUseUserSafes.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
 
     render(<AccountDetailClient />)
 
@@ -418,8 +418,8 @@ describe('AccountDetailClient', () => {
   // `setRemoveError(null)` from it and strand a stale refusal in the next
   // dialog session with nothing failing.
   it('does not carry a refusal into the next time the dialog is opened', async () => {
-    const removeSafe = vi.fn().mockRejectedValue(new ApiRequestError('nope', 409))
-    mockUseUserSafes.mockReturnValue({ renameSafe: vi.fn(), removeSafe, loading: false })
+    const removeAccount = vi.fn().mockRejectedValue(new ApiRequestError('nope', 409))
+    mockUseUserSafes.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
 
     render(<AccountDetailClient />)
 
@@ -441,8 +441,8 @@ describe('AccountDetailClient', () => {
   })
 
   it('reports a non-refusal unlink failure without blaming a budget', async () => {
-    const removeSafe = vi.fn().mockRejectedValue(new ApiRequestError('boom', 500))
-    mockUseUserSafes.mockReturnValue({ renameSafe: vi.fn(), removeSafe, loading: false })
+    const removeAccount = vi.fn().mockRejectedValue(new ApiRequestError('boom', 500))
+    mockUseUserSafes.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
 
     render(<AccountDetailClient />)
 
@@ -462,8 +462,8 @@ describe('AccountDetailClient', () => {
   })
 
   it('navigates away when unlinking succeeds', async () => {
-    const removeSafe = vi.fn().mockResolvedValue(undefined)
-    mockUseUserSafes.mockReturnValue({ renameSafe: vi.fn(), removeSafe, loading: false })
+    const removeAccount = vi.fn().mockResolvedValue(undefined)
+    mockUseUserSafes.mockReturnValue({ renameAccount: vi.fn(), removeAccount, loading: false })
 
     render(<AccountDetailClient />)
 
@@ -482,10 +482,10 @@ describe('AccountDetailClient', () => {
         name: 'Ada',
         email: 'ada@example.com',
         wallet_address: '0x5555555555555555555555555555555555555555',
-        safes: [{ ...SAFE, account_type: 'delegator_hybrid' }],
+        accounts: [{ ...SAFE, account_type: 'delegator_hybrid' }],
       },
-      activeSafe: { ...SAFE, account_type: 'delegator_hybrid' },
-      setActiveSafe: vi.fn(),
+      activeAccount: { ...SAFE, account_type: 'delegator_hybrid' },
+      setActiveAccount: vi.fn(),
       loading: false,
       passkeys: [],
     })

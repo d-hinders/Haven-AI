@@ -18,18 +18,18 @@ interface UseBalancesOptions {
 }
 
 export function useBalances(
-  safeAddress: string | null,
+  accountAddress: string | null,
   { enabled = true, chainId }: UseBalancesOptions = {},
 ): UseBalancesReturn {
   const [balances, setBalances] = useState<BalanceItem[]>([])
-  const [loading, setLoading] = useState(Boolean(safeAddress) && enabled)
+  const [loading, setLoading] = useState(Boolean(accountAddress) && enabled)
   const [error, setError] = useState<string | null>(null)
   const generationRef = useRef(0)
 
   const fetchBalances = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
 
-    if (!safeAddress) {
+    if (!accountAddress) {
       setBalances([])
       setError(null)
       setLoading(false)
@@ -51,7 +51,7 @@ export function useBalances(
       }
       const chainQuery = chainId === undefined ? '' : `?chain_id=${encodeURIComponent(String(chainId))}`
       const data = await api.get<BalancesResponse>(
-        `/balances/${safeAddress}${chainQuery}`,
+        `/balances/${accountAddress}${chainQuery}`,
       )
       if (generationRef.current === generation) {
         setBalances(
@@ -72,10 +72,10 @@ export function useBalances(
         setLoading(false)
       }
     }
-  }, [chainId, enabled, safeAddress])
+  }, [chainId, enabled, accountAddress])
 
   useEffect(() => {
-    if (!safeAddress) {
+    if (!accountAddress) {
       generationRef.current += 1
       setBalances([])
       setError(null)
@@ -94,7 +94,7 @@ export function useBalances(
     return () => {
       generationRef.current += 1
     }
-  }, [enabled, fetchBalances, safeAddress])
+  }, [enabled, fetchBalances, accountAddress])
 
   // #2732: the 60s interval moved into the shared visible-only policy — 10s
   // while visible, immediate fetch on return-to-visible, zero fetches while

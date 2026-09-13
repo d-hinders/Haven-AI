@@ -315,6 +315,13 @@ import {
   LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
 } from '../src/infra/repositories/agent-tool-invocations.js'
 import { LIST_AGENT_NAMES_FOR_USER_SQL } from '../src/infra/repositories/agents.js'
+import {
+  COUNT_ACCOUNTS_FOR_USER_SQL,
+  FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
+  FIND_OWNED_HYBRID_ACCOUNT_SQL,
+  INSERT_HYBRID_ACCOUNT_SQL,
+} from '../src/infra/repositories/smart-accounts.js'
+import { INSERT_HYBRID_ACCOUNT_PASSKEY_SQL } from '../src/infra/repositories/hybrid-signers.js'
 
 interface SmokeQuery {
   name: string
@@ -495,17 +502,19 @@ const QUERIES: SmokeQuery[] = [
     sql: INSERT_RESIDUE_EVENT_SQL,
   },
   {
+    // IMPORTED since #2911 — was a pasted copy that had drifted from the source
+    // (the source also writes owner_address + single_signer_waiver_at).
     name: 'hybrid accounts: provisioning insert with rail + type (#825)',
-    sql: `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail)
-          VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation')
-          RETURNING id, created_at`,
+    sql: INSERT_HYBRID_ACCOUNT_SQL,
   },
   {
+    // IMPORTED since #2911 — was a pasted copy.
     name: 'hybrid accounts: passkey signer persist (#885)',
-    sql: `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT (account_id, key_id) DO NOTHING`,
+    sql: INSERT_HYBRID_ACCOUNT_PASSKEY_SQL,
   },
+  { name: 'hybrid accounts: duplicate-address check (#2911)', sql: FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL },
+  { name: 'hybrid accounts: first-account gate (#2911)', sql: COUNT_ACCOUNTS_FOR_USER_SQL },
+  { name: 'hybrid accounts: ownership read (#2911)', sql: FIND_OWNED_HYBRID_ACCOUNT_SQL },
   {
     // IMPORTED since #999 — was a pasted copy.
     name: 'hybrid accounts: owner config round-trip — passkey set (#885)',

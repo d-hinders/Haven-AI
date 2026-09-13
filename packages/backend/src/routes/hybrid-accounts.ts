@@ -33,7 +33,13 @@ import {
 import { prepareTransfer, submitTransfer, type TransferBody } from '../rails/hybrid-transfers.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
-import { listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
+import { INSERT_HYBRID_ACCOUNT_PASSKEY_SQL, listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
+import {
+  COUNT_ACCOUNTS_FOR_USER_SQL,
+  FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
+  FIND_OWNED_HYBRID_ACCOUNT_SQL,
+  INSERT_HYBRID_ACCOUNT_SQL,
+} from '../infra/repositories/smart-accounts.js'
 
 interface CreateHybridBody {
   chain_id?: number
@@ -125,8 +131,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
 
     const existing = await pool.query<{ id: string }>(
-      `SELECT id FROM smart_accounts
-       WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3`,
+      FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL,
       [sub, accountAddress, chainId],
     )
     if (existing.rows.length > 0) {
@@ -134,7 +139,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
 
     const firstCheck = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM smart_accounts WHERE user_id = $1`,
+      COUNT_ACCOUNTS_FOR_USER_SQL,
       [sub],
     )
     const isFirst = firstCheck.rows[0]?.count === '0'
@@ -146,9 +151,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       waiverAcknowledged && isValueBearingChain(chainId) && signerCount < 2
 
     const result = await pool.query<{ id: string; created_at: string }>(
-      `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail, owner_address, single_signer_waiver_at)
-       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6, $7)
-       RETURNING id, created_at`,
+      INSERT_HYBRID_ACCOUNT_SQL,
       // owner_address: the EOA owner for treasury ops (#828 revoke). A pure-
       // passkey account has none — its config lives in hybrid_account_passkeys.
       [sub, accountAddress, chainId, name?.trim() || 'My account', isFirst, owner_address?.toLowerCase() ?? null, recordWaiver ? new Date().toISOString() : null],
@@ -160,9 +163,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     // can reconstruct the owner config for a pure-passkey account.
     for (const pk of parsedPasskeys) {
       await pool.query(
-        `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (account_id, key_id) DO NOTHING`,
+        INSERT_HYBRID_ACCOUNT_PASSKEY_SQL,
         [userSafeId, pk.keyId, `0x${pk.x.toString(16)}`, `0x${pk.y.toString(16)}`],
       )
     }
@@ -204,9 +205,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     // duplicate check is a `SELECT id FROM smart_accounts`, and sharing that shape
     // would make pattern-matched test mocks ambiguous between the two.
     const owned = await pool.query(
-      `SELECT 1 FROM smart_accounts
-       WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3
-         AND account_type = 'delegator_hybrid'`,
+      FIND_OWNED_HYBRID_ACCOUNT_SQL,
       [userId, address, chainId],
     )
     if (owned.rows.length === 0) {

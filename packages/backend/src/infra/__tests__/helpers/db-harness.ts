@@ -1118,7 +1118,7 @@ async function readSchemaFingerprint(): Promise<TableFingerprint[]> {
  *   and `payment_intents.user_id` (000), `agent_rekeys.initiated_by_user_id`
  *   (065) and `agent_delegations.rekey_id` (065) declare no action and so
  *   default to `NO ACTION`. Those are the reason the ordering is
- *   load-bearing rather than decorative. (`self_sign_agents.account_id` (001)
+ *   load-bearing rather than decorative. (`self_sign_agents.safe_id` (001)
  *   was another until #2851 dropped the table it lived on; self-references
  *   such as `outbound_txs.replaced_by` are skipped by `planDeleteOrder`.)
  * - **Sequences.** `RESTART IDENTITY` reset them; an explicit

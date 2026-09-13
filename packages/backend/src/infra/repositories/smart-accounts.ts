@@ -464,7 +464,7 @@ export async function findExecutionRailForAgent(
  */
 // Query shape matters here: this runs on every login/me. The count is a
 // direct LEFT JOIN + GROUP BY on the PK — user_id filters first, then per-safe
-// index lookups on hybrid_account_passkeys(user_safe_id). A GROUP BY derived
+// index lookups on hybrid_account_passkeys(account_id). A GROUP BY derived
 // table would hash-aggregate the WHOLE passkey table for every session
 // (review finding on the first draft of #1205).
 export const LIST_SESSION_ACCOUNTS_FOR_USER_SQL = `SELECT us.id, us.account_address, us.chain_id, us.name, us.is_default, us.created_at, us.account_type,
@@ -505,3 +505,18 @@ export async function listSessionAccountsForUser(
   const result = await db.query<SessionAccountRow>(LIST_SESSION_ACCOUNTS_FOR_USER_SQL, [userId])
   return result.rows
 }
+
+// ── Hybrid-account provisioning statements (#2911 review) ──────────────────
+// Lifted verbatim from routes/hybrid-accounts.ts so the schema smoke PREPAREs
+// the statements the signup path actually runs instead of a pasted copy — the
+// #757 class: an inline literal that names a renamed object is proven by
+// nothing until the first request fails.
+export const FIND_HYBRID_ACCOUNT_BY_ADDRESS_FOR_USER_SQL = `SELECT id FROM smart_accounts
+       WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3`
+export const COUNT_ACCOUNTS_FOR_USER_SQL = `SELECT COUNT(*) AS count FROM smart_accounts WHERE user_id = $1`
+export const INSERT_HYBRID_ACCOUNT_SQL = `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail, owner_address, single_signer_waiver_at)
+       VALUES ($1, $2, $3, $4, $5, 'delegator_hybrid', 'delegation', $6, $7)
+       RETURNING id, created_at`
+export const FIND_OWNED_HYBRID_ACCOUNT_SQL = `SELECT 1 FROM smart_accounts
+       WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3
+         AND account_type = 'delegator_hybrid'`

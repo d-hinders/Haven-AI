@@ -117,3 +117,9 @@ export function passkeyEnrollmentDates(rows: AccountPasskeyRow[]): Map<string, s
   }
   return byKey
 }
+
+// Lifted verbatim from routes/hybrid-accounts.ts (#2911 review) so the schema
+// smoke PREPAREs the statement the signup path runs, not a pasted copy.
+export const INSERT_HYBRID_ACCOUNT_PASSKEY_SQL = `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (account_id, key_id) DO NOTHING`

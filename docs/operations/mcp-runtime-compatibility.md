@@ -14,7 +14,7 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
-last-verified: "2026-09-12"
+last-verified: "2026-09-13"
 ---
 
 # MCP Runtime Compatibility
@@ -75,6 +75,18 @@ last-verified: "2026-09-12"
 > two permissive tools, and both moved), schemas and descriptions still come
 > from the #2807 contracts module, and the version-skew and consent-hash
 > contracts do not move because the registered tool-NAME set does not.
+>
+> **Recent re-verification (#2912, naming epic #2906 phase 3b):** a **data**
+> migration renamed the `account_type` VALUE `'safe'` to `'legacy_safe'` on
+> `smart_accounts` and tightened its CHECK — schema/data only, no wire
+> contract change (the OpenAPI `account_type` field was already typed as a
+> bare string, and the one enum that narrows it already excluded `'safe'`
+> since #2413). `packages/cli/src/commands.test.ts` is covered here only
+> because it carries a mock fixture (`account_type: 'safe'` → `'legacy_safe'`)
+> used to test the "grant refuses a non-delegation-rail agent" case; the
+> assertion, the CLI behavior, the tool names, schemas, version-skew and
+> consent-hash contracts are all unchanged. No other file this document
+> covers was touched by #2912.
 >
 > **Two sections sit outside that scope**, each for its own reason:
 >

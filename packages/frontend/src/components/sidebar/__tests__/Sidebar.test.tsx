@@ -127,7 +127,7 @@ describe('Sidebar', () => {
         name: 'Ada Lovelace',
         email: 'ada@example.com',
         safes: [
-          { id: 's1', account_type: 'safe' },
+          { id: 's1', account_type: 'legacy_safe' },
           { id: 's2', account_type: 'delegator_hybrid' },
         ],
       },

@@ -18,6 +18,17 @@
  * this file still says `user_safes`/`safe_address` on purpose: within the
  * revert window, that is genuinely the table's name.
  *
+ * #2912 (data migration, epic #2906 phase 3b, later still): several tests
+ * below seed a row with `account_type='safe'` directly. `085` tightens the
+ * CHECK on `smart_accounts` to `('legacy_safe','delegator_hybrid')`, and
+ * `084`'s `down()` only renames the constraint back to
+ * `user_safes_account_type_check` — it does not touch the constraint's
+ * CONTENT, so a `'safe'` insert would still 23514 inside the 084-reverted
+ * window unless `085` is reverted FIRST. `beforeEach`/`afterEach` therefore
+ * revert `085` before `084` and restore `084` before `085` — same nesting
+ * order 075's test uses for 083/084.
+ *
+
  * The load-bearing test is the DEFAULT one, same shape as 075's: an insert
  * that omits BOTH `execution_rail` and `account_type` is what a future
  * caller writes by accident, and before this migration that insert landed a
@@ -30,6 +41,7 @@ import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../083_drop_dead_safe_rail_tables.js'
 import { down as down084, up as up084 } from '../084_rename_user_safes_to_smart_accounts.js'
+import { down as down085, up as up085 } from '../085_account_type_legacy_safe.js'
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -83,15 +95,22 @@ describeDb('migration 083: drop the last dead Safe-rail tables (#2851)', () => {
     // Leave the shared worker schema in the migrated (post-083) state,
     // whatever an individual test did — the #2020 leak lesson. 083's own
     // `up()` hardcodes `ALTER TABLE user_safes` (immutable history), so it
-    // only runs against the pre-#2911 name — revert the rename around it,
-    // same as every per-test wrap below.
+    // only runs against the pre-#2911 name — revert 085 then 084 around it
+    // (085 built on top of 084's rename, so it must come off first), and
+    // restore 084 then 085 afterwards, same nesting as every per-test wrap
+    // below.
     const client = await db.connect()
     try {
-      await down084(client)
+      await down085(client)
       try {
-        await up(client)
+        await down084(client)
+        try {
+          await up(client)
+        } finally {
+          await up084(client)
+        }
       } finally {
-        await up084(client)
+        await up085(client)
       }
     } finally {
       client.release()
@@ -105,11 +124,18 @@ describeDb('migration 083: drop the last dead Safe-rail tables (#2851)', () => {
   // `smart_accounts` at head, so every test in this file needs 084's rename
   // reverted for its duration — the same "a later migration renamed what an
   // earlier test asserted" shape as 075's file-level wrap.
+  //
+  // #2912 (data migration, epic #2906 phase 3b): 085 tightens the CHECK on
+  // `smart_accounts` and several tests below seed `account_type='safe'`
+  // directly, so 085 must be reverted FIRST (before 084 renames the table
+  // away) and restored LAST (after 084 is back) — see the file header.
   beforeEach(async () => {
+    await down085(db as never)
     await down084(db as never)
   })
   afterEach(async () => {
     await up084(db as never)
+    await up085(db as never)
   })
 
   beforeEach(async () => {

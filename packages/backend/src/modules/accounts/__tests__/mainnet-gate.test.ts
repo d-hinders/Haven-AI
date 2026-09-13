@@ -96,7 +96,7 @@ describe('sessionAccountPayload (#1205 — the production call site)', () => {
   })
 
   it('is null for non-delegation accounts, whose signer truth is on-chain', () => {
-    const payload = sessionAccountPayload({ ...base, account_type: 'safe' })
+    const payload = sessionAccountPayload({ ...base, account_type: 'legacy_safe' })
     expect(payload.needs_backup_recommendation).toBeNull()
     // ...but chain classification is still served, from the same single home.
     expect(payload.value_bearing_chain).toBe(true)

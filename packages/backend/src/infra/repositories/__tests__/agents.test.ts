@@ -290,7 +290,7 @@ describeDb('agents archive (#1401, real DB)', () => {
     )
     const safe = await db.query<{ id: string }>(
       `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
-       VALUES ($1, $2, 'Legacy account', true, 'safe') RETURNING id`,
+       VALUES ($1, $2, 'Legacy account', true, 'legacy_safe') RETURNING id`,
       [user.rows[0].id, `0x${(++seq).toString(16).padStart(40, '0')}`],
     )
     const agent = await db.query<{ id: string }>(
@@ -442,7 +442,8 @@ describeDb('agents archive (#1401, real DB)', () => {
   })
 
   // #2413 narrowed this case rather than deleting it, and the narrowing is the
-  // point. This block seeds a LEGACY account ('Legacy account', 'safe'), and
+  // point. This block seeds a LEGACY account ('Legacy account',
+  // 'legacy_safe' — renamed from 'safe' by #2912), and
   // both reads now filter to `delegator_hybrid` — so "no agent disappears" is
   // no longer true of a legacy agent THROUGH THOSE READS. What #1401 actually
   // guarantees is unchanged and is what this now asserts directly: archiving

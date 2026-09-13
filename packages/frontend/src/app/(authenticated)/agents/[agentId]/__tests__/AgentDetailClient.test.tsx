@@ -668,7 +668,7 @@ describe('AgentDetailClient last-activity metadata', () => {
       ...base,
       agents: base.agents.map((agent: { id: string }) => ({
         ...agent,
-        account_type: 'safe',
+        account_type: 'legacy_safe',
       })),
     })
 
@@ -680,7 +680,7 @@ describe('AgentDetailClient last-activity metadata', () => {
   })
 
   it('shows recovery for a legacy agent with a residual USDC balance (#2258)', () => {
-    mockAgentWith({ account_type: 'safe' })
+    mockAgentWith({ account_type: 'legacy_safe' })
     mockUseDelegateBalance.mockReturnValue({
       balance: {
         delegate_address: '0x2222222222222222222222222222222222222222',

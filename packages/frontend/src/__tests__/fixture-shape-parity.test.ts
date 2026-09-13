@@ -219,16 +219,19 @@ describe('the shared fixtures default to the LIVE rail (#2264)', () => {
     expect(FIXTURE_ACCOUNT.account_type).toBe('delegator_hybrid')
   })
 
-  it('the shared e2e fixture carries no legacy-rail account literal (#2459)', () => {
+  it('the shared e2e fixture carries no legacy-rail account literal (#2459, #2912)', () => {
     // DELETION, decided deliberately: `legacySafe` was removed, not kept.
     // #2413 filtered every account list query to `delegator_hybrid`
     // (`infra/repositories/{user-safes,agents,dashboard}.ts`), so an
-    // `account_type: 'safe'` session/agent payload stopped being servable on
-    // these routes, and a fixture stubbing one asserts against a state that
-    // cannot occur in production. This block keeps the deletion honest in the
-    // direction that matters: a `safe`-shaped account literal returning to the
-    // shared e2e fixture fails HERE, by name — the same re-inversion tripwire
-    // the #2264 default pin above provides for the delegated shape.
+    // `account_type: 'legacy_safe'` session/agent payload stopped being
+    // servable on these routes, and a fixture stubbing one asserts against a
+    // state that cannot occur in production. This block keeps the deletion
+    // honest in the direction that matters: a legacy-rail account literal
+    // returning to the shared e2e fixture fails HERE, by name — the same
+    // re-inversion tripwire the #2264 default pin above provides for the
+    // delegated shape. #2912 renamed the retired VALUE from `'safe'` to
+    // `'legacy_safe'`; the guard checks the current name so it keeps catching
+    // the same class of regression rather than one it can no longer produce.
     //
     // Scope boundary: scenario-level legacy stubs inside
     // `scripts/screenshot.mjs` are NOT covered here — they pre-date #2413's
@@ -237,8 +240,8 @@ describe('the shared fixtures default to the LIVE rail (#2264)', () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
     const source = readFileSync(path.join(root, 'e2e/fixtures/haven-api.ts'), 'utf8')
     expect(
-      /account_type: 'safe'/.test(source),
-      'e2e/fixtures/haven-api.ts constructs a legacy-rail account the API can no longer serve (#2413, #2459)',
+      /account_type: '(legacy_)?safe'/.test(source),
+      'e2e/fixtures/haven-api.ts constructs a legacy-rail account the API can no longer serve (#2413, #2459, #2912)',
     ).toBe(false)
   })
 

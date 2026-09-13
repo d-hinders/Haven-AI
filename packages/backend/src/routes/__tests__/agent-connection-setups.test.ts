@@ -2212,7 +2212,7 @@ describe('delegation-rail budget approval (#1073)', () => {
 
   it('rejects a legacy Safe account — that rail approves with a wallet transaction', async () => {
     const app = await buildApp()
-    primeDb(setupForUser({ ...CONNECTED_SETUP, account_type: 'safe' }))
+    primeDb(setupForUser({ ...CONNECTED_SETUP, account_type: 'legacy_safe' }))
 
     const response = await approve(app)
 

@@ -42,7 +42,7 @@ async function seedSafe(
   userId: string,
   addr: string,
   rail: 'allowance_module' | 'delegation',
-  accountType: 'safe' | 'delegator_hybrid',
+  accountType: 'legacy_safe' | 'delegator_hybrid',
 ): Promise<string> {
   const safe = await db.query<{ id: string }>(
     `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
@@ -131,7 +131,7 @@ describeDb('agent reads survive the agent_allowances drop (#2020)', () => {
       userId,
       '0x' + 'a'.repeat(40),
       'allowance_module',
-      'safe',
+      'legacy_safe',
     )
     const hybridSafeId = await seedSafe(
       userId,

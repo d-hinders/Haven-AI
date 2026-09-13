@@ -18,7 +18,7 @@ const AGENT: Agent = {
   safe_address: '0x1111111111111111111111111111111111111111',
   safe_name: 'Operating wallet',
   safe_chain_id: 100,
-  account_type: 'safe',
+  account_type: 'legacy_safe',
   api_key_prefix: 'sk_agent_abc',
   status: 'active',
   created_at: '2026-05-01T00:00:00Z',

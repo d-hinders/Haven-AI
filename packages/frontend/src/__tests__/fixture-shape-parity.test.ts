@@ -240,7 +240,7 @@ describe('the shared fixtures default to the LIVE rail (#2264)', () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
     const source = readFileSync(path.join(root, 'e2e/fixtures/haven-api.ts'), 'utf8')
     expect(
-      /account_type: 'legacy_safe'/.test(source),
+      /account_type: '(legacy_)?safe'/.test(source),
       'e2e/fixtures/haven-api.ts constructs a legacy-rail account the API can no longer serve (#2413, #2459, #2912)',
     ).toBe(false)
   })

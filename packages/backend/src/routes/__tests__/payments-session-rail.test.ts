@@ -13,7 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet, getBytes } from 'ethers'
 
-const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, mockRecordRefusal } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getProvider: vi.fn(),
@@ -27,6 +27,11 @@ const { mockQuery, allowanceMocks, fiatMocks, delegationMocks } = vi.hoisted(() 
     prepareDelegationPayment: vi.fn(),
     submitDelegationPayment: vi.fn(),
   },
+  // #2945: the fire-and-forget ledger write, observed as a spy. The route's
+  // contract with it is asserted in the `#2945` describe at the foot of this
+  // file; the write itself is proven on real Postgres in
+  // `infra/repositories/__tests__/payment-refusals.test.ts`.
+  mockRecordRefusal: vi.fn(),
 }))
 
 vi.mock('../../db.js', () => ({
@@ -36,6 +41,10 @@ vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 // Only the network seams of the delegation rail are mocked.
 vi.mock('../../rails/delegation-authorization.js', () => delegationMocks)
+vi.mock('../../modules/payments/refusal-ledger.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/payments/refusal-ledger.js')>()
+  return { ...actual, recordRefusalFireAndForget: (...a: unknown[]) => mockRecordRefusal(...a) }
+})
 
 const paymentRoutes = (await import('../payments.js')).default
 const { serializeUserOp, allowanceModuleRailRetired, sessionRailRetired } = await import(
@@ -441,5 +450,236 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
     })
 
     expect(response.statusCode).toBe(410)
+  })
+})
+
+// ── #2945: the payment_refusals ledger on the direct payment paths ─────────
+//
+// The characterization the issue names as mandatory, for the refusal paths
+// that live on routes/payments.ts itself:
+//
+//   1. POST /payments   — the caveat enforcers refuse during gas estimation
+//      (prepareDelegationPayment throws). The period-budget enforcer's own
+//      revert text names the refusal (Enforcer:transfer-amount-exceeded) and
+//      classifies as delegation_budget_exceeded — the direct route has no
+//      fail-fast pre-check, so that revert IS its over-budget answer; an
+//      unrecognised revert classifies onchain_revert; a bundler/transport
+//      failure is NOT a refusal and writes nothing.
+//   2. POST /payments   — no delegation for this token/recipient            → 403
+//   3. POST /:id/sign   — the relayer-budget refusal before broadcast        → 429
+//
+// Each pins the response byte-identical with the ledger succeeding AND
+// failing (the real module swallows its own write failures, so the broken
+// case is modeled faithfully as a call that returns while its detached write
+// rejects — never a synchronous throw, which would pin a 500 the system
+// cannot produce), and asserts the exact ask the ledger receives. The write
+// itself is proven against real Postgres in
+// `infra/repositories/__tests__/payment-refusals.test.ts`; the x402 legs in
+// `x402-delegation.test.ts`.
+
+describe('POST /payments — the refusal ledger on the direct paths (#2945)', () => {
+  let app: FastifyInstance
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(paymentRoutes, { prefix: '/payments' })
+  })
+  afterAll(async () => {
+    await app.close()
+  })
+  beforeEach(() => {
+    mockQuery.mockReset()
+    for (const mock of Object.values(allowanceMocks)) mock.mockReset()
+    for (const mock of Object.values(fiatMocks)) mock.mockReset()
+    for (const mock of Object.values(delegationMocks)) mock.mockReset()
+    mockRecordRefusal.mockReset()
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '0.01', eur: '0.01' })
+    mockRecordRefusal.mockImplementation(() => {})
+  })
+
+  // The bearer token is assembled by concatenation so the literal never
+  // round-trips a secret-redaction filter; the middleware demands the
+  // sk_agent_ prefix and the AUTH db route answers the hash lookup.
+  const AUTH_HEADER = `Bearer ${['sk', 'agent', 'test', 'key', '0001'].join('_')}`
+  const sendBody = { token: 'USDC', amount: '0.01', to: RECIPIENT }
+  const injectCreate = async () =>
+    app.inject({
+      method: 'POST',
+      url: '/payments',
+      headers: { authorization: AUTH_HEADER },
+      payload: sendBody,
+    })
+  const injectSign = async () =>
+    app.inject({
+      method: 'POST',
+      url: `/payments/${PAYMENT_ID}/sign`,
+      headers: { authorization: AUTH_HEADER },
+      payload: { signature: '0x' + 'ab'.repeat(97) },
+    })
+
+  /** The ledger asks the spy captured — one entry per fire-and-forget call. */
+  function ledgerAsks(): Array<Record<string, unknown>> {
+    return mockRecordRefusal.mock.calls.map((c) => c[0] as Record<string, unknown>)
+  }
+
+  /** The faithful broken-ledger model: returns; its detached write rejects. */
+  function brokenLedger() {
+    mockRecordRefusal.mockImplementation(() => {
+      Promise.reject(new Error('payment_refusals write exploded')).catch(() => {})
+    })
+  }
+
+  it('the period-budget enforcer revert is recorded as delegation_budget_exceeded; the 502 is byte-identical with a broken ledger', async () => {
+    // PERSISTENT rejection: the test injects TWICE (ledger ok / ledger broken)
+    // and both must answer the same 502; a Once-rejection would let the
+    // second call fall through to the base impl and return a different status.
+    delegationMocks.prepareDelegationPayment.mockRejectedValue(
+      new Error('EstimateGasExecutionError: ERC20PeriodTransferEnforcer:transfer-amount-exceeded'),
+    )
+    primeDb(AUTH, railState({ execution_rail: 'delegation' }))
+
+    const withLedger = await injectCreate()
+    expect(withLedger.statusCode).toBe(502)
+    const asks = ledgerAsks()
+    expect(asks).toHaveLength(1)
+    expect(asks[0]).toMatchObject({
+      userId: AGENT.user_id,
+      agentId: AGENT.id,
+      chainId: AGENT.chain_id,
+      tokenSymbol: 'USDC',
+      amountAtomic: '10000',
+      accountAddress: AGENT.account_address,
+      merchantTo: RECIPIENT.toLowerCase(),
+      reason: 'delegation_budget_exceeded',
+      source: 'payment',
+    })
+    expect(asks[0].detail).toEqual({ error_code: 'delegation_budget_exceeded' })
+
+    brokenLedger()
+    const withBrokenLedger = await injectCreate()
+    expect(withBrokenLedger.statusCode).toBe(502)
+    expect(withBrokenLedger.body).toBe(withLedger.body)
+  })
+
+  it('an unrecognised execution revert records onchain_revert; a bundler/transport failure records NOTHING', async () => {
+    // (a) An estimation revert nothing recognises — a revert, but not one of
+    // the named enforcers. The issue keeps this bucket small on purpose
+    // ("rare since #2706"); the classifier stays dumb about the three.
+    const { EstimateGasExecutionError } = await import('viem')
+    delegationMocks.prepareDelegationPayment.mockRejectedValueOnce(
+      new EstimateGasExecutionError(
+        Object.assign(new Error('Execution reverted with an unknown reason'), {
+          shortMessage: 'Execution reverted with an unknown reason',
+        }) as never,
+        {},
+      ),
+    )
+    primeDb(AUTH, railState({ execution_rail: 'delegation' }))
+    const revert = await injectCreate()
+    expect(revert.statusCode).toBe(502)
+    expect(ledgerAsks()).toHaveLength(1)
+    expect(ledgerAsks()[0]).toMatchObject({ reason: 'onchain_revert', source: 'payment' })
+
+    // (b) The infrastructure broke; the guardrails refused nothing. Same 502
+    // shape, zero ledger rows — an outage is not a refusal.
+    mockRecordRefusal.mockClear()
+    delegationMocks.prepareDelegationPayment.mockRejectedValueOnce(
+      new Error('fetch failed: bundler unreachable (ETIMEDOUT)'),
+    )
+    const outage = await injectCreate()
+    expect(outage.statusCode).toBe(502)
+    expect(ledgerAsks()).toHaveLength(0)
+  })
+
+  it('the no-delegation-for-target 403 is recorded; the body is unchanged by a broken ledger', async () => {
+    delegationMocks.prepareDelegationPayment.mockResolvedValue(null)
+    primeDb(AUTH, railState({ execution_rail: 'delegation' }))
+
+    const withLedger = await injectCreate()
+    expect(withLedger.statusCode).toBe(403)
+    const asks = ledgerAsks()
+    expect(asks).toHaveLength(1)
+    expect(asks[0]).toMatchObject({
+      userId: AGENT.user_id,
+      agentId: AGENT.id,
+      merchantTo: RECIPIENT.toLowerCase(),
+      reason: 'no_delegation_for_target',
+      source: 'payment',
+    })
+    expect(asks[0].detail).toEqual({ error_code: 'no_delegation_for_target' })
+
+    brokenLedger()
+    const withBrokenLedger = await injectCreate()
+    expect(withBrokenLedger.statusCode).toBe(403)
+    expect(withBrokenLedger.body).toBe(withLedger.body)
+  })
+
+  it('the relayer-budget 429 is recorded, releases the claim, and is byte-identical with a broken ledger', async () => {
+    const { RelayerBudgetExceededError } = await import('../../infra/relayer-spend-guard.js')
+    // PERSISTENT rejection (two injects, one 429 each — see the budget test).
+    delegationMocks.submitDelegationPayment.mockRejectedValue(
+      new RelayerBudgetExceededError('allowance_transfer', 5, 60),
+    )
+    primeDb(AUTH, intentById(delegationIntentRow()), claim(true))
+
+    const withLedger = await injectSign()
+    expect(withLedger.statusCode).toBe(429)
+    const asks = ledgerAsks()
+    expect(asks).toHaveLength(1)
+    expect(asks[0]).toMatchObject({
+      userId: AGENT.user_id,
+      agentId: AGENT.id,
+      chainId: AGENT.chain_id,
+      tokenSymbol: 'USDC',
+      amountAtomic: '10000',
+      accountAddress: AGENT.account_address,
+      merchantTo: RECIPIENT.toLowerCase(),
+      resourceUrl: null,
+      reason: 'relayer_budget',
+      source: 'redeem',
+    })
+    expect(asks[0].detail).toEqual({ error_code: 'relayer_budget_exceeded' })
+    // #1119 B1: the 429 releases the claim it took — the intent stays retryable.
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'pending_signature'/i.test(String(c[0])))).toBe(true)
+
+    brokenLedger()
+    const withBrokenLedger = await injectSign()
+    expect(withBrokenLedger.statusCode).toBe(429)
+    expect(withBrokenLedger.body).toBe(withLedger.body)
+  })
+
+  it('POSITIVE CONTROLS: a prepared 201 and a non-refusal sign 502 write no refusal row', async () => {
+    // (a) The full happy prepare: 201, nothing refused, nothing recorded.
+    // Persistent (not Once): the #1226/775 rule this file exists for — a new
+    // query in the handler must not re-shuffle a positional chain.
+    delegationMocks.prepareDelegationPayment.mockResolvedValue({
+      delegationHash: DELEGATION_HASH,
+      prepared: {
+        userOperation: PREPARED_USER_OP,
+        userOpHash: USER_OP_HASH,
+        signingTypedData: {
+          domain: { name: 'HybridDelegator' },
+          types: {},
+          primaryType: 'PackedUserOperation',
+          message: {},
+        },
+        delegateAccountAddress: '0x' + 'ee'.repeat(20),
+      },
+    })
+    primeDb(AUTH, railState({ execution_rail: 'delegation' }), insertIntent(delegationIntentRow()))
+    const created = await injectCreate()
+    expect(created.statusCode).toBe(201)
+    expect(ledgerAsks()).toHaveLength(0)
+
+    // (b) The sign path's non-refusal 502: a submit failure that is not the
+    // relayer budget is an infrastructure failure — the intent fails, no row.
+    mockRecordRefusal.mockClear()
+    delegationMocks.submitDelegationPayment.mockRejectedValueOnce(
+      new Error('bundler RPC unreachable at https://bundler.example'),
+    )
+    primeDb(AUTH, intentById(delegationIntentRow()), claim(true))
+    const signOutage = await injectSign()
+    expect(signOutage.statusCode).toBe(502)
+    expect(ledgerAsks()).toHaveLength(0)
   })
 })

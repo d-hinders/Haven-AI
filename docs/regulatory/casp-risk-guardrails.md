@@ -26,6 +26,8 @@ covers:
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
   - packages/backend/src/infra/repositories/smart-accounts.ts
+  - packages/backend/src/infra/repositories/payment-refusals.ts
+  - packages/backend/src/modules/payments/refusal-ledger.ts
   - packages/backend/src/modules/accounting/entry.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
@@ -68,7 +70,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-11"
+last-verified: "2026-09-13"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -792,6 +794,8 @@ The codebase should make it easy to prove:
   owner to manage.
 
 Add comments, docs, tests, and PR notes around these points when touching payment, agent authority, relaying, account setup, SDK, or demo payment flows.
+
+**The refusal record (`payment_refusals`, #2945) is the audit trail of this section, and it is a record, not a control.** When a fail-fast pre-check or an on-chain caveat enforcer refuses a payment, `modules/payments/refusal-ledger.ts` writes one row (reason, source, amounts, the fiat values booked through the same price path a settled payment uses, and a JSONB `detail` restricted to a named allowlist) so the user can see what their guardrails caught even though nothing moved. The posture is deliberately fire-and-forget: the write happens after the refusal is decided, its own failure is logged and swallowed, and characterization tests pin every refusal response byte-identical with the ledger succeeding and failing. That ordering is the regulatory point: a telemetry table must never be able to alter, delay, or soften a refusal the on-chain guardrails already made, because the enforcement is the enforcer's and the ledger only testifies to it. Two boundaries belong in the record and are stated rather than assumed: the hosted MCP's `PRICE_EXCEEDS_MAX` cap refusal happens in the agent's own runtime before any backend call and is the user's own instruction, so it is not in this table (a machine-side report of it is a possible follow-up, not filed); and there is no retention policy, because these rows are small and they are precisely the evidence trail this section asks the codebase to maintain.
 
 **The user-facing half of this is `/custody` (#2106), and the distinction it draws is the settled one.** The page separates what the chain enforces from what Haven merely asserts, and marks each claim accordingly rather than collapsing them into one reassurance: budget, period, expiry and any pinned recipient are badged on-chain enforced — "a payment outside them reverts on-chain instead of waiting for anyone's approval" — while a recipient that is only advisory on a given account is badged as such. Its framing is the wording to match when a new surface has to make this distinction: *"Proof that you — not Haven — control your funds. Your agents' limits are enforced on-chain by your account, not by Haven's database."* Before #2106 that page told delegation-rail users their agent had no on-chain limits, which was the invariant above stated backwards on the one screen built to demonstrate it. Reach for this phrasing rather than inventing another.
 

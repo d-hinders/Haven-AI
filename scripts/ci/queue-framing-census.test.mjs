@@ -166,6 +166,15 @@ const GUARDED_FILES = [
   // overrides every corrected string in the surfaces above. This file is the
   // one that answers the tool an agent calls to decide what to do next.
   'packages/backend/src/modules/payments/agent-payment-status.ts',
+  // #2945 — the write side of the `payment_refusals` ledger (analytics
+  // slice A, epic #2944). Its `reason`/`source` strings and the detail
+  // allowlist are the record a person reads to learn WHY a payment was
+  // refused — the same class of surface #2115 added for
+  // `agent-payment-status.ts`, and exactly where a future author would be
+  // tempted to write that a declined payment "waits for approval". It does
+  // not: the refusal is the answer, the ledger only testifies to it.
+  'packages/backend/src/modules/payments/refusal-ledger.ts',
+  'packages/backend/src/infra/repositories/payment-refusals.ts',
   // #2115 — the SDK's exported wire types. Their `x-enumDescriptions` are
   // agent-visible through the OpenAPI spec, and the retired values carry
   // "Retired wire value: … stop and tell the user" prose that a future edit

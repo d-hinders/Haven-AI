@@ -7,13 +7,14 @@ import { LocaleProvider } from '@/context/LocaleContext'
 import { ThemeToggle } from '../ThemeToggle'
 
 /**
- * The quick toggle (#2928): the cycle order, the label in every state,
- * keyboard activation, and the reduced-motion path.
+ * The quick toggle (#2928, two-state flip per #2953): the flip in both
+ * directions, the label in every palette, the system-resolution rule, the
+ * absent tooltip, keyboard activation, and the reduced-motion path.
  *
  * The provider wraps the control rather than `useTheme` being mocked. The
- * cycle is the interaction of two components — the button's ring and the
+ * flip is the interaction of two components — the button's ring and the
  * provider's `setPreference` — and the label is derived from the provider's
- * state; stubbing the hook would let a control that cycles an order the
+ * state; stubbing the hook would let a control that flips to a state the
  * provider does not implement, or announces a state it does not hold, pass
  * every green test. It is the same choice `ThemeContext.test.tsx` makes from
  * the other side of the same seam.
@@ -23,6 +24,7 @@ type MotionListener = (event: { matches: boolean }) => void
 
 let motionListeners: MotionListener[] = []
 let reduced = false
+let osDark = false
 
 /**
  * jsdom's `matchMedia` (src/__tests__/setup.ts) answers `reduce` to every
@@ -34,13 +36,14 @@ let reduced = false
  * So each query answers only its own question and registers only its own
  * listeners — the discipline the Sidebar drawer mock (#2586) documents.
  */
-function installMatchMedia(initialReduced = false) {
+function installMatchMedia(initialReduced = false, initialDark = false) {
   motionListeners = []
   reduced = initialReduced
+  osDark = initialDark
   vi.spyOn(window, 'matchMedia').mockImplementation(((query: string) => ({
     matches:
       query === '(prefers-color-scheme: dark)'
-        ? false
+        ? osDark
         : query === '(prefers-reduced-motion: reduce)'
           ? reduced
           : false,
@@ -68,17 +71,21 @@ function setReducedMotion(matches: boolean) {
   })
 }
 
+/** Recolour the device; the mount effect of the next provider reads it live. */
+function setOsDark(matches: boolean) {
+  osDark = matches
+}
+
 function renderToggle(ui = <ThemeToggle />) {
   return render(<LocaleProvider><ThemeProvider>{ui}</ThemeProvider></LocaleProvider>)
 }
 
-/** The control, named by its accessible message in the given state. */
+/** The control, named by its accessible message in the given palette. */
 const buttonIn = (message: string) => screen.getByRole('button', { name: message })
 
 const MESSAGES = {
   light: 'Theme: light. Switch to dark',
-  dark: 'Theme: dark. Switch to system',
-  system: 'Theme: system. Switch to light',
+  dark: 'Theme: dark. Switch to light',
 } as const
 
 /** The serialisation of the glyph currently on screen, or the empty string. */
@@ -99,41 +106,61 @@ describe('ThemeToggle', () => {
     delete document.documentElement.dataset.theme
   })
 
-  it('cycles light, dark, system, light — the order the issue specifies', async () => {
+  it('flips light to dark and back — the two-state ring #2953 specifies', async () => {
     const user = userEvent.setup()
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
     renderToggle()
-    await waitFor(() => buttonIn(MESSAGES.system))
-
-    await user.click(buttonIn(MESSAGES.system))
     await waitFor(() => buttonIn(MESSAGES.light))
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
 
     await user.click(buttonIn(MESSAGES.light))
     await waitFor(() => buttonIn(MESSAGES.dark))
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
     expect(document.documentElement.dataset.theme).toBe('dark')
 
+    // And the ring closes: dark flips straight back to light. No third step
+    // exists to pass through.
     await user.click(buttonIn(MESSAGES.dark))
-    await waitFor(() => buttonIn(MESSAGES.system))
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('system')
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
-
-    // And the ring closes: system advances to light, not off the end.
-    await user.click(buttonIn(MESSAGES.system))
     await waitFor(() => buttonIn(MESSAGES.light))
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+  })
+
+  it('a click while system is stored resolves the palette on screen, flips it, and persists the explicit choice', async () => {
+    const user = userEvent.setup()
+
+    // A light device: `system` resolves light, so the click must land on dark
+    // — persisted as the EXPLICIT choice, never left as `system`.
+    const first = renderToggle()
+    await waitFor(() => buttonIn(MESSAGES.light))
+    await user.click(buttonIn(MESSAGES.light))
+    await waitFor(() => buttonIn(MESSAGES.dark))
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    first.unmount()
+
+    // The same gesture on a dark device resolves the other way: `system`
+    // reads dark, the flip lands on light. The resolved palette decides, not
+    // the stored word.
+    window.localStorage.clear()
+    setOsDark(true)
+    renderToggle()
+    await waitFor(() => buttonIn(MESSAGES.dark))
+    await user.click(buttonIn(MESSAGES.dark))
+    await waitFor(() => buttonIn(MESSAGES.light))
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
   })
 
   it.each([
     ['light', MESSAGES.light],
     ['dark', MESSAGES.dark],
-    ['system', MESSAGES.system],
   ] as const)(
-    'in preference %s the name states the current and the next: %s',
+    'in palette %s the name states the current and the next: %s',
     async (stored, message) => {
-      if (stored !== 'system') window.localStorage.setItem(THEME_STORAGE_KEY, stored)
+      window.localStorage.setItem(THEME_STORAGE_KEY, stored)
       renderToggle()
       await waitFor(() => buttonIn(message))
-      // The one control, three messages: no stale second button, and no
+      // The one control, two messages: no stale second button, and no
       // other state's name is reachable.
       expect(screen.queryAllByRole('button')).toHaveLength(1)
       for (const other of Object.values(MESSAGES)) {
@@ -144,23 +171,20 @@ describe('ThemeToggle', () => {
     },
   )
 
-  it('shows the sun in light, the moon in dark, the monitor on a system choice', async () => {
+  it('shows the sun in light and the moon in dark — two glyphs, no monitor', async () => {
     const user = userEvent.setup()
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
     renderToggle()
-    await waitFor(() => buttonIn(MESSAGES.system))
+    await waitFor(() => buttonIn(MESSAGES.light))
 
     // Structural fingerprints rather than path literals: lucide's sun carries
-    // a circle, the monitor a rect, the moon neither. Reading the SVG
-    // serialisation binds the assertion to WHICH glyph is on screen, which is
-    // the claim; a snapshot would bind it to lucide's whole icon library.
-    const systemMarkup = glyphMarkup()
-    expect(/<rect/.test(systemMarkup)).toBe(true)
-    expect(/<circle/.test(systemMarkup)).toBe(false)
-
-    await user.click(buttonIn(MESSAGES.system))
-    await waitFor(() => buttonIn(MESSAGES.light))
+    // a circle, the moon neither. Reading the SVG serialisation binds the
+    // assertion to WHICH glyph is on screen, which is the claim; a snapshot
+    // would bind it to lucide's whole icon library.
     const lightMarkup = glyphMarkup()
     expect(/<circle/.test(lightMarkup)).toBe(true)
+    // The monitor glyph of the retired three-state ring carries a <rect>;
+    // the quick toggle must not render it in ANY state (#2953).
     expect(/<rect/.test(lightMarkup)).toBe(false)
 
     await user.click(buttonIn(MESSAGES.light))
@@ -170,31 +194,71 @@ describe('ThemeToggle', () => {
     expect(/<circle/.test(darkMarkup)).toBe(false)
     expect(/<rect/.test(darkMarkup)).toBe(false)
 
-    // Three distinct glyphs. A component that ignored the preference and drew
-    // one icon always would pass every per-state check above written against a
+    // Two distinct glyphs. A component that ignored the palette and drew one
+    // icon always would pass every per-state check above written against a
     // mocked icon map, and fails this one.
-    expect(new Set([systemMarkup, lightMarkup, darkMarkup]).size).toBe(3)
+    expect(lightMarkup).not.toBe(darkMarkup)
   })
 
-  it('is keyboard operable: Tab reaches it, Enter and Space both advance the ring', async () => {
+  it('renders no tooltip on the icon variant — a plain clickable icon (#2953)', async () => {
+    const { container } = renderToggle()
+    await waitFor(() => buttonIn(MESSAGES.light))
+    const button = buttonIn(MESSAGES.light)
+
+    // The trigger wrapper the Tooltip primitive renders around the control is
+    // gone: the button mounts directly in its call site's markup, not under a
+    // hover/focus proxy span.
+    expect(button.parentElement).toBe(container)
+
+    // Hovering and focusing show nothing: no tooltip role anywhere in the
+    // document, and no aria-describedby pointing at one.
     const user = userEvent.setup()
+    await user.hover(button)
+    button.focus()
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(container.querySelector('[role="tooltip"]')).toBeNull()
+    expect(document.querySelectorAll('[role="tooltip"]')).toHaveLength(0)
+    expect(button.getAttribute('aria-describedby')).toBeNull()
+  })
+
+  it('the glyph keeps a stable className across the flip — the key replays the animation, the class does not change', async () => {
+    const user = userEvent.setup()
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
     renderToggle()
-    await waitFor(() => buttonIn(MESSAGES.system))
+    await waitFor(() => buttonIn(MESSAGES.light))
+
+    const glyphClass = () => screen.getByRole('button').querySelector('span')?.className ?? ''
+    const before = glyphClass()
+    expect(before).toContain('animate-theme-swap')
+
+    await user.click(buttonIn(MESSAGES.light))
+    await waitFor(() => buttonIn(MESSAGES.dark))
+    // Headless equivalent of the rendered pass: the swap is a remount of the
+    // glyph under the SAME classes, so a regression that swapped the class
+    // (and with it the palette-gated styles) reddens here.
+    expect(glyphClass()).toBe(before)
+  })
+
+  it('is keyboard operable: Tab reaches it, Enter and Space both flip', async () => {
+    const user = userEvent.setup()
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    renderToggle()
+    await waitFor(() => buttonIn(MESSAGES.light))
 
     await user.tab()
-    expect(buttonIn(MESSAGES.system)).toHaveFocus()
+    expect(buttonIn(MESSAGES.light)).toHaveFocus()
     await user.keyboard('{Enter}')
-    await waitFor(() => buttonIn(MESSAGES.light))
+    await waitFor(() => buttonIn(MESSAGES.dark))
 
     // Space is the second half of the <button> activation contract, and it
     // only lands if the focus survived the Enter-activated click.
     await user.keyboard(' ')
-    await waitFor(() => buttonIn(MESSAGES.dark))
+    await waitFor(() => buttonIn(MESSAGES.light))
   })
 
   it('cross-fades the swap with no OS preference and snaps it when the OS says reduce — live, not by reload', async () => {
     renderToggle()
-    await waitFor(() => buttonIn(MESSAGES.system))
+    await waitFor(() => buttonIn(MESSAGES.light))
     const animatedGlyph = () =>
       screen.getByRole('button').querySelector('span[class*=animate-theme-swap]')
 
@@ -208,28 +272,28 @@ describe('ThemeToggle', () => {
     setReducedMotion(true)
     await waitFor(() => expect(animatedGlyph()).toBeNull())
 
-    // And the next step of the ring still works under reduce: the control
-    // degrades, it does not die.
+    // And the next flip still works under reduce: the control degrades, it
+    // does not die.
     const user = userEvent.setup()
-    await user.click(buttonIn(MESSAGES.system))
-    await waitFor(() => expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light'))
+    await user.click(buttonIn(MESSAGES.light))
+    await waitFor(() => expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark'))
   })
 
   it('renders the More-sheet row: the visible label is the prefix of the accessible name', async () => {
     renderToggle(<ThemeToggle variant="row" />)
-    await waitFor(() => buttonIn(MESSAGES.system))
-    const row = buttonIn(MESSAGES.system)
+    await waitFor(() => buttonIn(MESSAGES.light))
+    const row = buttonIn(MESSAGES.light)
 
     // The row shows the command and the state it is in, next to the glyph.
     expect(row.textContent).toContain('Theme')
-    expect(row.textContent).toContain('System')
+    expect(row.textContent).toContain('Light')
 
     // WCAG 2.5.3 (Label in Name). The lookup above IS the assertion that the
     // accessible name is the whole sentence — dom-accessible-name computed it
     // from the control's own markup, so this does not read the attribute back
     // to itself. And the sentence begins with the visible label, so a voice
     // command that speaks the label activates this control.
-    expect(/^Theme/.test(MESSAGES.system)).toBe(true)
-    expect(row.textContent).toContain(MESSAGES.system.slice(0, 'Theme'.length))
+    expect(/^Theme/.test(MESSAGES.light)).toBe(true)
+    expect(row.textContent).toContain(MESSAGES.light.slice(0, 'Theme'.length))
   })
 })

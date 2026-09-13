@@ -720,7 +720,7 @@ export default function DesignSystemPage() {
               <ThemeToggle />
               <span className="text-xs text-[var(--v2-ink-3)]">
                 The icon button, as the top bar's right cluster renders it — one click
-                advances the ring from light to dark to system, and the accessible name says
+                flips the palette, light to dark and back, and the accessible name says
                 what the click will do, not only what the icon is.
               </span>
             </div>
@@ -733,12 +733,15 @@ export default function DesignSystemPage() {
               (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
               from the top bar and the mobile sheet's control block — Settings keeps its
               three explicit choices on its own screen). The glyph answers what you are
-              (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code>,{' '}
-              <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code>, or{' '}
-              <code className="rounded bg-[var(--v2-surface)] px-1">Monitor</code> when the
-              device decides); the name answers where you are going
-              ("Theme: dark. Switch to system"), because a control whose label is only
-              its current state cannot be predicted. The swap cross-fades under{' '}
+              (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code> in light,{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code> in dark;
+              the quick toggle has no system step — that choice lives in Settings); the
+              name answers where you are going
+              (&quot;Theme: dark. Switch to light&quot;), because a control whose label is only
+              its current state cannot be predicted. The icon is a plain clickable
+              button with no hover or focus tooltip (#2953): the icon alone is the
+              affordance, and the accessible name carries the whole message for screen
+              readers. The swap cross-fades under{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">prefers-reduced-motion:
               no-preference</code> and snaps otherwise, and the row variant's visible
               label is a prefix of the name, so the label sits in the name. Never hand-roll

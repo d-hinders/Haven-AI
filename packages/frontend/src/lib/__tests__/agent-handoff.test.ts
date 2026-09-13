@@ -18,7 +18,7 @@ const BASE_INPUT: HandoffInput = {
     name: 'My Payment Agent',
     description: 'Pays for x402 APIs',
     delegateAddress: '0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b',
-    safeAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
+    accountAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
     safeName: 'Treasury Safe',
     chainId: 100,
   },
@@ -62,6 +62,9 @@ describe('buildDotenv', () => {
     expect(env).toContain('HAVEN_AGENT_ID=agt_abc123')
     expect(env).toContain('HAVEN_API_KEY=sk_agent_TESTKEY_NEVERREAL')
     expect(env).toContain('HAVEN_DELEGATE_ADDRESS=0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b')
+    expect(env).toContain('HAVEN_ACCOUNT_ADDRESS=0xbf35beb0f587db2527b64e58d61f78bbf840860f')
+    // #2906 window: the new name first, the old names until #2914 removes them.
+    expect(env.indexOf('HAVEN_ACCOUNT_ADDRESS=')).toBeLessThan(env.indexOf('HAVEN_WALLET_ADDRESS='))
     expect(env).toContain('HAVEN_WALLET_ADDRESS=0xbf35beb0f587db2527b64e58d61f78bbf840860f')
     expect(env).toContain('HAVEN_SAFE_ADDRESS=0xbf35beb0f587db2527b64e58d61f78bbf840860f')
     expect(env).toContain('HAVEN_CHAIN_ID=100')

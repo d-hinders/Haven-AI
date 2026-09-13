@@ -125,7 +125,7 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
     api_key: credentials.apiKey,
     delegate_key: credentials.delegatePrivateKey,
     delegate_address: agent.delegateAddress,
-    safe_address: agent.safeAddress,
+    safe_address: agent.accountAddress,
     chain_id: agent.chainId,
     network: resolveNetworkName(agent.chainId),
     api_url: apiBaseUrl ?? null,

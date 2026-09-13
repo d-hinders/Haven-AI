@@ -6,14 +6,14 @@ import { useRef } from 'react'
 import { getChainConfig } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-import type { UserSafe } from '@/context/AuthContext'
+import type { SmartAccount } from '@/context/AuthContext'
 
 interface Props {
   open: boolean
   action: 'receive' | 'add-funds'
-  safes: UserSafe[]
+  safes: SmartAccount[]
   onClose: () => void
-  onSelect: (safeId: string) => void
+  onSelect: (accountId: string) => void
 }
 
 export default function DashboardActionPickerModal({

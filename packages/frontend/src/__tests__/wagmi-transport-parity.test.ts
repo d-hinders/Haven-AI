@@ -14,7 +14,7 @@
  * and returns `undefined`, so `usePublicClient({ chainId: 84532 })` was
  * `undefined`, and every consumer guards on exactly that and returns:
  *
- *     if (!publicClient || !safeAddress) { setLoading(false); return }
+ *     if (!publicClient || !accountAddress) { setLoading(false); return }
  *
  * No request, no error, no visible failure — just the empty branch of a surface
  * that had data. The dev deployment DEFAULTS to 84532

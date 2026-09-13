@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
-import type { SafeFunding } from '@/hooks/useSafeFunding'
+import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
  * The empty-state funding card, fed by the funding endpoint (#2534).
@@ -25,7 +25,7 @@ vi.mock('@/components/ui/Button', () => ({
   ),
 }))
 
-const FUNDING: SafeFunding = {
+const FUNDING: AccountFunding = {
   account_address: '0xabc0000000000000000000000000000000000004',
   chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },
   tokens: [
@@ -80,7 +80,7 @@ describe('DashboardOnboardingGuide — funding card (#2534)', () => {
   })
 
   it('falls back to the general copy when no token carries a minimum', () => {
-    const noMinimum: SafeFunding = {
+    const noMinimum: AccountFunding = {
       ...FUNDING,
       tokens: [
         { symbol: 'USDC', address: '0xusdc', decimals: 6, balance_human: '0', minimum_useful_human: null },

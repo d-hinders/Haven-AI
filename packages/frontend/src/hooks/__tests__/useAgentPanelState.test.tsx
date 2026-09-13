@@ -51,7 +51,7 @@ describe('useAgentPanelState', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
-    mockUseAuth.mockReturnValue({ activeSafe: SAFE })
+    mockUseAuth.mockReturnValue({ activeAccount: SAFE })
     mockUseAgents.mockReturnValue({
       agents: [],
       loading: false,
@@ -68,22 +68,22 @@ describe('useAgentPanelState', () => {
     vi.useRealTimers()
   })
 
-  describe('agentUsesActiveSafe', () => {
+  describe('agentUsesActiveAccount', () => {
     it('matches by safe_id first', () => {
       const { result } = renderHook(() => useAgentPanelState())
-      expect(result.current.agentUsesActiveSafe(baseAgent({ safe_id: 'safe-1' }))).toBe(true)
-      expect(result.current.agentUsesActiveSafe(baseAgent({ safe_id: 'safe-other' }))).toBe(false)
+      expect(result.current.agentUsesActiveAccount(baseAgent({ safe_id: 'safe-1' }))).toBe(true)
+      expect(result.current.agentUsesActiveAccount(baseAgent({ safe_id: 'safe-other' }))).toBe(false)
     })
 
     it('falls back to address + chain when there is no safe_id', () => {
       const { result } = renderHook(() => useAgentPanelState())
       expect(
-        result.current.agentUsesActiveSafe(
+        result.current.agentUsesActiveAccount(
           baseAgent({ safe_id: null as unknown as string, safe_address: SAFE.safe_address.toUpperCase(), safe_chain_id: 100 }),
         ),
       ).toBe(true)
       expect(
-        result.current.agentUsesActiveSafe(
+        result.current.agentUsesActiveAccount(
           baseAgent({ safe_id: null as unknown as string, safe_address: SAFE.safe_address, safe_chain_id: 8453 }),
         ),
       ).toBe(false)

@@ -19,7 +19,7 @@ interface UsePortfolioOptions {
 }
 
 export function usePortfolio(
-  safeAddress: string | null,
+  accountAddress: string | null,
   { chainId }: UsePortfolioOptions = {},
 ): UsePortfolioReturn {
   const [totalUsd, setTotalUsd] = useState(0)
@@ -32,7 +32,7 @@ export function usePortfolio(
   const fetchPortfolio = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
 
-    if (!safeAddress) {
+    if (!accountAddress) {
       setTotalUsd(0)
       setTotalEur(0)
       setBreakdown([])
@@ -50,7 +50,7 @@ export function usePortfolio(
       }
       const chainQuery = chainId === undefined ? '' : `?chain_id=${encodeURIComponent(String(chainId))}`
       const data = await api.get<PortfolioResponse>(
-        `/portfolio/${safeAddress}${chainQuery}`,
+        `/portfolio/${accountAddress}${chainQuery}`,
       )
       if (generationRef.current === generation) {
         setTotalUsd(data.totalUsd)
@@ -69,10 +69,10 @@ export function usePortfolio(
         setLoading(false)
       }
     }
-  }, [chainId, safeAddress])
+  }, [chainId, accountAddress])
 
   useEffect(() => {
-    if (!safeAddress) {
+    if (!accountAddress) {
       generationRef.current += 1
       setLoading(false)
       return
@@ -83,7 +83,7 @@ export function usePortfolio(
     return () => {
       generationRef.current += 1
     }
-  }, [fetchPortfolio, safeAddress])
+  }, [fetchPortfolio, accountAddress])
 
   // #2732: the 60s interval moved into the shared visible-only policy — 10s
   // while visible, immediate fetch on return-to-visible, zero fetches while

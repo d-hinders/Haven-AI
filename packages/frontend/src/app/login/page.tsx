@@ -32,7 +32,7 @@ function LoginForm() {
   useEffect(() => {
     if (!loading && user) {
       router.replace(
-        postAuthDestination(Boolean(user.safes?.length > 0 || user.safe_address), nextPath),
+        postAuthDestination(Boolean(user.accounts?.length > 0 || user.safe_address), nextPath),
       )
     }
   }, [loading, user, router, nextPath])

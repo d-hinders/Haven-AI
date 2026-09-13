@@ -8,7 +8,7 @@ import { RESET_PERIODS } from '@/lib/budget-period'
 import { api, getResolvedApiBaseUrl } from '@/lib/api'
 import { resolveDiscoverySource } from '@/lib/discovery'
 import type { ApiSchema } from '@haven_ai/core'
-import { useAuth, type UserSafe } from '@/context/AuthContext'
+import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import {
   useAgentConnectionSetupStatus,
@@ -57,8 +57,8 @@ export interface ManualCredential {
 export interface UseAgentConnectionSetupOptions {
   open: boolean
   onClose: () => void
-  safeAddress?: string
-  safeId?: string | null
+  accountAddress?: string
+  accountId?: string | null
   /** See ConnectAgentModal's prop of the same name. */
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
   /** See ConnectAgentModal's prop of the same name. */
@@ -322,14 +322,14 @@ export function buildManualCredentialPrompt(input: {
 export function useAgentConnectionSetup({
   open,
   onClose,
-  safeAddress: propSafeAddress,
-  safeId: propSafeId,
+  accountAddress: propAccountAddress,
+  accountId: propAccountId,
   onSetupUpdated,
   starterAllowance = false,
   resumeSetupId = null,
 }: UseAgentConnectionSetupOptions) {
-  const { user, activeSafe } = useAuth()
-  const userSafes = useMemo(() => user?.safes ?? [], [user?.safes])
+  const { user, activeAccount } = useAuth()
+  const userAccounts = useMemo(() => user?.accounts ?? [], [user?.accounts])
 
   // Only wallets on a currently-supported chain can actually run a new agent
   // (the wallet/approval flow is scoped to enabled chains). Offer those in the
@@ -337,18 +337,18 @@ export function useAgentConnectionSetup({
   // chain, so the picker is never empty.
   const isSupportedChain = (chainId?: number) =>
     chainId !== undefined && SUPPORTED_CHAIN_IDS.includes(chainId)
-  const supportedSafes = userSafes.filter((safe) => isSupportedChain(safe.chain_id))
-  const selectableSafes = supportedSafes.length > 0 ? supportedSafes : userSafes
+  const supportedAccounts = userAccounts.filter((account) => isSupportedChain(account.chain_id))
+  const selectableAccounts = supportedAccounts.length > 0 ? supportedAccounts : userAccounts
 
-  const initialSafeId =
-    propSafeId ??
-    userSafes.find((safe) => safe.safe_address.toLowerCase() === propSafeAddress?.toLowerCase())?.id ??
-    (isSupportedChain(activeSafe?.chain_id) ? activeSafe?.id : undefined) ??
-    selectableSafes.find((safe) => safe.is_default)?.id ??
-    selectableSafes[0]?.id ??
+  const initialAccountId =
+    propAccountId ??
+    userAccounts.find((account) => account.safe_address.toLowerCase() === propAccountAddress?.toLowerCase())?.id ??
+    (isSupportedChain(activeAccount?.chain_id) ? activeAccount?.id : undefined) ??
+    selectableAccounts.find((account) => account.is_default)?.id ??
+    selectableAccounts[0]?.id ??
     null
 
-  const [selectedSafeId, setSelectedSafeId] = useState<string | null>(initialSafeId)
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(initialAccountId)
   // A resumed setup already exists, so the three authoring steps are behind
   // the user and the flow opens on the connect step.
   const [step, setStep] = useState<SetupStep>(resumeSetupId ? 'connect' : 'details')
@@ -371,12 +371,12 @@ export function useAgentConnectionSetup({
   const [manualCreating, setManualCreating] = useState(false)
   const [manualError, setManualError] = useState<string | null>(null)
 
-  const selectedSafe = userSafes.find((safe) => safe.id === selectedSafeId) ?? null
-  const safeAddress = selectedSafe?.safe_address ?? propSafeAddress ?? ''
-  const safeId = selectedSafe?.id ?? propSafeId ?? null
-  const chainId = selectedSafe?.chain_id ?? activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
+  const selectedAccount = userAccounts.find((account) => account.id === selectedAccountId) ?? null
+  const accountAddress = selectedAccount?.safe_address ?? propAccountAddress ?? ''
+  const accountId = selectedAccount?.id ?? propAccountId ?? null
+  const chainId = selectedAccount?.chain_id ?? activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
-  const walletName = selectedSafe?.name ?? activeSafe?.name ?? 'Selected Haven wallet'
+  const walletName = selectedAccount?.name ?? activeAccount?.name ?? 'Selected Haven wallet'
   const walletNetworkName = getChainConfig(chainId).name
   // A setup created in THIS session wins over a resumed id: the user who just
   // clicked through the wizard is looking at their own new setup, not at
@@ -395,7 +395,7 @@ export function useAgentConnectionSetup({
     : walletName
   // Detect when a wallet IS connected but to the wrong chain for this approval.
   // In that case `useWalletClient({ chainId: approvalChainId })` returns null, so
-  // useSafeOperationGate falls through to `no_signer` — but the real problem is
+  // useAccountOperationGate falls through to `no_signer` — but the real problem is
   // just a network mismatch, not an absent wallet.
   const { address: walletAddress, chain: walletChain } = useAccount()
   const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
@@ -421,13 +421,13 @@ export function useAgentConnectionSetup({
   // deps) is deliberate: `tokenOptions` changes identity whenever the chosen
   // wallet's chain changes, so depending on it here would re-run this effect
   // and snap the user's wallet choice back to the default mid-selection.
-  const initialSafeIdRef = useRef(initialSafeId)
-  initialSafeIdRef.current = initialSafeId
+  const initialSafeIdRef = useRef(initialAccountId)
+  initialSafeIdRef.current = initialAccountId
   const prevOpenRef = useRef(false)
 
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      setSelectedSafeId(initialSafeIdRef.current)
+      setSelectedAccountId(initialSafeIdRef.current)
     }
     prevOpenRef.current = open
   }, [open])
@@ -511,7 +511,7 @@ export function useAgentConnectionSetup({
 
   useEscapeToClose(open, handleClose, { enabled: !creating && !manualCreating })
 
-  const hasMultipleSafes = userSafes.length > 1
+  const hasMultipleAccounts = userAccounts.length > 1
   const setupSteps: SetupStep[] = ['details', 'policy', 'review', 'connect']
   const currentStepIndex = setupSteps.indexOf(step)
   const { resetPeriodOptions } = railBudgetRules(allowances.length)
@@ -524,10 +524,10 @@ export function useAgentConnectionSetup({
     (addAmountValidation && !addAmountValidation.ok && !isIncompleteMoneyInput(addAmount)
       ? addAmountValidation.message
       : '')
-  const walletUnavailable = !safeId
+  const walletUnavailable = !accountId
 
   async function handleCreateSetup() {
-    if (!safeId) {
+    if (!accountId) {
       setCreateError('Choose or create a Haven wallet before creating this setup.')
       return
     }
@@ -542,7 +542,7 @@ export function useAgentConnectionSetup({
       const response = await api.post<CreateSetupResponse>('/agent-connection-setups', {
         name: name.trim(),
         description: description.trim() || undefined,
-        safe_id: safeId,
+        safe_id: accountId,
         local_mcp: localMcp ? true : undefined,
         allowances: allowances.map((allowance) => ({
           token_address:
@@ -703,10 +703,10 @@ export function useAgentConnectionSetup({
     localMcp,
     setLocalMcp,
     // Wallet selection
-    hasMultipleSafes,
-    selectableSafes,
-    selectedSafeId,
-    setSelectedSafeId,
+    hasMultipleAccounts,
+    selectableAccounts,
+    selectedAccountId,
+    setSelectedAccountId,
     walletName,
     walletNetworkName,
     walletUnavailable,

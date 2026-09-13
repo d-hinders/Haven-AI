@@ -13,7 +13,7 @@ import {
  * Active-chain selector (#632, epic #625).
  *
  * The **active chain** is the chain of the user's currently-active account
- * (`AuthContext.activeSafe`); before any account exists it falls back to
+ * (`AuthContext.activeAccount`); before any account exists it falls back to
  * `DEFAULT_CHAIN_ID`. Surfaces read it to drive their *default* chain scope.
  *
  * Two patterns, chosen per surface (see `useChainScope`):
@@ -25,8 +25,8 @@ import {
 
 /** The id of the active chain (the active account's chain, or the default). */
 export function useActiveChainId(): number {
-  const { activeSafe } = useAuth()
-  return activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
+  const { activeAccount } = useAuth()
+  return activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
 }
 
 /** The full config of the active chain. */

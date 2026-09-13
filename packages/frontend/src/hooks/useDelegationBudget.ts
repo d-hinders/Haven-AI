@@ -160,7 +160,7 @@ export function useDelegationBudget(
   // stored-passkey/hybrid branches are unreachable and `ready` would depend
   // on any globally-connected wallet with no per-account check.
   const signer = useActiveSigner({
-    safeAddress: signers ? (signers.account_address as Address) : undefined,
+    accountAddress: signers ? (signers.account_address as Address) : undefined,
     chainId,
   })
 

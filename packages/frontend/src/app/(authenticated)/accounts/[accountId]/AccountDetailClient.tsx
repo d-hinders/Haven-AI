@@ -4,14 +4,14 @@ import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useAuth, type UserSafe } from '@/context/AuthContext'
+import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
 import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
-import { useUserSafes } from '@/hooks/useUserSafes'
+import { useAccounts } from '@/hooks/useAccounts'
 import { ApiRequestError } from '@/lib/api'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import DelegationSendModal from '@/components/DelegationSendModal'
@@ -84,38 +84,38 @@ function agentAccessSummary(agent: Agent, chainId: number | null): string {
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
-  const safeId = params.safeId as string
+  const accountId = params.accountId as string
 
-  const { user, activeSafe, setActiveSafe, loading: authLoading, passkeys = [] } = useAuth()
-  const { renameSafe, removeSafe, setDefault, loading: safesLoading } = useUserSafes()
+  const { user, activeAccount, setActiveAccount, loading: authLoading, passkeys = [] } = useAuth()
+  const { renameAccount, removeAccount, setDefault, loading: accountsLoading } = useAccounts()
   const { toast } = useToast()
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
 
   // Find this Safe from user's list
-  const safe = user?.safes?.find((s) => s.id === safeId)
-  const safeAddress = safe?.safe_address ?? null
+  const safe = user?.accounts?.find((s) => s.id === accountId)
+  const accountAddress = safe?.safe_address ?? null
   const chainId = safe?.chain_id ?? DEFAULT_CHAIN_ID
 
   // Keep the active Safe in sync with the route. Runs as an effect so we
   // never call setState during render.
   useEffect(() => {
-    if (safe && activeSafe?.id !== safe.id) {
-      setActiveSafe(safe)
+    if (safe && activeAccount?.id !== safe.id) {
+      setActiveAccount(safe)
     }
-  }, [safe, activeSafe, setActiveSafe])
+  }, [safe, activeAccount, setActiveAccount])
 
-  const safeNamesByAddress = new Map<string, string>()
-  for (const account of user?.safes ?? []) {
-    safeNamesByAddress.set(
+  const accountNamesByAddress = new Map<string, string>()
+  for (const account of user?.accounts ?? []) {
+    accountNamesByAddress.set(
       `${account.safe_address.toLowerCase()}:${account.chain_id}`,
       account.name,
     )
   }
 
   // Build linked-agent list
-  const safeAgents = agents.filter((a) => a.safe_id === safeId)
+  const safeAgents = agents.filter((a) => a.safe_id === accountId)
 
 
   // #2413: the deposit gate was about retired accounts, which no longer
@@ -129,13 +129,13 @@ export default function AccountDetailClient() {
     loading: portfolioLoading,
     error: portfolioError,
     refetch: refetchPortfolio,
-  } = usePortfolio(safeAddress, { chainId })
+  } = usePortfolio(accountAddress, { chainId })
 
   const {
     balances,
     error: balancesError,
     refetch: refetchBalances,
-  } = useBalances(safeAddress, { chainId })
+  } = useBalances(accountAddress, { chainId })
 
   const {
     transactions,
@@ -145,7 +145,7 @@ export default function AccountDetailClient() {
     hasMore,
     truncated,
     refresh: refetchTx,
-  } = useTransactionsFeed({ safeId }, 10)
+  } = useTransactionsFeed({ accountId }, 10)
 
   const totalFiat = currency === 'EUR' ? totalEur : totalUsd
   const chain = getChainConfig(chainId)
@@ -173,7 +173,7 @@ export default function AccountDetailClient() {
 
   const handleRename = async (name: string) => {
     if (!safe) return
-    await renameSafe(safe.id, name)
+    await renameAccount(safe.id, name)
     setRenameOpen(false)
   }
 
@@ -201,7 +201,7 @@ export default function AccountDetailClient() {
     setRemoving(true)
     setRemoveError(null)
     try {
-      await removeSafe(safe.id)
+      await removeAccount(safe.id)
       router.push('/accounts')
     } catch (err) {
       setRemoveError(
@@ -232,7 +232,7 @@ export default function AccountDetailClient() {
     setRemoveError(null)
   }
 
-  // While auth context is still hydrating `user.safes`, avoid flashing
+  // While auth context is still hydrating `user.accounts`, avoid flashing
   // "Account not found" — the safe lookup will resolve once safes load.
   if (authLoading || !user) {
     return (
@@ -260,11 +260,11 @@ export default function AccountDetailClient() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
+            {safe.is_default && (user?.accounts?.length ?? 0) > 1 ? (
               <StatusBadge tone="brand">Default</StatusBadge>
             ) : null}
             <StatusBadge>{chain.name}</StatusBadge>
-            {safeAddress && (
+            {accountAddress && (
               <>
                 {/* #1083 gave Send to BOTH rails. #1989 (epic #1440) took it
                     back off the legacy Safe rail: that path signed a Safe
@@ -299,7 +299,7 @@ export default function AccountDetailClient() {
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
                   Rename
                 </DropdownMenuItem>
-                {!safe.is_default && (user?.safes?.length ?? 0) > 1 ? (
+                {!safe.is_default && (user?.accounts?.length ?? 0) > 1 ? (
                   <DropdownMenuItem
                     onSelect={() => {
                       void setDefault(safe.id)
@@ -376,7 +376,7 @@ export default function AccountDetailClient() {
               title="No token balances yet"
               body="Receive funds to see tokens in this Haven wallet."
               className="py-8"
-              action={safeAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
+              action={accountAddress ? <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive funds</Button> : null}
             />
           ) : (
             <>
@@ -514,7 +514,7 @@ export default function AccountDetailClient() {
       {/* #1089: backup & recovery is an account capability, not an agent one —
           it works from the moment the account exists, with no agent required. */}
       <AccountSignersCard
-        safeAddress={safe.safe_address}
+        accountAddress={safe.safe_address}
         chainId={chainId}
         userEmail={user?.email ?? ''}
       />
@@ -537,17 +537,17 @@ export default function AccountDetailClient() {
           <div>
             <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
             <div className="flex items-center gap-3">
-              {safeAddress ? (
-                <Tooltip label={safeAddress} mono>
+              {accountAddress ? (
+                <Tooltip label={accountAddress} mono>
                   <span className="text-sm font-mono text-[var(--v2-ink)]">
-                    {truncate(safeAddress)}
+                    {truncate(accountAddress)}
                   </span>
                 </Tooltip>
               ) : (
                 <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
               )}
-              {safeAddress && <CopyButton value={safeAddress} label="address" />}
-              {safeAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', safeAddress)} label="Open wallet address externally" />}
+              {accountAddress && <CopyButton value={accountAddress} label="address" />}
+              {accountAddress && <ExternalDetailsLink href={getExplorerUrl(chainId, 'address', accountAddress)} label="Open wallet address externally" />}
             </div>
           </div>
           {/* #2413: "Required approvals" and "Approvers" lived here. Both were
@@ -566,7 +566,7 @@ export default function AccountDetailClient() {
               <h2 className="text-base font-semibold text-[var(--v2-ink)]">Transaction history</h2>
               {!txLoading && total > 0 ? (
                 <Button
-                  href={`/transactions?safeId=${encodeURIComponent(safeId)}`}
+                  href={`/transactions?accountId=${encodeURIComponent(accountId)}`}
                   variant="tertiary"
                   size="sm"
                   trailingIcon
@@ -602,7 +602,7 @@ export default function AccountDetailClient() {
             error={txError}
             onRefresh={() => void refetchTx()}
             resolveAddress={resolveAddress}
-            safeNamesByAddress={safeNamesByAddress}
+            accountNamesByAddress={accountNamesByAddress}
             hasActiveFilters={false}
             variant="card"
             emptyState={{
@@ -613,7 +613,7 @@ export default function AccountDetailClient() {
         </Card>
         {transactions.length > 0 && hasMore ? (
           <div className="mt-5 flex justify-center">
-            <Button href={`/transactions?safeId=${encodeURIComponent(safeId)}`} variant="ghost">
+            <Button href={`/transactions?accountId=${encodeURIComponent(accountId)}`} variant="ghost">
               View all
             </Button>
           </div>
@@ -622,15 +622,15 @@ export default function AccountDetailClient() {
 
       {/*
         Mount the modal only while open so its wallet hooks
-        (useSendTransaction / useActiveSigner / useSafeOperationGate, each
+        (useSendTransaction / useActiveSigner / useAccountOperationGate, each
         backing a wagmi wallet-client subscription) don't run in the
         background on every account page view.
       */}
-      {sendOpen && safeAddress && (
+      {sendOpen && accountAddress && (
         <DelegationSendModal
           open
           onClose={() => setSendOpen(false)}
-          accountAddress={safeAddress}
+          accountAddress={accountAddress}
           chainId={chainId}
           onSent={handleSendSuccess}
         />
@@ -645,7 +645,7 @@ export default function AccountDetailClient() {
           safe={safe}
           onClose={() => setRenameOpen(false)}
           onRename={handleRename}
-          loading={safesLoading}
+          loading={accountsLoading}
         />
       )}
       <ConfirmDialog
@@ -677,7 +677,7 @@ function RenameModal({
   onRename,
   loading,
 }: {
-  safe: UserSafe
+  safe: SmartAccount
   onClose: () => void
   onRename: (name: string) => Promise<void>
   loading: boolean

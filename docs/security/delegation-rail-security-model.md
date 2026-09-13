@@ -32,7 +32,7 @@ covers:
   - packages/frontend/src/lib/hybridAccountOps.ts
   - packages/frontend/src/lib/delegationPasskeySigner.ts
   - packages/frontend/src/lib/signer.ts
-  - packages/frontend/src/hooks/useSafeOperationGate.ts
+  - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
 last-verified: "2026-09-13"
@@ -444,7 +444,8 @@ matched, so a marker-less user (new device or browser profile; cleared site
 data followed by re-login — the signer-set blob re-hydrates from the
 owner-scoped read while markers are written only at enrolment; or a passkey
 enrolled from another device) saw a wallet-connection CTA in the header while
-every signing surface in this section worked, and `useSafeOperationGate`
+every signing surface in this section worked, and `useAccountOperationGate`
+(named `useSafeOperationGate` before #2913)
 simultaneously blocked gated actions for the same state. The decision:
 `useActiveSigner` resolves any **non-empty** hydrated signer set, mirroring
 `pickSigningPath`'s precedence exactly — marker-matched passkey → connected
@@ -473,7 +474,7 @@ same shared return, and it is correct there because the address was just
 proven equal to `owner_address`.
 Refusing (the pre-#1969 status quo) was declined as incoherent with the
 #1097 rule above and with shipped signing behaviour; offering **silently**
-was declined per #1952's design record. `useSafeOperationGate`'s hybrid
+was declined per #1952's design record. `useAccountOperationGate`'s hybrid
 branch now answers `ready` for a non-empty set for the same reason, and —
 since #2068 — for an owner-only set exactly when the connected wallet is
 the named owner (the same address check; an unrelated wallet stays blocked,

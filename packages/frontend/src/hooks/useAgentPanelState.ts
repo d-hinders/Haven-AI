@@ -14,9 +14,9 @@ export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
  * The panel deliberately has no on-chain Safe transaction path.
  */
 export function useAgentPanelState() {
-  const { activeSafe } = useAuth()
-  const safeAddress = activeSafe?.safe_address ?? null
-  const chainId = activeSafe?.chain_id ?? DEFAULT_CHAIN_ID
+  const { activeAccount } = useAuth()
+  const accountAddress = activeAccount?.safe_address ?? null
+  const chainId = activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   const {
     agents,
     loading,
@@ -110,20 +110,20 @@ export function useAgentPanelState() {
     return () => window.clearTimeout(timeout)
   }, [toastMessage])
 
-  const agentUsesActiveSafe = useCallback(
+  const agentUsesActiveAccount = useCallback(
     (agent: Agent): boolean => {
-      if (agent.safe_id) return agent.safe_id === activeSafe?.id
+      if (agent.safe_id) return agent.safe_id === activeAccount?.id
       if (agent.safe_address) {
         const agentChainId = agent.safe_chain_id ?? DEFAULT_CHAIN_ID
         return Boolean(
-          safeAddress &&
-            agent.safe_address.toLowerCase() === safeAddress.toLowerCase() &&
+          accountAddress &&
+            agent.safe_address.toLowerCase() === accountAddress.toLowerCase() &&
             agentChainId === chainId,
         )
       }
       return true
     },
-    [activeSafe?.id, chainId, safeAddress],
+    [activeAccount?.id, chainId, accountAddress],
   )
 
   function handleViewDetails(agent: Agent) {
@@ -131,7 +131,7 @@ export function useAgentPanelState() {
   }
 
   function handleEdit(agent: Agent) {
-    if (!agentUsesActiveSafe(agent)) {
+    if (!agentUsesActiveAccount(agent)) {
       handleViewDetails(agent)
       return
     }
@@ -139,8 +139,8 @@ export function useAgentPanelState() {
   }
 
   useEffect(() => {
-    if (editAgent && !agentUsesActiveSafe(editAgent)) setEditAgent(null)
-  }, [agentUsesActiveSafe, editAgent])
+    if (editAgent && !agentUsesActiveAccount(editAgent)) setEditAgent(null)
+  }, [agentUsesActiveAccount, editAgent])
 
   async function handlePause(agent: Agent) {
     setBusyAgentId(agent.id)
@@ -208,15 +208,15 @@ export function useAgentPanelState() {
   }
 
   return {
-    safeAddress,
+    accountAddress,
     chainId,
-    activeSafeId: activeSafe?.id,
+    activeAccountId: activeAccount?.id,
     agents,
     loading,
     error,
     visibleAgents,
     removedAgents,
-    agentUsesActiveSafe,
+    agentUsesActiveAccount,
     connectAgentOpen,
     setConnectAgentOpen,
     firstAgentSetup,

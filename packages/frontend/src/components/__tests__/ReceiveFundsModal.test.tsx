@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { UserSafe } from '@/context/AuthContext'
+import type { SmartAccount } from '@/context/AuthContext'
 
 vi.mock('qrcode', () => ({
   default: {
@@ -41,7 +41,7 @@ function textNodesJoined(el: HTMLElement): string {
   return parts.join(' ')
 }
 
-const SAFE: UserSafe = {
+const SAFE: SmartAccount = {
   id: 'safe-id',
   safe_address: '0xa0e99A227fc546017Fd68D49711C1857208F0eB9',
   chain_id: 8453,
@@ -127,7 +127,7 @@ describe('ReceiveFundsModal', () => {
   describe.each([
     ['a chain_id that is absent', { ...SAFE, chain_id: undefined as unknown as number }],
     ['a chain_id that is present but unregistered', { ...SAFE, chain_id: 999_999 }],
-  ])('with %s', (_label, unresolvedSafe: UserSafe) => {
+  ])('with %s', (_label, unresolvedSafe: SmartAccount) => {
     it('renders without throwing and refuses to name a network or reveal an address', () => {
       // A1 — does not throw. Today's code takes the whole screen down through
       // the error boundary here; the throw is a distinguishable failure from an

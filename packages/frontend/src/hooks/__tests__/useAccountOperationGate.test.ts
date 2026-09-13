@@ -22,7 +22,7 @@ import {
   setStoredHybridSigners,
   setStoredPasskeySigner,
 } from '@/lib/signer'
-import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
+import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 
 const SAFE_ADDRESS = '0x07058311f995c89F4DbE17Db61fa1A3CDe638975' as Address
 const PASSKEY_SIGNER_ADDRESS = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2' as Address
@@ -37,7 +37,7 @@ const PASSKEY_ROW = {
   created_at: '2026-05-05T00:00:00.000Z',
 }
 
-describe('useSafeOperationGate', () => {
+describe('useAccountOperationGate', () => {
   beforeEach(() => {
     localStorage.clear()
     mockUseAccount.mockReset()
@@ -65,8 +65,8 @@ describe('useSafeOperationGate', () => {
     })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({
-        safeAddress: SAFE_ADDRESS,
+      useAccountOperationGate({
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )
@@ -79,8 +79,8 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({
-        safeAddress: SAFE_ADDRESS,
+      useAccountOperationGate({
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )
@@ -93,8 +93,8 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: undefined })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({
-        safeAddress: SAFE_ADDRESS,
+      useAccountOperationGate({
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )
@@ -104,8 +104,8 @@ describe('useSafeOperationGate', () => {
 
   it('returns no_signer when there is neither a stored passkey nor a connected wallet', () => {
     const { result } = renderHook(() =>
-      useSafeOperationGate({
-        safeAddress: SAFE_ADDRESS,
+      useAccountOperationGate({
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )
@@ -118,8 +118,8 @@ describe('useSafeOperationGate', () => {
     mockUseAccount.mockReturnValue({ address: EOA_ADDRESS })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({
-        safeAddress: SAFE_ADDRESS,
+      useAccountOperationGate({
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )
@@ -150,7 +150,7 @@ describe('useSafeOperationGate', () => {
   }
 
   function mockHybridAuth() {
-    mockUseAuth.mockReturnValue({ passkeys: [], user: { safes: [HYBRID_SAFE_ROW] } })
+    mockUseAuth.mockReturnValue({ passkeys: [], user: { accounts: [HYBRID_SAFE_ROW] } })
   }
 
   it('hybrid account: ready when the signer set is hydrated and the passkey is on this device', () => {
@@ -159,7 +159,7 @@ describe('useSafeOperationGate', () => {
     rememberPasskeyCredentialOnDevice(credentialIdFromKeyId(HYBRID_KEY_ID))
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useAccountOperationGate({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({ kind: 'ready' })
@@ -174,7 +174,7 @@ describe('useSafeOperationGate', () => {
     setStoredHybridSigners(HYBRID_SIGNERS)
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useAccountOperationGate({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({ kind: 'ready' })
@@ -187,7 +187,7 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useAccountOperationGate({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({ kind: 'ready' })
@@ -207,7 +207,7 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useAccountOperationGate({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({
@@ -231,7 +231,7 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: undefined })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useAccountOperationGate({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current.kind).toBe('wrong_wallet')
@@ -251,7 +251,7 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: undefined })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useAccountOperationGate({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({ kind: 'no_signer' })
@@ -264,7 +264,7 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: HYBRID_ADDRESS, chainId: 84532 }),
+      useAccountOperationGate({ accountAddress: HYBRID_ADDRESS, chainId: 84532 }),
     )
 
     expect(result.current).toEqual({ kind: 'no_signer' })
@@ -278,7 +278,7 @@ describe('useSafeOperationGate', () => {
     mockUseWalletClient.mockReturnValue({ data: { type: 'walletClient' } })
 
     const { result } = renderHook(() =>
-      useSafeOperationGate({ safeAddress: SAFE_ADDRESS, chainId: 100 }),
+      useAccountOperationGate({ accountAddress: SAFE_ADDRESS, chainId: 100 }),
     )
 
     // Legacy path untouched: connected wallet → ready.

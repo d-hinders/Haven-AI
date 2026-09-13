@@ -11,7 +11,7 @@ import {
   passkeyStorageKey,
 } from '@/lib/signer'
 
-export type SafeOperationGate =
+export type AccountOperationGate =
   | { kind: 'ready' }
   | { kind: 'no_signer' }
   // #2073: a wallet IS connected, but it is not the hybrid account's named
@@ -35,31 +35,31 @@ function subscribe(onStoreChange: () => void): () => void {
 }
 
 function readStoredPasskeyValue(args: {
-  safeAddress?: Address
+  accountAddress?: Address
   chainId?: number
 }): string | null {
-  if (typeof window === 'undefined' || !args.safeAddress || args.chainId === undefined) {
+  if (typeof window === 'undefined' || !args.accountAddress || args.chainId === undefined) {
     return null
   }
 
-  return window.localStorage.getItem(passkeyStorageKey(args.safeAddress, args.chainId))
+  return window.localStorage.getItem(passkeyStorageKey(args.accountAddress, args.chainId))
 }
 
 function readStoredHybridValue(args: {
-  safeAddress?: Address
+  accountAddress?: Address
   chainId?: number
 }): string | null {
-  if (typeof window === 'undefined' || !args.safeAddress || args.chainId === undefined) {
+  if (typeof window === 'undefined' || !args.accountAddress || args.chainId === undefined) {
     return null
   }
 
-  return window.localStorage.getItem(hybridSignersStorageKey(args.safeAddress, args.chainId))
+  return window.localStorage.getItem(hybridSignersStorageKey(args.accountAddress, args.chainId))
 }
 
-export function useSafeOperationGate(args: {
-  safeAddress?: Address
+export function useAccountOperationGate(args: {
+  accountAddress?: Address
   chainId?: number
-}): SafeOperationGate {
+}): AccountOperationGate {
   const { passkeys, user } = useAuth()
   const { address } = useAccount()
   const { data: walletClient } = useWalletClient({ chainId: args.chainId })
@@ -72,7 +72,7 @@ export function useSafeOperationGate(args: {
 
   const storedPasskeySigner = useMemo(
     () => getStoredPasskeySigner(args),
-    [args.chainId, args.safeAddress, storedPasskeyValue],
+    [args.chainId, args.accountAddress, storedPasskeyValue],
   )
 
   // #1079: rail awareness. A Hybrid DeleGator account's signer set lives in
@@ -86,24 +86,24 @@ export function useSafeOperationGate(args: {
 
   const hybridSigners = useMemo(
     () => getStoredHybridSigners(args),
-    [args.chainId, args.safeAddress, storedHybridValue],
+    [args.chainId, args.accountAddress, storedHybridValue],
   )
 
   const isHybridAccount = useMemo(() => {
-    const safeAddress = args.safeAddress?.toLowerCase()
-    if (!safeAddress || args.chainId === undefined) return false
+    const accountAddress = args.accountAddress?.toLowerCase()
+    if (!accountAddress || args.chainId === undefined) return false
     // #2413: every listed account is on the delegation rail, so matching the
     // address and chain is the whole test.
-    return (user?.safes ?? []).some(
-      (safe) =>
-        safe.chain_id === args.chainId &&
-        safe.safe_address.toLowerCase() === safeAddress,
+    return (user?.accounts ?? []).some(
+      (account) =>
+        account.chain_id === args.chainId &&
+        account.safe_address.toLowerCase() === accountAddress,
     )
-  }, [args.chainId, args.safeAddress, user?.safes])
+  }, [args.chainId, args.accountAddress, user?.accounts])
 
   const backendPasskey = useMemo(() => {
-    const safeAddress = args.safeAddress?.toLowerCase()
-    if (!safeAddress || args.chainId === undefined) {
+    const accountAddress = args.accountAddress?.toLowerCase()
+    if (!accountAddress || args.chainId === undefined) {
       return null
     }
 
@@ -111,10 +111,10 @@ export function useSafeOperationGate(args: {
       passkeys.find(
         (passkey) =>
           passkey.chain_id === args.chainId &&
-          passkey.safe_address?.toLowerCase() === safeAddress,
+          passkey.safe_address?.toLowerCase() === accountAddress,
       ) ?? null
     )
-  }, [args.chainId, args.safeAddress, passkeys])
+  }, [args.chainId, args.accountAddress, passkeys])
 
   if (isHybridAccount) {
     if (hybridSigners && hybridSigners.passkeys.length > 0) {

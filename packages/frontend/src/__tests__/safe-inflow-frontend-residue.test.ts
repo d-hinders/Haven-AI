@@ -19,7 +19,7 @@
  * Scoped to the RETIRED verbs, not the paths. `/user/safes` stays very much
  * alive for GET (list), PUT (rename, set default) and DELETE (unlink) — those
  * operate on EXISTING accounts, which must keep working (see
- * `hooks/useUserSafes.ts`). Only creation and import are gone.
+ * `hooks/useAccounts.ts`). Only creation and import are gone.
  *
  * **Known limits — a partial net, documented here rather than implied to be a
  * closed guarantee** (haven-reviewer, #2261; the same treatment

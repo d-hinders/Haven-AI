@@ -27,7 +27,7 @@ import {
 } from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { BRAND_COLOURS } from '@/lib/brand-colours'
-import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
+import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { truncateAddress } from '@/components/haven'
 
 // Generative identicon gradient stops — decorative art hashed from an address
@@ -627,20 +627,20 @@ function getSafeChainName(chainId?: number): string | undefined {
 export default function WalletButton() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
-  const { activeSafe, passkeys } = useAuth()
-  const activeSafeAddress = activeSafe?.safe_address as Address | undefined
+  const { activeAccount, passkeys } = useAuth()
+  const activeAccountAddress = activeAccount?.safe_address as Address | undefined
   const activeSigner = useActiveSigner({
-    safeAddress: activeSafeAddress,
-    chainId: activeSafe?.chain_id,
+    accountAddress: activeAccountAddress,
+    chainId: activeAccount?.chain_id,
   })
   // #2073: the same gate the action areas consult, so the header pill and the
   // disabled action below it agree about whether a USEFUL wallet is connected.
   // Before this, a hybrid account with the wrong wallet connected rendered a
   // normal connected pill up here while the action area said to connect the
   // owner wallet — the two surfaces silently disagreed.
-  const operationGate = useSafeOperationGate({
-    safeAddress: activeSafeAddress,
-    chainId: activeSafe?.chain_id,
+  const operationGate = useAccountOperationGate({
+    accountAddress: activeAccountAddress,
+    chainId: activeAccount?.chain_id,
   })
   const passkeySigner = activeSigner?.type === 'passkey' ? activeSigner : null
   // #1079: a Hybrid DeleGator account whose passkey is on this device gets the
@@ -648,17 +648,17 @@ export default function WalletButton() {
   // "Connect wallet" for a passkey that had just signed a budget.
   const delegatorSigner = activeSigner?.type === 'delegator_passkey' ? activeSigner : null
   const passkeyUnavailableOnDevice = useMemo(() => {
-    const safeAddress = activeSafe?.safe_address.toLowerCase()
-    if (!safeAddress || activeSafe?.chain_id === undefined || passkeySigner) {
+    const accountAddress = activeAccount?.safe_address.toLowerCase()
+    if (!accountAddress || activeAccount?.chain_id === undefined || passkeySigner) {
       return false
     }
 
     return passkeys.some(
       (passkey) =>
-        passkey.chain_id === activeSafe.chain_id &&
-        passkey.safe_address?.toLowerCase() === safeAddress,
+        passkey.chain_id === activeAccount.chain_id &&
+        passkey.safe_address?.toLowerCase() === accountAddress,
     )
-  }, [activeSafe?.chain_id, activeSafe?.safe_address, passkeySigner, passkeys])
+  }, [activeAccount?.chain_id, activeAccount?.safe_address, passkeySigner, passkeys])
 
   // "Switch wallet" flow: disconnect, then open the connect modal once
   // wagmi has committed isConnected=false. Driven from the parent so the
@@ -722,7 +722,7 @@ export default function WalletButton() {
           )
         }
 
-        const safeChainName = getSafeChainName(activeSafe?.chain_id)
+        const safeChainName = getSafeChainName(activeAccount?.chain_id)
         const openWalletConnect = () => {
           if (openConnectModalHook) {
             openConnectModalHook()

@@ -1,13 +1,13 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useSafeFunding } from '@/hooks/useSafeFunding'
-import type { SafeFunding } from '@/hooks/useSafeFunding'
+import { useAccountFunding } from '@/hooks/useAccountFunding'
+import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
- * `useSafeFunding` (#2534) — one read of the funding-facts endpoint, the same
+ * `useAccountFunding` (#2534) — one read of the funding-facts endpoint, the same
  * object `haven wallets funding` prints. What is pinned here:
  *
- * 1. It GETs `/user/safes/:safeId/funding` and stores the response.
+ * 1. It GETs `/user/accounts/:accountId/funding` and stores the response.
  * 2. A failed read is surfaced, not thrown — the onboarding card must keep
  *    its general copy when this GET fails, exactly as the balance read
  *    failing keeps the hero usable.
@@ -26,7 +26,7 @@ vi.mock('@/lib/api', () => ({
 import { api } from '@/lib/api'
 const mockGet = vi.mocked(api.get)
 
-const FUNDING: SafeFunding = {
+const FUNDING: AccountFunding = {
   account_address: '0x1111111111111111111111111111111111111111',
   chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },
   tokens: [
@@ -40,32 +40,32 @@ beforeEach(() => {
   mockGet.mockReset()
 })
 
-describe('useSafeFunding (#2534)', () => {
+describe('useAccountFunding (#2534)', () => {
   it('reads the funding endpoint for the safe it is given', async () => {
     mockGet.mockResolvedValue(FUNDING)
-    const { result } = renderHook(() => useSafeFunding('safe-1'))
+    const { result } = renderHook(() => useAccountFunding('safe-1'))
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(mockGet).toHaveBeenCalledWith('/user/safes/safe-1/funding')
+    expect(mockGet).toHaveBeenCalledWith('/user/accounts/safe-1/funding')
     expect(result.current.funding).toEqual(FUNDING)
     expect(result.current.error).toBeNull()
   })
 
   it('surfaces a failed read instead of throwing', async () => {
     mockGet.mockRejectedValue(new Error('boom'))
-    const { result } = renderHook(() => useSafeFunding('safe-1'))
+    const { result } = renderHook(() => useAccountFunding('safe-1'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.funding).toBeNull()
     expect(result.current.error).toBe('boom')
   })
 
   it('makes no request without a safe id', () => {
-    renderHook(() => useSafeFunding(undefined))
+    renderHook(() => useAccountFunding(undefined))
     expect(mockGet).not.toHaveBeenCalled()
   })
 
   it('refetch silently re-reads without flashing the loading flag', async () => {
     mockGet.mockResolvedValue(FUNDING)
-    const { result } = renderHook(() => useSafeFunding('safe-1'))
+    const { result } = renderHook(() => useAccountFunding('safe-1'))
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     mockGet.mockResolvedValue({ ...FUNDING, funded: true })

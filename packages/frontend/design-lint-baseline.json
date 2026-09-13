@@ -1,5 +1,5 @@
 {
-  "src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
+  "src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx": {
     "white-or-black-class": 2
   },
   "src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx": {

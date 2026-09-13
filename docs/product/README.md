@@ -89,7 +89,7 @@ High-level voice rules:
 ## 3. Information Architecture
 
 - Collection routes are plural: `/accounts`, `/agents`, `/contacts`, `/transactions`.
-- Detail routes use an id: `/accounts/[safeId]`, `/agents/[agentId]`.
+- Detail routes use an id: `/accounts/[accountId]`, `/agents/[agentId]`.
 - Legacy singular collection routes should redirect to the plural route.
 - Navigation items are stable nouns. Actions such as Send, Receive, Add funds, and Approve live inside the relevant screen.
 - Authenticated pages use the shared shell: sidebar navigation, TopBar breadcrumbs/back links on detail routes, and a PageHeader in the page body.

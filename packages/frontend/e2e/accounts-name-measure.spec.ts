@@ -336,12 +336,13 @@ function overlapOf(a: Rect, b: Rect): { x: number; y: number } {
  * handler first. Nothing in the shared fixture is edited, so no other spec and
  * no capture scenario moves.
  */
-async function serveAccounts(page: Page, safes: unknown[]) {
+async function serveAccounts(page: Page, accounts: unknown[]) {
   await page.route('**/auth/me', async (route) => {
     await route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ...testUser, safes }),
+      // Both envelope keys: AuthContext reads `accounts`; `safes` remains the
+      // deprecated twin on the response until #2914 retires it.
+      body: JSON.stringify({ ...testUser, accounts, safes: accounts }),
     })
   })
 }
@@ -916,7 +917,7 @@ test('/accounts: the single-account case is unchanged — no badges, name in ful
  *   - both badges are gated on `safes.length > 1`, so the word `default`
  *     renders NOWHERE on the page;
  *   - `/accounts/<id>` gates its own "Set as default" on
- *     `!safe.is_default && (user?.safes?.length ?? 0) > 1`, so the detail page
+ *     `!safe.is_default && (user?.accounts?.length ?? 0) > 1`, so the detail page
  *     deliberately hides the action in this exact state;
  *   - the card's star was gated on `!safe.is_default` ALONE, so it rendered
  *     anyway — a permanently visible, unlabelled control for an action that

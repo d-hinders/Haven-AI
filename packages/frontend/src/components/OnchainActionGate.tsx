@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import type { SafeOperationGate } from '@/hooks/useSafeOperationGate'
+import type { AccountOperationGate } from '@/hooks/useAccountOperationGate'
 import NetworkGate from './NetworkGate'
 import PasskeyOtherDeviceNotice from './PasskeyOtherDeviceNotice'
 import { Info } from 'lucide-react'
@@ -10,7 +10,7 @@ import { truncateAddress } from '@/components/haven'
 
 interface OnchainActionGateProps {
   requiredChainId: number
-  operationGate: SafeOperationGate
+  operationGate: AccountOperationGate
   children: (state: { disabled: boolean }) => ReactNode
   noSignerMessage: string
   className?: string
@@ -19,17 +19,17 @@ interface OnchainActionGateProps {
 }
 
 interface OnchainActionNoticeProps {
-  operationGate: SafeOperationGate
+  operationGate: AccountOperationGate
   noSignerMessage: string
   className?: string
 }
 
-export function isOnchainActionBlocked(operationGate: SafeOperationGate): boolean {
+export function isOnchainActionBlocked(operationGate: AccountOperationGate): boolean {
   return operationGate.kind !== 'ready'
 }
 
 export function getOnchainActionBlockMessage(
-  operationGate: SafeOperationGate,
+  operationGate: AccountOperationGate,
   noSignerMessage: string,
 ): string | null {
   if (operationGate.kind === 'no_signer') return noSignerMessage

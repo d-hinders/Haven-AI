@@ -16,7 +16,7 @@ import {
   resolveRouteAuthPartitions,
   signedOutRoutesFor,
 } from '../../scripts/screenshot.mjs'
-import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
+import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_ACCOUNT_STORAGE_KEY } from '../lib/auth-storage'
 
 import {
   isMcpToolCallActivityItem,
@@ -53,12 +53,12 @@ type StagedScenarioShape = ScenarioShape & {
   stage: (next: string) => void
   stages: Record<string, Record<string, unknown> | null>
 }
-/** Kept in step with FIXTURE_SAFE in screenshot.mjs. */
-const FIXTURE_SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
+/** Kept in step with FIXTURE_ACCOUNT in screenshot.mjs. */
+const FIXTURE_ACCOUNT_ADDRESS = '0x1111111111111111111111111111111111111111'
 /** Kept in step with the scenario's own constant in screenshot.mjs. */
 const SETUP_ID = 'setup-screenshot'
-/** Likewise FIXTURE_SAFE.id — the legacy scenario must reuse the same account. */
-const FIXTURE_SAFE_ID = 'safe-fixture'
+/** Likewise FIXTURE_ACCOUNT.id — the legacy scenario must reuse the same account. */
+const FIXTURE_ACCOUNT_ID = 'safe-fixture'
 
 describe('screenshot populated fixture (#896 follow-up)', () => {
   it('serves the populated shapes the hooks actually read', () => {
@@ -675,7 +675,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     // capture logged-out screenshots as PR evidence.
     expect(SEED_STORAGE_KEYS).toEqual({
       token: AUTH_TOKEN_STORAGE_KEY,
-      activeSafe: ACTIVE_SAFE_STORAGE_KEY,
+      activeAccount: ACTIVE_ACCOUNT_STORAGE_KEY,
     })
   })
 
@@ -693,7 +693,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     afterEach(() => backupRecovery.stage('healthy'))
 
     const signersOf = (scenario: ScenarioShape) =>
-      scenario.api(`/accounts/hybrid/${FIXTURE_SAFE_ADDRESS}/signers`, 'GET')
+      scenario.api(`/accounts/hybrid/${FIXTURE_ACCOUNT_ADDRESS}/signers`, 'GET')
 
     it('overrides only the account signer set needed to reach the removal confirmation (#1199)', () => {
       const signers = signerRemoval.api('/accounts/hybrid/0x111/signers', 'GET')
@@ -942,19 +942,21 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // filename, which is exactly the confidently-wrong-evidence shape #1800
       // exists to prevent.
       const unresolved = scenarioWithApi('add-funds-unresolved-chain')
-      const me = unresolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
+      const me = unresolved.api('/auth/me', 'GET') as { accounts: Record<string, unknown>[] }
       const list = unresolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
-      for (const { safes } of [me, list]) {
-        expect(safes).toHaveLength(1)
-        expect(safes[0]).not.toHaveProperty('chain_id')
+      // The scenario sets both envelope keys (`accounts` authoritative, the
+      // deprecated `safes` twin) to the same array — assert both halves.
+      for (const accounts of [me.accounts, list.safes]) {
+        expect(accounts).toHaveLength(1)
+        expect(accounts[0]).not.toHaveProperty('chain_id')
         // Still a real, addressable safe — the hazard is a MISSING chain beside
         // a PRESENT address, so an empty safe would prove something else.
-        expect(safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
-        expect(safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(accounts[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(accounts[0].id).toBe(FIXTURE_ACCOUNT_ID)
         // #2202: the rail is named, and it matches the resolved twin's — the
         // pair is evidence about `chain_id` only while `chain_id` is the one
         // field that differs between them.
-        expect(safes[0].account_type).toBe('safe')
+        expect(accounts[0].account_type).toBe('safe')
       }
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
     })
@@ -967,9 +969,9 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // renders its action buttons instead of the passkey-on-another-device
       // notice).
       const resolved = scenarioWithApi('add-funds')
-      const me = resolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
-      expect(me.safes).toHaveLength(1)
-      expect(me.safes[0].chain_id).toBe(84532)
+      const me = resolved.api('/auth/me', 'GET') as { accounts: Record<string, unknown>[] }
+      expect(me.accounts).toHaveLength(1)
+      expect(me.accounts[0].chain_id).toBe(84532)
       // #2202: the rail is now NAMED rather than expressed by absence. An
       // absent `account_type` is not a state the API can serve — the column is
       // `NOT NULL DEFAULT 'safe'` (`041_hybrid_accounts.ts:29`) — and `railOf`
@@ -977,7 +979,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // rendered differently (`railOf` is deleted since #2413). What this still pins is that the override is the SAME on
       // both halves of the pair, which is what makes `chain_id` the sole
       // variable.
-      expect(me.safes[0].account_type).toBe('safe')
+      expect(me.accounts[0].account_type).toBe('safe')
       // Both safe endpoints must agree — a fixture where one says 84532 and the
       // other says nothing is a trap for the next scenario that reads the other.
       const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
@@ -994,22 +996,27 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const unresolved = scenarioWithApi('receive-funds-unresolved-chain')
 
       for (const endpoint of ['/auth/me', '/user/safes']) {
-        const r = resolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
-        const u = unresolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
-        expect(r.safes).toHaveLength(1)
-        expect(u.safes).toHaveLength(1)
-        expect(r.safes[0].chain_id).toBe(84532)
-        expect(u.safes[0]).not.toHaveProperty('chain_id')
+        // /auth/me serves the `accounts` envelope; /user/safes keeps the
+        // `safes` envelope until #2914 retires it. The scenario sets both
+        // keys on /auth/me, so the pair asserts the same array either way.
+        const r = resolved.api(endpoint, 'GET') as Record<string, Record<string, unknown>[] | undefined>
+        const u = unresolved.api(endpoint, 'GET') as Record<string, Record<string, unknown>[] | undefined>
+        const rList = endpoint === '/auth/me' ? r.accounts : r.safes
+        const uList = endpoint === '/auth/me' ? u.accounts : u.safes
+        expect(rList).toHaveLength(1)
+        expect(uList).toHaveLength(1)
+        expect(rList?.[0].chain_id).toBe(84532)
+        expect(uList?.[0]).not.toHaveProperty('chain_id')
         // A MISSING chain beside a PRESENT address is the hazard; an empty safe
         // would prove something else entirely.
-        expect(u.safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
-        expect(u.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(uList?.[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(uList?.[0].id).toBe(FIXTURE_ACCOUNT_ID)
         // The rail override is the ONLY other difference from the shared
         // fixture, and both halves carry it, so `chain_id` is the sole variable.
         // #2202: named rather than absent — see the #1844 pair above. Both
         // halves carry it, which is the invariant this line is really for.
-        expect(r.safes[0].account_type).toBe('safe')
-        expect(u.safes[0].account_type).toBe('safe')
+        expect(rList?.[0].account_type).toBe('safe')
+        expect(uList?.[0].account_type).toBe('safe')
       }
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()

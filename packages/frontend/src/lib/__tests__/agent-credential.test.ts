@@ -8,7 +8,7 @@ const BASE_INPUT: HandoffInput = {
     name: 'Research Agent',
     description: 'Pays for x402 APIs',
     delegateAddress: '0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b',
-    safeAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
+    accountAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
     safeName: 'Treasury Safe',
     chainId: 100,
   },

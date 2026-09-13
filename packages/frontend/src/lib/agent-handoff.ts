@@ -29,7 +29,7 @@ export interface HandoffInput {
     name: string
     description?: string
     delegateAddress: string
-    safeAddress: string
+    accountAddress: string
     safeName?: string
     chainId: number
   }
@@ -98,8 +98,12 @@ export function buildDotenv(input: HandoffInput): string {
     lines.push(`# HAVEN_DELEGATE_KEY=<private key for ${agent.delegateAddress}>`)
   }
   lines.push(
-    `HAVEN_WALLET_ADDRESS=${agent.safeAddress}`,
-    `HAVEN_SAFE_ADDRESS=${agent.safeAddress}`,
+    `HAVEN_ACCOUNT_ADDRESS=${agent.accountAddress}`,
+    // #2906 window: the old names stay until #2914 removes them. Every
+    // consumed env name must be picked up by the rename census — add it to
+    // scripts/ci/safe-account-rename-census.mjs when introducing one.
+    `HAVEN_WALLET_ADDRESS=${agent.accountAddress}`,
+    `HAVEN_SAFE_ADDRESS=${agent.accountAddress}`,
     `HAVEN_CHAIN_ID=${agent.chainId}`,
   )
   if (apiBaseUrl) lines.push(`HAVEN_API_URL=${apiBaseUrl}`)
@@ -246,7 +250,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `## Identity`,
     ``,
     `- **Agent ID:** \`${agent.id}\``,
-    `- **Haven wallet:** \`${agent.safeAddress}\`${agent.safeName ? ` (${agent.safeName})` : ''}`,
+    `- **Haven wallet:** \`${agent.accountAddress}\`${agent.safeName ? ` (${agent.safeName})` : ''}`,
     `- **Credential address:** \`${agent.delegateAddress}\``,
     `- **Network:** ${chainName} (chain id \`${agent.chainId}\`)`,
     ``,

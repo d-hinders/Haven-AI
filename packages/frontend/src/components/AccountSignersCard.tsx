@@ -29,12 +29,12 @@ import { truncateAddress } from '@/components/haven'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 
 interface Props {
-  safeAddress: string
+  accountAddress: string
   chainId: number
   userEmail: string
 }
 
-export default function AccountSignersCard({ safeAddress, chainId, userEmail }: Props) {
+export default function AccountSignersCard({ accountAddress, chainId, userEmail }: Props) {
   const {
     signers,
     loadError,
@@ -46,7 +46,7 @@ export default function AccountSignersCard({ safeAddress, chainId, userEmail }: 
     removePasskey,
     removeOwner,
     reload,
-  } = useAccountSigners(safeAddress, chainId, userEmail)
+  } = useAccountSigners(accountAddress, chainId, userEmail)
   const { toast } = useToast()
   const [walletAddr, setWalletAddr] = useState('')
   const [showWallet, setShowWallet] = useState(false)

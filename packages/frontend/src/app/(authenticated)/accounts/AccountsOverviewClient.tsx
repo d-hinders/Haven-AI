@@ -3,8 +3,8 @@
 import { ArrowRight, CircleAlert, CreditCard, FlaskConical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import Link from 'next/link'
-import { useAuth, type UserSafe } from '@/context/AuthContext'
-import { useUserSafes } from '@/hooks/useUserSafes'
+import { useAuth, type SmartAccount } from '@/context/AuthContext'
+import { useAccounts } from '@/hooks/useAccounts'
 import { useAgents } from '@/hooks/useAgents'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
@@ -41,7 +41,7 @@ function formatFiat(value: number, currency: 'USD' | 'EUR'): string {
 }
 
 interface SafeCardProps {
-  safe: UserSafe
+  safe: SmartAccount
   isActive: boolean
   showActiveBadge: boolean
   agentCount: number
@@ -218,7 +218,7 @@ function SafeCard({
 
           AND IT REMOVES A REAL ASYMMETRY, which is the part that was not a
           matter of taste. The detail page gates the same action on
-          `!safe.is_default && (user?.safes?.length ?? 0) > 1`
+          `!safe.is_default && (user?.accounts?.length ?? 0) > 1`
           (`AccountDetailClient.tsx`), and BOTH of this card's badges carry the
           same `safes.length > 1` term (see the call site below). The star was
           gated on `!safe.is_default` alone, so it was the one place that would
@@ -371,8 +371,8 @@ function SafeCard({
 // ── Main Component ──────────────────────────────────────────────────
 
 export default function AccountsOverviewClient() {
-  const { activeSafe, setActiveSafe } = useAuth()
-  const { safes } = useUserSafes()
+  const { activeAccount, setActiveAccount } = useAuth()
+  const { accounts: safes } = useAccounts()
   const { agents } = useAgents()
   const { currency } = usePreferences()
 
@@ -432,14 +432,14 @@ export default function AccountsOverviewClient() {
             <SafeCard
               key={safe.id}
               safe={safe}
-              isActive={activeSafe?.id === safe.id}
-              showActiveBadge={activeSafe?.id === safe.id && safes.length > 1}
+              isActive={activeAccount?.id === safe.id}
+              showActiveBadge={activeAccount?.id === safe.id && safes.length > 1}
               agentCount={agentCountBySafe.get(safe.id) ?? 0}
               showDefaultBadge={!!safe.is_default && safes.length > 1}
               currency={currency}
               staggerIndex={index}
-              onClick={() => setActiveSafe(safe)}
-              onSetActive={() => setActiveSafe(safe)}
+              onClick={() => setActiveAccount(safe)}
+              onSetActive={() => setActiveAccount(safe)}
             />
           ))}
         </div>

@@ -2113,7 +2113,7 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">Switch wallet to {'{chain}'}</code>{' '}
               button (white background, brand focus ring) instead of the primary action. A wallet
               that is connected but is not the account&apos;s owner gets the second caption
-              (`wrong_wallet` in `useSafeOperationGate`, #2073): it names both addresses, because
+              (`wrong_wallet` in `useAccountOperationGate`, #2073): it names both addresses, because
               &quot;connect a wallet&quot; would send the user back to the wallet they already
               connected. The header wallet pill renders the matching &quot;Wrong wallet&quot;
               state in the same case.
@@ -2131,10 +2131,12 @@ export default function DesignSystemPage() {
             <div>
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Account, not Safe</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Users see <span className="font-medium">account</span>. The Safe contract abstraction stays
-                in code (<code className="text-xs">safeId</code>,{' '}
-                <code className="text-xs">UserSafe</code>, etc.). The word <em>Safe</em> should not
-                appear in any rendered string.
+                Users see <span className="font-medium">account</span>. The Safe contract
+                abstraction stays behind this vocabulary — the code now names it{' '}
+                <code className="text-xs">accountId</code>,{' '}
+                <code className="text-xs">SmartAccount</code> and friends (renamed
+                in #2913). The word{' '}
+                <em>Safe</em> should not appear in any rendered string.
               </p>
             </div>
             <div>

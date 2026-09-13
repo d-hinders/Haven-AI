@@ -2,16 +2,16 @@
 
 import { useState, useCallback } from 'react'
 import { api } from '@/lib/api'
-import { useAuth, type UserSafe } from '@/context/AuthContext'
+import { useAuth, type SmartAccount } from '@/context/AuthContext'
 
-export function useUserSafes() {
+export function useAccounts() {
   const { user, refreshUser } = useAuth()
   const [loading, setLoading] = useState(false)
 
-  const safes = user?.safes ?? []
+  const accounts = user?.accounts ?? []
 
-  // `addSafe` lived here — a POST to /user/safes, the Safe IMPORT route. It is
-  // removed rather than left dead: since #1984 (epic #1440) that route answers
+  // `addAccount` lived here — a POST to /user/safes, the Safe IMPORT route. It
+  // is removed rather than left dead: since #1984 (epic #1440) that route answers
   // 410, so the only thing this could still do is throw. Its one call site,
   // the Accounts page's AddSafeModal, went with it. The onboarding surface that
   // called the same route, `PasskeyEnrollFlow`, was deleted by #2261 — nothing
@@ -20,11 +20,11 @@ export function useUserSafes() {
   // Rename, remove and set-default all stay: they operate on EXISTING
   // accounts, which must keep working.
 
-  const renameSafe = useCallback(
-    async (safeId: string, name: string): Promise<UserSafe> => {
+  const renameAccount = useCallback(
+    async (accountId: string, name: string): Promise<SmartAccount> => {
       setLoading(true)
       try {
-        const result = await api.put<UserSafe>(`/user/safes/${safeId}`, { name })
+        const result = await api.put<SmartAccount>(`/user/accounts/${accountId}`, { name })
         await refreshUser()
         return result
       } finally {
@@ -34,11 +34,11 @@ export function useUserSafes() {
     [refreshUser],
   )
 
-  const removeSafe = useCallback(
-    async (safeId: string): Promise<void> => {
+  const removeAccount = useCallback(
+    async (accountId: string): Promise<void> => {
       setLoading(true)
       try {
-        await api.delete(`/user/safes/${safeId}`)
+        await api.delete(`/user/accounts/${accountId}`)
         await refreshUser()
       } finally {
         setLoading(false)
@@ -48,10 +48,10 @@ export function useUserSafes() {
   )
 
   const setDefault = useCallback(
-    async (safeId: string): Promise<void> => {
+    async (accountId: string): Promise<void> => {
       setLoading(true)
       try {
-        await api.put(`/user/safes/${safeId}/default`, {})
+        await api.put(`/user/accounts/${accountId}/default`, {})
         await refreshUser()
       } finally {
         setLoading(false)
@@ -60,5 +60,5 @@ export function useUserSafes() {
     [refreshUser],
   )
 
-  return { safes, loading, renameSafe, removeSafe, setDefault }
+  return { accounts, loading, renameAccount, removeAccount, setDefault }
 }

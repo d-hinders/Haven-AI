@@ -56,7 +56,7 @@
   "packages/frontend/public/docs/security-model.md": {
     "still-readable": 2
   },
-  "packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
+  "packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx": {
     "both-rails": 1
   },
   "packages/frontend/src/app/(authenticated)/agents/page.tsx": {

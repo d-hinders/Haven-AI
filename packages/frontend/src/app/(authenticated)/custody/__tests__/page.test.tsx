@@ -29,7 +29,7 @@ const {
   mockUseDelegationCustodyProof: vi.fn(),
 }))
 
-vi.mock('@/hooks/useUserSafes', () => ({ useUserSafes: () => mockUseUserSafes() }))
+vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseUserSafes() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/useSafeDetails', () => ({ useSafeDetails: () => mockUseSafeDetails() }))
 vi.mock('@/hooks/useDelegationCustodyProof', () => ({
@@ -139,7 +139,7 @@ describe('"What Haven cannot do" after the rail collapse (#2413)', () => {
 
 describe('/custody — delegation rail (#2106)', () => {
   beforeEach(() => {
-    mockUseUserSafes.mockReturnValue({ safes: [safe('delegator_hybrid')], loading: false })
+    mockUseUserSafes.mockReturnValue({ accounts: [safe('delegator_hybrid')], loading: false })
   })
 
   it('does NOT render the AllowanceModule copy', () => {
@@ -199,7 +199,7 @@ describe('/custody — delegation rail (#2106)', () => {
  */
 describe('/custody — a failed delegation read is never "no budget" (#2106)', () => {
   beforeEach(() => {
-    mockUseUserSafes.mockReturnValue({ safes: [safe('delegator_hybrid')], loading: false })
+    mockUseUserSafes.mockReturnValue({ accounts: [safe('delegator_hybrid')], loading: false })
     mockUseDelegationCustodyProof.mockReturnValue({
       signers: null,
       signersLoading: false,
@@ -247,7 +247,7 @@ describe('/custody — an expired delegation is not live spend control (#2106)',
   }
 
   beforeEach(() => {
-    mockUseUserSafes.mockReturnValue({ safes: [safe('delegator_hybrid')], loading: false })
+    mockUseUserSafes.mockReturnValue({ accounts: [safe('delegator_hybrid')], loading: false })
     mockUseDelegationCustodyProof.mockReturnValue({
       signers: null,
       signersLoading: false,

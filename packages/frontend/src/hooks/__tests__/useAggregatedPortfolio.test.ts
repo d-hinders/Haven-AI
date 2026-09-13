@@ -26,11 +26,11 @@ const SECOND_SAFE_ADDRESS = '0x2222222222222222222222222222222222222222'
 const TOKEN_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
 function mockSafes(
-  safes: Array<{ id: string; safe_address: string; chain_id: number }>,
+  accounts: Array<{ id: string; safe_address: string; chain_id: number }>,
 ) {
   mockUseAuth.mockReturnValue({
     user: {
-      safes: safes.map((safe) => ({
+      accounts: accounts.map((safe) => ({
         ...safe,
         name: safe.id,
         is_default: false,

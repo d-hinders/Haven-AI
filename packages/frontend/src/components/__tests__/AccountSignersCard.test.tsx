@@ -10,7 +10,7 @@ vi.mock('@/components/ui/Toast', () => ({
 
 const AccountSignersCard = (await import('../AccountSignersCard')).default
 
-const PROPS = { safeAddress: '0x' + 'aa'.repeat(20), chainId: 84532, userEmail: 'x@y.z' }
+const PROPS = { accountAddress: '0x' + 'aa'.repeat(20), chainId: 84532, userEmail: 'x@y.z' }
 
 function base(overrides: Record<string, unknown> = {}) {
   return {

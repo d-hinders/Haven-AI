@@ -76,7 +76,7 @@ describe('Sidebar', () => {
       user: {
         name: 'Ada Lovelace',
         email: 'ada@example.com',
-        safes: [],
+        accounts: [],
       },
       logout: vi.fn(),
     })
@@ -339,7 +339,7 @@ describe('Sidebar', () => {
       user: {
         name: 'Ada Lovelace',
         email: 'ada@example.com',
-        safes: [],
+        accounts: [],
       },
       logout,
     })

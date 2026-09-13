@@ -27,7 +27,7 @@ export default function AgentPanel() {
   const removedAgentsPanelId = 'removed-agent-list'
   const panel = useAgentPanelState()
   const {
-    safeAddress,
+    accountAddress,
     chainId,
     agents,
     loading,
@@ -79,7 +79,7 @@ export default function AgentPanel() {
   }, [panel, resumeSetupId])
 
 
-  if (!safeAddress) {
+  if (!accountAddress) {
   
   return (
       <EmptyState
@@ -295,7 +295,7 @@ export default function AgentPanel() {
           {visibleAgents.length > 0 && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
-                const usesActiveSafe = panel.agentUsesActiveSafe(agent)
+                const usesActiveAccount = panel.agentUsesActiveAccount(agent)
                 const agentChainId = agent.safe_chain_id ?? chainId
 
                 return (
@@ -310,7 +310,7 @@ export default function AgentPanel() {
                     onArchive={panel.handleArchive}
                     onRestore={panel.handleRestore}
                     busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                    canUseWalletActions={usesActiveSafe}
+                    canUseWalletActions={usesActiveAccount}
                     chainId={agentChainId}
                   />
                 )
@@ -358,7 +358,7 @@ export default function AgentPanel() {
                 onArchive={panel.handleArchive}
                 onRestore={panel.handleRestore}
                 busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                canUseWalletActions={panel.agentUsesActiveSafe(agent)}
+                canUseWalletActions={panel.agentUsesActiveAccount(agent)}
                 chainId={agent.safe_chain_id ?? chainId}
               />
             ))}
@@ -371,14 +371,14 @@ export default function AgentPanel() {
         open={panel.connectAgentOpen || Boolean(activeResumeSetupId)}
         onClose={closeConnectModal}
         starterAllowance={panel.firstAgentSetup}
-        safeAddress={safeAddress}
-        safeId={panel.activeSafeId}
+        accountAddress={accountAddress}
+        accountId={panel.activeAccountId}
         onSetupUpdated={panel.handleSetupUpdated}
         resumeSetupId={activeResumeSetupId}
       />
 
       {/* Edit agent modal */}
-      {panel.editAgent && panel.agentUsesActiveSafe(panel.editAgent) && (
+      {panel.editAgent && panel.agentUsesActiveAccount(panel.editAgent) && (
         <EditAgentModal
           open={!!panel.editAgent}
           onClose={() => panel.setEditAgent(null)}

@@ -26,7 +26,7 @@ import type { StatusTone } from '@/components/ui/StatusBadge'
  */
 type TransactionInitiator = 'agent' | 'human' | 'unknown'
 
-/** Per-Safe page item (`GET /transactions/{safeAddress}`) — no Safe scope. */
+/** Per-account page item (`GET /transactions/{accountAddress}`) — no account scope. */
 export type Transaction = ApiSchema<'TransactionBase'> & {
   initiatedBy?: TransactionInitiator
 }
@@ -84,7 +84,7 @@ export type TransactionsFeedResponse = Omit<ApiSchema<'TransactionsResponse'>, '
 
 /** Client-side only — not a wire shape. */
 export interface TransactionFilterState {
-  safeId?: string
+  accountId?: string
   agentId?: string
   tokenKey?: string
   /**
@@ -95,7 +95,12 @@ export interface TransactionFilterState {
 }
 
 export type TransactionFilterOptionsResponse = ApiSchema<'TransactionFilterOptionsResponse'>
-export type TransactionFilterSafeOption = TransactionFilterOptionsResponse['safes'][number]
+/**
+ * The filter-options wire envelope key stays `safes` until #2914 retires it —
+ * #2907 twinned the transaction query param (`?accountId=`) but not this
+ * envelope. Only the frontend alias carries the account vocabulary.
+ */
+export type TransactionFilterAccountOption = TransactionFilterOptionsResponse['safes'][number]
 export type TransactionFilterAgentOption = TransactionFilterOptionsResponse['agents'][number]
 export type TransactionFilterTokenOption = TransactionFilterOptionsResponse['tokens'][number]
 

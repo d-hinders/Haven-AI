@@ -107,7 +107,7 @@ export default function OnboardingClient() {
   useEffect(() => {
     if (loading || !user) return
     if (creationStartedRef.current || phase === 'success') return
-    if (user.safes?.length > 0 || user.safe_address) {
+    if (user.accounts?.length > 0 || user.safe_address) {
       router.replace(nextPath ?? '/dashboard')
     }
   }, [loading, phase, router, user, nextPath])

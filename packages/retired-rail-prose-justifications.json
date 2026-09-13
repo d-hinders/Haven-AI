@@ -113,7 +113,7 @@
       "note": "Generated copy (packages/frontend/scripts/serve-docs.mjs, from next.config.ts) of docs/security/delegation-rail-security-model.md, which lives under docs/ outside this ratchet's packages/ scan — the generated copy is the only place its phrases are counted. The claim is the #2669-scoped one and stays true after #2847: legacy Safe rows are readable to a direct database query, never a dashboard surface."
     }
   },
-  "packages/frontend/src/app/(authenticated)/accounts/[safeId]/AccountDetailClient.tsx": {
+  "packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx": {
     "both-rails": {
       "category": "past-tense-history",
       "note": "Past-tense narration: '#1083 gave Send to BOTH rails. #1989 (epic #1440) took it' — history, not a present claim."

@@ -17,12 +17,12 @@ import {
   getOnchainActionBlockMessage,
   isOnchainActionBlocked,
 } from '@/components/OnchainActionGate'
-import type { SafeOperationGate } from '@/hooks/useSafeOperationGate'
+import type { AccountOperationGate } from '@/hooks/useAccountOperationGate'
 
 const CONNECTED = '0x9999999999999999999999999999999999999999' as Address
 const OWNER = '0xEEEEeeeeEEeeeEeEeEeEEEeeEEEeeeeEeEeeeeEe' as Address
 
-const WRONG_WALLET: SafeOperationGate = {
+const WRONG_WALLET: AccountOperationGate = {
   kind: 'wrong_wallet',
   connectedAddress: CONNECTED,
   ownerAddress: OWNER,
@@ -64,7 +64,7 @@ describe('OnchainActionGate rendering by gate kind', () => {
     // rendering a silent disabled button. Kinds are enumerated here because
     // TypeScript unions do not exist at runtime; add the new kind's
     // representative value when extending the union.
-    const blockedStates: SafeOperationGate[] = [
+    const blockedStates: AccountOperationGate[] = [
       { kind: 'no_signer' },
       { kind: 'passkey_on_other_device' },
       WRONG_WALLET,

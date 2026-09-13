@@ -26,6 +26,8 @@ function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransacti
     tokenAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     tokenSymbol: 'USDC',
     chainId: 8453,
+    accountId: 'safe-id',
+    accountAddress: '0x135a9215604711AC70d970e12Caa812c53537EF4',
     safeId: 'safe-id',
     safeAddress: '0x135a9215604711AC70d970e12Caa812c53537EF4',
     safeName: 'Main Haven wallet',

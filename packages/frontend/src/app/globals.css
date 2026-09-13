@@ -287,10 +287,17 @@
  *   - Chain identity colours follow their pills: lighter fills, translucent
  *     borders, foregrounds bright enough on the new pill grounds.
  *   - Content keeps its own colours: `--v2-surface-code` stays near-black
- *     (code blocks are not inverted), and the shadows, gradients and
- *     `--v2-safe-*` lengths are deliberately NOT redeclared here — shadows
- *     and gradients are slice 3's sweep (#2929), the insets are env() lengths
- *     with no colour to swap.
+ *     (code blocks are not inverted). Shadows ARE redeclared per theme since
+ *     #2929 — elevation is a hairline + low-alpha depth cue on the dark
+ *     ground, not the light theme's grey wash — while the `--v2-safe-*`
+ *     lengths are not (env() lengths, no colour to swap). Brand gradients
+ *     (`--v2-brand-gradient`, `--v2-bar-fill-*`) stay brand-filled in both
+ *     themes: they are saturated fills, readable on either ground.
+ *     `--v2-surface-hero` is the exception — it is GROUND-classified (a wash
+ *     the ink sits ON), so #2929 redeclares it below; the parity test cannot
+ *     see gradients (composite values are not colour-valued), so the class
+ *     split is stated here, in prose, because a token in the wrong class is a
+ *     white card with white ink and no test that can notice.
  *
  * `color-scheme` rides in every block so native form controls, scrollbars
  * and the date picker match the active palette.
@@ -346,6 +353,23 @@
     --v2-danger-soft-rgb: 58 21 18;
     --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
 
+    /*
+     * Elevation redeclared for the dark ground (#2929). Dark UIs elevate by
+     * SURFACE (each step lighter than the one below, above), so a light-theme
+     * shadow reads as grey smear on `#12151c` and the elevation job moves to
+     * the border: every tier here leads with a translucent WHITE hairline (the
+     * border the light theme gets for free against `--v2-bg`), and the ambient
+     * shadow behind it drops to a low-alpha depth cue rather than disappearing.
+     * Byte-identical in both dark blocks — the theme-tokens unit test holds
+     * the two declaration sets equal.
+     */
+    --v2-shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.04);
+    --v2-shadow-card-raised: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.40);
+    --v2-shadow-button: 0 1px 1px rgba(0, 0, 0, 0.30);
+    --v2-shadow-modal: 0 16px 40px rgba(0, 0, 0, 0.50);
+    --v2-shadow-popover: 0 12px 28px rgba(0, 0, 0, 0.45);
+    --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
     --v2-chain-base: #3395ff;
     --v2-chain-gnosis: #3e9b8f;
     --v2-chain-testnet: #fbbf24;
@@ -360,6 +384,19 @@
     --v2-surface-hover: #232837;
     --v2-surface-anchor: #1a1f29;
     --v2-border-anchor: rgba(165, 172, 255, 0.16);
+
+    /*
+     * The hero wash is GROUND-classified (#2929): the balance figure and its
+     * caption sit ON it in theme ink, so the light theme's near-white lavender
+     * would put `--v2-ink` (#f0f3f8) on a near-white card — invisible text no
+     * contrast test can catch, because the parity test only scans colour-valued
+     * tokens and this value is a gradient. The dark form is the same three-stop
+     * horizontal wash a degree deeper in the brand hue, sitting between
+     * `--v2-bg` and `--v2-surface` in elevation, so the hero still reads as
+     * lifted from the page without becoming a light island. Byte-identical in
+     * both dark blocks.
+     */
+    --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
 
     --v2-table-header-bg: #191d26;
     --v2-table-header-ink: #97a3b6;
@@ -418,6 +455,23 @@
   --v2-danger-soft-rgb: 58 21 18;
   --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
 
+  /*
+   * Elevation redeclared for the dark ground (#2929). Dark UIs elevate by
+   * SURFACE (each step lighter than the one below, above), so a light-theme
+   * shadow reads as grey smear on `#12151c` and the elevation job moves to
+   * the border: every tier here leads with a translucent WHITE hairline (the
+   * border the light theme gets for free against `--v2-bg`), and the ambient
+   * shadow behind it drops to a low-alpha depth cue rather than disappearing.
+   * Byte-identical in both dark blocks — the theme-tokens unit test holds
+   * the two declaration sets equal.
+   */
+  --v2-shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --v2-shadow-card-raised: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.40);
+  --v2-shadow-button: 0 1px 1px rgba(0, 0, 0, 0.30);
+  --v2-shadow-modal: 0 16px 40px rgba(0, 0, 0, 0.50);
+  --v2-shadow-popover: 0 12px 28px rgba(0, 0, 0, 0.45);
+  --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
   --v2-chain-base: #3395ff;
   --v2-chain-gnosis: #3e9b8f;
   --v2-chain-testnet: #fbbf24;
@@ -432,6 +486,19 @@
   --v2-surface-hover: #232837;
   --v2-surface-anchor: #1a1f29;
   --v2-border-anchor: rgba(165, 172, 255, 0.16);
+
+  /*
+   * The hero wash is GROUND-classified (#2929): the balance figure and its
+   * caption sit ON it in theme ink, so the light theme's near-white lavender
+   * would put `--v2-ink` (#f0f3f8) on a near-white card — invisible text no
+   * contrast test can catch, because the parity test only scans colour-valued
+   * tokens and this value is a gradient. The dark form is the same three-stop
+   * horizontal wash a degree deeper in the brand hue, sitting between
+   * `--v2-bg` and `--v2-surface` in elevation, so the hero still reads as
+   * lifted from the page without becoming a light island. Byte-identical in
+   * both dark blocks.
+   */
+  --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
 
   --v2-table-header-bg: #191d26;
   --v2-table-header-ink: #97a3b6;
@@ -450,6 +517,46 @@
 [data-theme-switching] *::before,
 [data-theme-switching] *::after {
   transition: none !important;
+}
+
+/*
+ * Never-invert content surfaces (#2929).
+ *
+ * Some content is authored against WHITE and must stay that way in both
+ * themes: QR codes (a scanner reads the module contrast, not the theme),
+ * receipt images, and any raster that arrives with its own light background.
+ * Their CONTAINER opts the subtree out of the dark palette with
+ * `color-scheme: light`, so a native control or fallback paint inside it
+ * (a broken-image icon, a scroll corner, an input autofill) does not flip.
+ * The light paint is explicit rather than inherited-from-the-OS: a fixed
+ * white ground and a fixed hairline, so the box is identical in light and
+ * dark by construction — `var(--v2-bg)` would flip to the dark ground
+ * exactly where this class exists to keep the content light.
+ */
+.v2-light-surface {
+  color-scheme: light;
+  background: #ffffff;
+  border-color: #e6ebf1;
+}
+
+/*
+ * The avatar chrome (#2929).
+ *
+ * `WalletButton`'s address avatar paints a FIXED palette hash: nine hard-coded
+ * gradient pairs plus hard-coded white stripes (getAvatarStyle), identical in
+ * both themes — the palette is identity for the address, so it must not shift
+ * when the app does. The rim is therefore also fixed, and a themed token is
+ * the wrong instrument for it: `--v2-ink-on-brand` INVERTS (#ffffff light /
+ * #1a1f36 dark), so a token-routed rim would paint a dark hairline down on the
+ * light half of every avatar and vanish on the dark one. It reads as a class
+ * of its own: same tokens, same constants, different themes — not this one.
+ * The inset ring is the light catch on the gradient; the hairline keeps the
+ * disc readable on both grounds.
+ */
+.v2-avatar-chrome {
+  color-scheme: light;
+  border-color: rgba(255, 255, 255, 0.70);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
 .v2-text-display {

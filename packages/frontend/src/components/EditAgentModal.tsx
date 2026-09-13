@@ -93,7 +93,7 @@ export default function EditAgentModal({
         role="dialog"
         aria-modal="true"
         aria-label="Edit agent"
-        className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
       >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>

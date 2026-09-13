@@ -67,7 +67,7 @@ export default function DashboardOnboardingGuide({
         <div className="flex items-center gap-3">
           <span
             aria-hidden="true"
-            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-white"
+            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
           >
             <CheckIcon />
           </span>
@@ -155,7 +155,7 @@ export default function DashboardOnboardingGuide({
   }
 
   return (
-    <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-white p-5 shadow-card">
+    <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">
@@ -234,7 +234,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-white"
+        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
       >
         <CheckIcon />
       </span>
@@ -244,7 +244,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-semibold text-white v2-tabular"
+        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-semibold text-[var(--v2-ink-on-brand)] v2-tabular"
       >
         {number}
       </span>

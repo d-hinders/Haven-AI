@@ -218,6 +218,11 @@ import {
 // The EXPECTED installed-shell identity is transpiled from the app's own
 // source (#2735), never restated here — see the docblock section above.
 import { loadInstalledAppExpectations } from './installed-app-source.mjs'
+// The theme seed key is the APP'S OWN constant, not a restated literal — the
+// same contract the auth keys below hold with `src/lib/auth-storage.ts`:
+// a rename in ThemeContext's storage must fail a test, not silently capture
+// light-mode PNGs labelled dark (#2929).
+import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap.ts'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
 const PUBLIC_DIR = path.join(ROOT, 'public')
@@ -243,6 +248,63 @@ const DEVICE_SCALE_FACTOR = 2
 export const SEED_STORAGE_KEYS = {
   token: 'haven_token',
   activeAccount: 'haven_active_account_id',
+}
+
+// ── Color scheme of a run (#2929) ────────────────────────────────────────────
+// `--color-scheme light|dark|both` picks the palette the captures render in.
+// `both` produces PAIRED PNGs (`<route>-<vp>-light.png` / `<route>-<vp>-dark.png`)
+// so the design reviewer can compare the two schemes side by side.
+//
+// Two mechanisms, and the issue is explicit about which one carries
+// determinism: the storage seed (`haven.theme`) is what makes the render
+// deterministic — the app's ThemeContext reads the stored choice and stamps
+// `data-theme`, which pins the token block REGARDLESS of the OS setting —
+// while Playwright's `colorScheme` sets `prefers-color-scheme` so the media-
+// query path and any OS-sensitive rendering agree with the seed. The seed is
+// read through the app's own `THEME_STORAGE_KEY` constant (see the import
+// above), so a storage-key rename fails the parity test instead of silently
+// labelling light PNGs dark.
+
+/** The schemes a run may capture, and the exact flag values that name them. */
+export const COLOR_SCHEMES = ['light', 'dark'] // pair order: name in filenames
+const COLOR_SCHEME_FLAG = '--color-scheme='
+
+/**
+ * Parse the run's requested color scheme.
+ *
+ * Pure and exported for the fixture test. Absent flag → `['light']`, which is
+ * byte-identical to every run this harness ever produced (no scheme suffix on
+ * filenames, light palette) — the flag is purely additive.
+ *
+ * @param {string[]} [args] the raw CLI args
+ * @param {Record<string, string | undefined>} [env] the environment to read the
+ *   fallback from — injectable so the parity test can drive it without touching
+ *   the real `process.env`
+ * @returns {('light' | 'dark')[]} the schemes this run captures
+ */
+export function resolveColorScheme(args = [], env = process.env) {
+  const raw = args.find((a) => a.startsWith(COLOR_SCHEME_FLAG))?.slice(COLOR_SCHEME_FLAG.length)
+  const value = (raw ?? env.SCREENSHOT_COLOR_SCHEME ?? '').trim().toLowerCase()
+  if (value === '') return ['light']
+  if (value === 'both') return COLOR_SCHEMES
+  if (COLOR_SCHEMES.includes(value)) return [value]
+  throw new Error(
+    `Invalid ${COLOR_SCHEME_FLAG.slice(0, -1)} value "${raw}" — expected ${COLOR_SCHEMES.join('|both')}.`,
+  )
+}
+
+/**
+ * The storage seed for one scheme: the app's own theme key, so ThemeContext
+ * hydrates onto the exact palette the run asked for. Pure and exported for the
+ * parity test. `null` seed = stamp nothing — the app falls to its light
+ * default, which is what the light run captures.
+ *
+ * @param {'light' | 'dark'} scheme
+ * @returns {Record<string, string> | null}
+ */
+export function themeSeedFor(scheme) {
+  if (scheme === 'dark') return { [THEME_STORAGE_KEY]: 'dark' }
+  return null
 }
 
 // ── Installed-shell metadata check (#2735) ───────────────────────────────────
@@ -467,22 +529,25 @@ export function resolveRouteAuthPartitions(routes, signedOutRoutes) {
  * /dashboard identity check below. A mutual pair is one record, anchored at
  * the first capture in run order. Exported and pure for the fixture test.
  */
-export function findSignedOutDuplicates(signedOutFiles, allFiles) {
+export function findSignedOutDuplicates(signedOutFiles, allFiles, partitionKey) {
   const pool = allFiles.filter((f) => f.route !== '/design-system')
   // A mutual pair (X matches Y and Y matches X) is ONE duplicate, not two —
   // the same bytes in the same viewport are one fact. Canonical pair key
   // `viewport|sorted-routes`, anchored at whichever capture comes first in
   // run order; the advisory is direction-agnostic (it names the twin, not a
   // cause), so the anchor choice carries no claim about which route moved.
+  // `partitionKey` (#2929) scopes comparison WITHIN one color scheme: a `both`
+  // run never reports a dark capture as its light twin's duplicate.
+  const key = (f) => (partitionKey ? `${partitionKey(f)}|${f.viewport}` : f.viewport)
   const seenPairs = new Set()
   return signedOutFiles
     .map((f) => {
-      const twin = pool.find((other) => other.viewport === f.viewport && other.route !== f.route && other.sha256 === f.sha256)
+      const twin = pool.find((other) => key(other) === key(f) && other.route !== f.route && other.sha256 === f.sha256)
       if (!twin) return null
-      const pairKey = `${f.viewport}|${[f.route, twin.route].sort().join('=')}`
+      const pairKey = `${key(f)}|${[f.route, twin.route].sort().join('=')}`
       if (seenPairs.has(pairKey)) return null
       seenPairs.add(pairKey)
-      return { route: f.route, viewport: f.viewport, file: f.file, sha256: f.sha256, matches: twin.route }
+      return { route: f.route, viewport: f.viewport, scheme: f.scheme, file: f.file, sha256: f.sha256, matches: twin.route }
     })
     .filter(Boolean)
 }
@@ -507,13 +572,23 @@ export function findSignedOutDuplicates(signedOutFiles, allFiles) {
  *
  * Exported and pure for the fixture test.
  */
-export function findRedirectCaptures(files, dashboardByViewport) {
+export function findRedirectCaptures(files, dashboardByViewport, partitionKey) {
+  // `partitionKey` (#2929): the lookup key gains the capture's color scheme on
+  // a `both` run, so a dark capture is only ever judged against the dark
+  // dashboard — cross-palette bytes are never identical and never comparable.
+  const lookupKey = (f) => (partitionKey ? `${partitionKey(f)}|${f.viewport}` : f.viewport)
   return files
     .filter((f) => f.route !== '/dashboard')
-    .filter((f) => dashboardByViewport.has(f.viewport) && dashboardByViewport.get(f.viewport) === f.sha256)
+    .filter((f) => {
+      const k = lookupKey(f)
+      return dashboardByViewport.has(k) && dashboardByViewport.get(k) === f.sha256
+    })
     .map((f) => ({
       route: f.route,
       viewport: f.viewport,
+      // Which palette convicted it (#2929): on a `both` run the manifest
+      // reader must be able to tell which side of the pair redirected.
+      scheme: f.scheme,
       file: f.file,
       sha256: f.sha256,
       text:
@@ -544,7 +619,7 @@ export function findRedirectCaptures(files, dashboardByViewport) {
  *                          floor; the only tell is that it is short
  *   'unknown'              anything else, never silently folded into the above
  */
-export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
+export function describeDeletedCapture(err, { route, viewport, scheme = null, file, written = true }) {
   const message = String(err?.message ?? err)
   const cause =
     err?.shellCause ??
@@ -557,6 +632,7 @@ export function describeDeletedCapture(err, { route, viewport, file, written = t
   return {
     route,
     viewport,
+    scheme: scheme ?? null,
     file,
     // "Deleted" and "never written" are different facts, and a change whose
     // entire subject is precise causal reporting should not blur them: a shell
@@ -589,11 +665,23 @@ export function describeDeletedCapture(err, { route, viewport, file, written = t
  * `deletedCaptures`, which is why this guard is scoped to the wrong-width one.
  *
  * Pure and exported so it can be tested without booting a browser.
+ *
+ * @param {string[]} files the capture file names
+ * @param {{name: string}[]} viewports the widths the run resolved
+ * @param {string[]} [schemes] the schemes this run captured (#2929)
  */
-export function findViewportMismatches(files, viewports) {
+export function findViewportMismatches(files, viewports, schemes = ['light']) {
   const names = viewports.map((vp) => vp.name)
-  // `<slug>-<vp.name>.png`, and the taller re-shoot `<base>-<vp.name>-full.png`.
-  const suffixes = names.flatMap((name) => [`-${name}.png`, `-${name}-full.png`])
+  // `<slug>-<vp.name>.png` (light keeps the historical suffix-free name),
+  // `<slug>-<vp.name>-<scheme>.png` for every other scheme (#2929), and the
+  // taller re-shoot `<base>-<vp.name>[-<scheme>]-full.png`.
+  const schemeParts = schemes.map((s) => (s === 'light' ? '' : `-${s}`))
+  const suffixes = names.flatMap((name) =>
+    schemeParts.flatMap((schemeSuffix) => [
+      `-${name}${schemeSuffix}.png`,
+      `-${name}${schemeSuffix}-full.png`,
+    ]),
+  )
   return files
     .filter((file) => !suffixes.some((suffix) => file.endsWith(suffix)))
     .map((file) => ({ file, expected: names }))
@@ -1858,11 +1946,18 @@ export const STALE_BUSY_DECLARATIONS = []
  * with a failure instead (#1725); `delayedHttp` keeps it pending long enough
  * to capture a loading branch.
  */
-async function newFixtureContext(browser, vp, scenario, { signedOut = false } = {}) {
+async function newFixtureContext(browser, vp, scenario, { signedOut = false, colorScheme = 'light' } = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
     deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
+    // The OS-preference half of the scheme contract (#2929). The DETERMINISTIC
+    // half is the storage seed below — the app stamps `data-theme` from the
+    // stored choice, which pins the token block regardless of this setting —
+    // but `prefers-color-scheme` must agree with the seed so the media-query
+    // token path, native form controls and scrollbars all render the same
+    // palette the seed asked for.
+    colorScheme,
   })
 
   // Auth fixture: seed the token before any app code runs — UNLESS this
@@ -1890,11 +1985,15 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
   // a hook for stubbing component state, and a scenario that needs one should
   // be re-examined rather than served here.
   // Scenario data is limited to deterministic API and browser fixtures.
-  const seeded = scenario?.seed?.()
-  if (seeded) {
+  // The theme seed (#2929) rides the SAME seam — it seeds the app's own
+  // `haven.theme` key, so ThemeContext (not the harness) decides the palette,
+  // through the app's real read path.
+  const seeded = { ...(scenario?.seed?.() ?? {}), ...(themeSeedFor(colorScheme) ?? {}) }
+  const seededEntries = Object.entries(seeded)
+  if (seededEntries.length > 0) {
     await context.addInitScript((entries) => {
       for (const [key, value] of entries) window.localStorage.setItem(key, value)
-    }, Object.entries(seeded))
+    }, seededEntries)
   }
 
   // A CONNECTED wallet, through the real wagmi path (#2073). Same posture as
@@ -4450,6 +4549,12 @@ async function main() {
     process.env,
   )
 
+  // The palettes THIS run renders (#2929). Same fail-fast stance: a malformed
+  // `--color-scheme=` throws before anything is acquired. With no flag this is
+  // `['light']` — the scheme every historical run captured, with no filename
+  // suffix — so the flag is purely additive.
+  const colorSchemes = resolveColorScheme(ARGS, process.env)
+
   // Provenance, printed before anything is captured and stamped into the
   // manifest afterwards: a PNG on its own cannot say which branch it shows.
   // Resolved BEFORE retention runs, because the archived run's manifest records
@@ -4480,6 +4585,14 @@ async function main() {
   if (signedOutSet.size > 0) {
     console.log(`screenshot: signed-out captures for ${[...signedOutSet].join(', ')} (#2825) — signedOut on the route's definition in ROUTE_DEFINITIONS; no auth token seeded, every other route keeps the authenticated fixture`)
   }
+  // Same rule as the viewport line above (#2006): a reviewer reading a PNG has
+  // to be able to ask which palette it shows and get an answer from the run log.
+  console.log(
+    `screenshot: color scheme ${colorSchemes.join(' + ')}` +
+      (colorSchemes.length === 1 && colorSchemes[0] === 'light'
+        ? ' — the default (no --color-scheme given); filenames carry no scheme suffix'
+        : ` — via --color-scheme; filenames carry -${colorSchemes.join('/')} suffixes (#2929)`),
+  )
 
   // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
   // unconditionally — including the case that motivated #1888, a narrow
@@ -4653,196 +4766,210 @@ async function main() {
   // 'still-loading'; these are the ones the wait rescued.
   const contentRaced = []
   try {
-    for (const vp of captureViewports) {
-      // ONE context per auth mode per viewport (#2825). The auth seed is
-      // per-context — it must land before any app code runs — so the context
-      // FOLLOWS the route's auth mode as the loop walks the caller's route
-      // order: a run mixing /dashboard and /login opens an
-      // authenticated context for the dashboard and a signed-out one for the
-      // login, never one context wearing both sessions. With no opt-out the
-      // flip never happens and this is the old single-context behaviour
-      // exactly: the authenticated default is unchanged, not relaxed.
-      let context = null
-      let contextIsSignedOut = null
-      let page = null
-      let currentRoute = ROUTES[0]
-      const attachDiagnostics = (p) => {
-        p.on('console', (msg) => {
-          if (msg.type() === 'error') {
-            consoleErrors.push({ route: currentRoute, viewport: vp.name, text: msg.text().slice(0, 300) })
-          }
-        })
-        p.on('pageerror', (err) => {
-          consoleErrors.push({ route: currentRoute, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
-        })
-      }
-      for (const routePath of ROUTES) {
-        const routeIsSignedOut = signedOutSet.has(routePath)
-        if (routeIsSignedOut !== contextIsSignedOut) {
-          if (context) await context.close()
-          context = await newFixtureContext(browser, vp, null, { signedOut: routeIsSignedOut })
-          contextIsSignedOut = routeIsSignedOut
-          page = await context.newPage()
-          attachDiagnostics(page)
-        }
-        currentRoute = routePath
-        // A swallowed navigation failure would screenshot the PREVIOUS route's
-        // content under this route's filename — record it and mark the run.
-        const navError = await page
-          .goto(`${BASE_URL}${routePath}`, { waitUntil: 'networkidle', timeout: 30_000 })
-          .then(() => null, (err) => err)
-        if (navError) {
-          gotoFailures.push({ route: routePath, viewport: vp.name, text: `goto failed: ${String(navError.message ?? navError).slice(0, 200)}` })
-          continue // never write a mislabeled PNG
-        }
-        await page.waitForTimeout(400) // settle late paints
-        const file = path.join(OUT_DIR, `${slug(routePath)}-${vp.name}.png`)
-        // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
-        // whole route, then reads the PNG back and refuses a blank one (#1738).
-        try {
-          // No `allowBusy` here on purpose: `captureFullPage` derives the
-          // tolerance from the page's own URL, so every consumer gets the same
-          // answer (#2204 CI catch).
-          const busyTolerance = busyToleranceFor(routePath)
-          const { shell, content } = await captureFullPage(page, {
-            path: file,
-            label: `${routePath} · ${vp.name}`,
-            viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
+    for (const scheme of colorSchemes) {
+      for (const vp of captureViewports) {
+        // ONE context per auth mode per viewport per SCHEME (#2825, #2929). The
+        // auth seed and the theme seed are both per-context — they must land
+        // before any app code runs — so the context FOLLOWS the route's auth
+        // mode and the run's palette as the loop walks the caller's route
+        // order: a run mixing /dashboard and /login opens an
+        // authenticated context for the dashboard and a signed-out one for the
+        // login, never one context wearing both sessions; a `both` run gives
+        // each scheme its own contexts so no storage seed can leak across the
+        // pair. With no opt-out the flip never happens and this is the old
+        // single-context behaviour exactly: the authenticated light default is
+        // unchanged, not relaxed.
+        let context = null
+        let contextIsSignedOut = null
+        let page = null
+        let currentRoute = ROUTES[0]
+        const attachDiagnostics = (p) => {
+          p.on('console', (msg) => {
+            if (msg.type() === 'error') {
+              consoleErrors.push({ route: currentRoute, viewport: vp.name, scheme, text: msg.text().slice(0, 300) })
+            }
           })
-          captured.push(path.relative(ROOT, file))
-          captureRecords.push({ route: routePath, viewport: vp.name, file: path.relative(ROOT, file) })
-          if (content) {
-            contentSettles.push({
-              route: routePath,
-              viewport: vp.name,
-              chars: content.chars,
-              elements: content.elements,
-              busy: content.busy ?? 0,
-              waited_ms: content.waitedMs,
+          p.on('pageerror', (err) => {
+            consoleErrors.push({ route: currentRoute, viewport: vp.name, scheme, text: `pageerror: ${String(err).slice(0, 300)}` })
+          })
+        }
+        for (const routePath of ROUTES) {
+          const routeIsSignedOut = signedOutSet.has(routePath)
+          if (routeIsSignedOut !== contextIsSignedOut) {
+            if (context) await context.close()
+            context = await newFixtureContext(browser, vp, null, { signedOut: routeIsSignedOut, colorScheme: scheme })
+            contextIsSignedOut = routeIsSignedOut
+            page = await context.newPage()
+            attachDiagnostics(page)
+          }
+          currentRoute = routePath
+          // A swallowed navigation failure would screenshot the PREVIOUS route's
+          // content under this route's filename — record it and mark the run.
+          const navError = await page
+            .goto(`${BASE_URL}${routePath}`, { waitUntil: 'networkidle', timeout: 30_000 })
+            .then(() => null, (err) => err)
+          if (navError) {
+            gotoFailures.push({ route: routePath, viewport: vp.name, scheme, text: `goto failed: ${String(navError.message ?? navError).slice(0, 200)}` })
+            continue // never write a mislabeled PNG
+          }
+          await page.waitForTimeout(400) // settle late paints
+          // The scheme rides the FILENAME (#2929): light keeps the historical
+          // suffix-free name, dark and every non-default scheme get
+          // `<route>-<vp>-<scheme>.png`, so a reviewer can pair the two sides of
+          // a `both` run side by side without opening the manifest.
+          const schemeSuffix = scheme === 'light' ? '' : `-${scheme}`
+          const file = path.join(OUT_DIR, `${slug(routePath)}-${vp.name}${schemeSuffix}.png`)
+          // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
+          // whole route, then reads the PNG back and refuses a blank one (#1738).
+          try {
+            // No `allowBusy` here on purpose: `captureFullPage` derives the
+            // tolerance from the page's own URL, so every consumer gets the same
+            // answer (#2204 CI catch).
+            const busyTolerance = busyToleranceFor(routePath)
+            const { shell, content } = await captureFullPage(page, {
+              path: file,
+              label: `${routePath} · ${vp.name}`,
+              viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
             })
-            // The exemption's expiry date (#2204). A route declared
-            // busy-tolerant that held nothing busy is a declaration nobody has
-            // re-read; say so rather than carry it forever.
-            if (busyTolerance && !(content.busy > 0)) {
-              STALE_BUSY_DECLARATIONS.push({
+            captured.push(path.relative(ROOT, file))
+            captureRecords.push({ route: routePath, viewport: vp.name, scheme, file: path.relative(ROOT, file) })
+            if (content) {
+              contentSettles.push({
                 route: routePath,
                 viewport: vp.name,
-                reason: busyTolerance.reason,
+                scheme,
+                chars: content.chars,
+                elements: content.elements,
+                busy: content.busy ?? 0,
+                waited_ms: content.waitedMs,
               })
+              // The exemption's expiry date (#2204). A route declared
+              // busy-tolerant that held nothing busy is a declaration nobody has
+              // re-read; say so rather than carry it forever.
+              if (busyTolerance && !(content.busy > 0)) {
+                STALE_BUSY_DECLARATIONS.push({
+                  route: routePath,
+                  viewport: vp.name,
+                  scheme,
+                  reason: busyTolerance.reason,
+                })
+              }
+              if (content.raced) {
+                contentRaced.push({ route: routePath, viewport: vp.name, scheme, waitedMs: content.waitedMs })
+              }
             }
-            if (content.raced) {
-              contentRaced.push({ route: routePath, viewport: vp.name, waitedMs: content.waitedMs })
+            if (shell.mode === SHELL_MODE.NO_SCROLL_SHELL) {
+              shellless.push({ route: routePath, viewport: vp.name, scheme, height: shell.height })
+            } else if (shell.raced) {
+              raced.push({ route: routePath, viewport: vp.name, scheme, waitedMs: shell.waitedMs })
             }
-          }
-          if (shell.mode === SHELL_MODE.NO_SCROLL_SHELL) {
-            shellless.push({ route: routePath, viewport: vp.name, height: shell.height })
-          } else if (shell.raced) {
-            raced.push({ route: routePath, viewport: vp.name, waitedMs: shell.waitedMs })
-          }
-        } catch (err) {
-          // Same stance as the navigation failure above: a PNG that looks like
-          // evidence and is not is worse than no PNG, so remove it rather than
-          // leave it for someone to attach to a PR.
-          //
-          // But NEVER delete silently. The deletion, the file it removed and
-          // the cause all go on the record — in the console AND in the
-          // manifest — so an empty `.screenshots/` can be read as "this is why
-          // there is nothing here" rather than "there was nothing to capture".
-          // Was there anything to remove? A shell verdict throws before
-          // `page.screenshot` runs, so reporting that one as DELETED would be
-          // a small lie in the middle of the honesty this change is about.
-          const written = await stat(file).then(
-            () => true,
-            () => false,
-          )
-          await rm(file, { force: true })
-          deletedCaptures.push(
-            describeDeletedCapture(err, {
-              route: routePath,
-              viewport: vp.name,
-              file: path.relative(ROOT, file),
-              written,
-            }),
-          )
-          continue
-        }
-      }
-      await context.close()
-
-      // Scenarios get their own context per viewport: a virtual clock and
-      // scenario-specific API answers must not leak into the route captures.
-      for (const scenario of scenarios) {
-        const label = `scenario:${scenario.name}`
-        const scenarioContext = await newFixtureContext(browser, vp, scenario)
-        const scenarioPage = await scenarioContext.newPage()
-        scenarioPage.on('console', (msg) => {
-          if (msg.type() === 'error') {
-            consoleErrors.push({ route: label, viewport: vp.name, text: msg.text().slice(0, 300) })
-          }
-        })
-        scenarioPage.on('pageerror', (err) => {
-          consoleErrors.push({ route: label, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
-        })
-
-        // A scenario drives real UI, so a selector drift or a state that never
-        // arrives must FAIL LOUDLY rather than silently write fewer PNGs — a
-        // missing stage is exactly the evidence gap this exists to close.
-        const shoot = async (target, name) => {
-          await scenarioPage.waitForTimeout(300) // settle the transition
-          const base = `${scenario.name}-${name}-${vp.name}`
-          const file = path.join(OUT_DIR, `${base}.png`)
-          await target.screenshot({ path: file })
-          captured.push(path.relative(ROOT, file))
-
-          // An element screenshot captures the VISIBLE box. A dialog that caps
-          // itself (max-h + overflow-y-auto) therefore drops everything below
-          // the fold — and its rounded bottom edge renders cleanly at the clip,
-          // so the PNG LOOKS complete. That is worse than a missing capture: a
-          // reviewer would judge a screen they have only partly seen. Record
-          // the shortfall and shoot the whole thing alongside it.
-          const before = await measureHiddenBelowFold(target)
-          if (before.hidden > CLIP_TOLERANCE_PX) {
-            await scenarioPage.setViewportSize({
-              width: vp.width,
-              height: vp.height + before.hidden + 48,
-            })
-            await scenarioPage.waitForTimeout(200)
-            // Re-measure BEFORE re-shooting. Growing the viewport only helps a
-            // scroller whose cap is viewport-relative (`ui/Modal`'s
-            // `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]`, `ui/SidePanel`'s full-height body). A
-            // box with its own fixed `max-h` keeps clipping however tall the
-            // window gets, and the whole point of this change is that the
-            // difference must be visible instead of assumed.
-            const after = await measureHiddenBelowFold(target)
-            const fullFile = path.join(OUT_DIR, `${base}-full.png`)
-            await target.screenshot({ path: fullFile })
-            captured.push(path.relative(ROOT, fullFile))
-            clipped.push({
-              capture: base,
-              hidden: before.hidden,
-              offender: before.offender,
-              offenderCount: before.offenderCount,
-              residual: after.hidden,
-              // The box still clipping AFTER the growth, which is usually not
-              // the one that was worst BEFORE it (#1887). Recorded separately
-              // because the two answer different questions and the report was
-              // printing the first one under the second one's heading.
-              residualOffender: after.offender,
-            })
-            await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
-            await scenarioPage.waitForTimeout(200)
+          } catch (err) {
+            // Same stance as the navigation failure above: a PNG that looks like
+            // evidence and is not is worse than no PNG, so remove it rather than
+            // leave it for someone to attach to a PR.
+            //
+            // But NEVER delete silently. The deletion, the file it removed and
+            // the cause all go on the record — in the console AND in the
+            // manifest — so an empty `.screenshots/` can be read as "this is why
+            // there is nothing here" rather than "there was nothing to capture".
+            // Was there anything to remove? A shell verdict throws before
+            // `page.screenshot` runs, so reporting that one as DELETED would be
+            // a small lie in the middle of the honesty this change is about.
+            const written = await stat(file).then(
+              () => true,
+              () => false,
+            )
+            await rm(file, { force: true })
+            deletedCaptures.push(
+              describeDeletedCapture(err, {
+                route: routePath,
+                viewport: vp.name,
+                scheme,
+                file: path.relative(ROOT, file),
+                written,
+              }),
+            )
+            continue
           }
         }
-        try {
-          await scenario.run({ page: scenarioPage, vp, shoot })
-        } catch (err) {
-          gotoFailures.push({
-            route: label,
-            viewport: vp.name,
-            text: `scenario failed: ${String(err?.message ?? err).slice(0, 300)}`,
+        await context.close()
+
+        // Scenarios get their own context per viewport per scheme: a virtual
+        // clock, scenario-specific API answers and the theme seed must not leak
+        // into the route captures — or across the two sides of a `both` run.
+        for (const scenario of scenarios) {
+          const label = `scenario:${scenario.name}`
+          const scenarioContext = await newFixtureContext(browser, vp, scenario, { colorScheme: scheme })
+          const scenarioPage = await scenarioContext.newPage()
+          scenarioPage.on('console', (msg) => {
+            if (msg.type() === 'error') {
+              consoleErrors.push({ route: label, viewport: vp.name, scheme, text: msg.text().slice(0, 300) })
+            }
           })
+          scenarioPage.on('pageerror', (err) => {
+            consoleErrors.push({ route: label, viewport: vp.name, scheme, text: `pageerror: ${String(err).slice(0, 300)}` })
+          })
+
+          // A scenario drives real UI, so a selector drift or a state that never
+          // arrives must FAIL LOUDLY rather than silently write fewer PNGs — a
+          // missing stage is exactly the evidence gap this exists to close.
+          const shoot = async (target, name) => {
+            await scenarioPage.waitForTimeout(300) // settle the transition
+            const base = `${scenario.name}-${name}-${vp.name}${scheme === 'light' ? '' : `-${scheme}`}`
+            const file = path.join(OUT_DIR, `${base}.png`)
+            await target.screenshot({ path: file })
+            captured.push(path.relative(ROOT, file))
+
+            // An element screenshot captures the VISIBLE box. A dialog that caps
+            // itself (max-h + overflow-y-auto) therefore drops everything below
+            // the fold — and its rounded bottom edge renders cleanly at the clip,
+            // so the PNG LOOKS complete. That is worse than a missing capture: a
+            // reviewer would judge a screen they have only partly seen. Record
+            // the shortfall and shoot the whole thing alongside it.
+            const before = await measureHiddenBelowFold(target)
+            if (before.hidden > CLIP_TOLERANCE_PX) {
+              await scenarioPage.setViewportSize({
+                width: vp.width,
+                height: vp.height + before.hidden + 48,
+              })
+              await scenarioPage.waitForTimeout(200)
+              // Re-measure BEFORE re-shooting. Growing the viewport only helps a
+              // scroller whose cap is viewport-relative (`ui/Modal`'s
+              // `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]`, `ui/SidePanel`'s full-height body). A
+              // box with its own fixed `max-h` keeps clipping however tall the
+              // window gets, and the whole point of this change is that the
+              // difference must be visible instead of assumed.
+              const after = await measureHiddenBelowFold(target)
+              const fullFile = path.join(OUT_DIR, `${base}-full.png`)
+              await target.screenshot({ path: fullFile })
+              captured.push(path.relative(ROOT, fullFile))
+              clipped.push({
+                capture: base,
+                hidden: before.hidden,
+                offender: before.offender,
+                offenderCount: before.offenderCount,
+                residual: after.hidden,
+                // The box still clipping AFTER the growth, which is usually not
+                // the one that was worst BEFORE it (#1887). Recorded separately
+                // because the two answer different questions and the report was
+                // printing the first one under the second one's heading.
+                residualOffender: after.offender,
+              })
+              await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
+              await scenarioPage.waitForTimeout(200)
+            }
+          }
+          try {
+            await scenario.run({ page: scenarioPage, vp, shoot })
+          } catch (err) {
+            gotoFailures.push({
+              route: label,
+              viewport: vp.name,
+              text: `scenario failed: ${String(err?.message ?? err).slice(0, 300)}`,
+            })
+          }
+          await scenarioContext.close()
         }
-        await scenarioContext.close()
       }
     }
   } finally {
@@ -4851,31 +4978,45 @@ async function main() {
   }
 
   // Did the run shoot the widths it resolved? Computed BEFORE the manifest is
-  // written, and recorded in it, so a contradiction between the claim and the
-  // files is on the record rather than only on a console someone scrolled past.
-  const viewportMismatches = findViewportMismatches(captured, captureViewports)
+    // written, and recorded in it, so a contradiction between the claim and the
+    // files is on the record rather than only on a console someone scrolled past.
+    const viewportMismatches = findViewportMismatches(captured, captureViewports, colorSchemes)
 
-  // Signed-out capture evidence (#2825): the auth opt-out is only trustworthy
-  // if its captures are PROVEN different, so captures are hashed and compared.
-  // The dashboard-identity half GATES over EVERY capture — the original
-  // finding was an authenticated /login whose bytes were the dashboard's, so
-  // forgetting the flag must fail the run rather than silently re-shoot the
-  // redirect. The duplicate half is ADVISORY, because a redirect IS what some
-  // routes legitimately do (/onboarding signed out redirects to /login). With
-  // no opt-out and no redirect the lists are empty.
-  const sha256 = (file) =>
+    // Signed-out capture evidence (#2825): the auth opt-out is only trustworthy
+    // if its captures are PROVEN different, so captures are hashed and compared.
+    // The dashboard-identity half GATES over EVERY capture — the original
+    // finding was an authenticated /login whose bytes were the dashboard's, so
+    // forgetting the flag must fail the run rather than silently re-shoot the
+    // redirect. The duplicate half is ADVISORY, because a redirect IS what some
+    // routes legitimately do (/onboarding signed out redirects to /login). With
+    // no opt-out and no redirect the lists are empty.
+    //
+    // SCOPED PER SCHEME (#2929): the pool and the dashboard reference map are
+    // both keyed by scheme, so a `both` run never compares its dark capture
+    // against the light dashboard (every route would trivially "match" across
+    // palettes). Within one scheme the semantics are exactly #2825's.
+    const sha256 = (file) =>
     createHash('sha256').update(readFileSync(file)).digest('hex')
-  // Route captures only, paired with their REAL route (#2825) — scenario
-  // captures and `-full` re-shoots stay out of these pools (they are not
-  // route evidence, and re-parsing their filenames would fabricate routes:
-  // `design-system-desktop.png` splits on the first hyphen into `/design`).
-  const allFiles = captureRecords.map((f) => ({ ...f, sha256: sha256(path.join(ROOT, f.file)) }))
-  const dashboardByViewport = new Map(
-    allFiles.filter((f) => f.route === '/dashboard').map((f) => [f.viewport, f.sha256]),
-  )
-  const signedOutFileRecords = allFiles.filter((f) => signedOutSet.has(f.route))
-  const redirectCaptures = findRedirectCaptures(allFiles, dashboardByViewport)
-  const signedOutDuplicates = findSignedOutDuplicates(signedOutFileRecords, allFiles)
+    // Route captures only, paired with their REAL route (#2825) — scenario
+    // captures and `-full` re-shoots stay out of these pools (they are not
+    // route evidence, and re-parsing their filenames would fabricate routes:
+    // `design-system-desktop.png` splits on the first hyphen into `/design`).
+    const allFiles = captureRecords.map((f) => ({ ...f, sha256: sha256(path.join(ROOT, f.file)) }))
+    const dashboardByViewport = new Map(
+    allFiles.filter((f) => f.route === '/dashboard').map((f) => [`${f.scheme}|${f.viewport}`, f.sha256]),
+    )
+    const signedOutFileRecords = allFiles.filter((f) => signedOutSet.has(f.route))
+    const redirectCaptures = findRedirectCaptures(
+    allFiles,
+    dashboardByViewport,
+    // Cross-scheme comparisons are meaningless: partition per scheme.
+    colorSchemes.length > 1 ? (f) => f.scheme : undefined,
+    )
+    const signedOutDuplicates = findSignedOutDuplicates(
+    signedOutFileRecords,
+    allFiles,
+    colorSchemes.length > 1 ? (f) => f.scheme : undefined,
+    )
   if (redirectCaptures.length > 0) {
     console.error(
       `\n✗ ${redirectCaptures.length} capture(s) are BYTE-IDENTICAL to /dashboard — the route redirected ` +
@@ -4930,6 +5071,12 @@ async function main() {
         // a 390px one once the PNG is attached to a review thread.
         viewports: captureViewports.map(({ name, width, height }) => ({ name, width, height })),
         viewport_source: viewportSource,
+        // The palettes these PNGs were rendered in (#2929). A `both` run
+        // records `["light","dark"]` and every dark capture carries a
+        // `-dark` filename suffix; a plain run records `["light"]`, which is
+        // what every pre-#2929 manifest means by omission. A reader can tell
+        // which scheme a capture set shows without opening a single PNG.
+        color_schemes: colorSchemes,
         // Empty on every honest run. Non-empty means the files and the
         // `viewports` claim above disagree — see `findViewportMismatches`.
         viewport_mismatches: viewportMismatches,

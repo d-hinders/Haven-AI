@@ -136,7 +136,7 @@ function NavLink({
           className={`whitespace-nowrap flex-shrink-0 text-xs font-semibold leading-none px-1.5 py-0.5 rounded-full v2-tabular ${
             item.badgeTone === 'muted'
               ? 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-              : 'bg-[var(--v2-brand)] text-white'
+              : 'bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)]'
           }`}
         >
           {item.badgeTitle ? (
@@ -668,7 +668,7 @@ export default function Sidebar() {
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2"
               >
                 {/* Avatar */}
-                <div className="w-8 h-8 rounded-full bg-[var(--v2-brand)] flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                <div className="w-8 h-8 rounded-full bg-[var(--v2-brand)] flex items-center justify-center text-xs font-bold text-[var(--v2-ink-on-brand)] flex-shrink-0">
                   {userInitial}
                 </div>
 

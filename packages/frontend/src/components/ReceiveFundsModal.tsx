@@ -94,7 +94,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="receive-funds-title"
-        className="relative mx-4 max-h-[calc(100vh-2rem-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative mx-4 max-h-[calc(100vh-2rem-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
       >
         <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-4">
           <div>
@@ -193,7 +193,12 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
               </div>
 
               {showQr && (
-                <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+                // Never-invert container (#2929): the QR is authored against
+                // white and a scanner reads its module contrast — the box stays
+                // fixed-white in both themes via `.v2-light-surface`
+                // (globals.css), which also opts native fallback paints inside
+                // out of the dark scheme.
+                <div className="v2-light-surface rounded-[10px] border p-4">
                   <div role="status" aria-busy={!qrDataUrl} aria-live="polite" className="flex flex-col items-center">
                     {qrDataUrl ? (
                       <img
@@ -211,7 +216,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                 </div>
               )}
 
-              <div className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+              <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
                 <p className="text-xs font-medium text-[var(--v2-ink-3)]">
                   Supported on {chainConfig.name}
                 </p>

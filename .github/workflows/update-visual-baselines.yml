@@ -178,6 +178,21 @@ jobs:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
           NEXT_TELEMETRY_DISABLED: 1
 
+      # #2929: the dark scheme's baselines regenerate in the SAME dispatch, on
+      # the SAME runner image, from the SAME cached browser — the light and
+      # dark halves of one gate must never be blessed by different builds
+      # (#1930's lesson, inverted: the two halves of one gate disagreed about
+      # what was on disk). A first dispatch with no dark baselines committed
+      # writes them (Playwright's `changed` mode writes what it cannot
+      # compare), and the audit step below sees them as new files.
+      - name: Regenerate dark baselines (design system)
+        run: npm run test:visual:dark -w packages/frontend -- --update-snapshots="$UPDATE_MODE"
+        env:
+          UPDATE_MODE: ${{ inputs.mode }}
+          CI: 1
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ci-placeholder
+          NEXT_TELEMETRY_DISABLED: 1
+
       # #2218. Runs BEFORE the commit, so a baseline this dispatch did not come
       # for is never pushed in the first place.
       #

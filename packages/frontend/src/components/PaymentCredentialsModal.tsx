@@ -132,7 +132,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
         role="dialog"
         aria-modal="true"
         aria-labelledby="payment-credentials-title"
-        className="relative flex w-full max-w-lg flex-col rounded-2xl border border-[var(--v2-border)] bg-white shadow-modal max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))]"
+        className="relative flex w-full max-w-lg flex-col rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))]"
       >
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-border)] px-6 py-5 flex-shrink-0">

@@ -315,12 +315,12 @@ export default function DesignSystemPage() {
                 name: '--v2-ink / -2 / -3',
                 soft: '—',
                 use: 'Text hierarchy. -ink is primary, -ink-2 secondary, -ink-3 quietest.',
-                swatch: 'border-[var(--v2-border)] bg-white text-[var(--v2-ink)]',
+                swatch: 'border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink)]',
               },
             ].map((token) => (
               <div
                 key={token.name}
-                className="flex gap-3 rounded-[10px] border border-[var(--v2-border)] bg-white p-3"
+                className="flex gap-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3"
               >
                 <span
                   aria-hidden="true"
@@ -594,7 +594,7 @@ export default function DesignSystemPage() {
               { icon: EllipsisVertical, name: 'EllipsisVertical' },
             ].map((entry) => (
               <div key={entry.name} className="flex flex-col items-center gap-1.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)]">
+                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)]">
                   <Icon icon={entry.icon} className="h-4 w-4" />
                 </span>
                 <p className="font-mono text-xs text-[var(--v2-ink-3)]">{entry.name}</p>
@@ -1192,7 +1192,7 @@ export default function DesignSystemPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -1692,7 +1692,7 @@ export default function DesignSystemPage() {
               </Button>
             </div>
           </div>
-          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Supported on Base</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {['ETH', 'USDC'].map((token) => (

@@ -291,7 +291,7 @@ export default function AccountDetailClient() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -716,7 +716,7 @@ function RenameModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="rename-account-title"
-        className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
       >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
           <div>

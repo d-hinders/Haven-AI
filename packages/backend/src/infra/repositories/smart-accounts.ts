@@ -14,8 +14,6 @@
  * - Approver membership truth is ON-CHAIN (`getOwners()`); the
  *   `safe_approver_metadata` table only decorates owners with a label + type.
  *   Nothing here grants or removes an owner.
- * - Deleting a Safe must orphan `self_sign_agents` rows BEFORE the delete —
- *   their RESTRICT foreign key otherwise blocks it (see the delete test).
  * - Deleting a Safe must not orphan an agent with a pending or active budget
  *   delegation or an in-flight sweep; the transaction locks bound agent rows
  *   before checking this.
@@ -250,7 +248,9 @@ export async function setDefaultAccountForUser(
 
 export const ORPHAN_AGENTS_FOR_ACCOUNT_SQL = `UPDATE agents SET safe_id = NULL, updated_at = NOW() WHERE safe_id = $1`
 
-export const ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL = `UPDATE self_sign_agents SET safe_id = NULL, updated_at = NOW() WHERE safe_id = $1`
+// `ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL` was removed here (#2851, epic
+// #1440's final slice): `self_sign_agents` no longer exists as of migration
+// `083_drop_dead_safe_rail_tables.ts`, so there is nothing left to orphan.
 
 export const DELETE_USER_ACCOUNT_SQL = `DELETE FROM user_safes WHERE id = $1`
 
@@ -295,13 +295,15 @@ export const CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL = `UPDATE users SET safe_addr
 /**
  * Unlink a Safe — one transaction, exactly the route's BEGIN/COMMIT block:
  * Lock bound agents and refuse when any still has live delegation authority;
- * otherwise orphan agents, orphan leftover self-sign agents (their RESTRICT
- * FK would otherwise block the delete), delete the row, then — when the
- * deleted Safe was the default (`wasDefault`, read by the caller's ownership
- * check) — promote the oldest remaining Safe and re-point the legacy mirror,
- * or clear the mirror when none remain. Returning false means the Safe was
- * kept intact because a delegation, recovery sweep, or re-key is still in
- * flight.
+ * otherwise orphan agents, delete the row, then — when the deleted Safe was
+ * the default (`wasDefault`, read by the caller's ownership check) — promote
+ * the oldest remaining Safe and re-point the legacy mirror, or clear the
+ * mirror when none remain. Returning false means the Safe was kept intact
+ * because a delegation, recovery sweep, or re-key is still in flight.
+ *
+ * Used to also orphan leftover `self_sign_agents` rows here, before the
+ * delete, because their `NO ACTION` FK would otherwise block it. That step
+ * was removed (#2851): the table itself is gone as of migration `083`.
  */
 export async function deleteAccountForUser(
   accountId: string,
@@ -322,7 +324,6 @@ export async function deleteAccountForUser(
     if (inFlightRekey.rows[0]?.in_flight === true) return false
 
     await tx.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId])
-    await tx.query(ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL, [accountId])
     await tx.query(DELETE_USER_ACCOUNT_SQL, [accountId])
 
     if (wasDefault) {

@@ -119,12 +119,12 @@ describe('transaction functions keep their statement order and scope', () => {
     expect(promote?.[1]).toEqual([OWNER])
     const mirror = calls.find(([sql]) => sql === SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL)
     expect(mirror?.[1]).toEqual(['0xnext', OWNER])
-    // Self-sign orphan precedes the delete (RESTRICT FK) — same pin as the
-    // route-level delete test, here at the unit that owns the order.
+    // The self-sign orphan statement is GONE (#2851): self_sign_agents no
+    // longer exists as of migration 083_drop_dead_safe_rail_tables.ts, so
+    // there is nothing left to orphan and no such statement should ever run
+    // again — not merely reordered, absent.
     const sqls = calls.map(([sql]) => sql)
-    expect(sqls.findIndex((s) => s.includes('self_sign_agents'))).toBeLessThan(
-      sqls.findIndex((s) => s.startsWith('DELETE FROM user_safes')),
-    )
+    expect(sqls.some((s) => s.includes('self_sign_agents'))).toBe(false)
   })
 
   it('deleteAccountForUser: keeps a Safe linked when an agent still has live delegation authority', async () => {

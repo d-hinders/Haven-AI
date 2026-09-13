@@ -47,7 +47,7 @@ describe('DELETE /user/safes/:safeId', () => {
     mockRelease.mockReset()
   })
 
-  it('orphans leftover self-sign agents so an old Safe with self-sign rows can be deleted', async () => {
+  it('never issues a self-sign-agent orphan statement — the table is gone (#2851)', async () => {
     // Ownership check: a non-default Safe that belongs to the user.
     mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: false }] })
     // Every transactional statement succeeds.
@@ -63,14 +63,13 @@ describe('DELETE /user/safes/:safeId', () => {
     expect(response.json()).toEqual({ success: true })
 
     const sqls = mockClientQuery.mock.calls.map(([sql]) => String(sql))
-    const selfSignIdx = sqls.findIndex((s) => /UPDATE\s+self_sign_agents\s+SET\s+safe_id\s*=\s*NULL/i.test(s))
     const deleteIdx = sqls.findIndex((s) => /DELETE\s+FROM\s+user_safes/i.test(s))
 
-    // The self-sign orphan must run, and must run before the Safe is deleted —
-    // otherwise its RESTRICT foreign key would block the delete.
-    expect(selfSignIdx).not.toBe(-1)
+    // self_sign_agents no longer exists as of migration
+    // 083_drop_dead_safe_rail_tables.ts, so this statement must never run
+    // again — absent, not merely reordered.
+    expect(sqls.some((s) => /self_sign_agents/i.test(s))).toBe(false)
     expect(deleteIdx).not.toBe(-1)
-    expect(selfSignIdx).toBeLessThan(deleteIdx)
     expect(mockRelease).toHaveBeenCalledTimes(1)
   })
 

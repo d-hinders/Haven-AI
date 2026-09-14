@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
   - packages/backend/src/modules/payments/agent-payment-status.ts
@@ -37,6 +38,7 @@ covers:
   - packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts
   - packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
+  - packages/demo-merchant-mcp/src/invoice.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
@@ -1030,6 +1032,17 @@ The demo merchant's own receipt labels the address for what it is
 (`delegatkonto — betalningen dras från ägarens treasury`) rather than implying
 custody it does not have. Third-party merchants will print whatever they
 print — which is exactly why the API-side mapping exists.
+
+**#2960** names these four addresses on the API side as a shared vocabulary
+(`treasury_account` / `delegate` / `delegate_account` / `merchant`), additive
+on receipts, payment status and the payment-receipt bundle — see
+[`agent-payment-status.ts`](../../packages/backend/src/modules/payments/agent-payment-status.ts)
+and [`party-model.ts`](../../packages/backend/src/openapi/party-model.ts). It
+also closed the one place the demo merchant's OWN invoice document (as
+opposed to the confirmation text quoted above) still called this address "the
+buyer" without qualification —
+[`invoice.ts`](../../packages/demo-merchant-mcp/src/invoice.ts)'s `kopare.roll`
+now carries the same distinction the confirmation text already made.
 
 ## Differences From Direct Payments
 

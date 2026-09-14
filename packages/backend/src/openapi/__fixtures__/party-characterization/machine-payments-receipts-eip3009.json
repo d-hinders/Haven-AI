@@ -1,0 +1,36 @@
+{
+  "_base": "24a08ec3",
+  "body": [
+    {
+      "id": "ev-2",
+      "settlement_scheme": "eip3009",
+      "budget_delegation_hash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "payment_id": "pi-3",
+      "payment_intent_id": "pi-3",
+      "approval_request_id": null,
+      "rail": "x402",
+      "proof_status": "payment_confirmed",
+      "tx_hash": "0xdededededededededededededededededededededededededededededededede",
+      "chain_id": 8453,
+      "resource_url": "https://api.example.com/data",
+      "merchant_address": "0x4444444444444444444444444444444444444444",
+      "payer_address": "0x5555555555555555555555555555555555555555",
+      "settlement_address": "0x4444444444444444444444444444444444444444",
+      "token_symbol": "USDC",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount_raw": "20000",
+      "amount_human": "0.02",
+      "challenge_id": null,
+      "idempotency_key": null,
+      "challenge_payload": null,
+      "selected_payment": null,
+      "payment_proof_header_name": null,
+      "protocol_receipt_header_name": null,
+      "protocol_receipt_payload": null,
+      "merchant_status": null,
+      "confirmed_at": "2026-09-01T00:00:00.000Z",
+      "created_at": "2026-09-01T00:00:00.000Z",
+      "updated_at": "2026-09-01T00:00:00.000Z"
+    }
+  ]
+}

@@ -22,7 +22,7 @@ function fakeInvoice(overrides: Partial<Invoice['json']> = {}): Invoice {
         bic: 'ESSESESS',
         crypto_address: '0x1111111111111111111111111111111111111111',
       },
-      kopare: { identifierare: '0x2222222222222222222222222222222222222222', typ: 'blockkedjeadress' },
+      kopare: { identifierare: '0x2222222222222222222222222222222222222222', typ: 'blockkedjeadress', roll: 'agent_delegate' },
       rader: [],
       belopp_exkl_moms: '0.0004',
       moms_procent: 25,

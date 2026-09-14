@@ -94,7 +94,7 @@ export const toolDescriptions = {
     summary:
       'Fetch structured Haven payment status, including phase and nextAction taxonomy for agent recovery.',
     behavior:
-      'Accepts a payment intent id and returns the full state taxonomy (phase, nextAction, rail, amount, merchant, resource url, idempotency key, message).',
+      'State for id: phase, nextAction, rail, amount, merchant, resource, idempotency, message. parties: treasuryAccount/delegate/delegateAccount/merchant.',
     nextActionGuidance: '',
   },
   getResumeState: {

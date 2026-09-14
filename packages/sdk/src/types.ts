@@ -740,6 +740,27 @@ export interface HavenAgentSummary extends HavenAgent {
   allowances: HavenAgentAllowanceSummary[]
 }
 
+/**
+ * #2960 — one party vocabulary for "who paid" a Haven payment, additive
+ * alongside every existing lone `payer*`/`*Address` field (same discipline
+ * as the #2907 `safe`/`account` dual-emit, except these four are DISTINCT
+ * addresses, not same-value twins of one old field).
+ */
+export interface PaymentParties {
+  treasuryAccount: string | null
+  delegate: string | null
+  delegateAccount: string | null
+  merchant: string | null
+}
+
+/** @internal wire shape of {@link PaymentParties}. */
+export interface RawPaymentParties {
+  treasury_account: string | null
+  delegate: string | null
+  delegate_account: string | null
+  merchant: string | null
+}
+
 export interface HavenPaymentReceipt {
   id: string
   paymentId: string
@@ -752,6 +773,8 @@ export interface HavenPaymentReceipt {
   resourceUrl: string
   merchantAddress: string | null
   payerAddress: string
+  /** #2960: additive alongside `payerAddress` above (`parties.treasury_account` only). */
+  parties?: PaymentParties
   settlementAddress: string
   tokenSymbol: string
   tokenAddress: string
@@ -1353,6 +1376,8 @@ export interface PaymentStatusResult {
   merchantAddress: string | null
   /** Delegate EOA captured on the payment intent when it was created. */
   payerAddress?: string | null
+  /** #2960: additive alongside `payerAddress` above (`parties.delegate` only). */
+  parties?: PaymentParties
   txHash: string | null
   expiresAt: string
   chainId: number
@@ -1595,6 +1620,8 @@ export interface RawPaymentStatusResult {
   resource_url: string | null
   merchant_address: string | null
   payer_address?: string | null
+  /** #2960: additive alongside `payer_address` above (`parties.delegate` only). */
+  parties?: RawPaymentParties
   tx_hash: string | null
   expires_at: string
   chain_id: number
@@ -1669,6 +1696,8 @@ export interface RawHavenPaymentReceipt {
   resource_url: string
   merchant_address: string | null
   payer_address: string
+  /** #2960: additive alongside `payer_address` above (`parties.treasury_account` only). */
+  parties?: RawPaymentParties
   settlement_address: string
   token_symbol: string
   token_address: string

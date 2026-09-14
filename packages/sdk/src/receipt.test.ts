@@ -64,4 +64,29 @@ describe('verifyPaymentReceipt (client-side, no Haven trust)', () => {
     const signature = DELEGATE.signingKey.sign(SIGN_HASH).serialized
     expect(verifyPaymentReceipt(receipt({ signature })).verified).toBe(true)
   })
+
+  // #2960: `payment.parties` is additive and NEVER read by verification —
+  // it recovers the signer from `authorization` only.
+  it('verifies identically whether or not payment.parties is present, and ignores wrong values in it', () => {
+    const signature = DELEGATE.signingKey.sign(SIGN_HASH).serialized
+    const withoutParties = receipt({ signature })
+    const withParties: PaymentReceipt = {
+      ...withoutParties,
+      payment: {
+        ...withoutParties.payment,
+        parties: {
+          // Deliberately garbage — if verification read this, it would not
+          // recover to DELEGATE.address and the assertion below would fail.
+          treasury_account: '0x0000000000000000000000000000000000dEaD',
+          delegate: '0x0000000000000000000000000000000000dEaD',
+          delegate_account: null,
+          merchant: null,
+        },
+      },
+    }
+    const withoutResult = verifyPaymentReceipt(withoutParties)
+    const withResult = verifyPaymentReceipt(withParties)
+    expect(withResult).toEqual(withoutResult)
+    expect(withResult.verified).toBe(true)
+  })
 })

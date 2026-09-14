@@ -3353,6 +3353,16 @@ export type components = {
             description: string | null;
             idempotency_key: string | null;
         };
+        Parties: {
+            /** @description The owner smart account the funds left. */
+            treasury_account: string | null;
+            /** @description The agent's signing EOA. */
+            delegate: string | null;
+            /** @description The agent's delegate smart account (erc7710 `delegator`), persisted at authorize time. Null for rows authorized before #2960 and on the legacy rail. */
+            delegate_account: string | null;
+            /** @description `payTo`. */
+            merchant: string | null;
+        };
         AgentPaymentStatus: {
             /** Format: uuid */
             payment_id: string;
@@ -3371,20 +3381,38 @@ export type components = {
             /** Format: uri */
             resource_url: string | null;
             merchant_address: string | null;
-            /** @description Delegate EOA captured on a payment intent. */
+            /**
+             * @deprecated
+             * @description Delegate EOA captured on a payment intent. Deprecated: same value as `parties.delegate`; prefer `parties`.
+             */
             payer_address?: string | null;
+            parties?: components["schemas"]["Parties"];
             tx_hash: string | null;
             /** Format: date-time */
             expires_at: string;
             chain_id: number;
             message: string;
+            fee?: {
+                amount: string;
+                token: string;
+                basis_points: number;
+                applied: boolean;
+            } | null;
             amount_atomic?: string | null;
             asset?: string | null;
             network?: string | null;
             description?: string | null;
             idempotency_key?: string | null;
             x402?: components["schemas"]["RailContext"];
-            mpp?: components["schemas"]["RailContext"] & {
+            mpp?: {
+                amount_atomic: string | null;
+                asset: string | null;
+                network: string | null;
+                /** Format: uri */
+                resource_url: string | null;
+                merchant_address: string | null;
+                description: string | null;
+                idempotency_key: string | null;
                 challenge_id?: string | null;
             };
         };
@@ -3716,7 +3744,10 @@ export type components = {
             /** Format: uri */
             resource_url: string;
             merchant_address?: string | null;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @description The treasury account — same as `parties.treasury_account`; prefer `parties`.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             payer_address?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             settlement_address?: string;
@@ -3733,6 +3764,7 @@ export type components = {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            parties?: components["schemas"]["Parties"];
         } & {
             [key: string]: unknown;
         };

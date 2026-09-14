@@ -7,6 +7,7 @@ import {
 } from '../../domain/agent-payment-taxonomy.js'
 import { config } from '../../config.js'
 import { ethers } from 'ethers'
+import { withParties, type Parties } from '../../openapi/party-model.js'
 import {
   expireOverdueIntentById,
   findIntentStatusRow,
@@ -64,6 +65,8 @@ export interface AgentPaymentStatus {
   merchant_address: string | null
   /** Delegate captured with this intent; never inferred from a later agent rotation. */
   payer_address?: string | null
+  /** #2960: the party quadruple, additive alongside `payer_address` (`delegate` only). */
+  parties?: Parties
   tx_hash: string | null
   expires_at: string
   chain_id: number
@@ -445,21 +448,33 @@ export function merchantReportGraceElapsed(
   return Number.isFinite(confirmedAtMs) && now - confirmedAtMs >= graceMin * 60_000
 }
 
-/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
-function settlementSchemeOf(machineMetadata: unknown): string | null {
+/** Parse `machine_metadata` the way `settlement-observed.ts` does, once, for both keys read off it below. */
+function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
   if (!machineMetadata) return null
-  let metadata: Record<string, unknown> | null = null
   if (typeof machineMetadata === 'string') {
     try {
-      metadata = JSON.parse(machineMetadata) as Record<string, unknown>
+      return JSON.parse(machineMetadata) as Record<string, unknown>
     } catch {
       return null
     }
-  } else {
-    metadata = machineMetadata as Record<string, unknown>
   }
-  const scheme = metadata?.settlement_scheme
+  return machineMetadata as Record<string, unknown>
+}
+
+/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
+function settlementSchemeOf(machineMetadata: unknown): string | null {
+  const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
   return typeof scheme === 'string' ? scheme : null
+}
+
+/**
+ * #2960: `machine_metadata.delegate_account_address`, written at authorize
+ * on both delegation-rail legs (`modules/x402/delegation-authorize.ts`).
+ * Null on rows authorized before #2960 and on the legacy rail.
+ */
+function delegateAccountAddressOf(machineMetadata: unknown): string | null {
+  const value = parsedMachineMetadata(machineMetadata)?.delegate_account_address
+  return typeof value === 'string' ? value : null
 }
 
 /**
@@ -766,34 +781,45 @@ export async function getAgentPaymentStatus(
     const rail = railFor(payment)
     const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
     const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address
-    return {
-      payment_id: payment.id,
-      kind: 'payment_intent',
-      rail,
-      status: payment.status,
-      phase: state.phase,
-      next_action: state.nextAction,
-      amount: payment.amount_human,
-      token: payment.token_symbol,
-      resource_url: resourceUrl,
-      merchant_address: merchantAddress,
-      payer_address: payment.delegate_address,
-      tx_hash: payment.tx_hash,
-      expires_at: payment.expires_at,
-      chain_id: payment.chain_id,
-      message: state.message,
-      fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
-      ...railContext({
+    return withParties(
+      {
+        payment_id: payment.id,
+        kind: 'payment_intent' as const,
         rail,
-        amountRaw: payment.amount_raw,
-        tokenAddress: payment.token_address,
-        resourceUrl,
-        merchantAddress,
-        idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
-        challengeId: payment.machine_challenge_id,
-        machineMetadata: payment.machine_metadata,
-      }),
-    }
+        status: payment.status,
+        phase: state.phase,
+        next_action: state.nextAction,
+        amount: payment.amount_human,
+        token: payment.token_symbol,
+        resource_url: resourceUrl,
+        merchant_address: merchantAddress,
+        payer_address: payment.delegate_address,
+        tx_hash: payment.tx_hash,
+        expires_at: payment.expires_at,
+        chain_id: payment.chain_id,
+        message: state.message,
+        fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
+        ...railContext({
+          rail,
+          amountRaw: payment.amount_raw,
+          tokenAddress: payment.token_address,
+          resourceUrl,
+          merchantAddress,
+          idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
+          challengeId: payment.machine_challenge_id,
+          machineMetadata: payment.machine_metadata,
+        }),
+      },
+      {
+        account_address: payment.account_address ?? null,
+        delegate_address: payment.delegate_address,
+        // #2960: `machine_metadata.delegate_account_address`, written at
+        // authorize on both delegation-rail legs — null for rows authorized
+        // before #2960 and on the legacy rail, where no such account exists.
+        delegate_account_address: delegateAccountAddressOf(payment.machine_metadata),
+        merchant_address: merchantAddress,
+      },
+    )
   }
 
   // #2055: the approval_requests fallback that stood here is gone — the table

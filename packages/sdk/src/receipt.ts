@@ -1,4 +1,5 @@
 import { ethers } from 'ethers'
+import type { RawPaymentParties } from './types.js'
 
 /**
  * Verifiable payment receipts.
@@ -31,6 +32,13 @@ export interface PaymentReceipt {
      * the window: a server from before the twin emits `safe` only.
      */
     account?: string
+    /**
+     * #2960: one party vocabulary for "who paid", additive alongside `safe`/
+     * `account` above (which are `parties.treasury_account` only). Optional
+     * for the window: a server from before #2960 emits neither. Ignored by
+     * `verifyPaymentReceipt`, which reads only `authorization`.
+     */
+    parties?: RawPaymentParties
     chainId: number
     settledAt: string | null
     resourceUrl: string | null

@@ -835,6 +835,52 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }))
   })
 
+  it('persists delegate_account_address into machine_metadata on BOTH delegation branches (#2960 write path)', async () => {
+    // Same discipline as the #1307/#1355 write-path tests above: prove the
+    // authorize call STORES the delegate account, or dropping the metadata
+    // line regresses receipts/status `parties.delegate_account` silently.
+    // `payTo === agent.delegate_address` (with `merchantPayTo` set) selects
+    // the eip3009 funding-leg shape (`deriveFundingShape`); `payTo` = the
+    // merchant, the default, selects erc7710 direct settlement.
+
+    // Branch 1: eip3009 funding leg — `fundingAuth.prepared.delegateAccountAddress`.
+    mockPrepareFunding.mockResolvedValue(PREPARED)
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    let res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        settlement_scheme: 'eip3009',
+        delegate_account_address: PREPARED.prepared.delegateAccountAddress,
+      }),
+    }))
+
+    // Branch 2: erc7710 direct settlement — the settlement child's own delegator.
+    mockCreateIntent.mockClear()
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody(),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        settlement_scheme: 'erc7710',
+        delegate_account_address: DELEGATE_ACCT,
+      }),
+    }))
+  })
+
   it('authorize 400s a malformed or oversized paymentRequired instead of silently dropping it', async () => {
     for (const bad of ['a-string', [1, 2], { blob: 'x'.repeat(70000) }]) {
       const res = await app.inject({

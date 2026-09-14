@@ -32,8 +32,8 @@ last-verified: "2026-09-14"
 > and the point of refusal (before any funding intent) are unchanged; no tool
 > added, renamed or re-shaped, so tool identity, the strict-input list, the
 > consent hash and the version-skew contract are untouched. The local
-> runtime forwards the failure fields unchanged. Nothing else in this
-> document was re-verified in this pass.
+> runtime (`packages/mcp`) has no cap contract at all — this is hosted-only.
+> Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#2908, naming epic #2906 phase 1):** the local
 > runtime's readers accept both the Safe-vocabulary and the account-vocabulary

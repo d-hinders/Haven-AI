@@ -399,7 +399,7 @@ Hosted MCP and signer tools also return stable `code` values on recoverable x402
 
 | `code` | Meaning | Agent recovery |
 |--------|---------|----------------|
-| `PRICE_EXCEEDS_MAX` | The merchant-authoritative x402 price is above the caller's spending cap. No funding transfer was created. | Tell the user the live price exceeded the cap and retry only after they confirm a higher one. |
+| `PRICE_EXCEEDS_MAX` | The merchant-authoritative x402 price is above the caller's spending cap. No funding transfer was created. | Tell the user the live price exceeded the cap and retry only after they confirm a higher one. Payloads carry `next_action: stop_and_tell_user` and `retry_with_new_quote: true` — the latter means any retry needs a fresh quote, not that one should be attempted unattended. |
 | `AMBIGUOUS_MAX_AMOUNT` | Both `max_amount` (atomic units) and `max_amount_human` (whole tokens) were sent for one purchase. Nothing was contacted and nothing was spent. | Re-send with exactly one — `max_amount_human` for a cap the user stated in tokens, `max_amount` for an exact atomic figure. |
 | `MAX_AMOUNT_UNCONVERTIBLE` | `max_amount_human` could not be converted against this quote's asset — its decimals are unknown to Haven, or the cap has more decimal places than the asset supports. Nothing was spent. | Round the cap to the asset's decimals, or re-send it as an exact atomic `max_amount`. |
 | `PAYMENT_WINDOW_EXPIRED` | The funding/quote window closed before `haven_x402_sign_header`, `haven_submit`, or `haven_complete_mcp_tool` could finish. | Re-run `haven_pay_mcp_tool` with the same `idempotency_key`, then sign and complete the fresh quote. Payloads include `retry_with_new_quote: true`. |

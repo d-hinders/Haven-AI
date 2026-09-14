@@ -1026,6 +1026,14 @@ export interface ToolFailure {
   next_action?: string
   rail?: string
   idempotency_key?: string | null
+  /**
+   * Any retry of this payment needs a FRESH quote — the one behind this
+   * failure is stale (`PAYMENT_WINDOW_EXPIRED`) or was refused against the
+   * cap (`PRICE_EXCEEDS_MAX`, #2975). WHETHER to retry is `next_action`'s
+   * call, not this field's: `check_status_later`/re-run for an expired
+   * window, `stop_and_tell_user` (confirm the higher amount first) for a
+   * cap refusal.
+   */
   retry_with_new_quote?: boolean
 }
 

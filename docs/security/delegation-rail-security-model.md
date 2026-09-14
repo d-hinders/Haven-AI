@@ -35,7 +35,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-13"
+last-verified: "2026-09-14"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -259,6 +259,23 @@ in-flight live operation cannot lose its Safe binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
 
+> **Re-verified #2945 (payment-refusals ledger, dep-boundary rework):** this
+> diff touched one file in this document's coverage list,
+> `infra/repositories/smart-accounts.ts`, by pure addition: the refusal
+> ledger's owner-scoped account resolution moved verbatim out of
+> `modules/payments/refusal-ledger.ts` into this repository as
+> `FIND_OWNED_ACCOUNT_ID_BY_ADDRESS_AND_CHAIN_SQL` +
+> `findOwnedAccountIdByAddressAndChain` (`SELECT id FROM smart_accounts WHERE
+> user_id = $1 AND account_address = $2 AND chain_id = $3 LIMIT 1`,
+> executor-last with the pool as default, `rows[0]?.id ?? null`). The new
+> function is a read: it grants nothing, signs nothing, and touches no chain
+> state; it feeds the fire-and-forget refusal records on the payment path,
+> where unknown addresses and lookup failures resolve NULL (the
+> swallow-to-NULL catch stays in the ledger's `resolveAccountId`). Every
+> predicate, tenant scope, authority check and signing path this document
+> describes is unchanged; the §6 owner-scoped `(address, chain)` lookup
+> prose, the unlink transaction and the §8 settlement writes are untouched.
+>
 > **Re-verified #2911 (naming epic #2906, phase 3 — the schema rename):** this
 > diff touched twelve files in this document's coverage list (`routes/auth.ts`,
 > `routes/agents.ts`, `routes/user-safes.ts`, `routes/hybrid-accounts.ts`,

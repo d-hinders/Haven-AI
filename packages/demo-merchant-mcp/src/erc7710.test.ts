@@ -524,9 +524,20 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
 
     // The buyer whose money already moved gets the goods, and nothing is
     // submitted on-chain again. The spent read went to the PINNED enforcer.
+    //
+    // #2970: this recovery path builds the served payment with a ZERO tx hash
+    // (no real settlement transaction was observed — see the
+    // `AuthorizationAlreadyUsedError` handling in x402.ts) — delivered, but
+    // honestly NOT settled, and with no Tx: line for a hash that is not real.
     expect(retry.status).toBe(200)
     expect(retry.headers.get(PAYMENT_RESPONSE_HEADER)).toBeTruthy()
-    expect(text).toContain('Purchase confirmed')
+    expect(text).toContain('Delivered — not confirmed on-chain')
+    expect(text).not.toContain('Purchase confirmed')
+    // The confirmation header's OWN Tx: line is gone (it is at the start of
+    // the text, flush-aligned like the other header fields); the invoice's
+    // separate BLOCKKEDJEREFERENS block still names the reported hash — that
+    // is an unchanged, deliberate audit field, not this header line.
+    expect(text).not.toMatch(/Tx:       0x0{64}/)
     expect(second.submitRedeemDelegations).not.toHaveBeenCalled()
     expect(second.spentOnDelegation).toHaveBeenCalledWith(ENFORCER, DELEGATION_MANAGER, LEAF_HASH)
   })

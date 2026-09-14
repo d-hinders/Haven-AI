@@ -169,6 +169,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   ResolvedMerchantCallContext: { module: 'paid-mcp-completion', slices: ['s2812'] },
   deliverMerchantPayment: { module: 'paid-mcp-completion', slices: ['s2812'] },
   preflightMcpPaymentHeader: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  // #2970: the hosted erc7710 settlement gate — "settled" means Haven verified
+  // the reported hash, not that the merchant answered 2xx. Single-slice, same
+  // as its siblings above.
+  classifyErc7710Settlement: { module: 'paid-mcp-completion', slices: ['s2812'] },
   // tools/support/quote-response.ts — quote responses + status predicates.
   buildMcpToolQuoteResponse: { module: 'quote-response', slices: ['s2810', 's2811'] },
   isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
@@ -345,6 +349,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'ResolvedMerchantCallContext',
     'deliverMerchantPayment',
     'preflightMcpPaymentHeader',
+    'classifyErc7710Settlement',
   ],
   'quote-response': [
     'buildMcpToolQuoteResponse',
@@ -378,6 +383,7 @@ const HELPER_HOST_MODULE_EXPORTS: Record<string, string[]> = {
     'ResolvedMerchantCallContext',
     'deliverMerchantPayment',
     'preflightMcpPaymentHeader',
+    'classifyErc7710Settlement',
   ],
 }
 

@@ -649,8 +649,15 @@ describe('demo merchant MCP x402 flow', () => {
 
       expect(status).toBe(200)
       expect(body.error).toBeUndefined()
-      // The goods, not a challenge.
-      expect(text).toContain('Purchase confirmed')
+      // The goods, not a challenge. #2970: this recovery path never observed a
+      // real settlement transaction (a zero hash), so the honest confirmation
+      // says delivered-but-unsettled, not "Purchase confirmed" — the SSE
+      // event's structuredContent.summary.status mirrors it (the response is
+      // not plain JSON here, so this is checked as a raw text needle rather
+      // than parsed).
+      expect(text).toContain('Delivered — not confirmed on-chain')
+      expect(text).not.toContain('Purchase confirmed')
+      expect(text).toContain('"status":"delivered_unsettled"')
       // A settled payment is not a fault, so nothing is logged as one.
       expect(consoleError).not.toHaveBeenCalled()
     })

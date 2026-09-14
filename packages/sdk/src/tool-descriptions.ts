@@ -92,9 +92,9 @@ export const toolDescriptions = {
   // deleted `/demo/mpp/*` route. Use the x402 fragments above instead.
   getPaymentStatus: {
     summary:
-      'Fetch structured Haven payment status, including phase and nextAction taxonomy for agent recovery.',
+      'Fetch structured Haven payment status for agent recovery.',
     behavior:
-      'State for id: phase, nextAction, rail, amount, merchant, resource, idempotency, message. parties: treasuryAccount/delegate/delegateAccount/merchant.',
+      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified.',
     nextActionGuidance: '',
   },
   getResumeState: {

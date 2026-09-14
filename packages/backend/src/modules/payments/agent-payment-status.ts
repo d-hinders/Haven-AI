@@ -15,6 +15,7 @@ import {
 } from '../../infra/repositories/payment-intents.js'
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
+import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../x402/x402-delegation.js'
 
 /**
  * #2085: narrowed — this module constructs `'payment_intent'` and nothing
@@ -507,6 +508,41 @@ export function isFundedX402AwaitingMerchantLeg(payment: PaymentIntentStatusRow)
 }
 
 /**
+ * #2970: true past its settlement window for a `submitted` erc7710 intent
+ * that never received verified evidence — the case `check_status_later`
+ * lied about, because nothing is watching for this settlement except a
+ * report (#2092's on-chain-verified confirm seam, `modules/mpp/evidence.ts`
+ * → `settlement-observed.ts`, runs only when the evidence endpoint is
+ * called; there is no passive success path for this row besides the
+ * sweeper's own best-effort scan). Mirrors the sweeper's own
+ * `isPastSettlementWindow` (`modules/x402/settlement-sweeper.ts`) — same
+ * anchor (`created_at`, the authorize time), same constant
+ * (`MAX_SETTLEMENT_WINDOW_SECONDS`), no clock-skew allowance added on top,
+ * because this is a UX cutover (stop promising a poll will resolve it), not
+ * the sweeper's own attribution boundary.
+ *
+ * `status === 'submitted'` alone is enough to know evidence never arrived:
+ * that same confirm seam moves the intent to `confirmed` the instant a
+ * verifiable hash is reported, so a still-`submitted` erc7710 intent has
+ * never had one. (Deliberately not naming the confirm function here by its
+ * identifier — `__tests__/erc7710-confirm-seam-census-pin.test.ts` greps
+ * production source for it and pins an exact three-file import census; a
+ * fourth textual hit would redden a pin about call sites, not comments.)
+ */
+export function isPastSettlementEvidenceWindowErc7710(payment: PaymentIntentStatusRow): boolean {
+  if (
+    payment.status !== 'submitted' ||
+    railFor(payment) !== AgentPaymentRail.X402 ||
+    settlementSchemeOf(payment.machine_metadata) !== 'erc7710'
+  ) {
+    return false
+  }
+  const createdMs = new Date(payment.created_at).getTime()
+  if (!Number.isFinite(createdMs)) return true
+  return Date.now() > createdMs + MAX_SETTLEMENT_WINDOW_SECONDS * 1000
+}
+
+/**
  * #2145: the phase/next_action/message for a payment-intent row, including
  * the two funded-but-unsettled overrides of the plain status mapping.
  *
@@ -567,6 +603,13 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
       phase: AgentPaymentPhase.FundedButUnsettled,
       nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
       message: "Haven's funding leg confirmed but no merchant response was ever recorded — the merchant has likely not been paid. Resume this payment to retry the original request; do not start a new payment for the same purchase. Report what the merchant answers, so Haven records the outcome instead of waiting out this window again.",
+    }
+  }
+  if (isPastSettlementEvidenceWindowErc7710(payment)) {
+    return {
+      phase: AgentPaymentPhase.PaymentSubmitted,
+      nextAction: AgentPaymentNextAction.AwaitingSettlementEvidence,
+      message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. Haven's settlement sweep may still attribute it within about two minutes — poll haven_get_payment_status once more after that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
     }
   }
   return paymentIntentState(payment.status)

@@ -913,6 +913,72 @@ describe('machine payment routes', () => {
     expectMatchesSpec('GET', '/machine-payments/{id}/status', response.json())
   })
 
+  // #2970: a submitted erc7710 intent past its settlement window with no
+  // verified evidence answers awaiting_settlement_evidence, not
+  // check_status_later, which promised a resolution nothing would produce.
+  it('returns awaiting_settlement_evidence for a submitted erc7710 intent past its settlement window', async () => {
+    primeDb(
+      AUTH,
+      intentStatusRow({
+        ...confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' }),
+        status: 'submitted',
+        tx_hash: null,
+        confirmed_at: null,
+        created_at: '2020-01-01T00:00:00.000Z',
+        payment_rail: 'x402',
+        source: 'x402',
+        machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
+      }),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.next_action).toBe('awaiting_settlement_evidence')
+    expect(body.status).toBe('submitted')
+    // #2970 review: the honest remedy is the settlement sweep's own residual
+    // attribution window, not a hash-report tool that does not exist for
+    // this scheme (`haven_report_x402_outcome` takes no hash).
+    expect(body.message).toMatch(/settlement sweep/i)
+    expect(body.message).not.toMatch(/haven_report_x402_outcome/)
+    // #2970 review: expectMatchesSpec('GET', '/machine-payments/{id}/status', body)
+    // surfaces a PRE-EXISTING spec drift unrelated to this change (the route's
+    // real response carries `fee` and `mpp.challenge_id`, which openapi/spec.ts
+    // does not declare) — reported, not silently fixed here; see the final report.
+  })
+
+  // Inside the window the same shape still answers check_status_later — the
+  // predicate is time-gated, not scheme-gated alone.
+  it('still returns check_status_later for a submitted erc7710 intent INSIDE its settlement window', async () => {
+    primeDb(
+      AUTH,
+      intentStatusRow({
+        ...confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' }),
+        status: 'submitted',
+        tx_hash: null,
+        confirmed_at: null,
+        created_at: new Date().toISOString(),
+        payment_rail: 'x402',
+        source: 'x402',
+        machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
+      }),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().next_action).toBe('check_status_later')
+  })
+
   it('returns funded_but_unsettled phase when merchant retry was rejected after funding', async () => {
     primeDb(
       AUTH,

@@ -23,6 +23,7 @@ import {
   listEvidenceReceiptsForAgent,
   resolveReconciliationForPayment,
   upsertEvidenceBase,
+  type IntentSettlementFields,
 } from '../../infra/repositories/machine-payments.js'
 import { findAgentDelegateAddress } from '../../infra/repositories/agents.js'
 import { getBookTimeCapture } from '../../infra/fiat-values.js'
@@ -139,6 +140,22 @@ export interface MachinePaymentEvidenceRow {
   settlement_scheme?: string | null
   /** The metering budget, uniform across schemes (#1059) — null on the legacy rail. */
   budget_delegation_hash?: string | null
+  /**
+   * #2960: the delegate that PAID this intent, joined from
+   * `payment_intents.delegate_address` — captured at intent time and never
+   * rotated. Distinct from `AgentContext.delegate_address` (the calling
+   * agent's CURRENT delegate), which rotates on rekey and is the wrong value
+   * for a receipt. Null on pre-#2055 approval-era rows, which never joined
+   * to a payment intent.
+   */
+  intent_delegate_address?: string | null
+  /**
+   * #2960: `payment_intents.machine_metadata->>'delegate_account_address'`,
+   * written at authorize on both delegation-rail legs
+   * (`modules/x402/delegation-authorize.ts`). Null on rows authorized
+   * before #2960 and on the legacy rail, where no such account exists.
+   */
+  intent_delegate_account_address?: string | null
 }
 
 interface PaymentIntentEvidenceRow extends MachinePaymentEvidenceSource {
@@ -555,19 +572,18 @@ export async function reconcileDelegateResidueAfterSettlement(
  * pre-#2055 approval-era receipt an agent asks about.
  */
 /**
- * #2960: `agentDelegateAddress` is the CALLING agent's current delegate EOA
- * (`AgentContext.delegate_address`), threaded in by the route rather than
- * joined in SQL — every reader of this shape is already scoped to one agent
- * (`e.agent_id = $1` in `LIST_EVIDENCE_RECEIPTS_SQL`, and the attach flow's
- * `agentId` param), so the value is already in hand at the route with no
- * extra query. `delegate_account` is left null here: deriving it costs an
- * RPC read (`computeHybridAccountAddress`, the same helper
- * `routes/machine-payments.ts`'s `GET /agent` already pays once per
- * identity read) and this is a list/echo surface, not an identity read —
- * #2960 decided against adding a chain read here. `GET /machine-payments/agent`
- * remains the place to look it up.
+ * #2960: `parties.delegate` is the delegate that PAID this intent
+ * (`row.intent_delegate_address`, joined from `payment_intents.delegate_address`
+ * in `LIST_EVIDENCE_RECEIPTS_SQL` / `GET_INTENT_SETTLEMENT_FIELDS_SQL`), NOT
+ * the calling agent's current delegate — an agent that rekeys after the
+ * intent must still show the delegate that actually paid on its historical
+ * receipts. `parties.delegate_account` is `row.intent_delegate_account_address`,
+ * from `payment_intents.machine_metadata->>'delegate_account_address'`,
+ * written at authorize on both delegation-rail legs
+ * (`modules/x402/delegation-authorize.ts`) — null on rows authorized before
+ * #2960 and on the legacy rail.
  */
-export function mapEvidence(row: MachinePaymentEvidenceRow, agentDelegateAddress: string | null = null) {
+export function mapEvidence(row: MachinePaymentEvidenceRow) {
   return withParties(
     {
       id: row.id,
@@ -605,21 +621,17 @@ export function mapEvidence(row: MachinePaymentEvidenceRow, agentDelegateAddress
       // written from `intent.account_address` (`modules/mpp/evidence.ts`'s
       // own evidence-base write) — the treasury, not the delegate.
       account_address: row.payer_address ?? null,
-      delegate_address: agentDelegateAddress,
-      delegate_account_address: null,
+      delegate_address: row.intent_delegate_address ?? null,
+      delegate_account_address: row.intent_delegate_account_address ?? null,
       merchant_address: row.merchant_address ?? null,
     },
   )
 }
 
 /** `GET /receipts` orchestration: recent evidence rows, agent-scoped. */
-export async function listReceipts(
-  agentId: string,
-  limit: number,
-  agentDelegateAddress: string | null = null,
-) {
+export async function listReceipts(agentId: string, limit: number) {
   const receipts = await listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit)
-  return receipts.map((row) => mapEvidence(row, agentDelegateAddress))
+  return receipts.map((row) => mapEvidence(row))
 }
 
 /**
@@ -633,7 +645,6 @@ export async function listReceipts(
 export async function attachEvidenceHandler(
   agentId: string,
   body: EvidenceBody,
-  agentDelegateAddress: string | null = null,
 ): Promise<MppHandlerResult> {
   try {
     const evidence = await attachMachinePaymentEvidence({
@@ -656,10 +667,12 @@ export async function attachEvidenceHandler(
       return { statusCode: 404, body: { error: 'Payment not found' } }
     }
 
-    // The INSERT…RETURNING row has no intent join — look the two intent
+    // The INSERT…RETURNING row has no intent join — look the intent
     // fields up so this echo reports the same truth the receipts list does
-    // (previously both always echoed null here, #1118 review NB2).
-    let intentFields: { settlement_scheme?: string | null; budget_delegation_hash?: string | null } = {}
+    // (previously both always echoed null here, #1118 review NB2). #2960
+    // extends this to the intent-captured delegate/delegate-account, for
+    // the same reason `LIST_EVIDENCE_RECEIPTS_SQL` joins them.
+    let intentFields: IntentSettlementFields | Record<string, never> = {}
     if (evidence.payment_intent_id) {
       try {
         intentFields = (await getIntentSettlementFields(evidence.payment_intent_id)) ?? {}
@@ -669,7 +682,7 @@ export async function attachEvidenceHandler(
     }
     return {
       statusCode: 202,
-      body: { evidence: mapEvidence({ ...evidence, ...intentFields }, agentDelegateAddress) },
+      body: { evidence: mapEvidence({ ...evidence, ...intentFields }) },
     }
   } catch (err) {
     const marker = err instanceof Error ? err.message : String(err)

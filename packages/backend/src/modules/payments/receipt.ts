@@ -32,6 +32,8 @@ export interface PaymentReceiptRow {
   confirmed_at: string | null
   resource_url: string | null
   amount_sek: string | null
+  /** #2960: `machine_metadata.delegate_account_address` — absent (undefined) on rows read by older callers, null for intents authorized before #2960. */
+  delegate_account_address?: string | null
 }
 
 /**
@@ -51,10 +53,9 @@ export interface PaymentReceiptRow {
  *
  * #2960: `payment.parties` is additive the same way — `verifyPaymentReceipt`
  * reads only `receipt.authorization`, never `payment`, so this changes
- * nothing about what is verified. `delegate_account` is null: this row has
- * no delegate-account column and deriving it here would be a per-receipt
- * RPC read (`computeHybridAccountAddress`), which this pure mapping
- * function does not do.
+ * nothing about what is verified. `delegate_account` is `row.delegate_account_address`
+ * (`machine_metadata.delegate_account_address`, written at authorize on both
+ * delegation-rail legs) — null on rows authorized before #2960.
  */
 export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
   return {
@@ -76,7 +77,7 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
       {
         account_address: row.account_address,
         delegate_address: row.delegate_address,
-        delegate_account_address: null,
+        delegate_account_address: row.delegate_account_address ?? null,
         merchant_address: row.to_address,
       },
     ) as PaymentReceipt['payment'],

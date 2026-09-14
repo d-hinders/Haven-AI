@@ -11,10 +11,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { beforeEach, it, vi } from 'vitest'
-// dep-lint-exempt: one-shot base-SHA recorder script (never shipped, run only from a scratch worktree at 24a08ec3) — no public index export exists for these internal functions
-import { listReceipts } from '../../../modules/mpp/evidence.js'
-// dep-lint-exempt: one-shot base-SHA recorder script (never shipped, run only from a scratch worktree at 24a08ec3) — no public index export exists for these internal functions
-import { getAgentPaymentStatus } from '../../../modules/payments/agent-payment-status.js'
+import { listReceipts } from '../../../modules/mpp/index.js'
+import { getAgentPaymentStatus } from '../../../modules/payments/index.js'
 
 const FIXTURES_DIR = path.dirname(fileURLToPath(import.meta.url))
 const BASE_SHA = '24a08ec3'

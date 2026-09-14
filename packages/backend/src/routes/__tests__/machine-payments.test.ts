@@ -638,6 +638,12 @@ describe('machine payment routes', () => {
           created_at: '2026-05-15T12:00:01.000Z',
           updated_at: '2026-05-15T12:00:01.000Z',
           settlement_scheme: 'eip3009',
+          // #2960: `pi.delegate_address AS intent_delegate_address` /
+          // `pi.machine_metadata->>'delegate_account_address'`, joined by
+          // `LIST_EVIDENCE_RECEIPTS_SQL` — the delegate that PAID this
+          // intent, not the calling agent's current delegate.
+          intent_delegate_address: AGENT.delegate_address,
+          intent_delegate_account_address: null,
         }],
       })],
     )
@@ -691,6 +697,71 @@ describe('machine payment routes', () => {
     })
     expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
     expect(JSON.stringify(response.json())).not.toContain('secret-proof-header')
+  })
+
+  // #2960 finding 3: the erc7710 case was missing here — receipts had only
+  // an eip3009 fixture, so a CASP shard claim that this file "tests both
+  // schemes on both surfaces" was false. This closes the gap and also
+  // covers finding 2/6: `parties.delegate_account` reading back
+  // `machine_metadata.delegate_account_address` through the live route.
+  it('lists recent receipts on the erc7710 scheme with parties.delegate_account populated', async () => {
+    const delegateAccount = '0xdddddddddddddddddddddddddddddddddddddddd'
+    primeDb(
+      AUTH,
+      [/FROM machine_payment_evidence e/, () => ({
+        rows: [{
+          id: '55555555-5555-5555-5555-555555555555',
+          payment_intent_id: PAYMENT_ID,
+          approval_request_id: null,
+          agent_id: AGENT.id,
+          user_id: AGENT.user_id,
+          rail: 'x402',
+          proof_status: 'payment_confirmed',
+          tx_hash: TX_HASH,
+          chain_id: 8453,
+          resource_url: challenge.resource,
+          merchant_address: RECIPIENT.toLowerCase(),
+          payer_address: AGENT.account_address.toLowerCase(),
+          settlement_address: RECIPIENT.toLowerCase(),
+          token_symbol: 'USDC',
+          token_address: USDC,
+          amount_raw: '10000',
+          amount_human: '0.01',
+          challenge_id: null,
+          idempotency_key: 'x402:test',
+          challenge_payload: null,
+          selected_payment: null,
+          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+          payment_proof_header: 'secret-proof-header',
+          protocol_receipt_header_name: 'Payment-Receipt',
+          protocol_receipt_header: 'receipt-header',
+          protocol_receipt_payload: { ok: true },
+          merchant_status: 200,
+          confirmed_at: '2026-05-15T12:00:00.000Z',
+          created_at: '2026-05-15T12:00:01.000Z',
+          updated_at: '2026-05-15T12:00:01.000Z',
+          settlement_scheme: 'erc7710',
+          intent_delegate_address: AGENT.delegate_address,
+          intent_delegate_account_address: delegateAccount,
+        }],
+      })],
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=10',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as { receipts: Array<{ parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string } }> }
+    expect(body.receipts[0].parties).toEqual({
+      treasury_account: AGENT.account_address.toLowerCase(),
+      delegate: AGENT.delegate_address,
+      delegate_account: delegateAccount,
+      merchant: RECIPIENT.toLowerCase(),
+    })
+    expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
   })
 
   // #993 (review finding on #1120): /send never consulted the seam — a

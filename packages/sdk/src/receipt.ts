@@ -1,4 +1,5 @@
 import { ethers } from 'ethers'
+import type { RawPaymentParties } from './types.js'
 
 /**
  * Verifiable payment receipts.
@@ -37,12 +38,7 @@ export interface PaymentReceipt {
      * for the window: a server from before #2960 emits neither. Ignored by
      * `verifyPaymentReceipt`, which reads only `authorization`.
      */
-    parties?: {
-      treasury_account: string | null
-      delegate: string | null
-      delegate_account: string | null
-      merchant: string | null
-    }
+    parties?: RawPaymentParties
     chainId: number
     settledAt: string | null
     resourceUrl: string | null

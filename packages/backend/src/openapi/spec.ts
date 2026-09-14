@@ -1037,8 +1037,10 @@ const paymentSignData = {
  *   delegate         — the agent's signing EOA (`agents.delegate_address`).
  *   delegate_account — the agent's delegate SMART account, the erc7710
  *     `delegator` / the merchant's `PAYMENT-RESPONSE.payer` and invoice buyer
- *     on that scheme. Null wherever deriving it live would cost a chain read
- *     this surface does not otherwise pay for (documented per call site).
+ *     on that scheme. Persisted at authorize time on
+ *     `payment_intents.machine_metadata.delegate_account_address` (both
+ *     delegation-rail legs write it). Null for rows authorized before #2960
+ *     and on the legacy rail, where no such account exists.
  *   merchant         — `payTo`.
  *
  * On an EIP-3009 payment `delegate` is what the merchant calls "payer"; on
@@ -1056,7 +1058,7 @@ const partiesSchema = {
     delegate_account: {
       anyOf: [address, { type: 'null' }],
       description:
-        "The agent's delegate smart account (erc7710 `delegator`). Null when not stored and deriving it live would add a chain read this surface does not otherwise pay for.",
+        "The agent's delegate smart account (erc7710 `delegator`), persisted at authorize time. Null for rows authorized before #2960 and on the legacy rail.",
     },
     merchant: { anyOf: [address, { type: 'null' }], description: '`payTo`.' },
   },
@@ -1101,7 +1103,11 @@ const agentPaymentStatus = {
     token: { type: 'string' },
     resource_url: { type: ['string', 'null'], format: 'uri' },
     merchant_address: { anyOf: [address, { type: 'null' }] },
-    payer_address: { anyOf: [address, { type: 'null' }], description: 'Delegate EOA captured on a payment intent.' },
+    payer_address: {
+      anyOf: [address, { type: 'null' }],
+      deprecated: true,
+      description: 'Delegate EOA captured on a payment intent. Deprecated: same value as `parties.delegate`; prefer `parties`.',
+    },
     // #2960: additive alongside `payer_address` above — the party quadruple,
     // not a same-value twin of it (`payer_address` is `delegate` only).
     parties: { $ref: '#/components/schemas/Parties' },
@@ -8166,7 +8172,10 @@ export const openapiSpec = {
           chain_id: { type: 'integer' },
           resource_url: { type: 'string', format: 'uri' },
           merchant_address: { anyOf: [address, { type: 'null' }] },
-          payer_address: address,
+          payer_address: {
+            ...address,
+            description: 'The treasury account — same as `parties.treasury_account`; prefer `parties`.',
+          },
           settlement_address: address,
           token_symbol: { type: 'string' },
           token_address: address,

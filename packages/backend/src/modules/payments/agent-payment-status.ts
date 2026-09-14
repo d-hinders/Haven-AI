@@ -448,21 +448,33 @@ export function merchantReportGraceElapsed(
   return Number.isFinite(confirmedAtMs) && now - confirmedAtMs >= graceMin * 60_000
 }
 
-/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
-function settlementSchemeOf(machineMetadata: unknown): string | null {
+/** Parse `machine_metadata` the way `settlement-observed.ts` does, once, for both keys read off it below. */
+function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
   if (!machineMetadata) return null
-  let metadata: Record<string, unknown> | null = null
   if (typeof machineMetadata === 'string') {
     try {
-      metadata = JSON.parse(machineMetadata) as Record<string, unknown>
+      return JSON.parse(machineMetadata) as Record<string, unknown>
     } catch {
       return null
     }
-  } else {
-    metadata = machineMetadata as Record<string, unknown>
   }
-  const scheme = metadata?.settlement_scheme
+  return machineMetadata as Record<string, unknown>
+}
+
+/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
+function settlementSchemeOf(machineMetadata: unknown): string | null {
+  const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
   return typeof scheme === 'string' ? scheme : null
+}
+
+/**
+ * #2960: `machine_metadata.delegate_account_address`, written at authorize
+ * on both delegation-rail legs (`modules/x402/delegation-authorize.ts`).
+ * Null on rows authorized before #2960 and on the legacy rail.
+ */
+function delegateAccountAddressOf(machineMetadata: unknown): string | null {
+  const value = parsedMachineMetadata(machineMetadata)?.delegate_account_address
+  return typeof value === 'string' ? value : null
 }
 
 /**
@@ -801,11 +813,10 @@ export async function getAgentPaymentStatus(
       {
         account_address: payment.account_address ?? null,
         delegate_address: payment.delegate_address,
-        // #2960: not stored on payment_intents and deriving it here would be
-        // a per-status-read RPC (`computeHybridAccountAddress`) — the same
-        // decision as the receipts list. `GET /machine-payments/agent`
-        // remains the place to look it up.
-        delegate_account_address: null,
+        // #2960: `machine_metadata.delegate_account_address`, written at
+        // authorize on both delegation-rail legs — null for rows authorized
+        // before #2960 and on the legacy rail, where no such account exists.
+        delegate_account_address: delegateAccountAddressOf(payment.machine_metadata),
         merchant_address: merchantAddress,
       },
     )

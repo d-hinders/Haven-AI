@@ -725,9 +725,13 @@ export async function findIntentStatusRow(
 
 // ── Receipt assembly (lib/receipt.ts) ────────────────────────────────────────
 
+// #2960: `delegate_account_address` is `pi.machine_metadata->>'delegate_account_address'`,
+// written at authorize on both delegation-rail legs — null on rows
+// authorized before #2960 and on the legacy rail.
 export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_address, pi.chain_id, pi.token_symbol, pi.token_address,
             pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
             pi.signature, pi.tx_hash, pi.confirmed_at,
+            pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
             mpe.resource_url AS resource_url,
             mpe.amount_sek AS amount_sek
      FROM payment_intents pi
@@ -749,6 +753,8 @@ export interface PaymentReceiptRow {
   confirmed_at: string | null
   resource_url: string | null
   amount_sek: string | null
+  /** #2960: from `machine_metadata`; null on rows authorized before #2960. */
+  delegate_account_address: string | null
 }
 
 export async function findSettledPaymentReceiptRow(

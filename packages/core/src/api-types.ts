@@ -3358,7 +3358,7 @@ export type components = {
             treasury_account: string | null;
             /** @description The agent's signing EOA. */
             delegate: string | null;
-            /** @description The agent's delegate smart account (erc7710 `delegator`). Null when not stored and deriving it live would add a chain read this surface does not otherwise pay for. */
+            /** @description The agent's delegate smart account (erc7710 `delegator`), persisted at authorize time. Null for rows authorized before #2960 and on the legacy rail. */
             delegate_account: string | null;
             /** @description `payTo`. */
             merchant: string | null;
@@ -3381,7 +3381,10 @@ export type components = {
             /** Format: uri */
             resource_url: string | null;
             merchant_address: string | null;
-            /** @description Delegate EOA captured on a payment intent. */
+            /**
+             * @deprecated
+             * @description Delegate EOA captured on a payment intent. Deprecated: same value as `parties.delegate`; prefer `parties`.
+             */
             payer_address?: string | null;
             parties?: components["schemas"]["Parties"];
             tx_hash: string | null;
@@ -3741,7 +3744,10 @@ export type components = {
             /** Format: uri */
             resource_url: string;
             merchant_address?: string | null;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @description The treasury account — same as `parties.treasury_account`; prefer `parties`.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             payer_address?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             settlement_address?: string;

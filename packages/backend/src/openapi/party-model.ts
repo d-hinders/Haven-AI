@@ -24,9 +24,11 @@ export interface Parties {
   delegate: string | null
   /**
    * The agent's delegate SMART account (erc7710 `delegator`; the merchant's
-   * `PAYMENT-RESPONSE.payer` and invoice buyer on that scheme). Null
-   * wherever deriving it live would cost a chain read the surface does not
-   * otherwise pay for — see the call site's comment for the specific reason.
+   * `PAYMENT-RESPONSE.payer` and invoice buyer on that scheme). Persisted at
+   * authorize time on `payment_intents.machine_metadata.delegate_account_address`
+   * (both delegation-rail legs write it, `modules/x402/delegation-authorize.ts`).
+   * Null for rows authorized before #2960, and on the legacy rail, where no
+   * such account exists — never derived live at read time.
    */
   delegate_account: string | null
   /** `payTo`. */
@@ -42,9 +44,9 @@ export interface Parties {
 export interface PartySourceFields {
   /** Treasury: `smart_accounts.account_address` / `machine_payment_evidence.payer_address`. */
   account_address: string | null
-  /** Delegate: `agents.delegate_address`. */
+  /** Delegate: `agents.delegate_address` for the agent's CURRENT delegate; the intent-captured delegate for a receipt/status row. */
   delegate_address: string | null
-  /** Delegate account, when known without an extra chain read; null otherwise. */
+  /** Delegate account, from `machine_metadata.delegate_account_address`; null on rows authorized before #2960 or on the legacy rail. */
   delegate_account_address: string | null
   /** Merchant / `payTo`. */
   merchant_address: string | null

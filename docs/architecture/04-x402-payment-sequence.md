@@ -1033,7 +1033,7 @@ The demo merchant's own receipt labels the address for what it is
 custody it does not have. Third-party merchants will print whatever they
 print — which is exactly why the API-side mapping exists.
 
-**#2960** names these three addresses on the API side as a shared vocabulary
+**#2960** names these four addresses on the API side as a shared vocabulary
 (`treasury_account` / `delegate` / `delegate_account` / `merchant`), additive
 on receipts, payment status and the payment-receipt bundle — see
 [`agent-payment-status.ts`](../../packages/backend/src/modules/payments/agent-payment-status.ts)

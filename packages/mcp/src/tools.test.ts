@@ -1439,6 +1439,136 @@ describe('merchant MCP endpoint discovery (#1301)', () => {
   })
 })
 
+// ── #2983: local-runtime parity for the demo merchant's own `merchant_not_ready`
+// capacity refusal (hosted counterpart: mcp-server's `merchantNotReadyErrorFor`,
+// #2979) ───────────────────────────────────────────────────────────────────────
+
+describe('haven_pay_mcp_tool: merchant_not_ready parity (#2983)', () => {
+  const NOT_READY_DELEGATE_KEY = '0x' + 'd'.repeat(64)
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function notReadyHandlers() {
+    const haven = new HavenClient({
+      apiKey: 'sk_agent_test',
+      baseUrl: 'http://haven.test',
+      delegateKey: NOT_READY_DELEGATE_KEY,
+    })
+    return createToolHandlers(haven)
+  }
+
+  function installFetch(
+    routes: Record<string, { status: number; body?: unknown }>,
+  ): { url: string; method: string }[] {
+    const calls: { url: string; method: string }[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: unknown, init: RequestInit = {}) => {
+      const urlStr = String(url)
+      const method = (init.method ?? 'GET').toUpperCase()
+      calls.push({ url: urlStr, method })
+      const bodyStr = typeof init.body === 'string' ? init.body : undefined
+      let bodyJson: Record<string, unknown> | undefined
+      if (bodyStr) {
+        try {
+          bodyJson = JSON.parse(bodyStr)
+        } catch {
+          bodyJson = undefined
+        }
+      }
+      if (bodyJson?.method === 'initialize') {
+        return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      const key = `${method} ${urlStr}`
+      const def = routes[key]
+      if (!def) {
+        return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify(def.body ?? {}), {
+        status: def.status,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    return calls
+  }
+
+  it('a 503 { error: "merchant_not_ready" } body is reported as MERCHANT_NOT_READY, never as a discovery miss', async () => {
+    const calls = installFetch({
+      'POST http://merchant.test/mcp': {
+        status: 503,
+        body: { error: 'merchant_not_ready', reason_code: 'fail_floor_reached', settlements_remaining: 0, retry_after_s: 30 },
+      },
+    })
+
+    const result = await notReadyHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('MERCHANT_NOT_READY')
+    expect(result.nextAction).toBe('stop_and_tell_user')
+    expect(result.retry_with_new_quote).toBe(true)
+    expect(result.message).toMatch(/reason_code: fail_floor_reached/)
+    expect(result.message).toMatch(/Retry after approximately 30s/)
+    expect(result.message).not.toMatch(/discovery document/)
+    // Never spent the discovery retry — the merchant's own reason is
+    // conclusive, no need to probe .well-known or same-origin `/`.
+    expect(calls.some((c) => c.url.includes('.well-known'))).toBe(false)
+  })
+
+  it('negative pin: a bare 503 (no matching body) keeps today\'s discovery path, not MERCHANT_NOT_READY', async () => {
+    installFetch({
+      'POST http://merchant.test/mcp': { status: 503, body: { error: 'service_unavailable' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': { status: 404, body: {} },
+      'GET http://merchant.test/': { status: 404, body: {} },
+    })
+
+    const result = await notReadyHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).not.toBe('MERCHANT_NOT_READY')
+    expect(result.message).toMatch(/No same-origin discovery document/)
+  })
+
+  it('negative pin: a non-JSON 503 body keeps today\'s discovery path, not MERCHANT_NOT_READY', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: unknown, init: RequestInit = {}) => {
+      const urlStr = String(url)
+      const bodyStr = typeof init.body === 'string' ? init.body : undefined
+      let bodyJson: Record<string, unknown> | undefined
+      if (bodyStr) {
+        try {
+          bodyJson = JSON.parse(bodyStr)
+        } catch {
+          bodyJson = undefined
+        }
+      }
+      if (bodyJson?.method === 'initialize') {
+        return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (urlStr === 'http://merchant.test/mcp') {
+        return new Response('<html>Service Unavailable</html>', { status: 503, headers: { 'Content-Type': 'text/html' } })
+      }
+      return new Response(JSON.stringify({}), { status: 404, headers: { 'Content-Type': 'application/json' } })
+    })
+
+    const result = await notReadyHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).not.toBe('MERCHANT_NOT_READY')
+    expect(result.message).toMatch(/No same-origin discovery document/)
+  })
+})
+
 // ── #318 Tool selection clarity ───────────────────────────────────────────────
 
 describe('Tool selection errors (#318)', () => {

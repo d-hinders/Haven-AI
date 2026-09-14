@@ -247,7 +247,7 @@ describe('haven_settle_mcp_tool', () => {
     expect(completeSpy).not.toHaveBeenCalled()
   })
 
-  it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects post-funding', async () => {
+  it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects post-funding — eip3009 KEEPS sweep guidance', async () => {
     stubFetch({
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
     })
@@ -268,7 +268,54 @@ describe('haven_settle_mcp_tool', () => {
 
     if (payload.success) throw new Error('expected a failure payload')
     expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    // eip3009 funded the delegate BEFORE this refusal — the delegate wallet
+    // genuinely may hold stranded funds, so the sweep guidance stays.
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+    expect(payload.message).toMatch(/stranded funds/)
+  })
+
+  /**
+   * #2983 (follow-up from #2979's review): on erc7710 there is NO funding
+   * leg — the signature IS the settlement child (#1456), delivered straight
+   * to `POST /x402/:id/settle`. A merchant refusal at this point means
+   * NOTHING moved: no delegate balance was ever created, so there is nothing
+   * to strand and nothing to sweep. The eip3009 test above pins the case
+   * where the sweep guidance is TRUE; this one pins the case where it is not.
+   */
+  it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects an erc7710 settle — NO sweep guidance, honest message', async () => {
+    const SIG7710 = '0x' + '33'.repeat(65)
+    stubFetch({
+      'POST /x402/pay_7710_reject/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 503,
+      ok: false,
+      body: { error: 'merchant_not_ready', reason_code: 'fail_floor_reached', retry_after_s: 45 },
+    })
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710_reject',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    // No stranded-funds claim and no sweep suggestion — nothing moved.
+    expect(payload.suggested_tool).toBeUndefined()
+    expect(payload.next_action).not.toBe(AgentPaymentNextAction.SweepStrandedFunds)
+    expect(payload.message).not.toMatch(/stranded/)
+    expect(payload.message).not.toMatch(/sweep_stranded|haven_sweep_delegate/)
+    // What IS true: no settlement, budget intact, honest re-quote guidance,
+    // and the merchant's own reason surfaced.
+    expect(payload.message).toMatch(/no settlement occurred/i)
+    expect(payload.message).toMatch(/budget is intact/i)
+    expect(payload.message).toMatch(/reason_code: fail_floor_reached/)
+    expect(payload.message).toMatch(/retry after approximately 45s/i)
+    expect(payload.retry_with_new_quote).toBe(true)
   })
 })
 

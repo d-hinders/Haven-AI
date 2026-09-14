@@ -169,6 +169,26 @@ export async function resolveMerchantCallContext(
  * via haven_sweep_delegate. The X-PAYMENT header is a signed authorization the
  * edge signer produced — Haven relays it but never holds the key.
  */
+/**
+ * #2983: the merchant may refuse the paid retry with its OWN
+ * `merchant_not_ready` capacity signal (same shape `merchantNotReadyErrorFor`
+ * in `support/mcp-context.ts` reads on the quote path) rather than a generic
+ * rejection. Best-effort: any other shape (or a non-JSON body) yields `null`,
+ * and the caller falls back to the generic refusal message.
+ */
+function merchantNotReadyBodyFor(
+  body: unknown,
+): { reasonCode?: string; retryAfterS?: number } | null {
+  if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
+    return null
+  }
+  const { reason_code, retry_after_s } = body as Record<string, unknown>
+  return {
+    reasonCode: typeof reason_code === 'string' ? reason_code : undefined,
+    retryAfterS: typeof retry_after_s === 'number' ? retry_after_s : undefined,
+  }
+}
+
 export async function deliverMerchantPayment(
   haven: HavenClient,
   // Parsed haven_complete_mcp_tool / haven_settle_mcp_tool args (Zod-validated).
@@ -270,6 +290,38 @@ export async function deliverMerchantPayment(
       status = await haven.getPaymentStatus(args.payment_id)
     } catch {
       // Preserve the merchant rejection even if status lookup is unavailable.
+    }
+    // #2983: `noFundingLeg` (set true ONLY on the erc7710 call sites, above)
+    // is the same scheme signal `ensureFundingConfirmed`'s gate reads — reuse
+    // it rather than re-deriving "which scheme is this" a second way.
+    if (options?.noFundingLeg) {
+      // On erc7710 the signature IS the settlement child (#1456): there is no
+      // funding leg, so a merchant refusal at this point means NOTHING moved
+      // — no delegate balance to strand, nothing to sweep. The eip3009
+      // guidance below is false here and would tell the agent to "reconcile"
+      // a balance that was never created. Say what is true instead.
+      const notReady = merchantNotReadyBodyFor(result.body)
+      const notReadyGuidance = notReady
+        ? ' The merchant reported it cannot settle right now' +
+          (notReady.reasonCode ? ` (reason_code: ${notReady.reasonCode})` : '') +
+          (notReady.retryAfterS ? `; retry after approximately ${notReady.retryAfterS}s.` : '.')
+        : ''
+      throw new HostedToolError({
+        code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
+        message:
+          `Merchant refused to deliver the resource (HTTP ${result.status}). erc7710 has no ` +
+          `funding leg, so no settlement occurred and no funds moved — the agent's budget is ` +
+          `intact.${notReadyGuidance} Re-quote and try again later; there is nothing to sweep. ` +
+          `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
+        statusCode: result.status,
+        paymentId: args.payment_id,
+        status: status?.status ?? 'merchant_rejected_after_funding',
+        phase: status?.phase ?? 'not_delivered',
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        rail: status?.rail ?? 'erc7710',
+        idempotencyKey: status?.idempotencyKey,
+        retryWithNewQuote: true,
+      })
     }
     throw new HostedToolError({
       code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,

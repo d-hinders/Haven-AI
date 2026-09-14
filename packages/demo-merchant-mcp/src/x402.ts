@@ -362,6 +362,42 @@ export function decodeTransferAmountCap(terms: Hex): bigint | null {
   }
 }
 
+/**
+ * #2969: the explicit truth about what actually happened on-chain, replacing
+ * the #2970 boolean (`settled?: boolean`) that was inferred from
+ * `txHash !== ZERO_TX_HASH`. A boolean could not distinguish the two
+ * zero-hash paths from each other, and they are different facts:
+ *
+ *  - `settled_onchain`: the normal path — a real settlement transaction was
+ *    submitted AND its receipt was observed (`confirmSubmittedPayment`).
+ *  - `already_settled_earlier`: `AuthorizationAlreadyUsedError` recovery — the
+ *    chain says this authorization (or, on erc7710, this settlement child)
+ *    already moved the money in an EARLIER transaction that this process did
+ *    not submit and cannot name. The goods are owed; there is no hash to show.
+ *  - `settlement_unknown`: the `MERCHANT_SKIP_SETTLE_PRODUCT` QA hook — no
+ *    settlement was ever attempted, so nothing is known either way.
+ *
+ * This is display/reporting-only, same as `PurchaseSummary` in server.ts — the
+ * wire to the buyer (`paymentResponse`, `paymentResponseHeader`) is UNCHANGED,
+ * still carrying `transaction: ZERO_TX_HASH` on the two non-settled paths
+ * exactly as before. That is the x402 protocol surface; this field is not on
+ * it.
+ */
+export type SettlementState = 'settled_onchain' | 'already_settled_earlier' | 'settlement_unknown'
+
+/**
+ * #2969: the state is caller-supplied (the hash alone cannot tell the two
+ * zero-hash paths apart), so pin the one thing the hash CAN say: a real hash
+ * is `settled_onchain` and the zero hash never is. A caller that disagrees is
+ * a bug, not a receipt — throw before anything is rendered or delivered.
+ */
+export function assertSettlementConsistent(txHash: Hex, settlement: SettlementState): void {
+  const realHash = txHash !== ZERO_TX_HASH
+  if (realHash !== (settlement === 'settled_onchain')) {
+    throw new Error(`settlement "${settlement}" contradicts txHash ${txHash}`)
+  }
+}
+
 export interface SettledPayment {
   productId: ProductId
   settlementMethod: SettlementMethod
@@ -372,18 +408,8 @@ export interface SettledPayment {
   txHash: Hex
   paymentResponse: SettleResponse
   paymentResponseHeader: string
-  /**
-   * #2970: false ONLY on the two zero-hash paths — the
-   * MERCHANT_SKIP_SETTLE_PRODUCT QA hook and `AuthorizationAlreadyUsedError`
-   * recovery — both of which build this with `ZERO_TX_HASH` because no real
-   * on-chain settlement ran (or was observed). `undefined`/`true` mean a real
-   * settlement (the normal case; existing call sites and fixtures need no
-   * change). This is display/reporting-only, same as `PurchaseSummary` below —
-   * the wire to the buyer (`paymentResponse`, `paymentResponseHeader`) is
-   * UNCHANGED either way, still carrying `transaction: ZERO_TX_HASH` on those
-   * two paths exactly as before.
-   */
-  settled?: boolean
+  /** #2969: see `SettlementState`. Always set, never inferred from `txHash`. */
+  settlement: SettlementState
 }
 
 export interface SettlementClient {
@@ -637,7 +663,7 @@ export function createX402PaymentProcessor(
           // are owed — rather than being charged and handed a 402.
           const entry: SettledCacheEntry = {
             productId: params.productId,
-            payment: buildSettledPayment(params, ZERO_TX_HASH),
+            payment: buildSettledPayment(params, ZERO_TX_HASH, 'already_settled_earlier'),
           }
           settled.set(productKey, entry)
           return entry
@@ -684,7 +710,7 @@ export function createX402PaymentProcessor(
       }
       throw err
     }
-    const payment = buildSettledPayment(params, txHash)
+    const payment = buildSettledPayment(params, txHash, 'settled_onchain')
     const entry = { productId: params.productId, payment }
     settled.set(productKey, entry)
     return entry
@@ -693,7 +719,9 @@ export function createX402PaymentProcessor(
   function buildSettledPayment(
     params: { productId: ProductId; verified: VerifiedPayment; expectedAmount: bigint },
     txHash: Hex,
+    settlement: SettlementState,
   ): SettledPayment {
+    assertSettlementConsistent(txHash, settlement)
     const response: SettleResponse = {
       success: true,
       payer: params.verified.payer,
@@ -709,11 +737,8 @@ export function createX402PaymentProcessor(
       value: params.expectedAmount,
       nonce: params.verified.nonce,
       txHash,
-      // #2970: a zero hash means no real on-chain settlement ran (or was
-      // observed) — see `ZERO_TX_HASH`'s two call sites above. Derived from
-      // the hash itself rather than threaded as a caller flag, so it can
-      // never drift from what `paymentResponse.transaction` (below) says.
-      settled: txHash !== ZERO_TX_HASH,
+      // #2969: explicit, caller-supplied state — see `SettlementState`.
+      settlement,
       paymentResponse: response,
       paymentResponseHeader: encodePaymentResponseHeader(response),
     }
@@ -928,6 +953,7 @@ export function createX402PaymentProcessor(
         return buildSettledPayment(
           { productId: params.productId, verified, expectedAmount: params.expectedAmount },
           ZERO_TX_HASH,
+          'settlement_unknown',
         )
       }
 

@@ -455,6 +455,10 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
     expect(payload.message).toContain('1500000')
     expect(payload.message).toContain('1000000')
+    // #2975: the refusal is machine-readable, not prose-only — the agent must
+    // stop and confirm the higher amount, then re-quote before retrying.
+    expect(payload.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(payload.retry_with_new_quote).toBe(true)
     // The MCP lifecycle reads the public delegate address before quoting, but
     // the cap guard still fires before any funding intent is constructed.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()

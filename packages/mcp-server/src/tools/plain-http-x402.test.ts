@@ -74,6 +74,9 @@ describe('haven_pay_x402_quote', () => {
     expect(payload.success).toBe(false)
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
+    // #2975: same refusal on the plain-HTTP path carries the same guidance.
+    expect(payload.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(payload.retry_with_new_quote).toBe(true)
     // #2041 CHARACTERIZATION CHANGE, stated rather than quietly dropped: this
     // used to also assert the agent fetch had not run. The cap is now asserted
     // AFTER scheme selection — because a cap checked before selection is a cap

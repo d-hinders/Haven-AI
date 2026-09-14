@@ -61,6 +61,16 @@ export interface InvoiceParams {
   invoiceNumber: string
   productId: ProductId
   buyerAddress: string
+  /**
+   * #2960: which party `buyerAddress` actually is. The merchant only ever
+   * observes the address it verified the payment FROM — the delegate EOA on
+   * `eip3009`, the delegate SMART account (`delegator`) on `erc7710` — never
+   * the owner's treasury account, which is not knowable merchant-side (it
+   * never appears in the x402 payload on either scheme). This is what
+   * carries that distinction onto the invoice instead of an unqualified
+   * "buyer".
+   */
+  payerRole: 'agent_delegate' | 'agent_delegate_account'
   /** EIP-3009 authorization nonce (hex bytes32) */
   authorizationNonce: string
   /** Tx hash if settled, otherwise undefined */
@@ -83,6 +93,13 @@ export interface InvoiceJson {
   kopare: {
     identifierare: string
     typ: 'blockkedjeadress'
+    /**
+     * #2960, additive — which party `identifierare` is (see
+     * `InvoiceParams.payerRole`). Never read by `buildInvoiceText` (the
+     * Swedish render stays byte-for-byte per #1550); the English render
+     * uses it to avoid calling a delegate address "the buyer".
+     */
+    roll: 'agent_delegate' | 'agent_delegate_account'
   }
   rader: InvoiceRow[]
   belopp_exkl_moms: string
@@ -142,6 +159,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     kopare: {
       identifierare: params.buyerAddress,
       typ: 'blockkedjeadress',
+      roll: params.payerRole,
     },
     rader: [row],
     belopp_exkl_moms: formatUsdc(exklMoms),
@@ -236,8 +254,9 @@ SELLER
   Org. no:      ${inv.saljare.org_nr}
   VAT reg. no:  ${inv.saljare.moms_nr}
 
-BUYER
+PAYER
   Blockchain address: ${inv.kopare.identifierare}
+  Role: ${inv.kopare.roll === 'agent_delegate_account' ? 'agent delegate account (erc7710 delegator) — paid on behalf of an owner treasury account not visible to this merchant' : 'agent delegate address (eip3009)'}
 
 ────────────────────────────────────────────────────────────
   Invoice number:  ${inv.fakturanummer}
@@ -291,6 +310,10 @@ export function invoiceForPayment(payment: SettledPayment, productId: ProductId)
     invoiceNumber: nextInvoiceNumber(),
     productId,
     buyerAddress: payment.from,
+    // #2960: `payment.from` is the delegate EOA on `eip3009` and the
+    // delegate SMART account (`delegator`) on `erc7710` — see
+    // `verifyEip3009Payment`/`verifyErc7710Payment` in `x402.ts`.
+    payerRole: payment.settlementMethod === 'erc7710' ? 'agent_delegate_account' : 'agent_delegate',
     authorizationNonce: payment.nonce,
     txHash: payment.txHash,
   })

@@ -87,12 +87,26 @@ export const TWIN_KEY_PAIRS: ReadonlyArray<readonly [string, string]> = [
 ]
 
 /** Strip every twin NEW key (`account_*`) from an object, recursively into arrays. */
+/**
+ * #2960: `parties` is additive on `PaymentReceipt.payment` (the SAME shape
+ * `buildPaymentReceipt` returns and this file's `payment-receipt` fixture
+ * pins), but it is NOT a `[oldKey, newKey]` twin of anything — it has no
+ * single old-name sibling to equal-compare against (it derives from FOUR
+ * fields, several of which have no existing wire name at all). Stripping it
+ * here, alongside the P0 twin keys, is what keeps this file's base-6e3ea1dc
+ * replay green after #2960 lands; `TWIN_KEY_PAIRS` itself is untouched
+ * because `collectTwinMismatches` below only knows how to check an
+ * old/new PAIR, and `parties` has none.
+ */
+const P2960_ADDITIVE_KEYS: ReadonlySet<string> = new Set(['parties'])
+
 function stripTwins(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripTwins)
   if (value === null || typeof value !== 'object') return value
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (TWIN_KEY_PAIRS.some(([, newKey]) => newKey === k)) continue
+    if (P2960_ADDITIVE_KEYS.has(k)) continue
     out[k] = stripTwins(v)
   }
   return out

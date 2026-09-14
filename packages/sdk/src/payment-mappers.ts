@@ -1,13 +1,26 @@
 import type {
   HavenPaymentReceipt,
+  PaymentParties,
   PaymentResult,
   PaymentStatus,
   PaymentStatusResult,
   RawHavenPaymentReceipt,
+  RawPaymentParties,
   RawPaymentStatusResult,
   RawStatusResponse,
 } from './types.js'
 import { canonicalAgentPaymentNextAction } from './types.js'
+
+/** #2960: one mapper, reused by every raw shape carrying `parties`. */
+function mapParties(raw: RawPaymentParties | undefined): PaymentParties | undefined {
+  if (!raw) return undefined
+  return {
+    treasuryAccount: raw.treasury_account,
+    delegate: raw.delegate,
+    delegateAccount: raw.delegate_account,
+    merchant: raw.merchant,
+  }
+}
 
 export type ExplorerUrlBuilder = (chainId: number | undefined, txHash: string) => string
 
@@ -56,6 +69,7 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     resourceUrl: raw.resource_url,
     merchantAddress: raw.merchant_address,
     payerAddress: raw.payer_address ?? null,
+    parties: mapParties(raw.parties),
     txHash: raw.tx_hash,
     expiresAt: raw.expires_at,
     chainId: raw.chain_id,
@@ -98,6 +112,7 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
     resourceUrl: raw.resource_url,
     merchantAddress: raw.merchant_address,
     payerAddress: raw.payer_address,
+    parties: mapParties(raw.parties),
     settlementAddress: raw.settlement_address,
     tokenSymbol: raw.token_symbol,
     tokenAddress: raw.token_address,

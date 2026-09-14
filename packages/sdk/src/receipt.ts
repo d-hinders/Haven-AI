@@ -31,6 +31,18 @@ export interface PaymentReceipt {
      * the window: a server from before the twin emits `safe` only.
      */
     account?: string
+    /**
+     * #2960: one party vocabulary for "who paid", additive alongside `safe`/
+     * `account` above (which are `parties.treasury_account` only). Optional
+     * for the window: a server from before #2960 emits neither. Ignored by
+     * `verifyPaymentReceipt`, which reads only `authorization`.
+     */
+    parties?: {
+      treasury_account: string | null
+      delegate: string | null
+      delegate_account: string | null
+      merchant: string | null
+    }
     chainId: number
     settledAt: string | null
     resourceUrl: string | null

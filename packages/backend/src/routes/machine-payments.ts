@@ -90,7 +90,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
 
-    const receipts = await listReceipts(agent.id, limit)
+    const receipts = await listReceipts(agent.id, limit, agent.delegate_address)
     return reply.send({ receipts })
   })
 
@@ -210,7 +210,7 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(400).send({ error: 'protocolReceiptPayload must be an object' })
     }
 
-    const result = await attachEvidenceHandler(agent.id, body)
+    const result = await attachEvidenceHandler(agent.id, body, agent.delegate_address)
     return reply.code(result.statusCode).send(result.body)
   })
 

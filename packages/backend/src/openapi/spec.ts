@@ -1024,6 +1024,45 @@ const paymentSignData = {
   additionalProperties: false,
 } as const
 
+/**
+ * #2960 — one party vocabulary for "who paid", additive alongside every
+ * existing lone `payer*` field (same discipline as #2907's dual-emit, but
+ * these four are not same-value twins of a single old field — they are
+ * DISTINCT addresses, so this is a new composite object, not an alias).
+ * Flat and closed (#2888 — no `$ref` inside `allOf`): a plain object of four
+ * nullable addresses.
+ *
+ *   treasury_account — the owner's smart account the funds actually left
+ *     (`smart_accounts.account_address` / `machine_payment_evidence.payer_address`).
+ *   delegate         — the agent's signing EOA (`agents.delegate_address`).
+ *   delegate_account — the agent's delegate SMART account, the erc7710
+ *     `delegator` / the merchant's `PAYMENT-RESPONSE.payer` and invoice buyer
+ *     on that scheme. Null wherever deriving it live would cost a chain read
+ *     this surface does not otherwise pay for (documented per call site).
+ *   merchant         — `payTo`.
+ *
+ * On an EIP-3009 payment `delegate` is what the merchant calls "payer"; on
+ * an erc7710 payment it is `delegate_account` instead — the two schemes
+ * disagree about which of THESE FOUR the merchant-visible payer is, which is
+ * exactly the collision #2960 exists to name explicitly instead of leaving
+ * implicit in a single ambiguous `payer` field.
+ */
+const partiesSchema = {
+  type: 'object',
+  required: ['treasury_account', 'delegate', 'delegate_account', 'merchant'],
+  properties: {
+    treasury_account: { anyOf: [address, { type: 'null' }], description: 'The owner smart account the funds left.' },
+    delegate: { anyOf: [address, { type: 'null' }], description: "The agent's signing EOA." },
+    delegate_account: {
+      anyOf: [address, { type: 'null' }],
+      description:
+        "The agent's delegate smart account (erc7710 `delegator`). Null when not stored and deriving it live would add a chain read this surface does not otherwise pay for.",
+    },
+    merchant: { anyOf: [address, { type: 'null' }], description: '`payTo`.' },
+  },
+  additionalProperties: false,
+} as const
+
 const agentPaymentStatus = {
   type: 'object',
   required: [
@@ -1063,26 +1102,51 @@ const agentPaymentStatus = {
     resource_url: { type: ['string', 'null'], format: 'uri' },
     merchant_address: { anyOf: [address, { type: 'null' }] },
     payer_address: { anyOf: [address, { type: 'null' }], description: 'Delegate EOA captured on a payment intent.' },
+    // #2960: additive alongside `payer_address` above — the party quadruple,
+    // not a same-value twin of it (`payer_address` is `delegate` only).
+    parties: { $ref: '#/components/schemas/Parties' },
     tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
     expires_at: isoDateTime,
     chain_id: { type: 'integer' },
     message: { type: 'string' },
+    // Present when the fee module quotes a nonzero fee for this rail
+    // (`modules/fee/index.ts` — dark today: amount "0", applied false).
+    fee: {
+      type: ['object', 'null'],
+      properties: {
+        amount: { type: 'string' },
+        token: { type: 'string' },
+        basis_points: { type: 'integer' },
+        applied: { type: 'boolean' },
+      },
+      required: ['amount', 'token', 'basis_points', 'applied'],
+      additionalProperties: false,
+    },
     amount_atomic: { type: ['string', 'null'] },
     asset: { anyOf: [address, { type: 'null' }] },
     network: { type: ['string', 'null'] },
     description: { type: ['string', 'null'] },
     idempotency_key: { type: ['string', 'null'] },
     x402: { $ref: '#/components/schemas/RailContext' },
+    // #2888: flat and closed, NOT `allOf: [RailContext, {...}]` — an allOf
+    // member is validated independently, so a field this object needs
+    // (`challenge_id`) that only the second member declares fails the FIRST
+    // member's `additionalProperties: false` the moment both members close.
+    // Duplicates `RailContext`'s fields rather than referencing it.
     mpp: {
-      allOf: [
-        { $ref: '#/components/schemas/RailContext' },
-        {
-          type: 'object',
-          properties: {
-            challenge_id: { type: ['string', 'null'] },
-          },
-        },
-      ],
+      type: 'object',
+      required: ['amount_atomic', 'asset', 'network', 'resource_url', 'merchant_address', 'description', 'idempotency_key'],
+      properties: {
+        amount_atomic: { type: ['string', 'null'] },
+        asset: { anyOf: [address, { type: 'null' }] },
+        network: { type: ['string', 'null'] },
+        resource_url: { type: ['string', 'null'], format: 'uri' },
+        merchant_address: { anyOf: [address, { type: 'null' }] },
+        description: { type: ['string', 'null'] },
+        idempotency_key: { type: ['string', 'null'] },
+        challenge_id: { type: ['string', 'null'] },
+      },
+      additionalProperties: false,
     },
   },
   additionalProperties: false,
@@ -7657,6 +7721,7 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      Parties: partiesSchema,
       AgentPaymentStatus: agentPaymentStatus,
       X402PaymentOption: {
         type: 'object',
@@ -8113,6 +8178,9 @@ export const openapiSpec = {
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,
+          // #2960: additive — `payer_address` above is `parties.treasury_account`
+          // only; this carries the other three.
+          parties: { $ref: '#/components/schemas/Parties' },
         },
         additionalProperties: true,
       },

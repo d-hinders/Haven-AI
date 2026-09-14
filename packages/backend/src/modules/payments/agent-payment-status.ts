@@ -7,6 +7,7 @@ import {
 } from '../../domain/agent-payment-taxonomy.js'
 import { config } from '../../config.js'
 import { ethers } from 'ethers'
+import { withParties, type Parties } from '../../openapi/party-model.js'
 import {
   expireOverdueIntentById,
   findIntentStatusRow,
@@ -64,6 +65,8 @@ export interface AgentPaymentStatus {
   merchant_address: string | null
   /** Delegate captured with this intent; never inferred from a later agent rotation. */
   payer_address?: string | null
+  /** #2960: the party quadruple, additive alongside `payer_address` (`delegate` only). */
+  parties?: Parties
   tx_hash: string | null
   expires_at: string
   chain_id: number
@@ -766,34 +769,46 @@ export async function getAgentPaymentStatus(
     const rail = railFor(payment)
     const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
     const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address
-    return {
-      payment_id: payment.id,
-      kind: 'payment_intent',
-      rail,
-      status: payment.status,
-      phase: state.phase,
-      next_action: state.nextAction,
-      amount: payment.amount_human,
-      token: payment.token_symbol,
-      resource_url: resourceUrl,
-      merchant_address: merchantAddress,
-      payer_address: payment.delegate_address,
-      tx_hash: payment.tx_hash,
-      expires_at: payment.expires_at,
-      chain_id: payment.chain_id,
-      message: state.message,
-      fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
-      ...railContext({
+    return withParties(
+      {
+        payment_id: payment.id,
+        kind: 'payment_intent' as const,
         rail,
-        amountRaw: payment.amount_raw,
-        tokenAddress: payment.token_address,
-        resourceUrl,
-        merchantAddress,
-        idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
-        challengeId: payment.machine_challenge_id,
-        machineMetadata: payment.machine_metadata,
-      }),
-    }
+        status: payment.status,
+        phase: state.phase,
+        next_action: state.nextAction,
+        amount: payment.amount_human,
+        token: payment.token_symbol,
+        resource_url: resourceUrl,
+        merchant_address: merchantAddress,
+        payer_address: payment.delegate_address,
+        tx_hash: payment.tx_hash,
+        expires_at: payment.expires_at,
+        chain_id: payment.chain_id,
+        message: state.message,
+        fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
+        ...railContext({
+          rail,
+          amountRaw: payment.amount_raw,
+          tokenAddress: payment.token_address,
+          resourceUrl,
+          merchantAddress,
+          idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
+          challengeId: payment.machine_challenge_id,
+          machineMetadata: payment.machine_metadata,
+        }),
+      },
+      {
+        account_address: payment.account_address ?? null,
+        delegate_address: payment.delegate_address,
+        // #2960: not stored on payment_intents and deriving it here would be
+        // a per-status-read RPC (`computeHybridAccountAddress`) — the same
+        // decision as the receipts list. `GET /machine-payments/agent`
+        // remains the place to look it up.
+        delegate_account_address: null,
+        merchant_address: merchantAddress,
+      },
+    )
   }
 
   // #2055: the approval_requests fallback that stood here is gone — the table

@@ -1,0 +1,40 @@
+{
+  "_base": "24a08ec3",
+  "body": {
+    "payment_id": "pi-2",
+    "kind": "payment_intent",
+    "rail": "x402",
+    "status": "confirmed",
+    "phase": "payment_confirmed",
+    "next_action": "none",
+    "amount": "0.01",
+    "token": "USDC",
+    "resource_url": "https://api.example.com/data",
+    "merchant_address": "0x2222222222222222222222222222222222222222",
+    "payer_address": "0x1111111111111111111111111111111111111111",
+    "tx_hash": "0xefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "expires_at": "2026-09-01T01:00:00.000Z",
+    "chain_id": 8453,
+    "message": "The payment is confirmed.",
+    "fee": {
+      "amount": "0",
+      "token": "USDC",
+      "basis_points": 0,
+      "applied": false
+    },
+    "amount_atomic": "10000",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "network": null,
+    "description": null,
+    "idempotency_key": null,
+    "x402": {
+      "amount_atomic": "10000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "network": null,
+      "resource_url": "https://api.example.com/data",
+      "merchant_address": "0x2222222222222222222222222222222222222222",
+      "description": null,
+      "idempotency_key": null
+    }
+  }
+}

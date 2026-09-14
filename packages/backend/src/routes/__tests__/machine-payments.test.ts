@@ -607,7 +607,7 @@ describe('machine payment routes', () => {
       AUTH,
       [/FROM machine_payment_evidence e/, () => ({
         rows: [{
-          id: 'evidence-1',
+          id: '44444444-4444-4444-4444-444444444444',
           payment_intent_id: PAYMENT_ID,
           approval_request_id: null,
           agent_id: AGENT.id,
@@ -651,7 +651,7 @@ describe('machine payment routes', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
       receipts: [{
-        id: 'evidence-1',
+        id: '44444444-4444-4444-4444-444444444444',
         settlement_scheme: 'eip3009',
         budget_delegation_hash: null,
         payment_id: PAYMENT_ID,
@@ -680,8 +680,16 @@ describe('machine payment routes', () => {
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
         updated_at: '2026-05-15T12:00:01.000Z',
+        // #2960: additive alongside `payer_address` above (`treasury_account` only).
+        parties: {
+          treasury_account: AGENT.account_address.toLowerCase(),
+          delegate: AGENT.delegate_address,
+          delegate_account: null,
+          merchant: RECIPIENT.toLowerCase(),
+        },
       }],
     })
+    expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
     expect(JSON.stringify(response.json())).not.toContain('secret-proof-header')
   })
 
@@ -823,7 +831,15 @@ describe('machine payment routes', () => {
         idempotency_key: 'mpp_demo:test',
         challenge_id: challenge.challengeId,
       },
+      // #2960: additive alongside `payer_address` above (`delegate` only).
+      parties: {
+        treasury_account: AGENT.account_address,
+        delegate: AGENT.delegate_address,
+        delegate_account: null,
+        merchant: RECIPIENT.toLowerCase(),
+      },
     })
+    expectMatchesSpec('GET', '/machine-payments/{id}/status', response.json())
   })
 
   it('returns funded_but_unsettled phase when merchant retry was rejected after funding', async () => {

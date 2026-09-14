@@ -9,6 +9,7 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     chainId: 8453,
     settledAt: '2026-06-19T10:00:00.000Z',
     direction: 'out',
+    treasuryAccount: null,
     counterparty: { address: '0xmerchant', name: 'Soundside', country: null },
     token: 'USDC',
     amountAtomic: '12500000',

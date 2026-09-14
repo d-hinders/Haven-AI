@@ -31,6 +31,7 @@ import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
+import { withParties } from '../../openapi/party-model.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
@@ -553,44 +554,72 @@ export async function reconcileDelegateResidueAfterSettlement(
  * have: removing the fallback below would return `payment_id: null` for every
  * pre-#2055 approval-era receipt an agent asks about.
  */
-export function mapEvidence(row: MachinePaymentEvidenceRow) {
-  return {
-    id: row.id,
-    settlement_scheme: row.settlement_scheme ?? null,
-    budget_delegation_hash: row.budget_delegation_hash ?? null,
-    payment_id: row.payment_intent_id ?? row.approval_request_id,
-    payment_intent_id: row.payment_intent_id,
-    approval_request_id: row.approval_request_id,
-    rail: row.rail,
-    proof_status: row.proof_status,
-    tx_hash: row.tx_hash,
-    chain_id: row.chain_id,
-    resource_url: row.resource_url,
-    merchant_address: row.merchant_address,
-    payer_address: row.payer_address,
-    settlement_address: row.settlement_address,
-    token_symbol: row.token_symbol,
-    token_address: row.token_address,
-    amount_raw: row.amount_raw,
-    amount_human: row.amount_human,
-    challenge_id: row.challenge_id,
-    idempotency_key: row.idempotency_key,
-    challenge_payload: row.challenge_payload,
-    selected_payment: row.selected_payment,
-    payment_proof_header_name: row.payment_proof_header_name,
-    protocol_receipt_header_name: row.protocol_receipt_header_name,
-    protocol_receipt_payload: row.protocol_receipt_payload,
-    merchant_status: row.merchant_status,
-    confirmed_at: row.confirmed_at,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-  }
+/**
+ * #2960: `agentDelegateAddress` is the CALLING agent's current delegate EOA
+ * (`AgentContext.delegate_address`), threaded in by the route rather than
+ * joined in SQL — every reader of this shape is already scoped to one agent
+ * (`e.agent_id = $1` in `LIST_EVIDENCE_RECEIPTS_SQL`, and the attach flow's
+ * `agentId` param), so the value is already in hand at the route with no
+ * extra query. `delegate_account` is left null here: deriving it costs an
+ * RPC read (`computeHybridAccountAddress`, the same helper
+ * `routes/machine-payments.ts`'s `GET /agent` already pays once per
+ * identity read) and this is a list/echo surface, not an identity read —
+ * #2960 decided against adding a chain read here. `GET /machine-payments/agent`
+ * remains the place to look it up.
+ */
+export function mapEvidence(row: MachinePaymentEvidenceRow, agentDelegateAddress: string | null = null) {
+  return withParties(
+    {
+      id: row.id,
+      settlement_scheme: row.settlement_scheme ?? null,
+      budget_delegation_hash: row.budget_delegation_hash ?? null,
+      payment_id: row.payment_intent_id ?? row.approval_request_id,
+      payment_intent_id: row.payment_intent_id,
+      approval_request_id: row.approval_request_id,
+      rail: row.rail,
+      proof_status: row.proof_status,
+      tx_hash: row.tx_hash,
+      chain_id: row.chain_id,
+      resource_url: row.resource_url,
+      merchant_address: row.merchant_address,
+      payer_address: row.payer_address,
+      settlement_address: row.settlement_address,
+      token_symbol: row.token_symbol,
+      token_address: row.token_address,
+      amount_raw: row.amount_raw,
+      amount_human: row.amount_human,
+      challenge_id: row.challenge_id,
+      idempotency_key: row.idempotency_key,
+      challenge_payload: row.challenge_payload,
+      selected_payment: row.selected_payment,
+      payment_proof_header_name: row.payment_proof_header_name,
+      protocol_receipt_header_name: row.protocol_receipt_header_name,
+      protocol_receipt_payload: row.protocol_receipt_payload,
+      merchant_status: row.merchant_status,
+      confirmed_at: row.confirmed_at,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    },
+    {
+      // `row.payer_address` is `machine_payment_evidence.payer_address`,
+      // written from `intent.account_address` (`modules/mpp/evidence.ts`'s
+      // own evidence-base write) — the treasury, not the delegate.
+      account_address: row.payer_address ?? null,
+      delegate_address: agentDelegateAddress,
+      delegate_account_address: null,
+      merchant_address: row.merchant_address ?? null,
+    },
+  )
 }
 
 /** `GET /receipts` orchestration: recent evidence rows, agent-scoped. */
-export async function listReceipts(agentId: string, limit: number) {
+export async function listReceipts(
+  agentId: string,
+  limit: number,
+  agentDelegateAddress: string | null = null,
+) {
   const receipts = await listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit)
-  return receipts.map(mapEvidence)
+  return receipts.map((row) => mapEvidence(row, agentDelegateAddress))
 }
 
 /**
@@ -604,6 +633,7 @@ export async function listReceipts(agentId: string, limit: number) {
 export async function attachEvidenceHandler(
   agentId: string,
   body: EvidenceBody,
+  agentDelegateAddress: string | null = null,
 ): Promise<MppHandlerResult> {
   try {
     const evidence = await attachMachinePaymentEvidence({
@@ -637,7 +667,10 @@ export async function attachEvidenceHandler(
         // Echo enrichment only — never fail the 202 over it.
       }
     }
-    return { statusCode: 202, body: { evidence: mapEvidence({ ...evidence, ...intentFields }) } }
+    return {
+      statusCode: 202,
+      body: { evidence: mapEvidence({ ...evidence, ...intentFields }, agentDelegateAddress) },
+    }
   } catch (err) {
     const marker = err instanceof Error ? err.message : String(err)
     if (marker === 'payment_not_confirmed') {

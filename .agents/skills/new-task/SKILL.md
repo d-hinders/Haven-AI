@@ -10,6 +10,8 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
 ## Workflow
 
 1. Inspect the repository just enough to anchor the scope, likely files, and existing patterns. Use a read-only explorer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md) for non-trivial work.
+
+   **Every code claim in the body is measured, not remembered.** Each `file:line` reference, count, status list, schema claim, or mechanism claim (what code writes, reads, returns, or refuses) is produced by a command the body quotes, at a named commit: the body carries a one-line `Measured on `origin/dev` @ `<sha>`` and, for each figure, either the command inline or a single fenced *Method* block at the end. A mechanism claim is verified by reading the statement that does the work (the `INSERT`, the `UPDATE`, the `return`), never the comment above it, and cites that line. A claim the writer could not verify is written as a question ("verify whether … holds"), never as a fact. This is the same discipline `ship-next` already binds PR bodies with (its *Numbers state their basis* rule requires every count re-derived from its instrument at a named commit); nothing else enforces it for issue bodies, and unverified claims are the largest class of partner corrections on filed epics.
 2. Classify every affected surface using `area:frontend`, `area:backend`, `area:sdk`, `area:mcp`, `area:docs`, and `money-path`. Confirm money-path classification against [ship-next](../ship-next/SKILL.md).
 3. Ask one or two focused questions when scope, acceptance, or surface is ambiguous. Always ask before defining acceptance for money movement, authentication, authorization, or schema work.
 4. Draft the body using [the loop-task template](../../../.github/ISSUE_TEMPLATE/loop-task.md):
@@ -81,6 +83,62 @@ encodes have to be applied by hand; that is what the rest of this section is for
   are the queue for `epic=#<n>`, and that label is for the standalone queue
   (`loop-epic.md` states this; it is the one rule most easily lost when filing
   through the API). Backlog-only still applies to the epic itself.
+- **Add a `## Method` block when the epic body carries measurements.** Code
+  claims in the body follow the writer rule in step 1, so the epic body closes
+  with the block that rule asks for:
+
+````markdown
+## Method
+Measured on `origin/dev` @ `3d056b8f`.
+
+- "migration 084 renames every `safe_*` column":
+  `git show 3d056b8f -- packages/backend/migrations/084*`
+- "the refusals ledger has one writer":
+  `grep -rn "INSERT INTO payment_refusals" packages/backend/src | wc -l`
+````
+
+- **Post one spec-review verdict comment on the epic before partners are
+  pinged.** For an epic whose body carries code claims, the § *Epic review* pass
+  below ends with the captain posting this shape on the tracking issue:
+
+````markdown
+Spec-review verdict on `origin/dev` @ `3d056b8f`: 9 claims re-run, 8 reproduce,
+1 wrong (fixed): "27 `-rgb` twins" measures 20 (`grep -rc "rgb(" packages/frontend/src/app`).
+Open questions: whether refusal caps belong on the ledger or the agent card.
+````
+
+## Epic review
+
+Once per epic, after the tracking issue and its sub-issues are created and
+**before** `pending-review` is lifted (or before the epic is announced ready,
+when no review label is used), the captain dispatches **one
+[haven-reviewer](../haven-agent-workflow/SKILL.md) pass** with the spec-review
+brief below. The role already exists
+([`.agents/skills/haven-agent-workflow/references/reviewer.md`](../haven-agent-workflow/references/reviewer.md),
+dispatched by `.claude/agents/haven-reviewer.md`) — no new agent file, and the
+review runs in its own isolated tree per that role's rules. The brief is fixed
+text so two sessions dispatch the same review:
+
+> Re-run every claim in the epic body and each sub-issue against `origin/dev`
+> at the commit the body names: every `file:line`, count, status list, schema
+> and mechanism claim. Report each as *reproduces* / *wrong (with the measured
+> value and command)* / *could not verify*. Then, for each sub-issue: name any
+> lever that could break an installed client (SDK, signer, connector,
+> credential file, env var), a live payment path, or a migration ordering; and
+> list what the scope does not say that a builder would have to decide.
+> Findings by severity; no edits; no issues filed.
+
+The captain then has three obligations before the epic goes to partners:
+
+1. **Fix** every *wrong* claim in the epic and sub-issue bodies.
+2. **Resolve or state** every named lever and scope gap: settle it in the body,
+   or record it as an open question for the partners.
+3. **Post the verdict comment** on the epic: the verdict SHA, the corrections
+   applied, and the open questions (shape in § *Epics* above).
+
+The pass is **not** run for single tasks, and not for epics whose bodies carry
+no code claims — a pure process epic says so in its body and skips this
+section.
 
 ## Backlog And Shipping
 
@@ -91,5 +149,6 @@ encodes have to be applied by hand; that is what the rest of this section is for
 ## Guardrails
 
 - Do not fabricate requirements for money-path, authentication, authorization, or schema tasks.
+- Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and an epic goes to partners only after its one spec-review pass and verdict comment (§ *Epic review*).
 - Keep generated and hand-written loop issues interchangeable.
 - Prefer an editable, correctly shaped issue over speculative implementation detail.

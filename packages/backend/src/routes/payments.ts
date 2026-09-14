@@ -27,6 +27,7 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
+import { recordRefusalFireAndForget, classifyRevertForLedger } from '../modules/payments/index.js'
 import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
@@ -427,12 +428,47 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     } catch (err) {
       // Caveat rejection (budget/recipient/expiry) or bundler failure —
       // both land here, both leave the database untouched.
+      // #2945: a caveat REVERT is a policy refusal — record it
+      // fire-and-forget with the classified reason. A bundler/transport
+      // failure is NOT a refusal (the guardrails refused nothing); the
+      // classifier returns null for it and nothing is written. The
+      // 502 the caller receives is unchanged either way.
+      const refusalReason = classifyRevertForLedger(err)
+      if (refusalReason) {
+        recordRefusalFireAndForget({
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          merchantTo: to.toLowerCase(),
+          reason: refusalReason,
+          source: 'payment',
+          detail: { error_code: refusalReason },
+        })
+      }
       return reply.code(502).send({
         error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
         details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
       })
     }
     if (!authorization) {
+      // #2945: no active budget delegation for this token/recipient — how a
+      // recipient pin refuses on this rail. Record fire-and-forget, then the
+      // response the caller has always received, unchanged.
+      recordRefusalFireAndForget({
+        userId: agent.user_id,
+        agentId: agent.id,
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        amountAtomic: amountRaw.toString(),
+        accountAddress: agent.account_address,
+        merchantTo: to.toLowerCase(),
+        reason: 'no_delegation_for_target',
+        source: 'payment',
+        detail: { error_code: 'no_delegation_for_target' },
+      })
       return reply.code(403).send({
         error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this recipient`,
       })
@@ -706,6 +742,21 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         // claim or the row is stuck unretryable forever — the one place a 429
         // would otherwise be WORSE than the old burn-to-failed (#1119 review B1).
         if (err instanceof RelayerBudgetExceededError) {
+          // #2945: the sponsorship budget refused before broadcast — recorded
+          // fire-and-forget; `releaseSubmittedClaim` and the 429 are unchanged.
+          recordRefusalFireAndForget({
+            userId: agent.user_id,
+            agentId: agent.id,
+            chainId: intent.chain_id,
+            tokenSymbol: intent.token_symbol,
+            amountAtomic: intent.amount_raw,
+            accountAddress: intent.account_address,
+            merchantTo: intent.to_address,
+            resourceUrl: intent.x402_resource_url ?? intent.payment_resource_url ?? null,
+            reason: 'relayer_budget',
+            source: 'redeem',
+            detail: { error_code: 'relayer_budget_exceeded' },
+          })
           await releaseSubmittedClaim(intent.id)
           return reply.code(429).send({ payment_id: intent.id, status: 'pending_signature', error: err.message })
         }

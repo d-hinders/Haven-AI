@@ -37,7 +37,6 @@ import {
   type LocalMcpProbeResult,
 } from './probes.js'
 import {
-  installedRuntimeMatches,
   installedRuntimeMatchesVersions,
   prepareSignerRuntime,
   readRuntimeSidecar,
@@ -598,17 +597,28 @@ async function checksForAgent(
       ...(matches ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime} with the same HAVEN_*_SPEC variables set.` }),
     })
   } else {
-    const matches = await installedRuntimeMatches(sidecar.runtime_directory, sidecar.cli_path)
+    // #2963: two questions, two references. "Is the directory intact?" is
+    // answered against the SIDECAR — what npm actually laid down when this
+    // runtime was installed — and "is it current?" against the MANIFEST pin.
+    // Comparing intactness against the manifest (the pre-#2963 shape) made
+    // the drift message unreachable: an install that was merely older than
+    // the pin failed the intactness check and was reported as "stale or
+    // empty" while its CLI sat there, 64 kB, serving tools to the very next
+    // check.
+    const intact = await installedRuntimeMatchesVersions(sidecar.runtime_directory, sidecar.cli_path, {
+      signerVersion: sidecar.signer_version,
+      sdkVersion: sidecar.sdk_version,
+    })
     const versionOk = sidecar.signer_version === MCP_RUNTIME_MANIFEST.signerVersion
-    const ok = matches && versionOk
+    const ok = intact && versionOk
     checks.push({
       id: 'signer_runtime',
       label: 'Signer runtime (preinstalled wrapper)',
       ok,
       detail: ok
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory}`
-        : matches
-          ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion}.`
+        : intact
+          ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion} — intact, but outdated.`
           : `Runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
       ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
     })

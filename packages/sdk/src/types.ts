@@ -983,11 +983,16 @@ export const AgentPaymentNextAction = {
    * #2970: a `submitted` erc7710 x402 intent whose settlement window has
    * passed with no on-chain settlement evidence Haven could verify. Distinct
    * from {@link CheckStatusLater}, which this REPLACES once the window is
-   * past: polling again promises a resolution nothing will produce, because
-   * nothing is watching for this settlement except a report. Report the
-   * settlement transaction hash — via the evidence path (the hosted settle/
-   * complete tools do this automatically) or `haven_report_x402_outcome` —
-   * to resolve it.
+   * past — but it is not futile: Haven's settlement sweep (120s tick) scans
+   * each candidate over its own window plus a 120s clock-skew allowance, so
+   * it can still attribute the settlement for a short while after this value
+   * first appears. Poll {@link CheckStatusLater}'s tool
+   * (`haven_get_payment_status`) once more, roughly two minutes later; if it
+   * still shows no evidence, tell the user the goods were delivered but
+   * Haven holds no verified settlement evidence for this payment. There is
+   * no tool that reports a settlement transaction hash for this scheme —
+   * `haven_report_x402_outcome` takes no hash and refuses a non-`confirmed`
+   * intent.
    */
   AwaitingSettlementEvidence: 'awaiting_settlement_evidence',
 } as const
@@ -1172,7 +1177,7 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
   [AgentPaymentNextAction.AwaitingSettlementEvidence]:
-    'The settlement window passed with no verified on-chain evidence. Polling will not resolve this — report the settlement transaction hash instead, then check status again.',
+    "The settlement window passed with no verified on-chain evidence yet. Haven's settlement sweep may still attribute it within about two minutes — poll getPaymentStatus once more, then tell the user the goods were delivered but unverified if it still shows nothing.",
 }
 
 export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode, string> = {

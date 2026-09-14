@@ -941,7 +941,11 @@ describe('machine payment routes', () => {
     const body = response.json()
     expect(body.next_action).toBe('awaiting_settlement_evidence')
     expect(body.status).toBe('submitted')
-    expect(body.message).toMatch(/report the settlement/i)
+    // #2970 review: the honest remedy is the settlement sweep's own residual
+    // attribution window, not a hash-report tool that does not exist for
+    // this scheme (`haven_report_x402_outcome` takes no hash).
+    expect(body.message).toMatch(/settlement sweep/i)
+    expect(body.message).not.toMatch(/haven_report_x402_outcome/)
     // #2970 review: expectMatchesSpec('GET', '/machine-payments/{id}/status', body)
     // surfaces a PRE-EXISTING spec drift unrelated to this change (the route's
     // real response carries `fee` and `mpp.challenge_id`, which openapi/spec.ts

@@ -94,7 +94,7 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
   [AgentPaymentNextAction.AwaitingSettlementEvidence]:
-    'The settlement window passed with no verified on-chain evidence. Polling will not resolve this — report the settlement transaction hash instead, then check status again.',
+    "The settlement window passed with no verified on-chain evidence yet. Haven's settlement sweep may still attribute it within about two minutes — poll getPaymentStatus once more, then tell the user the goods were delivered but unverified if it still shows nothing.",
 }
 
 /**

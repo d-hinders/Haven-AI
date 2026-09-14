@@ -94,7 +94,7 @@ export const toolDescriptions = {
     summary:
       'Fetch structured Haven payment status for agent recovery.',
     behavior:
-      'State for id: phase, nextAction, rail, amount, merchant, resource, idempotency, message. parties: treasuryAccount/delegate/delegateAccount/merchant. awaiting_settlement_evidence: window passed, no evidence.',
+      'State for id: phase, nextAction, rail, amount, merchant, resource, idempotency, message. parties: treasuryAccount/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once more, else unverified.',
     nextActionGuidance: '',
   },
   getResumeState: {
@@ -106,7 +106,7 @@ export const toolDescriptions = {
   },
   getAgent: {
     summary:
-      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, and per-token remaining allowance (atomic + human-readable).',
+      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, and per-token remaining allowance (atomic + human-readable). The recommended first call in a new session to confirm who you are and whether Haven will let you spend right now.',
     selectionGuidance:
       'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:

@@ -412,7 +412,24 @@ export function createPaidMcpCompletionHandlers(
         // `createToolHandlers` directly, where no MCP SDK validation runs.
         // Both layers read their refusal text from STRICT_INPUT_TOOLS.
         const args = parseStrict('haven_complete_mcp_tool', input)
-        return deliverMerchantPayment(haven, args)
+        // #2970 review: pick explicit fields rather than spreading
+        // `deliverMerchantPayment`'s result verbatim — that result now also
+        // carries `evidence_outcome` (which can be `{outcome:'refused',
+        // statusCode:0}` on a transport failure) on BOTH schemes, and this
+        // tool's contract (`COMPLETE_MCP_TOOL_DESCRIPTION`) never documented
+        // it. Drop it here rather than document a field nothing downstream
+        // needs — `haven_settle_mcp_tool`'s erc7710 branch already turns the
+        // same evidence outcome into `code`/`settled`/agent guidance, and
+        // `haven_complete_mcp_tool` has no erc7710 branch of its own to
+        // classify (see `deliverMerchantPayment`'s `noFundingLeg` gate — a
+        // `submitted` erc7710 intent 409s here today, pre-existing).
+        const delivered = await deliverMerchantPayment(haven, args)
+        return {
+          status: delivered.status,
+          ok: delivered.ok,
+          result: delivered.result,
+          settlement_tx_hash: delivered.settlement_tx_hash,
+        }
       }),
 
     haven_settle_mcp_tool: async (input) =>
@@ -536,12 +553,13 @@ export function createPaidMcpCompletionHandlers(
                   'transaction is not mined yet). This is worth checking again — poll next_tool.'
                 : 'The merchant delivered the result, but Haven has no verified on-chain settlement ' +
                   'evidence for this payment — the reported settlement hash was missing, zero, or ' +
-                  'could not be verified. Checking again will not resolve this on its own; if you ' +
-                  'learn a real settlement transaction hash, report it via haven_report_x402_outcome ' +
-                  'so Haven can verify and confirm the payment.',
+                  "could not be verified. Haven's settlement sweep may still attribute it within " +
+                  'about two minutes; poll next_tool once more after that. If it still shows no ' +
+                  'evidence, tell the user the goods were delivered but Haven holds no verified ' +
+                  'settlement evidence for this payment.',
               summary: {
                 payment_id: args.payment_id,
-                status: pending ? 'settlement_pending' : 'delivered_unsettled',
+                status: summary7710.payment?.status ?? (pending ? 'settlement_pending' : 'delivered_unsettled'),
                 product: args.tool_name,
               },
               warnings: summary7710.warnings,

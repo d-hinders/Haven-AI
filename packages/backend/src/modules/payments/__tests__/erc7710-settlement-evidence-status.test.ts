@@ -94,7 +94,12 @@ describeDb('#2970 — erc7710 settlement-evidence status honesty', () => {
     })
     const status = await getAgentPaymentStatus(agent, paymentId)
     expect(status?.next_action).toBe('awaiting_settlement_evidence')
-    expect(status?.message).toMatch(/report the settlement/i)
+    // #2970 review: the old copy pointed at a remedy
+    // (`haven_report_x402_outcome`) that does not exist for this scheme — it
+    // takes no hash and refuses a non-`confirmed` intent. The honest message
+    // names the settlement sweep's own residual attribution window instead.
+    expect(status?.message).toMatch(/settlement sweep/i)
+    expect(status?.message).not.toMatch(/haven_report_x402_outcome/)
     expect(status?.message).not.toMatch(/^Poll/)
   })
 

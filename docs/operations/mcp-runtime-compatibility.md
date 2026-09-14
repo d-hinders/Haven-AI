@@ -157,14 +157,17 @@ last-verified: "2026-09-14"
 > BEFORE any funding relay, on both schemes) moved with the handlers verbatim.
 >
 > **Recent re-verification (#2970):** "settled means verified" — the erc7710
-> branch of `haven_settle_mcp_tool`/`haven_complete_mcp_tool`
-> (`paid-mcp-completion.ts`) now reports `settled: true` only once the backend
-> has confirmed the merchant's reported settlement hash on-chain (reusing the
-> SDK's existing evidence report, `HavenClient.completeX402MerchantCall` →
-> `MerchantCompletion.reportEvidence`), and otherwise returns
-> `code: 'DELIVERED_UNSETTLED'` or `code: 'SETTLEMENT_PENDING'` with
-> `next_action: check_status_later`. This is an ADDITIVE response-shape change
-> on the same two tool names, same schemas, same strict-input policy, same
+> branch of `haven_settle_mcp_tool` (`paid-mcp-completion.ts`) now reports
+> `settled: true` only once the backend has confirmed the merchant's reported
+> settlement hash on-chain (reusing the SDK's existing evidence report,
+> `HavenClient.completeX402MerchantCall` → `MerchantCompletion.reportEvidence`),
+> and otherwise returns `code: 'DELIVERED_UNSETTLED'` or
+> `code: 'SETTLEMENT_PENDING'` with `next_action: check_status_later`.
+> `haven_complete_mcp_tool` has no erc7710 branch of its own: it always takes
+> the funding-leg path, and `deliverMerchantPayment`'s unconditional
+> funding-leg status read 409s on a `submitted` erc7710 intent before any
+> merchant call is made — pre-existing, unchanged here. This is an ADDITIVE
+> response-shape change on `haven_settle_mcp_tool`, same schemas, same strict-input policy, same
 > #2282 fail-closed ordering — nothing here changes tool identity, the local
 > signer contract, or version skew. `haven_get_payment_status` gains a new
 > additive `next_action` value, `awaiting_settlement_evidence`, for a

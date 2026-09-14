@@ -609,7 +609,7 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
     return {
       phase: AgentPaymentPhase.PaymentSubmitted,
       nextAction: AgentPaymentNextAction.AwaitingSettlementEvidence,
-      message: "The settlement window passed and Haven has no verified on-chain evidence for this payment's settlement. Polling again will not resolve it — report the settlement transaction hash (the hosted settle/complete tools do this automatically; otherwise use the evidence path or haven_report_x402_outcome) so Haven can verify it and confirm the payment.",
+      message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. Haven's settlement sweep may still attribute it within about two minutes — poll haven_get_payment_status once more after that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
     }
   }
   return paymentIntentState(payment.status)

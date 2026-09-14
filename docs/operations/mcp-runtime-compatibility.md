@@ -1452,7 +1452,8 @@ what each server's instructions say and why they differ in length.
   > of what npm installed, *current?* against the connector's pinned manifest.
   > A runtime that is merely older than the pin reports `Installed X does not
   > match the connector's pinned Y — intact, but outdated`; only a directory
-  > with a missing CLI or package reports `stale or empty`. The repair action is
+  > whose CLI is missing, or whose installed package versions differ from what
+  > the sidecar recorded, reports `stale or empty`. The repair action is
   > the same either way (`--doctor --repair`). Nothing else in this section
   > re-read.
 

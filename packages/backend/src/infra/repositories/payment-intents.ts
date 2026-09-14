@@ -49,7 +49,7 @@ export interface PaymentIntentRow {
   id: string
   agent_id: string
   user_id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   token_symbol: string
   token_address: string
@@ -128,7 +128,7 @@ export async function listIntentsForAgent(
 // ── Inserts (one per rail shape) ─────────────────────────────────────────────
 
 export const INSERT_DELEGATION_INTENT_SQL = `INSERT INTO payment_intents (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          agent_id, user_id, account_address, chain_id, token_symbol, token_address,
           to_address, amount_raw, amount_human, delegate_address,
           allowance_nonce, sign_hash,
           execution_rail, delegation_hash, budget_delegation_hash, prepared_user_op,
@@ -141,7 +141,7 @@ export const INSERT_DELEGATION_INTENT_SQL = `INSERT INTO payment_intents (
 export interface NewDelegationIntent {
   agentId: string
   userId: string
-  safeAddress: string
+  accountAddress: string
   chainId: number
   tokenSymbol: string
   tokenAddress: string
@@ -167,7 +167,7 @@ export async function insertDelegationIntent(
   db: Executor = pool,
 ): Promise<PaymentIntentRow> {
   const result = await db.query<PaymentIntentRow>(INSERT_DELEGATION_INTENT_SQL, [
-    input.agentId, input.userId, input.safeAddress, input.chainId,
+    input.agentId, input.userId, input.accountAddress, input.chainId,
     input.tokenSymbol, input.tokenAddress, input.toAddress,
     input.amountRaw, input.amountHuman, input.delegateAddress,
     input.allowanceNonce,
@@ -182,7 +182,7 @@ export async function insertDelegationIntent(
 }
 
 export const INSERT_SEND_INTENT_SQL = `INSERT INTO payment_intents (
-          agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+          agent_id, user_id, account_address, chain_id, token_symbol, token_address,
           to_address, amount_raw, amount_human, delegate_address,
           allowance_nonce, sign_hash, send_idempotency_key, status, expires_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending_signature',
@@ -198,7 +198,7 @@ export const INSERT_SEND_INTENT_SQL = `INSERT INTO payment_intents (
 export interface NewSendIntent {
   agentId: string
   userId: string
-  safeAddress: string
+  accountAddress: string
   chainId: number
   tokenSymbol: string
   tokenAddress: string
@@ -230,7 +230,7 @@ export async function insertSendIntent(
   const result = await db.query<SendIntentRow>(INSERT_SEND_INTENT_SQL, [
     input.agentId,
     input.userId,
-    input.safeAddress,
+    input.accountAddress,
     input.chainId,
     input.tokenSymbol,
     input.tokenAddress,
@@ -261,7 +261,7 @@ function machineIntentInsertSql(
 ): string {
   return `INSERT INTO payment_intents (
       id,
-      agent_id, user_id, safe_address, chain_id, token_symbol, token_address,
+      agent_id, user_id, account_address, chain_id, token_symbol, token_address,
       to_address, amount_raw, amount_human, delegate_address,
       allowance_nonce, sign_hash, status, source, x402_resource_url, x402_category,
       x402_merchant_address, x402_idempotency_key,
@@ -297,7 +297,7 @@ export interface NewMachineIntent {
    * `gen_random_uuid()` exactly as before.
    */
   id?: string
-  agent: { id: string; user_id: string; safe_address: string; chain_id: number; delegate_address: string }
+  agent: { id: string; user_id: string; account_address: string; chain_id: number; delegate_address: string }
   rail: string
   payTo: string
   tokenSymbol: string
@@ -343,7 +343,7 @@ export async function insertMachineIntent(
       ? INSERT_MACHINE_INTENT_X402_KEY_SQL
       : INSERT_MACHINE_INTENT_MACHINE_KEY_SQL
   const result = await db.query<PaymentIntentRow>(sql, [
-    agent.id, agent.user_id, agent.safe_address, agent.chain_id,
+    agent.id, agent.user_id, agent.account_address, agent.chain_id,
     tokenSymbol, tokenAddress, payTo.toLowerCase(),
     amountRaw.toString(), amountHuman, agent.delegate_address,
     allowanceNonce, signHash,
@@ -723,7 +723,7 @@ export async function findIntentStatusRow(
 
 // ── Receipt assembly (lib/receipt.ts) ────────────────────────────────────────
 
-export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.safe_address, pi.chain_id, pi.token_symbol, pi.token_address,
+export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_address, pi.chain_id, pi.token_symbol, pi.token_address,
             pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
             pi.signature, pi.tx_hash, pi.confirmed_at,
             mpe.resource_url AS resource_url,
@@ -734,7 +734,7 @@ export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.safe_address, 
 
 export interface PaymentReceiptRow {
   id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   token_symbol: string
   token_address: string

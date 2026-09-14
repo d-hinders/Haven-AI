@@ -3,7 +3,7 @@
  *
  * This module used to deploy a passkey-owned Safe: predict the passkey signer
  * address, deploy the signer if needed, deploy the Safe proxy through the
- * factory, and register the result in `user_safes` inside one Postgres
+ * factory, and register the result in `smart_accounts` inside one Postgres
  * transaction. #1984 closed that inflow with a 410; this slice deletes the
  * implementation behind it, along with `modules/accounts/safe-deployer.ts` and
  * the proxy-factory half of `infra/chain/safe-proxy-deployer.ts`.

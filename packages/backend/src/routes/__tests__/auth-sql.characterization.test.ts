@@ -120,7 +120,7 @@ describe('auth SQL characterization (pre-#1180)', () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{
           id: 'u1', name: 'Ada', email: 'ada@example.com', password_hash: hash,
-          wallet_address: null, safe_address: null, currency_preference: null,
+          wallet_address: null, account_address: null, currency_preference: null,
         }],
       })
       mockQuery.mockResolvedValueOnce({ rows: [] })
@@ -132,7 +132,7 @@ describe('auth SQL characterization (pre-#1180)', () => {
       })
 
       expect(res.statusCode).toBe(200)
-      for (const col of ['password_hash', 'wallet_address', 'safe_address', 'currency_preference']) {
+      for (const col of ['password_hash', 'wallet_address', 'account_address', 'currency_preference']) {
         expect(sqlSent()[0]).toContain(col)
       }
       // A null preference presents as USD rather than leaking null to the client.
@@ -183,7 +183,7 @@ describe('auth SQL characterization (pre-#1180)', () => {
       expect(paramsSent()[1]).toEqual(['u1'])
       expect(sqlSent()[1]).toMatch(/WHERE (?:us\.)?user_id = \$1/)
       expect(sqlSent()[1]).toMatch(/ORDER BY (?:us\.)?created_at ASC/)
-      // #1205: raw signer-set inputs are consumed by sessionSafePayload; the
+      // #1205: raw signer-set inputs are consumed by sessionAccountPayload; the
       // payload carries the computed answer instead.
       expect(res.json().user.safes).toEqual([
         {

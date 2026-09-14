@@ -3,6 +3,7 @@ import { authMiddleware } from '../middleware/auth.js'
 import { getExplorerUrl } from '../domain/chains.js'
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
+import { withActivityPaymentAccountAlias } from '../openapi/wire-aliases.js'
 import {
   listToolInvocationsForAgent,
   listToolInvocationsForAgents,
@@ -54,7 +55,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           reconciliationEventType: p.payment_reconciliation_event_type,
         })
 
-        return {
+        return withActivityPaymentAccountAlias({
           type: 'payment' as const,
           id: p.id,
           token: p.token_symbol,
@@ -72,8 +73,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           x402_merchant_address: p.x402_merchant_address,
           chain_id: p.chain_id,
           token_address: p.token_address,
-          safe_id: p.safe_id,
-          safe_address: p.safe_address,
+          safe_id: p.account_id,
+          safe_address: p.account_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
           // #799: which on-chain mechanism moved the money, and (session rail)
@@ -84,7 +85,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
-        }
+        })
       }),
       ...invocations.map((inv) => ({
         type: 'mcp_tool_call' as const,
@@ -185,7 +186,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           reconciliationEventType: p.payment_reconciliation_event_type,
         })
 
-        return {
+        return withActivityPaymentAccountAlias({
           type: 'payment' as const,
           id: p.id,
           agent_id: p.agent_id,
@@ -205,8 +206,8 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           x402_merchant_address: p.x402_merchant_address,
           chain_id: p.chain_id,
           token_address: p.token_address,
-          safe_id: p.safe_id,
-          safe_address: p.safe_address,
+          safe_id: p.account_id,
+          safe_address: p.account_address,
           safe_name: p.safe_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
           // #799: which on-chain mechanism moved the money, and (session rail)
@@ -217,7 +218,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           delegation_hash: p.delegation_hash,
           confirmed_at: p.confirmed_at,
           created_at: p.created_at,
-        }
+        })
       }),
       ...invocations.map((inv) => ({
         type: 'mcp_tool_call' as const,

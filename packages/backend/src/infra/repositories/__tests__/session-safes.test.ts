@@ -2,7 +2,7 @@
  * Real-DB tests for the session safes projection (#1205, harness #1220).
  *
  * The session payload now carries the raw signer-set inputs
- * (`owner_address`, `passkey_count`) that `sessionSafePayload` maps through
+ * (`owner_address`, `passkey_count`) that `sessionAccountPayload` maps through
  * `needsBackupSignerRecommendation`. The passkey count is a JOIN against
  * `hybrid_account_passkeys` — exactly the "what does the query return" class
  * that belongs on the real database, not on a positional mock.
@@ -10,7 +10,7 @@
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
-import { listSessionSafesForUser } from '../user-safes.js'
+import { listSessionAccountsForUser } from '../smart-accounts.js'
 
 let n = 0
 
@@ -27,7 +27,7 @@ async function seedSafe(
   fields: { accountType?: string | null; ownerAddress?: string | null; chainId?: number } = {},
 ): Promise<string> {
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, name, chain_id, account_type, owner_address)
+    `INSERT INTO smart_accounts (user_id, account_address, name, chain_id, account_type, owner_address)
      VALUES ($1, $2, 'Test safe', $3, $4, $5) RETURNING id`,
     [
       userId,
@@ -46,13 +46,13 @@ async function seedSafe(
 
 async function seedPasskey(userSafeId: string, keyId: string): Promise<void> {
   await db.query(
-    `INSERT INTO hybrid_account_passkeys (user_safe_id, key_id, public_key_x, public_key_y)
+    `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
      VALUES ($1, $2, '0x1', '0x2')`,
     [userSafeId, keyId],
   )
 }
 
-describeDb('listSessionSafesForUser signer-set projection (#1205)', () => {
+describeDb('listSessionAccountsForUser signer-set projection (#1205)', () => {
   // AWAITED in beforeAll (#1562 follow-up): a bare registration-time call
   // leaves the returned promise dangling and lets the first tests race the
   // worker's own migration DDL — the 42P01/40P01 CI flake. resetDb() now
@@ -69,7 +69,7 @@ describeDb('listSessionSafesForUser signer-set projection (#1205)', () => {
     await seedPasskey(hybridId, 'key-b')
     const legacyId = await seedSafe(userId, { ownerAddress: '0x' + 'ab'.repeat(20) })
 
-    const rows = await listSessionSafesForUser(userId)
+    const rows = await listSessionAccountsForUser(userId)
     const hybrid = rows.find((r) => r.id === hybridId)
     const legacy = rows.find((r) => r.id === legacyId)
 
@@ -83,9 +83,9 @@ describeDb('listSessionSafesForUser signer-set projection (#1205)', () => {
   it('stays tenant-scoped: another user sees none of it', async () => {
     const owner = await seedUser()
     const other = await seedUser()
-    const safeId = await seedSafe(owner, { accountType: 'delegator_hybrid' })
-    await seedPasskey(safeId, 'key-a')
+    const accountId = await seedSafe(owner, { accountType: 'delegator_hybrid' })
+    await seedPasskey(accountId, 'key-a')
 
-    expect(await listSessionSafesForUser(other)).toEqual([])
+    expect(await listSessionAccountsForUser(other)).toEqual([])
   })
 })

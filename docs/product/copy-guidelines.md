@@ -597,9 +597,9 @@ never a README copy — the shared-prose rule this epic follows throughout.
 
 ## Enforcement
 
-These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list is a superset of the mapping table (it also covers e.g. "policy engine", "smart contract wallet", "webauthn credential"), and it does **not** reach `packages/backend/**` or the i18n catalogs under `src/lib/i18n/messages/**` — rules about strings that live there are documentation-only.
+These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list is a superset of the mapping table (it also covers e.g. "policy engine", "smart contract wallet", "webauthn credential"), and it does **not** reach `packages/backend/**` or the i18n catalog under `src/lib/i18n/messages/**` — rules about strings that live there are documentation-only.
 
-- **Prose outside those two directories is scanned only if it is named (#2317).** `src/lib` and `src/hooks` are excluded by directory on purpose — there the banned phrases are legitimate code identifiers, and widening the rule would bury a blocking check in false positives. But a handful of `lib/` files hold nothing but user-facing prose, and for those the gate was green while reading none of them: `agent-skill-bundle.ts` is downloaded verbatim as `SKILL.md` from the connect-agent success screen, and `agent-pause-copy.ts` / `stranded-funds-copy.ts` are single sentences extracted out of `components/` so two surfaces agree (#2195, #2230). Those files, plus `agent-handoff.ts`, `passkeyLabels.ts`, `transaction-labels.ts` / `transaction-presentation.tsx` (#2333) and the SDK's canonical `packages/sdk/src/skill-content.ts`, are listed individually in the script's `SCAN_FILES` allowlist. **If you add a prose file under `lib/`, the gate will not see it until you add it there** — a green check on a PR that touched only such a file carries no information about it. Entries must resolve to real files; an emptied allowlist or a path matching nothing fails the run rather than passing quietly.
+- **Prose outside those two directories is scanned only if it is named (#2317).** `src/lib` and `src/hooks` are excluded by directory on purpose — there the banned phrases are legitimate code identifiers, and widening the rule would bury a blocking check in false positives. But a handful of `lib/` files hold nothing but user-facing prose, and for those the gate was green while reading none of them: `agent-skill-bundle.ts` is downloaded verbatim as `SKILL.md` from the connect-agent success screen, and `agent-pause-copy.ts` / `stranded-funds-copy.ts` are single sentences extracted out of `components/` so two surfaces agree (#2195, #2230). Those files, plus `agent-handoff.ts`, `passkeyLabels.ts`, `transaction-labels.ts` / `transaction-presentation.tsx` (#2333) and the SDK's canonical `packages/sdk/src/skill-content.ts`, are listed individually in the script's `SCAN_FILES` allowlist. **The script is the list, not this sentence** — the enumeration above had drifted three entries behind it by #2926 (`agent-onboarding-prompt.ts`, the SDK's `agent-guidance.ts`, `public/for-agents.md`), which is what an enumeration in prose does; `npm run lint:copy` prints the live count in its own summary line. **If you add a prose file under `lib/`, the gate will not see it until you add it there** — a green check on a PR that touched only such a file carries no information about it. Entries must resolve to real files; an emptied allowlist or a path matching nothing fails the run rather than passing quietly.
 
 - **Name extracted copy so the gate can ask for it (#2333).** A hand-maintained list nobody is prompted to extend is a slower version of the hole it closes: the #2195/#2230 extraction pattern — pull a shared sentence out of `components/` into `lib/` so two surfaces say one fact identically — takes copy out of scope **every time it is applied**, and #2333 found three more unscanned modules a fortnight after #2317 added four. So the naming is now normative and enforced: **extracted UI copy under `src/lib` is named `*-copy.ts`, `*-labels.ts` or `*Labels.ts`, and any `.tsx` there renders by definition.** A file matching those shapes that is not in `SCAN_FILES` fails the run, naming the file, at the moment it lands — or is exempted in `CONVENTION_EXEMPT` with a written reason. **Its ceiling, stated as a fact:** it matches names, not content, so calling the next extraction `transactionText.ts` still evades it. What it changes is that following the convention is enforced and evading it is deliberate; it is not a content classifier for `src/lib`, and #2332 (`passkey.ts`, a genuine utility carrying a banned phrase in a developer-facing `throw`) is the standing counter-example for why one would be wrong. It is also not a substitute for reading the copy: the first human pass over the newly-scanned files found a real defect the matcher cannot see — bare "delegate" rendered on the primary transaction row (#2356), invisible because the matcher is multi-word-literal by design and "delegate" is a legitimate identifier everywhere else in the frontend.
 
@@ -707,15 +707,33 @@ precedents:
 - The homepage and the How it works page advertise EURe and Gnosis Chain even
   though current account creation offers Base and Base Sepolia, where USDC is
   the payment-token example.
-- The "payment evidence document" rule above is not yet reflected in the one
-  shipped string that remains: the generated underlag PDF is titled "HAVEN
-  PAYMENT RECEIPT" (`packages/backend/src/modules/accounting/receipt-underlag.ts:91`),
-  and "betalningsbevis" appears nowhere in the Swedish catalog. The bullet also
+- The "payment evidence document" rule above is not yet reflected in the
+  strings that remain: the generated underlag PDF is titled `'HAVEN
+  PAYMENT RECEIPT (underlag)'` in
+  `packages/backend/src/modules/accounting/receipt-underlag.ts` — named by its
+  string rather than its line, which drifts (this bullet said `:91` for a
+  string that sits at `:100`). This bullet also used to say "betalningsbevis"
+  appeared nowhere in the Swedish catalog, and **that was false when it was
+  written**: `sv.ts:41` read "…med betalningsbevis bifogat" while `sv.ts:114`
+  and `:193` said "betalningsunderlag", so the catalog disagreed with itself on
+  exactly this term. #2926 deleted that file, which is what makes the claim
+  true now rather than any correction to the copy. The bullet also
   named the approval and send surfaces as labelling it "Payment receipt"; those
   surfaces were deleted with the Safe rail (#1989) and the label survives on no
-  surface at all — checked over `packages/` rather than `packages/frontend`,
-  case-insensitively, so the claim's scope matches the check's. The rule is
-  still unenforced — the remaining drift sits in `packages/backend/**` and the
-  i18n catalogs, which the copy lint does not scan.
+  RENDERED DASHBOARD surface — the generated document below is the exception,
+  and saying "no surface at all" made this bullet contradict its own quotes two
+  sentences later. Checked over `packages/` rather than `packages/frontend`,
+  case-insensitively: that returns 15 hits in 9 files, and none of them is a
+  rendered label — they are comments, OpenAPI summaries, SDK tool descriptions
+  and the underlag document itself. The rule is
+  still unenforced — the remaining drift sits in the generated underlag
+  document under `packages/backend/**`, which the copy lint does not scan. A
+  SCOPE claim, deliberately, not a count: the title above is not the only
+  string there — the document's closing paragraph says "the verifiable Haven
+  payment receipt" and names the receipt JSON, and the attachment is filed as
+  `haven-receipt-<id>.pdf`. An earlier draft of this bullet said "the backend
+  string alone" and was wrong for that reason. The English catalog is clear of
+  it either way: it uses the preferred wording ("payment evidence attached")
+  throughout.
 
 Correct these in product-copy changes; do not weaken this guide to match them.

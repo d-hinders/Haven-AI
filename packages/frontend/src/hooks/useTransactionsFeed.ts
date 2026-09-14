@@ -18,7 +18,7 @@ interface UseTransactionsFeedReturn {
   hasMore: boolean
   error: string | null
   partialFailure: boolean
-  failedSafeIds: string[]
+  failedAccountIds: string[]
   /**
    * The feed is capped at the explorer window per account (#2882), so these
    * rows and `total` are a partial view of the history rather than all of it.
@@ -35,7 +35,7 @@ function toQueryString(
   fresh = false,
 ): string {
   const params = new URLSearchParams()
-  if (filters.safeId) params.set('safeId', filters.safeId)
+  if (filters.accountId) params.set('accountId', filters.accountId)
   if (filters.agentId) params.set('agentId', filters.agentId)
   if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
   params.set('offset', String(offset))
@@ -47,7 +47,7 @@ function toQueryString(
 function transactionIdentityKey(tx: AggregatedTransaction): string {
   return [
     tx.chainId,
-    tx.safeId,
+    tx.accountId,
     tx.hash.toLowerCase(),
     tx.type,
     tx.from.toLowerCase(),
@@ -84,7 +84,7 @@ export function useTransactionsFeed(
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [partialFailure, setPartialFailure] = useState(false)
-  const [failedSafeIds, setFailedSafeIds] = useState<string[]>([])
+  const [failedAccountIds, setFailedAccountIds] = useState<string[]>([])
   const [truncated, setTruncated] = useState(false)
 
   const requestIdRef = useRef(0)
@@ -136,7 +136,7 @@ export function useTransactionsFeed(
         setTotal(data.total)
         setHasMore(data.hasMore)
         setPartialFailure(data.partialFailure)
-        setFailedSafeIds(data.failedSafeIds)
+        setFailedAccountIds(data.failedAccountIds ?? data.failedSafeIds)
         setTruncated(data.truncated)
         if (silent) setError(null)
       } catch (err) {
@@ -153,7 +153,7 @@ export function useTransactionsFeed(
           setTotal(0)
           setHasMore(false)
           setPartialFailure(false)
-          setFailedSafeIds([])
+          setFailedAccountIds([])
           setTruncated(false)
         }
       } finally {
@@ -172,12 +172,12 @@ export function useTransactionsFeed(
     setTotal(0)
     setHasMore(false)
     setPartialFailure(false)
-    setFailedSafeIds([])
+    setFailedAccountIds([])
     setTruncated(false)
     setLoadingInitial(true)
     setError(null)
     void fetchPage(0, false, false)
-  }, [fetchPage, filters.safeId, filters.agentId, filters.tokenKey])
+  }, [fetchPage, filters.accountId, filters.agentId, filters.tokenKey])
 
   const loadMore = useCallback(async () => {
     if (loadingInitial || loadingMore || refreshing || !hasMore) return
@@ -206,7 +206,7 @@ export function useTransactionsFeed(
     hasMore,
     error,
     partialFailure,
-    failedSafeIds,
+    failedAccountIds,
     truncated,
     loadMore,
     refresh,

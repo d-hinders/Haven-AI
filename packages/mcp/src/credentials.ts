@@ -4,6 +4,19 @@ export interface HavenCredentialFile {
   apiKey: string
   delegateKey: string
   agentId?: string
+  /**
+   * The Haven account (smart account) the agent spends from — #2908, the
+   * account-vocabulary name, added EXPLICITLY here (this shape and the
+   * signer's are separate types; the epic's review found they must not be
+   * assumed to match). Same value as `safeAddress`.
+   */
+  accountAddress?: string
+  /**
+   * @deprecated #2908 — same value as {@link HavenCredentialFile.accountAddress}.
+   * Removed from this shape in the release after the one carrying #2908
+   * (#2914). The credential-FILE keys are read permanently — see
+   * `readAccountAddressField`.
+   */
   safeAddress?: string
   delegateAddress?: string
   chainId?: number
@@ -44,7 +57,11 @@ interface RawCredentialFile {
   delegateAddress?: unknown
   agent_id?: unknown
   agentId?: unknown
+  /** #2908: what `@haven_ai/connect` writes from this release on. */
+  account_address?: unknown
+  /** Pre-#2908 spelling — read PERMANENTLY, see `readAccountAddressField`. */
   safe_address?: unknown
+  /** Pre-#2908 spelling — read PERMANENTLY, see `readAccountAddressField`. */
   safeAddress?: unknown
   chain_id?: unknown
   chainId?: unknown
@@ -67,7 +84,9 @@ interface RawCredentialFile {
  *   1. Explicit `path` argument (typically from `--credentials <path>`).
  *   2. `HAVEN_CREDENTIALS` env var pointing at a credential JSON file.
  *   3. Inline env vars: `HAVEN_API_KEY` + `HAVEN_DELEGATE_KEY` (+ optional
- *      `HAVEN_AGENT_ID`, `HAVEN_SAFE_ADDRESS`, `HAVEN_API_URL`).
+ *      `HAVEN_AGENT_ID`, `HAVEN_ACCOUNT_ADDRESS` — or, until #2914, its
+ *      pre-#2908 spellings `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` —
+ *      and `HAVEN_API_URL`).
  *
  * The inline-env path exists so that runtime config snippets emitted by the
  * Haven dashboard (Claude Desktop / Cursor / generic MCP configs) can be a
@@ -127,11 +146,13 @@ async function loadCredentialsFromFile(path: string): Promise<HavenCredentialFil
     throw new Error('Haven MCP requires delegate_key so payments can be signed locally.')
   }
 
+  const accountAddress = readAccountAddressField(raw)
   return {
       apiKey,
       delegateKey,
       agentId: stringField(raw.agent_id ?? raw.agentId),
-      safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
+      accountAddress,
+      safeAddress: accountAddress,
       delegateAddress: stringField(raw.delegate_address ?? raw.delegateAddress),
       chainId: numberField(raw.chain_id ?? raw.chainId),
       network: stringField(raw.network),
@@ -166,11 +187,13 @@ async function loadCredentialsFromSplitFiles(identityPath: string, signerPath: s
       identity.agent_id ?? identity.agentId,
       signer.agent_id ?? signer.agentId,
     ),
-    safeAddress: matchingStringField(
-      'safe_address',
-      identity.safe_address ?? identity.safeAddress,
-      signer.safe_address ?? signer.safeAddress,
-      { caseInsensitive: true },
+    ...accountAddressTwins(
+      matchingStringField(
+        'account_address',
+        readAccountAddressField(identity),
+        readAccountAddressField(signer),
+        { caseInsensitive: true },
+      ),
     ),
     delegateAddress: matchingStringField(
       'delegate_address',
@@ -234,11 +257,45 @@ function loadCredentialsFromEnv(): HavenCredentialFile | null {
     apiKey,
     delegateKey,
       agentId: stringField(process.env.HAVEN_AGENT_ID),
-      safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
+      ...accountAddressTwins(readAccountAddressEnv(process.env)),
       chainId: numberField(process.env.HAVEN_CHAIN_ID),
       network: stringField(process.env.HAVEN_NETWORK),
       apiUrl: stringField(process.env.HAVEN_API_URL),
     }
+}
+
+/**
+ * The account address off a credential FILE: `account_address` (what
+ * `@haven_ai/connect` writes from #2908 on) first, then the two pre-#2908
+ * spellings.
+ *
+ * The two old fallbacks are PERMANENT (#2906, decision 2a) — a credential
+ * file on disk never rewrites itself, and a runtime that stopped reading
+ * `safe_address` would silently lose the address (and change the consent
+ * hash) for every agent connected before this release.
+ *
+ * Exported for the mutation tests: dropping `account_address` fails the
+ * new-shape test, dropping either old key fails the old-shape test.
+ */
+export function readAccountAddressField(
+  raw: Pick<RawCredentialFile, 'account_address' | 'safe_address' | 'safeAddress'>,
+): string | undefined {
+  return stringField(raw.account_address ?? raw.safe_address ?? raw.safeAddress)
+}
+
+/**
+ * The account address off the environment, new name first:
+ * `HAVEN_ACCOUNT_ADDRESS` (the survivor, decided on #2906), then the two
+ * names the dashboard handoff emitted before #2908 — `HAVEN_WALLET_ADDRESS`
+ * and `HAVEN_SAFE_ADDRESS`, which are dropped at #2914.
+ */
+export function readAccountAddressEnv(env: NodeJS.ProcessEnv): string | undefined {
+  return stringField(env.HAVEN_ACCOUNT_ADDRESS ?? env.HAVEN_WALLET_ADDRESS ?? env.HAVEN_SAFE_ADDRESS)
+}
+
+/** Both camelCase names, one value (or neither key when there is no value). */
+function accountAddressTwins(address: string | undefined): Pick<HavenCredentialFile, 'accountAddress' | 'safeAddress'> {
+  return { accountAddress: address, safeAddress: address }
 }
 
 function stringField(value: unknown): string | undefined {

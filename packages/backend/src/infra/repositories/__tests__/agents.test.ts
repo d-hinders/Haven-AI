@@ -5,10 +5,10 @@ import {
   FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
   FIND_AGENT_ID_FOR_USER_SQL,
   FIND_AGENT_ID_STATUS_FOR_USER_SQL,
-  FIND_DEFAULT_USER_SAFE_ID_SQL,
+  FIND_DEFAULT_USER_ACCOUNT_ID_SQL,
   FIND_DELEGATE_AGENT_FOR_USER_SQL,
   FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
-  FIND_USER_SAFE_ID_FOR_USER_SQL,
+  FIND_USER_ACCOUNT_ID_FOR_USER_SQL,
   HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
   LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
   UPDATE_AGENT_PROFILE_SQL,
@@ -18,10 +18,10 @@ import {
   unarchiveAgent,
   findAgentForUserAllStatuses,
   findAgentIdStatusForUser,
-  findDefaultUserSafeId,
+  findDefaultUserAccountId,
   findDelegateAgentForUser,
   findNonRevokedAgentIdByDelegate,
-  findUserSafeIdForUser,
+  findUserAccountIdForUser,
   listAgentsForUserAllStatuses,
   loadOwnedDelegationAgent,
   insertPendingDelegationForOwnedNonRevokedAgent,
@@ -71,14 +71,14 @@ describeDb('delegation lifecycle owner read (#2025)', () => {
       [`grant-eligibility-${Date.now()}@test.example`],
     )
     const safe = await db.query<{ id: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
        VALUES ($1, '0x1111111111111111111111111111111111111111', 'Delegation account', true, 'delegator_hybrid')
        RETURNING id`,
       [user.rows[0].id],
     )
     const [revoked, active] = await Promise.all(['revoked', 'active'].map(async (status) => {
       const result = await db.query<{ id: string }>(
-        `INSERT INTO agents (user_id, safe_id, name, status, delegate_address)
+        `INSERT INTO agents (user_id, account_id, name, status, delegate_address)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
         [
           user.rows[0].id,
@@ -167,8 +167,8 @@ describe('tenant scoping is required and effective — cross-tenant access retur
       LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL,
       FIND_AGENT_FOR_USER_ALL_STATUSES_SQL,
       FIND_DELEGATE_AGENT_FOR_USER_SQL,
-      FIND_USER_SAFE_ID_FOR_USER_SQL,
-      FIND_DEFAULT_USER_SAFE_ID_SQL,
+      FIND_USER_ACCOUNT_ID_FOR_USER_SQL,
+      FIND_DEFAULT_USER_ACCOUNT_ID_SQL,
       FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL,
       FIND_AGENT_ID_FOR_USER_SQL,
       FIND_AGENT_ID_STATUS_FOR_USER_SQL,
@@ -196,16 +196,16 @@ describe('tenant scoping is required and effective — cross-tenant access retur
     expect(await findDelegateAgentForUser('agent-1', OWNER, db)).not.toBeNull()
   })
 
-  it('findUserSafeIdForUser: another tenant cannot claim the safe', async () => {
+  it('findUserAccountIdForUser: another tenant cannot claim the safe', async () => {
     const db = tenantExecutor({ id: 'safe-1' })
-    expect(await findUserSafeIdForUser('safe-1', ATTACKER, db)).toBeNull()
-    expect(await findUserSafeIdForUser('safe-1', OWNER, db)).toBe('safe-1')
+    expect(await findUserAccountIdForUser('safe-1', ATTACKER, db)).toBeNull()
+    expect(await findUserAccountIdForUser('safe-1', OWNER, db)).toBe('safe-1')
   })
 
-  it('findDefaultUserSafeId: scoped to the caller', async () => {
+  it('findDefaultUserAccountId: scoped to the caller', async () => {
     const db = tenantExecutor({ id: 'safe-1' })
-    expect(await findDefaultUserSafeId(ATTACKER, db)).toBeNull()
-    expect(await findDefaultUserSafeId(OWNER, db)).toBe('safe-1')
+    expect(await findDefaultUserAccountId(ATTACKER, db)).toBeNull()
+    expect(await findDefaultUserAccountId(OWNER, db)).toBe('safe-1')
   })
 
   it('findNonRevokedAgentIdByDelegate: the duplicate check is per-tenant', async () => {
@@ -289,12 +289,12 @@ describeDb('agents archive (#1401, real DB)', () => {
       [`archive-legacy-u${++seq}-${Date.now()}@test.example`],
     )
     const safe = await db.query<{ id: string }>(
-      `INSERT INTO user_safes (user_id, safe_address, name, is_default, account_type)
-       VALUES ($1, $2, 'Legacy account', true, 'safe') RETURNING id`,
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
+       VALUES ($1, $2, 'Legacy account', true, 'legacy_safe') RETURNING id`,
       [user.rows[0].id, `0x${(++seq).toString(16).padStart(40, '0')}`],
     )
     const agent = await db.query<{ id: string }>(
-      `INSERT INTO agents (user_id, safe_id, name, status) VALUES ($1, $2, 'Legacy archive test', $3) RETURNING id`,
+      `INSERT INTO agents (user_id, account_id, name, status) VALUES ($1, $2, 'Legacy archive test', $3) RETURNING id`,
       [user.rows[0].id, safe.rows[0].id, status],
     )
     return { userId: user.rows[0].id, agentId: agent.rows[0].id }
@@ -326,7 +326,7 @@ describeDb('agents archive (#1401, real DB)', () => {
 
   it('archives a legacy record after its Safe was unlinked, without requiring revocation (#2258)', async () => {
     const { userId, agentId } = await seedLegacyAgent('active')
-    await db.query(`UPDATE agents SET safe_id = NULL WHERE id = $1`, [agentId])
+    await db.query(`UPDATE agents SET account_id = NULL WHERE id = $1`, [agentId])
 
     const archived = await archiveAgent(agentId, userId)
 
@@ -419,7 +419,7 @@ describeDb('agents archive (#1401, real DB)', () => {
     const { userId, agentId } = await seedAgent('revoked')
     await db.query(
       `INSERT INTO payment_intents
-         (agent_id, user_id, safe_address, token_symbol, token_address, to_address,
+         (agent_id, user_id, account_address, token_symbol, token_address, to_address,
           amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash, status, expires_at)
        VALUES ($1, $2, '0x00000000000000000000000000000000000000s1', 'USDC',
                '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
@@ -442,7 +442,8 @@ describeDb('agents archive (#1401, real DB)', () => {
   })
 
   // #2413 narrowed this case rather than deleting it, and the narrowing is the
-  // point. This block seeds a LEGACY account ('Legacy account', 'safe'), and
+  // point. This block seeds a LEGACY account ('Legacy account',
+  // 'legacy_safe' — renamed from 'safe' by #2912), and
   // both reads now filter to `delegator_hybrid` — so "no agent disappears" is
   // no longer true of a legacy agent THROUGH THOSE READS. What #1401 actually
   // guarantees is unchanged and is what this now asserts directly: archiving

@@ -70,7 +70,7 @@ const USER = {
   email: 'ada@example.com',
   wallet_address: null,
   safe_address: null,
-  safes: [],
+  accounts: [],
 }
 
 function authValue(overrides: Record<string, unknown> = {}) {

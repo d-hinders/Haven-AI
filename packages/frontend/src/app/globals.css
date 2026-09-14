@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 :root {
+  /* Light is the default colour scheme; both dark blocks below declare
+     `color-scheme: dark` so native form controls, scrollbars and the date
+     picker follow the active palette (#2927). */
+  color-scheme: light;
+
   --v2-bg: #ffffff;
   --v2-surface: #f6f9fc;
   --v2-surface-2: #eef2f7;
@@ -249,6 +254,311 @@
   --v2-text-meta-leading: 1.125rem;
 }
 
+/*
+ * ── Dark palette (#2927, epic #2925) ──────────────────────────────────────
+ *
+ * Two blocks, BYTE-IDENTICAL declarations, and a unit test holds them equal
+ * (`src/lib/__tests__/theme-tokens.test.ts` parses this file and diffs the
+ * two declaration sets):
+ *
+ *   1. `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])`
+ *      — the OS-preference path. Covers every un-stamped document (the
+ *      `system` preference stamps nothing) while an explicit LIGHT choice
+ *      keeps the palette above via the `:not()`.
+ *   2. `:root[data-theme="dark"]` — the explicit path. A stamped choice must
+ *      beat the OS in BOTH directions, which no single block can do.
+ *
+ * Rules the values follow (epic #2925, stated once here):
+ *   - Ground is a deep cool neutral, not pure black: `#12151c` sits in the
+ *     epic's `#0f1219`–`#14171c` band, hue-biased toward brand indigo.
+ *   - Surfaces step LIGHTER with elevation (`--v2-bg` < `surface` <
+ *     `surface-2` < `surface-hover`): dark UIs elevate by lightening, not by
+ *     shadow. Borders sit lighter than the surface they divide.
+ *   - The ink scale is inverted with measured contrast; every `ink*` on
+ *     `bg`/`surface`/`surface-2` clears WCAG AA (4.5:1) — enforced per theme
+ *     by `scripts/contrast-check.mjs`, not eyeballed.
+ *   - Brand is LIGHTENED and desaturated (`#a5acff`): `#4f46e5` is ~3.9:1 on
+ *     a dark ground and fails AA. With a lightened accent, `ink-on-brand`
+ *     flips to the deep ink — dark text on a light fill, the same logic as a
+ *     tinted chip.
+ *   - The `-soft` tints are REDEFINED as deep desaturated washes, not
+ *     inverted: a light tint inverted goes muddy. Each keeps ≥3:1 against its
+ *     foreground (all five actually clear 4.5:1).
+ *   - Chain identity colours follow their pills: lighter fills, translucent
+ *     borders, foregrounds bright enough on the new pill grounds.
+ *   - Content keeps its own colours: `--v2-surface-code` stays near-black
+ *     (code blocks are not inverted). Shadows ARE redeclared per theme since
+ *     #2929 — elevation is a hairline + low-alpha depth cue on the dark
+ *     ground, not the light theme's grey wash — while the `--v2-safe-*`
+ *     lengths are not (env() lengths, no colour to swap). Brand gradients
+ *     (`--v2-brand-gradient`, `--v2-bar-fill-*`) stay brand-filled in both
+ *     themes: they are saturated fills, readable on either ground.
+ *     `--v2-surface-hero` is the exception — it is GROUND-classified (a wash
+ *     the ink sits ON), so #2929 redeclares it below; the parity test cannot
+ *     see gradients (composite values are not colour-valued), so the class
+ *     split is stated here, in prose, because a token in the wrong class is a
+ *     white card with white ink and no test that can notice.
+ *
+ * `color-scheme` rides in every block so native form controls, scrollbars
+ * and the date picker match the active palette.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --v2-bg: #12151c;
+    --v2-bg-rgb: 18 21 28;
+    --v2-surface: #191d26;
+    --v2-surface-rgb: 25 29 38;
+    --v2-surface-2: #20252f;
+    --v2-surface-2-rgb: 32 37 47;
+    --v2-surface-code: #0b1120;
+    --v2-surface-code-rgb: 11 17 32;
+
+    --v2-ink: #f0f3f8;
+    --v2-ink-rgb: 240 243 248;
+    --v2-ink-2: #b3bdcd;
+    --v2-ink-2-rgb: 179 189 205;
+    --v2-ink-3: #8f9cb0;
+    --v2-ink-3-rgb: 143 156 176;
+    --v2-ink-on-brand: #1a1f36;
+
+    --v2-border: #2b3140;
+    --v2-border-rgb: 43 49 64;
+    --v2-border-strong: #3a4152;
+    --v2-border-strong-rgb: 58 65 82;
+
+    --v2-brand: #a5acff;
+    --v2-brand-rgb: 165 172 255;
+    --v2-brand-strong: #b7bcff;
+    --v2-brand-strong-rgb: 183 188 255;
+    --v2-brand-soft: #262b3f;
+    --v2-brand-soft-rgb: 38 43 63;
+
+    --v2-success: #34d399;
+    --v2-success-rgb: 52 211 153;
+    --v2-success-soft: #12312a;
+    --v2-success-soft-rgb: 18 49 42;
+    --v2-debit: #38bdf8;
+    --v2-debit-rgb: 56 189 248;
+    --v2-debit-soft: #0e2a3a;
+    --v2-debit-soft-rgb: 14 42 58;
+    --v2-warning: #fcd34d;
+    --v2-warning-rgb: 252 211 77;
+    --v2-warning-soft: #33260e;
+    --v2-warning-soft-rgb: 51 38 14;
+    --v2-danger: #f87171;
+    --v2-danger-rgb: 248 113 113;
+    --v2-danger-soft: #3a1512;
+    --v2-danger-soft-rgb: 58 21 18;
+    --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
+
+    /*
+     * Elevation redeclared for the dark ground (#2929). Dark UIs elevate by
+     * SURFACE (each step lighter than the one below, above), so a light-theme
+     * shadow reads as grey smear on `#12151c` and the elevation job moves to
+     * the border: every tier here leads with a translucent WHITE hairline (the
+     * border the light theme gets for free against `--v2-bg`), and the ambient
+     * shadow behind it drops to a low-alpha depth cue rather than disappearing.
+     * Byte-identical in both dark blocks — the theme-tokens unit test holds
+     * the two declaration sets equal.
+     */
+    --v2-shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.04);
+    --v2-shadow-card-raised: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.40);
+    --v2-shadow-button: 0 1px 1px rgba(0, 0, 0, 0.30);
+    --v2-shadow-modal: 0 16px 40px rgba(0, 0, 0, 0.50);
+    --v2-shadow-popover: 0 12px 28px rgba(0, 0, 0, 0.45);
+    --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+    --v2-chain-base: #3395ff;
+    --v2-chain-gnosis: #3e9b8f;
+    --v2-chain-testnet: #fbbf24;
+    --v2-chain-base-dot: #0ea5e9;
+    --v2-chain-base-fg: #7dd3fc;
+    --v2-chain-base-border: rgba(125, 211, 252, 0.28);
+    --v2-chain-base-bg: #12293b;
+    --v2-chain-testnet-fg: #fcd34d;
+    --v2-chain-testnet-border: rgba(252, 211, 77, 0.28);
+    --v2-chain-testnet-bg: #2e2410;
+
+    --v2-surface-hover: #232837;
+    --v2-surface-anchor: #1a1f29;
+    --v2-border-anchor: rgba(165, 172, 255, 0.16);
+
+    /*
+     * The hero wash is GROUND-classified (#2929): the balance figure and its
+     * caption sit ON it in theme ink, so the light theme's near-white lavender
+     * would put `--v2-ink` (#f0f3f8) on a near-white card — invisible text no
+     * contrast test can catch, because the parity test only scans colour-valued
+     * tokens and this value is a gradient. The dark form is the same three-stop
+     * horizontal wash a degree deeper in the brand hue, sitting between
+     * `--v2-bg` and `--v2-surface` in elevation, so the hero still reads as
+     * lifted from the page without becoming a light island. Byte-identical in
+     * both dark blocks.
+     */
+    --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
+
+    --v2-table-header-bg: #191d26;
+    --v2-table-header-ink: #97a3b6;
+    --v2-table-row-border: #2b3140;
+    --v2-table-row-hover: #20252f;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --v2-bg: #12151c;
+  --v2-bg-rgb: 18 21 28;
+  --v2-surface: #191d26;
+  --v2-surface-rgb: 25 29 38;
+  --v2-surface-2: #20252f;
+  --v2-surface-2-rgb: 32 37 47;
+  --v2-surface-code: #0b1120;
+  --v2-surface-code-rgb: 11 17 32;
+
+  --v2-ink: #f0f3f8;
+  --v2-ink-rgb: 240 243 248;
+  --v2-ink-2: #b3bdcd;
+  --v2-ink-2-rgb: 179 189 205;
+  --v2-ink-3: #8f9cb0;
+  --v2-ink-3-rgb: 143 156 176;
+  --v2-ink-on-brand: #1a1f36;
+
+  --v2-border: #2b3140;
+  --v2-border-rgb: 43 49 64;
+  --v2-border-strong: #3a4152;
+  --v2-border-strong-rgb: 58 65 82;
+
+  --v2-brand: #a5acff;
+  --v2-brand-rgb: 165 172 255;
+  --v2-brand-strong: #b7bcff;
+  --v2-brand-strong-rgb: 183 188 255;
+  --v2-brand-soft: #262b3f;
+  --v2-brand-soft-rgb: 38 43 63;
+
+  --v2-success: #34d399;
+  --v2-success-rgb: 52 211 153;
+  --v2-success-soft: #12312a;
+  --v2-success-soft-rgb: 18 49 42;
+  --v2-debit: #38bdf8;
+  --v2-debit-rgb: 56 189 248;
+  --v2-debit-soft: #0e2a3a;
+  --v2-debit-soft-rgb: 14 42 58;
+  --v2-warning: #fcd34d;
+  --v2-warning-rgb: 252 211 77;
+  --v2-warning-soft: #33260e;
+  --v2-warning-soft-rgb: 51 38 14;
+  --v2-danger: #f87171;
+  --v2-danger-rgb: 248 113 113;
+  --v2-danger-soft: #3a1512;
+  --v2-danger-soft-rgb: 58 21 18;
+  --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
+
+  /*
+   * Elevation redeclared for the dark ground (#2929). Dark UIs elevate by
+   * SURFACE (each step lighter than the one below, above), so a light-theme
+   * shadow reads as grey smear on `#12151c` and the elevation job moves to
+   * the border: every tier here leads with a translucent WHITE hairline (the
+   * border the light theme gets for free against `--v2-bg`), and the ambient
+   * shadow behind it drops to a low-alpha depth cue rather than disappearing.
+   * Byte-identical in both dark blocks — the theme-tokens unit test holds
+   * the two declaration sets equal.
+   */
+  --v2-shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --v2-shadow-card-raised: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.40);
+  --v2-shadow-button: 0 1px 1px rgba(0, 0, 0, 0.30);
+  --v2-shadow-modal: 0 16px 40px rgba(0, 0, 0, 0.50);
+  --v2-shadow-popover: 0 12px 28px rgba(0, 0, 0, 0.45);
+  --v2-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  --v2-chain-base: #3395ff;
+  --v2-chain-gnosis: #3e9b8f;
+  --v2-chain-testnet: #fbbf24;
+  --v2-chain-base-dot: #0ea5e9;
+  --v2-chain-base-fg: #7dd3fc;
+  --v2-chain-base-border: rgba(125, 211, 252, 0.28);
+  --v2-chain-base-bg: #12293b;
+  --v2-chain-testnet-fg: #fcd34d;
+  --v2-chain-testnet-border: rgba(252, 211, 77, 0.28);
+  --v2-chain-testnet-bg: #2e2410;
+
+  --v2-surface-hover: #232837;
+  --v2-surface-anchor: #1a1f29;
+  --v2-border-anchor: rgba(165, 172, 255, 0.16);
+
+  /*
+   * The hero wash is GROUND-classified (#2929): the balance figure and its
+   * caption sit ON it in theme ink, so the light theme's near-white lavender
+   * would put `--v2-ink` (#f0f3f8) on a near-white card — invisible text no
+   * contrast test can catch, because the parity test only scans colour-valued
+   * tokens and this value is a gradient. The dark form is the same three-stop
+   * horizontal wash a degree deeper in the brand hue, sitting between
+   * `--v2-bg` and `--v2-surface` in elevation, so the hero still reads as
+   * lifted from the page without becoming a light island. Byte-identical in
+   * both dark blocks.
+   */
+  --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
+
+  --v2-table-header-bg: #191d26;
+  --v2-table-header-ink: #97a3b6;
+  --v2-table-row-border: #2b3140;
+  --v2-table-row-hover: #20252f;
+}
+
+/*
+ * Theme-switch suppression (#2927). ThemeProvider stamps
+ * `[data-theme-switching]` on <html> for exactly one animation frame across a
+ * preference change, so every in-flight `transition-colors` is cut instead of
+ * cross-fading the whole app through the swap. One frame only — a persistent
+ * kill-switch would freeze every hover and press transition too.
+ */
+[data-theme-switching] *,
+[data-theme-switching] *::before,
+[data-theme-switching] *::after {
+  transition: none !important;
+}
+
+/*
+ * Never-invert content surfaces (#2929).
+ *
+ * Some content is authored against WHITE and must stay that way in both
+ * themes: QR codes (a scanner reads the module contrast, not the theme),
+ * receipt images, and any raster that arrives with its own light background.
+ * Their CONTAINER opts the subtree out of the dark palette with
+ * `color-scheme: light`, so a native control or fallback paint inside it
+ * (a broken-image icon, a scroll corner, an input autofill) does not flip.
+ * The light paint is explicit rather than inherited-from-the-OS: a fixed
+ * white ground and a fixed hairline, so the box is identical in light and
+ * dark by construction — `var(--v2-bg)` would flip to the dark ground
+ * exactly where this class exists to keep the content light.
+ */
+.v2-light-surface {
+  color-scheme: light;
+  background: #ffffff;
+  border-color: #e6ebf1;
+}
+
+/*
+ * The avatar chrome (#2929).
+ *
+ * `WalletButton`'s address avatar paints a FIXED palette hash: nine hard-coded
+ * gradient pairs plus hard-coded white stripes (getAvatarStyle), identical in
+ * both themes — the palette is identity for the address, so it must not shift
+ * when the app does. The rim is therefore also fixed, and a themed token is
+ * the wrong instrument for it: `--v2-ink-on-brand` INVERTS (#ffffff light /
+ * #1a1f36 dark), so a token-routed rim would paint a dark hairline down on the
+ * light half of every avatar and vanish on the dark one. It reads as a class
+ * of its own: same tokens, same constants, different themes — not this one.
+ * The inset ring is the light catch on the gradient; the hairline keeps the
+ * disc readable on both grounds.
+ */
+.v2-avatar-chrome {
+  color-scheme: light;
+  border-color: rgba(255, 255, 255, 0.70);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
 .v2-text-display {
   font-size: var(--v2-text-display);
   line-height: var(--v2-text-display-leading);
@@ -473,6 +783,36 @@
   .animate-pending-pulse {
     animation: pending-pulse 1.4s ease-in-out infinite;
   }
+}
+
+/* Theme toggle icon swap (#2928, epic #2925 slice 2).
+
+   Same two-half shape as `.animate-check-pop` and `.animate-pending-pulse`
+   above: the keyframes sit in this file behind the media query, so a
+   preference expressed by the operating system is what decides whether the
+   animation exists at all. The reduce block is not decoration of the
+   no-preference block — it is the gate, and it is what a browser that
+   reports the preference without a reload honours.
+
+   The component does not rely on either block being the only gate: it reads
+   the same media query through matchMedia and withholds the class entirely
+   under `reduce` (ThemeToggle.tsx), which is what its unit test asserts live
+   rather than by recomputing. Belt and braces, and the belt is the tested
+   half; this half is what still holds if the class is ever applied by a
+   call-site that forgot the query. */
+@keyframes theme-swap {
+  0%   { opacity: 0; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-theme-swap {
+    animation: theme-swap 180ms ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-theme-swap { animation: none; }
 }
 
 /*

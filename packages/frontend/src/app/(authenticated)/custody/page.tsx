@@ -47,11 +47,11 @@ import { Icon } from '@/components/ui/Icon'
 import { Table } from '@/components/ui/Table'
 import { type ReactNode } from 'react'
 import Link from 'next/link'
-import { useUserSafes } from '@/hooks/useUserSafes'
+import { useAccounts } from '@/hooks/useAccounts'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { useDelegationCustodyProof } from '@/hooks/useDelegationCustodyProof'
 import { type DelegationBudget } from '@/hooks/useDelegationBudget'
-import { type UserSafe } from '@/context/AuthContext'
+import { type SmartAccount } from '@/context/AuthContext'
 // #2106: rail classification and the rail-correct claim list live in
 // `lib/`, NOT here — Next type-checks a page MODULE and refuses arbitrary
 // named exports from `page.tsx` (`next build` fails; `tsc --noEmit` does not).
@@ -96,7 +96,7 @@ function AccountCardHeader({
   linkHref,
   linkLabel,
 }: {
-  safe: UserSafe
+  safe: SmartAccount
   linkHref?: string
   linkLabel?: ReactNode
 }) {
@@ -149,7 +149,7 @@ function isLiveBudget(budget: DelegationBudget, nowSec: number): boolean {
   return budget.expires_at === 0 || budget.expires_at > nowSec
 }
 
-function DelegationControlCard({ safe, agents }: { safe: UserSafe; agents: Agent[] }) {
+function DelegationControlCard({ safe, agents }: { safe: SmartAccount; agents: Agent[] }) {
   const safeAgents = agents.filter((a) => a.safe_id === safe.id)
   const { signers, signersLoading, budgetsByAgent, budgetsLoading, budgetsError, reloadBudgets } =
     useDelegationCustodyProof(safe.safe_address, safe.chain_id, safeAgents.map((a) => a.id))
@@ -348,7 +348,7 @@ function DelegationRow({
 // ── "What Haven cannot do" ──────────────────────────────────────────────────
 
 export default function CustodyPage() {
-  const { safes, loading: safesLoading } = useUserSafes()
+  const { accounts: safes, loading: accountsLoading } = useAccounts()
   const { agents } = useAgents()
 
   return (
@@ -370,7 +370,7 @@ export default function CustodyPage() {
         </ul>
       </Card>
 
-      {safesLoading ? (
+      {accountsLoading ? (
         <Skeleton variant="text" className="h-5 w-56" />
       ) : safes.length === 0 ? (
         <p className="text-sm text-[var(--v2-ink-3)]">No accounts linked yet.</p>

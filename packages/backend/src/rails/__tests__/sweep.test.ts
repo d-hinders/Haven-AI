@@ -19,7 +19,7 @@ describe('buildSweepAuthorization', () => {
   it('targets the Safe, pays the full balance, and expires ~5 min out', () => {
     const auth = buildSweepAuthorization({
       delegateAddress: DELEGATE.address,
-      safeAddress: SAFE,
+      accountAddress: SAFE,
       chainId: 8453,
       valueAtomic: 40000n,
       nowSec: 1_000_000,
@@ -41,7 +41,7 @@ describe('recoverSweepSigner', () => {
   it('recovers the delegate from a viem-signed authorization (signer ↔ backend)', async () => {
     const auth: SweepAuthorization = buildSweepAuthorization({
       delegateAddress: DELEGATE.address,
-      safeAddress: SAFE,
+      accountAddress: SAFE,
       chainId: 8453,
       valueAtomic: 40000n,
     })
@@ -90,7 +90,7 @@ describe('signSweepExpectedContext', () => {
   it('binds the authorization with the dedicated key and the signer can re-derive it', async () => {
     const auth = buildSweepAuthorization({
       delegateAddress: DELEGATE.address,
-      safeAddress: SAFE,
+      accountAddress: SAFE,
       chainId: 8453,
       valueAtomic: 40000n,
     })

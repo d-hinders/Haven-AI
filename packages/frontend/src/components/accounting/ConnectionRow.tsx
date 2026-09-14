@@ -49,7 +49,7 @@ import { Button } from '@/components/ui/Button'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
 import type { AccountingConnection, AccountingConnectionStatus, AccountingProvider } from '@/hooks/useAccounting'
-import type { Locale } from '@/lib/i18n'
+import { INTL_LOCALE, type Locale } from '@/lib/i18n'
 import { connectionSettingsRegionId } from './ConnectionSettings'
 
 export type ConnectionAction = 'connect' | 'reconnect' | 'settings'
@@ -83,7 +83,7 @@ const CHIP_TONE: Record<AccountingConnectionStatus, StatusTone> = {
 
 /** Absolute, locale-formatted day — never relative, so a capture is stable. */
 export function formatConnectionDate(iso: string, locale: Locale): string {
-  return new Date(iso).toLocaleDateString(locale === 'sv' ? 'sv-SE' : 'en-GB', {
+  return new Date(iso).toLocaleDateString(INTL_LOCALE[locale], {
     day: 'numeric',
     month: 'short',
     year: 'numeric',

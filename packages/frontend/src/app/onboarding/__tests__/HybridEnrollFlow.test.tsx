@@ -30,7 +30,7 @@ const mockUser = {
   email: 'hybrid@example.com',
   wallet_address: null,
   safe_address: null,
-  safes: [],
+  accounts: [],
 }
 
 // Raw credential id bytes ↔ the formats the flow must produce.

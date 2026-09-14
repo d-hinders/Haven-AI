@@ -26,14 +26,14 @@ import fastifyJwt from '@fastify/jwt'
 
 const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  portfolioMocks: { fetchPortfolioForSafe: vi.fn() },
+  portfolioMocks: { fetchPortfolioForAccount: vi.fn() },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
     enrichedTransactionIdentityKey: vi.fn((tx: { hash: string }) => tx.hash),
     enrichTransactionsWithAgents: vi.fn(
       async (_userId: string, transactions: unknown[]) => transactions,
     ),
-    fetchSafeTransactions: vi.fn(),
+    fetchAccountTransactions: vi.fn(),
     mergeX402Transactions: vi.fn(),
   },
   fiatMocks: { getFiatValuesForTokenAmount: vi.fn() },
@@ -50,7 +50,7 @@ import dashboardRoutes from '../dashboard.js'
 
 const SAFE = {
   id: 'safe-1',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 8453,
   name: 'Main account',
   is_default: true,
@@ -60,7 +60,7 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
-  safe_id: SAFE.id,
+  account_id: SAFE.id,
   safe_name: SAFE.name,
   safe_chain_id: SAFE.chain_id,
   account_type: null,
@@ -87,7 +87,7 @@ function installQueryMock(overrides: {
     if (sql.includes('AS has_first_agent_payment')) {
       return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
     }
-    if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
+    if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
       return Promise.resolve({ rows: overrides.safes ?? [SAFE] })
     }
     if (sql.includes('FROM agents a')) {
@@ -133,13 +133,13 @@ describe('dashboard aggregates (characterization, #1167)', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    portfolioMocks.fetchPortfolioForSafe.mockReset()
-    transactionMocks.fetchSafeTransactions.mockReset()
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
+    transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
     fiatMocks.getFiatValuesForTokenAmount.mockReset()
 
-    portfolioMocks.fetchPortfolioForSafe.mockResolvedValue({ totalUsd: 100, totalEur: 92 })
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [] })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 100, totalEur: 92 })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0, eur: 0 })
   })

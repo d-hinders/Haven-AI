@@ -47,6 +47,8 @@ function overview(id: string): DashboardOverviewResponse {
       blockNumber: 45725826,
       isError: false,
       chainId: 8453,
+      accountId: 'safe-1',
+      accountAddress: '0x1111111111111111111111111111111111111111',
       safeId: 'safe-1',
       safeAddress: '0x1111111111111111111111111111111111111111',
       safeName: 'Base wallet',

@@ -206,7 +206,7 @@ describe('Auth routes', () => {
           email: 'test@example.com',
           password_hash: testPasswordHash,
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: null,
+          account_address: null,
         }],
       })
       mockQuery.mockResolvedValueOnce({ rows: [] })
@@ -295,7 +295,7 @@ describe('Auth routes', () => {
           email: 'test@example.com',
           password_hash: testPasswordHash,
           wallet_address: null,
-          safe_address: null,
+          account_address: null,
         }],
       })
 
@@ -325,7 +325,7 @@ describe('Auth routes', () => {
           name: 'Ada Lovelace',
           email: 'test@example.com',
           wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-          safe_address: null,
+          account_address: null,
           // FIND_USER_PROFILE_BY_ID_SQL selects currency_preference too, so a
           // real row always carries it (#1446).
           currency_preference: 'USD',
@@ -347,6 +347,64 @@ describe('Auth routes', () => {
       expect(body.email).toBe('test@example.com')
       expect(body.safes).toEqual([])
       expectMatchesSpec('GET', '/auth/me', body)
+    })
+
+    // #2907 (naming P0 finding #2): the session user dual-emits
+    // `account_address` alongside `safe_address` ON THE WIRE, and each entry
+    // in `safes` carries its own `account_address` twin too. Removing
+    // `withSessionAccountAddressAlias(...)` (or the `.map(withAccountAddressAlias)`
+    // on the safes list) from this route leaves `wire-aliases.test.ts` green
+    // (it never calls the route) — this is the request-level check that
+    // catches it.
+    it('#2907: dual-emits account_address at the top level and per-safe', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+      const SAFE_ADDRESS = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+      // Dispatched by SQL text rather than a chain of positional per-call
+      // mocks — the shrink-only db-mock ratchet (#1227) caps that count per
+      // file, and this file is already at its baseline.
+      mockQuery.mockImplementation((sql: string) => {
+        const text = String(sql)
+        if (text.includes('FROM users WHERE id')) {
+          return Promise.resolve({
+            rows: [{
+              id: USER_UUID,
+              name: 'Ada Lovelace',
+              email: 'test@example.com',
+              wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
+              account_address: SAFE_ADDRESS,
+              currency_preference: 'USD',
+              created_at: '2025-01-01T00:00:00.000Z',
+            }],
+          })
+        }
+        if (text.includes('FROM smart_accounts')) {
+          return Promise.resolve({
+            rows: [{
+              id: 'safe-1',
+              account_address: SAFE_ADDRESS,
+              chain_id: 8453,
+              name: 'Main',
+              is_default: true,
+              account_type: 'delegator_hybrid',
+            }],
+          })
+        }
+        throw new Error(`Unexpected query: ${text}`)
+      })
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/auth/me',
+        headers: { authorization: `Bearer ${token}` },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expect(body.safe_address).toBe(body.account_address)
+      expect(body.account_address).toBe(SAFE_ADDRESS)
+      expect(body.safes).toHaveLength(1)
+      expect(body.safes[0].safe_address).toBe(body.safes[0].account_address)
     })
 
     it('returns 401 without token', async () => {
@@ -379,56 +437,56 @@ describe('safes payload carries the rail (#1069)', () => {
     // delegation accounts still dead-ended at the wallet approval. Pin the
     // field at the SOURCE the frontend actually consumes.
     //
-    // This guard used to scan `auth.ts` for `SELECT … FROM user_safes`. #1180
+    // This guard used to scan `auth.ts` for `SELECT … FROM smart_accounts`. #1180
     // moved that statement into the repository, which would have left the
     // scan matching NOTHING — a guard that silently policed an empty set. It
     // follows the SQL instead, and now asserts the constant directly rather
     // than a regex over a file's text.
-    const { LIST_SESSION_SAFES_FOR_USER_SQL } = await import(
-      '../../infra/repositories/user-safes.js'
+    const { LIST_SESSION_ACCOUNTS_FOR_USER_SQL } = await import(
+      '../../infra/repositories/smart-accounts.js'
     )
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('account_type')
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toMatch(/FROM user_safes/)
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toContain('account_type')
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toMatch(/FROM smart_accounts/)
   })
 
   it('both session endpoints use that one statement — neither can drift alone', async () => {
     // The original bug was two SELECTs disagreeing about one column. Rather
     // than re-check each call site's text, assert there is only one statement
-    // left to get wrong: `auth.ts` holds no inline user_safes SQL at all.
+    // left to get wrong: `auth.ts` holds no inline smart_accounts SQL at all.
     //
     // COUNTING, not `toContain` — the promotion-batch review proved the old
     // form was satisfied by the IMPORT LINE alone. Switching only /auth/me to
-    // `listSafesForUser` (which omits account_type) reintroduced #1069 with
+    // `listAccountsForUser` (which omits account_type) reintroduced #1069 with
     // the whole suite green: login still mentioned the right function, so the
     // grep passed. Both endpoints must CALL it.
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
-    expect(src).not.toMatch(/FROM user_safes/)
+    expect(src).not.toMatch(/FROM smart_accounts/)
 
-    const calls = src.match(/listSessionSafesForUser\(/g) ?? []
+    const calls = src.match(/listSessionAccountsForUser\(/g) ?? []
     expect(calls.length, 'both /auth/login and /auth/me must call it').toBe(2)
 
     // And no sibling projection may be reached from here: every other
-    // user_safes list omits account_type, which is the field #1069 is about.
-    expect(src).not.toMatch(/listSafesForUser\(|listSafesWithAccountTypeForUser\(/)
+    // smart_accounts list omits account_type, which is the field #1069 is about.
+    expect(src).not.toMatch(/listAccountsForUser\(|listAccountsWithTypeForUser\(/)
   })
 
   it('the session SELECT carries the signer-set inputs and both endpoints map them through the predicate (#1205)', async () => {
     // The recommendation's production origin: raw facts in the SQL, the
-    // ANSWER computed by sessionSafePayload — chain classification stays in
+    // ANSWER computed by sessionAccountPayload — chain classification stays in
     // exactly one place (modules/accounts/mainnet-gate.ts). Same #1069-class
     // guard shape: assert the statement, then count the mapping call sites.
-    const { LIST_SESSION_SAFES_FOR_USER_SQL } = await import(
-      '../../infra/repositories/user-safes.js'
+    const { LIST_SESSION_ACCOUNTS_FOR_USER_SQL } = await import(
+      '../../infra/repositories/smart-accounts.js'
     )
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('owner_address')
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toContain('passkey_count')
-    expect(LIST_SESSION_SAFES_FOR_USER_SQL).toMatch(/hybrid_account_passkeys/)
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toContain('owner_address')
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toContain('passkey_count')
+    expect(LIST_SESSION_ACCOUNTS_FOR_USER_SQL).toMatch(/hybrid_account_passkeys/)
 
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
-    const mapped = src.match(/\.map\(sessionSafePayload\)/g) ?? []
-    expect(mapped.length, 'both /auth/login and /auth/me must map through sessionSafePayload').toBe(2)
+    const mapped = src.match(/\.map\(sessionAccountPayload\)/g) ?? []
+    expect(mapped.length, 'both /auth/login and /auth/me must map through sessionAccountPayload').toBe(2)
   })
 })
 

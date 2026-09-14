@@ -107,7 +107,7 @@ export default function TransactionsClient() {
   const [filters, setFilters] = useState<TransactionFilterState>(() => {
     const direction = searchParams.get('direction')
     return {
-      safeId: searchParams.get('safeId') ?? undefined,
+      accountId: searchParams.get('accountId') ?? undefined,
       agentId: searchParams.get('agentId') ?? undefined,
       tokenKey: searchParams.get('tokenKey') ?? undefined,
       direction: direction === 'in' || direction === 'out' ? direction : undefined,
@@ -128,22 +128,22 @@ export default function TransactionsClient() {
     hasMore,
     error,
     partialFailure,
-    failedSafeIds,
+    failedAccountIds,
     truncated,
     loadMore,
     refresh,
   } = useTransactionsFeed(filters, 25)
 
-  const userSafes = user?.safes ?? []
-  const hasSafes = userSafes.length > 0
+  const userAccounts = user?.accounts ?? []
+  const hasAccounts = userAccounts.length > 0
   const hasActiveFilters = Boolean(
-    filters.safeId || filters.agentId || filters.tokenKey || filters.direction,
+    filters.accountId || filters.agentId || filters.tokenKey || filters.direction,
   )
 
   // Transactions follow the active chain by default and re-default when it
   // switches; the network dropdown overrides to another chain or all (#620).
   const { scope, setScope } = useChainScope('follow-active')
-  const chainIds = Array.from(new Set(userSafes.map((s) => s.chain_id))).sort((a, b) => a - b)
+  const chainIds = Array.from(new Set(userAccounts.map((s) => s.chain_id))).sort((a, b) => a - b)
   const showNetworkFilter = chainIds.length > 1
 
   // Client-side direction + network filters — the LIST endpoint doesn't support
@@ -160,17 +160,17 @@ export default function TransactionsClient() {
     })
   }, [transactions, filters.direction, scope])
 
-  const safeNamesById = new Map(safes.map((safe) => [safe.id, safe.name]))
+  const accountNamesById = new Map(safes.map((safe) => [safe.id, safe.name]))
   const agentNamesById = new Map(agents.map((agent) => [agent.id, agent.name]))
   const tokenSymbolsByKey = new Map(tokens.map((token) => [token.key, token.symbol]))
-  const safeNamesByAddress = new Map(
-    userSafes.map((safe) => [
+  const accountNamesByAddress = new Map(
+    userAccounts.map((safe) => [
       `${safe.safe_address.toLowerCase()}:${safe.chain_id}`,
       safe.name,
     ]),
   )
-  const failedSafeNames = failedSafeIds
-    .map((id) => safeNamesById.get(id))
+  const failedAccountNames = failedAccountIds
+    .map((id) => accountNamesById.get(id))
     .filter((name): name is string => Boolean(name))
 
   // Plain-English page subtitle that reflects the active filter scope. When
@@ -182,7 +182,7 @@ export default function TransactionsClient() {
       buildTransactionScopeSubtitle(
         filters,
         {
-          accountNamesById: safeNamesById,
+          accountNamesById,
           agentNamesById,
           tokenSymbolsByKey,
         },
@@ -190,7 +190,7 @@ export default function TransactionsClient() {
         // it is the false one when the feed is capped at the explorer window.
         truncated ? 'Recent activity across your accounts.' : undefined,
       ),
-    [filters, safeNamesById, agentNamesById, tokenSymbolsByKey, truncated],
+    [filters, accountNamesById, agentNamesById, tokenSymbolsByKey, truncated],
   )
 
   // Cheap summary stats — count by direction over what's currently loaded.
@@ -207,7 +207,7 @@ export default function TransactionsClient() {
     setExportNotice(null)
 
     const params = new URLSearchParams()
-    if (nextFilters.safeId) params.set('safeId', nextFilters.safeId)
+    if (nextFilters.accountId) params.set('accountId', nextFilters.accountId)
     if (nextFilters.agentId) params.set('agentId', nextFilters.agentId)
     if (nextFilters.tokenKey) params.set('tokenKey', nextFilters.tokenKey)
     if (nextFilters.direction) params.set('direction', nextFilters.direction)
@@ -227,7 +227,7 @@ export default function TransactionsClient() {
   // the on-screen rows agree.
   const handleExportCsv = async () => {
     const params = new URLSearchParams()
-    if (filters.safeId) params.set('safeId', filters.safeId)
+    if (filters.accountId) params.set('accountId', filters.accountId)
     if (filters.agentId) params.set('agentId', filters.agentId)
     if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
     if (filters.direction) params.set('direction', filters.direction)
@@ -266,7 +266,7 @@ export default function TransactionsClient() {
     }
   }
 
-  if (!hasSafes) {
+  if (!hasAccounts) {
     return (
       <div className="max-w-5xl">
         <PageHeader
@@ -283,7 +283,7 @@ export default function TransactionsClient() {
     )
   }
 
-  // Gated on the server's total for the FETCHED filter scope (safeId, agentId,
+  // Gated on the server's total for the FETCHED filter scope (accountId, agentId,
   // tokenKey — not direction or network, which the list applies in memory),
   // rather than on the rows the browser happens to hold: since #2871 the export
   // covers the whole result set, so gating on `visibleTransactions` would
@@ -336,8 +336,8 @@ export default function TransactionsClient() {
         <div className="mb-4 rounded-lg border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
           <div className="font-medium mb-1">Some accounts failed to load completely.</div>
           <div className="text-xs text-[var(--v2-warning)]">
-            {failedSafeNames.length > 0
-              ? `Affected: ${failedSafeNames.join(', ')}.`
+            {failedAccountNames.length > 0
+              ? `Affected: ${failedAccountNames.join(', ')}.`
               : 'Some network explorers returned partial data.'}{' '}
             Reload the page to try again.
           </div>
@@ -444,7 +444,7 @@ export default function TransactionsClient() {
           error={error}
           onRefresh={() => void refresh()}
           resolveAddress={resolveAddress}
-          safeNamesByAddress={safeNamesByAddress}
+          accountNamesByAddress={accountNamesByAddress}
           hasActiveFilters={hasActiveFilters}
           onClearFilters={handleClearFilters}
           variant="page"
@@ -457,7 +457,7 @@ export default function TransactionsClient() {
         open={selectedTx !== null}
         onClose={() => setSelectedTx(null)}
         resolveAddress={resolveAddress}
-        safeNamesByAddress={safeNamesByAddress}
+        accountNamesByAddress={accountNamesByAddress}
       />
 
       {visibleTransactions.length > 0 && (

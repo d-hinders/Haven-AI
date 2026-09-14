@@ -79,8 +79,8 @@ describe('agent routes', () => {
         name: 'Research Agent',
         description: null,
         delegate_address: '0x1111111111111111111111111111111111111111',
-        safe_id: SAFE_UUID,
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_id: SAFE_UUID,
+        account_address: '0x2222222222222222222222222222222222222222',
         safe_name: 'Main wallet',
         safe_chain_id: 8453,
         api_key_prefix: 'sk_agent_abc',
@@ -113,6 +113,56 @@ describe('agent routes', () => {
     // The populated shape is where drift would actually show.
     expectMatchesSpec('GET', '/agents/{id}', response.json())
 
+    // #2907 (naming P0 finding #2): the twin is asserted PRESENT and EQUAL
+    // to the old field ON THE WIRE — a request-level check, not just the
+    // mapper's own unit test. Removing the `withAgentAccountAlias(...)` call
+    // from this route leaves `wire-aliases.test.ts` green (it never calls the
+    // route) and this assertion is what catches it.
+    const body = response.json()
+    expect(body.safe_id).toBe(body.account_id)
+    expect(body.safe_address).toBe(body.account_address)
+    expect(body.account_name).toBe(body.safe_name)
+    expect(body.account_chain_id).toBe(body.safe_chain_id)
+
+    await app.close()
+  })
+
+  it('#2907: GET /agents (list) dual-emits the account_* twins, equal to safe_*', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+
+    // account_type is deliberately NOT 'delegator_hybrid': that branch reads
+    // active delegations through a second query, which this assertion does
+    // not need. Dispatched by SQL text rather than a positional per-call mock
+    // — the shrink-only db-mock ratchet (#1227) caps that count per file, and
+    // this file is already at its baseline.
+    mockQuery.mockImplementation(async () => ({
+      rows: [{
+        id: AGENT_UUID,
+        name: 'Research Agent',
+        description: null,
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        account_id: SAFE_UUID,
+        account_address: '0x2222222222222222222222222222222222222222',
+        safe_name: 'Main wallet',
+        safe_chain_id: 8453,
+        api_key_prefix: 'sk_agent_abc',
+        status: 'active',
+        account_type: 'hybrid',
+        created_at: '2026-05-25T12:00:00.000Z',
+        mcp_last_seen_at: null,
+      }],
+    }))
+
+    const response = await app.inject({ method: 'GET', url: '/agents' })
+
+    expect(response.statusCode).toBe(200)
+    const agent = response.json().agents[0]
+    expect(agent.safe_id).toBe(agent.account_id)
+    expect(agent.safe_address).toBe(agent.account_address)
+    expect(agent.account_name).toBe(agent.safe_name)
+    expect(agent.account_chain_id).toBe(agent.safe_chain_id)
+
     await app.close()
   })
 
@@ -135,8 +185,8 @@ describe('agent routes', () => {
             name: 'Renamed Agent',
             description: 'updated description',
             delegate_address: VALID_DELEGATE,
-            safe_id: SAFE_UUID,
-            safe_address: '0x2222222222222222222222222222222222222222',
+            account_id: SAFE_UUID,
+            account_address: '0x2222222222222222222222222222222222222222',
             safe_name: 'Main wallet',
             safe_chain_id: 84532,
             account_type: 'delegator_hybrid',
@@ -202,8 +252,8 @@ describe('agent routes', () => {
           name: 'Research Agent',
           description: null,
           delegate_address: '0x1111111111111111111111111111111111111111',
-          safe_id: 'safe-1',
-          safe_address: '0x2222222222222222222222222222222222222222',
+          account_id: 'safe-1',
+          account_address: '0x2222222222222222222222222222222222222222',
           safe_name: 'Main wallet',
           safe_chain_id: 8453,
           api_key_prefix: 'sk_agent_abc',
@@ -374,14 +424,14 @@ describe('agent creation — passport opt-in never breaks creation', () => {
   /** Mock the create path's queries: safe lookup, BEGIN, INSERT, safe info, COMMIT. */
   function mockCreateFlow() {
     mockQuery.mockImplementation(async (sql: string) => {
-      if (/SELECT id FROM user_safes/.test(sql)) return { rows: [{ id: SAFE_UUID }] }
+      if (/SELECT id FROM smart_accounts/.test(sql)) return { rows: [{ id: SAFE_UUID }] }
       if (/INSERT INTO agents/.test(sql)) {
         // Real uuids: the response-shape round trip below validates
         // `format: uuid` on `id` / `safe_id` (#2392; the columns are UUID PKs).
-        return { rows: [{ id: AGENT_UUID, name: 'A', description: null, delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID, api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
+        return { rows: [{ id: AGENT_UUID, name: 'A', description: null, delegate_address: VALID_DELEGATE, account_id: SAFE_UUID, api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
       }
-      if (/SELECT safe_address, name AS safe_name/.test(sql)) {
-        return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 84532 }] }
+      if (/SELECT account_address, name AS safe_name/.test(sql)) {
+        return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 84532 }] }
       }
       return { rows: [] }
     })
@@ -453,14 +503,96 @@ describe('agent creation — passport opt-in never breaks creation', () => {
     expect(mockQuery.mock.calls.some(([sql]) => /FROM agent_delegations/.test(String(sql)))).toBe(false)
   })
 
+  // #2907: `account_id` is the input twin of `safe_id` on POST /agents — P1
+  // (#2908) will make the SDK send `account_id`; this is what unblocks it.
+  describe('POST /agents: account_id input twin of safe_id', () => {
+    it('old-only (safe_id alone) still creates the agent against that account', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().account_id).toBe(SAFE_UUID)
+      expect(
+        mockQuery.mock.calls.some(
+          ([sql, params]) =>
+            /SELECT id FROM smart_accounts/.test(String(sql)) &&
+            Array.isArray(params) &&
+            params.includes(SAFE_UUID),
+        ),
+      ).toBe(true)
+    })
+
+    it('new-only (account_id alone, no safe_id) creates the agent against that account', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, account_id: SAFE_UUID },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().account_id).toBe(SAFE_UUID)
+      // Distinguishes "account_id was actually read" from "the default-safe
+      // fallback happened to return the same id": FIND_USER_SAFE_ID_FOR_USER_SQL
+      // takes TWO params (the requested id, then the user); the default-safe
+      // lookup takes only one. Without the `?? account_id` fallback in the
+      // route, account_id-only would silently fall through to the
+      // one-param default query instead.
+      expect(
+        mockQuery.mock.calls.some(
+          ([sql, params]) =>
+            /SELECT id FROM smart_accounts/.test(String(sql)) &&
+            Array.isArray(params) &&
+            params.length === 2 &&
+            params[0] === SAFE_UUID,
+        ),
+      ).toBe(true)
+    })
+
+    it('both given and equal creates the agent normally', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID, account_id: SAFE_UUID },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().account_id).toBe(SAFE_UUID)
+    })
+
+    it('both given and disagreeing is a 400 naming both keys, with no INSERT attempted', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+      const OTHER_UUID = '9f8e7d6c-5b4a-3c2d-1e0f-a1b2c3d4e5f6'
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID, account_id: OTHER_UUID },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toContain('safe_id')
+      expect(res.json().error).toContain('account_id')
+      expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO agents/.test(String(sql)))).toBe(false)
+    })
+  })
+
   it('skips the opt-in on an unsupported chain instead of creating a doomed row', async () => {
     const app = Fastify({ logger: false })
     await app.register(agentRoutes, { prefix: '/agents' })
     mockQuery.mockImplementation(async (sql: string) => {
-      if (/SELECT id FROM user_safes/.test(sql)) return { rows: [{ id: 'safe-1' }] }
-      if (/INSERT INTO agents/.test(sql)) return { rows: [{ id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE, safe_id: 'safe-1', api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
-      if (/SELECT safe_address, name AS safe_name/.test(sql)) {
-        return { rows: [{ safe_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 100 }] } // Gnosis — unsupported
+      if (/SELECT id FROM smart_accounts/.test(sql)) return { rows: [{ id: 'safe-1' }] }
+      if (/INSERT INTO agents/.test(sql)) return { rows: [{ id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE, account_id: 'safe-1', api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
+      if (/SELECT account_address, name AS safe_name/.test(sql)) {
+        return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 100 }] } // Gnosis — unsupported
       }
       return { rows: [] }
     })
@@ -473,12 +605,12 @@ describe('agent creation — passport opt-in never breaks creation', () => {
 })
 
 describe('agent payloads carry the rail (#1069/#1071 class)', () => {
-  it('every user_safes JOIN in the agents repository selects account_type — AgentPanel and EditAgentModal branch on it', async () => {
+  it('every smart_accounts JOIN in the agents repository selects account_type — AgentPanel and EditAgentModal branch on it', async () => {
     // Third instance of the same mine: the fix landed in GET /agents/:id, but
     // AgentPanel (dashboard/agents list) reads GET /agents, whose SELECT
     // omitted account_type — so delegation agents opened the legacy Safe
     // budget editor with a permanently dead "Update budget" button. Pin the
-    // field in EVERY user_safes join in the agents SQL, like auth.test.ts
+    // field in EVERY smart_accounts join in the agents SQL, like auth.test.ts
     // does for auth.ts. (#988 moved the SQL verbatim from routes/agents.ts
     // into infra/repositories/agents.ts; this pin follows it there.)
     const { readFileSync } = await import('node:fs')
@@ -487,10 +619,10 @@ describe('agent payloads carry the rail (#1069/#1071 class)', () => {
     // `SELECT[\s\S]*?JOIN` — that lazy span crossed statement boundaries, so
     // a SELECT without the join borrowed the NEXT statement's join and the
     // account_type check ran against two statements' merged text (#1210).
-    const selects = src.match(/`[^`]*JOIN user_safes[^`]*`/g) ?? []
+    const selects = src.match(/`[^`]*JOIN smart_accounts[^`]*`/g) ?? []
     expect(selects.length).toBeGreaterThanOrEqual(4)
     for (const sel of selects) {
-      expect(sel, `user_safes JOIN missing account_type: ${sel.slice(0, 80)}`).toContain('account_type')
+      expect(sel, `smart_accounts JOIN missing account_type: ${sel.slice(0, 80)}`).toContain('account_type')
     }
   })
 })
@@ -503,7 +635,7 @@ describe('delegation-rail budget view derives from active delegations (#1090)', 
   const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
   const AGENT_BASE = {
     id: 'agent-1', name: 'A', description: null, delegate_address: VALID_DELEGATE,
-    safe_id: 'safe-1', safe_address: '0x' + '22'.repeat(20), safe_name: 'Main',
+    account_id: 'safe-1', account_address: '0x' + '22'.repeat(20), safe_name: 'Main',
     safe_chain_id: 84532, api_key_prefix: 'sk_a', status: 'active',
     created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null, has_stranded_funds: false,
   }

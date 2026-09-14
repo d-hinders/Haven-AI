@@ -148,6 +148,48 @@ Use this instead of the pattern it replaces. #1803's 320px evidence came from a 
 
 **And do not read a 320px PNG as coverage.** [#1944](https://github.com/d-hinders/Haven-AI/issues/1944) declined to put 320 in the committed set and that decision stands: Haven has no breakpoint between 320 and 390 (Tailwind's `sm` is 640; the two container queries are at 718/974), so a 320 capture buys a picture of the same branches the mobile baseline already renders, at the cost of a blocking full-page `/design-system` baseline (~1.8 MB) plus a TopBar baseline plus a third PNG of every route in every evidence run, forever. What actually differs at 320 is **layout arithmetic**, and an overlap photographs perfectly happily ([#1858](https://github.com/d-hinders/Haven-AI/issues/1858)) — which is why 320 is gated by *measuring* specs (`mobile-nav-tap-target.mobile.spec.ts`, `mobile-nav-layering.mobile.spec.ts`, `transaction-row.mobile.spec.ts`, `navigation.mobile.spec.ts` all sweep it) and not by a baseline. The flag is for **seeing**; those specs are the coverage.
 
+
+**Capturing a palette — a PR that touches colour captures BOTH schemes ([#2929](https://github.com/d-hinders/Haven-AI/issues/2929)).** A theme-aware diff can look right in the palette the author happens to use and be wrong in the other one, and that half of the pair is exactly what a code review can read past. So a frontend PR that changes colour — a token, a shared primitive's classes, a surface, a shadow, a focus ring — attaches **paired** captures, light and dark, for every screen its sweep touched. The flag is the sibling of `--viewport`, and behaves like it:
+
+```bash
+npm run screenshot -w packages/frontend -- --color-scheme=both /dashboard      # paired PNGs
+npm run screenshot -w packages/frontend -- --color-scheme=dark /design-system  # one scheme
+```
+
+`light`, `dark`, `both`; also `SCREENSHOT_COLOR_SCHEME` for a whole run, with the
+flag winning. **Absent flag is `light` with no filename suffix, which is
+byte-identical to every run this harness has ever produced — the flag is purely
+additive.** A non-default scheme rides the *filename*: `dashboard-dark.png`, and
+the paired run therefore writes `dashboard-desktop.png` (the historical light
+name, unsuffixed) beside `dashboard-desktop-dark.png` for the reviewer to
+compare side by side. A
+malformed value (`--color-scheme=drk`) **fails the run** rather than falling
+back to light, because the fallback would hand a reviewer light-only evidence
+under a `both` expectation. The manifest records `color_schemes` for the run.
+
+Two mechanisms make a dark capture mean what it says, and only one of them is
+deterministic: the harness seeds the app's own `haven.theme` storage key through
+`THEME_STORAGE_KEY` (read through `src/lib/theme-bootstrap.ts`, so a key rename
+reddens the parity test in `src/__tests__/screenshot-fixture.test.ts` instead of
+quietly labelling light PNGs dark), and the app's no-flash bootstrap from #2927
+stamps `data-theme` from it before first paint — **that** is what pins the token
+block regardless of the OS. Playwright's `colorScheme` rides along so `prefers-color-scheme`-driven
+rendering (native controls, scrollbars, the media-query token path) agrees with
+the seed rather than fighting it. The byte-comparison guards (`redirect_captures`
+/ `signed_out_duplicates`) partition per scheme, so a dark capture is only ever
+judged against the dark `/dashboard`.
+
+The pixel gate has a dark half too: the `chromium-desktop-dark` Playwright
+project (`npm run test:visual:dark`) is scoped to `design-system.visual.spec.ts`
+alone and runs under the same *Design visual regression* job — advisory on
+`dev`, required on `main`, like the light project. It seeds `haven.theme` the
+same way and commits its baselines under a `-dark` suffix. It does not extend
+to the other visual specs, which have no dark baselines: a project that
+auto-writes missing snapshots is a green tick that compared nothing (the #2318
+class), so the scope is the honest one. `scripts/ci/visual-baseline-inventory.mjs`
+prints the split between the two schemes' counts; the dark baselines regenerate
+through the same *Update visual baselines* dispatch.
+
 **One capture server per worktree, and it has to prove who it is ([#1800](https://github.com/d-hinders/Haven-AI/issues/1800)).** The harness used to bind a fixed port (3111) in every worktree. Concurrent sessions are the normal state of this repo, so the second run found the port already bound, got a **200 OK from the other worktree's app**, and captured it — PNGs that render, have plausible dimensions, show the right routes, and are of a **different branch**, with nothing about them saying so. That is worse than a guard that fails silently: it is positive evidence that is confidently wrong, and the `haven-design-reviewer` pass below reasons from exactly these artifacts. Two things now stand in the way, and the second is the one that lasts:
 
 - the port is **derived from the worktree path** and proven bindable before the dev server starts (a busy port is skipped and the chosen one is printed — never inherited);
@@ -257,7 +299,8 @@ npm run screenshot -w packages/frontend -- --scenario=all             # every sc
 
 **A scenario can mock a CONNECTED wallet ([#2073](https://github.com/d-hinders/Haven-AI/issues/2073)).** A third class of state comes from the wagmi connection itself — the signer gate's `wrong_wallet` answer needs a hydrated signer set AND a connected wallet whose address the gate can compare, and neither `api()` nor `chain()` can express "a wallet is connected". Declare `connectedWallet: '0x…'` on a scenario and the harness installs a minimal EIP-1193 provider on `window.ethereum` plus the two wagmi storage keys (`wagmi.injected.connected`, `wagmi.recentConnectorId`) that let the targetless `injected()` connector reconnect on mount — so wagmi's own reconnect, `useAccount`, the gate and the header render are all the product's code, nothing forced by props. The stub answers only the read methods a mounted app needs (`eth_accounts`/`eth_requestAccounts`/`eth_chainId`/`net_version`) and **throws loudly on anything else**, so a scenario that starts SIGNING fails instead of hanging on a prompt no one can answer. One knock-on cost, already paid: a connected wallet makes RainbowKit batch-read the address's native balance (`getEthBalance` on Multicall3), so `makeAllowanceChainFixture` seeds that read — zero, for any address — or the #1935 unanswered-read guard rightly fails the run. `wrong-wallet` is the worked example, and `e2e/wallet-signer-offering.spec.ts` uses the same stub shape for the owner-match/mismatch pair.
 
-**A scenario can seed DEVICE-LOCAL state, including which account is active ([#1856](https://github.com/d-hinders/Haven-AI/issues/1856), first used by [#2202](https://github.com/d-hinders/Haven-AI/issues/2202)).** The fourth class, and the one an API body structurally cannot reach: state the product keeps in the **browser**, not on the server. Declare `seed()` on a scenario returning `{ [key]: value }` pairs and the harness writes them to `localStorage` before any app code runs — same posture as `connectedWallet` above, a browser-side store the product owns, so the app's own read path and branch are real. It was built for the passkey store (`useSafeOperationGate` resolves the signer from the credentials the app itself wrote at enrolment, and no API answer can put a credential on this device) and stood with **no callers at all** until #2202. Deliberately narrow: it seeds a store the product owns, and is **not** a hook for stubbing component state — a scenario that wants one should be re-examined instead. The keys the harness itself seeds are exported as `SEED_STORAGE_KEYS` (`haven_token`, `haven_active_safe_id`) and pinned against `src/lib/auth-storage.ts`, so a rename there fails a test rather than silently capturing logged-out screenshots. `agents-legacy-rail` is the worked example, and it shows the main reason to reach for this: **switching the ACTIVE account**. The shared fixture describes two accounts (a delegation-rail one and a legacy Safe), and a good deal of the product is gated on which is active — `useAgentPanelState` reads the chain for the active account only, and `AgentPanel` binds every agent's wallet controls to `agentUsesActiveSafe` — so the legacy rail's rendering is reachable by seeding `activeSafe` and overriding **nothing else**. Prefer that to an `api()` override: a scenario that has to restate the agent list to render a rail is evidence that the fixture disagrees with itself.
+**A scenario can seed DEVICE-LOCAL state, including which account is active ([#1856](https://github.com/d-hinders/Haven-AI/issues/1856), first used by [#2202](https://github.com/d-hinders/Haven-AI/issues/2202)).** The fourth class, and the one an API body structurally cannot reach: state the product keeps in the **browser**, not on the server. Declare `seed()` on a scenario returning `{ [key]: value }` pairs and the harness writes them to `localStorage` before any app code runs — same posture as `connectedWallet` above, a browser-side store the product owns, so the app's own read path and branch are real. It was built for the passkey store (`useAccountOperationGate`, named
+`useSafeOperationGate` before #2913, resolves the signer from the credentials the app itself wrote at enrolment, and no API answer can put a credential on this device) and stood with **no callers at all** until #2202. Deliberately narrow: it seeds a store the product owns, and is **not** a hook for stubbing component state — a scenario that wants one should be re-examined instead. The keys the harness itself seeds are exported as `SEED_STORAGE_KEYS` (`haven_token`, `haven_active_account_id`) and pinned against `src/lib/auth-storage.ts`, so a rename there fails a test rather than silently capturing logged-out screenshots. `agents-legacy-rail` is the worked example, and it shows the main reason to reach for this: **switching the ACTIVE account**. The shared fixture describes two accounts (a delegation-rail one and a legacy Safe), and a good deal of the product is gated on which is active — `useAgentPanelState` reads the chain for the active account only, and `AgentPanel` binds every agent's wallet controls to `agentUsesActiveAccount` — so the legacy rail's rendering is reachable by seeding `activeAccount` and overriding **nothing else**. Prefer that to an `api()` override: a scenario that has to restate the agent list to render a rail is evidence that the fixture disagrees with itself.
 
 **Two PNGs when a dialog scrolls.** An element screenshot captures only the visible box, so a dialog that caps its own height drops everything below the fold — and its rounded bottom edge makes the clipped capture look complete, which would have a reviewer judge a screen they have only partly seen. When a capture overflows, the run says so (`⚠ … had content BELOW THE FOLD`, with the pixel shortfall) and writes a second `…-full.png` at a viewport tall enough to show all of it. **Judge the content from the `-full` PNG; judge what is reachable without scrolling from the other** — the fold itself is often the finding.
 

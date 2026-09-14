@@ -13,7 +13,7 @@ const SIGN_HASH = `0x${'ab'.repeat(32)}`
 function row(over: Partial<PaymentReceiptRow> = {}): PaymentReceiptRow {
   return {
     id: 'pi1',
-    safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+    account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
     chain_id: 100,
     token_symbol: 'xDAI',
     token_address: '0x0000000000000000000000000000000000000000',
@@ -41,6 +41,24 @@ describe('buildPaymentReceipt (backend DB mapping)', () => {
   })
 
   it('produces a receipt that verifies via the SDK verifier (end-to-end)', () => {
+    const signature = DELEGATE.signingKey.sign(SIGN_HASH).serialized
+    const receipt = buildPaymentReceipt(row({ signature }))
+    expect(verifyPaymentReceipt(receipt).verified).toBe(true)
+  })
+
+  // #2907: payment.account twins payment.safe (same value) — additive,
+  // outside the SDK's typed PaymentReceipt['payment'] shape, so asserted at
+  // the JS-object level rather than through the TS type. Mutation-proven by
+  // dropping the `account: row.account_address` line in receipt.ts.
+  it('#2907: payment.account is a same-value twin of payment.safe', () => {
+    const r = buildPaymentReceipt(row({ signature: '0xsig' })) as unknown as {
+      payment: { safe: string; account: string }
+    }
+    expect(r.payment.account).toBe(r.payment.safe)
+    expect(r.payment.account).toBe('0x135a9215604711AC70d970e12Caa812c53537EF4')
+  })
+
+  it('#2907: verification still passes with the additive payment.account field present (signHash is stored, not recomputed over payment)', () => {
     const signature = DELEGATE.signingKey.sign(SIGN_HASH).serialized
     const receipt = buildPaymentReceipt(row({ signature }))
     expect(verifyPaymentReceipt(receipt).verified).toBe(true)

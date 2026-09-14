@@ -295,5 +295,29 @@ export default defineConfig({
       testMatch: ['**/*.mobile.spec.ts'],
       testIgnore: SUITE_IGNORE,
     },
+    {
+      // The dark palette's pixel gate (#2929). Scoped to the design-system
+      // spec ONLY — one screen, both schemes — because the other visual specs
+      // have no dark baselines yet, and a project that silently compared
+      // against (or silently auto-wrote) light baselines would be a green tick
+      // about nothing: exactly the #2318/#1863 failure class this suite keeps
+      // relearning. The spec reads `testInfo.project.name` and under this
+      // project captures `<base>-dark.png` and seeds `haven.theme='dark'` in
+      // storage BEFORE navigation; the seed is what makes the render
+      // deterministic (the app's no-flash bootstrap stamps `data-theme` from
+      // it, pinning the token block regardless of the OS), and
+      // `colorScheme: 'dark'` rides along so `prefers-color-scheme`-driven
+      // rendering — native controls, scrollbars, the media-query token path
+      // — agrees with it instead of fighting it.
+      //
+      // It stays OUT of `test:visual`'s `--project=chromium-desktop`
+      // invocation and runs under its own `test:visual:dark` script, wired
+      // into the same `design_visual` job — advisory on `dev`, required on
+      // `main`, exactly like the light project.
+      name: 'chromium-desktop-dark',
+      use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
+      testMatch: ['**/design-system.visual.spec.ts'],
+      testIgnore: SUITE_IGNORE,
+    },
   ],
 })

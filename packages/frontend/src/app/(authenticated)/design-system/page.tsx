@@ -21,6 +21,8 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
@@ -36,7 +38,9 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
+import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+
 import { WalletPopover } from '@/components/WalletButton'
 import {
   AgentBudgetCard,
@@ -52,6 +56,73 @@ import {
   TransactionMovement,
   WalletIdentityBlock,
 } from '@/components/haven'
+
+/**
+ * One-line use notes for the dual-palette swatch table (#2927). Tokens not
+ * listed here render an em dash — the table is the contract, the note is a
+ * courtesy; the semantic rules live in the section prose and in
+ * docs/product/design-system.md.
+ */
+const TOKEN_USE: Record<string, string> = {
+  bg: 'App ground.',
+  surface: 'Card fills; the first elevation step.',
+  'surface-2': 'Second elevation step — raised fills, control tracks.',
+  'surface-hover': 'Hover fill on list rows and menu items.',
+  'surface-anchor': 'Anchor cards — the second focal point on a page.',
+  'surface-code': 'Code blocks — deliberately NOT inverted in dark.',
+  ink: 'Primary text.',
+  'ink-2': 'Secondary text.',
+  'ink-3': 'Quiet metadata text (AA on every surface).',
+  'ink-on-brand': 'Text on brand fills.',
+  border: 'Hairline borders.',
+  'border-strong': 'Emphasised borders and control outlines.',
+  'border-anchor': 'Anchor-card brand-tinted hairline.',
+  brand: 'Primary actions, links, brand identity.',
+  'brand-strong': 'Brand hover / pressed fill.',
+  'brand-soft': 'Brand-tinted fills (chips, selection).',
+  success: 'Incoming payments, completed states.',
+  'success-soft': 'Success fill.',
+  debit: 'Outgoing payments — sibling to success, never a warning.',
+  'debit-soft': 'Debit fill.',
+  warning: 'Needs attention, soft caution.',
+  'warning-soft': 'Warning fill.',
+  danger: 'Errors, destructive confirmations.',
+  'danger-soft': 'Danger fill.',
+  'modal-backdrop': 'Modal scrim.',
+  'chain-base': 'Base identity dot.',
+  'chain-gnosis': 'Gnosis identity dot.',
+  'chain-testnet': 'Testnet flag colour.',
+  'chain-base-dot': 'NetworkPill Base dot (sky family).',
+  'chain-base-fg': 'NetworkPill Base text.',
+  'chain-base-border': 'NetworkPill Base border.',
+  'chain-base-bg': 'NetworkPill Base fill.',
+  'chain-testnet-fg': 'NetworkPill testnet text.',
+  'chain-testnet-border': 'NetworkPill testnet border.',
+  'chain-testnet-bg': 'NetworkPill testnet fill.',
+  'table-header-bg': 'Table header band.',
+  'table-header-ink': 'Table header text.',
+  'table-row-border': 'Table row divider.',
+  'table-row-hover': 'Table row hover fill.',
+}
+
+/** The acceptance pairs, measured once per theme for the page's table. */
+const CONTRAST_ROWS_BY_PAIR = (() => {
+  const rows = contrastTable()
+  return rows
+    .filter((row) => row.theme === 'light')
+    .map((light) => {
+      const dark = rows.find(
+        (r) => r.pair === light.pair && r.theme === 'dark',
+      )!
+      return {
+        fg: light.pair.fg,
+        bg: light.pair.bg,
+        min: light.pair.min,
+        light: light.ratio,
+        dark: dark.ratio,
+      }
+    })
+})()
 
 const sampleAddress = '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C'
 
@@ -134,6 +205,7 @@ export default function DesignSystemPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
+  const [segmented, setSegmented] = useState<'light' | 'dark' | 'system'>('system')
   const { toast } = useToast()
 
   return (
@@ -243,12 +315,12 @@ export default function DesignSystemPage() {
                 name: '--v2-ink / -2 / -3',
                 soft: '—',
                 use: 'Text hierarchy. -ink is primary, -ink-2 secondary, -ink-3 quietest.',
-                swatch: 'border-[var(--v2-border)] bg-white text-[var(--v2-ink)]',
+                swatch: 'border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink)]',
               },
             ].map((token) => (
               <div
                 key={token.name}
-                className="flex gap-3 rounded-[10px] border border-[var(--v2-border)] bg-white p-3"
+                className="flex gap-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3"
               >
                 <span
                   aria-hidden="true"
@@ -306,6 +378,158 @@ export default function DesignSystemPage() {
                 </span>
               ))}
             </div>
+          </div>
+
+          {/*
+            Both palettes side by side (#2927). The swatch values come from
+            lib/theme-tokens.ts, which is pinned to globals.css by test — the
+            page renders the contract, it does not restate it.
+          */}
+          <div className="mt-6 border-t border-[var(--v2-border)] pt-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">
+              Both palettes — light and dark (#2927)
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              Every colour token carries a light and a dark value in
+              <code className="mx-1 rounded bg-[var(--v2-surface)] px-1">globals.css</code>
+              — one <code className="rounded bg-[var(--v2-surface)] px-1">:root</code> light
+              palette and two byte-identical dark re-declaration blocks (see the Dark mode
+              rules below). The table is the whole colour contract; a designer checks a pair,
+              the coupling gate checks that this table exists.
+            </p>
+            <div className="mt-4 overflow-x-auto">
+              <Table className="min-w-[640px]">
+                <Table.Head collapseWhenNarrow={false}>
+                  <tr>
+                    <Table.HeaderCell align="left">Token</Table.HeaderCell>
+                    <Table.HeaderCell align="left">Light</Table.HeaderCell>
+                    <Table.HeaderCell align="left">Dark</Table.HeaderCell>
+                    <Table.HeaderCell align="left">Use</Table.HeaderCell>
+                  </tr>
+                </Table.Head>
+                <Table.Body>
+                  {THEME_TOKENS.map((token) => (
+                    <tr key={token.name}>
+                      <td className="px-4 py-2.5 align-top font-mono text-xs text-[var(--v2-ink)]">
+                        --v2-{token.name}
+                      </td>
+                      <td className="px-4 py-2.5 align-top">
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className="inline-block h-4 w-4 rounded border border-[var(--v2-border)]"
+                            style={{ backgroundColor: token.light }}
+                          />
+                          <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{token.light}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 align-top">
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className="inline-block h-4 w-4 rounded border border-[var(--v2-border)]"
+                            style={{ backgroundColor: token.dark }}
+                          />
+                          <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{token.dark}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 align-top text-xs text-[var(--v2-ink-2)]">
+                        {TOKEN_USE[token.name] ?? '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
+
+            <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">
+              Measured contrast — ink on ground, both themes
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <Table className="min-w-[520px]">
+                <Table.Head collapseWhenNarrow={false}>
+                  <tr>
+                    <Table.HeaderCell align="left">Pair</Table.HeaderCell>
+                    <Table.HeaderCell align="left">Light</Table.HeaderCell>
+                    <Table.HeaderCell align="left">Dark</Table.HeaderCell>
+                    <Table.HeaderCell align="left">Minimum</Table.HeaderCell>
+                  </tr>
+                </Table.Head>
+                <Table.Body>
+                  {CONTRAST_ROWS_BY_PAIR.map(({ fg, bg, min, light, dark }) => (
+                    <tr key={`${fg}-${bg}`}>
+                      <td className="px-4 py-2.5 align-top font-mono text-xs text-[var(--v2-ink)]">
+                        {fg} on {bg}
+                      </td>
+                      <td className="px-4 py-2.5 align-top v2-tabular text-xs text-[var(--v2-ink-2)]">{light.toFixed(2)}:1</td>
+                      <td className="px-4 py-2.5 align-top v2-tabular text-xs text-[var(--v2-ink-2)]">{dark.toFixed(2)}:1</td>
+                      <td className="px-4 py-2.5 align-top v2-tabular text-xs text-[var(--v2-ink-3)]">≥ {min}:1</td>
+                    </tr>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
+
+            <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Ratios are computed from the same token table
+              (<code className="rounded bg-[var(--v2-surface)] px-1">lib/theme-tokens.ts</code>) by{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">scripts/contrast-check.mjs</code>, which the unit
+              suite runs against the real CSS — change a token and the suite tells you what moved.
+            </p>
+          </div>
+
+          {/*
+            The dark-mode rules (#2925 epic), stated once here so a designer
+            reads the WHY beside the palettes that follow them.
+          */}
+          <div className="mt-6 border-t border-[var(--v2-border)] pt-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--v2-ink-3)]">
+              Dark mode
+            </p>
+            <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              <li>
+                <span className="font-medium text-[var(--v2-ink)]">Not pure black.</span> The dark
+                {/* design-lint-disable-line — the epic's literal band values, quoted on purpose */}
+                ground is a deep, slightly cool neutral (in the <code className="rounded bg-[var(--v2-surface)] px-1">#0f1219–#14171c</code> band,
+                hue-biased toward brand indigo).
+              </li>
+              <li>
+                <span className="font-medium text-[var(--v2-ink)]">Elevation lightens.</span> Surfaces
+                step lighter as they rise (bg, then surface, then surface-2);
+                dark UIs elevate by lightening, not by shadow, and borders sit lighter than the
+                surface they divide.
+              </li>
+              <li>
+                <span className="font-medium text-[var(--v2-ink)]">Contrast is measured.</span> Every
+                ink-on-ground pair ≥ 4.5:1 and every soft-tint pair ≥ 3:1 in BOTH themes —
+                enforced by <code className="rounded bg-[var(--v2-surface)] px-1">scripts/contrast-check.mjs</code>, not eyeballed.
+              </li>
+              <li>
+                <span className="font-medium text-[var(--v2-ink)]">Brand is re-tuned, not inverted.</span>{' '}
+                {/* design-lint-disable-line — the failing light value, quoted on purpose */}
+                <code className="rounded bg-[var(--v2-surface)] px-1">#4f46e5</code> is ~3.9:1 on a dark ground, so dark
+                brand is lightened and desaturated — and <code className="rounded bg-[var(--v2-surface)] px-1">ink-on-brand</code> flips
+                to the deep ink. The <code className="rounded bg-[var(--v2-surface)] px-1">-soft</code> tints are redefined as deep
+                washes, never inverted (an inverted light tint goes muddy).
+              </li>
+              <li>
+                <span className="font-medium text-[var(--v2-ink)]">Content keeps its own colours.</span>{' '}
+                Code blocks are not inverted; images and receipts stay as authored.
+              </li>
+              <li>
+                <span className="font-medium text-[var(--v2-ink)]">Native controls follow.</span>{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">color-scheme</code> is declared in all three palette blocks
+                so form controls, scrollbars and the date picker match the active palette.
+              </li>
+              <li>
+                <span className="font-medium text-[var(--v2-ink)]">Three states, one storage key.</span>{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">haven.theme</code> carries{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">light | dark | system</code> device-local. <code className="rounded bg-[var(--v2-surface)] px-1">system</code>{' '}
+                stamps nothing and the OS decides; explicit choices set{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">data-theme</code>, which beats the OS in both directions.
+                A no-flash inline script stamps the attribute before first paint.
+              </li>
+            </ul>
           </div>
         </Card>
       </Section>
@@ -370,7 +594,7 @@ export default function DesignSystemPage() {
               { icon: EllipsisVertical, name: 'EllipsisVertical' },
             ].map((entry) => (
               <div key={entry.name} className="flex flex-col items-center gap-1.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)]">
+                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)]">
                   <Icon icon={entry.icon} className="h-4 w-4" />
                 </span>
                 <p className="font-mono text-xs text-[var(--v2-ink-3)]">{entry.name}</p>
@@ -451,6 +675,79 @@ export default function DesignSystemPage() {
               <StatusBadge tone="brand">Connected</StatusBadge>
               <StatusBadge>Draft</StatusBadge>
             </div>
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Segmented control</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <SegmentedControl
+                ariaLabel="Theme"
+                value={segmented}
+                onChange={setSegmented}
+                options={[
+                  { value: 'light', label: 'Light' },
+                  { value: 'dark', label: 'Dark' },
+                  { value: 'system', label: 'System' },
+                ]}
+              />
+              <SegmentedControl
+                ariaLabel="Disabled example"
+                value="usd"
+                onChange={() => {}}
+                disabled
+                options={[
+                  { value: 'usd', label: '$ USD' },
+                  { value: 'eur', label: '€ EUR' },
+                ]}
+              />
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              The canonical choose-one-of-two-or-three toggle
+              (<code className="rounded bg-[var(--v2-surface)] px-1">ui/SegmentedControl</code>, promoted
+              in #2927 from its second and third call sites — Settings currency and theme, and
+              connect-agent&apos;s credential format). Semantics are RADIO, not buttons:{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;radiogroup&quot;</code> with{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code> options, because the
+              choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
+              so a screen reader names the question first; options are real buttons, so keyboard
+              works without extra wiring. Never hand-roll a second control of this shape.
+            </p>
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Theme toggle</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <ThemeToggle />
+              <span className="text-xs text-[var(--v2-ink-3)]">
+                The icon button, as the top bar's right cluster renders it — one click
+                flips the palette, light to dark and back, and the accessible name says
+                what the click will do, not only what the icon is.
+              </span>
+            </div>
+            <div className="mt-3 rounded-lg border border-[var(--v2-border)] p-2">
+              <ThemeToggle variant="row" />
+              <span className="sr-only">The row variant shown outside the sheet it lives in</span>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              The one-gesture theme control, the quick half
+              (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
+              from the top bar and the mobile sheet's control block — Settings keeps its
+              three explicit choices on its own screen). The glyph answers what you are
+              (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code> in light,{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code> in dark;
+              the quick toggle has no system step — that choice lives in Settings); the
+              name answers where you are going
+              (&quot;Theme: dark. Switch to light&quot;), because a control whose label is only
+              its current state cannot be predicted. The icon is a plain clickable
+              button with no hover or focus tooltip (#2953): the icon alone is the
+              affordance, and the accessible name carries the whole message for screen
+              readers. The swap cross-fades under{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">prefers-reduced-motion:
+              no-preference</code> and snaps otherwise, and the row variant's visible
+              label is a prefix of the name, so the label sits in the name. Never hand-roll
+              a second control of this shape; both surfaces here are the primitive's
+              variants, and the two call sites decide which one renders.
+            </p>
           </Card>
 
           <Card hover={false} className="p-5">
@@ -898,7 +1195,7 @@ export default function DesignSystemPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
               >
                 <Icon icon={EllipsisVertical} className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -1398,7 +1695,7 @@ export default function DesignSystemPage() {
               </Button>
             </div>
           </div>
-          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-white p-4">
+          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Supported on Base</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {['ETH', 'USDC'].map((token) => (
@@ -1819,7 +2116,7 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">Switch wallet to {'{chain}'}</code>{' '}
               button (white background, brand focus ring) instead of the primary action. A wallet
               that is connected but is not the account&apos;s owner gets the second caption
-              (`wrong_wallet` in `useSafeOperationGate`, #2073): it names both addresses, because
+              (`wrong_wallet` in `useAccountOperationGate`, #2073): it names both addresses, because
               &quot;connect a wallet&quot; would send the user back to the wallet they already
               connected. The header wallet pill renders the matching &quot;Wrong wallet&quot;
               state in the same case.
@@ -1837,10 +2134,12 @@ export default function DesignSystemPage() {
             <div>
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Account, not Safe</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Users see <span className="font-medium">account</span>. The Safe contract abstraction stays
-                in code (<code className="text-xs">safeId</code>,{' '}
-                <code className="text-xs">UserSafe</code>, etc.). The word <em>Safe</em> should not
-                appear in any rendered string.
+                Users see <span className="font-medium">account</span>. The Safe contract
+                abstraction stays behind this vocabulary — the code now names it{' '}
+                <code className="text-xs">accountId</code>,{' '}
+                <code className="text-xs">SmartAccount</code> and friends (renamed
+                in #2913). The word{' '}
+                <em>Safe</em> should not appear in any rendered string.
               </p>
             </div>
             <div>

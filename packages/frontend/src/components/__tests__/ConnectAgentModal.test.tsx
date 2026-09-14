@@ -31,8 +31,8 @@ vi.mock('@/components/connect-agent/ConnectStep', () => ({
 function flow(overrides: Record<string, unknown> = {}) {
   return {
     handleClose: vi.fn(),
-    selectableSafes: [],
-    selectedSafeId: null,
+    selectableAccounts: [],
+    selectedAccountId: null,
     isRetiredRail: false,
     headerSubtitleText: 'Name the agent and describe what it does',
     step: 'details',
@@ -50,7 +50,7 @@ beforeEach(() => {
 
 describe('ConnectAgentModal', () => {
   it('keeps the normal details step for a delegation account', () => {
-    render(<ConnectAgentModal open onClose={vi.fn()} safeAddress="0x111" safeId="safe-1" />)
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
 
     expect(screen.getByText('Agent details')).toBeInTheDocument()
     expect(screen.queryByText('Haven no longer sends payments from this account.')).not.toBeInTheDocument()

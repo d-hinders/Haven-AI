@@ -43,7 +43,7 @@ export default function AuthenticatedShell({
           */}
           <a
             href="#main-content"
-            className="sr-only focus:not-sr-only focus:fixed focus:top-[max(1rem,var(--v2-safe-top))] focus:left-[max(1rem,var(--v2-safe-left))] focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-popover focus:outline-none focus:ring-2 focus:ring-white/80"
+            className="sr-only focus:not-sr-only focus:fixed focus:top-[max(1rem,var(--v2-safe-top))] focus:left-[max(1rem,var(--v2-safe-left))] focus:z-[var(--v2-z-toast)] focus:rounded-md focus:bg-[var(--v2-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-[var(--v2-bg)] focus:shadow-popover focus:outline-none focus:ring-2 focus:ring-bg/80"
           >
             Skip to main content
           </a>

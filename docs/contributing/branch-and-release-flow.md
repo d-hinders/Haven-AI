@@ -10,7 +10,7 @@ covers:
   - scripts/release-bump.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-09-11"
+last-verified: "2026-09-12"
 ---
 
 # Branch & release flow

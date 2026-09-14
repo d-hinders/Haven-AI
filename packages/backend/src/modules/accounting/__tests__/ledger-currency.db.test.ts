@@ -93,7 +93,7 @@ async function seedSettled(
   const txHash = `0x${String(++seq).padStart(64, 'a')}`.slice(0, 66)
   await db.query(
     `INSERT INTO payment_intents
-       (id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+       (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash, status, tx_hash,
         confirmed_at, expires_at, created_at)
      VALUES ($1, $2, $3, $4, ${CHAIN}, 'USDC', $5, $6, '1000000', '1.0',
@@ -347,7 +347,10 @@ describeDb('multi-currency ledgers (#2877)', () => {
     // delayed, never fed, because this statement is the only path by which a
     // payment with no sync row reaches a connector.
     expect(await listUnpushedPaymentIds(userId, 'memory', 50, null)).toContain(paymentId)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    // #2915: `fed` counts pushes and the one enumerated payment IS pushed —
+    // from its EUR rate map, so the #2877 net-new semantics stay proven —
+    // while `total` names the enumeration the selector must keep covering.
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     expect(connector.pushed[0].tx.ledgerCurrency).toBe('EUR')
     expect(connector.pushed[0].tx.amountLedger).toBe('0.9200')
     // The SEK half stays missing and is not invented.

@@ -28,8 +28,8 @@ function paymentRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'payment-1',
     agent_id: 'agent-1',
-    safe_id: 'safe-base',
-    safe_address: SAFE_ADDRESS,
+    account_id: 'safe-base',
+    account_address: SAFE_ADDRESS,
     safe_name: 'Base wallet',
     chain_id: 8453,
     token_symbol: 'USDC',
@@ -143,18 +143,24 @@ describe('agent activity routes', () => {
     expectMatchesSpec('GET', '/agent-activity/{id}/activity', body)
     expect(body.activity[0]).toMatchObject({
       type: 'payment',
-      safe_id: 'safe-base',
-      safe_address: SAFE_ADDRESS,
+      account_id: 'safe-base',
+      account_address: SAFE_ADDRESS,
       safe_name: 'Base wallet',
       chain_id: 8453,
     })
+    // #2907: request-level twin === old, not just the mapper's own unit
+    // test — mutation-proven by dropping the withActivityPaymentAccountAlias
+    // call at this emit site.
+    expect(body.activity[0].safe_id).toBe(body.activity[0].account_id)
+    expect(body.activity[0].safe_address).toBe(body.activity[0].account_address)
+    expect(body.activity[0].account_name).toBe(body.activity[0].safe_name)
 
     const paymentSql = String(
       mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM payment_intents pi'))?.[0],
     )
-    expect(paymentSql).toContain('LOWER(us.safe_address) = LOWER(pi.safe_address)')
+    expect(paymentSql).toContain('LOWER(us.account_address) = LOWER(pi.account_address)')
     expect(paymentSql).toContain('us.chain_id = pi.chain_id')
-    expect(paymentSql).not.toContain('us.id = a.safe_id')
+    expect(paymentSql).not.toContain('us.id = a.account_id')
     // No approval-sourced entry, and no query against the dropped table.
     expect(mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql)))).toBe(false)
   })
@@ -192,10 +198,13 @@ describe('agent activity routes', () => {
       type: 'payment',
       agent_id: 'agent-1',
       agent_name: 'Research agent',
-      safe_id: 'safe-base',
-      safe_address: SAFE_ADDRESS,
+      account_id: 'safe-base',
+      account_address: SAFE_ADDRESS,
       chain_id: 8453,
     })
+    expect(body.activity[0].safe_id).toBe(body.activity[0].account_id)
+    expect(body.activity[0].safe_address).toBe(body.activity[0].account_address)
+    expect(body.activity[0].account_name).toBe(body.activity[0].safe_name)
     expect(mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql)))).toBe(false)
   })
 })

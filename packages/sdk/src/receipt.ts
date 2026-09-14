@@ -24,7 +24,13 @@ export interface PaymentReceipt {
     amount: string
     amountSek: string | null
     recipient: string
+    /** @deprecated since #2907 — read `account`; removed in #2914 (the release after the naming window). Same value as `account`. */
     safe: string
+    /**
+     * The payer's smart-account address (#2907 twin of `safe`). Optional for
+     * the window: a server from before the twin emits `safe` only.
+     */
+    account?: string
     chainId: number
     settledAt: string | null
     resourceUrl: string | null

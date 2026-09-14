@@ -426,9 +426,11 @@ export function createEdgeSigner(
       //    `expectedSafe` is threaded from the local credential's account
       //    address, so it is absent whenever no such address reaches this
       //    process. Three ways that happens, all supported: `HAVEN_DELEGATE_KEY`
-      //    set without `HAVEN_SAFE_ADDRESS` (the README quickstart — the
-      //    credential IS loaded here, it just carries no account address); a
-      //    credential file whose `safe_address` is null; or an embedder calling
+      //    set without `HAVEN_ACCOUNT_ADDRESS` (or its pre-#2908 spellings
+      //    `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS`; the README quickstart
+      //    — the credential IS loaded here, it just carries no account
+      //    address); a credential file whose `account_address` (or pre-#2908
+      //    `safe_address`) is null; or an embedder calling
       //    `resolveEdgeSigner({ delegateKey })`, whose fast path returns before
       //    credentials are read at all. With no local value there is nothing to
       //    re-derive `to` against, so the destination rests entirely on Haven's

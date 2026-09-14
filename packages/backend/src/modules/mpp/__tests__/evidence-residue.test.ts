@@ -29,7 +29,7 @@ function payment(overrides: Record<string, unknown> = {}) {
     id: 'intent-1',
     agent_id: AGENT_ID,
     user_id: '22222222-2222-2222-2222-222222222222',
-    safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+    account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
     chain_id: 8453,
     token_symbol: 'USDC',
     token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',

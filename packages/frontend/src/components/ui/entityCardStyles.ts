@@ -26,6 +26,6 @@ export function entityCardClassName({
     // is the failure mode #1708 was careful to flag rather than create.
     selected
       ? `border-brand/30 bg-brand/[0.03] ${hoverEffect}`
-      : `border-[var(--v2-border)] bg-white ${hoverEffect}`,
+      : `border-[var(--v2-border)] bg-[var(--v2-bg)] ${hoverEffect}`,
   ].filter(Boolean).join(' ')
 }

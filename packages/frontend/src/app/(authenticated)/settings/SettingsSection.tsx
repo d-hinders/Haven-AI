@@ -25,7 +25,7 @@ export function SettingsSection({
   className?: string
 }) {
   return (
-    <section className={`rounded-[10px] border border-[var(--v2-border)] bg-white shadow-card ${className}`}>
+    <section className={`rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card ${className}`}>
       <Card.Header padding="spacious" className="rounded-t-[10px]">
         <h2 className="text-[13px] font-semibold uppercase tracking-widest text-[var(--v2-ink)]">{title}</h2>
         {description ? (

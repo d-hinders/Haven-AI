@@ -49,7 +49,7 @@ const AGENT = {
   user_id: '22222222-2222-2222-2222-222222222222',
   name: 'Payment Agent',
   delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-  safe_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
   chain_id: 8453,
   status: 'active',
 }

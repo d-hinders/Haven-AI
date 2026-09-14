@@ -68,7 +68,7 @@ import { bannedModuleRefs, parseImportFacts, type ImportFacts } from './helpers/
  * 6. **Routes mounted anywhere but `index.ts`.** Rule 4 reads the one registry
  *    file. A plugin that registers a sub-route internally is not seen.
  * 7. **The database.** A row still marked `execution_rail='allowance_module'`
- *    is *expected* — the epic keeps `user_safes` rows readable. This guard says
+ *    is *expected* — the epic keeps `smart_accounts` rows readable. This guard says
  *    nothing about data, only about reachable code.
  * 8. **A non-literal route prefix.** Rule 4 sees `{ prefix: '/x' }` written
  *    inline with a string literal — the only shape `index.ts` uses today.

@@ -47,6 +47,12 @@ export const TRANSACTION_CSV_COLUMNS = [
   'agent_name',
   'safe_address',
   'initiator',
+  // #2907 (naming P0): account-vocabulary twin of `safe_address`, same
+  // value. Appended per the column-order rule above — `safe_address` stays
+  // for one release (deprecated, #2914 drops it) rather than being replaced
+  // in place, which would shift every column after it for an importer keyed
+  // on index.
+  'account_address',
 ] as const
 
 export type TransactionCsvColumn = (typeof TRANSACTION_CSV_COLUMNS)[number]
@@ -107,6 +113,8 @@ export function transactionCsvRow(
     // inbound and unattributed rows. Never the display string "You", so the
     // export stays unambiguous for an accountant reading it cold.
     initiator: tx.initiatedBy ?? '',
+    // #2907: same value as `safe_address` above — dual-emit, not a rename.
+    account_address: tx.safeAddress,
   }
 }
 

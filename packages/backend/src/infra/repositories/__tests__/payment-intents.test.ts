@@ -66,7 +66,7 @@ function delegationInput(agentId: string, userId: string, overrides: Record<stri
   return {
     agentId,
     userId,
-    safeAddress: '0x00000000000000000000000000000000000000f1',
+    accountAddress: '0x00000000000000000000000000000000000000f1',
     chainId: 84532,
     tokenSymbol: 'USDC',
     tokenAddress: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
@@ -93,7 +93,7 @@ function machineInput(
     agent: {
       id: agent.agentId,
       user_id: agent.userId,
-      safe_address: '0x00000000000000000000000000000000000000f1',
+      account_address: '0x00000000000000000000000000000000000000f1',
       chain_id: 84532,
       delegate_address: '0x00000000000000000000000000000000000000d1',
     },

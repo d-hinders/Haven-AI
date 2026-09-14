@@ -43,7 +43,7 @@ vi.mock('../../middleware/agentAuth.js', () => ({
     request.agent = {
       id: 'agent-1', user_id: 'user-1', name: 'A',
       delegate_address: DELEGATE_SIGNER.address,
-      safe_address: '0x' + 'aa'.repeat(20),
+      account_address: '0x' + 'aa'.repeat(20),
       chain_id: 84532, status: 'active',
       execution_rail: 'delegation', account_type: 'delegator_hybrid',
     }
@@ -572,6 +572,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(201)
       expect(res.json().sign_data.signature_scheme).toBe('eip712_userop')
+      // #2907: payer_account is a same-value twin of `safe` on a REAL
+      // response, not a source regex — mutation-proven by pointing
+      // payer_account at the delegate account instead.
+      const components = res.json().sign_data.components
+      expect(components.payer_account).toBe(components.safe)
+      expect(components.payer_account).not.toBe(components.account)
     })
 
     it('spends the LAST of the budget: remaining exactly equal to the amount is allowed', async () => {
@@ -1499,7 +1505,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     token_address: USDC.toLowerCase(),
     token_symbol: 'USDC',
     chain_id: 84532,
-    safe_address: '0x' + 'aa'.repeat(20),
+    account_address: '0x' + 'aa'.repeat(20),
     machine_metadata: { network: 'eip155:84532', settlement_scheme: 'eip3009' },
   }
 
@@ -1529,6 +1535,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
     // The whole point: NO fresh sponsored estimation ran.
     expect(mockPrepareFunding).not.toHaveBeenCalled()
     expect(mockCreateIntent).not.toHaveBeenCalled()
+    // #2907: payer_account is a same-value twin of `safe` on the REPLAY
+    // response too, not a source regex — mutation-proven by pointing
+    // payer_account at the delegate account instead.
+    const components = body.sign_data.components
+    expect(components.payer_account).toBe(components.safe)
+    expect(components.payer_account).not.toBe(components.account)
   })
 
   it('a confirmed idempotent retry replays the receipt (#961)', async () => {
@@ -1777,7 +1789,7 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     token_address: USDC.toLowerCase(),
     token_symbol: 'USDC',
     chain_id: 84532,
-    safe_address: '0x' + 'aa'.repeat(20),
+    account_address: '0x' + 'aa'.repeat(20),
     machine_metadata: { network: 'eip155:84532', settlement_scheme: 'eip3009' },
   }
 
@@ -1963,7 +1975,7 @@ describe('x402 sign-context funded-but-unsettled resume (#2290)', () => {
     token_address: USDC.toLowerCase(),
     token_symbol: 'USDC',
     chain_id: 84532,
-    safe_address: '0x' + 'aa'.repeat(20),
+    account_address: '0x' + 'aa'.repeat(20),
     machine_metadata: {
       network: 'eip155:84532',
       settlement_scheme: 'eip3009',

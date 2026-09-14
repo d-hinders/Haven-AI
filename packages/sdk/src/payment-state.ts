@@ -10,6 +10,7 @@ import {
   AgentPaymentPhase,
   HavenApiError,
   HavenPaymentStateError,
+  canonicalAgentPaymentNextAction,
 } from './types.js'
 
 const PAYMENT_STATE_STATUS_CODES: Record<string, number> = {
@@ -140,7 +141,11 @@ export function paymentStateFromRaw(
   if (!raw.payment_id || !raw.status) return null
 
   const phase = (raw.phase as PaymentPhase | undefined) ?? phaseForStatus(raw.status)
-  const nextAction = (raw.next_action as PaymentNextAction | undefined) ?? nextActionForStatus(raw.status)
+  // #2908: collapse the account-vocabulary alias before it reaches any
+  // `=== AgentPaymentNextAction.X` comparison downstream.
+  const nextAction =
+    (canonicalAgentPaymentNextAction(raw.next_action) as PaymentNextAction | undefined) ??
+    nextActionForStatus(raw.status)
   if (!phase || !nextAction) return null
 
   const amount = raw.amount ?? raw.requested ?? ''

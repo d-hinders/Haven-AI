@@ -6,7 +6,8 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
-import { ConnectionRow, primaryActionFor } from '@/components/accounting/ConnectionRow'
+import { ConnectionRow, formatConnectionDate, primaryActionFor } from '@/components/accounting/ConnectionRow'
+import { INTL_LOCALE } from '@/lib/i18n'
 import { connection, provider, COMING_SOON } from './fixtures'
 
 function renderRow(props: Partial<React.ComponentProps<typeof ConnectionRow>> = {}) {
@@ -169,5 +170,23 @@ describe('ConnectionRow — coming soon providers', () => {
     // The chip and the disabled action already say it; the line does not repeat it (#2903).
     expect(within(row).queryByText(/Not connectable yet/)).toBeNull()
     expect(within(row).getByText(/\.$/)).toBeInTheDocument()
+  })
+})
+
+/**
+ * #2926: with one locale left, the BCP-47 tag the row formats with comes from
+ * `INTL_LOCALE` rather than a literal at the `Intl` call, so a second language
+ * is a line in that map. Pinned on the day order, which is what actually
+ * differs between the plausible tags ('en-GB' day-month vs 'en-US'
+ * month-day) — a test that only re-derives the tag from the map would pass
+ * against any value in it.
+ */
+describe('formatConnectionDate (#2926)', () => {
+  it('formats through INTL_LOCALE — day before month, no locale literal', () => {
+    expect(INTL_LOCALE.en).toBe('en-GB')
+    // Day-month ORDER, not the exact abbreviation: ICU spells September's
+    // short form 'Sep' or 'Sept' by version, and the order is the property
+    // that separates 'en-GB' from 'en-US' ("Sep 12, 2026").
+    expect(formatConnectionDate('2026-09-12T10:00:00.000Z', 'en')).toMatch(/^12 Sept? 2026$/)
   })
 })

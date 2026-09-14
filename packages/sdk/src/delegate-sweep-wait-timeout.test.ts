@@ -14,6 +14,7 @@ const AGENT: HavenAgent = {
   id: 'agent_1',
   name: 'Sweep agent',
   status: 'active',
+  accountAddress: '0xsafe',
   safeAddress: '0xsafe',
   delegateAddress: '0xdelegate',
   chainId: 8453,

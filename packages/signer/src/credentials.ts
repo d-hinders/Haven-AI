@@ -19,6 +19,17 @@ import { readFile, stat } from 'node:fs/promises'
 export interface SignerCredentials {
   delegateKey: string
   agentId?: string
+  /**
+   * The Haven account (smart account) the agent spends from — #2908, the
+   * account-vocabulary name. Same value as `safeAddress`.
+   */
+  accountAddress?: string
+  /**
+   * @deprecated #2908 — same value as {@link SignerCredentials.accountAddress}.
+   * Removed from this shape in the release after the one carrying #2908
+   * (#2914). The credential-FILE keys it was read from are a different
+   * matter — see `readAccountAddressField`.
+   */
   safeAddress?: string
   chainId?: number
   network?: string
@@ -32,7 +43,11 @@ interface RawCredentialFile {
   delegateKey?: unknown
   agent_id?: unknown
   agentId?: unknown
+  /** #2908: what `@haven_ai/connect` writes from this release on. */
+  account_address?: unknown
+  /** Pre-#2908 spelling — read PERMANENTLY, see `readAccountAddressField`. */
   safe_address?: unknown
+  /** Pre-#2908 spelling — read PERMANENTLY, see `readAccountAddressField`. */
   safeAddress?: unknown
   chain_id?: unknown
   chainId?: unknown
@@ -59,10 +74,12 @@ export async function loadSignerCredentials(
 
   const envKey = stringField(process.env.HAVEN_DELEGATE_KEY)
   if (envKey) {
+    const accountAddress = readAccountAddressEnv(process.env)
     return {
       delegateKey: envKey,
       agentId: stringField(process.env.HAVEN_AGENT_ID),
-      safeAddress: stringField(process.env.HAVEN_SAFE_ADDRESS),
+      accountAddress,
+      safeAddress: accountAddress,
       chainId: chainIdField(process.env.HAVEN_CHAIN_ID, 'HAVEN_CHAIN_ID'),
       network: stringField(process.env.HAVEN_NETWORK),
       x402BindingSigner: stringField(process.env.HAVEN_X402_BINDING_SIGNER),
@@ -99,10 +116,12 @@ async function loadFromFile(path: string): Promise<SignerCredentials> {
     throw new Error('Haven credentials are missing delegate_key — the edge signer needs it to sign.')
   }
 
+  const accountAddress = readAccountAddressField(raw)
   return {
     delegateKey,
     agentId: stringField(raw.agent_id ?? raw.agentId),
-    safeAddress: stringField(raw.safe_address ?? raw.safeAddress),
+    accountAddress,
+    safeAddress: accountAddress,
     chainId: chainIdField(raw.chain_id ?? raw.chainId, 'chain_id'),
     network: stringField(raw.network),
     x402BindingSigner: stringField(
@@ -112,6 +131,36 @@ async function loadFromFile(path: string): Promise<SignerCredentials> {
     ),
     sourcePath: path,
   }
+}
+
+/**
+ * The account address off a credential FILE: `account_address` (what
+ * `@haven_ai/connect` writes from #2908 on) first, then the two pre-#2908
+ * spellings.
+ *
+ * The two old fallbacks are PERMANENT, not part of the one-release naming
+ * window (#2906, decision 2a): a credential file on disk was written once and
+ * never rewrites itself, so a signer that stopped reading `safe_address`
+ * would silently lose the address for every agent connected before this
+ * release — the consent hash would change and the spend-context prompt would
+ * say "not provided". Two lines, kept for as long as the file format exists.
+ *
+ * Exported for the mutation tests: dropping `account_address` fails the
+ * new-shape test, dropping either old key fails the old-shape test.
+ */
+export function readAccountAddressField(raw: Pick<RawCredentialFile, 'account_address' | 'safe_address' | 'safeAddress'>): string | undefined {
+  return stringField(raw.account_address ?? raw.safe_address ?? raw.safeAddress)
+}
+
+/**
+ * The account address off the process environment, new name first:
+ * `HAVEN_ACCOUNT_ADDRESS` (the survivor, decided on #2906) then the two
+ * names the dashboard handoff emitted before #2908 — `HAVEN_WALLET_ADDRESS`
+ * and `HAVEN_SAFE_ADDRESS`. Unlike the file fallbacks these two ARE
+ * window-scoped: they are dropped at #2914, one release after this one.
+ */
+export function readAccountAddressEnv(env: NodeJS.ProcessEnv): string | undefined {
+  return stringField(env.HAVEN_ACCOUNT_ADDRESS ?? env.HAVEN_WALLET_ADDRESS ?? env.HAVEN_SAFE_ADDRESS)
 }
 
 function stringField(value: unknown): string | undefined {

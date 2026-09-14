@@ -129,3 +129,44 @@ describe('MobileTabBar — active cell marks itself the way the drawer does (#28
     expect(current[0]).toHaveAttribute('href', '/agents')
   })
 })
+
+/**
+ * The bar is still five cells and the theme row is not in it (#2928).
+ *
+ * The quick toggle's mobile home is the More SHEET — the full-width drawer
+ * `Sidebar` renders and opens from this bar's fifth slot — and the row lives
+ * there, in the drawer's footer (asserted in Sidebar.test.tsx). This bar must
+ * not acquire it: #2731 fixed the cell count at five and the e2e geometry spec
+ * measures five tappable slots, and a button added to the grid would break
+ * both — a sixth tab's width for a control that is not a tab.
+ *
+ * So the claim this file carries for the slice is a negative one over the
+ * bar's own subtree, plus the positive control that keeps it honest: the grid
+ * still declares exactly five columns, and the four routes plus the More
+ * illustration still account for all of them.
+ */
+describe('MobileTabBar — five cells, and the theme row is not one of them (#2928)', () => {
+  const renderBar = () =>
+    render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
+
+  it('lays out exactly five columns', () => {
+    const { container } = renderBar()
+    const bar = container.querySelector('[data-mobile-tab-bar]')
+    expect(bar).not.toBeNull()
+    expect(/\bgrid-cols-5\b/.test(bar!.className)).toBe(true)
+    // The children are four links and the illustrative fifth cell; nothing
+    // else is placed directly in the grid. A control appended here — a toggle
+    // among the tabs — changes this count and the e2e slot geometry with it.
+    expect(bar!.children).toHaveLength(5)
+  })
+
+  it('contains no theme control; the sheet owns it', () => {
+    const { container } = renderBar()
+    const bar = container.querySelector('[data-mobile-tab-bar]')!
+    // A button inside the bar would be a sixth interactive cell; the present-
+    // ational copy already has none, and the live copy gets one only outside
+    // it (`Sidebar`'s toggle button, painted on the nav-toggle tier).
+    expect(bar.querySelectorAll('button')).toHaveLength(0)
+    expect(bar.querySelectorAll('[aria-label^="Theme:"]')).toHaveLength(0)
+  })
+})

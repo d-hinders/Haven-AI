@@ -186,8 +186,11 @@ what a payload means; they re-derive it.
   `from` check is unconditional. The **destination** check is not, and this is
   the one asymmetry in this list: the signer compares the sweep's `to` against
   the account address **only when the local credential records one**
-  (`safe_address`). Run with `HAVEN_DELEGATE_KEY` alone — or with a credential
-  whose `safe_address` is absent — and there is no local value to compare
+  (`account_address`, or the pre-#2908 `safe_address` / `safeAddress`, which
+  are read permanently; from the environment, `HAVEN_ACCOUNT_ADDRESS`, or the
+  older `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` until #2914). Run with
+  `HAVEN_DELEGATE_KEY` alone — or with a credential
+  whose account address is absent — and there is no local value to compare
   against, so the destination is authenticated by Haven's binding signature and
   the token/chain canonicality check, but not independently re-derived. Prefer
   a credential file that carries the account address.

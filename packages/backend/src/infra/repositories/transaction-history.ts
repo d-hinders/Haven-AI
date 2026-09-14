@@ -6,8 +6,8 @@
  * check behind `/transactions/:safeAddress`, and the single-evidence-row
  * lookup behind `/transactions/payment-intents/:paymentId/evidence`.
  *
- * This is NOT the `user_safes` or `agents` aggregate owner — those already
- * have their own repositories (`user-safes.ts` #988, `agents.ts` #988) with
+ * This is NOT the `smart_accounts` or `agents` aggregate owner — those already
+ * have their own repositories (`smart-accounts.ts` #988, `agents.ts` #988) with
  * a wider column set for their own routes. `transactions.ts` (the route)
  * only ever needed a 4-column safe projection and a 3-column agent
  * projection, so this file keeps that projection rather than pulling in the
@@ -20,12 +20,12 @@
  *
  * Invariants a reader must not break:
  *
- * - Every machine-payment agent-attribution query joins through `user_safes
+ * - Every machine-payment agent-attribution query joins through `smart_accounts
  *   us` scoped by `us.id = ANY($3)` (the caller's own Safe ids) AND matches
  *   chain — that double join is what stops a same-hash collision on another
  *   chain or another tenant's Safe from attributing an agent to the wrong
  *   transaction. Do not simplify it to a plain `tx_hash` match.
- * - `findSafeOwnership` has two SQL shapes (with/without `chain_id`) because
+ * - `findAccountOwnership` has two SQL shapes (with/without `chain_id`) because
  *   the route decides, based on how many rows come back, whether a
  *   `chain_id` disambiguator was required — collapsing them changes that
  *   behavior.
@@ -41,9 +41,9 @@ export type { Executor }
 
 // ── Row shapes ───────────────────────────────────────────────────────────────
 
-export interface TransactionSafeRow {
+export interface TransactionAccountRow {
   id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   name: string
 }
@@ -54,7 +54,7 @@ export interface TransactionFilterAgentRow {
   status: string
 }
 
-export interface SafeOwnershipRow {
+export interface AccountOwnershipRow {
   id: string
   chain_id: number
 }
@@ -62,7 +62,7 @@ export interface SafeOwnershipRow {
 export interface PaymentIntentAgentRow {
   id: string
   tx_hash: string
-  safe_id: string
+  account_id: string
   chain_id: number
   agent_id: string
   agent_name: string
@@ -79,7 +79,7 @@ export interface PaymentIntentAgentRow {
 export interface DelegateSweepAgentRow {
   id: string
   tx_hash: string
-  safe_id: string
+  account_id: string
   chain_id: number
   agent_id: string
   agent_name: string
@@ -92,8 +92,8 @@ export interface X402PaymentIntentRow {
   tx_hash: string
   agent_id: string
   agent_name: string
-  safe_id: string
-  safe_address: string
+  account_id: string
+  account_address: string
   safe_name: string
   chain_id: number
   token_symbol: string
@@ -146,17 +146,17 @@ export interface MachinePaymentEvidenceDetailRow {
 
 // ── Safe / agent lists that drive aggregation ───────────────────────────────
 
-export const LIST_BASIC_SAFES_FOR_USER_SQL = `SELECT id, safe_address, chain_id, name
-       FROM user_safes
+export const LIST_BASIC_ACCOUNTS_FOR_USER_SQL = `SELECT id, account_address, chain_id, name
+       FROM smart_accounts
        WHERE user_id = $1
        ORDER BY created_at ASC`
 
 /** `userId` is REQUIRED — the Safe set aggregation runs over is per-tenant. */
-export async function listBasicSafesForUser(
+export async function listBasicAccountsForUser(
   userId: string,
   db: Executor = pool,
-): Promise<TransactionSafeRow[]> {
-  const result = await db.query<TransactionSafeRow>(LIST_BASIC_SAFES_FOR_USER_SQL, [userId])
+): Promise<TransactionAccountRow[]> {
+  const result = await db.query<TransactionAccountRow>(LIST_BASIC_ACCOUNTS_FOR_USER_SQL, [userId])
   return result.rows
 }
 
@@ -185,11 +185,11 @@ export async function listAgentsForTransactionFilters(
 
 // ── Safe ownership (GET /:safeAddress) ──────────────────────────────────────
 
-export const FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL =
-  'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2)'
+export const FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL =
+  'SELECT id, chain_id FROM smart_accounts WHERE user_id = $1 AND LOWER(account_address) = LOWER($2)'
 
-export const FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL =
-  'SELECT id, chain_id FROM user_safes WHERE user_id = $1 AND LOWER(safe_address) = LOWER($2) AND chain_id = $3'
+export const FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL =
+  'SELECT id, chain_id FROM smart_accounts WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3'
 
 /**
  * `userId` is REQUIRED — this is the ownership check `/:safeAddress` runs
@@ -197,18 +197,18 @@ export const FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL =
  * chain the address is owned on (the route then decides whether that's
  * ambiguous); the two SQL shapes are preserved separately per the header note.
  */
-export async function findSafeOwnership(
+export async function findAccountOwnership(
   userId: string,
-  safeAddress: string,
+  accountAddress: string,
   chainId: number | null,
   db: Executor = pool,
-): Promise<SafeOwnershipRow[]> {
+): Promise<AccountOwnershipRow[]> {
   const result =
     chainId === null
-      ? await db.query<SafeOwnershipRow>(FIND_SAFE_OWNERSHIP_ANY_CHAIN_SQL, [userId, safeAddress])
-      : await db.query<SafeOwnershipRow>(FIND_SAFE_OWNERSHIP_FOR_CHAIN_SQL, [
+      ? await db.query<AccountOwnershipRow>(FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL, [userId, accountAddress])
+      : await db.query<AccountOwnershipRow>(FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL, [
           userId,
-          safeAddress,
+          accountAddress,
           chainId,
         ])
   return result.rows
@@ -218,7 +218,7 @@ export async function findSafeOwnership(
 
 export const FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL = `SELECT pi.id,
               LOWER(pi.tx_hash) AS tx_hash,
-              us.id AS safe_id,
+              us.id AS account_id,
               us.chain_id AS chain_id,
               pi.agent_id,
               a.name AS agent_name,
@@ -237,10 +237,10 @@ export const FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL = `SELECT pi.id,
          ON mpre.payment_intent_id = pi.id
         AND mpre.status = 'open'
         AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-       JOIN user_safes us
+       JOIN smart_accounts us
          ON us.user_id = pi.user_id
         AND us.id = ANY($3)
-        AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+        AND LOWER(us.account_address) = LOWER(pi.account_address)
         AND pi.chain_id IS NOT NULL
         AND us.chain_id = pi.chain_id
        WHERE LOWER(pi.tx_hash) = ANY($1)
@@ -272,7 +272,7 @@ export async function findPaymentIntentAgentMatches(
 
 export const FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL = `SELECT ds.id,
               LOWER(ds.tx_hash) AS tx_hash,
-              us.id AS safe_id,
+              us.id AS account_id,
               us.chain_id AS chain_id,
               ds.agent_id,
               a.name AS agent_name,
@@ -280,10 +280,10 @@ export const FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL = `SELECT ds.id,
               ds.to_address
        FROM delegate_sweeps ds
        JOIN agents a ON a.id = ds.agent_id
-       JOIN user_safes us
+       JOIN smart_accounts us
          ON us.user_id = ds.user_id
         AND us.id = ANY($3)
-        AND LOWER(us.safe_address) = LOWER(ds.to_address)
+        AND LOWER(us.account_address) = LOWER(ds.to_address)
         AND us.chain_id = ds.chain_id
        WHERE LOWER(ds.tx_hash) = ANY($1)
          AND ds.user_id = $2
@@ -311,8 +311,8 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
             pi.tx_hash,
             pi.agent_id,
             a.name AS agent_name,
-            us.id AS safe_id,
-            us.safe_address,
+            us.id AS account_id,
+            us.account_address,
             us.name AS safe_name,
             COALESCE(pi.chain_id, us.chain_id) AS chain_id,
             pi.token_symbol,
@@ -337,10 +337,10 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
        ON mpre.payment_intent_id = pi.id
       AND mpre.status = 'open'
       AND mpre.event_type = 'merchant_retry_rejected_after_payment'
-     JOIN user_safes us
+     JOIN smart_accounts us
        ON us.user_id = pi.user_id
       AND us.id = ANY($2)
-      AND LOWER(us.safe_address) = LOWER(pi.safe_address)
+      AND LOWER(us.account_address) = LOWER(pi.account_address)
       AND pi.chain_id IS NOT NULL
       AND us.chain_id = pi.chain_id
      WHERE pi.user_id = $1

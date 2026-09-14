@@ -97,6 +97,6 @@ items:
       returns them). Mock the db/balance seams — no live network. Test-only, no
       runtime change. Acceptance: new tests green; backend suite + tsc unchanged.
     files:
-      - packages/backend/src/routes/__tests__/user-safes-list.test.ts
+      - packages/backend/src/routes/__tests__/smart-accounts-list.test.ts
     money_path: false
     status: in-pr

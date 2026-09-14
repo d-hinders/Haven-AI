@@ -99,6 +99,25 @@ export const RULES = [
     regex: /text-\[1[01]px\]/g,
     exempt: isMarketingSurface,
   },
+  {
+    id: 'white-or-black-class',
+    describe:
+      'white/black colour class — primitives must read a token (both palettes render it, #2927); see /design-system → Colour tokens',
+    // Tailwind colour utilities carrying the literal white/black palette
+    // values. Word-bounded both sides: `whitespace-nowrap` and `ring-offset-2`
+    // must not match; `ring-white/80` and `focus:text-black` must.
+    regex: new RegExp(`\\b(?:${UTILITIES})-(?:white|black)(?:\\/|\\b)`, 'g'),
+    exempt: (file) =>
+      isMarketingSurface(file) ||
+      // The reference page quotes values and describes the system; its hex
+      // prose is the contract, not a bypass (#2927).
+      file.includes('src/app/(authenticated)/design-system/page.tsx') ||
+      // CodeBlock renders on `--v2-surface-code` — a fixed DARK surface in
+      // BOTH themes (#2927 keeps code blocks un-inverted). Its white
+      // text/white-alpha chrome is content-colour on that surface, correct in
+      // light and dark alike.
+      file.includes('src/components/ui/CodeBlock.tsx'),
+  },
   // ── Structural rules (#899): catch COMPONENT bypass — re-hand-rolling the
   // exact debt epic #859 cleaned. The token rules above can't see these.
   {

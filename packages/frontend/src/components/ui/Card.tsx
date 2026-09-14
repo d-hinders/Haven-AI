@@ -29,7 +29,7 @@ function CardRoot({
   const surfaceClass =
     elevation === 'anchor'
       ? 'bg-[var(--v2-surface-anchor)] border border-[var(--v2-border-anchor)]'
-      : 'bg-white border border-[var(--v2-border)]'
+      : 'bg-[var(--v2-bg)] border border-[var(--v2-border)]'
   const shadowClass =
     elevation === 'raised'
       ? 'shadow-card-raised'

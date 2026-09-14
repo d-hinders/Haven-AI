@@ -123,6 +123,20 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // on ("Send at least 5 USDC on Base to 0x…"). GET on `/user/...` is the
   // shape the census already classifies as a reading, not an arrangement.
   { method: 'GET', path: '/user/safes/{safeId}/funding' },
+  // #2907 (naming P0): `/user/accounts*` is the SAME handler module mounted a
+  // second time under the account-vocabulary prefix (`index.ts`) — not a new
+  // surface, so it carries the exact same authority as the two entries above.
+  // Missing this pair was a real bug (not a hypothetical one): a probe of a
+  // live `owner_cli` token showed `GET /user/safes` at 200 and `GET
+  // /user/accounts` at 401 for the identical caller and the identical data,
+  // because `routeAllowsOwnerCli` compares the LITERAL registered path and the
+  // twin registration is a different literal. The funding path param keeps
+  // the name `safeId` on the account-prefixed mount too (#2907
+  // route-coverage literal mapping — the param is not renamed in P0), so the
+  // twin entry below is `{safeId}`, matching what `request.routeOptions.url`
+  // actually reports for that mount.
+  { method: 'GET', path: '/user/accounts' },
+  { method: 'GET', path: '/user/accounts/{safeId}/funding' },
   // Also corrected from the issue's text: balances are served under their own
   // prefix, and the activity surface has no bare route — it has a feed and a
   // per-agent stats read. Granting a path that does not exist grants nothing

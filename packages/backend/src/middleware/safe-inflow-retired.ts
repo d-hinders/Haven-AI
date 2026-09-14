@@ -11,7 +11,7 @@
  * - `POST /user/safes/deploy`  — relay-sponsored, wallet-owned Safe deployment
  * - `POST /user/safes`         — importing / registering an existing Safe
  * - `PUT  /user/safe`          — the legacy single-Safe link, which is also an
- *                                import: it wrote `user_safes` through
+ *                                import: it wrote `smart_accounts` through
  *                                `linkDefaultUserSafe` and emitted the
  *                                `safe_imported` funnel event. No shipped
  *                                client calls it, which is exactly why it
@@ -38,7 +38,7 @@
  *   410 on /payments + x402, sequenced after this one on purpose, so an
  *   `allowance_module` account keeps working until that slice lands;
  * - it removes no rail code — that is #1987;
- * - it drops no data (#1990). `user_safes` rows and the `account_type` /
+ * - it drops no data (#1990). `smart_accounts` rows and the `account_type` /
  *   `execution_rail` columns stay: Hybrid lives in the same table, and the
  *   rail seam stays for reversibility.
  *

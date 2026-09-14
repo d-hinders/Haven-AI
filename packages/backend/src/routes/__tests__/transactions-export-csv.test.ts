@@ -143,8 +143,8 @@ const SECOND_BASE_SAFE = '0xCCCC0000000000000000000000000000000000C3'
 const SECOND_BASE_SAFE_ID = '33333333-3333-4333-8333-333333333333'
 
 const TWO_BASE_SAFES = [
-  { id: BASE_SAFE_ID, safe_address: BASE_SAFE, chain_id: 8453, name: 'Base account' },
-  { id: SECOND_BASE_SAFE_ID, safe_address: SECOND_BASE_SAFE, chain_id: 8453, name: 'Savings' },
+  { id: BASE_SAFE_ID, account_address: BASE_SAFE, chain_id: 8453, name: 'Base account' },
+  { id: SECOND_BASE_SAFE_ID, account_address: SECOND_BASE_SAFE, chain_id: 8453, name: 'Savings' },
 ]
 
 function stubTransferBetweenOwnAccounts() {
@@ -194,8 +194,8 @@ function x402Rows(count: number) {
     tx_hash: `0x${(i + 1).toString(16).padStart(64, '0')}`,
     agent_id: 'agent-1',
     agent_name: 'Buyer',
-    safe_id: BASE_SAFE_ID,
-    safe_address: BASE_SAFE,
+    account_id: BASE_SAFE_ID,
+    account_address: BASE_SAFE,
     safe_name: 'Base account',
     chain_id: 8453,
     token_symbol: 'USDC',
@@ -217,7 +217,7 @@ function x402Rows(count: number) {
 }
 
 interface DbRows {
-  user_safes?: unknown[]
+  smart_accounts?: unknown[]
   contacts?: unknown[]
   payment_intents?: unknown[]
 }
@@ -226,7 +226,7 @@ function routeDbQueries(rows: DbRows = {}) {
   return vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown) => {
       const text = String(sql)
-      if (text.includes('FROM user_safes')) return { rows: rows.user_safes ?? [] }
+      if (text.includes('FROM smart_accounts')) return { rows: rows.smart_accounts ?? [] }
       if (text.includes('FROM contacts')) return { rows: rows.contacts ?? [] }
       if (text.includes('FROM payment_intents')) return { rows: rows.payment_intents ?? [] }
       return { rows: [] }
@@ -235,8 +235,8 @@ function routeDbQueries(rows: DbRows = {}) {
 }
 
 const BOTH_SAFES = [
-  { id: BASE_SAFE_ID, safe_address: BASE_SAFE, chain_id: 8453, name: 'Base account' },
-  { id: GNOSIS_SAFE_ID, safe_address: GNOSIS_SAFE, chain_id: 100, name: 'Gnosis account' },
+  { id: BASE_SAFE_ID, account_address: BASE_SAFE, chain_id: 8453, name: 'Base account' },
+  { id: GNOSIS_SAFE_ID, account_address: GNOSIS_SAFE, chain_id: 100, name: 'Gnosis account' },
 ]
 
 /** Parse an RFC 4180 body into header + records, honouring quotes. */
@@ -310,7 +310,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('refuses an unauthenticated request', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: BOTH_SAFES })
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get('?fresh=1', false)
 
@@ -319,7 +319,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('returns a UTF-8 BOM, the CSV content type and an attachment filename', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: BOTH_SAFES })
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get('?fresh=1')
 
@@ -334,7 +334,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('exports every row of the result set, in the declared column order', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: BOTH_SAFES })
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get('?fresh=1')
     const { header, records } = parseCsv(response.body.slice(1))
@@ -356,7 +356,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('applies the direction filter server-side, over the whole result set', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: BOTH_SAFES })
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get('?fresh=1&direction=out')
     const { header, records } = parseCsv(response.body.slice(1))
@@ -368,7 +368,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('applies the chain filter server-side', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: BOTH_SAFES })
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get('?fresh=1&chainId=8453')
     const { header, records } = parseCsv(response.body.slice(1))
@@ -377,10 +377,58 @@ describe('GET /transactions/export.csv', () => {
     expect(records[0][header.indexOf('tx_hash')]).toBe(IN_HASH)
   })
 
+  // #2907 AC #3: `?accountId=` is the account-vocabulary twin of `?safeId=`;
+  // both accept, both must actually filter. The failure mode this guards
+  // against is silent: Fastify ignores an unrecognised query key rather than
+  // erroring, so reverting the route's `accountFilterId` alias back to
+  // reading only `safeId` would make `?accountId=` a no-op that returns every
+  // account's rows with no error — this asserts the filtered count is
+  // strictly less than the unfiltered one, which a no-op cannot produce.
+  it('applies the ?accountId= filter, and its count differs from the unfiltered export', async () => {
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+    const unfiltered = await get('?fresh=1')
+    expect(unfiltered.statusCode).toBe(200)
+    expect(unfiltered.headers['x-export-row-count']).toBe('2')
+
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+    const filtered = await get(`?fresh=1&accountId=${BASE_SAFE_ID}`)
+    expect(filtered.statusCode).toBe(200)
+    expect(filtered.headers['x-export-row-count']).toBe('1')
+    const { header, records } = parseCsv(filtered.body.slice(1))
+    expect(records).toHaveLength(1)
+    expect(records[0][header.indexOf('tx_hash')]).toBe(IN_HASH)
+
+    expect(Number(filtered.headers['x-export-row-count'])).toBeLessThan(
+      Number(unfiltered.headers['x-export-row-count']),
+    )
+  })
+
+  it('?accountId= and ?safeId= for the same id produce the identical export', async () => {
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+    const bySafeId = await get(`?fresh=1&safeId=${BASE_SAFE_ID}`)
+
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+    const byAccountId = await get(`?fresh=1&accountId=${BASE_SAFE_ID}`)
+
+    expect(byAccountId.statusCode).toBe(bySafeId.statusCode)
+    expect(byAccountId.headers['x-export-row-count']).toBe(bySafeId.headers['x-export-row-count'])
+    expect(byAccountId.body).toBe(bySafeId.body)
+  })
+
+  it('400s an invalid ?accountId= the same way it does an invalid ?safeId=', async () => {
+    const response = await get('?accountId=not-a-uuid')
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'Invalid safeId' })
+  })
+
   it('resolves the counterparty name from the address book', async () => {
     stubExplorers()
     routeDbQueries({
-      user_safes: BOTH_SAFES,
+      smart_accounts: BOTH_SAFES,
       contacts: [
         {
           id: 'c1',
@@ -404,7 +452,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('falls back to the name of the user\'s own account', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: BOTH_SAFES })
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get('?fresh=1&chainId=100')
     const { header, records } = parseCsv(response.body.slice(1))
@@ -422,7 +470,7 @@ describe('GET /transactions/export.csv', () => {
     // export far under it — it is reached through the unbounded x402 leg
     // below.
     stubManyBaseTransactions(80)
-    routeDbQueries({ user_safes: [BOTH_SAFES[0]] })
+    routeDbQueries({ smart_accounts: [BOTH_SAFES[0]] })
 
     const response = await get('?fresh=1')
     const { records } = parseCsv(response.body.slice(1))
@@ -438,7 +486,7 @@ describe('GET /transactions/export.csv', () => {
     // export has to as well — resolving from the `safeId`-narrowed list would
     // leave counterparty_name empty while the screen says "Savings".
     stubTransferBetweenOwnAccounts()
-    routeDbQueries({ user_safes: TWO_BASE_SAFES })
+    routeDbQueries({ smart_accounts: TWO_BASE_SAFES })
 
     const response = await get(`?fresh=1&safeId=${BASE_SAFE_ID}`)
     const { header, records } = parseCsv(response.body.slice(1))
@@ -451,7 +499,7 @@ describe('GET /transactions/export.csv', () => {
   it('refuses above the row cap with a structured error naming the count', async () => {
     // One row over EXPORT_ROW_CAP, seeded through the unbounded x402 leg.
     stubExplorers()
-    routeDbQueries({ user_safes: [BOTH_SAFES[0]], payment_intents: x402Rows(10_001) })
+    routeDbQueries({ smart_accounts: [BOTH_SAFES[0]], payment_intents: x402Rows(10_001) })
 
     const response = await get('?fresh=1')
 
@@ -469,7 +517,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('exports at the row cap rather than refusing', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: [BOTH_SAFES[0]], payment_intents: x402Rows(9_999) })
+    routeDbQueries({ smart_accounts: [BOTH_SAFES[0]], payment_intents: x402Rows(9_999) })
 
     const response = await get('?fresh=1')
 
@@ -486,7 +534,7 @@ describe('GET /transactions/export.csv', () => {
     ['?chainId=999999', 'Unsupported chain: 999999'],
   ])('rejects %s', async (query, error) => {
     stubExplorers()
-    routeDbQueries({ user_safes: BOTH_SAFES })
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get(`${query}&fresh=1`)
 
@@ -496,7 +544,7 @@ describe('GET /transactions/export.csv', () => {
 
   it('returns a header-only file when the user has no accounts', async () => {
     stubExplorers()
-    routeDbQueries({ user_safes: [] })
+    routeDbQueries({ smart_accounts: [] })
 
     const response = await get('?fresh=1')
 

@@ -2,7 +2,7 @@
  * #2849 (safe-retirement slice 3) — the behavioural upside of dropping the
  * Safe Transaction Service leg from transaction history.
  *
- * Before #2849, `fetchSafeTransactions` called the Safe Transaction
+ * Before #2849, `fetchSafeTransactions` (now `fetchAccountTransactions`, #2910) called the Safe Transaction
  * Service's transfers endpoint unconditionally for every account. A Hybrid
  * DeleGator is unknown to that service, so the leg failed on every
  * delegation-rail history read, was swallowed into `logFail('safe-transfers')`,
@@ -110,9 +110,9 @@ describe('#2849 delegation-account history read', () => {
     const token = app.jwt.sign({ sub: 'delegation-user', email: 'delegation@example.com' }, { expiresIn: '1h' })
     const fetchMock = stubBlockscoutOnlyFetch()
     const queryMock = vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
-      if (String(sql).includes('FROM user_safes')) {
+      if (String(sql).includes('FROM smart_accounts')) {
         return {
-          rows: [{ id: 'safe-delegation', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Delegation' }],
+          rows: [{ id: 'safe-delegation', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Delegation' }],
         } as never
       }
       return { rows: [] } as never
@@ -142,7 +142,7 @@ describe('#2849 delegation-account history read', () => {
     expect(body.transactions.map((tx) => tx.hash)).toEqual([NATIVE_HASH, ERC20_HASH])
 
     // And the read went to Blockscout, not the Safe Transaction Service.
-    const safesCall = queryMock.mock.calls.find((call) => String(call[0]).includes('FROM user_safes'))
+    const safesCall = queryMock.mock.calls.find((call) => String(call[0]).includes('FROM smart_accounts'))
     expect(safesCall).toBeDefined()
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('https://base.blockscout.com/api/v2/addresses/'),

@@ -8,6 +8,22 @@ import {
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
+import { withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
+
+/**
+ * #2911 (schema rename, epic #2906 phase 3): `withSessionAccountAddressAlias`'s
+ * input type still names its field `safe_address` — `openapi/wire-aliases.ts`
+ * is the wire contract and is deliberately untouched here. The repository
+ * rows it used to read that field directly off of are renamed
+ * (`account_address`), so this shim re-derives `safe_address` at the call
+ * site — the read changes, the wire mapper and its output do not.
+ */
+function toSafeAddressed<T extends { account_address: string | null }>(
+  row: T,
+): T & { safe_address: string | null } {
+  return { ...row, safe_address: row.account_address }
+}
+
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 
@@ -67,7 +83,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Enter a name using 80 characters or fewer' })
     }
 
-    return (await updateUserName(normalizedName, sub)) ?? userRowVanished()
+    const updated = await updateUserName(normalizedName, sub)
+    if (!updated) return userRowVanished()
+    // #2907: userProfile.account_address twins safe_address, same value.
+    return withSessionAccountAddressAlias(toSafeAddressed(updated))
   })
 
   // PUT /user/wallet
@@ -79,15 +98,22 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid Ethereum address' })
     }
 
-    return (await updateUserWalletAddress(wallet_address, sub)) ?? userRowVanished()
+    const updated = await updateUserWalletAddress(wallet_address, sub)
+    if (!updated) return userRowVanished()
+    // #2907: userIdentity.account_address twins safe_address, same value.
+    return withSessionAccountAddressAlias(toSafeAddressed(updated))
   })
 
   // PUT /user/safe — TOMBSTONE (#1984 closed it, #1988 deleted the body).
-  // The legacy single-Safe link was an IMPORT: it wrote `user_safes` through
+  // The legacy single-Safe link was an IMPORT: it wrote `smart_accounts` through
   // `linkDefaultUserSafe` and emitted the `safe_imported` funnel event. No
   // shipped client calls it, which is exactly what would have made it the hole
   // left open. Kept as a 410 rather than removed, per #834/#1328.
   app.put('/safe', retiredSafeInflowHandler('import'))
+
+  // PUT /user/account — #2907 twin of PUT /user/safe. Same handler, same 410
+  // tombstone; `updateUserAccount` in `openapi/spec.ts`.
+  app.put('/account', retiredSafeInflowHandler('import'))
 
   // GET /user/preferences
   app.get('/preferences', async (request) => {

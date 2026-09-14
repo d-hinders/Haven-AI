@@ -52,16 +52,18 @@
  * photographs of a retired screen.
  *
  * Measured against the code rather than the issue: **yes, on the live rail.**
- * The column is `CHECK (account_type IN ('safe','delegator_hybrid'))`
- * (migration 041) and only `delegator_hybrid` spends (every payment entry
- * point answers 410 for the rest, #1986). `useActiveSigner` resolves a
- * `delegator_passkey` for a hydrated set only when `passkeys.length > 0`
+ * The `account_type` column's two-value CHECK (migration 041) originally
+ * admitted the retired rail's literal alongside `delegator_hybrid`;
+ * `085_account_type_legacy_safe.ts` (#2912) tightened it to
+ * `('legacy_safe','delegator_hybrid')`, and only `delegator_hybrid` spends
+ * (every payment entry point answers 410 for the rest, #1986). `useActiveSigner`
+ * resolves a `delegator_passkey` for a hydrated set only when `passkeys.length > 0`
  * (`lib/signer.ts`), so an EOA-owned `delegator_hybrid` with ZERO enrolled
  * passkeys — provisionable as `POST /accounts/hybrid { owner_address }`, the
  * same account shape the #829 live proof signed with (an EOA owner and empty
  * passkey key-id/x/y arrays), and reachable from passkey onboarding via
  * `add_owner` then `remove_passkey` — falls through both passkey branches with the owner
- * wallet connected and lands here. The label is then `useSafeOperationGate`'s:
+ * wallet connected and lands here. The label is then `useAccountOperationGate`'s:
  * the named owner connected renders the truncated address (#2068); any other
  * wallet renders "Wrong wallet" in the danger tone (#2073). So the fixture
  * names the owner explicitly — `serveOwnerOnlyHybridSigners(page,
@@ -175,7 +177,7 @@
  * same way (`cp` from a backup, `diff -q` clean):
  *
  *   mutation                                          red                 other tests
- *   useSafeOperationGate: owner match inverted        name (1) — received green
+ *   useAccountOperationGate: owner match inverted        name (1) — received green
  *     (`===` <-> `!==` on `owner_address`, #2068/#2073) "Wrong wallet"
  *   useActiveSigner: hydrated set offers a passkey    name (1) — received ALL red,
  *     even when EMPTY (`hasPasskeys` guard dropped)     "Passkey"         same reason

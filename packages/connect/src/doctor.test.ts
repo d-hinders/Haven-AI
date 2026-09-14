@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
-import { runDoctor, runRepair, type DoctorDeps } from './doctor.js'
+import { describeAccountAddressKey, runDoctor, runRepair, type DoctorDeps } from './doctor.js'
 
 const API_KEY = 'sk_agent_1234567890abcdef1234567890abcdef'
 const DELEGATE_ADDRESS = '0x' + 'cd'.repeat(20)
@@ -1530,5 +1530,46 @@ describe('runtime_spec_override (#2424)', () => {
     const npmCall = runCommand.mock.calls.find(([command]) => command === 'npm')
     expect(npmCall![1]).toContain('file:/abs/path/packages/signer')
     expect(repair.messages.join('\n')).toContain('RUNTIME SPEC OVERRIDE ACTIVE')
+  })
+})
+
+/**
+ * #2908 (naming epic #2906): `--doctor` reports which NAME a credential set
+ * carries the account address under. Neither name fails the check — the
+ * pre-#2908 `safe_address` is read permanently by every runtime — but the
+ * report says which it found, so the O3 dual-read proof on the epic can quote
+ * the doctor line for an old-file machine.
+ */
+describe('credential address naming report (#2908)', () => {
+  it('names the pre-#2908 key for an OLD-shape set (the seeded fixture writes safe_address)', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const credentials = report.checks.find((c) => c.id === 'credentials')
+    expect(credentials?.ok).toBe(true)
+    expect(credentials?.detail).toContain('pre-#2908 name safe_address')
+    expect(credentials?.detail).toContain('still read')
+  })
+
+  it('names account_address for a NEW-shape set', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const signerPath = join(dir, 'signer.json')
+    const signer = JSON.parse(await readFile(signerPath, 'utf8')) as Record<string, unknown>
+    const { safe_address: address, ...rest } = signer
+    await writeFile(signerPath, JSON.stringify({ ...rest, account_address: address }), { mode: 0o600 })
+    // The consent ack hashes the credential; re-ack so the naming change is
+    // the only thing under test here.
+    await acknowledgeLocalSignerConsent(signerPath)
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const credentials = report.checks.find((c) => c.id === 'credentials')
+    expect(credentials?.ok).toBe(true)
+    expect(credentials?.detail).toContain('stored as account_address')
+    expect(credentials?.detail).not.toContain('safe_address')
+  })
+
+  it('describeAccountAddressKey: new wins over old, old is named, neither is said', () => {
+    expect(describeAccountAddressKey({ account_address: '0x1' }, { safe_address: '0x1' })).toContain('stored as account_address')
+    expect(describeAccountAddressKey({}, { safe_address: '0x1' })).toContain('pre-#2908 name safe_address')
+    expect(describeAccountAddressKey({ safe_address: '0x1' }, undefined)).toContain('pre-#2908 name safe_address')
+    expect(describeAccountAddressKey({}, {})).toBe('no account address stored')
   })
 })

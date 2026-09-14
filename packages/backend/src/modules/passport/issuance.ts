@@ -212,7 +212,7 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
 
   let claim: PassportClaim
   try {
-    if (!facts.safe_address) throw new Error('agent has no bound treasury account')
+    if (!facts.account_address) throw new Error('agent has no bound treasury account')
 
     // The agent's OWN smart account — the erc7710 delegator, derived from the
     // delegate EOA. NOT `safe_address`, which is the treasury it spends from.
@@ -239,7 +239,7 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     const now = Math.floor(Date.now() / 1000)
     claim = {
       ...binding,
-      treasury: facts.safe_address,
+      treasury: facts.account_address,
       assuranceLevel: AssuranceLevel.L0,
       policyUri: `haven:agent:${agentId}`,
       issuedAt: now,

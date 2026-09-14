@@ -87,7 +87,7 @@ export async function createHavenMcpServer(options: HavenMcpServerOptions = {}):
  * `agent_tool_invocations` rows are always attributed to the right tool.
  */
 export const MCP_NAME = '@haven_ai/mcp'
-export const MCP_VERSION = '0.1.37-alpha.0'
+export const MCP_VERSION = '0.2.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -194,7 +194,7 @@ export async function runConsentGate(
       apiKey: credentials.apiKey,
       apiUrl: credentials.apiUrl,
       agentId: credentials.agentId,
-      safeAddress: credentials.safeAddress,
+      safeAddress: credentials.accountAddress ?? credentials.safeAddress,
       delegateAddress: credentials.delegateAddress,
       chainId: credentials.chainId,
       allowanceSummary: credentials.allowanceSummary,

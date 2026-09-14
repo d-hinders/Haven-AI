@@ -75,7 +75,7 @@ vi.mock('../../modules/passport/index.js', () => ({
 
 const SAFE = {
   id: 'safe-1',
-  safe_address: '0x2222222222222222222222222222222222222222',
+  account_address: '0x2222222222222222222222222222222222222222',
   name: 'Main Haven wallet',
   chain_id: 100,
 }
@@ -99,7 +99,7 @@ beforeEach(() => {
     release: mockClientRelease,
   })
   mockQuery.mockImplementation(async (sql: unknown) => {
-    if (/FROM user_safes/.test(String(sql))) return { rows: [SAFE] }
+    if (/FROM smart_accounts/.test(String(sql))) return { rows: [SAFE] }
     if (/FROM agent_connection_setup_allowances/.test(String(sql))) return { rows: [ALLOWANCE] }
     return { rows: [] }
   })

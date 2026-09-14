@@ -441,3 +441,73 @@ concrete repo paths for the measured files: the covers-gate reads a path in
 prose as a claim about that file (the same false-positive class the
 2026-09-09 entry records for bare names), and a ledger has no business
 growing `covers:` over its own repro commands — the PR names the files.
+
+## 2026-09-13 — agent surface (safe-retirement, MCP hosted + local, signer, demo merchant; owner mandate 2026-09-12)
+
+Full report: [`docs/bug-reports/quality-scan-2026-09-13-agent-surface.md`](../bug-reports/quality-scan-2026-09-13-agent-surface.md)
+— it carries the file:line evidence; this entry stays path-free per the
+2026-09-10 convention. Method: live exercise on dev (two testnet purchases —
+the skip-settle fixture and a real erc7710 settlement) through the hosted MCP
++ local signer, plus four read-only explorations verified claim by claim.
+Prior findings excluded (the 2026-08-19 restart/state-loss refusal not
+re-surfaced; no delta measured). The report deliberately exceeds the skill's
+top-1–2 shape (mandate: bugs and proposals too); this entry keeps it.
+
+**Finding 1 — no single party model; three addresses are "the payer" of one payment.**
+- Evidence: for one settled payment, receipts name the treasury account,
+  payment status names the delegate EOA, and the merchant's receipt/invoice
+  names the delegate smart account. Tally of payer-named wire fields over the
+  spec, SDK types, demo-merchant x402 and signer core → 27 sites (7/10/4/6).
+  Cost: a #2906 review round on the `components.account` collision; the
+  invoice buyer appears in no Haven receipt.
+- Disposition: **pending owner decision.**
+
+**Finding 2 — "settled" is the merchant's 200, not settlement evidence.**
+- Evidence: the hosted erc7710 settle path sets `settled` from the merchant
+  `ok` and passes the hash through unchecked → live `settled:true` with a
+  zero hash and `next_action none`; the backend evidence seam (#2092) is
+  fail-closed and leaves the intent `submitted / check_status_later`, no
+  receipt row. Cost: the runbook's "NEVER `storage_50gb`" line; three
+  "settled but no evidence" log lines in the settlement sweeper.
+- Disposition: **pending owner decision.**
+
+**Finding 3 — retry/idempotency is prose, not protocol.**
+- Evidence: catalog prepare twice without a key → two intents with
+  `idempotencyKey: null`; the plain-x402 key is derived over a 5-minute
+  bucket with no boundary surfaced; `PRICE_EXCEEDS_MAX` and the signer's
+  success shape carry no `next_*`.
+  `gh issue list --state all --search idempotency --limit 500 --json number | jq length`
+  → 55; same for `next_action` → 27.
+- Disposition: **pending owner decision.**
+
+Thirteen verified `new-task`-sized defects (B1–B13) and ten proposals are in
+the report; refused under the bar as epics (one-PR remedies).
+
+**Probed clean** (dimension → command → number, all at `c3f0eddc`):
+- Sizing → `find packages/<p>/src -name '*.ts' ! -name '*.test.ts' ! -path '*__tests__*' | xargs wc -l | tail -1`
+  and `find packages/<p>/src \( -name '*.test.ts' -o -path '*__tests__*' \) -name '*.ts' | xargs wc -l | tail -1`
+  → signer 2,864 src / 4,091 test; mcp 1,762 / 3,386; mcp-server 6,128 /
+  11,903; demo-merchant-mcp 3,169 / 2,767; connect 10,223 / 12,093; cli
+  2,562 / 2,368; sdk 10,053 / 11,080.
+- Live path (dev) → `haven_get_agent` … `haven_settle_mcp_tool` → real
+  erc7710 purchase confirmed, budget 1.0 → 0.999, receipt row present.
+- Retired rail fail-closed → `git grep "process.env.SAFE" -- packages/backend/src`
+  → 0 (positive control: 54 backend files match `process.env\.`); the rail
+  decision has one resolver, pinned by the live-census pin test.
+- Guard net → `git grep -l "vi.doMock(" -- 'packages/backend/src/**/*.test.ts'`
+  → 3 (outside the mock-factory guard's `vi.mock(`-only net; B10).
+- Catalog badges → `haven_discover_tools verified=verified` → 0 of 6 (B1).
+- Incident clustering → `gh issue list --state all --search <term> --limit 500 --json number | jq length`
+  → idempotency 55, next_action 27, stranded 74, PAYMENT-SIGNATURE 125,
+  settled 129 (raw search counts; the classified cluster is in the report).
+- block 1 (guard falsifiability) → not taken this run.
+- block 2 (`covers:` completeness) → not taken this run.
+- block 3 (stale numbers in prose) → not taken this run.
+- block 4 (retired-vocabulary residue) → not taken this run; the #2907
+  naming census (`node scripts/ci/<the #2907 census script> c3f0eddc` → 2,920;
+  the script is named in the report) is a rename census, not the retired-rail one.
+- block 5 (merge-method drift) → not taken this run.
+- block 6 (nets with holes) → only B10 above; the block's full sweep not taken.
+- block 7 (chain health) → not taken this run.
+The run was scoped to the owner's four areas and the live path; a full-repo
+run should take the seven blocks from the 2026-09-03 baselines.

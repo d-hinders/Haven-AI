@@ -6,14 +6,14 @@ import { useRef } from 'react'
 import { getChainConfig } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-import type { UserSafe } from '@/context/AuthContext'
+import type { SmartAccount } from '@/context/AuthContext'
 
 interface Props {
   open: boolean
   action: 'receive' | 'add-funds'
-  safes: UserSafe[]
+  safes: SmartAccount[]
   onClose: () => void
-  onSelect: (safeId: string) => void
+  onSelect: (accountId: string) => void
 }
 
 export default function DashboardActionPickerModal({
@@ -43,7 +43,7 @@ export default function DashboardActionPickerModal({
     // the installed shell.
     <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
       <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-white shadow-modal max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] overflow-y-auto">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
           <div>
             <h2 className="text-base font-semibold text-[var(--v2-ink)]">{title}</h2>

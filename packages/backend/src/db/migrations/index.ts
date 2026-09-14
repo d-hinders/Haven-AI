@@ -81,6 +81,9 @@ import * as schemaLocalConstraintRepair from './079_schema_local_constraint_repa
 import * as accountingConnections from './080_accounting_connections.js'
 import * as dropFortnoxConnectionsRetired from './081_drop_fortnox_connections_retired.js'
 import * as evidenceLedgerFxRates from './082_evidence_ledger_fx_rates.js'
+import * as dropDeadSafeRailTables from './083_drop_dead_safe_rail_tables.js'
+import * as renameUserSafesToSmartAccounts from './084_rename_user_safes_to_smart_accounts.js'
+import * as accountTypeLegacySafe from './085_account_type_legacy_safe.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -221,4 +224,7 @@ export const migrations: Migration[] = [
   accountingConnections,
   dropFortnoxConnectionsRetired,
   evidenceLedgerFxRates,
+  dropDeadSafeRailTables,
+  renameUserSafesToSmartAccounts,
+  accountTypeLegacySafe,
 ]

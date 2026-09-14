@@ -2,13 +2,20 @@ import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { loadCredentials, warnIfCredentialFilePermissive } from './credentials.js'
+import {
+  loadCredentials,
+  readAccountAddressEnv,
+  readAccountAddressField,
+  warnIfCredentialFilePermissive,
+} from './credentials.js'
 
 const ENV_KEYS = [
   'HAVEN_CREDENTIALS',
   'HAVEN_API_KEY',
   'HAVEN_DELEGATE_KEY',
   'HAVEN_AGENT_ID',
+  'HAVEN_ACCOUNT_ADDRESS',
+  'HAVEN_WALLET_ADDRESS',
   'HAVEN_SAFE_ADDRESS',
   'HAVEN_CHAIN_ID',
   'HAVEN_NETWORK',
@@ -56,6 +63,7 @@ describe('loadCredentials', () => {
       apiKey: 'sk_agent_test',
       delegateKey: '0xdelegate',
       agentId: 'agent-1',
+      accountAddress: '0xSafe',
       safeAddress: '0xSafe',
       chainId: 100,
       network: 'Gnosis',
@@ -93,6 +101,7 @@ describe('loadCredentials', () => {
       apiKey: 'sk_agent_split',
       delegateKey: '0xdelegate',
       agentId: 'agent-1',
+      accountAddress: '0xSafe',
       safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 100,
@@ -114,8 +123,16 @@ describe('loadCredentials', () => {
         rawValues: ['agent-1', 'agent-2'],
       },
       {
-        label: 'safe_address',
+        // #2908: the mismatch is labelled by the name connect now writes,
+        // whichever spelling the two files happen to carry.
+        label: 'account_address',
         identity: { safe_address: '0xSafeA' },
+        signer: { safe_address: '0xSafeB' },
+        rawValues: ['0xSafeA', '0xSafeB'],
+      },
+      {
+        label: 'account_address',
+        identity: { account_address: '0xSafeA' },
         signer: { safe_address: '0xSafeB' },
         rawValues: ['0xSafeA', '0xSafeB'],
       },
@@ -220,6 +237,7 @@ describe('loadCredentials', () => {
       apiKey: 'sk_agent_env',
       delegateKey: '0xdelegate-env',
       agentId: 'agent-env',
+      accountAddress: '0xSafeEnv',
       safeAddress: '0xSafeEnv',
       apiUrl: 'https://haven.env.example',
       sourcePath: undefined,
@@ -300,5 +318,126 @@ describe('warnIfCredentialFilePermissive', () => {
     const logged: string[] = []
     await warnIfCredentialFilePermissive('/nonexistent/path/agent.json', (m) => logged.push(m), 'linux')
     expect(logged).toEqual([])
+  })
+})
+
+/**
+ * #2908 (naming epic #2906): every reader takes an OLD-shape and a NEW-shape
+ * input. This runtime's credential shape had no `accountAddress` key before
+ * this slice (the epic's review point), so both keys are asserted explicitly
+ * rather than assumed from the signer's shape. File fallbacks are permanent;
+ * env fallbacks are dropped at #2914.
+ *
+ * Mutations run by hand before the PR: dropping `account_address` from
+ * `readAccountAddressField` fails the new-shape tests; dropping
+ * `safe_address` fails the old-shape tests.
+ */
+describe('account address naming window (#2908)', () => {
+  const originalEnv = new Map<string, string | undefined>()
+  beforeEach(() => {
+    originalEnv.clear()
+    for (const key of ENV_KEYS) {
+      originalEnv.set(key, process.env[key])
+      delete process.env[key]
+    }
+  })
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      const prev = originalEnv.get(key)
+      if (prev === undefined) delete process.env[key]
+      else process.env[key] = prev
+    }
+  })
+
+  async function singleFile(body: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-naming-'))
+    const file = join(dir, 'agent.json')
+    await writeFile(file, JSON.stringify({ api_key: 'sk_agent_test', delegate_key: '0xdelegate', ...body }))
+    await chmod(file, 0o600)
+    return file
+  }
+
+  async function splitFiles(identity: Record<string, unknown>, signer: Record<string, unknown>) {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-mcp-naming-split-'))
+    const identityPath = join(dir, 'identity.json')
+    const signerPath = join(dir, 'signer.json')
+    await writeFile(identityPath, JSON.stringify({ api_key: 'sk_agent_split', agent_id: 'agent-1', ...identity }))
+    await writeFile(signerPath, JSON.stringify({ delegate_key: '0xdelegate', agent_id: 'agent-1', ...signer }))
+    await chmod(identityPath, 0o600)
+    await chmod(signerPath, 0o600)
+    return { identityPath, signerPath }
+  }
+
+  it('OLD-shape single file: safe_address only — read, permanently, into BOTH keys', async () => {
+    const creds = await loadCredentials(await singleFile({ safe_address: '0xOld' }))
+    expect(creds.accountAddress).toBe('0xOld')
+    expect(creds.safeAddress).toBe('0xOld')
+  })
+
+  it('NEW-shape single file: account_address only', async () => {
+    const creds = await loadCredentials(await singleFile({ account_address: '0xNew' }))
+    expect(creds.accountAddress).toBe('0xNew')
+    expect(creds.safeAddress).toBe('0xNew')
+  })
+
+  it('BOTH in the single file: the new name wins', async () => {
+    const creds = await loadCredentials(await singleFile({ account_address: '0xNew', safe_address: '0xOld' }))
+    expect(creds.accountAddress).toBe('0xNew')
+  })
+
+  it('OLD-shape split files: safe_address in both', async () => {
+    const creds = await loadCredentials(await splitFiles({ safe_address: '0xOld' }, { safe_address: '0xold' }))
+    expect(creds.accountAddress).toBe('0xOld')
+    expect(creds.safeAddress).toBe('0xOld')
+  })
+
+  it('NEW-shape split files: account_address in both', async () => {
+    const creds = await loadCredentials(await splitFiles({ account_address: '0xNew' }, { account_address: '0xnew' }))
+    expect(creds.accountAddress).toBe('0xNew')
+  })
+
+  it('MIXED split files (one rewritten, one not): the two spellings still have to agree', async () => {
+    const creds = await loadCredentials(await splitFiles({ account_address: '0xSame' }, { safe_address: '0xsame' }))
+    expect(creds.accountAddress).toBe('0xSame')
+    await expect(
+      loadCredentials(await splitFiles({ account_address: '0xOne' }, { safe_address: '0xTwo' })),
+    ).rejects.toThrow('mismatched account_address')
+  })
+
+  it('the file chain is exactly account_address ?? safe_address ?? safeAddress', () => {
+    expect(readAccountAddressField({ account_address: 'a', safe_address: 'b', safeAddress: 'c' })).toBe('a')
+    expect(readAccountAddressField({ safe_address: 'b', safeAddress: 'c' })).toBe('b')
+    expect(readAccountAddressField({ safeAddress: 'c' })).toBe('c')
+    expect(readAccountAddressField({})).toBeUndefined()
+  })
+
+  it('OLD-shape env: HAVEN_SAFE_ADDRESS only', async () => {
+    process.env.HAVEN_API_KEY = 'sk_agent_env'
+    process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
+    process.env.HAVEN_SAFE_ADDRESS = '0xOldEnv'
+    const creds = await loadCredentials(undefined)
+    expect(creds.accountAddress).toBe('0xOldEnv')
+    expect(creds.safeAddress).toBe('0xOldEnv')
+  })
+
+  it('OLD-shape env: HAVEN_WALLET_ADDRESS only', async () => {
+    process.env.HAVEN_API_KEY = 'sk_agent_env'
+    process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
+    process.env.HAVEN_WALLET_ADDRESS = '0xWalletEnv'
+    expect((await loadCredentials(undefined)).accountAddress).toBe('0xWalletEnv')
+  })
+
+  it('NEW-shape env: HAVEN_ACCOUNT_ADDRESS only (the survivor)', async () => {
+    process.env.HAVEN_API_KEY = 'sk_agent_env'
+    process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
+    process.env.HAVEN_ACCOUNT_ADDRESS = '0xNewEnv'
+    expect((await loadCredentials(undefined)).accountAddress).toBe('0xNewEnv')
+  })
+
+  it('the env chain is exactly HAVEN_ACCOUNT_ADDRESS ?? HAVEN_WALLET_ADDRESS ?? HAVEN_SAFE_ADDRESS', () => {
+    expect(readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: 'a', HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toBe('a')
+    expect(readAccountAddressEnv({ HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toBe('w')
+    expect(readAccountAddressEnv({ HAVEN_SAFE_ADDRESS: 's' })).toBe('s')
+    expect(readAccountAddressEnv({})).toBeUndefined()
   })
 })

@@ -454,7 +454,7 @@ export async function confirmObservedSettlement(
  * Oldest first: the candidates nearest the horizon are the ones that lose their
  * last chance if a tick runs out of budget.
  */
-export const FIND_SWEEPABLE_ERC7710_INTENTS_SQL = `SELECT id, agent_id, chain_id, safe_address,
+export const FIND_SWEEPABLE_ERC7710_INTENTS_SQL = `SELECT id, agent_id, chain_id, account_address,
                 to_address, token_symbol, token_address, amount_raw, amount_human,
                 status, tx_hash, delegation_hash, created_at,
                 source, payment_rail, execution_rail, machine_metadata
@@ -474,7 +474,7 @@ export interface SweepableSettlementRow {
   id: string
   agent_id: string
   chain_id: number
-  safe_address: string
+  account_address: string
   to_address: string
   token_symbol: string
   token_address: string
@@ -514,7 +514,7 @@ export interface SweepableSettlementRow {
  * unwritable row (a missing `resource_url`) is retried for a day and logged,
  * not retried forever.
  */
-export const FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL = `SELECT id, agent_id, chain_id, safe_address,
+export const FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL = `SELECT id, agent_id, chain_id, account_address,
                 to_address, token_symbol, token_address, amount_raw, amount_human,
                 status, tx_hash, delegation_hash, created_at,
                 source, payment_rail, execution_rail, machine_metadata

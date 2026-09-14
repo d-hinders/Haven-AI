@@ -36,7 +36,7 @@ describe('agentAuthMiddleware', () => {
         user_id: 'user-1',
         name: 'Research Agent',
         delegate_address: '0x1111111111111111111111111111111111111111',
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_address: '0x2222222222222222222222222222222222222222',
         chain_id: 100,
         status: 'pending_approval',
       }],
@@ -77,7 +77,7 @@ describe('agentAuthMiddleware', () => {
       rows: [{
         id: 'agent-1', user_id: 'user-1', name: 'A',
         delegate_address: '0x1111111111111111111111111111111111111111',
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_address: '0x2222222222222222222222222222222222222222',
         chain_id: 100, status: 'active', archived_at: '2026-08-14T12:00:00.000Z',
       }],
     }))
@@ -96,7 +96,7 @@ describe('agentAuthMiddleware', () => {
       rows: [{
         id: 'agent-1', user_id: 'user-1', name: 'A',
         delegate_address: '0x1111111111111111111111111111111111111111',
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_address: '0x2222222222222222222222222222222222222222',
         chain_id: 100, status: 'revoked', archived_at: '2026-08-14T12:00:00.000Z',
       }],
     })
@@ -115,7 +115,7 @@ describe('agentAuthMiddleware', () => {
       rows: [{
         id: 'agent-1', user_id: 'user-1', name: 'A',
         delegate_address: '0x1111111111111111111111111111111111111111',
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_address: '0x2222222222222222222222222222222222222222',
         chain_id: 100, status: 'pending_approval', archived_at: '2026-08-14T12:00:00.000Z',
       }],
     })
@@ -135,7 +135,7 @@ describe('agentAuthMiddleware', () => {
         rows: [{
           id: 'agent-1', user_id: 'user-1', name: 'A',
           delegate_address: '0x1111111111111111111111111111111111111111',
-          safe_address: '0x2222222222222222222222222222222222222222',
+          account_address: '0x2222222222222222222222222222222222222222',
           chain_id: 100, status,
         }],
       })
@@ -157,7 +157,7 @@ describe('agentAuthMiddleware', () => {
         rows: [{
           id: 'agent-1', user_id: 'user-1', name: 'A',
           delegate_address: '0x1111111111111111111111111111111111111111',
-          safe_address: '0x2222222222222222222222222222222222222222',
+          account_address: '0x2222222222222222222222222222222222222222',
           chain_id: 100, status,
         }],
       }))
@@ -177,7 +177,7 @@ describe('agentAuthMiddleware', () => {
       rows: [{
         id: 'agent-1', user_id: 'user-1', name: 'A',
         delegate_address: '0x1111111111111111111111111111111111111111',
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_address: '0x2222222222222222222222222222222222222222',
         chain_id: 100, status: 'paused',
       }],
     })
@@ -199,7 +199,7 @@ describe('agentAuthMiddleware', () => {
         user_id: 'user-1',
         name: 'Research Agent',
         delegate_address: '0x1111111111111111111111111111111111111111',
-        safe_address: '0x2222222222222222222222222222222222222222',
+        account_address: '0x2222222222222222222222222222222222222222',
         chain_id: 100,
         status: 'active',
       }],
@@ -225,9 +225,9 @@ describe('agentAuthMiddleware', () => {
         user_id: 'user-1',
         name: 'Historical Agent',
         delegate_address: '0x1111111111111111111111111111111111111111',
-        // This is the mutable users.safe_address fallback, not the agent's
+        // This is the mutable users.account_address fallback, not the agent's
         // original destination. The explicit binding flag must win.
-        safe_address: '0x3333333333333333333333333333333333333333',
+        account_address: '0x3333333333333333333333333333333333333333',
         chain_id: 8453,
         status: 'active',
         has_bound_safe: false,

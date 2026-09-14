@@ -9,7 +9,7 @@ import {
   type EnrichedTransaction,
   buildTransactionCacheKey,
   enrichTransactionsWithAgents,
-  fetchSafeTransactions,
+  fetchAccountTransactions,
   mergeX402Transactions,
 } from '../../modules/transactions/index.js'
 import pool from '../../db.js'
@@ -233,7 +233,7 @@ describe('transaction routes', () => {
 
   function mockSafeRows(rows: Array<{ id: string; chain_id: number }>) {
     return vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
-      if (String(sql).includes('FROM user_safes')) {
+      if (String(sql).includes('FROM smart_accounts')) {
         return { rows } as never
       }
       return { rows: [] } as never
@@ -367,7 +367,7 @@ describe('transaction routes', () => {
     stubOneNativeTransactionFetch()
     vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
       const text = String(sql)
-      if (text.includes('FROM user_safes') && text.includes('ORDER BY created_at ASC')) {
+      if (text.includes('FROM smart_accounts') && text.includes('ORDER BY created_at ASC')) {
         return {
           rows: [
             {
@@ -375,13 +375,13 @@ describe('transaction routes', () => {
               // format now — a fixture id of `'safe-gnosis'` fails it,
               // correctly (same lesson #1444 recorded for `'agent-1'`).
               id: '11111111-1111-4111-8111-111111111111',
-              safe_address: SAFE_ADDRESS,
+              account_address: SAFE_ADDRESS,
               chain_id: 100,
               name: 'Gnosis wallet',
             },
             {
               id: '22222222-2222-4222-8222-222222222222',
-              safe_address: SAFE_ADDRESS,
+              account_address: SAFE_ADDRESS,
               chain_id: 8453,
               name: 'Base wallet',
             },
@@ -447,13 +447,13 @@ describe('mergeX402Transactions', () => {
       [
         {
           id: 'safe-gnosis',
-          safe_address: SAFE_ADDRESS,
+          account_address: SAFE_ADDRESS,
           chain_id: 100,
           name: 'Gnosis wallet',
         },
         {
           id: 'safe-base',
-          safe_address: SAFE_ADDRESS,
+          account_address: SAFE_ADDRESS,
           chain_id: 8453,
           name: 'Base wallet',
         },
@@ -463,10 +463,10 @@ describe('mergeX402Transactions', () => {
 
     const paymentIntentSql = String(queryMock.mock.calls[0][0])
 
-    expect(paymentIntentSql).toContain('LOWER(us.safe_address) = LOWER(pi.safe_address)')
+    expect(paymentIntentSql).toContain('LOWER(us.account_address) = LOWER(pi.account_address)')
     expect(paymentIntentSql).toContain('pi.chain_id IS NOT NULL')
     expect(paymentIntentSql).toContain('us.chain_id = pi.chain_id')
-    expect(paymentIntentSql).not.toContain('us.id = a.safe_id')
+    expect(paymentIntentSql).not.toContain('us.id = a.account_id')
     // #2055: `findConfirmedX402ApprovalRequests` is gone with
     // `approval_requests` — confirmed x402 history is payment_intents alone,
     // so exactly one query fires here now.
@@ -482,8 +482,8 @@ describe('mergeX402Transactions', () => {
             tx_hash: TX_HASH,
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
-            safe_id: 'safe-id',
-            safe_address: SAFE_ADDRESS,
+            account_id: 'safe-id',
+            account_address: SAFE_ADDRESS,
             safe_name: 'Main wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
@@ -505,7 +505,7 @@ describe('mergeX402Transactions', () => {
       'user-id',
       [{
         id: 'safe-id',
-        safe_address: SAFE_ADDRESS,
+        account_address: SAFE_ADDRESS,
         chain_id: 8453,
         name: 'Main wallet',
       }],
@@ -563,8 +563,8 @@ describe('mergeX402Transactions', () => {
             tx_hash: TX_HASH,
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
-            safe_id: 'safe-id',
-            safe_address: SAFE_ADDRESS,
+            account_id: 'safe-id',
+            account_address: SAFE_ADDRESS,
             safe_name: 'Base wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
@@ -587,7 +587,7 @@ describe('mergeX402Transactions', () => {
       'user-id',
       [{
         id: 'safe-id',
-        safe_address: SAFE_ADDRESS,
+        account_address: SAFE_ADDRESS,
         chain_id: 8453,
         name: 'Base wallet',
       }],
@@ -647,8 +647,8 @@ describe('mergeX402Transactions', () => {
           tx_hash: TX_HASH,
           agent_id: 'agent-id',
           agent_name: 'Research assistant',
-          safe_id: 'safe-id',
-          safe_address: SAFE_ADDRESS,
+          account_id: 'safe-id',
+          account_address: SAFE_ADDRESS,
           safe_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
@@ -669,7 +669,7 @@ describe('mergeX402Transactions', () => {
 
     const result = await mergeX402Transactions(
       'user-id',
-      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [{ id: 'safe-id', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
       [],
     )
 
@@ -694,8 +694,8 @@ describe('mergeX402Transactions', () => {
           tx_hash: TX_HASH,
           agent_id: 'agent-id',
           agent_name: 'Research assistant',
-          safe_id: 'safe-id',
-          safe_address: SAFE_ADDRESS,
+          account_id: 'safe-id',
+          account_address: SAFE_ADDRESS,
           safe_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
@@ -716,7 +716,7 @@ describe('mergeX402Transactions', () => {
 
     const result = await mergeX402Transactions(
       'user-id',
-      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [{ id: 'safe-id', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
       [],
     )
 
@@ -734,8 +734,8 @@ describe('mergeX402Transactions', () => {
           tx_hash: TX_HASH,
           agent_id: 'agent-id',
           agent_name: 'Research assistant',
-          safe_id: 'safe-id',
-          safe_address: SAFE_ADDRESS,
+          account_id: 'safe-id',
+          account_address: SAFE_ADDRESS,
           safe_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
@@ -755,7 +755,7 @@ describe('mergeX402Transactions', () => {
 
     const result = await mergeX402Transactions(
       'user-id',
-      [{ id: 'safe-id', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [{ id: 'safe-id', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
       [],
     )
 
@@ -803,8 +803,8 @@ describe('mergeX402Transactions', () => {
             tx_hash: TX_HASH,
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
-            safe_id: 'safe-id',
-            safe_address: SAFE_ADDRESS,
+            account_id: 'safe-id',
+            account_address: SAFE_ADDRESS,
             safe_name: 'Main wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
@@ -827,7 +827,7 @@ describe('mergeX402Transactions', () => {
       'user-id',
       [{
         id: 'safe-id',
-        safe_address: SAFE_ADDRESS,
+        account_address: SAFE_ADDRESS,
         chain_id: 8453,
         name: 'Main wallet',
       }],
@@ -877,7 +877,7 @@ describe('enrichTransactionsWithAgents', () => {
           {
             id: 'payment-id',
             tx_hash: TX_HASH.toLowerCase(),
-            safe_id: 'safe-base',
+            account_id: 'safe-base',
             chain_id: 8453,
             agent_id: 'agent-id',
             agent_name: 'Soundside agent',
@@ -920,11 +920,11 @@ describe('enrichTransactionsWithAgents', () => {
     expect(result[1].paymentId).toBeUndefined()
 
     const paymentIntentSql = String(queryMock.mock.calls[0][0])
-    expect(paymentIntentSql).toContain('JOIN user_safes us')
-    expect(paymentIntentSql).toContain('LOWER(us.safe_address) = LOWER(pi.safe_address)')
+    expect(paymentIntentSql).toContain('JOIN smart_accounts us')
+    expect(paymentIntentSql).toContain('LOWER(us.account_address) = LOWER(pi.account_address)')
     expect(paymentIntentSql).toContain('us.id = ANY($3)')
     expect(paymentIntentSql).toContain('us.chain_id = pi.chain_id')
-    expect(paymentIntentSql).not.toContain('us.id = a.safe_id')
+    expect(paymentIntentSql).not.toContain('us.id = a.account_id')
     expect(queryMock.mock.calls[0][1]).toEqual([
       [TX_HASH.toLowerCase()],
       'user-id',
@@ -952,7 +952,7 @@ describe('enrichTransactionsWithAgents', () => {
           {
             id: 'sweep-id',
             tx_hash: TX_HASH.toLowerCase(),
-            safe_id: 'safe-base',
+            account_id: 'safe-base',
             chain_id: 8453,
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
@@ -998,7 +998,7 @@ describe('enrichTransactionsWithAgents', () => {
 
     const sweepSql = String(queryMock.mock.calls[1][0])
     expect(sweepSql).toContain('FROM delegate_sweeps ds')
-    expect(sweepSql).toContain('LOWER(us.safe_address) = LOWER(ds.to_address)')
+    expect(sweepSql).toContain('LOWER(us.account_address) = LOWER(ds.to_address)')
     expect(sweepSql).toContain('us.chain_id = ds.chain_id')
     expect(sweepSql).toContain("ds.status = 'submitted'")
     expect(queryMock.mock.calls[1][1]).toEqual([
@@ -1050,7 +1050,7 @@ describe('transaction cache hit/miss (#992 characterization)', () => {
 
   function mockSafeRows(rows: Array<{ id: string; chain_id: number }>) {
     return vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
-      if (String(sql).includes('FROM user_safes')) {
+      if (String(sql).includes('FROM smart_accounts')) {
         return { rows } as never
       }
       return { rows: [] } as never
@@ -1126,12 +1126,12 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
   }
 
   function mockPoolForAggregation(
-    safes: Array<{ id: string; safe_address: string; chain_id: number; name: string }>,
+    safes: Array<{ id: string; account_address: string; chain_id: number; name: string }>,
     validAgentIds: string[] = [],
   ) {
     return vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown, params?: unknown[]) => {
       const text = String(sql)
-      if (text.includes('FROM user_safes')) {
+      if (text.includes('FROM smart_accounts')) {
         return { rows: safes } as never
       }
       if (text.includes('FROM agents WHERE id')) {
@@ -1151,7 +1151,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const token = signToken({ sub: 'page-user', email: 'page@example.com' })
     stubMixedTransactionFetch()
     mockPoolForAggregation([
-      { id: 'safe-page', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
+      { id: 'safe-page', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
     ])
 
     const page1 = await app.inject({
@@ -1188,11 +1188,39 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     ])
   })
 
+  // #2907 (naming P0 finding #2): every transaction row, and the top-level
+  // `failedAccountIds`, dual-emit the account_* twins ON THE WIRE. Removing
+  // `withTransactionAccountAlias(...)` or `withFailedAccountIdsAlias(...)`
+  // from this route leaves `wire-aliases.test.ts` green (it never calls the
+  // route) — this is the request-level check that catches it.
+  it('#2907: transactions[] and failedAccountIds dual-emit the account_* twins', async () => {
+    const token = signToken({ sub: 'twin-user', email: 'twin@example.com' })
+    stubMixedTransactionFetch()
+    mockPoolForAggregation([
+      { id: 'safe-twin', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
+    ])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/transactions?fresh=1',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.transactions.length).toBeGreaterThan(0)
+    for (const tx of body.transactions) {
+      expect(tx.accountId).toBe(tx.safeId)
+      expect(tx.accountAddress).toBe(tx.safeAddress)
+      expect(tx.accountName).toBe(tx.safeName)
+    }
+    expect(body.failedAccountIds).toEqual(body.failedSafeIds)
+  })
+
   it('filters by tokenKey: native excludes ERC-20, and the token address excludes native', async () => {
     const token = signToken({ sub: 'filter-user', email: 'filter@example.com' })
     stubMixedTransactionFetch()
     mockPoolForAggregation([
-      { id: 'safe-filter', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
+      { id: 'safe-filter', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
     ])
 
     const nativeOnly = await app.inject({
@@ -1223,8 +1251,8 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const SAFE_A_ID = '33333333-3333-4333-8333-333333333333'
     const SAFE_B_ID = '44444444-4444-4444-8444-444444444444'
     mockPoolForAggregation([
-      { id: SAFE_A_ID, safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'A' },
-      { id: SAFE_B_ID, safe_address: SENDER, chain_id: 100, name: 'B' },
+      { id: SAFE_A_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'A' },
+      { id: SAFE_B_ID, account_address: SENDER, chain_id: 100, name: 'B' },
     ])
 
     const scoped = await app.inject({
@@ -1248,6 +1276,113 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     })
     expect(unowned.statusCode).toBe(400)
     expect(unowned.json().error).toBe('Invalid safeId')
+  })
+
+  // #2907: `accountId` is the account-vocabulary twin of `safeId` — both
+  // accepted, both filter identically. Asserted on a REAL count difference,
+  // not just "200 OK": an unknown query key is silently ignored by Fastify,
+  // so a missing alias would have returned ALL transactions with no error —
+  // the exact failure mode this guards against.
+  it('filters by accountId (the #2907 twin of safeId) — filtered count differs from unfiltered', async () => {
+    const token = signToken({ sub: 'accountid-user', email: 'accountid@example.com' })
+    const ACCOUNT_WITH_TXS_ID = '55555555-5555-4555-8555-555555555555'
+    const ACCOUNT_EMPTY_ID = '66666666-6666-4666-8666-666666666666'
+
+    // Per-address routing: SAFE_ADDRESS returns the 4-tx mixed fixture,
+    // SENDER (the second account) returns nothing.
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString()
+      if (url.includes('/api/v1/safes/') && url.includes('/transfers/')) {
+        return jsonResponse({ count: 0, next: null, previous: null, results: [] })
+      }
+      if (url.toLowerCase().includes(LOWERCASE_SAFE_ADDRESS)) {
+        if (url.includes('/token-transfers')) {
+          return jsonResponse({
+            items: [erc20Tx('0xE20000000000000000000000000000000000000000000000000000000E20', 100, '2026-05-01T00:00:00Z', '5000000')],
+            next_page_params: null,
+          })
+        }
+        return jsonResponse({
+          items: [
+            nativeTx('0xAAA0000000000000000000000000000000000000000000000000000000AAA', 300, '2026-05-03T00:00:00Z'),
+            nativeTx('0xBBB0000000000000000000000000000000000000000000000000000000BBB', 200, '2026-05-02T00:00:00Z'),
+            nativeTx('0xCCC0000000000000000000000000000000000000000000000000000000CCC', 100, '2026-05-01T12:00:00Z'),
+          ],
+          next_page_params: null,
+        })
+      }
+      // The second account (SENDER, on a different chain): nothing.
+      if (url.includes('module=account')) return jsonResponse({ status: '1', message: 'OK', result: [] })
+      return jsonResponse({ items: [], next_page_params: null })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    mockPoolForAggregation([
+      { id: ACCOUNT_WITH_TXS_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+      { id: ACCOUNT_EMPTY_ID, account_address: SENDER, chain_id: 100, name: 'Empty' },
+    ])
+
+    const unfiltered = await app.inject({
+      method: 'GET',
+      url: '/transactions?fresh=1',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(unfiltered.statusCode).toBe(200)
+    const unfilteredTotal = unfiltered.json().total as number
+    expect(unfilteredTotal).toBeGreaterThan(0)
+
+    const filteredToEmptyByAccountId = await app.inject({
+      method: 'GET',
+      url: `/transactions?accountId=${ACCOUNT_EMPTY_ID}&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(filteredToEmptyByAccountId.statusCode).toBe(200)
+    expect(filteredToEmptyByAccountId.json().total).toBe(0)
+    expect(filteredToEmptyByAccountId.json().total).not.toBe(unfilteredTotal)
+
+    const filteredToEmptyBySafeId = await app.inject({
+      method: 'GET',
+      url: `/transactions?safeId=${ACCOUNT_EMPTY_ID}&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(filteredToEmptyBySafeId.json().total).toBe(0)
+
+    // An unrecognized accountId still 400s (proves the param is actually
+    // read, not silently ignored).
+    const unrecognized = await app.inject({
+      method: 'GET',
+      url: '/transactions?accountId=00000000-0000-4000-8000-000000000000&fresh=1',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(unrecognized.statusCode).toBe(400)
+    expect(unrecognized.json().error).toBe('Invalid safeId')
+  })
+
+  // #2907 finding #10: when both are given, `accountId` wins (documented in
+  // `openapi/spec.ts`'s parameter description). Scoping to the account WITH
+  // transactions via `accountId` while `safeId` names the EMPTY one proves
+  // which one the route actually reads first — a swapped `??` operand would
+  // pass every other test here (both still filter something) but flip this
+  // one silently.
+  it('#2907: accountId wins when both accountId and safeId are given', async () => {
+    const token = signToken({ sub: 'precedence-user', email: 'precedence@example.com' })
+    const ACCOUNT_WITH_TXS_ID = '77777777-7777-4777-8777-777777777777'
+    const ACCOUNT_EMPTY_ID = '88888888-8888-4888-8888-888888888888'
+
+    stubMixedTransactionFetch()
+    mockPoolForAggregation([
+      { id: ACCOUNT_WITH_TXS_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+      { id: ACCOUNT_EMPTY_ID, account_address: SENDER, chain_id: 100, name: 'Empty' },
+    ])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions?accountId=${ACCOUNT_WITH_TXS_ID}&safeId=${ACCOUNT_EMPTY_ID}&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    // If safeId (the empty account) won, total would be 0.
+    expect(response.json().total).toBeGreaterThan(0)
   })
 
   it('agentId=user selects the unattributed outbound tx, not the agent-attributed one', async () => {
@@ -1300,9 +1435,9 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
 
     vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown, params?: unknown[]) => {
       const text = String(sql)
-      if (text.includes('FROM user_safes')) {
+      if (text.includes('FROM smart_accounts')) {
         return {
-          rows: [{ id: 'safe-agentfilter', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' }],
+          rows: [{ id: 'safe-agentfilter', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' }],
         } as never
       }
       if (text.includes('FROM agents WHERE id')) {
@@ -1320,7 +1455,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
             {
               id: 'payment-agentfilter',
               tx_hash: AGENT_HASH.toLowerCase(),
-              safe_id: 'safe-agentfilter',
+              account_id: 'safe-agentfilter',
               chain_id: 8453,
               agent_id: AGENT_ID,
               agent_name: 'Research assistant',
@@ -1363,7 +1498,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const token = signToken({ sub: 'agentreject-user', email: 'agentreject@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
     mockPoolForAggregation(
-      [{ id: 'safe-agentreject', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' }],
+      [{ id: 'safe-agentreject', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' }],
       ['agent-owned'],
     )
 
@@ -1406,9 +1541,9 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
     stubEmptyTransactionFetch()
     vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
       const text = String(sql)
-      if (text.includes('FROM user_safes')) {
+      if (text.includes('FROM smart_accounts')) {
         return {
-          rows: [{ id: '11111111-2222-4333-8444-555555555501', safe_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+          rows: [{ id: '11111111-2222-4333-8444-555555555501', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
         } as never
       }
       if (text.includes('FROM payment_intents pi') && text.includes('JOIN agents a')) {
@@ -1419,8 +1554,8 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
               tx_hash: TX_HASH,
               agent_id: '11111111-2222-4333-8444-555555555502',
               agent_name: 'Research assistant',
-              safe_id: '11111111-2222-4333-8444-555555555501',
-              safe_address: SAFE_ADDRESS,
+              account_id: '11111111-2222-4333-8444-555555555501',
+              account_address: SAFE_ADDRESS,
               safe_name: 'Main wallet',
               chain_id: 8453,
               token_symbol: 'USDC',

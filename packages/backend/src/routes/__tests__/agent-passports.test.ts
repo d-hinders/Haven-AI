@@ -171,7 +171,7 @@ describe('POST /agents/:id/passport', () => {
       chain_id: 84532,
       status: 'active',
       execution_rail: 'allowance_module',
-      account_type: 'safe',
+      account_type: 'legacy_safe',
     })
     mockGetPassport.mockResolvedValue(null)
 
@@ -189,7 +189,7 @@ describe('POST /agents/:id/passport', () => {
       chain_id: 84532,
       status: 'active',
       execution_rail: 'session_key',
-      account_type: 'safe',
+      account_type: 'legacy_safe',
     })
     mockGetPassport.mockResolvedValue(null)
 
@@ -211,7 +211,7 @@ describe('POST /agents/:id/passport', () => {
       chain_id: 84532,
       status: 'active',
       execution_rail: 'allowance_module',
-      account_type: 'safe',
+      account_type: 'legacy_safe',
     })
     mockGetPassport.mockResolvedValue({
       status: 'anchored',

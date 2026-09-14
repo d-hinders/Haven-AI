@@ -17,10 +17,11 @@
  * original three would be a production outage, and the surviving-tables test
  * below is what makes that edit red instead of green.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { up, down, version } from '../069_drop_safe_approver_metadata.js'
+import { down as down084, up as up084 } from '../084_rename_user_safes_to_smart_accounts.js'
 
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -67,6 +68,22 @@ describeDb('migration 069: drop safe_approver_metadata (#1990)', () => {
 
   beforeEach(async () => {
     await resetDb()
+  })
+
+  // #2911 (schema rename, epic #2906 phase 3): 024's/069's own DDL hardcodes
+  // `REFERENCES user_safes(id)` (migrations are immutable history, so that
+  // text never changes) — every test in this file either seeds a row through
+  // it or hand-invokes 069's `down()`, which recreates that FK. Post-#2911
+  // the table is `smart_accounts` at head, so both would fail with
+  // `relation "user_safes" does not exist` unless 084's rename is reverted
+  // for the duration of each test — the same "a later migration renamed what
+  // an earlier test asserted" shape 075's and 083's tests already carry, one
+  // layer up here because EVERY test in this file needs it, not just a few.
+  beforeEach(async () => {
+    await down084(db as never)
+  })
+  afterEach(async () => {
+    await up084(db as never)
   })
 
   it('the table is gone once the migration set has run', async () => {

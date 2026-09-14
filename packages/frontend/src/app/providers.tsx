@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { AuthProvider } from '@/context/AuthContext'
 import { LocaleProvider } from '@/context/LocaleContext'
+import { ThemeProvider } from '@/context/ThemeContext'
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit'
@@ -48,7 +49,8 @@ export default function Providers({ children }: { children: ReactNode }) {
 
   return (
     <LocaleProvider>
-      <AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
         {mounted ? (
           <WagmiProvider config={config}>
             <QueryClientProvider client={queryClient}>
@@ -67,7 +69,8 @@ export default function Providers({ children }: { children: ReactNode }) {
         ) : (
           children
         )}
-      </AuthProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </LocaleProvider>
   )
 }

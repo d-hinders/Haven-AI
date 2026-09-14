@@ -7,14 +7,14 @@ import { getChainConfig } from '@/lib/chains'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import type {
   TransactionFilterAgentOption,
-  TransactionFilterSafeOption,
+  TransactionFilterAccountOption,
   TransactionFilterState,
   TransactionFilterTokenOption,
 } from '@/types/transactions'
 
 interface FilterBarProps {
   filters: TransactionFilterState
-  safes: TransactionFilterSafeOption[]
+  safes: TransactionFilterAccountOption[]
   agents: TransactionFilterAgentOption[]
   tokens: TransactionFilterTokenOption[]
   loading: boolean
@@ -57,8 +57,8 @@ function triggerClasses(active: boolean, disabled = false): string {
     'flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors',
     active
       ? 'border-brand/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-      : 'border-[var(--v2-border)] bg-white text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]',
-    disabled ? 'cursor-not-allowed opacity-60 hover:bg-white' : '',
+      : 'border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]',
+    disabled ? 'cursor-not-allowed opacity-60 hover:bg-[var(--v2-bg)]' : '',
   ].join(' ')
 }
 
@@ -93,17 +93,17 @@ export default function FilterBar({
     return rank(a.status) - rank(b.status) || a.name.localeCompare(b.name)
   })
 
-  const selectedSafe = safes.find((safe) => safe.id === filters.safeId)
+  const selectedSafe = safes.find((safe) => safe.id === filters.accountId)
   const selectedAgent =
     filters.agentId === 'user'
       ? { id: 'user', name: 'User (manual)', status: 'manual' }
       : agents.find((agent) => agent.id === filters.agentId)
   const selectedToken = tokens.find((token) => token.key === filters.tokenKey)
 
-  type ChipKey = 'safeId' | 'agentId' | 'tokenKey' | 'direction'
+  type ChipKey = 'accountId' | 'agentId' | 'tokenKey' | 'direction'
   const chips = [
     selectedSafe
-      ? { key: 'safeId' as const, label: `Account: ${selectedSafe.name}` }
+      ? { key: 'accountId' as const, label: `Account: ${selectedSafe.name}` }
       : null,
     selectedAgent
       ? { key: 'agentId' as const, label: `Initiator: ${selectedAgent.name}` }
@@ -117,14 +117,14 @@ export default function FilterBar({
   ].filter((chip): chip is { key: ChipKey; label: string } => Boolean(chip))
 
   const clearFilter = (key: ChipKey) => {
-    if (key === 'safeId') onChange({ ...filters, safeId: undefined })
+    if (key === 'accountId') onChange({ ...filters, accountId: undefined })
     if (key === 'agentId') onChange({ ...filters, agentId: undefined })
     if (key === 'tokenKey') onChange({ ...filters, tokenKey: undefined })
     if (key === 'direction') onChange({ ...filters, direction: undefined })
   }
 
   return (
-    <div ref={ref} className="rounded-[10px] border border-[var(--v2-border)] bg-white p-4 shadow-card">
+    <div ref={ref} className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4 shadow-card">
       <div className="flex flex-wrap items-start gap-3">
         <div className="relative">
           <button
@@ -133,17 +133,17 @@ export default function FilterBar({
               setOpen(open === 'safe' ? null : 'safe')
             }}
             disabled={safes.length <= 1}
-            className={triggerClasses(Boolean(filters.safeId), safes.length <= 1)}
+            className={triggerClasses(Boolean(filters.accountId), safes.length <= 1)}
           >
             <span>Account: {selectedSafe?.name ?? 'All'}</span>
             <Chevron open={open === 'safe'} />
           </button>
           {open === 'safe' && safes.length > 1 && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal">
               <DropdownButton
-                active={!filters.safeId}
+                active={!filters.accountId}
                 onClick={() => {
-                  onChange({ ...filters, safeId: undefined })
+                  onChange({ ...filters, accountId: undefined })
                   setOpen(null)
                 }}
               >
@@ -152,9 +152,9 @@ export default function FilterBar({
               {safes.map((safe) => (
                 <DropdownButton
                   key={safe.id}
-                  active={filters.safeId === safe.id}
+                  active={filters.accountId === safe.id}
                   onClick={() => {
-                    onChange({ ...filters, safeId: safe.id })
+                    onChange({ ...filters, accountId: safe.id })
                     setOpen(null)
                   }}
                 >
@@ -179,7 +179,7 @@ export default function FilterBar({
             <Chevron open={open === 'agent'} />
           </button>
           {open === 'agent' && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-64 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-64 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal">
               <DropdownButton
                 active={!filters.agentId}
                 onClick={() => {
@@ -235,7 +235,7 @@ export default function FilterBar({
             <Chevron open={open === 'token'} />
           </button>
           {open === 'token' && (
-            <div className="absolute left-0 top-full z-40 mt-2 max-h-80 min-w-72 overflow-y-auto rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
+            <div className="absolute left-0 top-full z-40 mt-2 max-h-80 min-w-72 overflow-y-auto rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal">
               <DropdownButton
                 active={!filters.tokenKey}
                 onClick={() => {
@@ -272,7 +272,7 @@ export default function FilterBar({
             <Chevron open={open === 'direction'} />
           </button>
           {open === 'direction' && (
-            <div className="absolute left-0 top-full z-40 mt-2 min-w-44 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-white shadow-modal">
+            <div className="absolute left-0 top-full z-40 mt-2 min-w-44 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal">
               <DropdownButton
                 active={!filters.direction}
                 onClick={() => {

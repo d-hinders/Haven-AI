@@ -20,6 +20,8 @@ export {
 
 export {
   loadSignerCredentials,
+  readAccountAddressEnv,
+  readAccountAddressField,
   warnIfCredentialFilePermissive,
   type SignerCredentials,
 } from './credentials.js'

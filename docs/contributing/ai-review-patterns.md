@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/lib/allowance-format.ts
   - packages/frontend/src/lib/__tests__/allowance-format.test.ts
   - packages/frontend/src/lib/signer.ts
-  - packages/frontend/src/hooks/useSafeOperationGate.ts
+  - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/components/NetworkGate.tsx

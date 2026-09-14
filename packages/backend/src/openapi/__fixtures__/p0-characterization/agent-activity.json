@@ -1,0 +1,42 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "GET /agents/{id}/activity",
+  "request": {
+    "method": "GET",
+    "url": "/agent-activity/agent-1/activity",
+    "authClaims": {
+      "sub": "user-1",
+      "email": "test@example.com"
+    }
+  },
+  "status": 200,
+  "body": {
+    "activity": [
+      {
+        "type": "payment",
+        "id": "payment-1",
+        "token": "USDC",
+        "amount_raw": "10000",
+        "amount": "0.01",
+        "to": "0x2222222222222222222222222222222222222222",
+        "status": "confirmed",
+        "tx_hash": "0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1",
+        "payment_id": "payment-1",
+        "payment_proof_status": "payment_confirmed",
+        "payment_flow_status": "confirming_merchant",
+        "payment_attention_reason": null,
+        "source": "x402",
+        "x402_resource_url": "https://api.example.com/data",
+        "x402_merchant_address": "0x2222222222222222222222222222222222222222",
+        "chain_id": 8453,
+        "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "safe_id": "safe-base",
+        "safe_address": "0x1111111111111111111111111111111111111111",
+        "safe_name": "Base wallet",
+        "explorer_url": "https://basescan.org/tx/0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1",
+        "confirmed_at": "2026-05-08T11:49:59Z",
+        "created_at": "2026-05-08T11:49:00Z"
+      }
+    ]
+  }
+}

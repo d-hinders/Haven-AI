@@ -99,7 +99,7 @@ interface PaymentIntentRow {
   id: string
   agent_id: string
   user_id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   token_symbol: string
   token_address: string
@@ -261,7 +261,12 @@ async function replayIntentBody(
     sign_data: {
       hash: pi.sign_hash,
       components: {
-        safe: agent.safe_address,
+        safe: agent.account_address,
+        // #2907: payer_account is a same-value twin of `safe` — the clean
+        // case, since this shape carries no `account` key at all (unlike the
+        // delegation-authorize funding shape, where `account` already means
+        // the delegate account address).
+        payer_account: agent.account_address,
         token: pi.token_address,
         to: pi.to_address,
         amount: pi.amount_raw,
@@ -438,7 +443,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       delegationIntent = await insertDelegationIntent({
         agentId: agent.id,
         userId: agent.user_id,
-        safeAddress: agent.safe_address,
+        accountAddress: agent.account_address,
         chainId: agent.chain_id,
         tokenSymbol: tokenConfig.symbol,
         tokenAddress,

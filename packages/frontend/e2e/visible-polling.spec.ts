@@ -41,8 +41,8 @@ function paymentRow(merchant: string) {
     tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
     tokenSymbol: 'USDC',
     chainId: 8453,
-    safeId: 'safe-main',
-    safeAddress: testSafeAddress,
+    accountId: 'safe-main',
+    accountAddress: testSafeAddress,
     safeName: 'Operations',
     source: 'x402',
   }

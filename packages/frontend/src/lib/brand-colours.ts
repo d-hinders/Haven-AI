@@ -26,12 +26,37 @@ export const BRAND_COLOURS = {
   background: '#ffffff',
   /** `--v2-warning` — the dev install's icon badge, same tone as `EnvBadge`. */
   warning: '#b54708',
+  /**
+   * `--v2-bg` AS DECLARED IN THE DARK BLOCK — the value the status-bar pair
+   * and the runtime override carry when the palette renders dark (#2928).
+   *
+   * Distinct from `background` although spelled alike: both are `--v2-bg`,
+   * one is read from the `:root` block and this from the
+   * `@media (prefers-color-scheme: dark)` block, and a manifest or a meta
+   * can not read a custom property off a stylesheet. #2927's review verified
+   * the two dark re-declaration blocks byte-identical (60 declarations each),
+   * so parsing the media block alone is enough, and
+   * `installed-app.test.ts` re-parses it to keep this string from drifting.
+   */
+  darkBackground: '#12151c',
 } as const
 
-/** Which `globals.css` custom property each entry above is pinned to. */
-export const BRAND_COLOUR_TOKENS: Record<keyof typeof BRAND_COLOURS, string> = {
+/**
+ * Which `globals.css` custom property each entry above is pinned to, and
+ * from which block it is read. The four light entries are parsed from
+ * `:root`; `darkBackground` is the one dark entry, parsed from the media
+ * block, so it lives in its own map rather than in this one — a single map
+ * keyed by token name could not say which block to read the token from, and
+ * the whole point of the pin is that the test parses the RIGHT block.
+ */
+export const BRAND_COLOUR_TOKENS: Record<Exclude<keyof typeof BRAND_COLOURS, 'darkBackground'>, string> = {
   brand: '--v2-brand',
   onBrand: '--v2-ink-on-brand',
   background: '--v2-bg',
   warning: '--v2-warning',
+}
+
+/** The dark-palette entries and the token each is pinned to. */
+export const DARK_BRAND_COLOUR_TOKENS: Record<Extract<keyof typeof BRAND_COLOURS, 'darkBackground'>, string> = {
+  darkBackground: '--v2-bg',
 }

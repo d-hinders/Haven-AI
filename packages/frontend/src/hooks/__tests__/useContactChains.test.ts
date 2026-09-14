@@ -42,7 +42,7 @@ describe('useContactChains', () => {
     mockApiGet.mockReset()
     mockUseAuth.mockReturnValue({
       user: {
-        safes: [
+        accounts: [
           { id: 's1', safe_address: SAFE_BASE, chain_id: 8453 },
           { id: 's2', safe_address: SAFE_GNOSIS, chain_id: 100 },
         ],
@@ -88,7 +88,7 @@ describe('useContactChains', () => {
   })
 
   it('is empty when the user has no safes', async () => {
-    mockUseAuth.mockReturnValue({ user: { safes: [] } })
+    mockUseAuth.mockReturnValue({ user: { accounts: [] } })
     const { result } = renderHook(() => useContactChains())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.chainsByAddress.size).toBe(0)

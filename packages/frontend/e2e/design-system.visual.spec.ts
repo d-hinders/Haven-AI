@@ -55,6 +55,13 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, so the
 // screenshot evidence (#896) and this pixel gate always render the same widths.
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
+// The theme seed key is the APP'S OWN constant (#2929) — the same contract
+// `seedAuthenticatedSession` holds with `auth-storage.ts`: a storage-key
+// rename in ThemeContext has to fail this gate, not silently compare
+// light-mode renders against baselines that claim to be dark.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — plain .ts constant with no default export shape to widen.
+import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
 
 const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
   name: string
@@ -328,13 +335,56 @@ test.describe('design-system visual regression', () => {
     VISUAL_SKIP_REASON,
   )
 
-  test.beforeEach(async ({ page }) => {
+  /**
+   * Which palette this capture set renders in (#2929).
+   *
+   * Keyed on the PROJECT name rather than on a `test.describe` duplicated per
+   * scheme, because the project is where `colorScheme` and the storage seed
+   * are decided (`playwright.config.ts`), and a second copy of the whole
+   * capture body is the #1863 failure shape — a spec that exists but nothing
+   * runs, or two that drift. Under `chromium-desktop` this is the historical
+   * light path byte-for-byte, baselines included: the `-dark` suffix appears
+   * in no baseline name and no `haven.theme` seed is written, so the light
+   * baselines and the light runs are untouched by this change.
+   */
+  const schemeOf = (testInfo: { project: { name: string } }): 'light' | 'dark' =>
+    testInfo.project.name === 'chromium-desktop-dark' ? 'dark' : 'light'
+
+  test.beforeEach(async ({ page }, testInfo) => {
     await mockHavenApi(page)
     await seedAuthenticatedSession(page)
+    // The DETERMINISTIC half of the dark seed (#2929). The app's no-flash
+    // bootstrap reads this key before the first paint and stamps
+    // `data-theme`, which pins the token block regardless of the OS — so the
+    // render does not depend on `prefers-color-scheme` being honoured. The
+    // project's `colorScheme: 'dark'` is the second half: it makes the
+    // media-query path and every OS-sensitive native paint agree with the
+    // seed instead of fighting it. addInitScript runs BEFORE any app code,
+    // which is the "seeds storage before navigation" the gate requires.
+    //
+    // Same argument shape `seedAuthenticatedSession` uses: a single payload
+    // object, no destructuring of the outer scope, because the function is
+    // serialised into the page.
+    const scheme = schemeOf(testInfo)
+    if (scheme === 'dark') {
+      await page.addInitScript(
+        (themeKey) => {
+          window.localStorage.setItem(themeKey, 'dark')
+        },
+        THEME_STORAGE_KEY,
+      )
+    }
   })
 
   for (const vp of VIEWPORTS) {
-    test(`/design-system renders pixel-stable (${vp.name})`, async ({ page }) => {
+    test(`/design-system renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      // `-dark` rides the BASELINE NAME, not the project path: the snapshot
+      // template has no {projectName} segment, so the two schemes must not be
+      // able to resolve to the same PNG (one silently overwriting the other
+      // on a --update-snapshots run is how a dark gate would end up comparing
+      // light pixels).
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await page.goto('/design-system')
       // Determinism: fonts loaded, no animation mid-flight.
@@ -352,7 +402,7 @@ test.describe('design-system visual regression', () => {
       // one matching TWO would silently capture the first — the failure shape
       // this gate exists to close. Assert the count, don't assume it.
       await expect(topBar).toHaveCount(1)
-      await expect(topBar).toHaveScreenshot(`design-system-topbar-${vp.name}.png`, {
+      await expect(topBar).toHaveScreenshot(`design-system-topbar-${vp.name}${schemeSuffix}.png`, {
         animations: 'disabled',
         caret: 'hide',
         maxDiffPixels: TOP_BAR_MAX_DIFF_PIXELS,
@@ -365,7 +415,7 @@ test.describe('design-system visual regression', () => {
       if (vp.width >= SIDEBAR_MIN_VIEWPORT_WIDTH) {
         const sidebar = page.locator(APP_SIDEBAR)
         await expect(sidebar).toHaveCount(1)
-        await expect(sidebar).toHaveScreenshot(`design-system-sidebar-${vp.name}.png`, {
+        await expect(sidebar).toHaveScreenshot(`design-system-sidebar-${vp.name}${schemeSuffix}.png`, {
           animations: 'disabled',
           caret: 'hide',
           maxDiffPixels: SIDEBAR_MAX_DIFF_PIXELS,

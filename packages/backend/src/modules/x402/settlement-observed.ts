@@ -75,7 +75,7 @@ export interface ObservableSettlementIntent {
   id: string
   agent_id: string
   chain_id: number
-  safe_address: string
+  account_address: string
   to_address: string
   token_symbol: string
   token_address: string
@@ -207,7 +207,7 @@ export async function observeErc7710Settlement(
   const verification = await verifySettlementTransferTx(txHash, {
     chainId: intent.chain_id,
     tokenAddress: intent.token_address,
-    fromAddress: intent.safe_address,
+    fromAddress: intent.account_address,
     toAddress: intent.to_address,
     amountRaw: intent.amount_raw,
     notBeforeSec: authorizeSec - CLOCK_SKEW_SECONDS,

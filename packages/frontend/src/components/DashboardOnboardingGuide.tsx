@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import type { SafeFunding } from '@/hooks/useSafeFunding'
+import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 type StepStatus = 'complete' | 'active' | 'locked'
 
@@ -24,7 +24,7 @@ interface Props {
   hasAgents: boolean
   hasFirstAgentPayment: boolean
   /**
-   * #2534: the funding facts from `GET /user/safes/:safeId/funding` — the same
+   * #2534: the funding facts from `GET /user/safes/:accountId/funding` — the same
    * object `haven wallets funding` prints. The instruction text, the address
    * and the minimum are rendered FROM this payload, so the card and the CLI
    * cannot disagree: `@haven_ai/core` owns the minimum, the endpoint owns the
@@ -32,7 +32,7 @@ interface Props {
    * still renders (with the old general copy) while the read is in flight or
    * failed — the checklist must not go blank because one GET did.
    */
-  funding?: SafeFunding | null
+  funding?: AccountFunding | null
   onReceiveFunds: () => void
   onAddAgent: () => void
   onShowAgentUsage: () => void
@@ -67,7 +67,7 @@ export default function DashboardOnboardingGuide({
         <div className="flex items-center gap-3">
           <span
             aria-hidden="true"
-            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-white"
+            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
           >
             <CheckIcon />
           </span>
@@ -155,7 +155,7 @@ export default function DashboardOnboardingGuide({
   }
 
   return (
-    <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-white p-5 shadow-card">
+    <section className="v2-animate-fade-in rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5 shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--v2-brand)]">
@@ -234,7 +234,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-white"
+        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
       >
         <CheckIcon />
       </span>
@@ -244,7 +244,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-semibold text-white v2-tabular"
+        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-semibold text-[var(--v2-ink-on-brand)] v2-tabular"
       >
         {number}
       </span>

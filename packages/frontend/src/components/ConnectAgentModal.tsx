@@ -11,8 +11,8 @@ import { StepProgress } from './ui/StepProgress'
 interface Props {
   open: boolean
   onClose: () => void
-  safeAddress?: string
-  safeId?: string | null
+  accountAddress?: string
+  accountId?: string | null
   /**
    * Fires after any delegation setup-state change the parent should react to
    * (typically: refresh the agents list).
@@ -43,8 +43,8 @@ interface Props {
 export default function ConnectAgentModal({
   open,
   onClose,
-  safeAddress,
-  safeId,
+  accountAddress,
+  accountId,
   onSetupUpdated,
   starterAllowance = false,
   resumeSetupId = null,
@@ -52,8 +52,8 @@ export default function ConnectAgentModal({
   const flow = useAgentConnectionSetup({
     open,
     onClose,
-    safeAddress,
-    safeId,
+    accountAddress,
+    accountId,
     onSetupUpdated,
     starterAllowance,
     resumeSetupId,

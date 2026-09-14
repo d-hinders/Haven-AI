@@ -75,7 +75,38 @@ jobs:
           # `set -euo pipefail` would turn that 422 into a failed step — the digest
           # going silent exactly in the extreme case it exists to report. At ~25
           # first-parent commits a day a long stall reaches that ceiling in weeks.
-          list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev | head -100)
+          #
+          # The cap is applied by `git log -n`, NOT by piping into `head`, and that
+          # is the whole point. `… | head -100` made the cap itself the failure it
+          # was written to prevent: once the count passes the cap, `head` exits at
+          # its hundredth line, `git log` is killed by SIGPIPE on its next write,
+          # and `pipefail` turns that into exit 141 for the step.
+          #
+          # **Above the cap, treat this as broken rather than flaky.** It is a
+          # race — git streams in stdio-sized chunks, so whether it is mid-write
+          # when `head` goes away depends on scheduling — but the odds are bad and
+          # they worsen with every commit past the cap. Measured on one machine,
+          # 40 runs each, `PIPESTATUS[0] != 0`:
+          #
+          #     100 commits   0/40     (head reads to EOF; nothing to race)
+          #     101 commits   0/40
+          #     102 commits  25/40
+          #     150 commits  39/40
+          #
+          # Two things that sound like exonerations and are not. **It is not a
+          # pipe-buffer question**: at 150 commits the whole output is ~10 kB,
+          # comfortably inside a 64 kB pipe buffer, and it still fails 97 % of the
+          # time — an earlier version of this comment claimed the opposite and was
+          # measured wrong. **And it does reproduce locally**, readily, at any
+          # range a few commits past the cap; the reason it went unseen for months
+          # is that `main..dev` had never exceeded 100 before 2026-09-12, not that
+          # it is hard to trigger. Being a race also means two honest measurements
+          # disagree — a reviewer measured 38/40 at 101 commits where the table
+          # above reads 0/40 — so no observed pass rate makes the pipeline safe.
+          #
+          # `-n` never opens the pipe, so there is nothing to race at any size.
+          # Do not reintroduce `| head` here.
+          list=$(git log --first-parent --pretty='- %s' -n 100 origin/main..origin/dev)
           if [ "$count" -gt 100 ]; then
             list=$(printf '%s\n- _…and %s more — see the `main..dev` compare._' "$list" "$((count - 100))")
           fi

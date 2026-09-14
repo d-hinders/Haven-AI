@@ -61,7 +61,7 @@ export const toolDescriptions = {
       'Preserve the returned resume_state — it identifies this payment if you need to ask about it later. ' +
       'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
       'If the process crashes after this call and a later haven_get_payment_status reports nextAction=retry_original_x402_request, Haven\'s funding leg confirmed but no merchant response was ever recorded — call the resume tool with the preserved resume_state or payment_id instead of paying again. ' +
-      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance (or fund_account_or_raise_allowance), the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
   },
   payX402OneShot: {
     summary:
@@ -74,7 +74,7 @@ export const toolDescriptions = {
       'Preserve the returned resume_state or paymentId — either identifies this payment if you need to ask about it later. ' +
       'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
       'If the process crashes after this call and a later haven_get_payment_status reports nextAction=retry_original_x402_request, Haven\'s funding leg confirmed but no merchant response was ever recorded — call the resume tool with the preserved resume_state or payment_id instead of paying again. ' +
-      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance, the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
+      'If the response carries phase=insufficient_funds and nextAction=fund_safe_or_raise_allowance (or fund_account_or_raise_allowance), the payment cannot be retried until the account is funded or the agent budget raised — stop and tell the user the shortfall reported on the response.',
   },
   resumeX402: {
     summary:
@@ -110,7 +110,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Reads identity plus the live spend-authority snapshot in one shot — the agent\'s active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves: there is no approval queue, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields (id, name, status, safeAddress, delegateAddress, chainId) are unchanged from before.',
+      'Reads identity plus the live spend-authority snapshot in one shot — the agent\'s active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves: there is no approval queue, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields: id, name, status, accountAddress (safeAddress: deprecated alias, same value), delegateAddress, chainId.',
     nextActionGuidance: '',
   },
   getAllowances: {
@@ -191,16 +191,16 @@ export const toolDescriptions = {
   },
   sweep_delegate: {
     summary:
-      'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating Safe.',
+      'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating account.',
     selectionGuidance:
       'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
       'Do NOT use for normal payments — use haven_pay_x402. ' +
       'Do NOT use to read balances only — use haven_get_allowances.',
     behavior:
-      'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating Safe (hardcoded destination). ' +
+      'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating account (hardcoded destination). ' +
       'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
       'Returns tx hashes and recovered amounts. Returns an empty transfers list when nothing is stranded. ' +
-      'Each transfer carries confirmation: "confirmed" (a receipt was seen — the funds are in the Safe) or "unconfirmed" ' +
+      'Each transfer carries confirmation: "confirmed" (a receipt was seen — the funds are in the account) or "unconfirmed" ' +
       '(broadcast but not confirmed within 90 seconds — still in the mempool, may still land). The top-level unconfirmed flag is true when any transfer is unconfirmed.',
     nextActionGuidance:
       'If transfers is non-empty, confirm the amounts with the user. ' +

@@ -35,7 +35,7 @@ export function useDelegationSend(accountAddress: string, chainId: number) {
   const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState(false)
   const signer = useActiveSigner({
-    safeAddress: signers ? (signers.account_address as Address) : undefined,
+    accountAddress: signers ? (signers.account_address as Address) : undefined,
     chainId,
   })
 

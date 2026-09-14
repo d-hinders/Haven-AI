@@ -2,9 +2,9 @@ import Fastify, { FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockQuery, mockFetchPortfolioForSafe } = vi.hoisted(() => ({
+const { mockQuery, mockFetchPortfolioForAccount } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  mockFetchPortfolioForSafe: vi.fn(),
+  mockFetchPortfolioForAccount: vi.fn(),
 }))
 
 vi.mock('../../db.js', () => ({
@@ -14,7 +14,7 @@ vi.mock('../../db.js', () => ({
 }))
 
 vi.mock('../../modules/accounts/index.js', () => ({
-  fetchPortfolioForSafe: (...args: unknown[]) => mockFetchPortfolioForSafe(...args),
+  fetchPortfolioForAccount: (...args: unknown[]) => mockFetchPortfolioForAccount(...args),
 }))
 
 import portfolioRoutes from '../portfolio.js'
@@ -41,8 +41,8 @@ describe('portfolio routes', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    mockFetchPortfolioForSafe.mockReset()
-    mockFetchPortfolioForSafe.mockResolvedValue(PORTFOLIO)
+    mockFetchPortfolioForAccount.mockReset()
+    mockFetchPortfolioForAccount.mockResolvedValue(PORTFOLIO)
   })
 
   function signToken(payload: { sub: string; email: string }): string {
@@ -64,7 +64,7 @@ describe('portfolio routes', () => {
       expect.stringContaining('AND chain_id = $3'),
       ['user-1', SAFE_ADDRESS, 8453],
     )
-    expect(mockFetchPortfolioForSafe).toHaveBeenCalledWith(8453, SAFE_ADDRESS)
+    expect(mockFetchPortfolioForAccount).toHaveBeenCalledWith(8453, SAFE_ADDRESS)
     expect(response.json()).toEqual(PORTFOLIO)
   })
 
@@ -83,7 +83,7 @@ describe('portfolio routes', () => {
       expect.not.stringContaining('AND chain_id = $3'),
       ['user-1', SAFE_ADDRESS],
     )
-    expect(mockFetchPortfolioForSafe).toHaveBeenCalledWith(100, SAFE_ADDRESS)
+    expect(mockFetchPortfolioForAccount).toHaveBeenCalledWith(100, SAFE_ADDRESS)
   })
 
   it('requires chain_id for legacy reads that match multiple owned chains', async () => {
@@ -107,7 +107,7 @@ describe('portfolio routes', () => {
       expect.not.stringContaining('AND chain_id = $3'),
       ['user-1', SAFE_ADDRESS],
     )
-    expect(mockFetchPortfolioForSafe).not.toHaveBeenCalled()
+    expect(mockFetchPortfolioForAccount).not.toHaveBeenCalled()
   })
 
   it('rejects malformed chain_id values before ownership lookup', async () => {
@@ -122,7 +122,7 @@ describe('portfolio routes', () => {
     expect(response.statusCode).toBe(400)
     expect(response.json().error).toBe('Invalid chain_id')
     expect(mockQuery).not.toHaveBeenCalled()
-    expect(mockFetchPortfolioForSafe).not.toHaveBeenCalled()
+    expect(mockFetchPortfolioForAccount).not.toHaveBeenCalled()
   })
 
   it('rejects unsupported chains before ownership lookup', async () => {
@@ -137,7 +137,7 @@ describe('portfolio routes', () => {
     expect(response.statusCode).toBe(400)
     expect(response.json().error).toBe('Unsupported chain: 999999')
     expect(mockQuery).not.toHaveBeenCalled()
-    expect(mockFetchPortfolioForSafe).not.toHaveBeenCalled()
+    expect(mockFetchPortfolioForAccount).not.toHaveBeenCalled()
   })
 
   it('does not fall back to another chain when the requested chain is not owned', async () => {
@@ -156,6 +156,6 @@ describe('portfolio routes', () => {
       expect.stringContaining('AND chain_id = $3'),
       ['user-1', SAFE_ADDRESS, 8453],
     )
-    expect(mockFetchPortfolioForSafe).not.toHaveBeenCalled()
+    expect(mockFetchPortfolioForAccount).not.toHaveBeenCalled()
   })
 })

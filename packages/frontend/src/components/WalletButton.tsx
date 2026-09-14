@@ -27,7 +27,7 @@ import {
 } from '@/lib/signer'
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { BRAND_COLOURS } from '@/lib/brand-colours'
-import { useSafeOperationGate } from '@/hooks/useSafeOperationGate'
+import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { truncateAddress } from '@/components/haven'
 
 // Generative identicon gradient stops — decorative art hashed from an address
@@ -73,7 +73,10 @@ function AddressAvatar({ address }: { address: string }) {
   return (
     <span
       aria-hidden
-      className="h-5 w-5 shrink-0 overflow-hidden rounded-full border border-white/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)]"
+      // Sits on the generative avatar gradient — a fixed, theme-independent
+      // hash palette (see getAvatarStyle), so the rim is fixed too and lives
+      // with the other never-invert paints in `.v2-avatar-chrome` (#2929).
+      className="v2-avatar-chrome h-5 w-5 shrink-0 overflow-hidden rounded-full border"
       style={getAvatarStyle(address)}
     />
   )
@@ -627,20 +630,20 @@ function getSafeChainName(chainId?: number): string | undefined {
 export default function WalletButton() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
-  const { activeSafe, passkeys } = useAuth()
-  const activeSafeAddress = activeSafe?.safe_address as Address | undefined
+  const { activeAccount, passkeys } = useAuth()
+  const activeAccountAddress = activeAccount?.safe_address as Address | undefined
   const activeSigner = useActiveSigner({
-    safeAddress: activeSafeAddress,
-    chainId: activeSafe?.chain_id,
+    accountAddress: activeAccountAddress,
+    chainId: activeAccount?.chain_id,
   })
   // #2073: the same gate the action areas consult, so the header pill and the
   // disabled action below it agree about whether a USEFUL wallet is connected.
   // Before this, a hybrid account with the wrong wallet connected rendered a
   // normal connected pill up here while the action area said to connect the
   // owner wallet — the two surfaces silently disagreed.
-  const operationGate = useSafeOperationGate({
-    safeAddress: activeSafeAddress,
-    chainId: activeSafe?.chain_id,
+  const operationGate = useAccountOperationGate({
+    accountAddress: activeAccountAddress,
+    chainId: activeAccount?.chain_id,
   })
   const passkeySigner = activeSigner?.type === 'passkey' ? activeSigner : null
   // #1079: a Hybrid DeleGator account whose passkey is on this device gets the
@@ -648,17 +651,17 @@ export default function WalletButton() {
   // "Connect wallet" for a passkey that had just signed a budget.
   const delegatorSigner = activeSigner?.type === 'delegator_passkey' ? activeSigner : null
   const passkeyUnavailableOnDevice = useMemo(() => {
-    const safeAddress = activeSafe?.safe_address.toLowerCase()
-    if (!safeAddress || activeSafe?.chain_id === undefined || passkeySigner) {
+    const accountAddress = activeAccount?.safe_address.toLowerCase()
+    if (!accountAddress || activeAccount?.chain_id === undefined || passkeySigner) {
       return false
     }
 
     return passkeys.some(
       (passkey) =>
-        passkey.chain_id === activeSafe.chain_id &&
-        passkey.safe_address?.toLowerCase() === safeAddress,
+        passkey.chain_id === activeAccount.chain_id &&
+        passkey.safe_address?.toLowerCase() === accountAddress,
     )
-  }, [activeSafe?.chain_id, activeSafe?.safe_address, passkeySigner, passkeys])
+  }, [activeAccount?.chain_id, activeAccount?.safe_address, passkeySigner, passkeys])
 
   // "Switch wallet" flow: disconnect, then open the connect modal once
   // wagmi has committed isConnected=false. Driven from the parent so the
@@ -722,7 +725,7 @@ export default function WalletButton() {
           )
         }
 
-        const safeChainName = getSafeChainName(activeSafe?.chain_id)
+        const safeChainName = getSafeChainName(activeAccount?.chain_id)
         const openWalletConnect = () => {
           if (openConnectModalHook) {
             openConnectModalHook()
@@ -752,7 +755,7 @@ export default function WalletButton() {
                 aria-expanded={popoverOpen}
                 aria-label="Passkey"
                 title="Passkey"
-                className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+                className={`flex items-center gap-2 text-sm font-medium bg-[var(--v2-bg)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
               >
                 <AddressAvatar address={passkeySigner.address} />
                 <span className={LABEL_BELOW_SM}>Passkey</span>
@@ -826,7 +829,7 @@ export default function WalletButton() {
                 aria-expanded={popoverOpen}
                 aria-label="Passkey"
                 title="Passkey"
-                className={`flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
+                className={`flex items-center gap-2 text-sm font-medium bg-[var(--v2-bg)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`}
               >
                 <AddressAvatar address={delegatorSigner.accountAddress} />
                 <span className={LABEL_BELOW_SM}>Passkey</span>
@@ -867,7 +870,7 @@ export default function WalletButton() {
               // Offset against the page, as ui/Button does: on a brand-FILLED
               // control an un-offset brand ring composites brand-over-brand and
               // measures ~1.0:1 — invisible at any opacity (#1741).
-              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-white shadow-button transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] sm:px-4 sm:py-2 ${COLLAPSE_BELOW_SM}`}
+              className={`inline-flex items-center gap-2 text-sm font-medium bg-[var(--v2-brand)] hover:bg-[var(--v2-brand-strong)] text-[var(--v2-ink-on-brand)] shadow-button transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] sm:px-4 sm:py-2 ${COLLAPSE_BELOW_SM}`}
             >
               <Icon icon={Wallet} className="h-4 w-4 shrink-0 sm:hidden" />
               <span className={LABEL_BELOW_SM}>Connect wallet</span>
@@ -923,7 +926,7 @@ export default function WalletButton() {
               className={
                 wrongWallet
                   ? `flex items-center gap-2 text-sm font-medium bg-[var(--v2-danger-soft)] text-[var(--v2-danger)] border border-danger/25 hover:border-danger/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
-                  : `flex items-center gap-2 text-sm font-medium bg-white hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
+                  : `flex items-center gap-2 text-sm font-medium bg-[var(--v2-bg)] hover:bg-[var(--v2-surface)] text-[var(--v2-ink)] border border-[var(--v2-border)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:px-3 sm:py-1.5 ${COLLAPSE_BELOW_SM}`
               }
             >
               {wrongWallet ? (

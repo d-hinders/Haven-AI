@@ -20,8 +20,8 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
-  bindPasskeyToSafe,
-  findPasskeyForSafe,
+  bindPasskeyToAccount,
+  findPasskeyForAccount,
   findUserPasskeyByCredential,
   insertUserPasskey,
   listPasskeySignersForChain,
@@ -65,10 +65,10 @@ async function seedPasskey(seed: {
 }
 
 /** The Safe binding is set by the deploy path, not at enrolment. */
-async function bindDirect(credentialId: string, safeAddress: string): Promise<void> {
-  await db.query('UPDATE user_passkeys SET safe_address = $2 WHERE credential_id = $1', [
+async function bindDirect(credentialId: string, accountAddress: string): Promise<void> {
+  await db.query('UPDATE user_passkeys SET account_address = $2 WHERE credential_id = $1', [
     credentialId,
-    safeAddress,
+    accountAddress,
   ])
 }
 
@@ -134,11 +134,11 @@ describeDb('user-passkeys repository (#1229)', () => {
     const user = await seedUser()
     const { credentialId } = await seedPasskey({ userId: user })
 
-    expect(await bindPasskeyToSafe(user, credentialId, SAFE_A)).toBe(true)
-    expect(await bindPasskeyToSafe(user, credentialId, SAFE_B)).toBe(false)
+    expect(await bindPasskeyToAccount(user, credentialId, SAFE_A)).toBe(true)
+    expect(await bindPasskeyToAccount(user, credentialId, SAFE_B)).toBe(false)
 
     const row = await findUserPasskeyByCredential(user, BASE, credentialId)
-    expect(row?.safe_address).toBe(SAFE_A)
+    expect(row?.account_address).toBe(SAFE_A)
   })
 
   it('never binds another user\'s passkey', async () => {
@@ -146,8 +146,8 @@ describeDb('user-passkeys repository (#1229)', () => {
     const theirs = await seedUser()
     const { credentialId } = await seedPasskey({ userId: theirs })
 
-    expect(await bindPasskeyToSafe(mine, credentialId, SAFE_A)).toBe(false)
-    expect((await findUserPasskeyByCredential(theirs, BASE, credentialId))?.safe_address).toBeNull()
+    expect(await bindPasskeyToAccount(mine, credentialId, SAFE_A)).toBe(false)
+    expect((await findUserPasskeyByCredential(theirs, BASE, credentialId))?.account_address).toBeNull()
   })
 
   it('finds a Safe-bound passkey case-blind, and only for its own Safe', async () => {
@@ -155,11 +155,11 @@ describeDb('user-passkeys repository (#1229)', () => {
     const { credentialId } = await seedPasskey({ userId: user })
     await bindDirect(credentialId, SAFE_A.toLowerCase())
 
-    expect(await findPasskeyForSafe(user, SAFE_A, BASE)).toMatchObject({
+    expect(await findPasskeyForAccount(user, SAFE_A, BASE)).toMatchObject({
       credential_id: credentialId,
     })
-    expect(await findPasskeyForSafe(user, SAFE_B, BASE)).toBeNull()
-    expect(await findPasskeyForSafe(user, SAFE_A, GNOSIS)).toBeNull()
+    expect(await findPasskeyForAccount(user, SAFE_B, BASE)).toBeNull()
+    expect(await findPasskeyForAccount(user, SAFE_A, GNOSIS)).toBeNull()
   })
 
   it('returns every passkey a user holds, across chains, oldest first', async () => {

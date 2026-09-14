@@ -287,6 +287,41 @@ describe('haven_get_agent', () => {
       remainingDisplay: '0.0075 USDC',
     })
   })
+
+  /**
+   * #2908 (naming epic #2906): the hosted outputs carry BOTH names for the
+   * window — the #1598 pattern (`readiness` / `spend_authority_readiness`),
+   * applied to the account address. ONE mapper per shape produces both keys
+   * (`accountAddressTwins` in the SDK's `account-reads.ts`, spread into
+   * `haven_get_agent` and `haven_get_allowances`), and this equality test is
+   * what the mutation "emit only one name" fails. Each row is a different
+   * SERVER shape: old-only (pre-#2907), new-only (post-#2914), both.
+   */
+  describe.each([
+    ['old-only server (safe_address)', { safe_address: '0xAcct' }],
+    ['new-only server (account_address)', { account_address: '0xAcct' }],
+    ['both (the window)', { account_address: '0xAcct', safe_address: '0xAcct' }],
+  ])('dual-name account address — %s (#2908)', (_label, twins) => {
+    it('haven_get_agent: accountAddress === safeAddress', async () => {
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, ...twins } },
+        'GET /machine-payments/allowances': { status: 200, body: { ...AGENT_ALLOWANCES_RESPONSE, ...twins } },
+      })
+      const result = ok<{ accountAddress: string; safeAddress: string }>(await handlers().haven_get_agent({}))
+      expect(result.data.accountAddress).toBe('0xAcct')
+      expect(result.data.safeAddress).toBe('0xAcct')
+      expect(result.data.accountAddress).toBe(result.data.safeAddress)
+    })
+
+    it('haven_get_allowances: accountAddress === safeAddress', async () => {
+      stubFetch({
+        'GET /machine-payments/allowances': { status: 200, body: { ...AGENT_ALLOWANCES_RESPONSE, ...twins } },
+      })
+      const result = ok<{ accountAddress: string; safeAddress: string }>(await handlers().haven_get_allowances({}))
+      expect(result.data.accountAddress).toBe('0xAcct')
+      expect(result.data.safeAddress).toBe('0xAcct')
+    })
+  })
 })
 
 

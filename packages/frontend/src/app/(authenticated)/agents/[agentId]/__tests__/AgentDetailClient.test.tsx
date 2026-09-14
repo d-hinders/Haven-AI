@@ -128,7 +128,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
     mockUseAuth.mockReturnValue({
       user: {
-        safes: [SAFE],
+        accounts: [SAFE],
       },
     })
     mockUseAgents.mockReturnValue({
@@ -436,10 +436,11 @@ describe('AgentDetailClient last-activity metadata', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 
     const review = screen.getByRole('button', { name: 'Review the payment' })
-    // `Button`'s ghost variant — a white fill and a hairline, the same variant
-    // the one other Button inside an ApprovalRequiredBanner uses
-    // (`ReceiveFundsModal`'s "Refresh page").
-    expect(review.className).toContain('bg-white')
+    // `Button`'s ghost variant — a surface fill and a hairline, the same
+    // variant the one other Button inside an ApprovalRequiredBanner uses
+    // (`ReceiveFundsModal`'s "Refresh page"). (#2927: the fill reads the bg
+    // token, so the resting chrome renders in both themes.)
+    expect(review.className).toContain('bg-[var(--v2-bg)]')
     expect(review.className).toContain('border-[var(--v2-border-strong)]')
     // `tertiary` is `bg-transparent` with no border — the shape that failed.
     expect(review.className).not.toContain('bg-transparent')
@@ -667,7 +668,7 @@ describe('AgentDetailClient last-activity metadata', () => {
       ...base,
       agents: base.agents.map((agent: { id: string }) => ({
         ...agent,
-        account_type: 'safe',
+        account_type: 'legacy_safe',
       })),
     })
 
@@ -679,7 +680,7 @@ describe('AgentDetailClient last-activity metadata', () => {
   })
 
   it('shows recovery for a legacy agent with a residual USDC balance (#2258)', () => {
-    mockAgentWith({ account_type: 'safe' })
+    mockAgentWith({ account_type: 'legacy_safe' })
     mockUseDelegateBalance.mockReturnValue({
       balance: {
         delegate_address: '0x2222222222222222222222222222222222222222',
@@ -801,7 +802,7 @@ describe('AgentDetailClient first-budget token options (#2473)', () => {
   beforeEach(() => {
     budgetCardTokens.length = 0
     mockUseAuth.mockReturnValue({
-      user: { safes: [{ ...SAFE, chain_id: 8453 }] },
+      user: { accounts: [{ ...SAFE, chain_id: 8453 }] },
     })
     mockUseAgents.mockReturnValue({
       agents: [

@@ -41,7 +41,7 @@ export function buildTransactionSummary(
  * Render the `/transactions` page subtitle for a given filter state.
  *
  * Goals:
- * - When the user arrived at the page from `/accounts/[safeId]` → /transactions?safeId=…
+ * - When the user arrived at `/accounts/[accountId]` → /transactions?accountId=…
  *   (the "View all" link), the subtitle reads "Transactions for {accountName}"
  *   so the page feels intentional rather than as if the user landed on the
  *   global feed and the filter happened by accident.
@@ -62,8 +62,8 @@ export function buildTransactionScopeSubtitle(
   },
   defaultSubtitle = 'All activity across your accounts.',
 ): string {
-  const accountName = filters.safeId
-    ? lookups.accountNamesById.get(filters.safeId)
+  const accountName = filters.accountId
+    ? lookups.accountNamesById.get(filters.accountId)
     : undefined
   const agentName = filters.agentId
     ? lookups.agentNamesById.get(filters.agentId)

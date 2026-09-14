@@ -32,7 +32,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { ATTENTION_STATUSES, type AccountingFeedStatus } from '@/hooks/useAccountingFeed'
-import type { Locale } from '@/lib/i18n'
+import { INTL_LOCALE, type Locale } from '@/lib/i18n'
 
 /** Where the connection is managed (#2868): Settings owns Connect / Reconnect / Disconnect. */
 export const ACCOUNTING_SETTINGS_HREF = '/settings'
@@ -50,10 +50,10 @@ const TONE: Record<NonNullable<AccountingFeedStatus['destination']>['status'], S
  * is a pulse, not a log; the absolute time sits in the element's `title`.
  */
 export function relativeTime(iso: string, locale: Locale, now = Date.now()): string {
-  const rtf = new Intl.RelativeTimeFormat(locale === 'sv' ? 'sv-SE' : 'en-GB', { numeric: 'auto' })
+  const rtf = new Intl.RelativeTimeFormat(INTL_LOCALE[locale], { numeric: 'auto' })
   const diffSec = Math.round((new Date(iso).getTime() - now) / 1000)
   const abs = Math.abs(diffSec)
-  if (abs < 60) return rtf.format(0, 'second') // "now" / "nu" under numeric: 'auto'
+  if (abs < 60) return rtf.format(0, 'second') // "now" under numeric: 'auto'
   if (abs < 3600) return rtf.format(Math.trunc(diffSec / 60), 'minute')
   if (abs < 86_400) return rtf.format(Math.trunc(diffSec / 3600), 'hour')
   if (abs < 86_400 * 30) return rtf.format(Math.trunc(diffSec / 86_400), 'day')

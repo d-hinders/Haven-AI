@@ -23,12 +23,12 @@ export interface Portfolio {
 
 const portfolioCache = createCache<Portfolio>(60_000)
 
-export async function fetchPortfolioForSafe(
+export async function fetchPortfolioForAccount(
   chainId: number,
-  safeAddress: string,
+  accountAddress: string,
 ): Promise<Portfolio> {
   const chain = getChain(chainId)
-  const cacheKey = `portfolio:${chainId}:${safeAddress.toLowerCase()}`
+  const cacheKey = `portfolio:${chainId}:${accountAddress.toLowerCase()}`
 
   return portfolioCache.getOrFetch(cacheKey, async () => {
     const provider = getProvider(chainId)
@@ -39,10 +39,10 @@ export async function fetchPortfolioForSafe(
     const [pricesResult, nativeResult, ...erc20Results] =
       await Promise.allSettled([
         fetchTokenPrices(),
-        provider.getBalance(safeAddress),
+        provider.getBalance(accountAddress),
         ...erc20Tokens.map((token) => {
           const contract = new ethers.Contract(token.address!, ERC20_ABI, provider)
-          return contract.balanceOf(safeAddress) as Promise<bigint>
+          return contract.balanceOf(accountAddress) as Promise<bigint>
         }),
       ])
 

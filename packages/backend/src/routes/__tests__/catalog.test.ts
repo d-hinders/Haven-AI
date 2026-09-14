@@ -20,7 +20,7 @@ const AGENT_ROW = {
   name: 'Catalog Agent',
   delegate_address: '0x' + 'ab'.repeat(20),
   status: 'active',
-  safe_address: '0x' + 'cd'.repeat(20),
+  account_address: '0x' + 'cd'.repeat(20),
   chain_id: 8453,
 }
 

@@ -23,6 +23,7 @@ import {
 import { paymentStateFromRaw, throwPaymentStateError } from './payment-state.js'
 import { createErc20Contract, createJsonRpcProvider } from './provider.js'
 import { decodeBase64Json, encodeBase64Json } from './base64.js'
+import { readX402ReceiptPayer } from './account-naming.js'
 import {
   buildX402Receipt,
   chainIdFromNetwork,
@@ -309,7 +310,10 @@ export class X402FundingLeg {
     const to = execResult?.to ?? raw.to ?? this.delegateAddress ?? ''
     const explorerUrl = execResult?.explorer_url ?? raw.explorer_url ?? explorerUrlOrEmpty(chainId, txHash)
     const merchantTo = execResult?.merchant_to ?? raw.merchant_to ?? option.payTo
-    const payer = raw.payer ?? raw.safe_address ?? raw.sign_data?.components.safe
+    // #2908: new name before old at every level — `account_address` then
+    // `components.payer_account` (the #2907 twin) before `safe_address` /
+    // `components.safe`. NEVER `components.account`: that is the delegate.
+    const payer = readX402ReceiptPayer(raw)
 
     return buildX402Receipt({
       paymentId: raw.payment_id,

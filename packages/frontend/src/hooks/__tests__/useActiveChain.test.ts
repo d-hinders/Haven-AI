@@ -19,7 +19,7 @@ const SEPOLIA = 84532
 
 function setActiveChain(chainId: number | null) {
   mockUseAuth.mockReturnValue({
-    activeSafe: chainId == null ? null : { id: 's1', chain_id: chainId },
+    activeAccount: chainId == null ? null : { id: 's1', chain_id: chainId },
   })
 }
 

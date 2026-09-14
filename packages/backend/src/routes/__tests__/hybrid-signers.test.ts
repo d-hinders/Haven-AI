@@ -51,7 +51,7 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
           rows: [{ key_id: '0xDEADBEEF', public_key_x: '0x7', public_key_y: '0x9', created_at: ENROLLED_AT }],
         })
       }
-      if (/FROM user_safes/.test(String(sql))) return Promise.resolve({ rows: [{ '?column?': 1 }] })
+      if (/FROM smart_accounts/.test(String(sql))) return Promise.resolve({ rows: [{ '?column?': 1 }] })
       return Promise.resolve({ rows: [] })
     })
     mockLoadOwner.mockResolvedValueOnce({
@@ -79,7 +79,7 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
 
   it('a passkey with no stored row gets created_at: null — never a fabricated date (#1679)', async () => {
     mockQuery.mockImplementation((sql: string) =>
-      /FROM user_safes/.test(String(sql))
+      /FROM smart_accounts/.test(String(sql))
         ? Promise.resolve({ rows: [{ '?column?': 1 }] })
         : Promise.resolve({ rows: [] }),
     )
@@ -131,7 +131,7 @@ describe('account-scoped signer management (#1081)', () => {
     opts: { waiverAt?: string | null } = {},
   ) {
     mockQuery.mockImplementation((sql: string) =>
-      /FROM user_safes/.test(String(sql))
+      /FROM smart_accounts/.test(String(sql))
         ? Promise.resolve({ rows: [{ '?column?': 1 }] })
         : Promise.resolve({ rows: [] }),
     )
@@ -339,7 +339,7 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
     opts: { waiverAt?: string | null } = {},
   ) {
     mockQuery.mockImplementation((sql: string) =>
-      /FROM user_safes/.test(String(sql))
+      /FROM smart_accounts/.test(String(sql))
         ? Promise.resolve({ rows: [{ '?column?': 1 }] })
         : Promise.resolve({ rows: [] }),
     )
@@ -423,7 +423,7 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
     expect(res.json().error).toMatch(/no wallet owner/)
   })
 
-  it('submit clears user_safes.owner_address only when the signed calldata IS the removal', async () => {
+  it('submit clears smart_accounts.owner_address only when the signed calldata IS the removal', async () => {
     ownedAccount({ ownerAddress: OWNER_EOA, passkeys: [PK1] })
     mockPrepared()
     const { encodeFunctionData, zeroAddress } = await import('viem')
@@ -484,7 +484,7 @@ describe('owner-initiated send (#1083)', () => {
 
   function ownedAccount(config: { ownerAddress?: string; passkeys?: typeof PK1[] }) {
     mockQuery.mockImplementation((sql: string) =>
-      /FROM user_safes/.test(String(sql))
+      /FROM smart_accounts/.test(String(sql))
         ? Promise.resolve({ rows: [{ '?column?': 1 }] })
         : Promise.resolve({ rows: [] }),
     )

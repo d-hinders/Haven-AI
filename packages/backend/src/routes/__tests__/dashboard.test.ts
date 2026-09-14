@@ -8,7 +8,7 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
 const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   portfolioMocks: {
-    fetchPortfolioForSafe: vi.fn(),
+    fetchPortfolioForAccount: vi.fn(),
   },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
@@ -34,7 +34,7 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     enrichTransactionsWithAgents: vi.fn(
       async (_userId: string, transactions: unknown[]) => transactions,
     ),
-    fetchSafeTransactions: vi.fn(),
+    fetchAccountTransactions: vi.fn(),
     mergeX402Transactions: vi.fn(),
   },
 }))
@@ -65,7 +65,7 @@ const DELEGATION_UUID = '9c2b7e11-5d4f-4a8c-b3e6-1f0a2d7c8e94'
 
 const SAFE = {
   id: 'safe-1',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 8453,
   name: 'Main account',
   is_default: true,
@@ -75,7 +75,7 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
-  safe_id: SAFE.id,
+  account_id: SAFE.id,
   safe_name: SAFE.name,
   safe_chain_id: SAFE.chain_id,
 }
@@ -97,25 +97,25 @@ describe('dashboard routes', () => {
 
   beforeEach(() => {
     mockQuery.mockReset()
-    portfolioMocks.fetchPortfolioForSafe.mockReset()
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
     transactionMocks.compareTransactions.mockClear()
     transactionMocks.enrichedTransactionIdentityKey.mockClear()
     transactionMocks.enrichTransactionsWithAgents.mockClear()
-    transactionMocks.fetchSafeTransactions.mockReset()
+    transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
 
-    portfolioMocks.fetchPortfolioForSafe.mockResolvedValue({
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
       totalUsd: 100,
       totalEur: 92,
     })
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
 
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
       }
-      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
         return Promise.resolve({ rows: [SAFE] })
       }
       if (sql.includes('FROM agents a')) {
@@ -167,6 +167,54 @@ describe('dashboard routes', () => {
     expect(agentQuery).toContain("a.status IN ('active', 'paused')")
   })
 
+  // #2907 (naming P0 finding #2): DashboardAgentPreview and the preview
+  // transaction dual-emit the account_* twins, equal to their safe_*/safeId
+  // originals, ON THE WIRE. Dropping `withDashboardAgentAccountAlias(...)` or
+  // `withTransactionAccountAlias(...)` from this route leaves the mapper's own
+  // unit test green (it never calls the route) — this is the request-level
+  // check that catches it.
+  it('#2907: agents[] and transactions[] dual-emit the account_* twins', async () => {
+    const tx = {
+      hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+      type: 'native',
+      from: '0x2222222222222222222222222222222222222222',
+      to: SAFE.account_address,
+      value: '1000000000000000000',
+      valueFormatted: '1',
+      asset: 'ETH',
+      decimals: 18,
+      direction: 'in',
+      timestamp: 1778240999,
+      blockNumber: 45725826,
+      isError: false,
+    }
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [tx] })
+    transactionMocks.mergeX402Transactions.mockImplementation(
+      async (_userId: string, _safes: unknown[], transactions: unknown[]) => transactions,
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.agents.length).toBeGreaterThan(0)
+    for (const agent of body.agents) {
+      expect(agent.accountId).toBe(agent.safeId)
+      expect(agent.accountName).toBe(agent.safeName)
+      expect(agent.accountChainId).toBe(agent.safeChainId)
+    }
+    expect(body.transactions.length).toBeGreaterThan(0)
+    for (const item of body.transactions) {
+      expect(item.accountId).toBe(item.safeId)
+      expect(item.accountAddress).toBe(item.safeAddress)
+      expect(item.accountName).toBe(item.safeName)
+    }
+  })
+
   // #2055 (epic #1440, #2021 readability waiver): the approval queue is gone,
   // so `actionableApprovals` / `pendingApprovals` are structurally zero — the
   // wire fields survive for compatibility but no query backs them anymore.
@@ -199,7 +247,7 @@ describe('dashboard routes', () => {
       if (sql.includes('AS has_first_agent_payment')) {
         return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
       }
-      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) {
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
         return Promise.resolve({ rows: [gnosisSafe, baseSafe] })
       }
       if (sql.includes('FROM agents a')) {
@@ -222,7 +270,7 @@ describe('dashboard routes', () => {
       hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
       type: 'native',
       from: '0x2222222222222222222222222222222222222222',
-      to: SAFE.safe_address,
+      to: SAFE.account_address,
       value: '1000000000000000000',
       valueFormatted: '1',
       asset: 'ETH',
@@ -232,7 +280,7 @@ describe('dashboard routes', () => {
       blockNumber: 45725826,
       isError: false,
     }
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [tx] })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [tx] })
     transactionMocks.mergeX402Transactions.mockImplementation(
       async (_userId: string, _safes: unknown[], transactions: unknown[]) => transactions,
     )
@@ -268,15 +316,15 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
   afterAll(async () => app.close())
 
   it('a delegator_hybrid agent reports the active delegation, not the frozen mirror', async () => {
-    portfolioMocks.fetchPortfolioForSafe.mockResolvedValue({ totalUsd: 0, totalEur: 0 })
-    transactionMocks.fetchSafeTransactions.mockResolvedValue({ transactions: [] })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 0, totalEur: 0 })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
-      if (sql.includes('FROM user_safes') && sql.includes('ORDER BY created_at ASC')) return Promise.resolve({ rows: [SAFE] })
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) return Promise.resolve({ rows: [SAFE] })
       if (sql.includes('FROM agents a')) {
         return Promise.resolve({
-          rows: [{ ...AGENT, id: AGENT_UUID, safe_id: SAFE_UUID, account_type: 'delegator_hybrid' }],
+          rows: [{ ...AGENT, id: AGENT_UUID, account_id: SAFE_UUID, account_type: 'delegator_hybrid' }],
         })
       }
       if (sql.includes('FROM agent_allowances')) {

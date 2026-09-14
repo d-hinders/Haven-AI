@@ -44,6 +44,44 @@ const workflow = readFileSync(WORKFLOW, 'utf8')
 const indentOf = (line) => (line.match(/^ */) || [''])[0].length
 
 /**
+ * The digest step's `run:` block as text — from the `run: |` line through the
+ * line before the next key at or above its indentation. Returns null instead of
+ * silently reading nothing, so a caller can assert loudly on a reshaped file
+ * rather than pass vacuously on an empty string.
+ */
+function digestRunBlock(text) {
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => /^\s*run:\s*\|/.test(l))
+  if (start === -1) return null
+  const bodyIndent = indentOf(lines[start]) + 1
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i].trim() === '') continue
+    if (indentOf(lines[i]) < bodyIndent) {
+      end = i
+      break
+    }
+  }
+  const block = lines.slice(start + 1, end).join('\n')
+  return block.trim() === '' ? null : block
+}
+
+/**
+ * The same block with whole-line `#` comments removed, for assertions about
+ * what the step DOES. Without this, a comment that quotes the defect it warns
+ * against — as the `| head` warning in this very workflow does — reads as the
+ * defect itself, and the guard fails on the fixed file.
+ */
+function digestRunCode(text) {
+  const block = digestRunBlock(text)
+  if (block === null) return null
+  return block
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n')
+}
+
+/**
  * The top-level `on:` block as lines — from the `on:` key through the line
  * before the next top-level key. Returns null instead of silently reading
  * nothing, so a caller can assert loudly on a reshaped file.
@@ -181,6 +219,101 @@ describe('promotion-digest.yml triggers', () => {
     assert.ok(
       block.some((l) => /^\s*workflow_dispatch:/.test(l)),
       'workflow_dispatch was removed — there is no manual recovery path',
+    )
+  })
+
+  test('the commit list is capped with `git log -n`, never by piping into `head`', () => {
+    // 2026-09-12: this workflow failed for the first time, with exit 141, on
+    // the push of the 0.1.37-alpha.0 release merge. Exit 141 is 128 + 13,
+    // SIGPIPE. The step read:
+    //
+    //   list=$(git log --first-parent --pretty='- %s' origin/main..origin/dev | head -100)
+    //
+    // under `set -euo pipefail`. Once the first-parent count passes the cap,
+    // `head` exits at its hundredth line and `git log` is killed on its next
+    // write; `pipefail` promotes that to the step's exit status. The count was
+    // 102.
+    //
+    // The comment above that line existed to explain that the cap prevents the
+    // digest failing "exactly in the extreme case it exists to report" — a
+    // stalled promotion. The cap was the thing that failed, in exactly that
+    // case, and it self-conceals: the next promotion resets the count to 0 and
+    // the workflow goes green, so the evidence disappears until `dev` next
+    // passes the cap.
+    //
+    // It is a race, and the workflow comment carries the measured rates. What
+    // matters here is that no pass rate makes the pipeline safe, so this guard
+    // pins the shape rather than any observed behaviour.
+    //
+    // Scoped to the whole `run:` block, not just the assignment line: a `head`
+    // one line further down would be the same defect.
+    const runBlock = digestRunCode(workflow)
+    assert.ok(
+      runBlock,
+      'the digest step’s `run:` block could not be located — re-point this guard',
+    )
+    assert.doesNotMatch(
+      runBlock,
+      /\|\s*head\b/,
+      'the digest step must not pipe into `head`: under `set -euo pipefail` that ' +
+        'exits 141 (SIGPIPE) once the output exceeds what `head` consumes. Use `git log -n <cap>`.',
+    )
+
+    const listAssignment = runBlock
+      .split('\n')
+      .find((l) => /^\s*list=\$\(git log\b/.test(l))
+    assert.ok(
+      listAssignment,
+      'the `list=$(git log …)` assignment was renamed or reshaped — re-point this guard',
+    )
+    // Accepts a literal (`-n 100`) or an indirection (`-n "$CAP"`): a correct
+    // reformat must not turn this red. `pushBranches` above takes the same
+    // posture for the same reason — a guard that fails for the wrong reason is
+    // a guard that gets deleted rather than fixed.
+    assert.match(
+      listAssignment,
+      /\s-n\s+("?\$\{?\w+\}?"?|\d+)/,
+      'the commit list must still be capped, with `git log -n <cap>` — an uncapped ' +
+        'list can exceed GitHub’s 65,536-character issue-body limit and 422 the step',
+    )
+  })
+
+  test('the `-n` cap and the "…and N more" arithmetic use the same number', () => {
+    // The cap appears three times — `git log -n <cap>`, `[ "$count" -gt <cap> ]`
+    // and `$((count - <cap>))` — as three independent literals. Raising only the
+    // first (say to 100000) is silently accepted by the guard above while
+    // breaking both things the cap exists for: the body becomes unbounded, and
+    // the remainder line under-reports, since the list would carry more than
+    // <cap> entries while N is still computed against 100.
+    //
+    // Measured: the full first-parent list on this repo is ~136 kB, over twice
+    // GitHub's 65,536-character limit, so an unbounded body is a real 422 and
+    // not a theoretical one.
+    //
+    // Skipped when the cap is an indirection rather than a literal: a single
+    // `CAP=` variable threaded through all three sites is strictly better than
+    // what is here, and this guard must not stand in its way.
+    const runBlock = digestRunCode(workflow)
+    assert.ok(runBlock, 'the digest step’s `run:` block could not be located')
+
+    const logCap = runBlock.match(/list=\$\(git log\b[^\n]*?\s-n\s+(\d+)/)
+    if (!logCap) return // indirection, or reshaped — covered by the test above
+
+    const gtCap = runBlock.match(/\[\s*"\$count"\s*-gt\s*(\d+)\s*\]/)
+    const subCap = runBlock.match(/\$\(\(\s*count\s*-\s*(\d+)\s*\)\)/)
+    assert.ok(gtCap, 'the `[ "$count" -gt <cap> ]` branch was reshaped — re-point this guard')
+    assert.ok(subCap, 'the `$((count - <cap>))` remainder was reshaped — re-point this guard')
+
+    assert.equal(
+      gtCap[1],
+      logCap[1],
+      `the \`-gt\` threshold (${gtCap[1]}) must equal the \`git log -n\` cap (${logCap[1]}), ` +
+        'or the remainder line is computed against a cap the list does not use',
+    )
+    assert.equal(
+      subCap[1],
+      logCap[1],
+      `the \`count - N\` remainder (${subCap[1]}) must equal the \`git log -n\` cap (${logCap[1]})`,
     )
   })
 

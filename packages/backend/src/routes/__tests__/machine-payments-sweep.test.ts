@@ -34,7 +34,7 @@ const AGENT = {
   user_id: '22222222-2222-2222-2222-222222222222',
   name: 'Payment Agent',
   delegate_address: DELEGATE,
-  safe_address: SAFE,
+  account_address: SAFE,
   chain_id: 8453,
   status: 'active',
 }
@@ -89,7 +89,7 @@ const sqlCalls = () => mockQuery.mock.calls.map((c) => ({ sql: String(c[0]), par
 const findCall = (re: RegExp) => sqlCalls().find((c) => re.test(c.sql))
 
 const AUTH_ROUTE: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
-const BOUND_AGENT_ROUTE: DbRoute = [/FOR UPDATE OF a/, () => ({ rows: [{ safe_address: SAFE }] })]
+const BOUND_AGENT_ROUTE: DbRoute = [/FOR UPDATE OF a/, () => ({ rows: [{ account_address: SAFE }] })]
 
 /** Sweep routes: the prepared-row read (optionally different after a lost claim) + the claim CAS. */
 function sweepRoutes(opts: {
@@ -186,7 +186,7 @@ describe('machine payment sweep routes', () => {
     it('sweeps a DELEGATION-rail agent to its treasury Hybrid — 3009-mode reconciliation (#946)', async () => {
       // The #946 EIP-3009 fallback reintroduces a bounded funding leg on the
       // delegation rail and leans on THIS route for verify-without-settle
-      // reconciliation: agent.safe_address is the treasury Hybrid for
+      // reconciliation: agent.account_address is the treasury Hybrid for
       // delegator accounts, and the route must stay rail-agnostic.
       const TREASURY_HYBRID = '0x' + '77'.repeat(20)
       const treasuryAuthRoute: DbRoute = [
@@ -194,7 +194,7 @@ describe('machine payment sweep routes', () => {
         () => ({
           rows: [{
             ...AGENT,
-            safe_address: TREASURY_HYBRID,
+            account_address: TREASURY_HYBRID,
             execution_rail: 'delegation',
             account_type: 'delegator_hybrid',
             chain_id: 84532,
@@ -203,7 +203,7 @@ describe('machine payment sweep routes', () => {
       ]
       const treasuryBindingRoute: DbRoute = [
         /FOR UPDATE OF a/,
-        () => ({ rows: [{ safe_address: TREASURY_HYBRID }] }),
+        () => ({ rows: [{ account_address: TREASURY_HYBRID }] }),
       ]
       primeDb(treasuryAuthRoute, treasuryBindingRoute)
       allowanceMocks.getTokenBalance.mockResolvedValueOnce(2_000_000n)
@@ -214,7 +214,7 @@ describe('machine payment sweep routes', () => {
 
       expect(res.statusCode).toBe(201)
       expect(sweepMocks.buildSweepAuthorization).toHaveBeenCalledWith(
-        expect.objectContaining({ safeAddress: TREASURY_HYBRID, chainId: 84532 }),
+        expect.objectContaining({ accountAddress: TREASURY_HYBRID, chainId: 84532 }),
       )
     })
 

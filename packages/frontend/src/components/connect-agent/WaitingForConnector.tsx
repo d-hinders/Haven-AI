@@ -11,7 +11,7 @@ import { ChevronRight } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { CopyBlock } from './CopyBlock'
-import { SegmentedControl } from './SegmentedControl'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { InlineErrorNote } from './SetupNotices'
 import { formatAbsoluteDate } from './setup-copy'
 
@@ -166,7 +166,7 @@ export function WaitingForConnector({
           the dangerous route stays one click deeper than the harmless one.
 
           Design review: the first cut gave BOTH disclosures the Card recipe
-          (rounded + border + bg-white + p-3), so nesting them stacked three
+          (rounded + border + a white card fill + p-3), so nesting them stacked three
           identically-styled white boxes — a Card inside a Card inside a Card,
           which is the surface-hierarchy rule's "no nested filled cards" in its
           hand-rolled form (design-lint's structural rules only catch the
@@ -227,7 +227,7 @@ export function WaitingForConnector({
           ) : (
             <div className="space-y-3">
               <SegmentedControl
-                label="Credential format"
+                ariaLabel="Credential format"
                 options={[
                   { value: 'env', label: '.env' },
                   { value: 'prompt', label: 'Agent workspace prompt' },

@@ -49,11 +49,11 @@
  * signed, even if account state changes in between.
  */
 
-import { findExecutionRailForAgent } from '../infra/repositories/user-safes.js'
+import { findExecutionRailForAgent } from '../infra/repositories/smart-accounts.js'
 import { getChain } from '../domain/chains.js'
 
 export interface ExecutionRailState {
-  /** `user_safes.execution_rail` for the agent's Safe (null = no row / legacy). */
+  /** `smart_accounts.execution_rail` for the agent's Safe (null = no row / legacy). */
   safeExecutionRail: string | null
   chainId: number
 }
@@ -77,7 +77,7 @@ export type ExecutionRailDecision =
  * has to say what it does with `retired_allowance`, and the compiler names
  * every one of them.
  *
- * Note what the fall-through covers. `user_safes.execution_rail` is
+ * Note what the fall-through covers. `smart_accounts.execution_rail` is
  * `NOT NULL DEFAULT 'allowance_module'` (migration 036) with a CHECK over
  * exactly three values (migration 041), so `null` here means only one thing:
  * the LEFT JOIN in `FIND_EXECUTION_RAIL_FOR_AGENT_SQL` found no Safe row.
@@ -227,7 +227,7 @@ export function allowanceModuleRailRetired(kind: 'account' | 'intent'): {
 /**
  * Load the rail state for an agent. The query lives in
  * `infra/repositories/user-safes.ts` (`FIND_EXECUTION_RAIL_FOR_AGENT_SQL`, #999):
- * LEFT JOIN through `agents.safe_id` so a missing Safe row yields null →
+ * LEFT JOIN through `agents.account_id` so a missing Safe row yields null →
  * legacy (fail-closed), never an error — see the repository's note on the
  * #745/#757 join regression.
  */

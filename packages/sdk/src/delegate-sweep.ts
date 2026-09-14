@@ -72,14 +72,14 @@ export class DelegateSweepApi {
     if (isSweepableChain(agent.chainId)) {
       const contract = createErc20Contract(sweepUsdcAddress(agent.chainId), ['function balanceOf(address) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'], wallet)
       const balance = await contract.balanceOf(agent.delegateAddress) as bigint
-      if (balance > 0n) { const tx = await contract.transfer(agent.safeAddress, balance); const { txHash, confirmation } = await waitForSweepTx(tx as SweepTx); transfers.push({ asset: 'USDC', amount: format(balance, 6), amountAtomic: balance.toString(), txHash, explorerUrl: this.options.buildExplorerUrl(agent.chainId, txHash), confirmation }) }
+      if (balance > 0n) { const tx = await contract.transfer(agent.accountAddress, balance); const { txHash, confirmation } = await waitForSweepTx(tx as SweepTx); transfers.push({ asset: 'USDC', amount: format(balance, 6), amountAtomic: balance.toString(), txHash, explorerUrl: this.options.buildExplorerUrl(agent.chainId, txHash), confirmation }) }
     }
     // Reached even when the USDC leg came back `unconfirmed`: a stuck ERC-20
     // transfer must not strand the native balance this sweep also exists to
     // recover (#1756). Before the bound, it did — the ETH leg never ran.
     const balance = await provider.getBalance(agent.delegateAddress)
-    if (balance > 0n) { const fee = await provider.getFeeData(); const send = balance - ((fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n) * 21_000n * 2n); if (send > 0n) { const tx = await wallet.sendTransaction({ to: agent.safeAddress, value: send }); const { txHash, confirmation } = await waitForSweepTx(tx as SweepTx); transfers.push({ asset: 'ETH', amount: format(send, 18), amountAtomic: send.toString(), txHash, explorerUrl: this.options.buildExplorerUrl(agent.chainId, txHash), confirmation }) } }
-    return { fromAddress: agent.delegateAddress, toAddress: agent.safeAddress, chainId: agent.chainId, transfers, unconfirmed: transfers.some((t) => t.confirmation === 'unconfirmed') }
+    if (balance > 0n) { const fee = await provider.getFeeData(); const send = balance - ((fee.maxFeePerGas ?? fee.gasPrice ?? 1_000_000n) * 21_000n * 2n); if (send > 0n) { const tx = await wallet.sendTransaction({ to: agent.accountAddress, value: send }); const { txHash, confirmation } = await waitForSweepTx(tx as SweepTx); transfers.push({ asset: 'ETH', amount: format(send, 18), amountAtomic: send.toString(), txHash, explorerUrl: this.options.buildExplorerUrl(agent.chainId, txHash), confirmation }) } }
+    return { fromAddress: agent.delegateAddress, toAddress: agent.accountAddress, chainId: agent.chainId, transfers, unconfirmed: transfers.some((t) => t.confirmation === 'unconfirmed') }
   }
   prepareSweep(): Promise<SweepPrepareResponse> { return this.options.transport.post('/machine-payments/sweep/prepare', {}) }
   submitSweep(authorization: SweepAuthorization, signature: string): Promise<SweepSubmitResponse> { return this.options.transport.post('/machine-payments/sweep/submit', { authorization, signature }) }

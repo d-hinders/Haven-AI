@@ -18,6 +18,24 @@
     "db-mock": 1,
     "positional": 5
   },
+  "packages/backend/src/modules/accounting/__tests__/feed-dedup.integration.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/modules/accounting/__tests__/feed-sync.test.ts": {
+    "db-mock": 1,
+    "positional": 6
+  },
+  "packages/backend/src/modules/accounting/__tests__/fortnox-connection.test.ts": {
+    "db-mock": 1,
+    "positional": 2
+  },
+  "packages/backend/src/modules/accounting/__tests__/fortnox-connector.test.ts": {
+    "positional": 2
+  },
+  "packages/backend/src/modules/accounting/__tests__/receipt-underlag.test.ts": {
+    "db-mock": 1,
+    "positional": 2
+  },
   "packages/backend/src/modules/agents/__tests__/entitlements.test.ts": {
     "db-mock": 1,
     "positional": 6
@@ -47,24 +65,6 @@
   },
   "packages/backend/src/modules/passport/__tests__/passport-revocation.test.ts": {
     "db-mock": 1
-  },
-  "packages/backend/src/modules/accounting/__tests__/feed-dedup.integration.test.ts": {
-    "db-mock": 1
-  },
-  "packages/backend/src/modules/accounting/__tests__/feed-sync.test.ts": {
-    "db-mock": 1,
-    "positional": 6
-  },
-  "packages/backend/src/modules/accounting/__tests__/fortnox-connection.test.ts": {
-    "db-mock": 1,
-    "positional": 2
-  },
-  "packages/backend/src/modules/accounting/__tests__/fortnox-connector.test.ts": {
-    "positional": 2
-  },
-  "packages/backend/src/modules/accounting/__tests__/receipt-underlag.test.ts": {
-    "db-mock": 1,
-    "positional": 2
   },
   "packages/backend/src/rails/__tests__/execution-rail.test.ts": {
     "db-mock": 1
@@ -176,23 +176,23 @@
     "db-mock": 1,
     "positional": 4
   },
+  "packages/backend/src/routes/__tests__/smart-accounts-characterization.test.ts": {
+    "db-mock": 1,
+    "positional": 4
+  },
+  "packages/backend/src/routes/__tests__/smart-accounts-delete.test.ts": {
+    "db-mock": 1
+  },
+  "packages/backend/src/routes/__tests__/smart-accounts-list.test.ts": {
+    "db-mock": 1,
+    "positional": 1
+  },
   "packages/backend/src/routes/__tests__/transactions.test.ts": {
     "positional": 11
   },
   "packages/backend/src/routes/__tests__/user-preferences.characterization.test.ts": {
     "db-mock": 1,
     "positional": 5
-  },
-  "packages/backend/src/routes/__tests__/user-safes-characterization.test.ts": {
-    "db-mock": 1,
-    "positional": 4
-  },
-  "packages/backend/src/routes/__tests__/user-safes-delete.test.ts": {
-    "db-mock": 1
-  },
-  "packages/backend/src/routes/__tests__/user-safes-list.test.ts": {
-    "db-mock": 1,
-    "positional": 1
   },
   "packages/backend/src/routes/__tests__/user.test.ts": {
     "db-mock": 1,

@@ -39,7 +39,7 @@ export function CredentialHandoffCard({
           <div className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">{description}</div>
         </div>
         <div
-          className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-white ${
+          className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--v2-bg)] ${
             saved ? 'text-[var(--v2-success)]' : 'text-[var(--v2-brand)]'
           }`}
         >
@@ -53,7 +53,7 @@ export function CredentialHandoffCard({
        *  around a single button — drop it and centre the button at its
        *  natural width. */}
       {secondaryAction ? (
-        <div className="mt-4 grid gap-2 rounded-[10px] border border-[var(--v2-border)] bg-white p-2 sm:grid-cols-2">
+        <div className="mt-4 grid gap-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-2 sm:grid-cols-2">
           {primaryAction}
           {secondaryAction}
         </div>

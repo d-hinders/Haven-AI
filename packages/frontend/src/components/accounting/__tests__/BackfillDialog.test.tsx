@@ -11,7 +11,7 @@ import { BackfillDialog, ISO_DATE } from '@/components/accounting/BackfillDialog
 
 vi.mock('@/hooks/useScrollEdgeCue', () => ({ useScrollEdgeCue: () => false }))
 
-function renderDialog(onBackfill = vi.fn().mockResolvedValue({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 2 })) {
+function renderDialog(onBackfill = vi.fn().mockResolvedValue({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 2, total: 2 })) {
   const onClose = vi.fn()
   render(
     <LocaleProvider>
@@ -66,10 +66,26 @@ describe('BackfillDialog', () => {
     const [since] = onBackfill.mock.calls[0] as [string]
     expect(since).toBe('2026-01-01')
     expect(since).toMatch(ISO_DATE)
-    expect(await screen.findByRole('status')).toHaveTextContent('2 earlier payments fed.')
+    // #2915: the line counts PUSHED payments against the total enumerated —
+    // here everything enumerated was pushed, so no remainder line appears.
+    expect(await screen.findByRole('status')).toHaveTextContent('2 of 2 earlier payments fed.')
+    expect(screen.getByRole('status')).not.toHaveTextContent('Some of the earlier payments')
     expect(onClose).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('when some enumerated payments were not pushed, the line says so and points at Sync now (#2915)', async () => {
+    // The #2915 shape: two candidates enumerated, only one reached the ledger.
+    renderDialog(vi.fn().mockResolvedValue({ feedFrom: '2026-01-01T00:00:00.000Z', fed: 1, total: 2 }))
+    fireEvent.click(sinceRadio())
+    fireEvent.change(dateField(), { target: { value: '2026-01-01' } })
+    fireEvent.click(go())
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent('1 of 2 earlier payments fed.')
+    expect(status).toHaveTextContent(
+      'Some of the earlier payments were not fed. Press Sync now on the Accounting page to try them again.',
+    )
   })
 
   it('typing a date selects "since" on its own', () => {

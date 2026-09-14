@@ -43,7 +43,7 @@ function FilterPill({
       aria-pressed={active}
       className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
         active
-          ? 'bg-[var(--v2-brand)] text-white'
+          ? 'bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)]'
           : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-border)]'
       }`}
     >
@@ -176,7 +176,7 @@ function CatalogCard({
 
   return (
     <article
-      className="flex flex-col gap-3 rounded-xl border border-[var(--v2-border)] bg-white p-4 transition-colors hover:border-brand/30"
+      className="flex flex-col gap-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4 transition-colors hover:border-brand/30"
       data-testid={`catalog-card-${entry.id}`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -250,7 +250,7 @@ function CatalogCard({
           <code className="min-w-0 truncate text-xs text-[var(--v2-ink-2)]">{instruction}</code>
           <button
             onClick={copy}
-            className="shrink-0 rounded px-2 py-0.5 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:bg-white"
+            className="shrink-0 rounded px-2 py-0.5 text-xs font-medium text-[var(--v2-brand)] transition-colors hover:bg-[var(--v2-surface-2)]"
             aria-label={`Copy agent instruction for ${entry.name}`}
           >
             {copied ? 'Copied' : 'Copy'}

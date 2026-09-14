@@ -26,7 +26,7 @@ const AGENT_A: HandoffInput = {
     id: 'agt_abc123',
     name: 'My Payment Agent',
     delegateAddress: '0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b',
-    safeAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
+    accountAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
     chainId: 100,
   },
   policy: {
@@ -43,7 +43,7 @@ const AGENT_B: HandoffInput = {
     id: 'agt_zzz999',
     name: 'Completely Different Agent',
     delegateAddress: '0x1111111111111111111111111111111111111111',
-    safeAddress: '0x2222222222222222222222222222222222222222',
+    accountAddress: '0x2222222222222222222222222222222222222222',
     chainId: 8453,
   },
   policy: {
@@ -75,7 +75,7 @@ describe('generic skill', () => {
     expect(skill).toBe(buildGenericSkillMd())
     for (const input of [AGENT_A, AGENT_B]) {
       expect(skill).not.toContain(input.agent.name)
-      expect(skill).not.toContain(input.agent.safeAddress)
+      expect(skill).not.toContain(input.agent.accountAddress)
       expect(skill).not.toContain(input.agent.delegateAddress)
       expect(skill).not.toContain(input.credentials.apiKey)
       expect(skill).not.toContain(input.credentials.delegatePrivateKey)

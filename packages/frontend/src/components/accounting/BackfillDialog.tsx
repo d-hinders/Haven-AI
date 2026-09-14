@@ -19,8 +19,10 @@
  * to include), `NOT_ACTIVE` (not the destination). A refusal leaves the
  * dialog open with the choice intact.
  *
- * One call feeds at most 200 payments; the success line says how many, and
- * the intro points at Sync now for the rest.
+ * One call feeds at most 200 payments. The success line says how many of the
+ * enumerated payments were actually PUSHED (`fed` of `total`, #2915) — a
+ * payment that came back skipped, failed, or not feedable is never counted as
+ * fed — and when some were not, a second line points at Sync now for them.
  *
  * The footer has a way out of its own — "Not now", a ghost beside Continue
  * that does exactly what "Feed from now" does (closes, no request) — so the
@@ -66,7 +68,7 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
   const [since, setSince] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [fed, setFed] = useState<number | null>(null)
+  const [result, setResult] = useState<{ fed: number; total: number } | null>(null)
 
   const confirm = async () => {
     if (choice === 'now') {
@@ -80,8 +82,8 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
     setError(null)
     setBusy(true)
     try {
-      const result = await onBackfill(since)
-      setFed(result.fed)
+      const res = await onBackfill(since)
+      setResult(res)
     } catch (err) {
       const refusal = accountingRefusal(err)
       setError(
@@ -110,7 +112,7 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
       closeOnEscape={!busy}
       panelTestId={BACKFILL_DIALOG_TEST_ID}
       footer={
-        fed === null ? (
+        result === null ? (
           <>
             <Button variant="ghost" onClick={onClose} disabled={busy}>
               {copy.notNow}
@@ -124,7 +126,7 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
         )
       }
     >
-      {fed === null ? (
+      {result === null ? (
         <fieldset className="space-y-4" data-testid="backfill-choice">
           <legend className="sr-only">{copy.title}</legend>
           <label className="flex items-start gap-2 text-[var(--v2-ink)]">
@@ -177,9 +179,12 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
           {error ? <InlineAlert id={errorId}>{error}</InlineAlert> : null}
         </fieldset>
       ) : (
-        <p role="status" className="text-[var(--v2-ink)]">
-          {copy.done(fed)}
-        </p>
+        <div role="status" className="space-y-2">
+          <p className="text-[var(--v2-ink)]">{copy.done(result.fed, result.total)}</p>
+          {result.fed < result.total ? (
+            <p className="text-[var(--v2-ink-3)]">{copy.partial}</p>
+          ) : null}
+        </div>
       )}
     </Modal>
   )

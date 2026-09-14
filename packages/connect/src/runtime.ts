@@ -45,7 +45,7 @@ import { readIdentityFile, teardownLocalKeyMaterial, tombstoneDirectoryIfAbsent 
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.1.37-alpha.0'
+export const CONNECTOR_VERSION = '0.2.0-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string
@@ -595,7 +595,7 @@ async function executeConnect(
     apiKey: localApiKey,
     delegateKey: localKey.privateKey,
     delegateAddress: localKey.address,
-    safeAddress: setup.haven_wallet.address,
+    accountAddress: setup.haven_wallet.address,
     chainId: setup.haven_wallet.chain_id,
     network: setup.haven_wallet.network,
     agentBudget: setup.agent_budget.map((budget) => ({

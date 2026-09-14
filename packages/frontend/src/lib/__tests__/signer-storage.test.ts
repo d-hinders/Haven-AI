@@ -49,7 +49,7 @@ describe('passkey signer storage', () => {
 
     expect(
       getStoredPasskeySigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     ).toEqual({
@@ -65,13 +65,13 @@ describe('passkey signer storage', () => {
     setStoredPasskeySigner(storedValue)
 
     clearStoredPasskeySigner({
-      safeAddress: SAFE_ADDRESS,
+      accountAddress: SAFE_ADDRESS,
       chainId: 100,
     })
 
     expect(
       getStoredPasskeySigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     ).toBeNull()
@@ -88,7 +88,7 @@ describe('passkey signer storage', () => {
 
     expect(
       getStoredPasskeySigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     ).toBeNull()
@@ -105,7 +105,7 @@ describe('passkey signer storage', () => {
 
     expect(
       getStoredPasskeySigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     ).toBeNull()
@@ -124,7 +124,7 @@ describe('passkey signer storage', () => {
   it('re-renders useActiveSigner after same-tab storage writes', () => {
     const { result } = renderHook(() =>
       useActiveSigner({
-        safeAddress: SAFE_ADDRESS,
+        accountAddress: SAFE_ADDRESS,
         chainId: 100,
       }),
     )

@@ -222,7 +222,10 @@ export async function finishRekey(
     apiKey: options.newApiKey,
     delegateKey: pending.new_delegate_key,
     delegateAddress: pending.new_delegate_address,
-    safeAddress: stored.safeAddress ?? identity.safe_address ?? undefined,
+    // #2908: the stored value (already new-name-first) wins; the hosted
+    // identity's `account_address` twin before its deprecated `safe_address`.
+    accountAddress:
+      stored.accountAddress ?? identity.account_address ?? identity.safe_address ?? undefined,
     chainId: stored.chainId ?? identity.chain_id ?? undefined,
     network: stored.network,
     agentBudget: stored.agentBudget,

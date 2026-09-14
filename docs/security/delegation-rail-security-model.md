@@ -17,7 +17,7 @@ covers:
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
-  - packages/backend/src/infra/repositories/user-safes.ts
+  - packages/backend/src/infra/repositories/smart-accounts.ts
   - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts
@@ -32,10 +32,10 @@ covers:
   - packages/frontend/src/lib/hybridAccountOps.ts
   - packages/frontend/src/lib/delegationPasskeySigner.ts
   - packages/frontend/src/lib/signer.ts
-  - packages/frontend/src/hooks/useSafeOperationGate.ts
+  - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-13"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -151,6 +151,19 @@ up.
 
 ## 3. Delegation custody semantics (#828's contract)
 
+> **Re-verified #2929 (dark-mode epic #2925, slice 3/3):** the dark-token sweep
+> touched two files in this document's coverage list, `DelegationSendModal.tsx`
+> and `WalletButton.tsx`. Both edits are presentation-only, verified against the
+> diff at the base of this branch: the token-symbol input's and the modal
+> container's literal `bg-white` became `bg-[var(--v2-bg)]`, the avatar rim's
+> `border-white/70` moved to the fixed-paint `.v2-avatar-chrome` utility, and the
+> QR container's white box became the never-invert `.v2-light-surface`. No class
+> that carries a value a custody or authority statement rests on (the badge
+> tones, the `disabled` states) changed. No handler, fetch, signer call, key
+> read, caveat value, or user-visible claim about who signs, what may be spent,
+> or when revocation bites changed. A CSS token rename in a delegation-surface
+> file is not a semantics change: this paragraph is that re-verification record.
+
 **Where the signed delegation lives:** the agent receives it through the
 existing credential channel (same trust envelope as the agent API key).
 Haven stores a copy server-side for reconstruction, revocation targeting and
@@ -245,6 +258,47 @@ active delegation, or while a recovery sweep is prepared/submitting, so an
 in-flight live operation cannot lose its Safe binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
+
+> **Re-verified #2911 (naming epic #2906, phase 3 — the schema rename):** this
+> diff touched twelve files in this document's coverage list (`routes/auth.ts`,
+> `routes/agents.ts`, `routes/user-safes.ts`, `routes/hybrid-accounts.ts`,
+> `infra/repositories/{agents,dashboard,transaction-history,smart-accounts,
+> hybrid-signers}.ts`, `rails/hybrid-account-config.ts`,
+> `modules/accounts/mainnet-gate.ts`) by SQL identifier only: `user_safes` →
+> `smart_accounts`, `safe_address` → `account_address`, `safe_id` →
+> `account_id`, `user_safe_id` → `account_id`, `safe_tx_hash` →
+> `account_tx_hash`, plus the row reads that follow. Every predicate, tenant
+> scope (`WHERE user_id = $1`), authority check, signer-set rule and signing
+> path in this document is unchanged; the four sentences above that named the
+> old table or columns now name the new ones with the old in parentheses. The
+> wire keys this document quotes (`safe_address`, `safe_id` on responses) are
+> still emitted — the #2907 alias mappers are untouched and fed by local shims.
+
+> **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
+> migration):** this diff touched one file in this document's coverage list,
+> `infra/repositories/smart-accounts.ts`, and only its comment: the retired
+> `account_type` value is renamed `'safe'` → `'legacy_safe'` by
+> `085_account_type_legacy_safe.ts`, and the CHECK is tightened to
+> `('legacy_safe','delegator_hybrid')` — no `DELETE`, no row removed, inert
+> history kept representable under its new name (epic #1440's decision,
+> restated on #2912's issue). `DELEGATION_RAIL_ONLY`'s equality test
+> (`= 'delegator_hybrid'`) is unaffected — it was never keyed on the retired
+> value's spelling — and the migration's own test asserts the real repository
+> query (`listAccountsWithTypeForUser`) still matches only the live-rail rows
+> after the rename. Every predicate, tenant scope, authority check and
+> signing path in this document is unchanged.
+
+> **Re-verified #2851 (safe-retirement epic #1440, final slice):** the unlink
+> transaction in `infra/repositories/smart-accounts.ts` no longer nulls out
+> `self_sign_agents.safe_id` before deleting the account row — that step
+> existed only to satisfy `self_sign_agents`' own `NO ACTION` foreign key, and
+> the table itself is dropped by migration `083`. Nothing above depends on it:
+> the guards this section describes (live-delegation, open-sweep, in-flight
+> re-key refusal) are unaffected, no permission or chain state changes, and
+> the same migration's `account_type` default flip (`'safe'` →
+> `'delegator_hybrid'`) changes what an *omitting insert* gets, never the
+> `account_type = 'delegator_hybrid'` filter value the list queries above
+> compare against.
 
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database
@@ -377,7 +431,7 @@ names the consequence and asks for confirmation, and the API does not refuse
 
 **Read surface (#1079).** The signer set is additionally readable at account
 level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
-JWT + ownership check on `user_safes`) and returning **public-key material
+JWT + ownership check on `smart_accounts`, `user_safes` before #2911) and returning **public-key material
 plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
 `created_at` since #1679 — a timestamp the UI uses to label rows
 "Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
@@ -398,7 +452,7 @@ agents — and no longer duplicated on the agent page. The agent-scoped route
 stays live server-side (it is the same shared implementation below, just
 resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup
-versus an owner-scoped `(address, chain)` lookup on `user_safes`. Authority
+versus an owner-scoped `(address, chain)` lookup on `smart_accounts`. Authority
 rules, the last-signer refusal (§7), the calldata encoding and the signed-op
 matching
 are **one implementation** (`rails/hybrid-signer-actions.ts`), because two copies
@@ -444,7 +498,8 @@ matched, so a marker-less user (new device or browser profile; cleared site
 data followed by re-login — the signer-set blob re-hydrates from the
 owner-scoped read while markers are written only at enrolment; or a passkey
 enrolled from another device) saw a wallet-connection CTA in the header while
-every signing surface in this section worked, and `useSafeOperationGate`
+every signing surface in this section worked, and `useAccountOperationGate`
+(named `useSafeOperationGate` before #2913)
 simultaneously blocked gated actions for the same state. The decision:
 `useActiveSigner` resolves any **non-empty** hydrated signer set, mirroring
 `pickSigningPath`'s precedence exactly — marker-matched passkey → connected
@@ -473,7 +528,7 @@ same shared return, and it is correct there because the address was just
 proven equal to `owner_address`.
 Refusing (the pre-#1969 status quo) was declined as incoherent with the
 #1097 rule above and with shipped signing behaviour; offering **silently**
-was declined per #1952's design record. `useSafeOperationGate`'s hybrid
+was declined per #1952's design record. `useAccountOperationGate`'s hybrid
 branch now answers `ready` for a non-empty set for the same reason, and —
 since #2068 — for an owner-only set exactly when the connected wallet is
 the named owner (the same address check; an unrelated wallet stays blocked,
@@ -714,11 +769,12 @@ moment the user has nothing at risk and no context for what a backup protects.
   Since #1205 the predicate has its production call site: the session safes
   payload (`/auth/me`, login) carries the computed answer
   (`needs_backup_recommendation`) plus `value_bearing_chain`, mapped by
-  `sessionSafePayload` in the same module — so the dashboard's banner branches
+  `sessionAccountPayload` (`sessionSafePayload` before #2910) in the same module — so the dashboard's banner branches
   on the server's classification instead of re-deriving chain semantics
   client-side.
 - **The waiver column survives as history, not as an unblock.**
-  `user_safes.single_signer_waiver_at` (migration 046) is still written when an
+  `smart_accounts.single_signer_waiver_at` (migration 046; the table was
+  `user_safes` until #2911) is still written when an
   acknowledgement is sent, and nothing requires it to proceed. It no longer
   silences the recommendation either — it never made an account recoverable; it
   only recorded that someone had been told once, and the risk is ongoing.
@@ -779,6 +835,48 @@ hard backstop.
 
 ## 8. x402 dual-scheme settlement — the EIP-3009 interop bridge (#946)
 
+> **Re-verified #2910 (naming epic #2906, phase 2b):** this diff touched six
+> files in this document's coverage list — `routes/auth.ts`,
+> `routes/agents.ts`, `routes/user-safes.ts`, `infra/repositories/agents.ts`,
+> `rails/hybrid-account-config.ts`, `modules/accounts/mainnet-gate.ts` — by
+> identifier rename only: locals and parameters `safeId`/`safeAddress` →
+> `accountId`/`accountAddress`, the object-literal fields `NewAgent.safeId` →
+> `accountId` and `CreatedAgent.safeInfo` → `accountInfo`, and
+> `sessionSafePayload` → `sessionAccountPayload` (the §6 sentence naming it
+> updated). Every SQL literal in the
+> touched repository files is byte-identical (64 literals, 0 differences), no
+> route path, wire key, tenant-scoping clause, signing path or authority
+> check changed, and the `RelayerOperation` union lost only its dead
+> `'safe_deploy'` member (historical `relayer_gas_events` rows still read —
+> pinned by test). Every claim in this document that names one of these
+> files still holds under the new identifiers; nothing else re-read.
+
+> **Re-verified #2907 (naming epic #2906, phase 0):** the funding-leg
+> `sign_data.components` object (`delegation-authorize.ts`, `replay.ts`) gains
+> a `payer_account` field — an additive, same-value twin of the deprecated
+> `safe` field, not a rename into `components.account` (which already means
+> the *delegate* account address on this shape, a different address). No
+> authority, signing path, or invariant mapping changes: `payer_account` is a
+> read-side label, mutation-tested equal to `safe`
+> (`openapi/payer-account-alias.test.ts`). `routes/user-safes.ts` also gained
+> an additive `/user/accounts` prefix registration of the same handler
+> module — §2's invariant mapping and this doc's route list are otherwise
+> unaffected: no new authority, no new signing path.
+>
+> **Review-findings correction, same PR:** that additive `/user/accounts`
+> mount was NOT reflected in `middleware/owner-cli.ts`'s `OWNER_CLI_ALLOWED_
+> ROUTES`, which named only the `/user/safes` literal — `routeAllowsOwnerCli`
+> compares the registered route's exact URL, so an `owner_cli` token that
+> could read `GET /user/safes` and `GET /user/safes/{safeId}/funding` got a
+> 401 on the identical `/user/accounts` / `/user/accounts/{safeId}/funding`
+> mount, for the same data, through the same handler. This is a REFUSAL gap,
+> not an authorization grant — the token already had this read through the
+> `/user/safes` prefix — so fixing it (adding the two twin entries) does not
+> widen the owner_cli surface §9 below describes; it makes the surface
+> actually reachable through both names, which is the whole point of an
+> additive rename. Proven with a parity test that fails 4 assertions when the
+> twin entries are removed.
+
 > **Re-verified #2850:** this diff touched two files in this document's
 > covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by
 > exactly one import-path line: `getTokenBalance` now imports from
@@ -811,7 +909,9 @@ compensating controls:
    confirms; without it every purchase against a ≥300 s-timeout merchant
    failed structurally); the delegate-balance monitor
    covers delegation-rail agents; the rail-agnostic sweep route recovers
-   residuals to the **treasury Hybrid** (`agent.safe_address`), with the
+   residuals to the **treasury Hybrid** (`agent.account_address` — the
+   `agents.account_id` → `smart_accounts.account_address` read, columns
+   renamed by #2911), with the
    0.01 USDC recoverability floor and sub-floor residuals visible in the ledger.
 2. **Budget meters at the funding hop, not at settlement.** Verify-without-
    settle strands the amount on the EOA → sweep reconciles it; the budget

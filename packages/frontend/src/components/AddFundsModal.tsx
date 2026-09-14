@@ -12,14 +12,14 @@ interface Props {
   open: boolean
   onClose: () => void
   onReceive?: () => void
-  safeAddress?: string
+  accountAddress?: string
   chainId?: number
 }
 
 const ONRAMP_APP_ID = process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID
 
-function buildOnrampUrl(safeAddress: string, chainShortName: string): string {
-  const addresses = JSON.stringify({ [safeAddress]: [chainShortName] })
+function buildOnrampUrl(accountAddress: string, chainShortName: string): string {
+  const addresses = JSON.stringify({ [accountAddress]: [chainShortName] })
   const params = new URLSearchParams({
     appId: ONRAMP_APP_ID ?? '',
     addresses,
@@ -35,7 +35,7 @@ function buildOnrampUrl(safeAddress: string, chainShortName: string): string {
 // deliberately unchanged is `getChainConfig`'s throwing contract, which ~20
 // other call sites depend on. See the doc comment on the lifted function.
 
-export default function AddFundsModal({ open, onClose, onReceive, safeAddress, chainId }: Props) {
+export default function AddFundsModal({ open, onClose, onReceive, accountAddress, chainId }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
   useEscapeToClose(open, onClose)
@@ -51,23 +51,23 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
   // environment-correct but still unreadable as a guess from the screen.
   const chainConfig = resolveChainOrNull(chainId)
   const chainName = chainConfig?.name ?? null
-  const onrampAvailable = Boolean(ONRAMP_APP_ID && safeAddress && chainConfig)
-  const depositInstructionsAvailable = Boolean(safeAddress && chainConfig)
+  const onrampAvailable = Boolean(ONRAMP_APP_ID && accountAddress && chainConfig)
+  const depositInstructionsAvailable = Boolean(accountAddress && chainConfig)
 
   const handleCopy = useCallback(async () => {
-    if (!safeAddress) return
+    if (!accountAddress) return
     try {
-      await navigator.clipboard.writeText(safeAddress)
+      await navigator.clipboard.writeText(accountAddress)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
       // clipboard unavailable — no-op
     }
-  }, [safeAddress])
+  }, [accountAddress])
 
   function handleBuyWithCard() {
-    if (!safeAddress || !chainConfig) return
-    const url = buildOnrampUrl(safeAddress, chainConfig.shortName)
+    if (!accountAddress || !chainConfig) return
+    const url = buildOnrampUrl(accountAddress, chainConfig.shortName)
     window.open(url, '_blank', 'noopener,noreferrer,width=480,height=720')
   }
 
@@ -90,7 +90,7 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-funds-title"
-        className="relative mx-4 w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-white shadow-modal"
+        className="relative mx-4 w-full max-w-md overflow-hidden rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-4">
@@ -146,12 +146,12 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
               </div>
             </div>
 
-            {depositInstructionsAvailable && safeAddress ? (
+            {depositInstructionsAvailable && accountAddress ? (
               <div className="mt-3">
                 <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Account address ({chainName})</p>
                 <div className="flex items-center gap-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
                   <code className="min-w-0 flex-1 truncate text-xs text-[var(--v2-ink)]">
-                    {safeAddress}
+                    {accountAddress}
                   </code>
                   <button
                     onClick={handleCopy}
@@ -166,7 +166,7 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
                   </button>
                 </div>
               </div>
-            ) : !safeAddress ? (
+            ) : !accountAddress ? (
               <Button variant="ghost" className="mt-3 w-full" onClick={handleReceiveInstead} trailingIcon>
                 Show receive address
               </Button>
@@ -216,7 +216,7 @@ export default function AddFundsModal({ open, onClose, onReceive, safeAddress, c
           </div>
 
           {/* Fallback when provider unavailable and no safe */}
-          {!onrampAvailable && !safeAddress && onReceive && (
+          {!onrampAvailable && !accountAddress && onReceive && (
             <Button onClick={handleReceiveInstead} className="w-full">
               Receive instead
             </Button>

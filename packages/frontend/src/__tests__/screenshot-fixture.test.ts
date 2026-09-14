@@ -15,8 +15,15 @@ import {
   findSignedOutDuplicates,
   resolveRouteAuthPartitions,
   signedOutRoutesFor,
+  resolveColorScheme,
+  themeSeedFor,
+  findViewportMismatches,
 } from '../../scripts/screenshot.mjs'
-import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_SAFE_STORAGE_KEY } from '../lib/auth-storage'
+import { AUTH_TOKEN_STORAGE_KEY, ACTIVE_ACCOUNT_STORAGE_KEY } from '../lib/auth-storage'
+// The theme seed key is the app's own constant (#2929); the harness and this
+// parity test both read it through `theme-bootstrap`, so a rename in
+// ThemeContext reddens them together rather than drifting silently.
+import { THEME_STORAGE_KEY } from '../lib/theme-bootstrap'
 
 import {
   isMcpToolCallActivityItem,
@@ -53,12 +60,12 @@ type StagedScenarioShape = ScenarioShape & {
   stage: (next: string) => void
   stages: Record<string, Record<string, unknown> | null>
 }
-/** Kept in step with FIXTURE_SAFE in screenshot.mjs. */
-const FIXTURE_SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
+/** Kept in step with FIXTURE_ACCOUNT in screenshot.mjs. */
+const FIXTURE_ACCOUNT_ADDRESS = '0x1111111111111111111111111111111111111111'
 /** Kept in step with the scenario's own constant in screenshot.mjs. */
 const SETUP_ID = 'setup-screenshot'
-/** Likewise FIXTURE_SAFE.id — the legacy scenario must reuse the same account. */
-const FIXTURE_SAFE_ID = 'safe-fixture'
+/** Likewise FIXTURE_ACCOUNT.id — the legacy scenario must reuse the same account. */
+const FIXTURE_ACCOUNT_ID = 'safe-fixture'
 
 describe('screenshot populated fixture (#896 follow-up)', () => {
   it('serves the populated shapes the hooks actually read', () => {
@@ -675,7 +682,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     // capture logged-out screenshots as PR evidence.
     expect(SEED_STORAGE_KEYS).toEqual({
       token: AUTH_TOKEN_STORAGE_KEY,
-      activeSafe: ACTIVE_SAFE_STORAGE_KEY,
+      activeAccount: ACTIVE_ACCOUNT_STORAGE_KEY,
     })
   })
 
@@ -693,7 +700,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     afterEach(() => backupRecovery.stage('healthy'))
 
     const signersOf = (scenario: ScenarioShape) =>
-      scenario.api(`/accounts/hybrid/${FIXTURE_SAFE_ADDRESS}/signers`, 'GET')
+      scenario.api(`/accounts/hybrid/${FIXTURE_ACCOUNT_ADDRESS}/signers`, 'GET')
 
     it('overrides only the account signer set needed to reach the removal confirmation (#1199)', () => {
       const signers = signerRemoval.api('/accounts/hybrid/0x111/signers', 'GET')
@@ -942,19 +949,21 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // filename, which is exactly the confidently-wrong-evidence shape #1800
       // exists to prevent.
       const unresolved = scenarioWithApi('add-funds-unresolved-chain')
-      const me = unresolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
+      const me = unresolved.api('/auth/me', 'GET') as { accounts: Record<string, unknown>[] }
       const list = unresolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
-      for (const { safes } of [me, list]) {
-        expect(safes).toHaveLength(1)
-        expect(safes[0]).not.toHaveProperty('chain_id')
+      // The scenario sets both envelope keys (`accounts` authoritative, the
+      // deprecated `safes` twin) to the same array — assert both halves.
+      for (const accounts of [me.accounts, list.safes]) {
+        expect(accounts).toHaveLength(1)
+        expect(accounts[0]).not.toHaveProperty('chain_id')
         // Still a real, addressable safe — the hazard is a MISSING chain beside
         // a PRESENT address, so an empty safe would prove something else.
-        expect(safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
-        expect(safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(accounts[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(accounts[0].id).toBe(FIXTURE_ACCOUNT_ID)
         // #2202: the rail is named, and it matches the resolved twin's — the
         // pair is evidence about `chain_id` only while `chain_id` is the one
         // field that differs between them.
-        expect(safes[0].account_type).toBe('safe')
+        expect(accounts[0].account_type).toBe('legacy_safe')
       }
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
     })
@@ -967,9 +976,9 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // renders its action buttons instead of the passkey-on-another-device
       // notice).
       const resolved = scenarioWithApi('add-funds')
-      const me = resolved.api('/auth/me', 'GET') as { safes: Record<string, unknown>[] }
-      expect(me.safes).toHaveLength(1)
-      expect(me.safes[0].chain_id).toBe(84532)
+      const me = resolved.api('/auth/me', 'GET') as { accounts: Record<string, unknown>[] }
+      expect(me.accounts).toHaveLength(1)
+      expect(me.accounts[0].chain_id).toBe(84532)
       // #2202: the rail is now NAMED rather than expressed by absence. An
       // absent `account_type` is not a state the API can serve — the column is
       // `NOT NULL DEFAULT 'safe'` (`041_hybrid_accounts.ts:29`) — and `railOf`
@@ -977,7 +986,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // rendered differently (`railOf` is deleted since #2413). What this still pins is that the override is the SAME on
       // both halves of the pair, which is what makes `chain_id` the sole
       // variable.
-      expect(me.safes[0].account_type).toBe('safe')
+      expect(me.accounts[0].account_type).toBe('legacy_safe')
       // Both safe endpoints must agree — a fixture where one says 84532 and the
       // other says nothing is a trap for the next scenario that reads the other.
       const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
@@ -994,22 +1003,27 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const unresolved = scenarioWithApi('receive-funds-unresolved-chain')
 
       for (const endpoint of ['/auth/me', '/user/safes']) {
-        const r = resolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
-        const u = unresolved.api(endpoint, 'GET') as { safes: Record<string, unknown>[] }
-        expect(r.safes).toHaveLength(1)
-        expect(u.safes).toHaveLength(1)
-        expect(r.safes[0].chain_id).toBe(84532)
-        expect(u.safes[0]).not.toHaveProperty('chain_id')
+        // /auth/me serves the `accounts` envelope; /user/safes keeps the
+        // `safes` envelope until #2914 retires it. The scenario sets both
+        // keys on /auth/me, so the pair asserts the same array either way.
+        const r = resolved.api(endpoint, 'GET') as Record<string, Record<string, unknown>[] | undefined>
+        const u = unresolved.api(endpoint, 'GET') as Record<string, Record<string, unknown>[] | undefined>
+        const rList = endpoint === '/auth/me' ? r.accounts : r.safes
+        const uList = endpoint === '/auth/me' ? u.accounts : u.safes
+        expect(rList).toHaveLength(1)
+        expect(uList).toHaveLength(1)
+        expect(rList?.[0].chain_id).toBe(84532)
+        expect(uList?.[0]).not.toHaveProperty('chain_id')
         // A MISSING chain beside a PRESENT address is the hazard; an empty safe
         // would prove something else entirely.
-        expect(u.safes[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
-        expect(u.safes[0].id).toBe(FIXTURE_SAFE_ID)
+        expect(uList?.[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(uList?.[0].id).toBe(FIXTURE_ACCOUNT_ID)
         // The rail override is the ONLY other difference from the shared
         // fixture, and both halves carry it, so `chain_id` is the sole variable.
         // #2202: named rather than absent — see the #1844 pair above. Both
         // halves carry it, which is the invariant this line is really for.
-        expect(r.safes[0].account_type).toBe('safe')
-        expect(u.safes[0].account_type).toBe('safe')
+        expect(rList?.[0].account_type).toBe('legacy_safe')
+        expect(uList?.[0].account_type).toBe('legacy_safe')
       }
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
@@ -1287,6 +1301,128 @@ describe('signed-out capture opt-out (#2825)', () => {
         [rec('/dashboard', 'mobile', 'c'.repeat(64)), rec('/dashboard', 'desktop', 'd'.repeat(64))],
       )
       expect(duplicates).toEqual([])
+    })
+  })
+})
+
+describe('color-scheme capture parity (#2929)', () => {
+  /**
+   * The parity contract: a run names the palettes it rendered, the theme seed
+   * is read through the APP'S OWN storage key, and the guards that compare
+   * bytes partition per scheme. Each of these was a silent-failure class
+   * before it had a test: a wrong key ships dark-labelled light PNGs, and an
+   * unpartitioned guard reports every dark capture as its light twin's
+   * duplicate or a dashboard redirect.
+   */
+  it('absent flag is the historical light-only run, filenames unsuffixed', () => {
+    expect(resolveColorScheme([], {})).toEqual(['light'])
+    expect(resolveColorScheme(['--some-other=flag'], {})).toEqual(['light'])
+  })
+
+  it('both expands to the paired schemes, in the order the filenames use', () => {
+    expect(resolveColorScheme(['--color-scheme=both'], {})).toEqual(['light', 'dark'])
+  })
+
+  it('a single scheme selects just it, case-insensitively', () => {
+    expect(resolveColorScheme(['--color-scheme=dark'], {})).toEqual(['dark'])
+    expect(resolveColorScheme(['--color-scheme=DARK'], {})).toEqual(['dark'])
+  })
+
+  it('the environment can carry the choice; an explicit flag wins', () => {
+    expect(resolveColorScheme([], { SCREENSHOT_COLOR_SCHEME: 'both' })).toEqual(['light', 'dark'])
+    expect(
+      resolveColorScheme(['--color-scheme=light'], { SCREENSHOT_COLOR_SCHEME: 'both' }),
+    ).toEqual(['light'])
+  })
+
+  it('a malformed value FAILS LOUDLY — it does not fall back to light', () => {
+    // The fallback shape to fear is a typo (`--color-scheme=drk`) silently
+    // producing light-only captures under a reviewer's `both` expectation.
+    expect(() => resolveColorScheme(['--color-scheme=drk'], {})).toThrow(/--color-scheme/)
+    expect(() => resolveColorScheme(['--color-scheme=drk'], {})).toThrow(/both/)
+    // Positive control: the same call with a valid value must not throw.
+    expect(() => resolveColorScheme(['--color-scheme=dark'], {})).not.toThrow()
+  })
+
+  it('dark seeds the APP\'S OWN theme key, not a restated literal', () => {
+    // If ThemeContext renames its storage key, the app and this harness
+    // disagree silently: the run claims dark, the browser renders light, the
+    // manifest records the claim. Reading the imported constant is what turns
+    // that into a red test here, at the author's desk, and pins the exact
+    // value the app's no-flash bootstrap reads.
+    expect(themeSeedFor('dark')).toEqual({ [THEME_STORAGE_KEY]: 'dark' })
+    expect(THEME_STORAGE_KEY).toBe('haven.theme')
+  })
+
+  it('light seeds NOTHING — the app falls to its light default', () => {
+    // No key stamped at all: `null` means addInitScript writes no theme
+    // entry, exactly what every pre-#2929 run did.
+    expect(themeSeedFor('light')).toBeNull()
+  })
+
+  describe('the guards partition per scheme (a both run must not cross the pair)', () => {
+    /** A capture record in the shape main() builds, scheme included. */
+    const recS = (route: string, viewport: string, scheme: string, sha256: string) => ({
+      route,
+      viewport,
+      scheme,
+      file: `${route.slice(1)}-${viewport}${scheme === 'light' ? '' : `-${scheme}`}.png`,
+      sha256,
+    })
+    const schemeKey = (f: { scheme: string }) => f.scheme
+
+    it('findRedirectCaptures judges a dark capture only against the DARK dashboard', () => {
+      const sha = 'a'.repeat(64)
+      // Same bytes as the light dashboard entry below: with the partition key
+      // they must NOT convict, because the lookup key carries the scheme.
+      const mismatches = findRedirectCaptures(
+        [recS('/login', 'mobile', 'dark', sha)],
+        new Map([['light|mobile', sha]]),
+        schemeKey,
+      )
+      expect(mismatches).toEqual([])
+      // Positive control: the same bytes against the DARK dashboard DO match.
+      const caught = findRedirectCaptures(
+        [recS('/login', 'mobile', 'dark', sha)],
+        new Map([['dark|mobile', sha]]),
+        schemeKey,
+      )
+      expect(caught).toHaveLength(1)
+      expect(caught[0].scheme).toBe('dark')
+    })
+
+    it('findSignedOutDuplicates does not pair a route across the scheme boundary', () => {
+      const sha = 'a'.repeat(64)
+      expect(
+        findSignedOutDuplicates(
+          [recS('/login', 'mobile', 'dark', sha)],
+          [recS('/onboarding', 'mobile', 'light', sha)],
+          schemeKey,
+        ),
+      ).toEqual([])
+      // Positive control: within one scheme the #2825 advisory still fires.
+      const pair = findSignedOutDuplicates(
+        [recS('/login', 'mobile', 'dark', sha)],
+        [recS('/onboarding', 'mobile', 'dark', sha)],
+        schemeKey,
+      )
+      expect(pair).toHaveLength(1)
+      expect(pair[0].matches).toBe('/onboarding')
+    })
+
+    it('findViewportMismatches accepts the suffixed names a both run writes', () => {
+      const viewports = [{ name: 'desktop' }, { name: 'mobile' }]
+      const files = [
+        'dashboard-desktop.png',
+        'dashboard-mobile.png',
+        'dashboard-desktop-dark.png',
+        'dashboard-mobile-dark.png',
+        'dashboard-desktop-dark-full.png',
+      ]
+      expect(findViewportMismatches(files, viewports, ['light', 'dark'])).toEqual([])
+      // Positive control: WITHOUT the schemes argument the dark files are
+      // still unexplained — the default stays the historical light-only check.
+      expect(findViewportMismatches(files, viewports)).toHaveLength(3)
     })
   })
 })

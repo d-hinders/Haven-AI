@@ -1,0 +1,36 @@
+{
+  "_base": "6e3ea1dc",
+  "route": "GET /user/safes/{id}/funding",
+  "request": {
+    "method": "GET",
+    "url": "/user/safes/d2c47f10-9a83-4e61-8b25-7c3f0e91a4d6/funding",
+    "authClaims": {
+      "sub": "4f6c2b18-7d90-4a35-9e81-2c5b7f3a0d64",
+      "email": "ada@example.com"
+    }
+  },
+  "status": 200,
+  "body": {
+    "account_address": "0xabababababababababababababababababababab",
+    "chain": {
+      "id": 8453,
+      "name": "Base",
+      "explorer_url": "https://basescan.org"
+    },
+    "tokens": [
+      {
+        "symbol": "USDC",
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "decimals": 6,
+        "balance_human": "5.00",
+        "minimum_useful_human": "5"
+      }
+    ],
+    "native": {
+      "symbol": "ETH",
+      "balance_human": "0.0",
+      "needed": false
+    },
+    "funded": true
+  }
+}

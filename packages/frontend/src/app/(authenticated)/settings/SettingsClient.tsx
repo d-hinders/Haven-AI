@@ -5,62 +5,13 @@ import { Icon } from '@/components/ui/Icon'
 import { type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
-import { useLocale, useT } from '@/context/LocaleContext'
-import type { Locale } from '@/lib/i18n'
+import { useT } from '@/context/LocaleContext'
+import { useTheme, type ThemePreference } from '@/context/ThemeContext'
 import { Button } from '@/components/ui/Button'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { SettingsSection as Section, SettingsRow as SettingRow } from './SettingsSection'
 import { ConnectionsCard } from '@/components/accounting/ConnectionsCard'
-
-
-/**
- * Inline segmented control — the canonical Settings toggle (used for currency
- * and language). One tinted track (`--v2-surface`) with a white, shadowed
- * thumb on the active option; matches the design-system surface rules (no
- * nested filled cards — the track is a control surface, not a grouping card).
- */
-function SegmentedControl<T extends string>({
-  options,
-  value,
-  onChange,
-  disabled = false,
-  ariaLabel,
-}: {
-  options: ReadonlyArray<{ value: T; label: string }>
-  value: T
-  onChange: (value: T) => void
-  disabled?: boolean
-  ariaLabel: string
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label={ariaLabel}
-      className="flex rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface)] p-1"
-    >
-      {options.map((option) => {
-        const active = value === option.value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(option.value)}
-            disabled={disabled}
-            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-              active
-                ? 'bg-white text-[var(--v2-ink)] shadow-sm'
-                : 'text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]'
-            } disabled:opacity-50`}
-          >
-            {option.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
 
 function StatusPill({
   children,
@@ -93,7 +44,7 @@ function ComingSoonToggle({ label, comingSoonText }: { label: string; comingSoon
         aria-label={label}
         className="relative h-6 w-11 cursor-not-allowed rounded-full bg-[var(--v2-surface-2)] opacity-70"
       >
-        <span className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm" />
+        <span className="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--v2-bg)] shadow-sm" />
       </button>
     </div>
   )
@@ -102,7 +53,7 @@ function ComingSoonToggle({ label, comingSoonText }: { label: string; comingSoon
 export default function SettingsClient() {
   const { passkeys = [] } = useAuth()
   const { currency, setCurrency, saving } = usePreferences()
-  const { locale, setLocale } = useLocale()
+  const { preference, setPreference } = useTheme()
   const t = useT()
 
   const hasPasskey = passkeys.length > 0
@@ -140,17 +91,24 @@ export default function SettingsClient() {
               />
             )}
           />
+          {/*
+            Appearance (#2927): the theme preference. Same row shape the
+            language row used before #2926 removed it, on the promoted
+            ui/SegmentedControl. `system` (the default) stamps nothing and
+            lets the OS decide; explicit choices stamp `data-theme`.
+          */}
           <SettingRow
-            label={t.settings.language.label}
-            detail={t.settings.language.detail}
+            label={t.settings.theme.label}
+            detail={t.settings.theme.detail}
             action={(
               <SegmentedControl
-                ariaLabel={t.settings.language.label}
-                value={locale}
-                onChange={(next: Locale) => setLocale(next)}
+                ariaLabel={t.settings.theme.label}
+                value={preference}
+                onChange={(next: ThemePreference) => setPreference(next)}
                 options={[
-                  { value: 'en', label: t.settings.language.english },
-                  { value: 'sv', label: t.settings.language.swedish },
+                  { value: 'light', label: t.settings.theme.light },
+                  { value: 'dark', label: t.settings.theme.dark },
+                  { value: 'system', label: t.settings.theme.system },
                 ]}
               />
             )}
@@ -196,7 +154,7 @@ export default function SettingsClient() {
         {/*
           The Approvers section is DELETED (#1989, epic #1440). It hosted
           `ManageApprovers`, which built and relayed Safe owner-change
-          transactions through `POST /user/safes/:safeId/approvers/tx` — one of
+          transactions through `POST /user/safes/:accountId/approvers/tx` — one of
           five approver routes #1988 removed with the Safe rail. Left in place
           it would render a section whose every action 404s.
 

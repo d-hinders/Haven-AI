@@ -53,7 +53,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 // distinguish "no query ran" from "a query ran and found nothing". The three
 // read-path cases at the bottom are deliberately shallow for the same reason:
 // they assert the routes still SERVE, and their query semantics stay pinned
-// where they already are, in user-safes-characterization.test.ts and the
+// where they already are, in smart-accounts-characterization.test.ts and the
 // repository suites.
 const { mockPoolQuery, mockClientQuery, mockRelease, mockConnect } = vi.hoisted(() => ({
   mockPoolQuery: vi.fn(),
@@ -220,7 +220,7 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
   describe('an existing Safe account is untouched', () => {
     it('GET /user/safes still lists the caller’s Safes', async () => {
       mockPoolQuery.mockResolvedValue({
-        rows: [{ id: 'safe-1', safe_address: SAFE_ADDRESS, chain_id: 84532, is_default: true }],
+        rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS, chain_id: 84532, is_default: true }],
       })
 
       const res = await app.inject({ method: 'GET', url: '/user/safes', headers: auth() })
@@ -232,7 +232,7 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
     it('PUT /user/safes/:safeId still renames an existing Safe', async () => {
       mockPoolQuery.mockResolvedValue({
-        rows: [{ id: 'safe-1', safe_address: SAFE_ADDRESS, chain_id: 84532, name: 'Renamed' }],
+        rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS, chain_id: 84532, name: 'Renamed' }],
       })
 
       const res = await app.inject({
@@ -247,7 +247,7 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
     })
 
     it('PUT /user/safes/:safeId/default still re-defaults an existing Safe', async () => {
-      mockPoolQuery.mockResolvedValue({ rows: [{ id: 'safe-1', safe_address: SAFE_ADDRESS }] })
+      mockPoolQuery.mockResolvedValue({ rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS }] })
       mockClientQuery.mockResolvedValue({ rows: [] })
 
       const res = await app.inject({

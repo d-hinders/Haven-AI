@@ -23,7 +23,13 @@ export interface WriteCredentialInput {
   apiKey: string
   delegateKey: string
   delegateAddress: string
-  safeAddress?: string
+  /**
+   * The Haven account (smart account) address. Written to every credential
+   * file as `account_address` ONLY (#2908 — write the new name, never the
+   * old; the readers in `@haven_ai/signer` / `@haven_ai/mcp` fall back to the
+   * pre-#2908 `safe_address` permanently, so a file from either era loads).
+   */
+  accountAddress?: string
   chainId?: number
   network?: string
   agentBudget?: Array<{
@@ -114,7 +120,7 @@ function signerPayload(input: WriteCredentialInput): Record<string, unknown> {
     delegate_key: input.delegateKey,
     delegate_address: input.delegateAddress,
     agent_id: input.agentId,
-    safe_address: input.safeAddress,
+    account_address: input.accountAddress,
     chain_id: input.chainId,
     network: input.network,
     x402_binding_signer: input.x402BindingSigner,
@@ -126,7 +132,7 @@ function identityPayload(input: WriteCredentialInput): Record<string, unknown> {
   return {
     api_key: input.apiKey,
     agent_id: input.agentId,
-    safe_address: input.safeAddress,
+    account_address: input.accountAddress,
     chain_id: input.chainId,
     network: input.network,
     api_url: input.apiUrl,
@@ -140,7 +146,7 @@ function agentPayload(input: WriteCredentialInput): Record<string, unknown> {
   return {
     agent_id: input.agentId,
     delegate_address: input.delegateAddress,
-    safe_address: input.safeAddress,
+    account_address: input.accountAddress,
     chain_id: input.chainId,
     network: input.network,
     agent_budget: input.agentBudget,
@@ -156,7 +162,13 @@ export interface StoredCredentialSnapshot {
   agentId: string
   apiKey: string
   delegateAddress?: string
-  safeAddress?: string
+  accountAddress?: string
+  /**
+   * Which key the stored files carried the account address under — `--doctor`
+   * reports it (#2908). `account_address` from this release on; `safe_address`
+   * for a set written before it (still read, rewritten on the next re-key).
+   */
+  accountAddressKey?: 'account_address' | 'safe_address'
   chainId?: number
   network?: string
   apiUrl: string
@@ -210,7 +222,7 @@ export async function readStoredCredentials(
     apiUrl,
     hostedMcpUrl,
     delegateAddress: asString(agent.delegate_address) ?? asString(signer.delegate_address),
-    safeAddress: asString(identity.safe_address) ?? asString(agent.safe_address),
+    ...readStoredAccountAddress(identity, agent),
     chainId: typeof identity.chain_id === 'number' ? identity.chain_id : undefined,
     network: asString(identity.network),
     x402BindingSigner: asString(signer.x402_binding_signer),
@@ -218,6 +230,28 @@ export async function readStoredCredentials(
       ? (identity.agent_budget as WriteCredentialInput['agentBudget'])
       : undefined,
   }
+}
+
+/**
+ * The account address off a stored credential set, new name first (#2908):
+ * `account_address` (what this package writes from this release on) across
+ * both non-secret files, then the pre-#2908 `safe_address` across both. The
+ * old fallback is PERMANENT — a credential set written before this release
+ * never rewrites itself until the next re-key runs through `rewriteCredentialFiles`.
+ *
+ * Also says WHICH key was found, so `--doctor` can report it. Exported for
+ * the mutation tests: dropping `account_address` fails the new-shape test,
+ * dropping `safe_address` fails the old-shape test.
+ */
+export function readStoredAccountAddress(
+  identity: Record<string, unknown>,
+  agent: Record<string, unknown>,
+): Pick<StoredCredentialSnapshot, 'accountAddress' | 'accountAddressKey'> {
+  const fresh = asString(identity.account_address) ?? asString(agent.account_address)
+  if (fresh) return { accountAddress: fresh, accountAddressKey: 'account_address' }
+  const legacy = asString(identity.safe_address) ?? asString(agent.safe_address)
+  if (legacy) return { accountAddress: legacy, accountAddressKey: 'safe_address' }
+  return {}
 }
 
 /**

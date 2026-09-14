@@ -5,7 +5,7 @@ import * as setups from '../infra/repositories/agent-connection-setups.js'
 import type {
   AllowanceRow,
   SetupRow,
-  UserSafeRow,
+  SmartAccountRow,
 } from '../infra/repositories/agent-connection-setups.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { config } from '../config.js'
@@ -252,7 +252,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const parsed = validateCreateBody(request.body, reply)
       if (!parsed) return
 
-      const safe = await resolveUserSafe(sub, request.body.safe_id)
+      const safe = await resolveAccountForSetup(sub, request.body.safe_id)
       if (!safe) {
         return reply.code(400).send({ error: 'Haven wallet is required' })
       }
@@ -286,7 +286,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         {
           id: setupId,
           userId: sub,
-          safeId: safe.id,
+          accountId: safe.id,
           name: parsed.name,
           description: parsed.description,
           runtime: parsed.runtime,
@@ -466,7 +466,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             delegateAddress,
             apiKeyHash: request.body.api_key_hash,
             apiKeyPrefix,
-            safeId: setup.safe_id,
+            accountId: setup.account_id,
             mcpServerName,
           },
           tx,
@@ -735,7 +735,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
             setup.status === 'active' ||
             setup.status === 'approval_in_progress' ||
             setup.status === 'proposed' ||
-            setup.safe_tx_hash ||
+            setup.account_tx_hash ||
             setup.tx_hash
           ) {
             throw new SetupRefusal(409, 'Approved agents must be paused or revoked from the agent page')
@@ -860,8 +860,8 @@ const LOCAL_MCP_RUNTIMES = new Set([
   'codex-desktop',
 ])
 
-async function resolveUserSafe(userId: string, safeId?: string): Promise<UserSafeRow | null> {
-  return setups.findUserSafe(userId, safeId)
+async function resolveAccountForSetup(userId: string, accountId?: string): Promise<SmartAccountRow | null> {
+  return setups.findAccountForSetup(userId, accountId)
 }
 
 async function loadSetupByToken(setupToken: string | undefined): Promise<SetupRow | null> {
@@ -1061,9 +1061,9 @@ function buildConnectorSetupResponse(
       description: setup.description,
     },
     haven_wallet: {
-      id: setup.safe_id,
+      id: setup.account_id,
       name: setup.safe_name,
-      address: setup.safe_address,
+      address: setup.account_address,
       chain_id: setup.safe_chain_id,
       network: networkName(setup.safe_chain_id),
     },
@@ -1097,9 +1097,9 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
       description: setup.description,
     },
     haven_wallet: {
-      id: setup.safe_id,
+      id: setup.account_id,
       name: setup.safe_name,
-      address: setup.safe_address,
+      address: setup.account_address,
       chain_id: setup.safe_chain_id,
       network: networkName(setup.safe_chain_id),
     },
@@ -1123,7 +1123,7 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
     },
     install_status: setup.install_status ?? {},
     approval: {
-      safe_tx_hash: setup.safe_tx_hash,
+      safe_tx_hash: setup.account_tx_hash,
       tx_hash: setup.tx_hash,
       status: setup.approval_status,
     },

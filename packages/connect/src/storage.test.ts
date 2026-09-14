@@ -6,10 +6,14 @@ import {
   assertServerSlugAvailable,
   defaultAgentDirectory,
   preflightCredentialStorage,
+  readStoredAccountAddress,
+  readStoredCredentials,
+  rewriteCredentialFiles,
   writeConnectOutcomeRecord,
   writeCredentialFiles,
   CONNECT_OUTCOME_FILENAME,
 } from './storage.js'
+import { writeFile } from 'node:fs/promises'
 
 describe('writeCredentialFiles', () => {
   it('writes separated owner-only identity and signer credential files', async () => {
@@ -20,7 +24,7 @@ describe('writeCredentialFiles', () => {
       apiKey: 'sk_agent_testsecret',
       delegateKey: `0x${'11'.repeat(32)}`,
       delegateAddress: '0x1111111111111111111111111111111111111111',
-      safeAddress: '0x2222222222222222222222222222222222222222',
+      accountAddress: '0x2222222222222222222222222222222222222222',
       chainId: 100,
       network: 'Gnosis',
       agentBudget: [{ token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440 }],
@@ -45,7 +49,15 @@ describe('writeCredentialFiles', () => {
     const agent = await readFile(paths.agentPath, 'utf8')
     const agentJson = JSON.parse(agent)
     expect(agentJson.agent_id).toBe('agent-1')
-    expect(agentJson.safe_address).toBe('0x2222222222222222222222222222222222222222')
+    // #2908: the writer emits the account-vocabulary name ONLY — never the
+    // pre-#2908 `safe_address` (the readers fall back to it permanently, so
+    // nothing needs both in a freshly written file).
+    expect(agentJson.account_address).toBe('0x2222222222222222222222222222222222222222')
+    expect(agentJson).not.toHaveProperty('safe_address')
+    expect(JSON.parse(identity).account_address).toBe('0x2222222222222222222222222222222222222222')
+    expect(JSON.parse(signer).account_address).toBe('0x2222222222222222222222222222222222222222')
+    expect(identity).not.toContain('safe_address')
+    expect(signer).not.toContain('safe_address')
     expect(agentJson.network).toBe('Gnosis')
     expect(agentJson.agent_budget).toEqual([
       { token_symbol: 'USDC', allowance_amount: '25000000', reset_period_min: 1440 },
@@ -230,5 +242,68 @@ describe('writeConnectOutcomeRecord (#2173)', () => {
     // The swallow is the caller's contract (runConnect), never this writer's —
     // a silent no-op here would make an injected failing writer untestable.
     await expect(writeConnectOutcomeRecord(directory, { outcome: 'complete' })).rejects.toThrow()
+  })
+})
+
+/**
+ * #2908 (naming epic #2906): the stored-credential reader takes an OLD-shape
+ * set (`safe_address`, written before this release) and a NEW-shape set
+ * (`account_address`, written by this release). The old fallback is
+ * permanent. Mutations run by hand: dropping `account_address` from
+ * `readStoredAccountAddress` fails the new-shape test; dropping
+ * `safe_address` fails the old-shape test.
+ */
+describe('readStoredCredentials — account address naming window (#2908)', () => {
+  const ADDRESS = '0x3333333333333333333333333333333333333333'
+  async function seed(identityExtra: Record<string, unknown>, agentExtra: Record<string, unknown> = {}) {
+    const baseDir = await mkdtemp(join(tmpdir(), 'haven-connect-naming-'))
+    const directory = defaultAgentDirectory('agent-1', baseDir)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'identity.json'), JSON.stringify({
+      api_key: 'sk_agent_x', agent_id: 'agent-1', api_url: 'https://api.haven.example',
+      hosted_mcp_url: 'https://api.haven.example/mcp', ...identityExtra,
+    }))
+    await writeFile(join(directory, 'agent.json'), JSON.stringify({ agent_id: 'agent-1', ...agentExtra }))
+    await writeFile(join(directory, 'signer.json'), JSON.stringify({ delegate_key: '0xkey', agent_id: 'agent-1' }))
+    return baseDir
+  }
+
+  it('OLD shape: safe_address only — read, and reported as the old key', async () => {
+    const stored = await readStoredCredentials(undefined, 'agent-1', await seed({ safe_address: ADDRESS }))
+    expect(stored.accountAddress).toBe(ADDRESS)
+    expect(stored.accountAddressKey).toBe('safe_address')
+  })
+
+  it('NEW shape: account_address only', async () => {
+    const stored = await readStoredCredentials(undefined, 'agent-1', await seed({ account_address: ADDRESS }))
+    expect(stored.accountAddress).toBe(ADDRESS)
+    expect(stored.accountAddressKey).toBe('account_address')
+  })
+
+  it('BOTH: the new name wins', async () => {
+    const stored = await readStoredCredentials(undefined, 'agent-1', await seed({ account_address: ADDRESS, safe_address: '0xold' }))
+    expect(stored.accountAddress).toBe(ADDRESS)
+    expect(stored.accountAddressKey).toBe('account_address')
+  })
+
+  it('the chain is account_address (identity, agent) then safe_address (identity, agent)', () => {
+    expect(readStoredAccountAddress({ account_address: 'a' }, { account_address: 'b', safe_address: 'c' })).toEqual({ accountAddress: 'a', accountAddressKey: 'account_address' })
+    expect(readStoredAccountAddress({}, { account_address: 'b' })).toEqual({ accountAddress: 'b', accountAddressKey: 'account_address' })
+    expect(readStoredAccountAddress({ safe_address: 'c' }, { safe_address: 'd' })).toEqual({ accountAddress: 'c', accountAddressKey: 'safe_address' })
+    expect(readStoredAccountAddress({}, { safe_address: 'd' })).toEqual({ accountAddress: 'd', accountAddressKey: 'safe_address' })
+    expect(readStoredAccountAddress({}, {})).toEqual({})
+  })
+
+  it('a re-key rewrite of an OLD-shape set writes the NEW name only', async () => {
+    const baseDir = await seed({ safe_address: ADDRESS })
+    const stored = await readStoredCredentials(undefined, 'agent-1', baseDir)
+    await rewriteCredentialFiles({
+      baseDir, agentId: 'agent-1', apiKey: 'sk_agent_y', delegateKey: `0x${'22'.repeat(32)}`,
+      delegateAddress: '0x1111111111111111111111111111111111111111', accountAddress: stored.accountAddress,
+      apiUrl: stored.apiUrl, hostedMcpUrl: stored.hostedMcpUrl,
+    })
+    const after = await readStoredCredentials(undefined, 'agent-1', baseDir)
+    expect(after.accountAddress).toBe(ADDRESS)
+    expect(after.accountAddressKey).toBe('account_address')
   })
 })

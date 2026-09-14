@@ -127,7 +127,7 @@ async function seedSettled(userId: string, agentId: string): Promise<string> {
   const id = randomUUID()
   await db.query(
     `INSERT INTO payment_intents
-       (id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+       (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash, status, tx_hash,
         confirmed_at, expires_at, created_at)
      VALUES ($1, $2, $3, $4, ${CHAIN}, 'USDC', $5, $6, '100000', '0.10',
@@ -211,7 +211,9 @@ describeDb('Fortnox token lifecycle: lock, needs_reauthorisation, revoke (#2863)
     expect(calls.refresh).toBe(1)
 
     // The next sync: no refresh, no push, one skipped row that names the state.
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    // #2915: a skipped row was never pushed, so `fed` is 0 (enumerated: 1) —
+    // the dialog no longer says "1 earlier payment fed" for it.
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 1 })
     expect(calls.refresh).toBe(1)
     expect(calls.other).toEqual([])
     const syncs = await db.query<{ payment_id: string; status: string; error: string | null }>(

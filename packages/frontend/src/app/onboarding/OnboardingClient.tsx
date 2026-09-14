@@ -107,7 +107,7 @@ export default function OnboardingClient() {
   useEffect(() => {
     if (loading || !user) return
     if (creationStartedRef.current || phase === 'success') return
-    if (user.safes?.length > 0 || user.safe_address) {
+    if (user.accounts?.length > 0 || user.safe_address) {
       router.replace(nextPath ?? '/dashboard')
     }
   }, [loading, phase, router, user, nextPath])
@@ -171,7 +171,7 @@ export default function OnboardingClient() {
 
       <div className="relative z-10">
         <SafeAreaBand />
-        <div className="border-b border-[var(--v2-border)] bg-white/80 backdrop-blur-md">
+        <div className="border-b border-[var(--v2-border)] bg-bg/80 backdrop-blur-md">
           <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
             <Link
               href="/"

@@ -37,7 +37,6 @@
 import { countRecentEvents, insertEvent, updateEvent, spendSummary, type SpendSummaryRow } from './repositories/relayer-gas-events.js'
 
 export type RelayerOperation =
-  | 'safe_deploy'
   | 'hybrid_deploy'
   | 'allowance_transfer'
   | 'sweep'
@@ -58,12 +57,6 @@ interface BudgetRule {
  * headroom, sweeps are bounded by how often a funding leg can strand value.
  */
 const RULES: Record<RelayerOperation, BudgetRule> = {
-  safe_deploy: {
-    identity: 'user_id',
-    windowMinutes: 24 * 60,
-    envVar: 'RELAYER_MAX_DEPLOYS_PER_USER_PER_DAY',
-    defaultCap: 10,
-  },
   hybrid_deploy: {
     identity: 'user_id',
     windowMinutes: 24 * 60,

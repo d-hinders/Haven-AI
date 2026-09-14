@@ -42,7 +42,7 @@ export interface SetupRow {
   id: string
   user_id: string
   agent_id: string | null
-  safe_id: string
+  account_id: string
   name: string
   description: string | null
   runtime: string | null
@@ -59,10 +59,10 @@ export interface SetupRow {
   connector_context: Record<string, unknown>
   install_status: Record<string, unknown>
   approval_status: string
-  safe_tx_hash: string | null
+  account_tx_hash: string | null
   tx_hash: string | null
   failure_reason: string | null
-  safe_address: string
+  account_address: string
   safe_name: string
   safe_chain_id: number
   /** 'delegator_hybrid' = delegation rail (#1073); 'safe' = legacy AllowanceModule. */
@@ -87,9 +87,9 @@ export interface AllowanceRow {
   reset_period_min: number
 }
 
-export interface UserSafeRow {
+export interface SmartAccountRow {
   id: string
-  safe_address: string
+  account_address: string
   name: string
   chain_id: number
   account_type: string | null
@@ -108,17 +108,17 @@ export interface ActiveDelegationRow {
  * below, which is what `db-schema-smoke.ts` imports.
  */
 function setupSelectSql(where: string): string {
-  return `SELECT s.id, s.user_id, s.agent_id, s.safe_id, s.name, s.description,
+  return `SELECT s.id, s.user_id, s.agent_id, s.account_id, s.name, s.description,
                  s.runtime, s.status, s.setup_token_expires_at,
                  s.setup_token_consumed_at, s.challenge_id, s.challenge_message,
                  s.challenge_expires_at, s.delegate_address, s.proof_signature,
                  s.api_key_prefix, s.connector_version, s.connector_context,
-                 s.install_status, s.approval_status, s.safe_tx_hash, s.tx_hash,
+                 s.install_status, s.approval_status, s.account_tx_hash, s.tx_hash,
                  s.failure_reason, s.issue_passport, s.source, s.via,
-                 us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                 us.account_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
                  us.account_type
           FROM agent_connection_setups s
-          JOIN user_safes us ON us.id = s.safe_id
+          JOIN smart_accounts us ON us.id = s.account_id
           WHERE ${where}
           LIMIT 1`
 }
@@ -141,27 +141,27 @@ export const LOCK_SETUP_FOR_USER_SQL = `${FIND_SETUP_FOR_USER_SQL} FOR UPDATE OF
  * /:setupId/install-status`) reads neither field, and widening a query is a
  * behaviour change that belongs in its own change, not in an extraction.
  */
-export const FIND_SETUP_BY_AGENT_API_KEY_SQL = `SELECT s.id, s.user_id, s.agent_id, s.safe_id, s.name, s.description,
+export const FIND_SETUP_BY_AGENT_API_KEY_SQL = `SELECT s.id, s.user_id, s.agent_id, s.account_id, s.name, s.description,
             s.runtime, s.status, s.setup_token_expires_at,
             s.setup_token_consumed_at, s.challenge_id, s.challenge_message,
             s.challenge_expires_at, s.delegate_address, s.proof_signature,
             s.api_key_prefix, s.connector_version, s.connector_context,
-            s.install_status, s.approval_status, s.safe_tx_hash, s.tx_hash,
+            s.install_status, s.approval_status, s.account_tx_hash, s.tx_hash,
             s.failure_reason,
-            us.safe_address, us.name AS safe_name, us.chain_id AS safe_chain_id
+            us.account_address, us.name AS safe_name, us.chain_id AS safe_chain_id
      FROM agent_connection_setups s
-     JOIN user_safes us ON us.id = s.safe_id
+     JOIN smart_accounts us ON us.id = s.account_id
      JOIN agents a ON a.id = s.agent_id
      WHERE s.id = $1 AND a.api_key_hash = $2 AND a.status IN ($3, $4, $5)
      LIMIT 1`
 
-export const FIND_USER_SAFE_BY_ID_SQL = `SELECT id, safe_address, name, chain_id, account_type
-       FROM user_safes
+export const FIND_USER_ACCOUNT_BY_ID_SQL = `SELECT id, account_address, name, chain_id, account_type
+       FROM smart_accounts
        WHERE id = $1 AND user_id = $2
        LIMIT 1`
 
-export const FIND_DEFAULT_USER_SAFE_SQL = `SELECT id, safe_address, name, chain_id, account_type
-     FROM user_safes
+export const FIND_DEFAULT_USER_ACCOUNT_SQL = `SELECT id, account_address, name, chain_id, account_type
+     FROM smart_accounts
      WHERE user_id = $1 AND is_default = true
      LIMIT 1`
 
@@ -244,16 +244,16 @@ export async function lockSetupForUser(
   return result.rows[0] ?? null
 }
 
-export async function findUserSafe(
+export async function findAccountForSetup(
   userId: string,
-  safeId: string | undefined,
+  accountId: string | undefined,
   db: Executor = pool,
-): Promise<UserSafeRow | null> {
-  if (safeId) {
-    const result = await db.query<UserSafeRow>(FIND_USER_SAFE_BY_ID_SQL, [safeId, userId])
+): Promise<SmartAccountRow | null> {
+  if (accountId) {
+    const result = await db.query<SmartAccountRow>(FIND_USER_ACCOUNT_BY_ID_SQL, [accountId, userId])
     return result.rows[0] ?? null
   }
-  const result = await db.query<UserSafeRow>(FIND_DEFAULT_USER_SAFE_SQL, [userId])
+  const result = await db.query<SmartAccountRow>(FIND_DEFAULT_USER_ACCOUNT_SQL, [userId])
   return result.rows[0] ?? null
 }
 
@@ -297,7 +297,7 @@ export async function findAgentStatus(
 // ── Writes ───────────────────────────────────────────────────────────────────
 
 export const INSERT_SETUP_SQL = `INSERT INTO agent_connection_setups (
-             id, user_id, safe_id, name, description, runtime, status,
+             id, user_id, account_id, name, description, runtime, status,
              setup_token_hash, setup_token_prefix, setup_token_expires_at,
              challenge_id, challenge_message, challenge_expires_at, issue_passport,
              source, via
@@ -313,7 +313,7 @@ export const INSERT_SETUP_ALLOWANCE_SQL = `INSERT INTO agent_connection_setup_al
 export interface NewSetup {
   id: string
   userId: string
-  safeId: string
+  accountId: string
   name: string
   description: string | null
   runtime: string | null
@@ -353,7 +353,7 @@ export async function insertSetupWithAllowances(
     await tx.query(INSERT_SETUP_SQL, [
       setup.id,
       setup.userId,
-      setup.safeId,
+      setup.accountId,
       setup.name,
       setup.description,
       setup.runtime,
@@ -396,7 +396,7 @@ export async function updateConnectorMetadata(
 
 export const INSERT_AGENT_SQL = `INSERT INTO agents (
            user_id, name, description, delegate_address, api_key_hash,
-           api_key_prefix, safe_id, status, mcp_server_name
+           api_key_prefix, account_id, status, mcp_server_name
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_approval', $8)
          RETURNING id`
@@ -409,7 +409,7 @@ export async function insertPendingAgent(
     delegateAddress: string
     apiKeyHash: string
     apiKeyPrefix: string
-    safeId: string
+    accountId: string
     /**
      * #1878: the MCP server name the connector reported wiring this agent as.
      * NULL for every connector older than #1878 — a display aid, never keyed
@@ -426,7 +426,7 @@ export async function insertPendingAgent(
     input.delegateAddress,
     input.apiKeyHash,
     input.apiKeyPrefix,
-    input.safeId,
+    input.accountId,
     input.mcpServerName ?? null,
   ])
   return result.rows[0].id
@@ -517,7 +517,7 @@ export const CANCEL_SETUP_SQL = `UPDATE agent_connection_setups
            WHERE id = $1
              AND user_id = $2
              AND status IN ('awaiting_connection', 'connected_local', 'awaiting_wallet_approval')
-             AND safe_tx_hash IS NULL
+             AND account_tx_hash IS NULL
              AND tx_hash IS NULL
            RETURNING id`
 
@@ -554,7 +554,7 @@ export const UPDATE_APPROVAL_STATE_SQL = `UPDATE agent_connection_setups
        SET status = $3,
            approval_status = $4,
            tx_hash = $5,
-           safe_tx_hash = $6,
+           account_tx_hash = $6,
            failure_reason = $7,
            updated_at = NOW()
        WHERE id = $1 AND user_id = $2`
@@ -618,9 +618,9 @@ export async function applyApprovalState(
       if (locked.status === 'active') return locked
       if (!WALLET_APPROVAL_STATES.has(locked.status)) throw new AbandonTransaction()
       if (
-        locked.safe_tx_hash &&
+        locked.account_tx_hash &&
         input.safeTxHash &&
-        locked.safe_tx_hash.toLowerCase() !== input.safeTxHash.toLowerCase()
+        locked.account_tx_hash.toLowerCase() !== input.safeTxHash.toLowerCase()
       ) {
         throw new AbandonTransaction()
       }
@@ -637,7 +637,7 @@ export async function applyApprovalState(
         status: input.status,
         approval_status: input.approvalStatus,
         tx_hash: input.txHash ?? locked.tx_hash,
-        safe_tx_hash: input.safeTxHash ?? locked.safe_tx_hash,
+        account_tx_hash: input.safeTxHash ?? locked.account_tx_hash,
         failure_reason: input.failureReason,
       }
       await tx.query(UPDATE_APPROVAL_STATE_SQL, [
@@ -646,7 +646,7 @@ export async function applyApprovalState(
         input.status,
         input.approvalStatus,
         nextSetup.tx_hash,
-        nextSetup.safe_tx_hash,
+        nextSetup.account_tx_hash,
         input.failureReason,
       ])
       if (input.activateAgent && nextSetup.agent_id) {

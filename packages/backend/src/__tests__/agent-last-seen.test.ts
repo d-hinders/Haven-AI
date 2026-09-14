@@ -63,7 +63,7 @@ describe('registerAgentLastSeenHook', () => {
           user_id: '22222222-2222-2222-2222-222222222222',
           name: 'Test agent',
           delegate_address: '0xdead',
-          safe_address: '0xsafe',
+          account_address: '0xsafe',
           chain_id: 100,
           status: 'active',
         }

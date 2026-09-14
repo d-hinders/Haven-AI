@@ -77,12 +77,12 @@ async function seedAnchoredAgent(): Promise<Seeded> {
   )
   const userId = user.rows[0].id
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, chain_id, execution_rail, account_type)
+    `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
      VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid') RETURNING id`,
     [userId, TREASURY, CHAIN],
   )
   const agent = await db.query<{ id: string }>(
-    `INSERT INTO agents (user_id, name, safe_id, delegate_address, status)
+    `INSERT INTO agents (user_id, name, account_id, delegate_address, status)
      VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
     [userId, `rekey passport agent ${n}`, safe.rows[0].id, OLD_DELEGATE],
   )

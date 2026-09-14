@@ -14,7 +14,7 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
-last-verified: "2026-09-12"
+last-verified: "2026-09-14"
 ---
 
 # MCP Runtime Compatibility
@@ -22,6 +22,31 @@ last-verified: "2026-09-12"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Recent re-verification (#2908, naming epic #2906 phase 1):** the local
+> runtime's readers accept both the Safe-vocabulary and the account-vocabulary
+> names and prefer the new. Credential FILE: `account_address ?? safe_address
+> ?? safeAddress` in both `@haven_ai/signer` and `@haven_ai/mcp` — the two old
+> keys are read **permanently** (a file on disk never rewrites itself).
+> Environment: `HAVEN_ACCOUNT_ADDRESS ?? HAVEN_WALLET_ADDRESS ??
+> HAVEN_SAFE_ADDRESS`; the two old names are removed one release later
+> (#2914). `@haven_ai/connect` now WRITES `account_address` only, and
+> `--doctor`'s `credentials` check reports which name a credential set carries
+> (`stored as account_address` / `stored under the pre-#2908 name safe_address —
+> still read`). The CLI calls `/user/accounts*`, sends `?accountId=` beside
+> `?safeId=`, and dual-emits `account_id`/`safe_id` and
+> `account_address`/`safe_address` on `--json` and the CSV header for the
+> window. **The version-skew contract does not move:** `SUPPORTED_X402_EXPECTED_
+> VERSIONS` is still `[1, 2, 3]` (asserted by
+> `signer/src/naming-window-no-version-change.test.ts` beside the untouched
+> `version-skew.test.ts`), `sign_data.components.payer_account` is response
+> metadata twin of `components.safe`, never part of the signed payload, and
+> the consent hash input is the resolved address, not the key it came from —
+> an old-file machine's ack stays valid. The Supported Runtime Manifest table
+> below is unchanged. The `GET /machine-payments/agent` field list quoted under
+> `--rekey` is the P0 (#2907) shape; `account_address` on that endpoint is a
+> server twin P0 does not emit yet, and the connector reads it first when it
+> appears.
 >
 > **Recent re-verification (#2258):** Connect's `pending_approval` wording
 > describes zero spending authority, with the exact sweep-recovery exception
@@ -50,6 +75,18 @@ last-verified: "2026-09-12"
 > two permissive tools, and both moved), schemas and descriptions still come
 > from the #2807 contracts module, and the version-skew and consent-hash
 > contracts do not move because the registered tool-NAME set does not.
+>
+> **Recent re-verification (#2912, naming epic #2906 phase 3b):** a **data**
+> migration renamed the `account_type` VALUE `'safe'` to `'legacy_safe'` on
+> `smart_accounts` and tightened its CHECK — schema/data only, no wire
+> contract change (the OpenAPI `account_type` field was already typed as a
+> bare string, and the one enum that narrows it already excluded `'safe'`
+> since #2413). `packages/cli/src/commands.test.ts` is covered here only
+> because it carries a mock fixture (`account_type: 'safe'` → `'legacy_safe'`)
+> used to test the "grant refuses a non-delegation-rail agent" case; the
+> assertion, the CLI behavior, the tool names, schemas, version-skew and
+> consent-hash contracts are all unchanged. No other file this document
+> covers was touched by #2912.
 >
 > **Two sections sit outside that scope**, each for its own reason:
 >
@@ -228,10 +265,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.1.37-alpha.0` |
-| `@haven_ai/mcp` | `0.1.37-alpha.0` |
-| `@haven_ai/sdk` | `0.1.37-alpha.0` |
-| `@haven_ai/signer` | `0.1.37-alpha.0` |
+| `@haven_ai/connect` | `0.2.0-alpha.0` |
+| `@haven_ai/mcp` | `0.2.0-alpha.0` |
+| `@haven_ai/sdk` | `0.2.0-alpha.0` |
+| `@haven_ai/signer` | `0.2.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

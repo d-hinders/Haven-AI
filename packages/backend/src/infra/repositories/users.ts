@@ -12,9 +12,9 @@
  * - Every statement is scoped by `users.id`, and `userId` is a REQUIRED
  *   parameter on every function. There is no unscoped read or write of a user
  *   row here, and there must never be one: `id` is the tenant.
- * - `users.safe_address` is the LEGACY mirror of the default Safe. This module
+ * - `users.account_address` is the LEGACY mirror of the default Safe. This module
  *   only carries the direct `PUT /user/safe` write; the mirror is otherwise
- *   maintained alongside the default-Safe pointer in `user-safes.ts`, and the
+ *   maintained alongside the default-Safe pointer in `smart-accounts.ts`, and the
  *   two must not drift apart.
  *
  * **The SQL here is verbatim from the route.** Anything that looked improvable
@@ -34,7 +34,7 @@ export interface UserProfileRow {
   name: string | null
   email: string
   wallet_address: string | null
-  safe_address: string | null
+  account_address: string | null
   currency_preference: string | null
   created_at: string
 }
@@ -45,7 +45,7 @@ export interface UserIdentityRow {
   name: string | null
   email: string
   wallet_address: string | null
-  safe_address: string | null
+  account_address: string | null
 }
 
 export interface CurrencyPreferenceRow {
@@ -56,7 +56,7 @@ export interface CurrencyPreferenceRow {
 
 export const UPDATE_USER_NAME_SQL = `UPDATE users SET name = $1, updated_at = NOW()
        WHERE id = $2
-       RETURNING id, name, email, wallet_address, safe_address, currency_preference, created_at`
+       RETURNING id, name, email, wallet_address, account_address, currency_preference, created_at`
 
 /**
  * `userId` is REQUIRED — it is the row scope of the UPDATE.
@@ -78,12 +78,12 @@ export async function updateUserName(
 
 export const UPDATE_USER_WALLET_ADDRESS_SQL = `UPDATE users SET wallet_address = $1, updated_at = NOW()
        WHERE id = $2
-       RETURNING id, name, email, wallet_address, safe_address`
+       RETURNING id, name, email, wallet_address, account_address`
 
-// `UPDATE_USER_SAFE_ADDRESS_SQL` and `updateUserSafeAddress` are DELETED
+// The old direct-address-update SQL constant and its writer function are DELETED
 // (#1988). `PUT /user/safe` was their only caller and it is a 410 tombstone.
-// The legacy `users.safe_address` mirror is still written — by re-default and
-// unlink — through `SET_LEGACY_USER_SAFE_ADDRESS_SQL` in `user-safes.ts`,
+// The legacy `users.account_address` mirror is still written — by re-default and
+// unlink — through `SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL` in `smart-accounts.ts`,
 // which issues the identical UPDATE and is still exercised by the schema smoke.
 
 /** `userId` is REQUIRED — it is the row scope of the UPDATE. */
@@ -159,10 +159,10 @@ export const INSERT_USER_SQL =
   'INSERT INTO users (name, email, password_hash, via) VALUES ($1, $2, $3, $4) RETURNING id, name, email, created_at'
 
 export const FIND_USER_CREDENTIALS_BY_EMAIL_SQL =
-  'SELECT id, name, email, password_hash, wallet_address, safe_address, currency_preference FROM users WHERE email = $1'
+  'SELECT id, name, email, password_hash, wallet_address, account_address, currency_preference FROM users WHERE email = $1'
 
 export const FIND_USER_PROFILE_BY_ID_SQL =
-  'SELECT id, name, email, wallet_address, safe_address, currency_preference, created_at FROM users WHERE id = $1'
+  'SELECT id, name, email, wallet_address, account_address, currency_preference, created_at FROM users WHERE id = $1'
 
 /** The signup INSERT's projection — no `password_hash`, deliberately. */
 export interface NewUserRow {

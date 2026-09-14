@@ -23,6 +23,10 @@ import { describe, expect, it } from 'vitest'
 
 const FRONTEND = resolve(__dirname, '../..')
 const css = readFileSync(join(FRONTEND, 'src/app/globals.css'), 'utf8')
+// Comments are stripped ONCE, up front, with offsets preserved: the palette
+// block's documentation (#2927) quotes the block selectors in prose, and a
+// selector quoted in a comment must never be found instead of the real one.
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const tailwindConfig = require(join(FRONTEND, 'tailwind.config.js'))
 
@@ -51,46 +55,90 @@ function hexToChannels(hex: string): string {
   return [0, 2, 4].map((i) => parseInt(hex.slice(1 + i, 3 + i), 16)).join(' ')
 }
 
-/** Every `--v2-<name>-rgb: R G B;` declared in globals.css. */
-function channelTokens(): Array<{ name: string; channels: string }> {
+/**
+ * The inner span of the `{ … }` block whose selector contains `opener`.
+ *
+ * #2927 added TWO dark re-declaration blocks (byte-identical by test), so a
+ * channel token now appears up to three times — once per palette. Every
+ * check below therefore runs PER BLOCK: an `-rgb` triplet is compared
+ * against the hex declared in the SAME block, never against whichever match
+ * a whole-file regex happens to find first (that was the light value, and
+ * the dark blocks would have failed it by design).
+ */
+function blockSlice(css: string, opener: string): { start: number; end: number } {
+  const at = css.indexOf(opener)
+  if (at < 0) throw new Error(`globals.css: palette block not found: ${opener}`)
+  const openBrace = css.indexOf('{', at)
+  let depth = 0
+  for (let i = openBrace; i < css.length; i++) {
+    if (css[i] === '{') depth++
+    else if (css[i] === '}') {
+      depth--
+      if (depth === 0) return { start: openBrace + 1, end: i }
+    }
+  }
+  throw new Error(`globals.css: unbalanced braces in block: ${opener}`)
+}
+
+const LIGHT_OPENER = ':root {'
+const DARK_MEDIA_OPENER = ':root:not([data-theme="light"]) {'
+const DARK_EXPLICIT_OPENER = ':root[data-theme="dark"] {'
+
+/** Every `--v2-<name>-rgb: R G B;` declared inside the given block span. */
+function channelTokensIn(css: string, span: { start: number; end: number }) {
   const out: Array<{ name: string; channels: string }> = []
   const re = /--v2-([a-z0-9-]+)-rgb:\s*([0-9]{1,3} [0-9]{1,3} [0-9]{1,3});/g
+  const text = css.slice(span.start, span.end)
   let m: RegExpExecArray | null
-  while ((m = re.exec(css)) !== null) out.push({ name: m[1], channels: m[2] })
+  while ((m = re.exec(text)) !== null) out.push({ name: m[1], channels: m[2] })
   return out
 }
 
-describe('channel tokens stay in sync with their hex originals (#1708)', () => {
+describe('channel tokens stay in sync with their hex originals (#1708, per palette block since #2927)', () => {
+  const blocks = {
+    light: blockSlice(cssCode, LIGHT_OPENER),
+    mediaDark: blockSlice(cssCode, DARK_MEDIA_OPENER),
+    explicitDark: blockSlice(cssCode, DARK_EXPLICIT_OPENER),
+  }
+
   it('declares at least the palette the Tailwind theme consumes', () => {
     // A floor, not an inventory: it fails loudly if the block is deleted or
     // gutted, without forcing an edit every time a colour is added.
-    expect(channelTokens().length).toBeGreaterThanOrEqual(20)
+    expect(channelTokensIn(cssCode, blocks.light).length).toBeGreaterThanOrEqual(20)
   })
 
-  it('every --v2-<name>-rgb triplet equals its --v2-<name> hex', () => {
-    for (const { name, channels } of channelTokens()) {
-      const hex = css.match(new RegExp(`--v2-${name}:\\s*(#[0-9a-fA-F]{6})`))
-      // The hex form is the source of truth — token-contrast.test.ts reads it.
-      expect(hex, `--v2-${name} has a channel form but no #RRGGBB hex form`).not.toBeNull()
-      expect(channels, `--v2-${name}-rgb drifted from --v2-${name} (${hex![1]})`).toBe(
-        hexToChannels(hex![1].toLowerCase()),
-      )
-    }
-  })
+  for (const [blockName, span] of Object.entries(blocks) as Array<
+    [string, { start: number; end: number }]
+  >) {
+    it(`every --v2-<name>-rgb triplet equals its --v2-<name> hex in the ${blockName} block`, () => {
+      const blockText = cssCode.slice(span.start, span.end)
+      for (const { name, channels } of channelTokensIn(cssCode, span)) {
+        const hex = blockText.match(new RegExp(`--v2-${name}:\\s*(#[0-9a-fA-F]{6})`))
+        // The hex form is the source of truth — token-contrast.test.ts reads it.
+        expect(hex, `--v2-${name} has a channel form but no #RRGGBB hex form`).not.toBeNull()
+        expect(
+          channels,
+          `--v2-${name}-rgb drifted from --v2-${name} (${hex![1]}) in the ${blockName} block`,
+        ).toBe(hexToChannels(hex![1].toLowerCase()))
+      }
+    })
 
-  it('keeps every hex declaration in #RRGGBB form for token-contrast.test.ts', () => {
-    // That suite regex-parses `--v2-<name>: #RRGGBB` out of this same file.
-    // Replacing a hex with its channel form would make the colour invisible to
-    // the WCAG contrast guard instead of failing it. Checked for EVERY colour
-    // that has a channel form, not a hand-picked subset — a spot-check would
-    // miss exactly the token nobody thought to list.
-    const missing = channelTokens()
-      .map((t) => t.name)
-      .filter((name) => !new RegExp(`--v2-${name}:\\s*#[0-9a-f]{6};`).test(css))
-    expect(missing, 'these tokens lost their #RRGGBB form; token-contrast.test.ts reads it').toEqual(
-      [],
-    )
-  })
+    it(`keeps every hex declaration in #RRGGBB form in the ${blockName} block`, () => {
+      // That suite regex-parses `--v2-<name>: #RRGGBB` out of the same file.
+      // Replacing a hex with its channel form would make the colour invisible
+      // to the WCAG contrast guard instead of failing it. Checked for EVERY
+      // colour that has a channel form, not a hand-picked subset — a
+      // spot-check would miss exactly the token nobody thought to list.
+      const blockText = cssCode.slice(span.start, span.end)
+      const missing = channelTokensIn(cssCode, span)
+        .map((t) => t.name)
+        .filter((name) => !new RegExp(`--v2-${name}:\\s*#[0-9a-f]{6};`).test(blockText))
+      expect(
+        missing,
+        `these tokens lost their #RRGGBB form in the ${blockName} block; token-contrast.test.ts reads it`,
+      ).toEqual([])
+    })
+  }
 })
 
 describe('the Tailwind colour theme is alpha-capable (#1708)', () => {

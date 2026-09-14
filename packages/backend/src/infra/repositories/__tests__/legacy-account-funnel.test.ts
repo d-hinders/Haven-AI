@@ -19,12 +19,12 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 import {
-  listSafesForUser,
-  listSafesWithAccountTypeForUser,
-  listSessionSafesForUser,
-} from '../user-safes.js'
+  listAccountsForUser,
+  listAccountsWithTypeForUser,
+  listSessionAccountsForUser,
+} from '../smart-accounts.js'
 import { findAgentForUserAllStatuses, listAgentsForUserAllStatuses } from '../agents.js'
-import { listDashboardAgents, listDashboardSafes } from '../dashboard.js'
+import { listDashboardAgents, listDashboardAccounts } from '../dashboard.js'
 
 let n = 0
 
@@ -38,20 +38,20 @@ async function seedUser(): Promise<string> {
 
 // `account_type` is NOT NULL with a two-value CHECK (041_hybrid_accounts), so
 // the parameter is deliberately not nullable: there is no third state to seed.
-async function seedSafe(userId: string, accountType: 'safe' | 'delegator_hybrid'): Promise<string> {
+async function seedSafe(userId: string, accountType: 'legacy_safe' | 'delegator_hybrid'): Promise<string> {
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, name, chain_id, account_type)
+    `INSERT INTO smart_accounts (user_id, account_address, name, chain_id, account_type)
      VALUES ($1, $2, $3, 8453, $4) RETURNING id`,
     [userId, `0x${String(++n).padStart(40, '0')}`, `acct-${accountType}`, accountType],
   )
   return safe.rows[0].id
 }
 
-async function seedAgent(userId: string, safeId: string | null, name: string): Promise<void> {
+async function seedAgent(userId: string, accountId: string | null, name: string): Promise<void> {
   await db.query(
-    `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, safe_id)
+    `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, account_id)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    [userId, name, `0x${String(++n).padStart(40, 'a')}`, `hash-${n}`, `sk_${n}`, safeId],
+    [userId, name, `0x${String(++n).padStart(40, 'a')}`, `hash-${n}`, `sk_${n}`, accountId],
   )
 }
 
@@ -66,13 +66,13 @@ describeDb('legacy accounts are not listed (#2413)', () => {
   it('all three account-list queries return the delegation account and not the legacy one', async () => {
     const userId = await seedUser()
     await seedSafe(userId, 'delegator_hybrid')
-    await seedSafe(userId, 'safe')
+    await seedSafe(userId, 'legacy_safe')
 
-    expect((await listSafesForUser(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
-    expect((await listSafesWithAccountTypeForUser(userId)).map((s) => s.name)).toEqual([
+    expect((await listAccountsForUser(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
+    expect((await listAccountsWithTypeForUser(userId)).map((s) => s.name)).toEqual([
       'acct-delegator_hybrid',
     ])
-    expect((await listSessionSafesForUser(userId)).map((s) => s.name)).toEqual([
+    expect((await listSessionAccountsForUser(userId)).map((s) => s.name)).toEqual([
       'acct-delegator_hybrid',
     ])
   })
@@ -81,15 +81,15 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     // The accepted consequence, pinned rather than discovered: this user is
     // routed to onboarding, which provisions a Hybrid DeleGator.
     const userId = await seedUser()
-    await seedSafe(userId, 'safe')
+    await seedSafe(userId, 'legacy_safe')
 
-    expect(await listSessionSafesForUser(userId)).toEqual([])
+    expect(await listSessionAccountsForUser(userId)).toEqual([])
   })
 
   it('the agent list drops an agent bound to a legacy account and keeps a delegation one', async () => {
     const userId = await seedUser()
     const hybrid = await seedSafe(userId, 'delegator_hybrid')
-    const legacy = await seedSafe(userId, 'safe')
+    const legacy = await seedSafe(userId, 'legacy_safe')
     await seedAgent(userId, hybrid, 'delegation agent')
     await seedAgent(userId, legacy, 'legacy agent')
 
@@ -126,11 +126,11 @@ describeDb('legacy accounts are not listed (#2413)', () => {
   it('the dashboard overview lists neither legacy accounts nor their agents', async () => {
     const userId = await seedUser()
     const hybrid = await seedSafe(userId, 'delegator_hybrid')
-    const legacy = await seedSafe(userId, 'safe')
+    const legacy = await seedSafe(userId, 'legacy_safe')
     await seedAgent(userId, hybrid, 'delegation agent')
     await seedAgent(userId, legacy, 'legacy agent')
 
-    expect((await listDashboardSafes(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
+    expect((await listDashboardAccounts(userId)).map((s) => s.name)).toEqual(['acct-delegator_hybrid'])
     expect((await listDashboardAgents(userId)).map((a) => a.name)).toEqual(['delegation agent'])
   })
 
@@ -138,7 +138,7 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     // Otherwise the single-record route stays a way to reach an agent the list
     // refuses to show — the same inconsistency one layer down.
     const userId = await seedUser()
-    const legacy = await seedSafe(userId, 'safe')
+    const legacy = await seedSafe(userId, 'legacy_safe')
     await seedAgent(userId, legacy, 'legacy agent')
 
     const listed = await listAgentsForUserAllStatuses(userId)
@@ -153,8 +153,8 @@ describeDb('legacy accounts are not listed (#2413)', () => {
     const other = await seedUser()
     await seedSafe(owner, 'delegator_hybrid')
 
-    expect(await listSessionSafesForUser(other)).toEqual([])
-    expect(await listSafesForUser(other)).toEqual([])
-    expect(await listSafesWithAccountTypeForUser(other)).toEqual([])
+    expect(await listSessionAccountsForUser(other)).toEqual([])
+    expect(await listAccountsForUser(other)).toEqual([])
+    expect(await listAccountsWithTypeForUser(other)).toEqual([])
   })
 })

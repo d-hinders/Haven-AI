@@ -145,7 +145,7 @@ describe('re-key is delegation-rail only', () => {
     // let a half-provisioned account into the flow, where the revoke step
     // would fail after the ledger row was written.
     expect(railRefusal({ ...delegationAgent, treasury_address: null })).not.toBeNull()
-    expect(railRefusal({ ...delegationAgent, account_type: 'safe' })).not.toBeNull()
+    expect(railRefusal({ ...delegationAgent, account_type: 'legacy_safe' })).not.toBeNull()
   })
 })
 

@@ -43,7 +43,7 @@ function row(overrides: Record<string, unknown> = {}) {
     smart_account: SMART,
     chain_id: 84532,
     execution_rail: 'delegation',
-    safe_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    account_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
     ...overrides,
   }
 }
@@ -230,6 +230,9 @@ describe('minimal disclosure — the endpoint is unauthenticated', () => {
     expect(raw).not.toContain('833589fcd6edb6e08f4c7c32d4f71b54bda02913')
     expect(raw).not.toContain('user_id')
     expect(raw).not.toContain('safe_address')
+    // #2911: the row's field is `account_address` now — without this line the
+    // key-level guard above would be vacuous (the string could never appear).
+    expect(raw).not.toContain('account_address')
     expect(res.json().receipt.controls).toEqual({
       rail: 'delegation',
       policyEnforcedOnchain: true,

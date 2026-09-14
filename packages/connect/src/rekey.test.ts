@@ -34,7 +34,7 @@ async function seedAgent(serverName?: string): Promise<{ baseDir: string; direct
     apiKey: OLD_API_KEY,
     delegateKey: OLD_KEY,
     delegateAddress: OLD_DELEGATE,
-    safeAddress: '0x9999999999999999999999999999999999999999',
+    accountAddress: '0x9999999999999999999999999999999999999999',
     chainId: 84532,
     network: 'Base Sepolia',
     agentBudget: [{ token_symbol: 'USDC', allowance_amount: '25.000000', reset_period_min: 1440 }],

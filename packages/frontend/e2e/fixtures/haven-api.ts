@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test'
-import { ACTIVE_SAFE_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
+import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
 
 export const testSafeAddress = '0x1111111111111111111111111111111111111111'
 export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
@@ -21,10 +21,15 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  * spec that wants a retired-rail page today has nothing to opt down TO — the
  * state does not exist on the wire.
  *
- * The value is `'safe'` / `'delegator_hybrid'` and never `null` or absent:
- * migration `041_hybrid_accounts.ts` declares the column `VARCHAR(32) NOT NULL
- * DEFAULT 'safe'` with `CHECK (account_type IN ('safe','delegator_hybrid'))`,
- * so an absent value is not a state the backend can serve (#2202).
+ * The value is `'legacy_safe'` / `'delegator_hybrid'` and never `null` or
+ * absent: migration `041_hybrid_accounts.ts` declared the column
+ * `VARCHAR(32) NOT NULL DEFAULT 'safe'` with `CHECK (account_type IN
+ * ('safe','delegator_hybrid'))`, so an absent value is not a state the
+ * backend can serve (#2202). `085_account_type_legacy_safe.ts` (#2912) later
+ * renamed the retired value to `'legacy_safe'` and tightened the CHECK to
+ * `('legacy_safe','delegator_hybrid')` — the historical migration text above
+ * is unchanged (migrations are immutable), but the value this fixture
+ * exercises is the CURRENT one.
  */
 export const testSafe = {
   id: 'safe-main',
@@ -42,6 +47,7 @@ export const testUser = {
   email: 'ada@haven.test',
   wallet_address: null,
   safe_address: testSafeAddress,
+  accounts: [testSafe],
   safes: [testSafe],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
@@ -104,8 +110,8 @@ export const dashboardTransaction = {
   agentId: testAgent.id,
   agentName: testAgent.name,
   chainId: 8453,
-  safeId: testSafe.id,
-  safeAddress: testSafeAddress,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
   safeName: testSafe.name,
   source: 'x402',
   x402ResourceUrl: 'https://research.example/report',
@@ -170,7 +176,7 @@ export const dashboardOverview = {
       id: testAgent.id,
       name: testAgent.name,
       status: testAgent.status,
-      safeId: testSafe.id,
+      accountId: testSafe.id,
       safeName: testSafe.name,
       safeChainId: testSafe.chain_id,
       // #2264: same derived projection as `testAgent.allowances`, in the
@@ -748,7 +754,7 @@ export async function serveAccountingFeedStatus(page: Page, status: unknown) {
  * non-empty set — signer.test.ts › "owner-only hybrid set: the connected OWNER
  * wallet resolves as the EOA signer (#2068)"), so a connected wallet on a
  * supported chain reaches the connected-EOA branch. WHICH label that branch
- * carries is `useSafeOperationGate`'s call: the named owner connected renders
+ * carries is `useAccountOperationGate`'s call: the named owner connected renders
  * the truncated address; any other wallet renders "Wrong wallet" (#2073).
  * `ownerAddress` is therefore the caller's decision, made explicit.
  *
@@ -971,13 +977,13 @@ export async function serveAgentDetailResponses(page: Page, agentId: string) {
 
 export async function seedAuthenticatedSession(page: Page) {
   await page.addInitScript(
-    ({ tokenKey, activeSafeKey }) => {
+    ({ tokenKey, activeAccountKey }) => {
       window.localStorage.setItem(tokenKey, 'e2e-token')
-      window.localStorage.setItem(activeSafeKey, 'safe-main')
+      window.localStorage.setItem(activeAccountKey, 'safe-main')
     },
     {
       tokenKey: AUTH_TOKEN_STORAGE_KEY,
-      activeSafeKey: ACTIVE_SAFE_STORAGE_KEY,
+      activeAccountKey: ACTIVE_ACCOUNT_STORAGE_KEY,
     },
   )
 }

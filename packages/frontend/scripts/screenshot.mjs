@@ -119,7 +119,7 @@
  *     npm run screenshot -w packages/frontend -- --scenario=connect-agent
  *
  * ── The fixture ──────────────────────────────────────────────────────────────
- * Auth: an `haven_token` + `haven_active_safe_id` are seeded in localStorage
+ * Auth: an `haven_token` + `haven_active_account_id` are seeded in localStorage
  * before any script runs (the same keys the app and e2e fixtures use), so
  * authenticated routes render without a real login. Data: Haven-API requests
  * are answered by a route-keyed POPULATED dataset (a funded account, two
@@ -143,7 +143,7 @@
  * definition (`ROUTE_DEFINITIONS` below; `signedOut: true`), the way
  * `scenario.seed()` is already conditional. A caller captures `/login` by
  * passing `/login`: the harness reads the route's own definition, captures it
- * WITHOUT the token/active-safe seed, and renders the route's real screen
+ * WITHOUT the token/active-account seed, and renders the route's real screen
  * instead of its redirect target. No flag to remember, and one run still
  * captures `/dashboard` and `/login` together: routes are PARTITIONED per
  * viewport by their definitions — an authenticated context and a signed-out
@@ -218,6 +218,11 @@ import {
 // The EXPECTED installed-shell identity is transpiled from the app's own
 // source (#2735), never restated here — see the docblock section above.
 import { loadInstalledAppExpectations } from './installed-app-source.mjs'
+// The theme seed key is the APP'S OWN constant, not a restated literal — the
+// same contract the auth keys below hold with `src/lib/auth-storage.ts`:
+// a rename in ThemeContext's storage must fail a test, not silently capture
+// light-mode PNGs labelled dark (#2929).
+import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap.ts'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, '.screenshots')
 const PUBLIC_DIR = path.join(ROOT, 'public')
@@ -242,7 +247,64 @@ const DEVICE_SCALE_FACTOR = 2
 // there must fail a test here, not silently capture logged-out screenshots.
 export const SEED_STORAGE_KEYS = {
   token: 'haven_token',
-  activeSafe: 'haven_active_safe_id',
+  activeAccount: 'haven_active_account_id',
+}
+
+// ── Color scheme of a run (#2929) ────────────────────────────────────────────
+// `--color-scheme light|dark|both` picks the palette the captures render in.
+// `both` produces PAIRED PNGs (`<route>-<vp>-light.png` / `<route>-<vp>-dark.png`)
+// so the design reviewer can compare the two schemes side by side.
+//
+// Two mechanisms, and the issue is explicit about which one carries
+// determinism: the storage seed (`haven.theme`) is what makes the render
+// deterministic — the app's ThemeContext reads the stored choice and stamps
+// `data-theme`, which pins the token block REGARDLESS of the OS setting —
+// while Playwright's `colorScheme` sets `prefers-color-scheme` so the media-
+// query path and any OS-sensitive rendering agree with the seed. The seed is
+// read through the app's own `THEME_STORAGE_KEY` constant (see the import
+// above), so a storage-key rename fails the parity test instead of silently
+// labelling light PNGs dark.
+
+/** The schemes a run may capture, and the exact flag values that name them. */
+export const COLOR_SCHEMES = ['light', 'dark'] // pair order: name in filenames
+const COLOR_SCHEME_FLAG = '--color-scheme='
+
+/**
+ * Parse the run's requested color scheme.
+ *
+ * Pure and exported for the fixture test. Absent flag → `['light']`, which is
+ * byte-identical to every run this harness ever produced (no scheme suffix on
+ * filenames, light palette) — the flag is purely additive.
+ *
+ * @param {string[]} [args] the raw CLI args
+ * @param {Record<string, string | undefined>} [env] the environment to read the
+ *   fallback from — injectable so the parity test can drive it without touching
+ *   the real `process.env`
+ * @returns {('light' | 'dark')[]} the schemes this run captures
+ */
+export function resolveColorScheme(args = [], env = process.env) {
+  const raw = args.find((a) => a.startsWith(COLOR_SCHEME_FLAG))?.slice(COLOR_SCHEME_FLAG.length)
+  const value = (raw ?? env.SCREENSHOT_COLOR_SCHEME ?? '').trim().toLowerCase()
+  if (value === '') return ['light']
+  if (value === 'both') return COLOR_SCHEMES
+  if (COLOR_SCHEMES.includes(value)) return [value]
+  throw new Error(
+    `Invalid ${COLOR_SCHEME_FLAG.slice(0, -1)} value "${raw}" — expected ${COLOR_SCHEMES.join('|both')}.`,
+  )
+}
+
+/**
+ * The storage seed for one scheme: the app's own theme key, so ThemeContext
+ * hydrates onto the exact palette the run asked for. Pure and exported for the
+ * parity test. `null` seed = stamp nothing — the app falls to its light
+ * default, which is what the light run captures.
+ *
+ * @param {'light' | 'dark'} scheme
+ * @returns {Record<string, string> | null}
+ */
+export function themeSeedFor(scheme) {
+  if (scheme === 'dark') return { [THEME_STORAGE_KEY]: 'dark' }
+  return null
 }
 
 // ── Installed-shell metadata check (#2735) ───────────────────────────────────
@@ -467,22 +529,25 @@ export function resolveRouteAuthPartitions(routes, signedOutRoutes) {
  * /dashboard identity check below. A mutual pair is one record, anchored at
  * the first capture in run order. Exported and pure for the fixture test.
  */
-export function findSignedOutDuplicates(signedOutFiles, allFiles) {
+export function findSignedOutDuplicates(signedOutFiles, allFiles, partitionKey) {
   const pool = allFiles.filter((f) => f.route !== '/design-system')
   // A mutual pair (X matches Y and Y matches X) is ONE duplicate, not two —
   // the same bytes in the same viewport are one fact. Canonical pair key
   // `viewport|sorted-routes`, anchored at whichever capture comes first in
   // run order; the advisory is direction-agnostic (it names the twin, not a
   // cause), so the anchor choice carries no claim about which route moved.
+  // `partitionKey` (#2929) scopes comparison WITHIN one color scheme: a `both`
+  // run never reports a dark capture as its light twin's duplicate.
+  const key = (f) => (partitionKey ? `${partitionKey(f)}|${f.viewport}` : f.viewport)
   const seenPairs = new Set()
   return signedOutFiles
     .map((f) => {
-      const twin = pool.find((other) => other.viewport === f.viewport && other.route !== f.route && other.sha256 === f.sha256)
+      const twin = pool.find((other) => key(other) === key(f) && other.route !== f.route && other.sha256 === f.sha256)
       if (!twin) return null
-      const pairKey = `${f.viewport}|${[f.route, twin.route].sort().join('=')}`
+      const pairKey = `${key(f)}|${[f.route, twin.route].sort().join('=')}`
       if (seenPairs.has(pairKey)) return null
       seenPairs.add(pairKey)
-      return { route: f.route, viewport: f.viewport, file: f.file, sha256: f.sha256, matches: twin.route }
+      return { route: f.route, viewport: f.viewport, scheme: f.scheme, file: f.file, sha256: f.sha256, matches: twin.route }
     })
     .filter(Boolean)
 }
@@ -507,13 +572,23 @@ export function findSignedOutDuplicates(signedOutFiles, allFiles) {
  *
  * Exported and pure for the fixture test.
  */
-export function findRedirectCaptures(files, dashboardByViewport) {
+export function findRedirectCaptures(files, dashboardByViewport, partitionKey) {
+  // `partitionKey` (#2929): the lookup key gains the capture's color scheme on
+  // a `both` run, so a dark capture is only ever judged against the dark
+  // dashboard — cross-palette bytes are never identical and never comparable.
+  const lookupKey = (f) => (partitionKey ? `${partitionKey(f)}|${f.viewport}` : f.viewport)
   return files
     .filter((f) => f.route !== '/dashboard')
-    .filter((f) => dashboardByViewport.has(f.viewport) && dashboardByViewport.get(f.viewport) === f.sha256)
+    .filter((f) => {
+      const k = lookupKey(f)
+      return dashboardByViewport.has(k) && dashboardByViewport.get(k) === f.sha256
+    })
     .map((f) => ({
       route: f.route,
       viewport: f.viewport,
+      // Which palette convicted it (#2929): on a `both` run the manifest
+      // reader must be able to tell which side of the pair redirected.
+      scheme: f.scheme,
       file: f.file,
       sha256: f.sha256,
       text:
@@ -544,7 +619,7 @@ export function findRedirectCaptures(files, dashboardByViewport) {
  *                          floor; the only tell is that it is short
  *   'unknown'              anything else, never silently folded into the above
  */
-export function describeDeletedCapture(err, { route, viewport, file, written = true }) {
+export function describeDeletedCapture(err, { route, viewport, scheme = null, file, written = true }) {
   const message = String(err?.message ?? err)
   const cause =
     err?.shellCause ??
@@ -557,6 +632,7 @@ export function describeDeletedCapture(err, { route, viewport, file, written = t
   return {
     route,
     viewport,
+    scheme: scheme ?? null,
     file,
     // "Deleted" and "never written" are different facts, and a change whose
     // entire subject is precise causal reporting should not blur them: a shell
@@ -589,11 +665,23 @@ export function describeDeletedCapture(err, { route, viewport, file, written = t
  * `deletedCaptures`, which is why this guard is scoped to the wrong-width one.
  *
  * Pure and exported so it can be tested without booting a browser.
+ *
+ * @param {string[]} files the capture file names
+ * @param {{name: string}[]} viewports the widths the run resolved
+ * @param {string[]} [schemes] the schemes this run captured (#2929)
  */
-export function findViewportMismatches(files, viewports) {
+export function findViewportMismatches(files, viewports, schemes = ['light']) {
   const names = viewports.map((vp) => vp.name)
-  // `<slug>-<vp.name>.png`, and the taller re-shoot `<base>-<vp.name>-full.png`.
-  const suffixes = names.flatMap((name) => [`-${name}.png`, `-${name}-full.png`])
+  // `<slug>-<vp.name>.png` (light keeps the historical suffix-free name),
+  // `<slug>-<vp.name>-<scheme>.png` for every other scheme (#2929), and the
+  // taller re-shoot `<base>-<vp.name>[-<scheme>]-full.png`.
+  const schemeParts = schemes.map((s) => (s === 'light' ? '' : `-${s}`))
+  const suffixes = names.flatMap((name) =>
+    schemeParts.flatMap((schemeSuffix) => [
+      `-${name}${schemeSuffix}.png`,
+      `-${name}${schemeSuffix}-full.png`,
+    ]),
+  )
   return files
     .filter((file) => !suffixes.some((suffix) => file.endsWith(suffix)))
     .map((file) => ({ file, expected: names }))
@@ -621,7 +709,7 @@ export function formatDeletionReport(deleted) {
 
 // Authenticated-session fixture — mirrors the e2e `testUser` shape so
 // `/auth/me` resolves and the app shell renders. No secrets, no live backend.
-export const FIXTURE_SAFE = {
+export const FIXTURE_ACCOUNT = {
   id: 'safe-fixture',
   name: 'Operating wallet',
   safe_address: '0x1111111111111111111111111111111111111111',
@@ -642,10 +730,10 @@ export const FIXTURE_USER = {
   name: 'Screenshot Fixture',
   email: 'fixture@haven.test',
   wallet_address: null,
-  safe_address: FIXTURE_SAFE.safe_address,
+  safe_address: FIXTURE_ACCOUNT.safe_address,
   // Delegation-rail on the `/auth/me`-shaped safes list only — so the account
   // page's Backup & recovery card (#1089) has something real to render,
-  // without perturbing FIXTURE_SAFE's identity shape (pinned against the e2e
+  // without perturbing FIXTURE_ACCOUNT's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
   //
   // #2413: the legacy account #2202 listed beside it is GONE, and this is a
@@ -656,7 +744,8 @@ export const FIXTURE_USER = {
   // Every screenshot taken from that would depict a screen production cannot
   // produce. The harness caught this itself ("a fixture-shape gap or a real
   // client bug"), which is what that check is for.
-  safes: [{ ...FIXTURE_SAFE, account_type: 'delegator_hybrid' }],
+  accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
+  safes: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -683,7 +772,7 @@ const T0 = Date.parse('2026-07-10T09:00:00.000Z') / 1000 // fixed anchor, in sec
 const tx = (i, over = {}) => ({
   hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
   type: 'erc20',
-  from: FIXTURE_SAFE.safe_address,
+  from: FIXTURE_ACCOUNT.safe_address,
   to: ADDR.recipient,
   value: '25000000',
   valueFormatted: '25.00',
@@ -695,10 +784,10 @@ const tx = (i, over = {}) => ({
   isError: false,
   tokenSymbol: 'USDC',
   // AggregatedTransaction extras (harmless on the plain Transaction shape):
-  chainId: FIXTURE_SAFE.chain_id,
-  safeId: FIXTURE_SAFE.id,
-  safeAddress: FIXTURE_SAFE.safe_address,
-  safeName: FIXTURE_SAFE.name,
+  chainId: FIXTURE_ACCOUNT.chain_id,
+  accountId: FIXTURE_ACCOUNT.id,
+  accountAddress: FIXTURE_ACCOUNT.safe_address,
+  safeName: FIXTURE_ACCOUNT.name,
   ...over,
 })
 // #2870: the accounting badge's three states on three agent rows — pushed
@@ -711,14 +800,14 @@ export const FIXTURE_TXS = [
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
     paymentId: 'pay-1', accounting: accounting('pushed', { externalRef: 'fortnox:supplierinvoice:11' }),
   }),
-  tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_SAFE.safe_address, valueFormatted: '150.00', value: '150000000' }),
+  tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_ACCOUNT.safe_address, valueFormatted: '150.00', value: '150000000' }),
   tx(3, { agentName: 'Ops agent', paymentId: 'pay-3', accounting: accounting('pending') }),
   tx(4, { asset: 'ETH', tokenSymbol: undefined, type: 'native', decimals: 18, value: '12000000000000000', valueFormatted: '0.012' }),
   tx(5, {
     isError: true, agentName: 'Research agent',
     paymentId: 'pay-5', accounting: accounting('failed', { error: 'Fortnox answered 502 — will retry on the next sync' }),
   }),
-  tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_SAFE.safe_address, valueFormatted: '75.50', value: '75500000' }),
+  tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_ACCOUNT.safe_address, valueFormatted: '75.50', value: '75500000' }),
 ]
 
 export const FIXTURE_AGENTS = [
@@ -758,9 +847,9 @@ export const FIXTURE_AGENTS = [
     //   `/agents/:id/delegate-balance` was unkeyed in `fixtureFor` and
     //   `FIXTURE_EMPTY_FALLBACK` has no `usdc_atomic`, making `undefined !== '0'`
     //   true. Both halves are fixed together, below and in `fixtureFor`.
-    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_SAFE.id,
-    safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
-    safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
+    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_ACCOUNT.id,
+    safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    safe_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
     created_at: '2026-06-02T10:00:00.000Z',
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
@@ -806,9 +895,9 @@ export const FIXTURE_AGENTS = [
     // state is a pre-column legacy artefact (`000_initial.ts:40`) rather than
     // something a current write path can produce: this agent is seeded with no
     // payment intents, so nothing else contradicts it.
-    delegate_address: null, safe_id: FIXTURE_SAFE.id,
-    safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
-    safe_chain_id: FIXTURE_SAFE.chain_id, account_type: 'delegator_hybrid',
+    delegate_address: null, safe_id: FIXTURE_ACCOUNT.id,
+    safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    safe_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_g7h8i9', status: 'paused',
     created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
     // #2106: a PAUSED agent whose on-chain delegation is still live. That
@@ -833,8 +922,8 @@ const FIXTURE_PORTFOLIO = {
 }
 const FIXTURE_BALANCES = {
   balances: [
-    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11,890.55', decimals: 6, chainId: FIXTURE_SAFE.chain_id },
-    { symbol: 'ETH', address: null, balance: '250000000000000000', formatted: '0.25', decimals: 18, chainId: FIXTURE_SAFE.chain_id },
+    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11,890.55', decimals: 6, chainId: FIXTURE_ACCOUNT.chain_id },
+    { symbol: 'ETH', address: null, balance: '250000000000000000', formatted: '0.25', decimals: 18, chainId: FIXTURE_ACCOUNT.chain_id },
   ],
 }
 export const FIXTURE_OVERVIEW = {
@@ -849,7 +938,7 @@ export const FIXTURE_OVERVIEW = {
   actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
   agents: FIXTURE_AGENTS.map((a) => ({
-    id: a.id, name: a.name, status: a.status, safeId: a.safe_id,
+    id: a.id, name: a.name, status: a.status, accountId: a.safe_id,
     safeName: a.safe_name, safeChainId: a.safe_chain_id,
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
@@ -873,8 +962,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     // rendered "Sent" here because the deleted APPROVAL_STATUS map caught it.
     reason: null, status: 'confirmed', tx_hash: `0x${'a1'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/reports',
-    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
     // #2126: BOTH fields were fabricated. `payment_proof_status` mirrors
     // `machine_payment_evidence.proof_status`, whose only constructible values
@@ -919,8 +1008,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     token: 'USDC', token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
     reason: null, status: 'failed', tx_hash: null, source: 'api',
-    x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: null, confirmed_at: null, payment_proof_status: null,
     payment_flow_status: null, payment_attention_reason: null,
     created_at: '2026-07-10T07:45:00.000Z',
@@ -931,8 +1020,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     amount_raw: '4500000', amount: '4.50', to: ADDR.recipient,
     reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
-    chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'b2'.repeat(32)}`,
     // #2126: null, not 'paid'. `source: 'api'` is not in
     // `MACHINE_PAYMENT_RAILS` (`x402 | mpp_demo | mpp_crypto | spt`,
@@ -1005,8 +1094,8 @@ export const FIXTURE_AGENT_ACTIVITY = [
     amount_raw: '8000000', amount: '8.00', to: ADDR.merchant,
     reason: null, status: 'confirmed', tx_hash: `0x${'c3'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/datasets',
-    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_SAFE.chain_id,
-    safe_id: FIXTURE_SAFE.id, safe_address: FIXTURE_SAFE.safe_address, safe_name: FIXTURE_SAFE.name,
+    x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_ACCOUNT.chain_id,
+    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'c3'.repeat(32)}`,
     confirmed_at: '2026-07-09T09:16:00.000Z', payment_proof_status: 'payment_confirmed',
     payment_flow_status: 'needs_attention',
@@ -1083,13 +1172,13 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // The recoverable-funds incident, and the ONLY agent that renders the banner.
   'agent-research': {
     delegate_address: ADDR.researchDelegate,
-    safe_address: FIXTURE_SAFE.safe_address,
-    chain_id: FIXTURE_SAFE.chain_id,
+    safe_address: FIXTURE_ACCOUNT.safe_address,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
     eth: '0',
     eth_atomic: '0',
     usdc: STRANDED_INTENT.amount,
     usdc_atomic: STRANDED_INTENT.amount_raw,
-    usdc_address: resolveToken(FIXTURE_SAFE.chain_id, 'USDC').address,
+    usdc_address: resolveToken(FIXTURE_ACCOUNT.chain_id, 'USDC').address,
     sweep_min_usdc: '0.01',
   },
   // A delegate that holds nothing — the ordinary steady state, and the
@@ -1259,7 +1348,7 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
-  if (pathname === '/chains') return { deployable: [FIXTURE_SAFE.chain_id] }
+  if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
@@ -1287,11 +1376,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions/filters') {
     return {
-      safes: [{ id: FIXTURE_SAFE.id, name: FIXTURE_SAFE.name, address: FIXTURE_SAFE.safe_address, chainId: FIXTURE_SAFE.chain_id }],
+      safes: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.safe_address, chainId: FIXTURE_ACCOUNT.chain_id }],
       agents: FIXTURE_AGENTS.map((a) => ({ id: a.id, name: a.name, status: a.status })),
       tokens: [
-        { key: `usdc:${FIXTURE_SAFE.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_SAFE.chain_id, isNative: false },
-        { key: `eth:${FIXTURE_SAFE.chain_id}`, symbol: 'ETH', address: null, chainId: FIXTURE_SAFE.chain_id, isNative: true },
+        { key: `usdc:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_ACCOUNT.chain_id, isNative: false },
+        { key: `eth:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'ETH', address: null, chainId: FIXTURE_ACCOUNT.chain_id, isNative: true },
       ],
     }
   }
@@ -1303,8 +1392,8 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
     // Backup & recovery card renders its "only one way to approve" state.
     return {
-      account_address: FIXTURE_SAFE.safe_address,
-      chain_id: FIXTURE_SAFE.chain_id,
+      account_address: FIXTURE_ACCOUNT.safe_address,
+      chain_id: FIXTURE_ACCOUNT.chain_id,
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
     }
@@ -1333,7 +1422,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     if (pathname === `/agents/agent-research/delegations`) {
       return {
         delegations: [{
-          id: 'dlg-1', chain_id: FIXTURE_SAFE.chain_id,
+          id: 'dlg-1', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: ADDR.merchant,
           delegation_hash: '0x' + '4d'.repeat(32),
@@ -1348,7 +1437,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     if (pathname === `/agents/agent-retired/delegations`) {
       return {
         delegations: [{
-          id: 'dlg-2', chain_id: FIXTURE_SAFE.chain_id,
+          id: 'dlg-2', chain_id: FIXTURE_ACCOUNT.chain_id,
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
           delegation_hash: '0x' + '5e'.repeat(32),
@@ -1371,7 +1460,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
         passport: {
           status: 'anchored', assurance_level: 0,
           attestation_uid: '0x' + '22'.repeat(32),
-          tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_SAFE.chain_id,
+          tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_ACCOUNT.chain_id,
           attempts: 1, last_error: null,
           requested_at: '2026-06-02T10:05:00.000Z', anchored_at: '2026-06-02T10:05:12.000Z',
         },
@@ -1857,11 +1946,18 @@ export const STALE_BUSY_DECLARATIONS = []
  * with a failure instead (#1725); `delayedHttp` keeps it pending long enough
  * to capture a loading branch.
  */
-async function newFixtureContext(browser, vp, scenario, { signedOut = false } = {}) {
+async function newFixtureContext(browser, vp, scenario, { signedOut = false, colorScheme = 'light' } = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
     deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
+    // The OS-preference half of the scheme contract (#2929). The DETERMINISTIC
+    // half is the storage seed below — the app stamps `data-theme` from the
+    // stored choice, which pins the token block regardless of this setting —
+    // but `prefers-color-scheme` must agree with the seed so the media-query
+    // token path, native form controls and scrollbars all render the same
+    // palette the seed asked for.
+    colorScheme,
   })
 
   // Auth fixture: seed the token before any app code runs — UNLESS this
@@ -1873,12 +1969,12 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
   if (!signedOut) {
     await context.addInitScript((keys) => {
       window.localStorage.setItem(keys.token, 'screenshot-fixture-token')
-      window.localStorage.setItem(keys.activeSafe, 'safe-fixture')
+      window.localStorage.setItem(keys.activeAccount, 'safe-fixture')
     }, SEED_STORAGE_KEYS)
   }
 
   // Device-local state a scenario needs (#1856). Some gates read localStorage
-  // rather than the API — `useSafeOperationGate` resolves the signer from the
+  // rather than the API — `useAccountOperationGate` resolves the signer from the
   // passkey store the app itself writes at enrolment, and no API answer can
   // put a credential on this device. `scenario.seed()` returns the same
   // key/value pairs that store holds, seeded before any app code runs, exactly
@@ -1889,17 +1985,21 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
   // a hook for stubbing component state, and a scenario that needs one should
   // be re-examined rather than served here.
   // Scenario data is limited to deterministic API and browser fixtures.
-  const seeded = scenario?.seed?.()
-  if (seeded) {
+  // The theme seed (#2929) rides the SAME seam — it seeds the app's own
+  // `haven.theme` key, so ThemeContext (not the harness) decides the palette,
+  // through the app's real read path.
+  const seeded = { ...(scenario?.seed?.() ?? {}), ...(themeSeedFor(colorScheme) ?? {}) }
+  const seededEntries = Object.entries(seeded)
+  if (seededEntries.length > 0) {
     await context.addInitScript((entries) => {
       for (const [key, value] of entries) window.localStorage.setItem(key, value)
-    }, Object.entries(seeded))
+    }, seededEntries)
   }
 
   // A CONNECTED wallet, through the real wagmi path (#2073). Same posture as
   // `scenario.seed()` above: this stubs the BROWSER-side seam the product
   // reads (an EIP-1193 provider on `window.ethereum`), so wagmi's own
-  // `injected()` connector reconnect, `useAccount`, `useSafeOperationGate`
+  // `injected()` connector reconnect, `useAccount`, `useAccountOperationGate`
   // and the header render are all real. The two seeded wagmi keys are what
   // lets the targetless injected connector reconnect on mount
   // (`isAuthorized` requires `injected.connected`; `recentConnectorId` puts
@@ -1927,7 +2027,7 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
       },
       {
         addr: scenario.connectedWallet,
-        chainIdHex: `0x${FIXTURE_SAFE.chain_id.toString(16)}`,
+        chainIdHex: `0x${FIXTURE_ACCOUNT.chain_id.toString(16)}`,
       },
     )
   }
@@ -2005,7 +2105,7 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false } = 
       })
     }
     if (api === '/auth/me') return json(FIXTURE_USER)
-    if (api === '/user/safes') return json({ safes: FIXTURE_USER.safes })
+    if (api === '/user/safes') return json({ safes: FIXTURE_USER.accounts })
     const populated = fixtureFor(api + search)
     // #2194: the SAME `instanceof` check the scenario branch above makes, for
     // the same reason and one layer down. `fixtureFor` can now seed a route's
@@ -2166,8 +2266,8 @@ const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_
  */
 const BACKUP_RECOVERY_STAGES = {
   healthy: {
-    account_address: FIXTURE_SAFE.safe_address,
-    chain_id: FIXTURE_SAFE.chain_id,
+    account_address: FIXTURE_ACCOUNT.safe_address,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
     owner_address: '0x' + 'ee'.repeat(20),
     // Both dates are noon UTC so the rendered day cannot slide either way with
     // the runner's timezone — the label IS the evidence here. March 3 is the
@@ -2184,8 +2284,8 @@ const BACKUP_RECOVERY_STAGES = {
   // this is the minimum that renders it — and `owner_address: null` rather
   // than an omitted key, because the absence is the claim.
   'one-way': {
-    account_address: FIXTURE_SAFE.safe_address,
-    chain_id: FIXTURE_SAFE.chain_id,
+    account_address: FIXTURE_ACCOUNT.safe_address,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
     owner_address: null,
     passkeys: [
       { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
@@ -2325,10 +2425,10 @@ function connectorRepairHintScenarios() {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           agent_budget: [
@@ -2360,8 +2460,8 @@ function connectorRepairHintScenarios() {
       }
       if (apiPath === '/agents/agent-research/account-signers') {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: null,
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
@@ -3077,7 +3177,7 @@ export const SCENARIOS = {
       }
 
       await settleOnStage(() =>
-        page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, {
+        page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, {
           waitUntil: 'networkidle',
           timeout: 30_000,
         }),
@@ -3173,7 +3273,7 @@ export const SCENARIOS = {
           passport: {
             status: 'anchored', assurance_level: 0,
             attestation_uid: '0x' + '22'.repeat(32),
-            tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_SAFE.chain_id,
+            tx_hash: `0x${'c3'.repeat(32)}`, chain_id: FIXTURE_ACCOUNT.chain_id,
             attempts: 1, last_error: null,
             requested_at: '2026-06-02T10:05:00.000Z', anchored_at: '2026-06-02T10:05:12.000Z',
           },
@@ -3254,16 +3354,16 @@ export const SCENARIOS = {
       // otherwise have DELETED the refusal's only rendered evidence.
       if (apiPath === '/agents/agent-retired/account-signers') {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [],
         }
       }
       if (apiPath.endsWith('/account-signers')) {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [
             { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
@@ -3373,8 +3473,8 @@ export const SCENARIOS = {
     api(apiPath) {
       if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
@@ -3382,7 +3482,7 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/accounts/${FIXTURE_SAFE.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
       await dismissMobileSidebar(page, vp)
 
       await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
@@ -3427,10 +3527,10 @@ export const SCENARIOS = {
         return {
           agent: { name: 'Research agent', description: null },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           agent_budget: [],
@@ -3458,10 +3558,10 @@ export const SCENARIOS = {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: null },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           agent_budget: [],
@@ -3569,10 +3669,10 @@ export const SCENARIOS = {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: 'Pays for research APIs' },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           // 25.00 USDC per day, atomic — the Budget row is the whole reason
@@ -3608,8 +3708,8 @@ export const SCENARIOS = {
       // connect-wallet fallback instead of the Approve button this issue is about.
       if (apiPath === '/agents/agent-research/account-signers') {
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: null,
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
         }
@@ -3732,10 +3832,10 @@ export const SCENARIOS = {
           expires_at: '2099-01-01T00:00:00.000Z',
           agent: { name: 'Research agent', description: null },
           haven_wallet: {
-            id: FIXTURE_SAFE.id,
-            name: FIXTURE_SAFE.name,
-            address: FIXTURE_SAFE.safe_address,
-            chain_id: FIXTURE_SAFE.chain_id,
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.safe_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
           // A REAL grant, in atomic units: 25.00 USDC per day. The screen's
@@ -3843,10 +3943,10 @@ export const SCENARIOS = {
               expires_at: '2099-01-01T00:00:00.000Z',
               agent: { name: 'Research agent', description: null },
               haven_wallet: {
-                id: FIXTURE_SAFE.id,
-                name: FIXTURE_SAFE.name,
-                address: FIXTURE_SAFE.safe_address,
-                chain_id: FIXTURE_SAFE.chain_id,
+                id: FIXTURE_ACCOUNT.id,
+                name: FIXTURE_ACCOUNT.name,
+                address: FIXTURE_ACCOUNT.safe_address,
+                chain_id: FIXTURE_ACCOUNT.chain_id,
                 network: 'Base Sepolia',
               },
               agent_budget: [
@@ -3916,7 +4016,7 @@ export const SCENARIOS = {
     // (`scenario.seed`) but not the second. `connectedWallet` (the #2073 seam
     // in `newFixtureContext`) is the missing input. Everything above the
     // stubbed provider is the product's own code: wagmi reconnects the
-    // injected connector, `useSafeOperationGate` compares the connected
+    // injected connector, `useAccountOperationGate` compares the connected
     // address to the set's `owner_address`, and the header renders the
     // mismatch. The signer set arrives through the REAL hydration path — the
     // api() override below is what `AuthContext` reads and writes to the
@@ -3927,8 +4027,8 @@ export const SCENARIOS = {
         // Owner-only set: an EOA owner, zero enrolled passkeys — #2068's
         // shape, where the connected wallet's identity is the whole answer.
         return {
-          account_address: FIXTURE_SAFE.safe_address,
-          chain_id: FIXTURE_SAFE.chain_id,
+          account_address: FIXTURE_ACCOUNT.safe_address,
+          chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [],
         }
@@ -4002,7 +4102,7 @@ export const SCENARIOS = {
     // this scenario timed out waiting for the button while the unresolved
     // counterpart found it, because a missing chain_id happens to route the
     // gate down a different branch. Putting the account on the Safe rail
-    // (`account_type: 'safe'`) leaves it with no stored passkey, i.e.
+    // (`account_type: 'legacy_safe'`) leaves it with no stored passkey, i.e.
     // `no_signer`, which is a hero that offers its actions. Nothing about the
     // modal under capture changes.
     //
@@ -4014,9 +4114,9 @@ export const SCENARIOS = {
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
     // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       // Same both-endpoints reasoning as the unresolved twin below.
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4057,7 +4157,7 @@ export const SCENARIOS = {
     // `chain_id` — and the pair is therefore evidence about the chain and
     // nothing else.
     // Both safe-serving endpoints are overridden even though the dashboard reads
-    // only `/auth/me` (`DashboardClient.tsx:633` → `user?.safes`). Deliberate,
+    // only `/auth/me` (`DashboardClient.tsx:633` → `user?.accounts`). Deliberate,
     // not over-mocking: a fixture whose two safe endpoints disagree about
     // whether an account HAS a chain is a trap for the next scenario that
     // reaches for the other one, and the disagreement would be invisible.
@@ -4065,9 +4165,9 @@ export const SCENARIOS = {
       // #2202: the rail is NAMED here too, exactly as its resolved twin names
       // it — the pair is only evidence about `chain_id` if `chain_id` is the
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
+      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
       delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
       return undefined
     },
@@ -4087,12 +4187,12 @@ export const SCENARIOS = {
     description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
     // The resolved half of the #1852 pair. Same construction as `add-funds`
     // above and for the same reasons: the chain data is the shared fixture's
-    // (84532), and the ONE override is the rail marker (`account_type: 'safe'`,
+    // (84532), and the ONE override is the rail marker (`account_type: 'legacy_safe'`,
     // #2202 — see `add-funds` for why it is SET rather than dropped) so the
     // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4126,7 +4226,7 @@ export const SCENARIOS = {
     // endpoints for their whole run.
     //
     // The state is not reachable through the UI today (`chain_id` is
-    // non-nullable in `UserSafe`, and the hero only offers Receive when an
+    // non-nullable in `SmartAccount`, and the hero only offers Receive when an
     // account exists). What IS reachable is the wire condition: a safe that
     // arrives WITHOUT `chain_id`. That is what this serves — at the API
     // boundary, with no component code mutated — so the capture evidences the
@@ -4137,9 +4237,9 @@ export const SCENARIOS = {
       // #2202: the rail is NAMED here too, exactly as its resolved twin names
       // it — the pair is only evidence about `chain_id` if `chain_id` is the
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_SAFE, account_type: 'safe' }
+      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
       delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, safes: [safeWithoutChain] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
       if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
       return undefined
     },
@@ -4176,7 +4276,7 @@ export const SCENARIOS = {
     //    `activeStep === 3`). Funds and agents come from the shared fixture
     //    untouched, so steps 1 and 2 are genuinely complete and step 3 is
     //    genuinely the active one.
-    // 2. `account_type: 'safe'` on the account. Same override, same reason, as
+    // 2. `account_type: 'legacy_safe'` on the account. Same override, same reason, as
     //    the `add-funds` scenario above: the shared fixture's
     //    `delegator_hybrid` hydrates a signer set whose passkey is not on this
     //    device, so `requiresOtherDevice` is true — and that flag gates
@@ -4189,9 +4289,9 @@ export const SCENARIOS = {
         return { ...FIXTURE_OVERVIEW, onboardingProgress: { hasFirstAgentPayment: false } }
       }
       if (apiPath === '/auth/me') {
-        return { ...FIXTURE_USER, safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_SAFE, account_type: 'safe' }] }
+      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4254,7 +4354,7 @@ export const SCENARIOS = {
         const base = {
           category: 'media', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
           tool_arguments: null, asset_transfer_methods: null,
-          network: `eip155:${FIXTURE_SAFE.chain_id}`, status: 'active',
+          network: `eip155:${FIXTURE_ACCOUNT.chain_id}`, status: 'active',
           verified_at: '2026-08-30T09:00:00.000Z',
           source: 'operator', domain_verified: false, verified_payable: false,
         }
@@ -4449,6 +4549,12 @@ async function main() {
     process.env,
   )
 
+  // The palettes THIS run renders (#2929). Same fail-fast stance: a malformed
+  // `--color-scheme=` throws before anything is acquired. With no flag this is
+  // `['light']` — the scheme every historical run captured, with no filename
+  // suffix — so the flag is purely additive.
+  const colorSchemes = resolveColorScheme(ARGS, process.env)
+
   // Provenance, printed before anything is captured and stamped into the
   // manifest afterwards: a PNG on its own cannot say which branch it shows.
   // Resolved BEFORE retention runs, because the archived run's manifest records
@@ -4479,6 +4585,14 @@ async function main() {
   if (signedOutSet.size > 0) {
     console.log(`screenshot: signed-out captures for ${[...signedOutSet].join(', ')} (#2825) — signedOut on the route's definition in ROUTE_DEFINITIONS; no auth token seeded, every other route keeps the authenticated fixture`)
   }
+  // Same rule as the viewport line above (#2006): a reviewer reading a PNG has
+  // to be able to ask which palette it shows and get an answer from the run log.
+  console.log(
+    `screenshot: color scheme ${colorSchemes.join(' + ')}` +
+      (colorSchemes.length === 1 && colorSchemes[0] === 'light'
+        ? ' — the default (no --color-scheme given); filenames carry no scheme suffix'
+        : ` — via --color-scheme; filenames carry -${colorSchemes.join('/')} suffixes (#2929)`),
+  )
 
   // This used to be `rm -rf OUT_DIR`, which destroyed the previous run
   // unconditionally — including the case that motivated #1888, a narrow
@@ -4652,196 +4766,210 @@ async function main() {
   // 'still-loading'; these are the ones the wait rescued.
   const contentRaced = []
   try {
-    for (const vp of captureViewports) {
-      // ONE context per auth mode per viewport (#2825). The auth seed is
-      // per-context — it must land before any app code runs — so the context
-      // FOLLOWS the route's auth mode as the loop walks the caller's route
-      // order: a run mixing /dashboard and /login opens an
-      // authenticated context for the dashboard and a signed-out one for the
-      // login, never one context wearing both sessions. With no opt-out the
-      // flip never happens and this is the old single-context behaviour
-      // exactly: the authenticated default is unchanged, not relaxed.
-      let context = null
-      let contextIsSignedOut = null
-      let page = null
-      let currentRoute = ROUTES[0]
-      const attachDiagnostics = (p) => {
-        p.on('console', (msg) => {
-          if (msg.type() === 'error') {
-            consoleErrors.push({ route: currentRoute, viewport: vp.name, text: msg.text().slice(0, 300) })
-          }
-        })
-        p.on('pageerror', (err) => {
-          consoleErrors.push({ route: currentRoute, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
-        })
-      }
-      for (const routePath of ROUTES) {
-        const routeIsSignedOut = signedOutSet.has(routePath)
-        if (routeIsSignedOut !== contextIsSignedOut) {
-          if (context) await context.close()
-          context = await newFixtureContext(browser, vp, null, { signedOut: routeIsSignedOut })
-          contextIsSignedOut = routeIsSignedOut
-          page = await context.newPage()
-          attachDiagnostics(page)
-        }
-        currentRoute = routePath
-        // A swallowed navigation failure would screenshot the PREVIOUS route's
-        // content under this route's filename — record it and mark the run.
-        const navError = await page
-          .goto(`${BASE_URL}${routePath}`, { waitUntil: 'networkidle', timeout: 30_000 })
-          .then(() => null, (err) => err)
-        if (navError) {
-          gotoFailures.push({ route: routePath, viewport: vp.name, text: `goto failed: ${String(navError.message ?? navError).slice(0, 200)}` })
-          continue // never write a mislabeled PNG
-        }
-        await page.waitForTimeout(400) // settle late paints
-        const file = path.join(OUT_DIR, `${slug(routePath)}-${vp.name}.png`)
-        // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
-        // whole route, then reads the PNG back and refuses a blank one (#1738).
-        try {
-          // No `allowBusy` here on purpose: `captureFullPage` derives the
-          // tolerance from the page's own URL, so every consumer gets the same
-          // answer (#2204 CI catch).
-          const busyTolerance = busyToleranceFor(routePath)
-          const { shell, content } = await captureFullPage(page, {
-            path: file,
-            label: `${routePath} · ${vp.name}`,
-            viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
+    for (const scheme of colorSchemes) {
+      for (const vp of captureViewports) {
+        // ONE context per auth mode per viewport per SCHEME (#2825, #2929). The
+        // auth seed and the theme seed are both per-context — they must land
+        // before any app code runs — so the context FOLLOWS the route's auth
+        // mode and the run's palette as the loop walks the caller's route
+        // order: a run mixing /dashboard and /login opens an
+        // authenticated context for the dashboard and a signed-out one for the
+        // login, never one context wearing both sessions; a `both` run gives
+        // each scheme its own contexts so no storage seed can leak across the
+        // pair. With no opt-out the flip never happens and this is the old
+        // single-context behaviour exactly: the authenticated light default is
+        // unchanged, not relaxed.
+        let context = null
+        let contextIsSignedOut = null
+        let page = null
+        let currentRoute = ROUTES[0]
+        const attachDiagnostics = (p) => {
+          p.on('console', (msg) => {
+            if (msg.type() === 'error') {
+              consoleErrors.push({ route: currentRoute, viewport: vp.name, scheme, text: msg.text().slice(0, 300) })
+            }
           })
-          captured.push(path.relative(ROOT, file))
-          captureRecords.push({ route: routePath, viewport: vp.name, file: path.relative(ROOT, file) })
-          if (content) {
-            contentSettles.push({
-              route: routePath,
-              viewport: vp.name,
-              chars: content.chars,
-              elements: content.elements,
-              busy: content.busy ?? 0,
-              waited_ms: content.waitedMs,
+          p.on('pageerror', (err) => {
+            consoleErrors.push({ route: currentRoute, viewport: vp.name, scheme, text: `pageerror: ${String(err).slice(0, 300)}` })
+          })
+        }
+        for (const routePath of ROUTES) {
+          const routeIsSignedOut = signedOutSet.has(routePath)
+          if (routeIsSignedOut !== contextIsSignedOut) {
+            if (context) await context.close()
+            context = await newFixtureContext(browser, vp, null, { signedOut: routeIsSignedOut, colorScheme: scheme })
+            contextIsSignedOut = routeIsSignedOut
+            page = await context.newPage()
+            attachDiagnostics(page)
+          }
+          currentRoute = routePath
+          // A swallowed navigation failure would screenshot the PREVIOUS route's
+          // content under this route's filename — record it and mark the run.
+          const navError = await page
+            .goto(`${BASE_URL}${routePath}`, { waitUntil: 'networkidle', timeout: 30_000 })
+            .then(() => null, (err) => err)
+          if (navError) {
+            gotoFailures.push({ route: routePath, viewport: vp.name, scheme, text: `goto failed: ${String(navError.message ?? navError).slice(0, 200)}` })
+            continue // never write a mislabeled PNG
+          }
+          await page.waitForTimeout(400) // settle late paints
+          // The scheme rides the FILENAME (#2929): light keeps the historical
+          // suffix-free name, dark and every non-default scheme get
+          // `<route>-<vp>-<scheme>.png`, so a reviewer can pair the two sides of
+          // a `both` run side by side without opening the manifest.
+          const schemeSuffix = scheme === 'light' ? '' : `-${scheme}`
+          const file = path.join(OUT_DIR, `${slug(routePath)}-${vp.name}${schemeSuffix}.png`)
+          // Un-clips the h-screen/overflow-hidden shell so `fullPage` paints the
+          // whole route, then reads the PNG back and refuses a blank one (#1738).
+          try {
+            // No `allowBusy` here on purpose: `captureFullPage` derives the
+            // tolerance from the page's own URL, so every consumer gets the same
+            // answer (#2204 CI catch).
+            const busyTolerance = busyToleranceFor(routePath)
+            const { shell, content } = await captureFullPage(page, {
+              path: file,
+              label: `${routePath} · ${vp.name}`,
+              viewportDevicePx: vp.height * DEVICE_SCALE_FACTOR,
             })
-            // The exemption's expiry date (#2204). A route declared
-            // busy-tolerant that held nothing busy is a declaration nobody has
-            // re-read; say so rather than carry it forever.
-            if (busyTolerance && !(content.busy > 0)) {
-              STALE_BUSY_DECLARATIONS.push({
+            captured.push(path.relative(ROOT, file))
+            captureRecords.push({ route: routePath, viewport: vp.name, scheme, file: path.relative(ROOT, file) })
+            if (content) {
+              contentSettles.push({
                 route: routePath,
                 viewport: vp.name,
-                reason: busyTolerance.reason,
+                scheme,
+                chars: content.chars,
+                elements: content.elements,
+                busy: content.busy ?? 0,
+                waited_ms: content.waitedMs,
               })
+              // The exemption's expiry date (#2204). A route declared
+              // busy-tolerant that held nothing busy is a declaration nobody has
+              // re-read; say so rather than carry it forever.
+              if (busyTolerance && !(content.busy > 0)) {
+                STALE_BUSY_DECLARATIONS.push({
+                  route: routePath,
+                  viewport: vp.name,
+                  scheme,
+                  reason: busyTolerance.reason,
+                })
+              }
+              if (content.raced) {
+                contentRaced.push({ route: routePath, viewport: vp.name, scheme, waitedMs: content.waitedMs })
+              }
             }
-            if (content.raced) {
-              contentRaced.push({ route: routePath, viewport: vp.name, waitedMs: content.waitedMs })
+            if (shell.mode === SHELL_MODE.NO_SCROLL_SHELL) {
+              shellless.push({ route: routePath, viewport: vp.name, scheme, height: shell.height })
+            } else if (shell.raced) {
+              raced.push({ route: routePath, viewport: vp.name, scheme, waitedMs: shell.waitedMs })
             }
-          }
-          if (shell.mode === SHELL_MODE.NO_SCROLL_SHELL) {
-            shellless.push({ route: routePath, viewport: vp.name, height: shell.height })
-          } else if (shell.raced) {
-            raced.push({ route: routePath, viewport: vp.name, waitedMs: shell.waitedMs })
-          }
-        } catch (err) {
-          // Same stance as the navigation failure above: a PNG that looks like
-          // evidence and is not is worse than no PNG, so remove it rather than
-          // leave it for someone to attach to a PR.
-          //
-          // But NEVER delete silently. The deletion, the file it removed and
-          // the cause all go on the record — in the console AND in the
-          // manifest — so an empty `.screenshots/` can be read as "this is why
-          // there is nothing here" rather than "there was nothing to capture".
-          // Was there anything to remove? A shell verdict throws before
-          // `page.screenshot` runs, so reporting that one as DELETED would be
-          // a small lie in the middle of the honesty this change is about.
-          const written = await stat(file).then(
-            () => true,
-            () => false,
-          )
-          await rm(file, { force: true })
-          deletedCaptures.push(
-            describeDeletedCapture(err, {
-              route: routePath,
-              viewport: vp.name,
-              file: path.relative(ROOT, file),
-              written,
-            }),
-          )
-          continue
-        }
-      }
-      await context.close()
-
-      // Scenarios get their own context per viewport: a virtual clock and
-      // scenario-specific API answers must not leak into the route captures.
-      for (const scenario of scenarios) {
-        const label = `scenario:${scenario.name}`
-        const scenarioContext = await newFixtureContext(browser, vp, scenario)
-        const scenarioPage = await scenarioContext.newPage()
-        scenarioPage.on('console', (msg) => {
-          if (msg.type() === 'error') {
-            consoleErrors.push({ route: label, viewport: vp.name, text: msg.text().slice(0, 300) })
-          }
-        })
-        scenarioPage.on('pageerror', (err) => {
-          consoleErrors.push({ route: label, viewport: vp.name, text: `pageerror: ${String(err).slice(0, 300)}` })
-        })
-
-        // A scenario drives real UI, so a selector drift or a state that never
-        // arrives must FAIL LOUDLY rather than silently write fewer PNGs — a
-        // missing stage is exactly the evidence gap this exists to close.
-        const shoot = async (target, name) => {
-          await scenarioPage.waitForTimeout(300) // settle the transition
-          const base = `${scenario.name}-${name}-${vp.name}`
-          const file = path.join(OUT_DIR, `${base}.png`)
-          await target.screenshot({ path: file })
-          captured.push(path.relative(ROOT, file))
-
-          // An element screenshot captures the VISIBLE box. A dialog that caps
-          // itself (max-h + overflow-y-auto) therefore drops everything below
-          // the fold — and its rounded bottom edge renders cleanly at the clip,
-          // so the PNG LOOKS complete. That is worse than a missing capture: a
-          // reviewer would judge a screen they have only partly seen. Record
-          // the shortfall and shoot the whole thing alongside it.
-          const before = await measureHiddenBelowFold(target)
-          if (before.hidden > CLIP_TOLERANCE_PX) {
-            await scenarioPage.setViewportSize({
-              width: vp.width,
-              height: vp.height + before.hidden + 48,
-            })
-            await scenarioPage.waitForTimeout(200)
-            // Re-measure BEFORE re-shooting. Growing the viewport only helps a
-            // scroller whose cap is viewport-relative (`ui/Modal`'s
-            // `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]`, `ui/SidePanel`'s full-height body). A
-            // box with its own fixed `max-h` keeps clipping however tall the
-            // window gets, and the whole point of this change is that the
-            // difference must be visible instead of assumed.
-            const after = await measureHiddenBelowFold(target)
-            const fullFile = path.join(OUT_DIR, `${base}-full.png`)
-            await target.screenshot({ path: fullFile })
-            captured.push(path.relative(ROOT, fullFile))
-            clipped.push({
-              capture: base,
-              hidden: before.hidden,
-              offender: before.offender,
-              offenderCount: before.offenderCount,
-              residual: after.hidden,
-              // The box still clipping AFTER the growth, which is usually not
-              // the one that was worst BEFORE it (#1887). Recorded separately
-              // because the two answer different questions and the report was
-              // printing the first one under the second one's heading.
-              residualOffender: after.offender,
-            })
-            await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
-            await scenarioPage.waitForTimeout(200)
+          } catch (err) {
+            // Same stance as the navigation failure above: a PNG that looks like
+            // evidence and is not is worse than no PNG, so remove it rather than
+            // leave it for someone to attach to a PR.
+            //
+            // But NEVER delete silently. The deletion, the file it removed and
+            // the cause all go on the record — in the console AND in the
+            // manifest — so an empty `.screenshots/` can be read as "this is why
+            // there is nothing here" rather than "there was nothing to capture".
+            // Was there anything to remove? A shell verdict throws before
+            // `page.screenshot` runs, so reporting that one as DELETED would be
+            // a small lie in the middle of the honesty this change is about.
+            const written = await stat(file).then(
+              () => true,
+              () => false,
+            )
+            await rm(file, { force: true })
+            deletedCaptures.push(
+              describeDeletedCapture(err, {
+                route: routePath,
+                viewport: vp.name,
+                scheme,
+                file: path.relative(ROOT, file),
+                written,
+              }),
+            )
+            continue
           }
         }
-        try {
-          await scenario.run({ page: scenarioPage, vp, shoot })
-        } catch (err) {
-          gotoFailures.push({
-            route: label,
-            viewport: vp.name,
-            text: `scenario failed: ${String(err?.message ?? err).slice(0, 300)}`,
+        await context.close()
+
+        // Scenarios get their own context per viewport per scheme: a virtual
+        // clock, scenario-specific API answers and the theme seed must not leak
+        // into the route captures — or across the two sides of a `both` run.
+        for (const scenario of scenarios) {
+          const label = `scenario:${scenario.name}`
+          const scenarioContext = await newFixtureContext(browser, vp, scenario, { colorScheme: scheme })
+          const scenarioPage = await scenarioContext.newPage()
+          scenarioPage.on('console', (msg) => {
+            if (msg.type() === 'error') {
+              consoleErrors.push({ route: label, viewport: vp.name, scheme, text: msg.text().slice(0, 300) })
+            }
           })
+          scenarioPage.on('pageerror', (err) => {
+            consoleErrors.push({ route: label, viewport: vp.name, scheme, text: `pageerror: ${String(err).slice(0, 300)}` })
+          })
+
+          // A scenario drives real UI, so a selector drift or a state that never
+          // arrives must FAIL LOUDLY rather than silently write fewer PNGs — a
+          // missing stage is exactly the evidence gap this exists to close.
+          const shoot = async (target, name) => {
+            await scenarioPage.waitForTimeout(300) // settle the transition
+            const base = `${scenario.name}-${name}-${vp.name}${scheme === 'light' ? '' : `-${scheme}`}`
+            const file = path.join(OUT_DIR, `${base}.png`)
+            await target.screenshot({ path: file })
+            captured.push(path.relative(ROOT, file))
+
+            // An element screenshot captures the VISIBLE box. A dialog that caps
+            // itself (max-h + overflow-y-auto) therefore drops everything below
+            // the fold — and its rounded bottom edge renders cleanly at the clip,
+            // so the PNG LOOKS complete. That is worse than a missing capture: a
+            // reviewer would judge a screen they have only partly seen. Record
+            // the shortfall and shoot the whole thing alongside it.
+            const before = await measureHiddenBelowFold(target)
+            if (before.hidden > CLIP_TOLERANCE_PX) {
+              await scenarioPage.setViewportSize({
+                width: vp.width,
+                height: vp.height + before.hidden + 48,
+              })
+              await scenarioPage.waitForTimeout(200)
+              // Re-measure BEFORE re-shooting. Growing the viewport only helps a
+              // scroller whose cap is viewport-relative (`ui/Modal`'s
+              // `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]`, `ui/SidePanel`'s full-height body). A
+              // box with its own fixed `max-h` keeps clipping however tall the
+              // window gets, and the whole point of this change is that the
+              // difference must be visible instead of assumed.
+              const after = await measureHiddenBelowFold(target)
+              const fullFile = path.join(OUT_DIR, `${base}-full.png`)
+              await target.screenshot({ path: fullFile })
+              captured.push(path.relative(ROOT, fullFile))
+              clipped.push({
+                capture: base,
+                hidden: before.hidden,
+                offender: before.offender,
+                offenderCount: before.offenderCount,
+                residual: after.hidden,
+                // The box still clipping AFTER the growth, which is usually not
+                // the one that was worst BEFORE it (#1887). Recorded separately
+                // because the two answer different questions and the report was
+                // printing the first one under the second one's heading.
+                residualOffender: after.offender,
+              })
+              await scenarioPage.setViewportSize({ width: vp.width, height: vp.height })
+              await scenarioPage.waitForTimeout(200)
+            }
+          }
+          try {
+            await scenario.run({ page: scenarioPage, vp, shoot })
+          } catch (err) {
+            gotoFailures.push({
+              route: label,
+              viewport: vp.name,
+              text: `scenario failed: ${String(err?.message ?? err).slice(0, 300)}`,
+            })
+          }
+          await scenarioContext.close()
         }
-        await scenarioContext.close()
       }
     }
   } finally {
@@ -4850,31 +4978,45 @@ async function main() {
   }
 
   // Did the run shoot the widths it resolved? Computed BEFORE the manifest is
-  // written, and recorded in it, so a contradiction between the claim and the
-  // files is on the record rather than only on a console someone scrolled past.
-  const viewportMismatches = findViewportMismatches(captured, captureViewports)
+    // written, and recorded in it, so a contradiction between the claim and the
+    // files is on the record rather than only on a console someone scrolled past.
+    const viewportMismatches = findViewportMismatches(captured, captureViewports, colorSchemes)
 
-  // Signed-out capture evidence (#2825): the auth opt-out is only trustworthy
-  // if its captures are PROVEN different, so captures are hashed and compared.
-  // The dashboard-identity half GATES over EVERY capture — the original
-  // finding was an authenticated /login whose bytes were the dashboard's, so
-  // forgetting the flag must fail the run rather than silently re-shoot the
-  // redirect. The duplicate half is ADVISORY, because a redirect IS what some
-  // routes legitimately do (/onboarding signed out redirects to /login). With
-  // no opt-out and no redirect the lists are empty.
-  const sha256 = (file) =>
+    // Signed-out capture evidence (#2825): the auth opt-out is only trustworthy
+    // if its captures are PROVEN different, so captures are hashed and compared.
+    // The dashboard-identity half GATES over EVERY capture — the original
+    // finding was an authenticated /login whose bytes were the dashboard's, so
+    // forgetting the flag must fail the run rather than silently re-shoot the
+    // redirect. The duplicate half is ADVISORY, because a redirect IS what some
+    // routes legitimately do (/onboarding signed out redirects to /login). With
+    // no opt-out and no redirect the lists are empty.
+    //
+    // SCOPED PER SCHEME (#2929): the pool and the dashboard reference map are
+    // both keyed by scheme, so a `both` run never compares its dark capture
+    // against the light dashboard (every route would trivially "match" across
+    // palettes). Within one scheme the semantics are exactly #2825's.
+    const sha256 = (file) =>
     createHash('sha256').update(readFileSync(file)).digest('hex')
-  // Route captures only, paired with their REAL route (#2825) — scenario
-  // captures and `-full` re-shoots stay out of these pools (they are not
-  // route evidence, and re-parsing their filenames would fabricate routes:
-  // `design-system-desktop.png` splits on the first hyphen into `/design`).
-  const allFiles = captureRecords.map((f) => ({ ...f, sha256: sha256(path.join(ROOT, f.file)) }))
-  const dashboardByViewport = new Map(
-    allFiles.filter((f) => f.route === '/dashboard').map((f) => [f.viewport, f.sha256]),
-  )
-  const signedOutFileRecords = allFiles.filter((f) => signedOutSet.has(f.route))
-  const redirectCaptures = findRedirectCaptures(allFiles, dashboardByViewport)
-  const signedOutDuplicates = findSignedOutDuplicates(signedOutFileRecords, allFiles)
+    // Route captures only, paired with their REAL route (#2825) — scenario
+    // captures and `-full` re-shoots stay out of these pools (they are not
+    // route evidence, and re-parsing their filenames would fabricate routes:
+    // `design-system-desktop.png` splits on the first hyphen into `/design`).
+    const allFiles = captureRecords.map((f) => ({ ...f, sha256: sha256(path.join(ROOT, f.file)) }))
+    const dashboardByViewport = new Map(
+    allFiles.filter((f) => f.route === '/dashboard').map((f) => [`${f.scheme}|${f.viewport}`, f.sha256]),
+    )
+    const signedOutFileRecords = allFiles.filter((f) => signedOutSet.has(f.route))
+    const redirectCaptures = findRedirectCaptures(
+    allFiles,
+    dashboardByViewport,
+    // Cross-scheme comparisons are meaningless: partition per scheme.
+    colorSchemes.length > 1 ? (f) => f.scheme : undefined,
+    )
+    const signedOutDuplicates = findSignedOutDuplicates(
+    signedOutFileRecords,
+    allFiles,
+    colorSchemes.length > 1 ? (f) => f.scheme : undefined,
+    )
   if (redirectCaptures.length > 0) {
     console.error(
       `\n✗ ${redirectCaptures.length} capture(s) are BYTE-IDENTICAL to /dashboard — the route redirected ` +
@@ -4929,6 +5071,12 @@ async function main() {
         // a 390px one once the PNG is attached to a review thread.
         viewports: captureViewports.map(({ name, width, height }) => ({ name, width, height })),
         viewport_source: viewportSource,
+        // The palettes these PNGs were rendered in (#2929). A `both` run
+        // records `["light","dark"]` and every dark capture carries a
+        // `-dark` filename suffix; a plain run records `["light"]`, which is
+        // what every pre-#2929 manifest means by omission. A reader can tell
+        // which scheme a capture set shows without opening a single PNG.
+        color_schemes: colorSchemes,
         // Empty on every honest run. Non-empty means the files and the
         // `viewports` claim above disagree — see `findViewportMismatches`.
         viewport_mismatches: viewportMismatches,

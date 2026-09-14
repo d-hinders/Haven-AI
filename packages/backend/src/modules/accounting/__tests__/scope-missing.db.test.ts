@@ -99,7 +99,7 @@ async function seedSettled(userId: string, agentId: string): Promise<string> {
   const id = randomUUID()
   await db.query(
     `INSERT INTO payment_intents
-       (id, agent_id, user_id, safe_address, chain_id, token_symbol, token_address, to_address,
+       (id, agent_id, user_id, account_address, chain_id, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash, status, tx_hash,
         confirmed_at, expires_at, created_at)
      VALUES ($1, $2, $3, $4, ${CHAIN}, 'USDC', $5, $6, '100000', '0.10',
@@ -212,7 +212,7 @@ describeDb('scope-missing detection and re-consent (#2865)', () => {
     // The grant looked complete, but the file connection is refused.
     f.state.refuseFileConnection = true
     const pid = await seedSettled(userId, agentId)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     const pushed = (await getSyncState(userId, 'fortnox', pid))!
     expect(pushed).toMatchObject({ status: 'pushed', attempts: 1 })
     expect(pushed.external_ref).toMatch(/^fortnox:supplierinvoice:\d+$/)
@@ -245,7 +245,7 @@ describeDb('scope-missing detection and re-consent (#2865)', () => {
 
     // Positive control: the sweep and the backfill DO deliver the payment that
     // was never fed — a different invoice, the first one untouched.
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    expect(await syncUser(userId)).toEqual({ fed: 1, total: 1 })
     expect(await getSyncState(userId, 'fortnox', second)).toMatchObject({ status: 'pushed' })
     expect(f.state.invoicePosts).toBe(2)
     expect(await getSyncState(userId, 'fortnox', pid)).toMatchObject({ status: 'pushed', external_ref: pushed.external_ref })
@@ -265,7 +265,9 @@ describeDb('scope-missing detection and re-consent (#2865)', () => {
 
     f.state.refuseInvoice = true
     const pid = await seedSettled(userId, agentId)
-    expect(await syncUser(userId)).toEqual({ fed: 1 })
+    // #2915: the sync row is skipped, nothing was pushed — `fed` counts
+    // pushes, so the old enumerate answer { fed: 1 } was the lie.
+    expect(await syncUser(userId)).toEqual({ fed: 0, total: 1 })
     const skipped = (await getSyncState(userId, 'fortnox', pid))!
     expect(skipped).toMatchObject({ status: 'skipped', external_ref: null, attempts: 1 })
     expect(skipped.error).toMatch(/^scope refused before the invoice was created: .*\[2000663\]/)

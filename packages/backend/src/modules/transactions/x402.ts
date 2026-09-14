@@ -9,7 +9,7 @@ import {
   findConfirmedX402PaymentIntents,
 } from '../../infra/repositories/transaction-history.js'
 import { parseIsoTimestamp, paymentAgentIdentityKey } from './ordering.js'
-import type { EnrichedTransaction, UserSafeRow } from './types.js'
+import type { EnrichedTransaction, SmartAccountRow } from './types.js'
 
 function x402FundingIdentityKey(tx: EnrichedTransaction): string {
   return paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId)
@@ -17,7 +17,7 @@ function x402FundingIdentityKey(tx: EnrichedTransaction): string {
 
 export async function fetchConfirmedX402Transactions(
   userId: string,
-  safes: UserSafeRow[],
+  safes: SmartAccountRow[],
 ): Promise<EnrichedTransaction[]> {
   if (safes.length === 0) return []
 
@@ -43,7 +43,7 @@ export async function fetchConfirmedX402Transactions(
     return {
       hash: row.tx_hash,
       type: 'erc20',
-      from: row.safe_address,
+      from: row.account_address,
       to: merchantAddress,
       value: row.amount_raw,
       valueFormatted: row.amount_human,
@@ -59,8 +59,8 @@ export async function fetchConfirmedX402Transactions(
       x402ResourceUrl: row.x402_resource_url,
       x402MerchantAddress: row.x402_merchant_address,
       chainId: row.chain_id,
-      safeId: row.safe_id,
-      safeAddress: row.safe_address,
+      safeId: row.account_id,
+      safeAddress: row.account_address,
       safeName: row.safe_name,
       agentId: row.agent_id,
       agentName: row.agent_name,
@@ -83,7 +83,7 @@ export async function fetchConfirmedX402Transactions(
 
 export async function mergeX402Transactions(
   userId: string,
-  safes: UserSafeRow[],
+  safes: SmartAccountRow[],
   transactions: EnrichedTransaction[],
 ): Promise<EnrichedTransaction[]> {
   const x402Transactions = await fetchConfirmedX402Transactions(userId, safes)

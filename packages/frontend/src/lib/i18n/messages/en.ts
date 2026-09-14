@@ -107,11 +107,25 @@ export const en = {
       label: 'Preferred currency',
       detail: 'Used for balances, spending limits, and portfolio totals.',
     },
-    language: {
-      label: 'Language',
-      detail: "Choose the language Haven's interface is shown in.",
-      english: 'English',
-      swedish: 'Svenska',
+    theme: {
+      label: 'Theme',
+      detail: 'System follows your device',
+      light: 'Light',
+      dark: 'Dark',
+      system: 'System',
+    },
+    /**
+     * The quick toggle (#2928, epic #2925 slice 2; two-state flip per
+     * #2953): the TopBar icon button and the More sheet's row. The
+     * accessible name states the palette on screen and the one a click
+     * brings — "Theme: dark. Switch to light" — so a user can predict the
+     * flip from the name alone. The values arrive lower-case because the
+     * sentence reads them as values, not as button labels.
+     */
+    themeToggle: {
+      /** Visible label of the More-sheet row. */
+      label: 'Theme',
+      ariaLabel: (current: string, next: string) => `Theme: ${current}. Switch to ${next}`,
     },
     agentSpendAlerts: {
       label: 'Agent spend alerts',
@@ -266,7 +280,13 @@ export const en = {
         /** The footer's way out — the same no-op as "Feed from now". */
         notNow: 'Not now',
         working: 'Feeding…',
-        done: (n: number) => `${n} earlier payment${n === 1 ? '' : 's'} fed.`,
+        /**
+         * #2915: `fed` is what the sync actually pushed, `total` what it
+         * enumerated — the sentence never claims a payment that did not land.
+         */
+        done: (fed: number, total: number) => `${fed} of ${total} earlier payment${total === 1 ? '' : 's'} fed.`,
+        /** Under `done` when some enumerated payments were not pushed. */
+        partial: 'Some of the earlier payments were not fed. Press Sync now on the Accounting page to try them again.',
         close: 'Done',
         errors: {
           SINCE_INVALID: 'Enter a past date as YYYY-MM-DD, not before 2020-01-01.',

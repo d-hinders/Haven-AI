@@ -106,7 +106,7 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
       body: { error: `Sweep is not supported on chain ${agent.chain_id}.` },
     }
   }
-  if (!agent.delegate_address || !agent.safe_address) {
+  if (!agent.delegate_address || !agent.account_address) {
     return { statusCode: 422, body: { error: 'Agent is missing a delegate or Safe address.' } }
   }
 
@@ -165,7 +165,7 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
 
   const authorization = buildSweepAuthorization({
     delegateAddress: agent.delegate_address,
-    safeAddress: agent.safe_address,
+    accountAddress: agent.account_address,
     chainId: agent.chain_id,
     valueAtomic: balance,
   })
@@ -268,7 +268,7 @@ export async function submitSweep(
   if (!sameAddress(expected.from, agent.delegate_address)) {
     return { statusCode: 409, body: { error: 'Prepared sweep `from` no longer matches the agent delegate.' } }
   }
-  if (!sameAddress(expected.to, agent.safe_address)) {
+  if (!sameAddress(expected.to, agent.account_address)) {
     return { statusCode: 409, body: { error: 'Prepared sweep `to` no longer matches the agent Safe.' } }
   }
 
@@ -330,7 +330,7 @@ export async function submitSweep(
     row.id,
     agent.id,
     agent.user_id,
-    agent.safe_address,
+    agent.account_address,
   )
   if (claim === 'not_bound') {
     return {

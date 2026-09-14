@@ -90,6 +90,8 @@ describe('transactionCsvRow', () => {
       agent_name: 'Buyer',
       safe_address: '0xsafe',
       initiator: 'agent',
+      // #2907: dual-emitted, same value as safe_address.
+      account_address: '0xsafe',
     })
   })
 

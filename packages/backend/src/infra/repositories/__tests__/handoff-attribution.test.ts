@@ -26,18 +26,18 @@ let seq = 0
 
 async function seedSafe(userId: string): Promise<string> {
   const safe = await db.query<{ id: string }>(
-    `INSERT INTO user_safes (user_id, safe_address, name, chain_id)
+    `INSERT INTO smart_accounts (user_id, account_address, name, chain_id)
      VALUES ($1, $2, 'Main account', 84532) RETURNING id`,
     [userId, `0x${String(++seq).padStart(40, '0')}`],
   )
   return safe.rows[0].id
 }
 
-function newSetup(id: string, userId: string, safeId: string, via: string | null) {
+function newSetup(id: string, userId: string, accountId: string, via: string | null) {
   return {
     id,
     userId,
-    safeId,
+    accountId,
     name: 'Connect setup',
     description: null,
     runtime: null,
@@ -85,9 +85,9 @@ describeDb('agent hand-off attribution (#2522)', () => {
 
   it('stores the marker on a connection setup and reads it back through the row projection', async () => {
     const user = await insertUser('Owner', `setup-${++seq}@test.example`, 'x', VIA_AGENT)
-    const safeId = await seedSafe(user.id)
+    const accountId = await seedSafe(user.id)
     const setupId = randomUUID()
-    await insertSetupWithAllowances(newSetup(setupId, user.id, safeId, VIA_AGENT), [])
+    await insertSetupWithAllowances(newSetup(setupId, user.id, accountId, VIA_AGENT), [])
 
     // Through the real projection, not a bespoke SELECT: the column is only
     // useful if the SELECT list the route reads actually carries it.
@@ -97,9 +97,9 @@ describeDb('agent hand-off attribution (#2522)', () => {
 
   it('defaults to null for every setup written without a marker', async () => {
     const user = await insertUser('Owner', `nul-${++seq}@test.example`, 'x', null)
-    const safeId = await seedSafe(user.id)
+    const accountId = await seedSafe(user.id)
     const setupId = randomUUID()
-    await insertSetupWithAllowances(newSetup(setupId, user.id, safeId, null), [])
+    await insertSetupWithAllowances(newSetup(setupId, user.id, accountId, null), [])
     const row = await findSetupForUser(setupId, user.id)
     expect(row?.via).toBeNull()
   })

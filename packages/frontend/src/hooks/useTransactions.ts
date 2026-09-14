@@ -21,7 +21,7 @@ interface UseTransactionsOptions {
 }
 
 export function useTransactions(
-  safeAddress: string | null,
+  accountAddress: string | null,
   limitOrOptions: number | UseTransactionsOptions = 10,
 ): UseTransactionsReturn {
   const limit = typeof limitOrOptions === 'number'
@@ -40,7 +40,7 @@ export function useTransactions(
 
   const fetchTransactions = useCallback(async () => {
     const requestId = ++requestIdRef.current
-    if (!safeAddress) {
+    if (!accountAddress) {
       setTransactions([])
       setPages(0)
       setTotal(0)
@@ -60,7 +60,7 @@ export function useTransactions(
         params.set('chain_id', String(chainId))
       }
       const data = await api.get<TransactionsResponse>(
-        `/transactions/${safeAddress}?${params.toString()}`,
+        `/transactions/${accountAddress}?${params.toString()}`,
       )
       if (requestIdRef.current !== requestId) return
       setTransactions(data.transactions)
@@ -77,7 +77,7 @@ export function useTransactions(
         setLoading(false)
       }
     }
-  }, [safeAddress, page, limit, chainId])
+  }, [accountAddress, page, limit, chainId])
 
   useEffect(() => {
     fetchTransactions()

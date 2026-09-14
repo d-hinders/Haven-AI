@@ -28,7 +28,7 @@ describe('buildTransactionScopeSubtitle', () => {
 
   it('builds an account-only subtitle', () => {
     expect(
-      buildTransactionScopeSubtitle({ safeId: 'saf_1' }, lookups),
+      buildTransactionScopeSubtitle({ accountId: 'saf_1' }, lookups),
     ).toBe('Transactions for Main account')
   })
 
@@ -41,7 +41,7 @@ describe('buildTransactionScopeSubtitle', () => {
   it('combines account + agent', () => {
     expect(
       buildTransactionScopeSubtitle(
-        { safeId: 'saf_1', agentId: 'agt_1' },
+        { accountId: 'saf_1', agentId: 'agt_1' },
         lookups,
       ),
     ).toBe('Payments by Research agent from Main account')
@@ -50,7 +50,7 @@ describe('buildTransactionScopeSubtitle', () => {
   it('appends the token symbol on a scoped subtitle', () => {
     expect(
       buildTransactionScopeSubtitle(
-        { safeId: 'saf_1', tokenKey: '100:USDC.e' },
+        { accountId: 'saf_1', tokenKey: '100:USDC.e' },
         lookups,
       ),
     ).toBe('Transactions for Main account · USDC.e')
@@ -64,14 +64,14 @@ describe('buildTransactionScopeSubtitle', () => {
 
   it('ignores unknown ids gracefully and falls back to defaults', () => {
     expect(
-      buildTransactionScopeSubtitle({ safeId: 'saf_missing' }, lookups),
+      buildTransactionScopeSubtitle({ accountId: 'saf_missing' }, lookups),
     ).toBe('All activity across your accounts.')
   })
 
   it('ignores the direction filter (communicated by the chip instead)', () => {
     expect(
       buildTransactionScopeSubtitle(
-        { safeId: 'saf_2', direction: 'out' },
+        { accountId: 'saf_2', direction: 'out' },
         lookups,
       ),
     ).toBe('Transactions for Operations')
@@ -96,6 +96,8 @@ function tx(direction: 'in' | 'out', isError = false): AggregatedTransaction {
     blockNumber: 0,
     isError,
     chainId: 100,
+    accountId: 'saf_1',
+    accountAddress: '0xsafe',
     safeId: 'saf_1',
     safeAddress: '0xsafe',
     safeName: 'Main account',

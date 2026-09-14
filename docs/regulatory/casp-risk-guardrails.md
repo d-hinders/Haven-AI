@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
-  - packages/backend/src/infra/repositories/user-safes.ts
+  - packages/backend/src/infra/repositories/smart-accounts.ts
   - packages/backend/src/modules/accounting/entry.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
@@ -242,7 +242,7 @@ Haven backend
 > authentication gate stays a positive allow-list (revoked and unknown statuses
 > still 401). The exact sweep-recovery routes are a narrow exception for
 > recovering stranded delegate balances; they grant no spending authority.
-> Since #988 the agents/user-safes data access lives in
+> Since #988 the agents/smart-accounts data access lives in
 > `infra/repositories/` with tenant scoping as REQUIRED function parameters —
 > the `WHERE user_id = $1` authorization that used to hide in inline route
 > SQL is now a signature the type checker enforces; the SQL itself moved

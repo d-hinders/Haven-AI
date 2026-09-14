@@ -55,7 +55,7 @@ export function AgentBudgetCard({
           budgets.map((row) => (
             <div
               key={row.id ?? row.tokenSymbol}
-              className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-white px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2"
             >
               <p className="min-w-0 truncate text-sm font-medium text-[var(--v2-ink)] v2-tabular">
                 {`${row.amount} ${row.tokenSymbol} ${row.period}`}

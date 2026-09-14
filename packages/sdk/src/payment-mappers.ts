@@ -7,6 +7,7 @@ import type {
   RawPaymentStatusResult,
   RawStatusResponse,
 } from './types.js'
+import { canonicalAgentPaymentNextAction } from './types.js'
 
 export type ExplorerUrlBuilder = (chainId: number | undefined, txHash: string) => string
 
@@ -46,7 +47,10 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     rail: raw.rail,
     status: raw.status,
     phase: raw.phase,
-    nextAction: raw.next_action,
+    // #2908: the account-vocabulary alias collapses onto the canonical value
+    // so every `=== AgentPaymentNextAction.X` downstream keeps working when
+    // the server flips its emit at #2914.
+    nextAction: canonicalAgentPaymentNextAction(raw.next_action),
     amount: raw.amount,
     token: raw.token,
     resourceUrl: raw.resource_url,

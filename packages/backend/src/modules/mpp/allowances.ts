@@ -19,6 +19,7 @@ import { listDelegationJsonByIds } from '../../infra/repositories/delegation-bud
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
+import { withAccountAddressAlias } from '../../openapi/wire-aliases.js'
 
 export async function handleGetAllowances(agent: AgentContext): Promise<MppHandlerResult> {
   // #1135: this endpoint was rail-blind — it read the on-chain
@@ -81,9 +82,9 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
 
     return {
       statusCode: 200,
-      body: {
+      body: withAccountAddressAlias({
         agent_id: agent.id,
-        safe_address: agent.safe_address,
+        safe_address: agent.account_address,
         delegate_address: agent.delegate_address,
         chain_id: agent.chain_id,
         allowances: budgets.map((b) => {
@@ -138,7 +139,7 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             },
           }
         }),
-      },
+      }),
     }
   }
 

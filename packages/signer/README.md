@@ -207,7 +207,11 @@ read.** Since [#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the
 authenticated, read-only `GET /x402/:payment_id/sign-context` against Haven, so
 that agents never have to relay multi-KB EIP-712 payloads through a model's
 context window. **Only the Bearer API key goes out; the delegate key is never
-part of that request or its response.** Nothing else in the package reaches the
+part of that request or its response.** Since #2985 that read is bounded:
+it aborts after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a
+`HavenSigningError` naming the timeout and the `typed_data_b64` fallback,
+so a hung backend cannot hang the signer — and the agent — past the funding
+window. Nothing else in the package reaches the
 network: `haven_x402_sign_header` and `haven_sign_sweep_delegate` never fetch,
 the library surface above (`createEdgeSigner` and its six signing methods, over
 the network-free `src/core.ts`) never fetches, and passing the payload as

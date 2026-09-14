@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadHavenIdentity, fetchX402SignContext } from './sign-context.js'
+import { loadHavenIdentity, fetchX402SignContext, SIGN_CONTEXT_TIMEOUT_MS } from './sign-context.js'
 
 const IDENTITY = { api_key: 'sk_agent_test_1263', api_url: 'https://haven.test/' }
 
@@ -54,6 +54,48 @@ describe('fetchX402SignContext (#1263)', () => {
     expect(seenAuth).toBe('Bearer sk_agent_test_1263')
     expect(ctx.payloadHash).toBe('0x' + 'ab'.repeat(32))
     expect(ctx.typedData).toEqual({ primaryType: 'X' })
+  })
+
+  // #2985: the fetch is bounded. A fetchImpl that only ever settles when its
+  // signal aborts stands in for a hung backend; without the signal this test
+  // hangs past vitest's own timeout, which is the red we want.
+  it('aborts a hung sign-context fetch and names the timeout and the typed_data_b64 fallback (#2985)', async () => {
+    let sawSignal = false
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal
+        if (!signal) return // no signal → never settles → the test times out
+        sawSignal = true
+        signal.addEventListener('abort', () =>
+          reject(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })),
+        )
+      })) as typeof fetch
+    await expect(fetchX402SignContext(identity, 'pay_hung', fetchImpl, 20)).rejects.toThrow(
+      /within 20 ms.*typed_data_b64/s,
+    )
+    expect(sawSignal).toBe(true)
+  }, 2_000)
+
+  it('a body read that stalls past the timeout names the timeout, not a malformed response (#2985 review)', async () => {
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })),
+            )
+          }),
+      } as unknown as Response)) as typeof fetch
+    await expect(fetchX402SignContext(identity, 'pay_stall', fetchImpl, 20)).rejects.toThrow(
+      /within 20 ms.*typed_data_b64/s,
+    )
+  }, 2_000)
+
+  it('the default timeout is exported and sane — long enough for a read, short enough to leave the window (#2985)', () => {
+    expect(SIGN_CONTEXT_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000)
+    expect(SIGN_CONTEXT_TIMEOUT_MS).toBeLessThanOrEqual(30_000)
   })
 
   it('maps a 410 to an error naming the re-quote step', async () => {

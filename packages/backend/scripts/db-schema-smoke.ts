@@ -335,6 +335,8 @@ import {
   FEES_TOTALS_SQL,
   GAS_EVENTS_BY_CHAIN_SQL,
   ACTIVE_DELEGATIONS_FOR_USER_SQL,
+  AGGREGATE_REFUSALS_FOR_USER_SQL,
+  REFUSALS_BY_DAY_SQL,
 } from '../src/infra/repositories/analytics.js'
 
 interface SmokeQuery {
@@ -360,6 +362,10 @@ const QUERIES: SmokeQuery[] = [
   { name: 'analytics: fees totals (current + previous window)', sql: FEES_TOTALS_SQL },
   { name: 'analytics: gas events by chain', sql: GAS_EVENTS_BY_CHAIN_SQL },
   { name: 'analytics: active delegations for user', sql: ACTIVE_DELEGATIONS_FOR_USER_SQL },
+  // Added on review of #2946: replaced a 10,000-row full fetch that was
+  // folding `refused_amount`/by-day counts in application code.
+  { name: 'analytics: refusal amount + count aggregate', sql: AGGREGATE_REFUSALS_FOR_USER_SQL },
+  { name: 'analytics: refusals by day, tz-bucketed', sql: REFUSALS_BY_DAY_SQL },
   // Connect Agent 2 setup flow (#985). IMPORTED from the repository, so these
   // track the real queries — this is the first block extraction made reachable
   // by this script at all; before #985 every one of them was inline in a route.

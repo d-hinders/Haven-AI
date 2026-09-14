@@ -28,7 +28,8 @@ const {
   mockListReceiptMerchantNamesForUser,
   mockListContactsForUser,
   mockAggregateRefusalsForUserByAgent,
-  mockListRefusalsForUser,
+  mockAggregateRefusalAmountForUser,
+  mockListRefusalsByDayForUser,
 } = vi.hoisted(() => ({
   mockSumTotalsSpendForUser: vi.fn(),
   mockCountUnsettledSubmittedForUser: vi.fn(),
@@ -43,7 +44,8 @@ const {
   mockListReceiptMerchantNamesForUser: vi.fn(),
   mockListContactsForUser: vi.fn(),
   mockAggregateRefusalsForUserByAgent: vi.fn(),
-  mockListRefusalsForUser: vi.fn(),
+  mockAggregateRefusalAmountForUser: vi.fn(),
+  mockListRefusalsByDayForUser: vi.fn(),
 }))
 
 vi.mock('../../infra/repositories/analytics.js', async () => {
@@ -63,6 +65,8 @@ vi.mock('../../infra/repositories/analytics.js', async () => {
     listGasEventsByChainForUser: mockListGasEventsByChainForUser,
     listActiveDelegationsForUser: mockListActiveDelegationsForUser,
     listReceiptMerchantNamesForUser: mockListReceiptMerchantNamesForUser,
+    aggregateRefusalAmountForUser: mockAggregateRefusalAmountForUser,
+    listRefusalsByDayForUser: mockListRefusalsByDayForUser,
   }
 })
 
@@ -72,7 +76,6 @@ vi.mock('../../infra/repositories/contacts.js', () => ({
 
 vi.mock('../../infra/repositories/payment-refusals.js', () => ({
   aggregateRefusalsForUserByAgent: mockAggregateRefusalsForUserByAgent,
-  listRefusalsForUser: mockListRefusalsForUser,
 }))
 
 import analyticsOverviewRoutes from '../analytics-overview.js'
@@ -114,8 +117,59 @@ function emptyFixtures(userId: string) {
   mockListReceiptMerchantNamesForUser.mockResolvedValue(new Map())
   mockListContactsForUser.mockResolvedValue([])
   mockAggregateRefusalsForUserByAgent.mockResolvedValue([])
-  mockListRefusalsForUser.mockResolvedValue([])
+  mockAggregateRefusalAmountForUser.mockResolvedValue({
+    refused_count: '0',
+    refused_amount_usd: '0',
+    refused_amount_eur: '0',
+  })
+  mockListRefusalsByDayForUser.mockResolvedValue([])
   void userId
+}
+
+/**
+ * A payload that exercises every item schema in the OpenAPI response, not
+ * just the top-level object: a real merchant (`top_merchant` non-null on the
+ * one agent, `merchants[0]` populated), one balance-by-day entry, and one
+ * budget entry. `emptyFixtures`'s all-empty-arrays shape let
+ * `expectMatchesSpec` pass while `top_merchant`, `merchants[].items`,
+ * `balance_by_day[].items` and `agents[].budgets.items` went unvalidated —
+ * an item schema with a bug (e.g. a missing `required` field) could not have
+ * failed against it.
+ */
+const MERCHANT_ADDRESS = `0x${'7'.padStart(40, '0')}`
+
+function fullFixtures(userId: string) {
+  emptyFixtures(userId)
+  mockListPerAgentTopMerchantForUser.mockResolvedValue([
+    { agent_id: AGENT_UUID, merchant_key: MERCHANT_ADDRESS },
+  ])
+  mockListTopMerchantsForUser.mockResolvedValue([
+    {
+      merchant_key: MERCHANT_ADDRESS,
+      spent_usd: '10.00',
+      spent_eur: '9.00',
+      payments: '1',
+      agent_ids: [AGENT_UUID],
+      first_seen: '2030-06-01T12:00:00.000Z',
+      last_seen: '2030-06-01T12:00:00.000Z',
+    },
+  ])
+  mockListBalanceByDayForUser.mockResolvedValue([
+    { snapshot_date: '2030-06-01', total_usd: '100.00', total_eur: '90.00' },
+  ])
+  mockListActiveDelegationsForUser.mockResolvedValue([
+    {
+      id: 'd1',
+      agent_id: AGENT_UUID,
+      chain_id: 84532,
+      token_address: `0x${'a'.repeat(40)}`,
+      recipient_address: null,
+      delegation_json: '{}',
+      budget_atomic: '1000000',
+      period_seconds: 86400,
+      start_date: String(Math.floor(Date.now() / 1000) - 3600),
+    },
+  ])
 }
 
 describe('GET /analytics/overview', () => {
@@ -176,6 +230,36 @@ describe('GET /analytics/overview', () => {
     expect(res.statusCode).toBe(400)
   })
 
+  it('400s on a UTC offset string — Postgres and JS interpret its sign oppositely, so it must never reach either', async () => {
+    const res = await call('/analytics/overview?range=30d&tz=%2B05:00', token)
+    expect(res.statusCode).toBe(400)
+    // Never echoed: a raw offset/injection string reflected into the body is
+    // its own defect, independent of the validation being correct.
+    expect(JSON.stringify(res.json())).not.toContain('+05:00')
+  })
+
+  it('400s on a fixed-abbreviation zone (EST) even though the constructor would accept it', async () => {
+    const res = await call('/analytics/overview?range=30d&tz=EST', token)
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('400s on a bare country code (GB) — Intl.DateTimeFormat resolves it, IANA tzdata does not name it a zone', async () => {
+    const res = await call('/analytics/overview?range=30d&tz=GB', token)
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('400s on an injection-shaped tz value and does not echo it', async () => {
+    const injected = "Europe/Stockholm'; DROP TABLE payment_intents; --"
+    const res = await call(`/analytics/overview?range=30d&tz=${encodeURIComponent(injected)}`, token)
+    expect(res.statusCode).toBe(400)
+    expect(JSON.stringify(res.json())).not.toContain('DROP TABLE')
+  })
+
+  it("400s on the literal string 'Zulu' (a fixed abbreviation, not an IANA zone name)", async () => {
+    const res = await call('/analytics/overview?range=30d&tz=Zulu', token)
+    expect(res.statusCode).toBe(400)
+  })
+
   it('accepts a real IANA zone and defaults currency to usd', async () => {
     const res = await call('/analytics/overview?range=30d&tz=Europe/Stockholm', token)
     expect(res.statusCode).toBe(200)
@@ -183,7 +267,12 @@ describe('GET /analytics/overview', () => {
     expect(res.json().basis.tz).toBe('Europe/Stockholm')
   })
 
-  it('scopes every repository read to the caller\'s user id — a second user\'s token reads only its own scope', async () => {
+  it('accepts the literal zone name UTC', async () => {
+    const res = await call('/analytics/overview?range=30d&tz=UTC', token)
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('passes the caller\'s own sub to every repository call, never another user\'s (does NOT prove row-level tenant isolation — that is the repository suite\'s job)', async () => {
     await call('/analytics/overview?range=30d', token)
     expect(mockSumTotalsSpendForUser).toHaveBeenCalledWith(USER, expect.anything(), expect.anything())
 
@@ -199,10 +288,39 @@ describe('GET /analytics/overview', () => {
     expect(res.statusCode).toBe(200)
   })
 
-  it('the full 200 payload matches the OpenAPI spec exactly', async () => {
+  it('the full 200 payload matches the OpenAPI spec exactly, with every item schema exercised', async () => {
+    fullFixtures(USER)
     const res = await call('/analytics/overview?range=7d&currency=eur&tz=UTC', token)
     expect(res.statusCode).toBe(200)
-    expectMatchesSpec('GET', '/analytics/overview', res.json())
+    const body = res.json()
+    // Guard the fixture itself: an all-empty-arrays payload would still pass
+    // expectMatchesSpec without ever validating the item schemas below.
+    expect(body.agents[0].top_merchant).not.toBeNull()
+    expect(body.merchants.length).toBeGreaterThan(0)
+    expect(body.balance_by_day.length).toBeGreaterThan(0)
+    expect(body.agents[0].budgets.length).toBeGreaterThan(0)
+    expectMatchesSpec('GET', '/analytics/overview', body)
+  })
+
+  it('refused_amount is a numeric STRING, like every other money field on this response', async () => {
+    mockAggregateRefusalAmountForUser.mockResolvedValue({
+      refused_count: '2',
+      refused_amount_usd: '15.50',
+      refused_amount_eur: '14.00',
+    })
+    const res = await call('/analytics/overview?range=30d&currency=usd', token)
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(typeof body.totals.refused_amount).toBe('string')
+    expect(body.totals.refused_amount).toBe('15.50')
+  })
+
+  it('refused_amount and refused_count come from ONE aggregate read, tenant- and range-scoped like spend', async () => {
+    await call('/analytics/overview?range=30d', token)
+    expect(mockAggregateRefusalAmountForUser).toHaveBeenCalledWith(
+      USER,
+      expect.objectContaining({ from: expect.any(String), to: expect.any(String) }),
+    )
   })
 
   it('returns the documented shape end to end (range, basis, totals, sections)', async () => {

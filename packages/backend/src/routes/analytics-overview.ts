@@ -2,12 +2,9 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
+import { aggregateRefusalsForUserByAgent } from '../infra/repositories/payment-refusals.js'
 import {
-  aggregateRefusalsForUserByAgent,
-  listRefusalsForUser,
-  type PaymentRefusalRow,
-} from '../infra/repositories/payment-refusals.js'
-import {
+  aggregateRefusalAmountForUser,
   computeBudgetBands,
   listActiveDelegationsForUser,
   listBalanceByDayForUser,
@@ -16,6 +13,7 @@ import {
   listPerAgentSpendForUser,
   listPerAgentTopMerchantForUser,
   listReceiptMerchantNamesForUser,
+  listRefusalsByDayForUser,
   listTopMerchantsForUser,
   shapeBudgets,
   sumFeesTotalsForUser,
@@ -40,26 +38,19 @@ import {
 const RANGE_DAYS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90 }
 const CURRENCIES = new Set(['usd', 'eur'])
 
+/**
+ * `Intl.DateTimeFormat`'s own constructor accepts far more than IANA zone
+ * names — UTC offsets (`+05:00`), fixed abbreviations (`EST`), and even
+ * two-letter country codes (`GB`) all construct successfully, but Postgres's
+ * `AT TIME ZONE` (`BY_DAY_SPEND_SQL`) and this function's own JS Date math
+ * interpret an offset string with OPPOSITE sign conventions (POSIX vs ISO-8601),
+ * so accepting one here would silently bucket a day on the wrong side of
+ * midnight relative to what the SQL does. `Intl.supportedValuesOf('timeZone')`
+ * is the actual IANA tzdata list — `'UTC'` is added explicitly because the
+ * spec permits implementations to omit it from that list.
+ */
 function isValidTimeZone(tz: string): boolean {
-  try {
-    // Throws RangeError for an unrecognized zone; this IS the fixed IANA
-    // check the issue allows in place of a `pg_timezone_names` round trip —
-    // no extra query, and it fails the same set of inputs pg would.
-    new Intl.DateTimeFormat('en-US', { timeZone: tz }).format()
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** `YYYY-MM-DD` in the given zone — used to bucket refusal rows the same way `BY_DAY_SPEND_SQL` buckets payments. */
-function dayKeyInZone(iso: string, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(iso))
+  return tz === 'UTC' || Intl.supportedValuesOf('timeZone').includes(tz)
 }
 
 interface MerchantLabelSources {
@@ -92,7 +83,10 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       }
       const tz = tzParam ?? 'UTC'
       if (!isValidTimeZone(tz)) {
-        return reply.code(400).send({ error: `tz is not a recognized IANA time zone: ${tz}` })
+        // Never echo the raw query value: an offset/abbreviation/injection
+        // shape reflected verbatim into a 400 body is exactly the kind of
+        // instrument this endpoint must not become.
+        return reply.code(400).send({ error: 'unsupported tz' })
       }
       const cur = currency as 'usd' | 'eur'
 
@@ -118,7 +112,8 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         activeDelegations,
         refusalsCurrentByAgent,
         refusalsPreviousByAgent,
-        refusalRows,
+        refusalAmount,
+        refusalsByDayRows,
         contacts,
       ] = await Promise.all([
         sumTotalsSpendForUser(sub, current, previous),
@@ -133,7 +128,11 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         listActiveDelegationsForUser(sub),
         aggregateRefusalsForUserByAgent(sub, { fromExclusive: current.from, toInclusive: current.to }),
         aggregateRefusalsForUserByAgent(sub, { fromExclusive: previous.from, toInclusive: previous.to }),
-        listRefusalsForUser(sub, { fromExclusive: current.from, toInclusive: current.to }, 10_000),
+        // Amount and by-day are ONE aggregate scan each (analytics.ts,
+        // review of #2946) — never a client-side fold over a fetched row
+        // list, and both use the same `[from, to)` boundary as spend.
+        aggregateRefusalAmountForUser(sub, current),
+        listRefusalsByDayForUser(sub, tz, current),
         listContactsForUser(sub),
       ])
 
@@ -161,27 +160,19 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       }
       let refusedPreviousCount = 0
       for (const a of refusalsPreviousByAgent) refusedPreviousCount += a.refusals
-      const refusedAmount = refusalRows.reduce((sum, r: PaymentRefusalRow) => {
-        const value = cur === 'usd' ? r.usd_value : r.eur_value
-        return sum + (value ? Number(value) : 0)
-      }, 0)
+      const refusedAmount = cur === 'usd' ? refusalAmount.refused_amount_usd : refusalAmount.refused_amount_eur
 
-      // ── by_day: spend (from SQL) + refusals (bucketed here from the reads above). ──
-      const refusalsByDay = new Map<string, number>()
-      for (const r of refusalRows) {
-        const key = dayKeyInZone(r.created_at, tz)
-        refusalsByDay.set(key, (refusalsByDay.get(key) ?? 0) + 1)
-      }
+      // ── by_day: spend (from SQL) + refusals (from REFUSALS_BY_DAY_SQL, same tz bucketing). ──
       const byDayMap = new Map<string, { spent_by_agent: Record<string, string>; refusals: number }>()
       for (const row of byDaySpend) {
         const entry = byDayMap.get(row.day) ?? { spent_by_agent: {}, refusals: 0 }
         entry.spent_by_agent[row.agent_id] = cur === 'usd' ? row.usd : row.eur
         byDayMap.set(row.day, entry)
       }
-      for (const [day, count] of refusalsByDay) {
-        const entry = byDayMap.get(day) ?? { spent_by_agent: {}, refusals: 0 }
-        entry.refusals = count
-        byDayMap.set(day, entry)
+      for (const row of refusalsByDayRows) {
+        const entry = byDayMap.get(row.day) ?? { spent_by_agent: {}, refusals: 0 }
+        entry.refusals = Number(row.refusals)
+        byDayMap.set(row.day, entry)
       }
       const byDay = Array.from(byDayMap.entries())
         .sort(([a], [b]) => a.localeCompare(b))

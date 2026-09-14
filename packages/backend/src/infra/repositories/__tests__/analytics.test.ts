@@ -15,9 +15,11 @@ import {
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import {
   ACTIVE_DELEGATIONS_FOR_USER_SQL,
+  aggregateRefusalAmountForUser,
   BY_DAY_SPEND_SQL,
   computeBudgetBands,
   countUnsettledSubmittedForUser,
+  type DelegationBudgetView,
   listActiveDelegationsForUser,
   listBalanceByDayForUser,
   listByDaySpendForUser,
@@ -25,6 +27,8 @@ import {
   listPerAgentSpendForUser,
   listPerAgentTopMerchantForUser,
   listReceiptMerchantNamesForUser,
+  dayKeyInZone,
+  listRefusalsByDayForUser,
   listTopMerchantsForUser,
   PER_AGENT_SPEND_SQL,
   shapeBudgets,
@@ -33,7 +37,9 @@ import {
   sumValueBearingGasOps,
   TOTALS_SPEND_SQL,
   type DateRange,
+  type Executor,
 } from '../analytics.js'
+import type { QueryRow } from '../../transaction.js'
 import { recordPaymentRefusal } from '../payment-refusals.js'
 
 let seq = 0
@@ -434,6 +440,29 @@ describeDb('analytics-overview repository (#2946)', () => {
     expect(Number(fees.fee_rows)).toBe(1)
   })
 
+  it('a fee row whose intent carries a non-numeric amount_raw neither throws nor counts (the AMOUNT_RAW_IS_NUMERIC guard is load-bearing)', async () => {
+    // routes/payments.ts already distrusts amount_raw (try/catch BigInt), so a
+    // non-numeric value is a state the column can hold. Without the regex
+    // guard the ::numeric cast would 500 the whole overview; with it the row
+    // is dropped from the sum AND from fee_rows. Mutation: guard → '.*' makes
+    // this test throw on the cast.
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 12)
+    const agentId = await seedAgent(userId, accountId)
+    const range = rangeOfDays(7)
+    const goodId = await seedPayment({ agentId, userId, usdValue: 10, eurValue: 9, amountRaw: '10000000', confirmedAt: daysAgoIso(1) })
+    const badId = await seedPayment({ agentId, userId, usdValue: 10, eurValue: 9, amountRaw: '10000000', confirmedAt: daysAgoIso(1) })
+    await db.query(`UPDATE payment_intents SET amount_raw = 'not-a-number' WHERE id = $1`, [badId])
+    await db.query(
+      `INSERT INTO payment_fees (payment_id, rail, fee_amount_atomic, fee_token) VALUES ($1, 'x402', '100000', 'USDC'), ($2, 'x402', '100000', 'USDC')`,
+      [goodId, badId],
+    )
+
+    const fees = await sumFeesTotalsForUser(userId, range, rangeOfDays(14))
+    expect(Number(fees.fee_usd)).toBeCloseTo(0.1, 6)
+    expect(Number(fees.fee_rows)).toBe(1)
+  })
+
   // ── Gas — value-bearing chains only ──────────────────────────────────────
 
   it('gas ops are filtered to value-bearing chains via isValueBearingChain, not a hardcoded SQL list', async () => {
@@ -527,9 +556,10 @@ describeDb('analytics-overview repository (#2946)', () => {
     expect(Number(totals.payments_counted)).toBe(5)
   })
 
-  // ── Refusals are read, never re-queried (uses #2945's own repo) ──────────
+  // ── Refusals: dedupe/insert logic stays in payment-refusals.ts; only ────
+  // ── two read-only aggregates against the table live here (#2946 review) ──
 
-  it('reads refusals exclusively through payment-refusals.ts (no duplicate SQL against the table)', async () => {
+  it('never inserts, updates, or duplicates the per-agent/per-reason breakdown against payment_refusals (only reads two bounded aggregates)', async () => {
     const userId = await seedUser()
     const accountId = await seedAccount(userId, 15)
     const agentId = await seedAgent(userId, accountId)
@@ -547,14 +577,73 @@ describeDb('analytics-overview repository (#2946)', () => {
       source: 'x402_authorize',
     })
 
-    // The route composes its totals from `aggregateRefusalsForUserByAgent` /
-    // `listRefusalsForUser` (imported in routes/analytics-overview.ts) — this
-    // repository file itself defines no SQL against `payment_refusals`, which
-    // `grep` can confirm structurally:
+    // The dedupe/upsert logic and the (agent_id, reason) breakdown stay
+    // exclusively in payment-refusals.ts — this file may READ
+    // `payment_refusals` (two bounded aggregates: amount, by-day) but must
+    // never WRITE it, and must never re-implement the per-reason grouping.
     const fs = await import('node:fs/promises')
     const source = await fs.readFile(new URL('../analytics.ts', import.meta.url), 'utf8')
-    expect(source).not.toMatch(/FROM\s+payment_refusals/i)
     expect(source).not.toMatch(/INSERT INTO\s+payment_refusals/i)
+    expect(source).not.toMatch(/UPDATE\s+payment_refusals/i)
+    expect(source).not.toMatch(/GROUP BY[^;`]*reason/i)
+  })
+
+  it('aggregateRefusalAmountForUser: count and amount come from the SAME statement, so they cannot disagree', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 16)
+    const agentId = await seedAgent(userId, accountId)
+
+    await recordPaymentRefusal({
+      userId, accountId, agentId, chainId: 84532, tokenSymbol: 'USDC', amountAtomic: '1000',
+      usdValue: 1, eurValue: 0.9, reason: 'delegation_budget_exceeded', source: 'x402_authorize',
+    })
+    await recordPaymentRefusal({
+      userId, accountId, agentId, chainId: 84532, tokenSymbol: 'USDC', amountAtomic: '2000',
+      usdValue: 2, eurValue: 1.8, reason: 'relayer_budget', source: 'payment',
+    })
+
+    // Padded upper bound: the two refusals above land at `NOW()` (DB clock,
+    // at insert time), so a range built purely from `Date.now()` before
+    // those inserts would otherwise clip them (same reasoning as the gas-ops
+    // and tenant-isolation fixtures).
+    const range: DateRange = {
+      from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      to: new Date(Date.now() + 60_000).toISOString(),
+    }
+    const agg = await aggregateRefusalAmountForUser(userId, range)
+    expect(agg.refused_count).toBe('2')
+    expect(Number(agg.refused_amount_usd)).toBeCloseTo(3, 6)
+    expect(Number(agg.refused_amount_eur)).toBeCloseTo(2.7, 6)
+  })
+
+  it('listRefusalsByDayForUser buckets by tz exactly like BY_DAY_SPEND_SQL, and dayKeyInZone agrees', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 17)
+    const agentId = await seedAgent(userId, accountId)
+
+    // 2030-06-02T00:30+02:00 (CEST) == 2030-06-01T22:30Z — the same instant
+    // BY_DAY_SPEND_SQL's Stockholm test buckets onto 06-02, not 06-01.
+    const instant = '2030-06-01T22:30:00Z'
+    await recordPaymentRefusal({
+      userId, accountId, agentId, chainId: 84532, tokenSymbol: 'USDC', amountAtomic: '1000',
+      usdValue: 1, eurValue: 0.9, reason: 'delegation_budget_exceeded', source: 'x402_authorize',
+    })
+    await db.query(
+      `UPDATE payment_refusals SET created_at = $1 WHERE user_id = $2`,
+      [instant, userId],
+    )
+
+    const range: DateRange = { from: '2030-01-01T00:00:00Z', to: '2031-01-01T00:00:00Z' }
+    const utcRows = await listRefusalsByDayForUser(userId, 'UTC', range)
+    const stockholmRows = await listRefusalsByDayForUser(userId, 'Europe/Stockholm', range)
+    expect(utcRows.map((r) => r.day)).toEqual(['2030-06-01'])
+    expect(stockholmRows.map((r) => r.day)).toEqual(['2030-06-02'])
+
+    // dayKeyInZone (the JS-side bucketer the route used to use for refusals)
+    // agrees with the SQL bucket for BOTH zones, by construction — the
+    // "same instant, same day" proof the review asked for.
+    expect(dayKeyInZone(instant, 'UTC')).toBe('2030-06-01')
+    expect(dayKeyInZone(instant, 'Europe/Stockholm')).toBe('2030-06-02')
   })
 
   // ── Performance AC: one statement per section, not a per-agent loop ─────
@@ -629,6 +718,359 @@ describeDb('analytics-overview repository (#2946)', () => {
       for (const row of perAgent) {
         expect(Number(row.payments)).toBe(300)
       }
+    },
+  )
+
+  // ── Tenant isolation — a full two-tenant fixture across EVERY exported ──
+  // ── list/sum function, not just per-agent spend (#2946 review finding). ──
+
+  interface TenantFixture {
+    userId: string
+    accountId: string
+    agentId: string
+    merchantAddress: string
+    paymentId: string
+  }
+
+  /** Seeds one tenant with a row in every table an analytics.ts function reads. */
+  async function seedFullTenantFixture(seedBase: number): Promise<TenantFixture> {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, seedBase)
+    const agentId = await seedAgent(userId, accountId, { name: `tenant-${seedBase}` })
+    const merchantAddress = `0x${String(seedBase).padStart(40, '5')}`
+
+    const paymentId = await seedPayment({
+      agentId,
+      userId,
+      usdValue: 42,
+      eurValue: 39,
+      merchantAddress,
+      confirmedAt: daysAgoIso(1),
+    })
+    await seedPayment({ agentId, userId, status: 'submitted', createdAt: daysAgoIso(1) })
+
+    await db.query(
+      `INSERT INTO payment_fees (payment_id, rail, fee_amount_atomic, fee_token) VALUES ($1, 'x402', $2, 'USDC')`,
+      [paymentId, '500000'],
+    )
+
+    await recordPaymentRefusal({
+      userId,
+      accountId,
+      agentId,
+      chainId: 84532,
+      tokenSymbol: 'USDC',
+      amountAtomic: '9999',
+      usdValue: 77,
+      eurValue: 66,
+      reason: 'delegation_budget_exceeded',
+      source: 'x402_authorize',
+    })
+
+    await db.query(
+      `INSERT INTO relayer_gas_events (chain_id, operation, agent_id, created_at) VALUES (8453, 'exec', $1, NOW())`,
+      [agentId],
+    )
+
+    await db.query(
+      `INSERT INTO user_daily_portfolio_snapshots (user_id, snapshot_date, total_usd, total_eur)
+       VALUES ($1, CURRENT_DATE - 1, $2, $3)`,
+      [userId, seedBase * 100, seedBase * 90],
+    )
+
+    await db.query(`INSERT INTO contacts (user_id, name, address) VALUES ($1, $2, $3)`, [
+      userId,
+      `Contact-${seedBase}`,
+      `0x${String(seedBase).padStart(40, '6')}`,
+    ])
+
+    const evidence = await db.query<{ id: string }>(
+      `INSERT INTO machine_payment_evidence (
+         payment_intent_id, agent_id, user_id, rail, tx_hash, chain_id, resource_url,
+         merchant_address, payer_address, settlement_address, token_symbol, token_address, amount_raw, amount_human
+       ) VALUES ($1, $2, $3, 'x402', $4, 84532, 'https://merchant.example', $5,
+                 '0x' || repeat('e', 40), '0x' || repeat('f', 40), 'USDC', '0x' || repeat('b', 40), '1000', '0.001')
+       RETURNING id`,
+      [paymentId, agentId, userId, `0x${String(++seq).padStart(64, '3')}`.slice(0, 66), merchantAddress],
+    )
+    await db.query(`INSERT INTO merchant_receipts (evidence_id, inline_json) VALUES ($1, $2)`, [
+      evidence.rows[0].id,
+      JSON.stringify({ merchant_name: `Merchant-${seedBase}` }),
+    ])
+
+    await db.query(
+      `INSERT INTO agent_delegations (
+         agent_id, chain_id, token_address, recipient_address, delegation_hash,
+         delegation_json, version, status, budget_atomic, period_seconds,
+         start_date, expires_at
+       ) VALUES ($1, 84532, '0x' || repeat('a', 40), NULL, $2, '{}', 1, 'active', '1000000', 86400,
+                 $3, 9999999999)`,
+      [agentId, `0x${String(++seq).padStart(64, '4')}`.slice(0, 66), Math.floor(Date.now() / 1000) - 3600],
+    )
+
+    return { userId, accountId, agentId, merchantAddress, paymentId }
+  }
+
+  it('tenant isolation: user A never sees user B rows or amounts, across EVERY exported list/sum function', async () => {
+    const a = await seedFullTenantFixture(300)
+    const b = await seedFullTenantFixture(301)
+    // Computed AFTER seeding, upper bound padded a minute into the future —
+    // several rows above use `NOW()`/`CURRENT_DATE` at INSERT time, and a
+    // range built from `Date.now()` before those inserts would otherwise
+    // exclude rows the DB just wrote (same reasoning as the gas-ops test).
+    const range: DateRange = {
+      from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      to: new Date(Date.now() + 60_000).toISOString(),
+    }
+
+    const totalsA = await sumTotalsSpendForUser(a.userId, range, rangeOfDays(14))
+    expect(Number(totalsA.spent_usd)).toBeCloseTo(42, 6) // never 42+42's own duplication or B's 42
+
+    const unsettledA = await countUnsettledSubmittedForUser(a.userId, range)
+    expect(unsettledA).toBe(1)
+
+    const byDayA = await listByDaySpendForUser(a.userId, 'UTC', range)
+    expect(byDayA.length).toBeGreaterThan(0)
+    expect(byDayA.every((r) => r.agent_id === a.agentId)).toBe(true)
+    expect(byDayA.some((r) => r.agent_id === b.agentId)).toBe(false)
+
+    const perAgentA = await listPerAgentSpendForUser(a.userId, range)
+    expect(perAgentA.map((r) => r.agent_id)).toEqual([a.agentId])
+
+    const topMerchantPerAgentA = await listPerAgentTopMerchantForUser(a.userId, range)
+    expect(topMerchantPerAgentA.every((r) => r.agent_id === a.agentId)).toBe(true)
+    expect(topMerchantPerAgentA.some((r) => r.merchant_key === b.merchantAddress.toLowerCase())).toBe(false)
+
+    const topMerchantsA = await listTopMerchantsForUser(a.userId, range)
+    expect(topMerchantsA.map((m) => m.merchant_key)).toEqual([a.merchantAddress.toLowerCase()])
+    expect(topMerchantsA.every((m) => !m.agent_ids.includes(b.agentId))).toBe(true)
+
+    const namesA = await listReceiptMerchantNamesForUser(a.userId, [
+      a.merchantAddress,
+      b.merchantAddress,
+    ])
+    expect(namesA.get(a.merchantAddress.toLowerCase())).toBe(`Merchant-300`)
+    expect(namesA.has(b.merchantAddress.toLowerCase())).toBe(false)
+
+    const balanceA = await listBalanceByDayForUser(a.userId, range)
+    expect(balanceA).toHaveLength(1)
+    expect(Number(balanceA[0].total_usd)).toBeCloseTo(300 * 100, 6)
+
+    const feesA = await sumFeesTotalsForUser(a.userId, range, rangeOfDays(14))
+    expect(Number(feesA.fee_rows)).toBe(1)
+
+    const gasA = await listGasEventsByChainForUser(a.userId, range)
+    expect(sumValueBearingGasOps(gasA)).toBe(1)
+
+    const delegationsA = await listActiveDelegationsForUser(a.userId)
+    expect(delegationsA.map((d) => d.agent_id)).toEqual([a.agentId])
+  })
+
+  // ── Mutation-proof scaffolding lives in a bash procedure the agent runs ──
+  // ── against this file directly (cp backup, sed, run, cp restore) — see  ──
+  // ── the PR report for the eight recorded outputs.                       ──
+
+  // ── computeBudgetBands — pure unit tests, no DB ─────────────────────────
+
+  describe('computeBudgetBands (pure)', () => {
+    function view(agentId: string, ratio: number): DelegationBudgetView {
+      return {
+        agent_id: agentId,
+        token: 'USDC',
+        recipient: null,
+        used_atomic: '0',
+        budget_atomic: '1000000',
+        remaining_from_chain: true,
+        period_start: '2030-01-01T00:00:00.000Z',
+        period_end: '2030-01-02T00:00:00.000Z',
+        ratio,
+      }
+    }
+
+    it('one agent, two delegations at 0.6 and 0.8: worst ratio wins both bands', () => {
+      const byAgent = new Map<string, DelegationBudgetView[]>([
+        ['agent-1', [view('agent-1', 0.6), view('agent-1', 0.8)]],
+      ])
+      const bands = computeBudgetBands(byAgent)
+      expect(bands).toEqual({ above_75: 1, above_50: 1, agents_with_budget: 1 })
+    })
+
+    it('two agents: one above both bands, one below both', () => {
+      const byAgent = new Map<string, DelegationBudgetView[]>([
+        ['agent-1', [view('agent-1', 0.9)]],
+        ['agent-2', [view('agent-2', 0.2)]],
+      ])
+      const bands = computeBudgetBands(byAgent)
+      expect(bands).toEqual({ above_75: 1, above_50: 1, agents_with_budget: 2 })
+    })
+  })
+
+  // ── agents[]: a zero-spend agent still appears, spent: '0' ──────────────
+
+  it('a zero-spend agent (e.g. pending_approval, never yet spent) still appears in per-agent spend, with spent_usd: \'0\'', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 302)
+    const zeroSpendAgent = await seedAgent(userId, accountId, {
+      name: 'pending-approval-agent',
+      status: 'pending_approval',
+    })
+
+    const rows = await listPerAgentSpendForUser(userId, rangeOfDays(7))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].agent_id).toBe(zeroSpendAgent)
+    expect(rows[0].status).toBe('pending_approval')
+    expect(rows[0].spent_usd).toBe('0')
+    expect(Number(rows[0].payments)).toBe(0)
+  })
+
+  // ── Status-inclusion predicate: load-bearing on EVERY section, not just ──
+  // ── totals — the anomalous confirmed_at-but-not-confirmed row must be   ──
+  // ── excluded everywhere (#2946 review finding).                        ──
+
+  it('the anomalous failed-but-fiat row is excluded from by-day, per-agent, per-agent-top-merchant, top-merchants and fees — not just totals', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 303)
+    const agentId = await seedAgent(userId, accountId)
+    const merchant = `0x${'8'.padStart(40, '0')}`
+    const range = rangeOfDays(7)
+
+    const realPaymentId = await seedPayment({
+      agentId,
+      userId,
+      usdValue: 10,
+      eurValue: 9,
+      merchantAddress: merchant,
+      confirmedAt: daysAgoIso(1),
+    })
+    await db.query(
+      `INSERT INTO payment_fees (payment_id, rail, fee_amount_atomic, fee_token) VALUES ($1, 'x402', $2, 'USDC')`,
+      [realPaymentId, '100000'],
+    )
+
+    // The anomalous row: status = 'failed' but confirmed_at/usd_value/eur_value
+    // set anyway — a raw INSERT bypassing seedPayment's status-gated nulling,
+    // and the one thing that can tell "status = 'confirmed'" apart from
+    // "confirmed_at IS NOT NULL" in every section, not only totals.
+    await db.query(
+      `INSERT INTO payment_intents (
+         agent_id, user_id, account_address, token_symbol, token_address, to_address,
+         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+         status, usd_value, eur_value, confirmed_at, created_at, expires_at, merchant_address
+       ) VALUES ($1, $2, '0x' || repeat('a', 40), 'USDC', '0x' || repeat('b', 40), $3,
+                 '10000000', '10.00', '0x' || repeat('c', 40), 1, $4,
+                 'failed', 999999, 999999, $5, $5, NOW() + interval '10 minutes', $6)`,
+      [agentId, userId, `0x${String(++seq).padStart(40, '9')}`, `0x${String(++seq).padStart(64, 'f')}`.slice(0, 66), daysAgoIso(1), merchant],
+    )
+
+    const byDay = await listByDaySpendForUser(userId, 'UTC', range)
+    expect(byDay.reduce((s, r) => s + Number(r.usd), 0)).toBeCloseTo(10, 6)
+
+    const perAgent = await listPerAgentSpendForUser(userId, range)
+    expect(Number(perAgent[0].spent_usd)).toBeCloseTo(10, 6)
+    expect(Number(perAgent[0].payments)).toBe(1)
+
+    const topMerchantPerAgent = await listPerAgentTopMerchantForUser(userId, range)
+    expect(topMerchantPerAgent).toHaveLength(1)
+
+    const topMerchants = await listTopMerchantsForUser(userId, range)
+    expect(topMerchants).toHaveLength(1)
+    expect(Number(topMerchants[0].spent_usd)).toBeCloseTo(10, 6)
+    expect(Number(topMerchants[0].payments)).toBe(1)
+
+    const fees = await sumFeesTotalsForUser(userId, range, rangeOfDays(14))
+    expect(Number(fees.fee_rows)).toBe(1)
+    expect(Number(fees.fee_usd)).toBeCloseTo(0.1, 6)
+  })
+
+  // ── Performance AC, proven by counting driver calls, not by EXPLAIN ─────
+  // ── succeeding on the constant in isolation (#2946 review finding: the  ──
+  // ── previous perf test could not fail on a per-agent loop being added). ──
+
+  it(
+    'each section function issues exactly ONE db.query call against the 5x300 fixture — proven by counting, not by EXPLAIN',
+    { timeout: 60_000 },
+    async () => {
+      const userId = await seedUser()
+      const accountId = await seedAccount(userId, 21)
+      const agentIds: string[] = []
+      for (let i = 0; i < 5; i++) {
+        agentIds.push(await seedAgent(userId, accountId, { name: `count-agent-${i}` }))
+      }
+
+      const values: string[] = []
+      const params: unknown[] = []
+      let p = 0
+      for (const agentId of agentIds) {
+        for (let i = 0; i < 300; i++) {
+          const dayOffset = i % 90
+          const d = new Date()
+          d.setUTCDate(d.getUTCDate() - dayOffset)
+          values.push(
+            `($${++p}, $${++p}, '0x' || repeat('a', 40), 'USDC', '0x' || repeat('b', 40), $${++p}, '10000', '10.00', '0x' || repeat('c', 40), 1, $${++p}, 'confirmed', 1, 0.9, $${++p}, $${++p}, NOW() + interval '10 minutes', 84532)`,
+          )
+          params.push(
+            agentId,
+            userId,
+            `0x${String(p).padStart(40, '9')}`,
+            `0x${String(p).padStart(64, 'd')}`.slice(0, 66),
+            d.toISOString(),
+            d.toISOString(),
+          )
+        }
+      }
+      await db.query(
+        `INSERT INTO payment_intents (
+           agent_id, user_id, account_address, token_symbol, token_address, to_address,
+           amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+           status, usd_value, eur_value, confirmed_at, created_at, expires_at, chain_id
+         ) VALUES ${values.join(',')}`,
+        params,
+      )
+
+      const range: DateRange = rangeOfDays(90)
+
+      // A thin wrapper around the real pool that counts calls — same
+      // Executor shape every section function already accepts, so no
+      // production code changes to make this countable.
+      let calls = 0
+      const countingDb: Executor = {
+        query: <R extends QueryRow = QueryRow>(sql: string, vals?: unknown[]) => {
+          calls += 1
+          return db.query<R>(sql, vals)
+        },
+      }
+
+      calls = 0
+      await sumTotalsSpendForUser(userId, range, rangeOfDays(180), countingDb)
+      expect(calls).toBe(1)
+
+      calls = 0
+      await listPerAgentSpendForUser(userId, range, countingDb)
+      expect(calls).toBe(1)
+
+      calls = 0
+      await listByDaySpendForUser(userId, 'UTC', range, countingDb)
+      expect(calls).toBe(1)
+
+      calls = 0
+      await listPerAgentTopMerchantForUser(userId, range, countingDb)
+      expect(calls).toBe(1)
+
+      calls = 0
+      await listTopMerchantsForUser(userId, range, countingDb)
+      expect(calls).toBe(1)
+
+      calls = 0
+      await sumFeesTotalsForUser(userId, range, rangeOfDays(180), countingDb)
+      expect(calls).toBe(1)
+
+      calls = 0
+      await listGasEventsByChainForUser(userId, range, countingDb)
+      expect(calls).toBe(1)
+
+      calls = 0
+      await listActiveDelegationsForUser(userId, countingDb)
+      expect(calls).toBe(1)
     },
   )
 })

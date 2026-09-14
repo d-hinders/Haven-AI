@@ -8,15 +8,44 @@
  * on-chain read with no batch form, so it runs once per ACTIVE delegation
  * (bounded by how many delegations the tenant has, not by payment volume).
  *
- * Every statement here is tenant-scoped (`userId` required) and rail-scoped
- * (`DELEGATION_RAIL_ONLY` — joins through `agents.account_id` to
+ * Every statement here is tenant-scoped (`userId` required). Most are ALSO
+ * rail-scoped (`DELEGATION_RAIL_JOIN` — joins through `agents.account_id` to
  * `smart_accounts.account_type = 'delegator_hybrid'`, the same posture
- * `infra/repositories/smart-accounts.ts` and `dashboard.ts` already carry).
+ * `infra/repositories/smart-accounts.ts` and `dashboard.ts` already carry),
+ * but NOT every join in this file is that filter — two are deliberately not,
+ * corrected here after review claimed "every join" too broadly:
  *
- * Refusal data is READ, never re-queried: every number this file reports
- * about `payment_refusals` goes through `infra/repositories/payment-refusals.ts`
- * (`listRefusalsForUser`, `aggregateRefusalsForUserByAgent`) — no new SQL
- * against that table lives here.
+ * - `BALANCE_BY_DAY_SQL` reads `user_daily_portfolio_snapshots` directly —
+ *   one row per user per day, never per-account or per-agent. It is
+ *   rail-agnostic BY CONSTRUCTION: there is no `account_id`/`agent_id` column
+ *   on that table to join through, so a balance day cannot be attributed to
+ *   one rail even in principle.
+ * - `GAS_EVENTS_BY_CHAIN_SQL` reads `relayer_gas_events`, whose own migration
+ *   (`054_relayer_gas_events.ts`) makes `agent_id` deliberately NOT a foreign
+ *   key so that a deleted agent's gas attribution survives it, and lets
+ *   `user_id` carry a gas event directly for user-level operations (Safe/
+ *   Hybrid deploys) that have no owning agent at all. Both properties would
+ *   break under a hard `JOIN agents ... JOIN smart_accounts`: a deleted
+ *   agent's historical rows would silently vanish (contradicting the
+ *   migration's own stated invariant), and every direct `user_id` row —
+ *   which by definition has no agent to join through — would too. This
+ *   statement therefore stays tenant-scoped only; it is not rail-scoped, and
+ *   the CASP shard says so rather than repeating "every join".
+ *
+ * Refusal data is READ, never RE-WRITTEN: the dedupe/upsert logic and the
+ * `(agent_id, reason)` breakdown stay exclusively in
+ * `infra/repositories/payment-refusals.ts` (`listRefusalsForUser`,
+ * `aggregateRefusalsForUserByAgent`) — nothing here inserts, updates or
+ * duplicates that logic. Two READ-ONLY aggregates against `payment_refusals`
+ * DO live here (`AGGREGATE_REFUSALS_FOR_USER_SQL`, `REFUSALS_BY_DAY_SQL`,
+ * added on review of #2946): `listRefusalsForUser(..., 10_000)` was being
+ * pulled in full just to fold `refused_amount` and a by-day refusal count in
+ * application code, an O(rows) client-side sum instead of a SQL aggregate —
+ * the same class of bug the performance AC exists to prevent everywhere
+ * else in this file. Both are tenant-scoped and use the SAME half-open
+ * `[from, to)` boundary and `AT TIME ZONE $tz` bucketing as `BY_DAY_SPEND_SQL`
+ * (the route's separate `(fromExclusive, toInclusive]` convention for
+ * `listRefusalsForUser` does not apply to these two statements).
  */
 
 import pool from '../../db.js'
@@ -196,7 +225,7 @@ export const PER_AGENT_SPEND_SQL = `SELECT
     COALESCE(SUM(pi.usd_value), 0)::text AS spent_usd,
     COALESCE(SUM(pi.eur_value), 0)::text AS spent_eur,
     COUNT(pi.id)::text AS payments,
-    MAX(pi.confirmed_at)::text AS last_payment_at
+    MAX(pi.confirmed_at) AS last_payment_at
   FROM agents a
   ${DELEGATION_RAIL_JOIN}
   LEFT JOIN payment_intents pi
@@ -207,13 +236,28 @@ export const PER_AGENT_SPEND_SQL = `SELECT
   WHERE a.user_id = $1
   GROUP BY a.id, a.name, a.status`
 
+interface PerAgentSpendRawRow {
+  agent_id: string
+  name: string
+  status: string
+  spent_usd: string
+  spent_eur: string
+  payments: string
+  /** `timestamptz`, not `::text` — a session-zone cast would silently rebase
+   * this off UTC. Formatted to ISO-8601 UTC in application code below. */
+  last_payment_at: Date | null
+}
+
 export async function listPerAgentSpendForUser(
   userId: string,
   range: DateRange,
   db: Executor = pool,
 ): Promise<PerAgentSpendRow[]> {
-  const result = await db.query<PerAgentSpendRow>(PER_AGENT_SPEND_SQL, [userId, range.from, range.to])
-  return result.rows
+  const result = await db.query<PerAgentSpendRawRow>(PER_AGENT_SPEND_SQL, [userId, range.from, range.to])
+  return result.rows.map((r) => ({
+    ...r,
+    last_payment_at: r.last_payment_at ? r.last_payment_at.toISOString() : null,
+  }))
 }
 
 export interface PerAgentTopMerchantRow {
@@ -270,6 +314,7 @@ export interface MerchantAggregateRow {
   spent_eur: string
   payments: string
   agent_ids: string[]
+  /** ISO-8601 UTC (`toISOString()`), never a `::text` session-zone cast. */
   first_seen: string
   last_seen: string
 }
@@ -280,8 +325,8 @@ export const TOP_MERCHANTS_SQL = `SELECT
     COALESCE(SUM(pi.eur_value), 0)::text AS spent_eur,
     COUNT(*)::text AS payments,
     ARRAY_AGG(DISTINCT pi.agent_id)::text[] AS agent_ids,
-    MIN(pi.confirmed_at)::text AS first_seen,
-    MAX(pi.confirmed_at)::text AS last_seen
+    MIN(pi.confirmed_at) AS first_seen,
+    MAX(pi.confirmed_at) AS last_seen
   FROM payment_intents pi
   JOIN agents a ON a.id = pi.agent_id
   ${DELEGATION_RAIL_JOIN}
@@ -293,13 +338,27 @@ export const TOP_MERCHANTS_SQL = `SELECT
   ORDER BY SUM(pi.usd_value) DESC
   LIMIT 10`
 
+interface MerchantAggregateRawRow {
+  merchant_key: string
+  spent_usd: string
+  spent_eur: string
+  payments: string
+  agent_ids: string[]
+  first_seen: Date
+  last_seen: Date
+}
+
 export async function listTopMerchantsForUser(
   userId: string,
   range: DateRange,
   db: Executor = pool,
 ): Promise<MerchantAggregateRow[]> {
-  const result = await db.query<MerchantAggregateRow>(TOP_MERCHANTS_SQL, [userId, range.from, range.to])
-  return result.rows
+  const result = await db.query<MerchantAggregateRawRow>(TOP_MERCHANTS_SQL, [userId, range.from, range.to])
+  return result.rows.map((r) => ({
+    ...r,
+    first_seen: r.first_seen.toISOString(),
+    last_seen: r.last_seen.toISOString(),
+  }))
 }
 
 /**
@@ -373,20 +432,33 @@ export interface FeesTotalsRow {
  * `fee_amount_atomic` is `'0'` for every row, so this is honestly zero, not a
  * silent skip.
  */
+/**
+ * `pi.amount_raw::numeric` would throw a Postgres cast error — not a wrong
+ * number, a FAILED QUERY — the instant one row's `amount_raw` (`VARCHAR(78)`,
+ * no CHECK constraint) is not a plain digit string. `routes/payments.ts`'s own
+ * `try { BigInt(intent.amount_raw) } catch { gross = 0n }` is this codebase
+ * already not trusting that column absolutely, so this statement does not
+ * either: `pi.amount_raw ~ '^[0-9]+$'` guards every cast, and a row that
+ * fails it contributes 0 fee rather than crashing the aggregate — the same
+ * "honestly zero, not a silent skip" posture the module doc already commits
+ * to for the fee-flag-off case.
+ */
+const AMOUNT_RAW_IS_NUMERIC = `pi.amount_raw ~ '^[0-9]+$'`
+
 export const FEES_TOTALS_SQL = `SELECT
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 AND ${AMOUNT_RAW_IS_NUMERIC}
       THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.usd_value, 0)
       ELSE 0 END), 0)::text AS fee_usd,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 AND ${AMOUNT_RAW_IS_NUMERIC}
       THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.eur_value, 0)
       ELSE 0 END), 0)::text AS fee_eur,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 AND ${AMOUNT_RAW_IS_NUMERIC}
       THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.usd_value, 0)
       ELSE 0 END), 0)::text AS fee_usd_previous,
-    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 AND ${AMOUNT_RAW_IS_NUMERIC}
       THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.eur_value, 0)
       ELSE 0 END), 0)::text AS fee_eur_previous,
-    COUNT(*) FILTER (WHERE pi.confirmed_at >= $2 AND pi.confirmed_at < $3)::text AS fee_rows
+    COUNT(*) FILTER (WHERE pi.confirmed_at >= $2 AND pi.confirmed_at < $3 AND ${AMOUNT_RAW_IS_NUMERIC})::text AS fee_rows
   FROM payment_fees pf
   JOIN payment_intents pi ON pi.id::text = pf.payment_id
   JOIN agents a ON a.id = pi.agent_id
@@ -535,16 +607,50 @@ function currentPeriodBounds(startDateSec: number, periodSeconds: number, nowSec
 }
 
 /**
- * Reads the chain once per ACTIVE delegation (documented above) and shapes
- * the per-agent budget view. `remaining_from_chain: false` marks a fallback
- * read exactly as `readRemainingBudget` reports it.
+ * Bounded-concurrency map: runs `fn` over `items` with at most
+ * `concurrency` in flight at once, preserving no particular order among
+ * results (order does not matter to `shapeBudgets` — each result carries its
+ * own `agent_id`). A plain `Promise.all(items.map(fn))` would fire every
+ * on-chain read at once; a plain sequential loop (the previous shape) pays
+ * N times the per-read timeout in the worst case. Four in flight is enough
+ * to collapse that to roughly one timeout for the common delegation counts
+ * this endpoint sees, without unbounded RPC fan-out.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = next++
+      if (i >= items.length) return
+      results[i] = await fn(items[i])
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  await Promise.all(workers)
+  return results
+}
+
+const BUDGET_READ_CONCURRENCY = 4
+
+/**
+ * Reads the chain for every ACTIVE delegation (documented above) and shapes
+ * the per-agent budget view. Reads run with up to
+ * `BUDGET_READ_CONCURRENCY` in flight at once — each `readRemainingBudget`
+ * call keeps its own per-read timeout, so N sequential reads no longer cost
+ * N timeouts in the worst case (#2946 review). `remaining_from_chain: false`
+ * marks a fallback read exactly as `readRemainingBudget` reports it.
  */
 export async function shapeBudgets(
   delegations: ActiveDelegationForUserRow[],
   nowSec: number = Math.floor(Date.now() / 1000),
 ): Promise<Map<string, DelegationBudgetView[]>> {
   const byAgent = new Map<string, DelegationBudgetView[]>()
-  for (const d of delegations) {
+  const views = await mapWithConcurrency(delegations, BUDGET_READ_CONCURRENCY, async (d) => {
     const { remainingAtomic, fromChain } = await readRemainingBudget(
       d.chain_id,
       d.delegation_json,
@@ -566,11 +672,100 @@ export async function shapeBudgets(
       period_end: new Date(end * 1000).toISOString(),
       ratio,
     }
-    const existing = byAgent.get(d.agent_id) ?? []
+    return view
+  })
+  for (const view of views) {
+    const existing = byAgent.get(view.agent_id) ?? []
     existing.push(view)
-    byAgent.set(d.agent_id, existing)
+    byAgent.set(view.agent_id, existing)
   }
   return byAgent
+}
+
+// ── Refusal aggregates — amount and by-day, from ONE statement each ─────────
+
+export interface RefusalAmountRow {
+  refused_count: string
+  refused_amount_usd: string
+  refused_amount_eur: string
+}
+
+/**
+ * The total refused amount AND the row count from the same scan, so they
+ * cannot disagree with each other (the review finding this replaces: the
+ * previous code derived `refused_amount` from a separately-fetched
+ * 10,000-row list while `refused_count` came from a different aggregate).
+ * `[from, to)` — the same half-open boundary `TOTALS_SPEND_SQL` and
+ * `BY_DAY_SPEND_SQL` use, not `listRefusalsForUser`'s `(from, to]`.
+ */
+export const AGGREGATE_REFUSALS_FOR_USER_SQL = `SELECT
+    COUNT(*)::text AS refused_count,
+    COALESCE(SUM(pr.usd_value), 0)::text AS refused_amount_usd,
+    COALESCE(SUM(pr.eur_value), 0)::text AS refused_amount_eur
+  FROM payment_refusals pr
+  WHERE pr.user_id = $1
+    AND pr.created_at >= $2
+    AND pr.created_at < $3`
+
+export async function aggregateRefusalAmountForUser(
+  userId: string,
+  range: DateRange,
+  db: Executor = pool,
+): Promise<RefusalAmountRow> {
+  const result = await db.query<RefusalAmountRow>(AGGREGATE_REFUSALS_FOR_USER_SQL, [
+    userId,
+    range.from,
+    range.to,
+  ])
+  return (
+    result.rows[0] ?? { refused_count: '0', refused_amount_usd: '0', refused_amount_eur: '0' }
+  )
+}
+
+export interface RefusalsByDayRow {
+  /** `YYYY-MM-DD` in the requested zone — bucketed exactly like `BY_DAY_SPEND_SQL`. */
+  day: string
+  refusals: string
+}
+
+export const REFUSALS_BY_DAY_SQL = `SELECT
+    date_trunc('day', pr.created_at AT TIME ZONE $2)::date::text AS day,
+    COUNT(*)::text AS refusals
+  FROM payment_refusals pr
+  WHERE pr.user_id = $1
+    AND pr.created_at >= $3
+    AND pr.created_at < $4
+  GROUP BY day`
+
+/**
+ * `YYYY-MM-DD` in the given zone, via `Intl.DateTimeFormat` — the JS-side
+ * counterpart to `AT TIME ZONE $tz` bucketing in `BY_DAY_SPEND_SQL` and
+ * `REFUSALS_BY_DAY_SQL`. Lives here (not in the route) so the repository
+ * test suite can prove, by construction, that this function and the SQL
+ * bucket the same instant onto the same calendar day for a non-UTC zone.
+ */
+export function dayKeyInZone(iso: string, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso))
+}
+
+export async function listRefusalsByDayForUser(
+  userId: string,
+  tz: string,
+  range: DateRange,
+  db: Executor = pool,
+): Promise<RefusalsByDayRow[]> {
+  const result = await db.query<RefusalsByDayRow>(REFUSALS_BY_DAY_SQL, [
+    userId,
+    tz,
+    range.from,
+    range.to,
+  ])
+  return result.rows
 }
 
 export interface BudgetBands {

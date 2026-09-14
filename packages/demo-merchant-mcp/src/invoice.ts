@@ -1,6 +1,6 @@
 import type { MerchantLocale, ProductId } from './products.js'
 import { PRODUCTS, formatUsdc } from './products.js'
-import type { SettledPayment } from './x402.js'
+import type { SettledPayment, SettlementState } from './x402.js'
 
 // #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
 // Swedish bookkeeping artifact by design — it feeds the `x-receipt-json`
@@ -75,12 +75,8 @@ export interface InvoiceParams {
   authorizationNonce: string
   /** Tx hash if settled, otherwise undefined */
   txHash?: string
-  /**
-   * #2970: false ONLY for the demo merchant's two zero-hash paths (see
-   * `SettledPayment.settled`). Default true — every existing caller/fixture
-   * that omits this keeps producing `status: 'Betald'`, byte-identical.
-   */
-  settled?: boolean
+  /** #2969: explicit settlement truth — see `SettlementState`. */
+  settlement: SettlementState
 }
 
 export interface Invoice {
@@ -114,14 +110,17 @@ export interface InvoiceJson {
   totalt_inkl_moms: string
   valuta: 'USDC'
   betalningssatt: 'Kryptovaluta (USDC på Base)'
-  blockkedje_referens: string
   /**
-   * #2970: 'Betald' (settled, the default — unchanged for every existing
-   * caller) or, ONLY on the demo merchant's two zero-hash paths (skip-settle,
-   * already-used-recovery), the honest alternative — delivered, but Haven has
-   * no verified on-chain settlement for it.
+   * #2969: `null` on both non-settled states — never the zero hash. Only
+   * `settlement === 'settled_onchain'` carries a real transaction reference.
    */
-  status: 'Betald' | 'Levererad — ej bekräftad på kedjan'
+  blockkedje_referens: string | null
+  /**
+   * #2969: 'Betald' only for `settlement === 'settled_onchain'`. The other
+   * two `SettlementState`s each get their own honest status — 'already
+   * settled earlier, no reference' is distinct from 'delivered, unconfirmed'.
+   */
+  status: 'Betald' | 'Betald i tidigare transaktion — referens saknas' | 'Levererad — ej bekräftad på kedjan'
 }
 
 interface InvoiceRow {
@@ -131,6 +130,12 @@ interface InvoiceRow {
   moms_procent: number
   moms_belopp: string
   totalt_inkl_moms: string
+}
+
+const STATUS_BY_SETTLEMENT: Record<SettlementState, InvoiceJson['status']> = {
+  settled_onchain: 'Betald',
+  already_settled_earlier: 'Betald i tidigare transaktion — referens saknas',
+  settlement_unknown: 'Levererad — ej bekräftad på kedjan',
 }
 
 export function generateInvoice(params: InvoiceParams): Invoice {
@@ -145,9 +150,11 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   const exklMoms = (totalInclMoms * 100n) / 125n
   const momsBelopp = totalInclMoms - exklMoms
 
-  const blockRef = params.txHash
-    ? `Tx: ${params.txHash}`
-    : `EIP-3009 nonce: ${params.authorizationNonce}`
+  // #2969: only a REAL on-chain settlement gets a reference. Both non-settled
+  // states get `null` — never the zero hash, and never a fallback nonce
+  // dressed up as a reference for a transaction that may not exist at all
+  // (`already_settled_earlier` names no hash this process observed).
+  const blockRef = params.settlement === 'settled_onchain' ? `Tx: ${params.txHash}` : null
 
   const ocr = generateOcr(params.invoiceNumber)
 
@@ -181,12 +188,25 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     valuta: 'USDC',
     betalningssatt: 'Kryptovaluta (USDC på Base)',
     blockkedje_referens: blockRef,
-    status: params.settled === false ? 'Levererad — ej bekräftad på kedjan' : 'Betald',
+    status: STATUS_BY_SETTLEMENT[params.settlement],
   }
 
   const text = buildInvoiceText(json, product.name)
 
   return { json, text }
+}
+
+/**
+ * #2969: the blockchain reference section is present only when there is a
+ * real one to show (`settlement === 'settled_onchain'`). Printing the zero
+ * hash for the other two states was the bug this issue exists to fix — the
+ * fix is to say nothing rather than print a fake reference, so the section
+ * (heading + value + trailing blank line) is omitted entirely when
+ * `blockkedje_referens` is `null`.
+ */
+function blockchainReferenceSection(inv: InvoiceJson, heading: string): string {
+  if (inv.blockkedje_referens === null) return ''
+  return `${heading}\n  ${inv.blockkedje_referens}\n\n`
 }
 
 function buildInvoiceText(inv: InvoiceJson, productName: string): string {
@@ -227,10 +247,7 @@ TJÄNSTER
   Betalningssätt:   ${inv.betalningssatt}
   Mottagaradress:   ${inv.saljare.crypto_address}
 
-BLOCKKEDJEREFERENS
-  ${inv.blockkedje_referens}
-
-  Status: ${inv.status}
+${blockchainReferenceSection(inv, 'BLOCKKEDJEREFERENS')}  Status: ${inv.status}
 
 ════════════════════════════════════════════════════════════
   Tack för ditt köp av ${productName}!
@@ -251,6 +268,12 @@ export function renderInvoiceText(
   locale: MerchantLocale,
 ): string {
   return locale === 'sv' ? buildInvoiceText(inv, productName) : buildInvoiceTextEn(inv, productName)
+}
+
+const STATUS_EN: Record<InvoiceJson['status'], string> = {
+  Betald: 'Paid',
+  'Betald i tidigare transaktion — referens saknas': 'Paid in an earlier transaction — reference unavailable',
+  'Levererad — ej bekräftad på kedjan': 'Delivered — not confirmed on-chain',
 }
 
 function buildInvoiceTextEn(inv: InvoiceJson, productName: string): string {
@@ -292,10 +315,7 @@ SERVICES
   Payment method:    Cryptocurrency (USDC on Base)
   Recipient address: ${inv.saljare.crypto_address}
 
-BLOCKCHAIN REFERENCE
-  ${inv.blockkedje_referens}
-
-  Status: ${inv.status === 'Betald' ? 'Paid' : 'Delivered — not confirmed on-chain'}
+${blockchainReferenceSection(inv, 'BLOCKCHAIN REFERENCE')}  Status: ${STATUS_EN[inv.status]}
 
 ════════════════════════════════════════════════════════════
   Thank you for purchasing ${productName}!
@@ -328,7 +348,7 @@ export function invoiceForPayment(payment: SettledPayment, productId: ProductId)
     payerRole: payment.settlementMethod === 'erc7710' ? 'agent_delegate_account' : 'agent_delegate',
     authorizationNonce: payment.nonce,
     txHash: payment.txHash,
-    settled: payment.settled,
+    settlement: payment.settlement,
   })
   invoicesByPayment.set(payment, invoice)
   return invoice

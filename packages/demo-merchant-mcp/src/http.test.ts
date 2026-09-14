@@ -609,7 +609,7 @@ describe('demo merchant MCP x402 flow', () => {
       } catch {
         body = undefined
       }
-      return { status: paid.status, body: body ?? ({} as PaymentRequired & { error?: string }), text }
+      return { status: paid.status, body: body ?? ({} as PaymentRequired & { error?: string }), text, headers: paid.headers }
     }
 
     it('names the fault class and points at the logs, instead of "Payment failed"', async () => {
@@ -641,7 +641,7 @@ describe('demo merchant MCP x402 flow', () => {
       // has PAID; answering 402 would charge them and deliver nothing — the
       // exact defect observed on dev on 2026-08-17, where a successful
       // settlement (0.001 USDC on-chain) was reported as a merchant fault.
-      const { status, body, text } = await payAndCaptureError({
+      const { status, body, text, headers } = await payAndCaptureError({
         submit: vi
           .fn<SettlementClient['submit']>()
           .mockRejectedValue(new AuthorizationAlreadyUsedError('nonce 0xdead already used')),
@@ -649,15 +649,37 @@ describe('demo merchant MCP x402 flow', () => {
 
       expect(status).toBe(200)
       expect(body.error).toBeUndefined()
-      // The goods, not a challenge. #2970: this recovery path never observed a
-      // real settlement transaction (a zero hash), so the honest confirmation
-      // says delivered-but-unsettled, not "Purchase confirmed" — the SSE
-      // event's structuredContent.summary.status mirrors it (the response is
-      // not plain JSON here, so this is checked as a raw text needle rather
-      // than parsed).
-      expect(text).toContain('Delivered — not confirmed on-chain')
+      // The goods are delivered (#1519's own point stands).
+      //
+      // #2969: this is `already_settled_earlier`, NOT `settlement_unknown`
+      // (the skip-settle QA hook's state, covered separately) — the two are
+      // different facts (paid-in-an-earlier-tx vs never-attempted) and must
+      // render with DIFFERENT headings and DIFFERENT structuredContent
+      // statuses, distinguishable without ever comparing to the zero hash.
+      // Mutation target: collapsing both into `delivered_unsettled` (the old
+      // #2970 shape) must fail this.
+      expect(text).toContain('Paid in an earlier transaction — the settlement reference is unavailable')
       expect(text).not.toContain('Purchase confirmed')
-      expect(text).toContain('"status":"delivered_unsettled"')
+      expect(text).not.toContain('Delivered — not confirmed on-chain')
+      expect(text).toContain('"status":"already_settled_earlier"')
+      expect(text).not.toContain('"status":"delivered_unsettled"')
+      // Neither the exact 'Paid'/'Betald' status nor the zero hash may appear
+      // anywhere in the rendered text (the longer "paid in an earlier
+      // transaction" status string, which itself contains the substring
+      // "Betald", is allowed and expected — checked above).
+      expect(text).not.toContain('Status: Paid\n')
+      expect(text).not.toContain('"status": "Betald"')
+      const zeroHash = `0x${'0'.repeat(64)}`
+      expect(text).not.toContain(zeroHash)
+
+      const receiptHeader = headers.get('x-receipt-json')
+      expect(receiptHeader).toBeTruthy()
+      const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
+      expect(receipt.status).toBe('Betald i tidigare transaktion — referens saknas')
+      expect(receipt.status).not.toBe('Betald')
+      expect(receipt.blockkedje_referens).toBeNull()
+      expect(JSON.stringify(receipt)).not.toContain(zeroHash)
+
       // A settled payment is not a fault, so nothing is logged as one.
       expect(consoleError).not.toHaveBeenCalled()
     })

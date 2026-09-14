@@ -18,7 +18,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment, renderInvoiceText, type Invoice } from './invoice.js'
-import type { SettledPayment, X402PaymentProcessor } from './x402.js'
+import type { SettledPayment, SettlementState, X402PaymentProcessor } from './x402.js'
 import type { Address } from 'viem'
 
 const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
@@ -61,8 +61,11 @@ interface MerchantStrings {
   paymentRequirementsHeading: string
   resendHint: string
   purchaseConfirmed: string
-  /** #2970: heading for the two zero-hash paths — delivered, not settled. */
+  /** #2970: heading for the skip-settle QA hook — delivered, not settled. */
   deliveredUnsettled: string
+  /** #2969: heading for `already_settled_earlier` — paid, but in a tx this
+   *  process never observed, so there is no reference to show. */
+  alreadySettledEarlier: string
   productLabel: string
   paidLabel: string
   fromDelegate: (from: string) => string
@@ -90,6 +93,7 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     resendHint: 'Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header.',
     purchaseConfirmed: '✅ Purchase confirmed!',
     deliveredUnsettled: '⚠️ Delivered — not confirmed on-chain. Haven has no verified settlement evidence for this payment.',
+    alreadySettledEarlier: '⚠️ Paid in an earlier transaction — the settlement reference is unavailable.',
     productLabel: 'Product',
     paidLabel: 'Paid',
     fromDelegate: (from) => `From:     ${from} (delegate account — the payment is drawn from the owner's treasury)`,
@@ -117,6 +121,7 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     resendHint: 'Skicka om samma HTTP-anrop med PAYMENT-SIGNATURE eller X-PAYMENT header.',
     purchaseConfirmed: '✅ Köp bekräftat!',
     deliveredUnsettled: '⚠️ Levererad — ej bekräftad på kedjan. Haven har inget verifierat betalningsbevis för denna betalning.',
+    alreadySettledEarlier: '⚠️ Betald i en tidigare transaktion — betalningsreferensen är inte tillgänglig.',
     productLabel: 'Produkt',
     paidLabel: 'Betalat',
     fromDelegate: (from) => `Från:     ${from} (delegatkonto — betalningen dras från ägarens treasury)`,
@@ -148,12 +153,12 @@ const RESULT_DETAIL_PARAM = z
 // actually settled on-chain.
 export interface PurchaseSummary {
   /**
-   * #2970: 'confirmed' is the default and unchanged for every existing
-   * caller. 'delivered_unsettled' is reachable ONLY on the demo merchant's
-   * two zero-hash paths (`SettledPayment.settled === false`) — the goods were
-   * delivered, but Haven has no verified on-chain settlement for it.
+   * #2969: 'confirmed' mirrors `settlement === 'settled_onchain'`.
+   * 'already_settled_earlier' and 'delivered_unsettled' mirror the other two
+   * `SettlementState` values — the goods were delivered either way, but
+   * Haven has no verified on-chain settlement reference for either.
    */
-  status: 'confirmed' | 'delivered_unsettled'
+  status: 'confirmed' | 'already_settled_earlier' | 'delivered_unsettled'
   product_id: ProductId
   product_name: string
   invoice_id: string
@@ -164,17 +169,28 @@ export interface PurchaseSummary {
   /** Not known merchant-side in this demo (no funding-leg visibility here);
    *  present for shape parity with Haven's funding+settlement two-leg rails. */
   funding_tx_hash?: string
-  settlement_tx_hash: string
+  /**
+   * #2969: `null` on both non-settled states — never the zero hash. Only
+   * `status: 'confirmed'` carries a real transaction hash.
+   */
+  settlement_tx_hash: string | null
+}
+
+const SUMMARY_STATUS_BY_SETTLEMENT: Record<SettlementState, PurchaseSummary['status']> = {
+  settled_onchain: 'confirmed',
+  already_settled_earlier: 'already_settled_earlier',
+  settlement_unknown: 'delivered_unsettled',
 }
 
 /** Built only from an ALREADY-SETTLED payment (`status: 'confirmed'`) — or,
- *  on the two zero-hash paths ONLY, `status: 'delivered_unsettled'` — reachable
- *  only via this function, and only after `waitForReceipt` has proven the
- *  on-chain transaction succeeded (see x402.ts `confirmSubmittedPayment`). */
+ *  on the two non-settled `SettlementState`s, the honest alternative status —
+ *  reachable only via this function, and only after `waitForReceipt` has
+ *  proven the on-chain transaction succeeded (see x402.ts
+ *  `confirmSubmittedPayment`) for the settled case. */
 export function buildPurchaseSummary(payment: SettledPayment, invoice: Invoice): PurchaseSummary {
   const product = PRODUCTS[payment.productId]
   return {
-    status: payment.settled === false ? 'delivered_unsettled' : 'confirmed',
+    status: SUMMARY_STATUS_BY_SETTLEMENT[payment.settlement],
     product_id: payment.productId,
     product_name: product.name,
     invoice_id: invoice.json.fakturanummer,
@@ -182,7 +198,7 @@ export function buildPurchaseSummary(payment: SettledPayment, invoice: Invoice):
     amount: formatUsdc(payment.value),
     asset: 'USDC',
     network: `eip155:${CHAIN_ID}`,
-    settlement_tx_hash: payment.txHash,
+    settlement_tx_hash: payment.settlement === 'settled_onchain' ? payment.txHash : null,
   }
 }
 
@@ -363,12 +379,19 @@ function completePurchase(
     return { content: [{ type: 'text' as const, text: cachedText }], structuredContent: { summary } }
   }
 
-  // #2970: the two zero-hash paths (skip-settle QA hook, already-used
-  // recovery) are delivered but never settled Haven-verifiably — say so, and
-  // never print a Tx: line for a hash that is not a real transaction.
-  const isSettled = payment.settled !== false
+  // #2969: three distinct headings, one per `SettlementState` — the
+  // already-used recovery (paid earlier, no reference) must not read the
+  // same as the skip-settle QA hook (delivered, unconfirmed). Neither prints
+  // a Tx: line for a hash that is not a real transaction.
+  const isSettled = payment.settlement === 'settled_onchain'
+  const heading =
+    payment.settlement === 'settled_onchain'
+      ? t.purchaseConfirmed
+      : payment.settlement === 'already_settled_earlier'
+        ? t.alreadySettledEarlier
+        : t.deliveredUnsettled
   const header =
-    `${isSettled ? t.purchaseConfirmed : t.deliveredUnsettled}\n\n` +
+    `${heading}\n\n` +
     `${t.productLabel}:  ${product.name}\n` +
     `${t.paidLabel}:     $${formatUsdc(payment.value)} USDC\n` +
     // #1472, decision recorded: the receipt says what the address IS. On

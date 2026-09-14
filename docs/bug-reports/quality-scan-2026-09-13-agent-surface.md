@@ -139,6 +139,12 @@ otherwise leave out; the ledger entry keeps the skill's shape.
   distinct `delivered_unsettled` outcome for the merchant-says-200 case,
   removes a class of "why is this payment stuck" tickets and makes the
   fixture safe to list.
+- **Status:** slice (a) shipped as #2970; slice (b) shipped as #2969 — the
+  skip-settle and already-used paths no longer share one `delivered_unsettled`
+  outcome (they are different facts: never-attempted vs. paid-in-an-earlier-
+  transaction), neither prints "Paid", and `blockkedje_referens` /
+  `settlement_tx_hash` are `null` rather than the zero hash on both. Slices
+  (c)/(d) remain open.
 - **Slices:** (a) hosted `settle`/`complete`: `settled` requires a non-zero
   hash that the backend verified (or an explicit `delivered_unsettled` with
   `next_action`); (b) demo merchant: skip-settle and already-used paths

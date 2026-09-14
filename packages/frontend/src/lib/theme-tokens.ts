@@ -60,6 +60,14 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'danger', light: '#b42318', dark: '#f87171' },
   { name: 'danger-soft', light: '#fef2f2', dark: '#3a1512' },
   { name: 'modal-backdrop', light: 'rgba(26, 31, 54, 0.66)', dark: 'rgba(0, 0, 0, 0.6)' },
+  // Categorical data-viz series (#2948) — the ordered set the chart primitives
+  // paint from. Measured ≥3:1 on their theme's grounds (see CONTRAST_PAIRS).
+  { name: 'series-1', light: '#4f46e5', dark: '#8f8ef5' },
+  { name: 'series-2', light: '#0d7f63', dark: '#59c9a3' },
+  { name: 'series-3', light: '#b0500a', dark: '#f2c94a' },
+  { name: 'series-4', light: '#0369a1', dark: '#59bdf2' },
+  { name: 'series-5', light: '#8a1290', dark: '#c28fff' },
+  { name: 'series-6', light: '#a01a63', dark: '#e878b5' },
   // Chain identity — pills flip to translucent-border-on-deep-fill.
   { name: 'chain-base', light: '#0052ff', dark: '#3395ff' },
   { name: 'chain-gnosis', light: '#3e9b8f', dark: '#3e9b8f' },
@@ -108,6 +116,14 @@ export const CONTRAST_PAIRS: ContrastPair[] = [
   { fg: 'debit', bg: 'debit-soft', min: 3 },
   { fg: 'warning', bg: 'warning-soft', min: 3 },
   { fg: 'danger', bg: 'danger-soft', min: 3 },
+  // The categorical series (#2948): each stop on the two grounds a chart paints
+  // on — the page background and the card surface — in BOTH themes. The dataviz
+  // non-text bar is 3:1, and the pair is fg-vs-ground rather than fg-vs-own-tint
+  // because a series colour has no `-soft` twin: it is a paint, not a text role.
+  ...[1, 2, 3, 4, 5, 6].flatMap((n) => [
+    { fg: `series-${n}`, bg: 'bg', min: 3 as const },
+    { fg: `series-${n}`, bg: 'surface', min: 3 as const },
+  ]),
 ]
 
 /** Relative luminance (WCAG 2.1) of a `#rgb`/`#rrggbb` hex colour. */

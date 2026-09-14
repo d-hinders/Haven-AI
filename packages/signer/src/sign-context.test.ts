@@ -76,6 +76,23 @@ describe('fetchX402SignContext (#1263)', () => {
     expect(sawSignal).toBe(true)
   }, 2_000)
 
+  it('a body read that stalls past the timeout names the timeout, not a malformed response (#2985 review)', async () => {
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })),
+            )
+          }),
+      } as unknown as Response)) as typeof fetch
+    await expect(fetchX402SignContext(identity, 'pay_stall', fetchImpl, 20)).rejects.toThrow(
+      /within 20 ms.*typed_data_b64/s,
+    )
+  }, 2_000)
+
   it('the default timeout is exported and sane — long enough for a read, short enough to leave the window (#2985)', () => {
     expect(SIGN_CONTEXT_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000)
     expect(SIGN_CONTEXT_TIMEOUT_MS).toBeLessThanOrEqual(30_000)

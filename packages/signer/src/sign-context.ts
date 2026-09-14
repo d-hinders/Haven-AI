@@ -75,7 +75,8 @@ export interface FetchedSignContext {
  * tool call — and so the agent — indefinitely while the funding window ran
  * out, and the `typed_data_b64` fallback the error names was unreachable
  * because the call never returned. 15 s is generous for a single
- * authenticated read and still leaves a 300 s x402 window intact.
+ * authenticated read and sits well under the 60 s floor of the x402
+ * settlement window (`clamp(maxTimeoutSeconds, 60, 600)` backend-side).
  */
 export const SIGN_CONTEXT_TIMEOUT_MS = 15_000
 
@@ -105,7 +106,21 @@ export async function fetchX402SignContext(
           'Retry, or pass typed_data_b64 from the quote result instead.',
     )
   }
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>
+  // #2985 review: the same signal bounds the BODY read. A stalled body used
+  // to be swallowed by the `.catch(() => ({}))` and misdiagnosed as a
+  // malformed/older backend response — name the timeout instead.
+  let body: Record<string, unknown>
+  try {
+    body = (await response.json()) as Record<string, unknown>
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new HavenSigningError(
+        `Haven did not finish sending the signing context for ${paymentId} within ${timeoutMs} ms. ` +
+          'Retry, or pass typed_data_b64 from the quote result instead.',
+      )
+    }
+    body = {}
+  }
   if (!response.ok) {
     const detail =
       typeof body.error === 'string' ? body.error : `HTTP ${response.status}`

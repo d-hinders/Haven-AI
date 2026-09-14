@@ -23,6 +23,17 @@ last-verified: "2026-09-14"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#2985):** the signer's one network call —
+> `fetchX402SignContext` (`packages/signer/src/sign-context.ts`, the
+> authenticated `GET /x402/:id/sign-context` read behind the `{ payment_id }`
+> form of `haven_sign` / `haven_sign_x402`) — now carries
+> `AbortSignal.timeout(SIGN_CONTEXT_TIMEOUT_MS = 15_000)`; a timeout surfaces
+> as the same `HavenSigningError` class as an unreachable host, naming the
+> timeout and the `typed_data_b64` fallback. No tool, argument, version
+> field, consent hash or signing logic changes; the local runtime and the
+> hosted server are not on this path. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#2979):** the hosted server's shared MCP quote
 > probe (`src/tools/support/mcp-context.ts`, `quoteMcpToolCall`) now
 > recognises a merchant's own `503 { error: 'merchant_not_ready', … }`

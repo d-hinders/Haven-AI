@@ -69,22 +69,40 @@ export interface FetchedSignContext {
  * argument would be — the signing path's binding verification and digest
  * equality are what make it safe to use, not its provenance.
  */
+/**
+ * #2985: the signer's ONLY network call is bounded. Without a signal a hung
+ * `/sign-context` (half-open connection, stalled backend) hung the signer
+ * tool call — and so the agent — indefinitely while the funding window ran
+ * out, and the `typed_data_b64` fallback the error names was unreachable
+ * because the call never returned. 15 s is generous for a single
+ * authenticated read and still leaves a 300 s x402 window intact.
+ */
+export const SIGN_CONTEXT_TIMEOUT_MS = 15_000
+
 export async function fetchX402SignContext(
   identity: HavenIdentity,
   paymentId: string,
   fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
 ): Promise<FetchedSignContext> {
   let response: Response
   try {
     response = await fetchImpl(
       `${identity.apiUrl}/x402/${encodeURIComponent(paymentId)}/sign-context`,
-      { headers: { Authorization: `Bearer ${identity.apiKey}` } },
+      {
+        headers: { Authorization: `Bearer ${identity.apiKey}` },
+        signal: AbortSignal.timeout(timeoutMs),
+      },
     )
   } catch (err) {
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
     throw new HavenSigningError(
-      `Could not reach Haven to fetch the signing context for ${paymentId}: ` +
-        `${err instanceof Error ? err.message : String(err)}. ` +
-        'Retry, or pass typed_data_b64 from the quote result instead.',
+      timedOut
+        ? `Haven did not answer the signing-context fetch for ${paymentId} within ${timeoutMs} ms. ` +
+          'Retry, or pass typed_data_b64 from the quote result instead.'
+        : `Could not reach Haven to fetch the signing context for ${paymentId}: ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          'Retry, or pass typed_data_b64 from the quote result instead.',
     )
   }
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>

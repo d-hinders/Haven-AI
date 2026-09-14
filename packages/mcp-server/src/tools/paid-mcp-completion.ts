@@ -3,10 +3,15 @@
  * out of `tools.ts` (which stays the compatibility facade `index.ts`,
  * `server.ts`, tests and embedders import).
  *
- * Two tools, one owner:
+ * Three tools, one owner:
  *
- *   complete   haven_complete_mcp_tool   (decomposed flow: deliver a signed header)
- *   settle     haven_settle_mcp_tool     (fast flow: fund AND deliver in one call)
+ *   complete   haven_complete_mcp_tool             (decomposed flow: deliver a signed header)
+ *   settle     haven_settle_mcp_tool               (fast flow: fund AND deliver in one call)
+ *   report     haven_report_settlement_evidence    (#2972: hand Haven a settlement hash the
+ *                                                    agent holds out of band, for the erc7710
+ *                                                    settlement classification the two tools
+ *                                                    above already use — see
+ *                                                    `classifySettlementEvidenceReport`)
  *
  * This is the FINAL capability slice of the #2806 chain. It moves the two
  * handlers AND their merchant delivery / context-rehydration helpers —
@@ -332,6 +337,64 @@ export function classifyErc7710Settlement(
 }
 
 /**
+ * #2972: the `haven_report_settlement_evidence` tool's response shape — the
+ * SAME three outcomes `classifyErc7710Settlement` classifies for the settle/
+ * complete gate, built directly from `MerchantCompletion.reportEvidence`'s
+ * `EvidenceReportOutcome` rather than derived from a merchant HTTP call (there
+ * is none here — the agent is handing Haven a hash it already holds).
+ *
+ * `confirmed` -> settled: true. `retryable` -> SETTLEMENT_PENDING (the chain
+ * could not be read yet, or the transaction is not mined — worth reporting
+ * again). Everything else (`refused`, at any status code — a 409 mismatch, a
+ * 404 for a payment this agent does not own, a validation error) ->
+ * DELIVERED_UNSETTLED: a settled no, never a write. `next_tool` is always
+ * `haven_get_payment_status` on the two unsettled branches, exactly as the
+ * settle/complete gate points there — this tool does not retry itself.
+ */
+export function classifySettlementEvidenceReport(
+  paymentId: string,
+  settlementTxHash: string,
+  outcome: EvidenceReportOutcome,
+): Record<string, unknown> {
+  if (outcome.outcome === 'confirmed') {
+    return {
+      payment_id: paymentId,
+      settled: true,
+      settlement_tx_hash: settlementTxHash,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.None,
+        safeToContinue: true,
+        reason:
+          'Haven verified this settlement transaction on-chain against the payment and ' +
+          'confirmed it — the payment now has verified settlement evidence.',
+        summary: { payment_id: paymentId, status: 'settled' },
+      }),
+    }
+  }
+  const pending = outcome.outcome === 'retryable'
+  return {
+    payment_id: paymentId,
+    settled: false,
+    code: pending ? 'SETTLEMENT_PENDING' : 'DELIVERED_UNSETTLED',
+    ...(pending ? { retryable: true } : {}),
+    settlement_tx_hash: settlementTxHash,
+    ...buildAgentGuidance({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'mcp__haven__haven_get_payment_status',
+      nextArguments: { payment_id: paymentId },
+      safeToContinue: true,
+      reason: pending
+        ? 'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
+          'the transaction is not mined yet. Report the same hash again shortly, or poll next_tool.'
+        : 'Haven could not verify this transaction against this payment on-chain — it does not ' +
+          "match this payment's transfer shape or window, or the payment could not be found for " +
+          'this agent. Reporting it again will not change that; poll next_tool for the current status.',
+      summary: { payment_id: paymentId, status: 'submitted' },
+    }),
+  }
+}
+
+/**
  * Hosted fast-path preflight (#1398). The status read is agent-scoped and
  * exposes the intent's captured delegate, unlike getAgent() which may have
  * changed after the intent was created. Never include an untrusted header in a
@@ -389,6 +452,7 @@ export async function preflightMcpPaymentHeader(haven: HavenClient, args: Record
 export const PAID_MCP_COMPLETION_TOOLS = [
   'haven_complete_mcp_tool',
   'haven_settle_mcp_tool',
+  'haven_report_settlement_evidence',
 ] as const satisfies readonly HostedToolName[]
 
 export type PaidMcpCompletionToolName = (typeof PAID_MCP_COMPLETION_TOOLS)[number]
@@ -646,5 +710,24 @@ export function createPaidMcpCompletionHandlers(
         }
       }),
 
+    // #2972: report a settlement hash the agent holds out of band — see the
+    // module header and `classifySettlementEvidenceReport`. Agent-authenticated,
+    // own payments only: `HavenClient.reportSettlementEvidence` posts to the
+    // SAME backend route (`POST /machine-payments/evidence`) the settle/
+    // complete gate above already calls, scoped `WHERE agent_id = $` there —
+    // a foreign payment_id 404s and is classified DELIVERED_UNSETTLED, never
+    // written. The zero hash never reaches that call at all: the SDK refuses
+    // it client-side (`HavenZeroSettlementHashError`), which `runTool`'s
+    // generic `HavenError` branch turns into a `ToolFailure` carrying `code:
+    // "ZERO_SETTLEMENT_HASH"` — no separate catch needed here.
+    haven_report_settlement_evidence: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_report_settlement_evidence', input)
+        const outcome = await haven.reportSettlementEvidence(
+          args.payment_id,
+          args.settlement_tx_hash,
+        )
+        return classifySettlementEvidenceReport(args.payment_id, args.settlement_tx_hash, outcome)
+      }),
   }
 }

@@ -51,6 +51,10 @@ import {
 /** Minimum valid arguments for each strict tool, plus the undeclared key to smuggle. */
 const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   haven_report_x402_outcome: { payment_id: 'pay_x402', outcome: 'rejected', merchant_status: 402 },
+  haven_report_settlement_evidence: {
+    payment_id: 'pay_7710',
+    settlement_tx_hash: '0x' + 'ab'.repeat(32),
+  },
   haven_submit: { payment_id: 'pay_1', signature: '0x' + 'ab'.repeat(32) },
   haven_settle_mcp_tool: { payment_id: 'pay_1', signature: '0x' + 'ab'.repeat(32) },
   // #2353's switch — the rehydration pair is enough to reach the handler (the
@@ -126,6 +130,10 @@ const OFFLINE_TOOLS: Partial<Record<StrictInputToolName, string>> = {
  */
 const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   haven_report_x402_outcome: 'tx_hash',
+  // #2972: `rail` is one of the fields this tool reads from the payment's
+  // own record (STRICT_INPUT_TOOLS.haven_report_settlement_evidence), not an
+  // invented key.
+  haven_report_settlement_evidence: 'rail',
   haven_submit: 'amount',
   haven_settle_mcp_tool: 'merchant_address',
   // #2353: the exact undeclared key the shipped SKILL.md used to instruct —
@@ -538,6 +546,10 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     for (const tool of ['haven_report_x402_outcome', 'haven_submit', 'haven_settle_mcp_tool']) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
+    // #2972: the newest addition, pinned individually for the same
+    // anti-vacuity reason — a deletion of this entry must turn THIS
+    // assertion red, not merely shrink the total below.
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toContain('haven_report_settlement_evidence')
     // Batch 3's twelve (#2349). The literal list is the anti-vacuity pin: the
     // loops above self-scope to whatever STRICT_INPUT_TOOLS holds, so a
     // deletion removes its own tests; this is what makes that deletion red.
@@ -563,7 +575,7 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(20)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(21)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],

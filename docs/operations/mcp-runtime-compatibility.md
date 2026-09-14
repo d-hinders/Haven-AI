@@ -174,6 +174,30 @@ last-verified: "2026-09-14"
 > `submitted` erc7710 intent whose settlement window has passed with no
 > verified evidence — the local runtime forwards it unchanged, same as every
 > other `next_action` value.
+>
+> **Recent re-verification (#2972):** a new HOSTED-only tool,
+> `haven_report_settlement_evidence { payment_id, settlement_tx_hash }`, is
+> the remedy #2970's guidance could not name — an agent holding the
+> merchant's real erc7710 settlement transaction hash (from
+> `PAYMENT-RESPONSE.transaction`, or a prior settle/complete result's
+> `settlement_tx_hash`) can now hand it to Haven directly instead of only
+> waiting on the settlement sweep or the 3009-shaped `haven_report_x402_outcome`
+> (which takes no hash and refuses a non-`confirmed` intent). It reuses the
+> SAME backend seam (`POST /machine-payments/evidence` →
+> `observeErc7710Settlement`, fail-closed, #2092) and reports the same three
+> outcomes as the #2970 settle/complete gate: `settled: true` only once Haven
+> verified the hash on-chain, else `code: 'DELIVERED_UNSETTLED'` or
+> `code: 'SETTLEMENT_PENDING'`. Strict input (23rd hosted tool, in
+> `STRICT_INPUT_TOOLS`), agent-scoped (a foreign `payment_id` 404s and is
+> classified `DELIVERED_UNSETTLED`, never a write), a zero settlement hash is
+> refused client-side before any network call
+> (`HavenClient.reportSettlementEvidence` /
+> `MerchantCompletion.reportSettlementEvidence`). No local-runtime twin: this
+> is a hosted-only tool, so the version-skew contract, the consent hash, and
+> the local signer surface are all unchanged. `haven_get_payment_status`'s
+> `awaiting_settlement_evidence` message and the #2970 `DELIVERED_UNSETTLED` /
+> `SETTLEMENT_PENDING` guidance now name this tool as the remedy when the
+> agent holds a hash.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

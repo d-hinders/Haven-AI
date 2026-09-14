@@ -989,8 +989,11 @@ export const AgentPaymentNextAction = {
    * first appears. Poll {@link CheckStatusLater}'s tool
    * (`haven_get_payment_status`) once more, roughly two minutes later; if it
    * still shows no evidence, tell the user the goods were delivered but
-   * Haven holds no verified settlement evidence for this payment. There is
-   * no tool that reports a settlement transaction hash for this scheme —
+   * Haven holds no verified settlement evidence for this payment. If the
+   * agent holds the merchant's real settlement transaction hash (from
+   * `PAYMENT-RESPONSE`'s `transaction` field, or a prior settle/complete
+   * result's `settlement_tx_hash`), report it with the hosted
+   * `haven_report_settlement_evidence` tool instead of waiting —
    * `haven_report_x402_outcome` takes no hash and refuses a non-`confirmed`
    * intent.
    */
@@ -1177,7 +1180,7 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
   [AgentPaymentNextAction.AwaitingSettlementEvidence]:
-    "The settlement window passed with no verified on-chain evidence yet. Haven's settlement sweep may still attribute it within about two minutes — poll getPaymentStatus once more, then tell the user the goods were delivered but unverified if it still shows nothing.",
+    "The settlement window passed with no verified on-chain evidence yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep may still attribute it within about two minutes — poll getPaymentStatus once more, then tell the user the goods were delivered but unverified if it still shows nothing.",
 }
 
 export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode, string> = {
@@ -1945,6 +1948,29 @@ export class HavenSigningError extends HavenError {
   constructor(message: string) {
     super(message, 'SIGNING_ERROR')
     this.name = 'HavenSigningError'
+  }
+}
+
+/**
+ * #2972: `MerchantCompletion.reportSettlementEvidence` /
+ * `HavenClient.reportSettlementEvidence` refuse a `0x00…00` settlement hash
+ * BEFORE any network call — see `isZeroSettlementTxHash`. That marker is
+ * never a real transaction (the demo merchant's own "delivered, not settled"
+ * value), so posting it to `POST /machine-payments/evidence` could only ever
+ * come back refused, at the cost of a real round trip. A typed error rather
+ * than a `HavenApiError`-shaped 400: no request was ever attempted, so there
+ * is no HTTP status or response body to carry.
+ */
+export class HavenZeroSettlementHashError extends HavenError {
+  constructor(paymentId: string) {
+    super(
+      'settlement_tx_hash is the zero hash (0x00…00), which is never a real settlement ' +
+        'transaction — refused before any report was sent.',
+      'ZERO_SETTLEMENT_HASH',
+      400,
+      paymentId,
+    )
+    this.name = 'HavenZeroSettlementHashError'
   }
 }
 

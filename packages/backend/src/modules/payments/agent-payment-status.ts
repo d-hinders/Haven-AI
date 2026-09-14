@@ -609,7 +609,14 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
     return {
       phase: AgentPaymentPhase.PaymentSubmitted,
       nextAction: AgentPaymentNextAction.AwaitingSettlementEvidence,
-      message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. Haven's settlement sweep may still attribute it within about two minutes — poll haven_get_payment_status once more after that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
+      // #2972: if the agent holds the merchant's real settlement transaction
+      // hash (PAYMENT-RESPONSE.transaction, or a prior settle/complete
+      // result's settlement_tx_hash), report it with
+      // haven_report_settlement_evidence instead of waiting on the sweep —
+      // that tool posts to the SAME fail-closed on-chain verification door
+      // `modules/mpp/evidence.ts` already guards (see #2680's confirm-seam
+      // census). Otherwise poll haven_get_payment_status, unchanged.
+      message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep may still attribute it within about two minutes — poll haven_get_payment_status once more after that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
     }
   }
   return paymentIntentState(payment.status)

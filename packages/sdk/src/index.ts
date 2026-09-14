@@ -140,6 +140,7 @@ export {
   X402AlreadySettledError,
   HavenPaymentStateError,
   HavenSigningError,
+  HavenZeroSettlementHashError,
   HavenTimeoutError,
   HavenUnsupportedSignerVersionError,
   SignerRefusalCode,

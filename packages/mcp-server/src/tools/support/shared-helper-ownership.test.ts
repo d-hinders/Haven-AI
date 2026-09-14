@@ -173,6 +173,11 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // the reported hash, not that the merchant answered 2xx. Single-slice, same
   // as its siblings above.
   classifyErc7710Settlement: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  // #2972: the haven_report_settlement_evidence classification — same three
+  // outcomes as classifyErc7710Settlement above, built from a direct
+  // EvidenceReportOutcome rather than a merchant HTTP result. Single-slice,
+  // same module.
+  classifySettlementEvidenceReport: { module: 'paid-mcp-completion', slices: ['s2812'] },
   // tools/support/quote-response.ts — quote responses + status predicates.
   buildMcpToolQuoteResponse: { module: 'quote-response', slices: ['s2810', 's2811'] },
   isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
@@ -350,6 +355,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'deliverMerchantPayment',
     'preflightMcpPaymentHeader',
     'classifyErc7710Settlement',
+    'classifySettlementEvidenceReport',
   ],
   'quote-response': [
     'buildMcpToolQuoteResponse',
@@ -384,6 +390,7 @@ const HELPER_HOST_MODULE_EXPORTS: Record<string, string[]> = {
     'deliverMerchantPayment',
     'preflightMcpPaymentHeader',
     'classifyErc7710Settlement',
+    'classifySettlementEvidenceReport',
   ],
 }
 

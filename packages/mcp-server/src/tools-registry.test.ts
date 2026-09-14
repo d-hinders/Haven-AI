@@ -46,7 +46,7 @@ import {
 } from './tools/registry.js'
 
 /**
- * The 22 hosted tool names, pinned HERE independently of `toolSchemas` — so
+ * The 23 hosted tool names, pinned HERE independently of `toolSchemas` — so
  * the completeness assertion cannot heal itself when a contract entry is
  * removed (a mutation proof deletes the entry; a list derived from the
  * mutated map would shrink with it and stay green).
@@ -67,6 +67,7 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_pay_x402_quote',
   'haven_resume_x402_payment',
   'haven_report_x402_outcome',
+  'haven_report_settlement_evidence',
   'haven_get_payment_status',
   'haven_get_resume_state',
   'haven_list_receipts',

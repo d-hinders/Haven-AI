@@ -1447,6 +1447,23 @@ export class HavenClient {
   }
 
   /**
+   * #2972: report the merchant's real settlement transaction hash for an
+   * erc7710 x402 payment — the remedy for `DELIVERED_UNSETTLED` /
+   * `SETTLEMENT_PENDING` / `awaiting_settlement_evidence` when the agent
+   * holds the hash (`PAYMENT-RESPONSE.transaction`, or a prior settle/
+   * complete result's `settlement_tx_hash`) and Haven does not. See
+   * `MerchantCompletion.reportSettlementEvidence` for the fail-closed
+   * verification this posts into (`observeErc7710Settlement`) and the
+   * client-side zero-hash refusal.
+   */
+  async reportSettlementEvidence(
+    paymentId: string,
+    settlementTxHash: string,
+  ): Promise<EvidenceReportOutcome> {
+    return await this.merchantCompletion.reportSettlementEvidence(paymentId, settlementTxHash)
+  }
+
+  /**
    * GET /x402/:id/merchant-call-context — the settle-leg twin of #1263's
    * sign-context fetch (#1307). Re-serves the stored merchant MCP-tool call
    * context (merchant_url, tool_name, arguments, mcp_transport) recorded at

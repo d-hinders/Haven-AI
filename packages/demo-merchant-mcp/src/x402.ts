@@ -83,6 +83,16 @@ if (SKIP_SETTLE_PRODUCTS.size > 0 && CHAIN_ID !== 84532) {
   process.exit(1)
 }
 
+/**
+ * #2979: whether `productId` is the MERCHANT_SKIP_SETTLE_PRODUCT QA fixture —
+ * exported so `http.ts`'s settlement-readiness gate can exempt it. The fixture
+ * settles nothing on-chain (see the `verifyAndSettle` branch below), so a
+ * drained settlement wallet cannot block it: there is no settlement to block.
+ */
+export function isSkipSettleProduct(productId: ProductId): boolean {
+  return SKIP_SETTLE_PRODUCTS.has(productId)
+}
+
 export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED'
 export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE'
 export const LEGACY_PAYMENT_SIGNATURE_HEADER = 'X-PAYMENT'

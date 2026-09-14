@@ -113,6 +113,13 @@ reverse-charge VAT 2645/2614), then import in Fortnox
 - A completed purchase from rehearsal visible in the dashboard.
 - If dev is down: the local stack (backend + demo merchant) per
   `docs/operations/dev-environment.md`.
+- If the demo merchant's settlement wallet is out of gas (rare on dev, but
+  check the day before): the agent's `haven_pay_mcp_tool` call refuses
+  cleanly with `MERCHANT_NOT_READY` and a "cannot settle right now, retry
+  later" message — no botched purchase, no stranded funds, no confusing
+  fault mid-demo (#2979). Top up `SETTLEMENT_PRIVATE_KEY`'s Base Sepolia ETH
+  balance and retry; `GET /healthz` on the merchant shows the same
+  `settlement.status` band ahead of time.
 
 ## Rehearsal checklist
 

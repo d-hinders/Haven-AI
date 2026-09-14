@@ -158,6 +158,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   parseMcpTransport: { module: 'mcp-context', slices: ['s2810', 's2812'] },
   isMerchantEndpointMiss: { module: 'mcp-context', slices: ['s2810'] },
   withDiscoveryGuidance: { module: 'mcp-context', slices: ['s2810'] },
+  // #2979: the merchant_not_ready classifier, checked before the discovery
+  // wrapper below inside quoteMcpToolCall — same transitive-call shape as
+  // isMerchantEndpointMiss/withDiscoveryGuidance (see SINGLE_SLICE_RETAINED).
+  merchantNotReadyErrorFor: { module: 'mcp-context', slices: ['s2810'] },
   quoteMcpToolCall: { module: 'mcp-context', slices: ['s2810'] },
   submitSignatureWithExpiryMapping: { module: 'mcp-context', slices: ['s2809', 's2812'] },
   submitErc7710WithExpiryMapping: { module: 'mcp-context', slices: ['s2809'] },
@@ -221,6 +225,12 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'also the mcp-server half of the #1271/#1301 bounded same-origin discovery pattern whose ' +
     'other half is shared verbatim with the local runtime through @haven_ai/sdk; forking the ' +
     'mcp-server half into one capability is what the CASP record for #1301 argues against.',
+  merchantNotReadyErrorFor:
+    'DELIBERATE, same shape as isMerchantEndpointMiss/withDiscoveryGuidance: zero references ' +
+    'from tools/catalog-purchase.ts, called only from inside quoteMcpToolCall (checked BEFORE ' +
+    'the discovery wrapper, so an honest merchant_not_ready 503 is reported as itself rather ' +
+    'than run through the #1271 wrong-endpoint heuristic). Belongs beside the wrapper it guards, ' +
+    'not the capability that cannot see it.',
   quoteMcpToolCall:
     'DELIBERATE. This one IS called by #2810 (tools/catalog-purchase.ts), so the earlier ' +
     'reason was accurate — but moving it alone forks the pattern, because it is the wrapper ' +
@@ -338,6 +348,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'delegationSignFields',
     'isMerchantEndpointMiss',
     'withDiscoveryGuidance',
+    'merchantNotReadyErrorFor',
     'quoteMcpToolCall',
     'serializeMcpTransport',
     'parseMcpTransport',

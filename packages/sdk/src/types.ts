@@ -1090,6 +1090,16 @@ export const AgentPaymentFailureCode = {
    * The fallback is the exact atomic `max_amount`.
    */
   MaxAmountUnconvertible: 'MAX_AMOUNT_UNCONVERTIBLE',
+  /**
+   * #2979: the merchant answered a `tools/call` probe with its own
+   * machine-readable "cannot settle right now" refusal (HTTP 503,
+   * `{ error: 'merchant_not_ready', reason_code, ... }`) instead of a 402
+   * challenge — e.g. its settlement wallet is out of gas. No 402 was ever
+   * issued and no payment was created; this is honest and (per
+   * `retry_after_s`, when present) usually transient, unlike a permanent
+   * endpoint miss.
+   */
+  MerchantNotReady: 'MERCHANT_NOT_READY',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -1198,6 +1208,8 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     'Both max_amount (atomic units) and max_amount_human (whole tokens) were supplied for one purchase. Nothing was contacted and nothing was spent. Re-send with exactly ONE: max_amount_human for a cap the user stated in tokens, max_amount for an exact atomic figure.',
   [AgentPaymentFailureCode.MaxAmountUnconvertible]:
     "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
+  [AgentPaymentFailureCode.MerchantNotReady]:
+    'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint.',
 }
 
 /**
@@ -1886,8 +1898,18 @@ export class MerchantTimeoutError extends HavenApiError {
 
 export class X402UnexpectedStatusError extends HavenApiError {
   readonly x402ErrorCode = 'unexpected_non_402_status' as const
-  constructor(message: string, statusCode: number) {
-    super(message, statusCode)
+  /**
+   * #2979: `body` is the merchant's own JSON, when the non-402 response
+   * carried one — e.g. the demo merchant's `/mcp` readiness gate answers
+   * `503 { error: 'merchant_not_ready', reason_code, ... }`. Optional and
+   * best-effort: a non-JSON or unreadable body leaves this `undefined`, same
+   * as before this field existed. Consumers key on it (not on the message
+   * string) to distinguish an honest, machine-readable merchant refusal from
+   * a genuine "this is not the x402 endpoint" miss, which otherwise look
+   * identical — both are just "some non-402 status".
+   */
+  constructor(message: string, statusCode: number, body?: unknown) {
+    super(message, statusCode, body)
     this.name = 'X402UnexpectedStatusError'
   }
 }

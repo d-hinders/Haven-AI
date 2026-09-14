@@ -912,10 +912,22 @@ export class HavenClient {
     const response = await this.merchantTransport.fetch(url, initialInit)
 
     if (response.status !== 402) {
+      // #2979: best-effort JSON body, so a merchant answering with its own
+      // machine-readable refusal (e.g. `503 { error: 'merchant_not_ready' }`)
+      // is not reduced to a bare status code — `.clone()` because the caller
+      // never otherwise reads this response, but cloning before an unread
+      // body is a defensive habit, not a requirement here.
+      let body: unknown
+      try {
+        body = await response.clone().json()
+      } catch {
+        body = undefined
+      }
       // #1300: typed, so consumers key on the class instead of message text.
       throw new X402UnexpectedStatusError(
         `Expected an x402 quote response with HTTP 402, got HTTP ${response.status}.`,
         response.status || 400,
+        body,
       )
     }
 

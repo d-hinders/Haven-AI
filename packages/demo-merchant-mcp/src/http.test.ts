@@ -34,7 +34,10 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-async function startServer(client: Partial<SettlementClient> = {}) {
+async function startServer(
+  client: Partial<SettlementClient> = {},
+  serverOptions: { readinessCacheMs?: number } = {},
+) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
   const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
   const settlementClient: SettlementClient = {
@@ -51,6 +54,11 @@ async function startServer(client: Partial<SettlementClient> = {}) {
     // is still a client whose `readiness` is undefined, so /healthz omits the
     // settlement block exactly as before.
     settlementClient,
+    // #2979: `readinessCacheMs: 0` (default in these tests unless overridden)
+    // disables the gate's read cache, so each gate check in a test reflects
+    // the CURRENT stub return value instead of a value cached from an earlier
+    // call in the same test — no fake clock, no sleep.
+    readinessCacheMs: serverOptions.readinessCacheMs ?? 0,
   })
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -568,6 +576,129 @@ describe('demo merchant MCP x402 flow', () => {
     })
   })
 
+  // #2979: /mcp must consult the same readiness signal /healthz already does,
+  // gated BOTH before the 402 challenge is issued and again before settling —
+  // a wallet can drain between the two. `fail` refuses with 503 and never
+  // lets an agent sign an authorization the merchant already knows it cannot
+  // settle; `warn` and an `unknown` (throwing) read must both proceed
+  // unchanged, same as the pre-existing /healthz rule.
+  describe('/mcp settlement-readiness gate (#2979)', () => {
+    async function unpaidBuy(url: string) {
+      return postMcp(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      })
+    }
+
+    it('refuses a paid tool with 503 + reason_code + Retry-After when the wallet is in the fail band, before any 402 is issued', async () => {
+      const { url, submit } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, 255_000_000_000n)),
+      })
+
+      const res = await unpaidBuy(url)
+      const body = await res.json()
+
+      expect(res.status).toBe(503)
+      expect(body).toMatchObject({
+        error: 'merchant_not_ready',
+        reason_code: 'settlement_wallet_out_of_gas',
+        settlements_remaining: 0,
+        fail_floor: 12,
+      })
+      expect(typeof body.retry_after_s).toBe('number')
+      expect(res.headers.get('Retry-After')).toBe(String(body.retry_after_s))
+      // No 402 was ever issued, so nothing was ever signed or submitted.
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('refuses the paid retry (after a healthy 402) if the wallet drains into the fail band before settlement', async () => {
+      let balance = SETTLEMENT_COST_WEI * 30n // usable at challenge time
+      const { url, submit } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, balance)),
+      })
+
+      const unpaid = await unpaidBuy(url)
+      expect(unpaid.status).toBe(402)
+      const paymentRequired = (await unpaid.json()) as PaymentRequired
+      const paymentHeader = await signedHeader(paymentRequired)
+
+      // Drain the wallet between the challenge and the agent's signed retry.
+      balance = 255_000_000_000n
+
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader })
+      const body = await paid.json()
+
+      expect(paid.status).toBe(503)
+      expect(body).toMatchObject({ error: 'merchant_not_ready', reason_code: 'settlement_wallet_out_of_gas' })
+      // The agent signed an authorization, but it must never have been redeemed.
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('proceeds normally through the 402/200 flow when the wallet is only in the warn band', async () => {
+      const { url, submit } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, SETTLEMENT_COST_WEI * 24n)),
+      })
+
+      const unpaid = await unpaidBuy(url)
+      expect(unpaid.status).toBe(402)
+      const paymentRequired = (await unpaid.json()) as PaymentRequired
+      const paymentHeader = await signedHeader(paymentRequired)
+
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader })
+
+      expect(paid.status).toBe(200)
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+
+    it('proceeds normally when the readiness read throws — unknown never blocks', async () => {
+      const { url, submit } = await startServer({
+        readiness: () => Promise.reject(new Error('RPC unreachable')),
+      })
+
+      const unpaid = await unpaidBuy(url)
+      expect(unpaid.status).toBe(402)
+      const paymentRequired = (await unpaid.json()) as PaymentRequired
+      const paymentHeader = await signedHeader(paymentRequired)
+
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader })
+
+      expect(paid.status).toBe(200)
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves a free tool (list_products) unaffected by the fail band', async () => {
+      const { url } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, 255_000_000_000n)),
+      })
+
+      const res = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'list_products', arguments: {} },
+      })
+
+      expect(res.status).toBe(200)
+    })
+  })
+
   /**
    * A refusal and a breakage both leave the payer with a 402, but they are
    * opposite events: one is the merchant working, the other is the merchant
@@ -627,12 +758,45 @@ describe('demo merchant MCP x402 flow', () => {
       expect(body.error).toContain('merchant-side fault')
       expect(body.error).toContain('HttpRequestError')
       expect(body.error).not.toContain('ECONNREFUSED')
+      // #2979: reason catalog, additive to the prose above — a client
+      // branches on this instead of parsing the message.
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_rpc_unreachable')
 
       // And it is no longer silent in the merchant's own logs.
       expect(consoleError).toHaveBeenCalledTimes(1)
       const [message, context] = consoleError.mock.calls[0]
       expect(String(message)).toContain('FAULT')
       expect(context).toMatchObject({ productId: 'vpn_basic', error: rpcDown })
+    })
+
+    // #2979: reason catalog — a settlement-time "insufficient funds" fault
+    // (the wallet ran out of gas mid-submit, as opposed to the pre-flight
+    // /mcp gate catching it before the challenge) maps to the SAME
+    // `settlement_wallet_out_of_gas` code the gate's 503 body uses.
+    it('classifies an insufficient-funds settlement fault as settlement_wallet_out_of_gas', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const outOfGas = Object.assign(new Error('insufficient funds for gas * price + value'), {
+        name: 'InsufficientFundsError',
+      })
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(outOfGas),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_wallet_out_of_gas')
+    })
+
+    // An unrecognized fault class falls back to the generic code rather than
+    // guessing a specific one.
+    it('classifies an unrecognized fault as the generic merchant_fault code', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const mystery = Object.assign(new Error('something unexpected happened'), { name: 'WeirdError' })
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(mystery),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('merchant_fault')
     })
 
     it('serves the goods when the authorization already settled on-chain (#1519)', async () => {

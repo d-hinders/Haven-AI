@@ -2075,3 +2075,122 @@ describe('#2054 — erc7710-only merchants', () => {
   })
 })
 
+// #2979: what the hosted tools return when a merchant answers its `/mcp`
+// `tools/call` probe with its OWN machine-readable "cannot settle right now"
+// refusal (demo-merchant-mcp's settlement-readiness gate: `503
+// { error: 'merchant_not_ready', reason_code, settlements_remaining,
+// fail_floor, retry_after_s }`) instead of a 402 challenge.
+//
+// BEFORE this slice, both `haven_quote_mcp_tool` and
+// `haven_prepare_catalog_purchase` treated ANY non-402 status — including
+// this one — as a "wrong endpoint" and ran the #1271 same-origin discovery
+// fallback, which (rightly, since the URL WAS correct) also found nothing,
+// and surfaced `code: 'API_ERROR'` with no `next_action` and a message
+// blaming a failed discovery probe — discarding the merchant's own, honest
+// reason entirely. That misleading shape is what these tests replace.
+describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint miss (#2979)', () => {
+  const MERCHANT_NOT_READY_BODY = {
+    error: 'merchant_not_ready',
+    reason_code: 'settlement_wallet_out_of_gas',
+    settlements_remaining: 0,
+    fail_floor: 12,
+    retry_after_s: 60,
+  }
+
+  describe('haven_quote_mcp_tool', () => {
+    async function quoteAgainstNotReadyMerchant() {
+      stubFetch({
+        'POST /mcp': {
+          status: 503,
+          body: MERCHANT_NOT_READY_BODY,
+          responseHeaders: { 'Retry-After': '60' },
+        },
+      })
+      return handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+    }
+
+    it('refuses with MERCHANT_NOT_READY, a StopAndTellUser next_action, and the merchant reason surfaced', async () => {
+      const res = await quoteAgainstNotReadyMerchant()
+
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { code?: string }).code).not.toBe('UNKNOWN_ERROR')
+      expect((res as { code?: string }).code).not.toBe('API_ERROR')
+      expect((res as { next_action?: string }).next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+      const message = (res as { message?: string }).message ?? ''
+      expect(message).toContain('settlement_wallet_out_of_gas')
+      expect(message).toContain('60')
+      // The old, misleading text this replaces must be gone.
+      expect(message).not.toContain('discovery document')
+      expect((res as { retry_with_new_quote?: boolean }).retry_with_new_quote).toBe(true)
+    })
+
+    it('never spends the bounded #1271 discovery retry on an honest 503', async () => {
+      await quoteAgainstNotReadyMerchant()
+      // The MCP session lifecycle (initialize, notifications/initialized,
+      // tools/call) all land on the same `/mcp` path for the ONE probe
+      // attempt; what matters is that no #1271 discovery document fetch ran
+      // and no SECOND round of the lifecycle was started against a
+      // discovered endpoint.
+      expect(recordedCalls().some((call) => new URL(call.url).pathname.includes('well-known'))).toBe(false)
+      expect(recordedCalls().filter((call) => call.body?.method === 'tools/call')).toHaveLength(1)
+    })
+  })
+
+  describe('haven_prepare_catalog_purchase', () => {
+    const CATALOG_ENTRY = {
+      id: 'cat_not_ready',
+      name: 'NordShield VPN Basic',
+      description: 'VPN subscription',
+      category: 'vpn',
+      resource_url: 'http://merchant.test/mcp',
+      rail: 'x402',
+      protocol: 'mcp',
+      tool_name: 'buy_vpn',
+      tool_arguments: { plan: 'basic' },
+      price_display: '$0.001 USDC',
+      price_atomic: '1000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      network: 'eip155:8453',
+      status: 'active',
+      verified_at: '2026-06-16T08:50:39.772Z',
+    }
+
+    it('surfaces the same MERCHANT_NOT_READY refusal, not a wrong-endpoint miss', async () => {
+      stubFetch({
+        'GET /catalog/cat_not_ready': { status: 200, body: CATALOG_ENTRY },
+        'POST /mcp': {
+          status: 503,
+          body: MERCHANT_NOT_READY_BODY,
+          responseHeaders: { 'Retry-After': '60' },
+        },
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: {
+            agent_id: 'agt_1',
+            safe_address: '0xSafe',
+            delegate_address: '0xDelegate',
+            chain_id: 8453,
+            allowances: [],
+          },
+        },
+      })
+
+      const res = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_not_ready',
+        max_amount_human: '1',
+      })
+
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { next_action?: string }).next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+      expect((res as { message?: string }).message ?? '').toContain('settlement_wallet_out_of_gas')
+    })
+  })
+})
+

@@ -220,6 +220,43 @@ Endpoints:
   boolean (`ok` is true unless `status` is `fail`). A read failure reports
   `ok: null` + `error` instead of taking health down.
 
+### `/mcp` settlement-readiness gate (#2979)
+
+`/healthz` reporting the `fail` band was not enough on its own: before #2979,
+`/mcp` never consulted it, so a wallet with no gas left still issued 402
+challenges — the agent signed an authorization, and only then did settlement
+fail, with no way to have known beforehand.
+
+`POST /mcp` now reads the same `readiness()` signal (cached per server for
+`readinessCacheMs`, default 15s, so a busy merchant does not turn every tool
+call into an extra RPC read) at two points for every PAID tool call: before a
+402 challenge is issued, and again immediately before settling a paid retry —
+the wallet can drain in the window between the two.
+
+- **`fail`**: the call is refused with `HTTP 503` and no 402 is ever issued
+  (or, on the paid retry, nothing is settled):
+  ```json
+  {
+    "error": "merchant_not_ready",
+    "reason_code": "settlement_wallet_out_of_gas",
+    "settlements_remaining": 0,
+    "fail_floor": 12,
+    "retry_after_s": 60
+  }
+  ```
+  with a matching `Retry-After: 60` header.
+- **`warn`**: unchanged — the call proceeds normally.
+- **unknown** (the `readiness()` read itself threw, e.g. an unreachable RPC):
+  unchanged — same "never block on an unknown" rule as `/healthz`.
+- **Exempt**: free (unpaid) tools, and the `MERCHANT_SKIP_SETTLE_PRODUCT`
+  QA fixture below — neither one settles anything on-chain, so a drained
+  wallet cannot block a settlement that never runs.
+
+The existing merchant-fault 402 body (the #1517 fault-class message) also now
+carries a `reason_code` additively — `settlement_wallet_out_of_gas`,
+`settlement_rpc_unreachable`, or `merchant_fault` — so a client can branch on
+it without parsing the message prose. The message text itself is unchanged.
+
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC
 `transferWithAuthorization`; it does not need to be the receiving wallet and
@@ -250,6 +287,11 @@ scenario uses it to strand the delegate deterministically. It is
 `MERCHANT_CHAIN_ID=84532`, because a skipped settlement also skips the only
 balance check — on any real chain a listed product would hand out goods
 against a well-formed authorization from an empty wallet.
+
+Listed products are also exempt from the `/mcp` settlement-readiness gate
+(#2979) above: the gate exists to stop settling against a wallet that cannot
+afford it, and this fixture settles nothing, so a fail-band wallet cannot
+block it either.
 
 ## ERC-7710 Smart-Account Payments
 

@@ -740,8 +740,9 @@ async function main() {
 
   // The five published CHANGELOGs get their release heading here (the
   // changelog-heading gap, fixed 2026-09-14). They each USED to say the bump
-  // wrote it while the bump did not, so every release shipped `## Unreleased`
-  // over the entry that had just gone out.
+  // wrote it while the bump did not — so a release would have shipped
+  // `## Unreleased` standing over the entry that had just gone out. None did:
+  // see the file header, which records that the gap cost zero releases.
   //
   // NOT in snapshot mode. A `0.0.0-dev.*` snapshot is explicitly "not a
   // release" (`docs/operations/package-dev-channel.md`), so stamping a release

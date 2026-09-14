@@ -1428,6 +1428,14 @@ what each server's instructions say and why they differ in length.
   reinstalls the pinned runtime and rewrites wrapper + config from STORED
   credentials — no new setup token, keys untouched. `--json` for automation.
 
+  The hosted MCP `tools/list` check proves only that its endpoint responds; it
+  does not authenticate a bearer token. Credential verdicts instead use the
+  authenticated, read-only agent-identity endpoint: an accepted identity read
+  leaves a superseded key spend-capable, a 401/403 reports it already revoked,
+  and a network or malformed response remains explicitly unverifiable. This
+  prevents a static MCP capability listing from being mistaken for proof that
+  an old credential can still act.
+
   **`--repair` rewrites only the pair the directory owns (#1910).** It reads
   the wiring slug from that directory's own `signer-runtime.json` sidecar
   (#1696) and writes `haven-<slug>` / `haven-signer-<slug>`, so repairing a

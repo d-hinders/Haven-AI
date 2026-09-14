@@ -486,6 +486,10 @@ describe('installRuntime hosted default topology', () => {
     expect(result.localSignerConfigured).toBe(true)
     expect(result.localMcpConfigured).toBe(false)
     expect(result.errorCode).toBeUndefined()
+    expect(result.messages.join('\n')).toContain(
+      'hosted Haven MCP tools endpoint responds to a read-only handshake',
+    )
+    expect(result.messages.join('\n')).not.toContain('Verified hosted Haven MCP tools with')
     expect(result.nextUserAction).toBe('return_to_haven_for_wallet_approval_then_restart_codex')
     expect(codexConfig).toContain('[mcp_servers.haven]')
     expect(codexConfig).toContain(`url = "${HOSTED_URL}"`)

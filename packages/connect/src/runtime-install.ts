@@ -382,7 +382,7 @@ export async function installRuntime(
   const hostedProbeMessages = configResult.hostedConfigured && hostedProbe.status !== 'ok'
     ? [`Hosted Haven MCP probe failed: ${hostedProbe.status}.`]
     : configResult.hostedConfigured
-      ? ['Verified hosted Haven MCP tools with a read-only handshake.']
+      ? ['Verified that the hosted Haven MCP tools endpoint responds to a read-only handshake.']
       : []
   const signerProbeMessages = signerProbe
     ? signerProbe.status === 'ok'

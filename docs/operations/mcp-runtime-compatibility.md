@@ -14,7 +14,7 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
-last-verified: "2026-09-13"
+last-verified: "2026-09-14"
 ---
 
 # MCP Runtime Compatibility
@@ -265,10 +265,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.1.37-alpha.0` |
-| `@haven_ai/mcp` | `0.1.37-alpha.0` |
-| `@haven_ai/sdk` | `0.1.37-alpha.0` |
-| `@haven_ai/signer` | `0.1.37-alpha.0` |
+| `@haven_ai/connect` | `0.2.0-alpha.0` |
+| `@haven_ai/mcp` | `0.2.0-alpha.0` |
+| `@haven_ai/sdk` | `0.2.0-alpha.0` |
+| `@haven_ai/signer` | `0.2.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

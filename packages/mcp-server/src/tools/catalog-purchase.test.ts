@@ -1325,7 +1325,10 @@ describe('haven_discover_tools verified directory (#1716)', () => {
         price_atomic: '10000',
         asset: 'USDC',
         network: 'eip155:8453',
-        status: 'active',
+        // #2978: an active operator row with verified_at set now carries the
+        // badge, so this fixture models the shape that stays UNbadged — a
+        // degraded operator row — rather than one the backend can no longer emit.
+        status: 'degraded',
         verified_at: '2026-08-01T00:00:00.000Z',
         source: 'operator',
         domain_verified: false,
@@ -1362,6 +1365,30 @@ describe('haven_discover_tools verified directory (#1716)', () => {
       await handlers().haven_discover_tools({ verified: 'operator' }),
     )
     expect(operator.data.map((e) => e.id)).toEqual(['cat_cur_1'])
+  })
+
+  it('verified=verified returns a probe-verified operator entry at the hosted boundary (#2978)', async () => {
+    const probedOperator = {
+      ...(directoryFixture.entries[1] as Record<string, unknown>),
+      id: 'cat_cur_probed',
+      status: 'active',
+      verified_payable: true,
+    }
+    stubFetch({
+      'GET /catalog': { status: 200, body: { entries: [...directoryFixture.entries, probedOperator] } },
+    })
+
+    const verified = ok<Array<Record<string, unknown>>>(
+      await handlers().haven_discover_tools({ verified: 'verified' }),
+    )
+    // The badge decides, not provenance: the probed operator row is in, the
+    // degraded one is out.
+    expect(verified.data.map((e) => e.id).sort()).toEqual(['cat_cur_probed', 'cat_dir_1'])
+    expect(verified.data.find((e) => e.id === 'cat_cur_probed')).toMatchObject({
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: true,
+    })
   })
 })
 

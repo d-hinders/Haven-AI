@@ -459,6 +459,56 @@ describe('catalog discovery + submission (#1716)', () => {
     routes.assertAllUsed()
   })
 
+  // #2978: `verified=verified` filters on the badge (`verifiedPayable`), not
+  // on provenance — an operator row that keeps passing its periodic 402
+  // probe carries the badge just like a self-submitted, domain-proven one.
+  const BADGE_MIX = {
+    entries: [
+      MIXED.entries[0], // ingestion, domainVerified true, verifiedPayable true
+      MIXED.entries[1], // operator, both false (never probed / degraded)
+      {
+        id: 'op_verified', name: 'Probed Operator Merchant', description: 'd', category: 'ai',
+        resource_url: 'https://operator.example.com/paid', rail: 'x402', protocol: 'http',
+        tool_name: null, tool_arguments: null,
+        price_display: '$0.02 USDC', price_atomic: '20000', asset: 'USDC', network: 'eip155:8453',
+        status: 'active', verified_at: '2026-09-10T00:00:00.000Z',
+        // Operator provenance, but the catalog refresh probe verified it —
+        // this is exactly the case the hard-coded `false` used to hide.
+        source: 'operator', domain_verified: false, verified_payable: true,
+      },
+      {
+        // Review of PR #2981: a shape the backend cannot emit today
+        // (`serializeIngestion` hard-codes true), modelled anyway so the filter
+        // is proven to be on the BADGE, not on provenance — widening it with
+        // `|| source === 'ingestion'` must fail this test.
+        id: 'dir_unverified', name: 'Unverified Directory Merchant', description: 'd', category: 'ai',
+        resource_url: 'https://dir-unverified.example.com/paid', rail: 'x402', protocol: 'http',
+        tool_name: null, tool_arguments: null,
+        price_display: '$0.03 USDC', price_atomic: '30000', asset: 'USDC', network: 'eip155:8453',
+        status: 'active', verified_at: null,
+        source: 'ingestion', domain_verified: true, verified_payable: false,
+      },
+    ],
+  }
+
+  it('verified=verified includes a probe-verified operator entry and excludes an unverified one (#2978)', async () => {
+    const routes = installRoutes({
+      'GET https://haven.test/catalog': [() => json(BADGE_MIX)],
+    })
+
+    const verified = await client().discoverTools({ verified: 'verified' })
+    // Included: the ingestion entry (verifiedPayable true) AND the operator
+    // entry that the refresh probe verified (verifiedPayable true).
+    // Excluded: the operator entry with verifiedPayable false AND the
+    // ingestion entry with verifiedPayable false (the backend cannot emit
+    // that shape today — `listVerifiedCatalogSubmissions` only returns rows
+    // that reached `verified_payable` — but the filter is on the badge, not
+    // on provenance, and this row proves it).
+    expect(verified.map((e) => e.id).sort()).toEqual(['dir_1', 'op_verified'])
+    expect(verified.every((e) => e.verifiedPayable === true)).toBe(true)
+    routes.assertAllUsed()
+  })
+
   it('submits a catalog entry and maps the token response', async () => {
     const routes = installRoutes({
       'POST https://haven.test/catalog/submit': (call) => {

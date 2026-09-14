@@ -713,10 +713,13 @@ export class HavenClient {
       search?: string
       rail?: 'x402' | 'mpp'
       /**
-       * Filter on the entry's provenance (epic #1717): `'verified'` returns
-       * only self-submitted, domain-verified, probe-verified directory
-       * entries; `'operator'` only the operator-curated ones; `'any'` (the
-       * default) returns the merged listing.
+       * `'verified'` (epic #1717, #2978) returns entries whose endpoint Haven
+       * watched answer a live quote — `verifiedPayable === true` — from
+       * EITHER source: an operator-curated row that keeps passing its
+       * periodic 402 probe, or a self-submitted row that also passed
+       * domain-ownership proof. It is not a provenance filter; `'operator'`
+       * still filters on provenance (`source === 'operator'`) regardless of
+       * badge state, and `'any'` (the default) returns the merged listing.
        */
       verified?: 'any' | 'verified' | 'operator'
     } = {},
@@ -728,7 +731,7 @@ export class HavenClient {
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
     let entries = raw.entries.map(mapCatalogEntry)
-    if (options.verified === 'verified') entries = entries.filter((e) => e.source === 'ingestion')
+    if (options.verified === 'verified') entries = entries.filter((e) => e.verifiedPayable === true)
     if (options.verified === 'operator') entries = entries.filter((e) => e.source === 'operator')
     return entries
   }

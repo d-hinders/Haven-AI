@@ -2761,13 +2761,13 @@ export type components = {
             status: "active" | "degraded" | "delisted";
             verified_at: string | null;
             /**
-             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches; no verification badges). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.
+             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.
              * @enum {string}
              */
             source: "operator" | "ingestion";
-            /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows, which have a different (operator) trust story. */
+            /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows: no ownership proof ever runs for them, and this field must not claim one. */
             domain_verified: boolean;
-            /** @description True only for `ingestion` entries that a leader-locked, SSRF-hardened, read-only probe watched answer a real x402 quote. The badge claims domain-control AND verified-payable — never merchant honesty, quality, or settlement reliability. */
+            /** @description True when Haven watched this endpoint answer a real x402 (or MPP) quote in its periodic probe: for `ingestion` rows that is the SSRF-hardened directory probe; for `operator` rows it is the catalog refresh probe (`status === active && verified_at` set) — same observation, no domain-ownership claim attached. False for a degraded row, or an operator row with no `verified_at` (migration 058 seeds its demo rows with one, so on a fresh database those carry the badge before the first refresh tick). Never treat this badge as proof of merchant honesty, quality, or settlement reliability. */
             verified_payable: boolean;
         };
         CatalogSubmitRequest: {

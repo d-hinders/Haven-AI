@@ -1757,13 +1757,21 @@ export interface HavenCatalogEntry {
   verifiedAt: string | null
   /**
    * Where the entry came from. `operator` = curated in migrations/scripts
-   * (the operator vouches; no verification badges). `ingestion` = submitted
+   * (the operator vouches for the listing; the catalog refresh probe still
+   * checks the endpoint, see `verifiedPayable`). `ingestion` = submitted
    * through the Verified Payable Directory and passed domain-ownership proof
    * plus the read-only quote probe.
    */
   source: 'operator' | 'ingestion'
-  /** True only for `ingestion` entries. See the epic's trust claim (never merchant honesty or quality). */
+  /** True only for `ingestion` entries — the one ownership claim. See the epic's trust claim (never merchant honesty or quality). */
   domainVerified: boolean
+  /**
+   * True when Haven watched this endpoint answer a live quote (#2978): the
+   * directory probe for `ingestion` rows, the periodic catalog refresh probe
+   * for `operator` rows (`status === 'active'` with `verifiedAt` set). False
+   * for a degraded row of either source. `discoverTools({ verified:
+   * 'verified' })` filters on this field, not on `source`.
+   */
   verifiedPayable: boolean
 }
 

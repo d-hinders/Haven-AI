@@ -288,6 +288,13 @@ contract — the three variables, what each replaces, the sidecar and wrapper
 records — is in the connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
 
+> **Re-verified #2963:** for a *pinned* (non-override) install `--doctor`'s
+> `signer_runtime` check compares intactness against the sidecar and currency
+> against the manifest — a dev-channel snapshot that is intact but behind the
+> pin now reads as version drift, not `stale or empty`; the override path
+> described above is unchanged (it already compared against the sidecar).
+
+
 The two loops compose: `@dev` picks the connector, the override picks the
 signer/SDK/MCP it installs. The connector package itself has no override — it
 is the process running — so a change to `packages/connect` takes the merge

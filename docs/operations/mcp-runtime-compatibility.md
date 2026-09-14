@@ -1447,6 +1447,15 @@ what each server's instructions say and why they differ in length.
   reinstalls the pinned runtime and rewrites wrapper + config from STORED
   credentials — no new setup token, keys untouched. `--json` for automation.
 
+  > **Re-verified #2963:** the `signer_runtime` check now asks its two
+  > questions against two references — *intact?* against the sidecar's record
+  > of what npm installed, *current?* against the connector's pinned manifest.
+  > A runtime that is merely older than the pin reports `Installed X does not
+  > match the connector's pinned Y — intact, but outdated`; only a directory
+  > with a missing CLI or package reports `stale or empty`. The repair action is
+  > the same either way (`--doctor --repair`). Nothing else in this section
+  > re-read.
+
   The hosted MCP `tools/list` check proves only that its endpoint responds; it
   does not authenticate a bearer token. Credential verdicts instead use the
   authenticated, read-only agent-identity endpoint: an accepted identity read

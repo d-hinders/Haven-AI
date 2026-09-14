@@ -271,8 +271,10 @@ from branches; `@haven_ai/core` is workspace-private.
   Runtime Manifest table, or a published package's CHANGELOG release heading** —
   `release-bump.mjs` owns all four atomically. The heading joined the list on
   2026-09-14: the five changelogs had asserted the bump wrote it since they were
-  created while the bump did not touch them, so every release shipped
-  `## Unreleased` over the entry it had just published.
+  created while the bump did not touch it — a file instructing the next reader
+  not to fix what it describes. No release shipped a stale heading: the files
+  were created 2026-09-13 and the one release between then and the fix
+  hand-stamped the heading.
   Published packages pin internal `@haven_ai/*` deps exactly; workspace-private
   consumers (`backend`, `qa-agent`, `frontend`, `mcp-server`) use `"*"`. The
   dividing line is `private: true`, not "is it on npm" — `mcp-server` is

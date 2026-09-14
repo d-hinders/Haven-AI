@@ -372,6 +372,18 @@ export interface SettledPayment {
   txHash: Hex
   paymentResponse: SettleResponse
   paymentResponseHeader: string
+  /**
+   * #2970: false ONLY on the two zero-hash paths — the
+   * MERCHANT_SKIP_SETTLE_PRODUCT QA hook and `AuthorizationAlreadyUsedError`
+   * recovery — both of which build this with `ZERO_TX_HASH` because no real
+   * on-chain settlement ran (or was observed). `undefined`/`true` mean a real
+   * settlement (the normal case; existing call sites and fixtures need no
+   * change). This is display/reporting-only, same as `PurchaseSummary` below —
+   * the wire to the buyer (`paymentResponse`, `paymentResponseHeader`) is
+   * UNCHANGED either way, still carrying `transaction: ZERO_TX_HASH` on those
+   * two paths exactly as before.
+   */
+  settled?: boolean
 }
 
 export interface SettlementClient {
@@ -697,6 +709,11 @@ export function createX402PaymentProcessor(
       value: params.expectedAmount,
       nonce: params.verified.nonce,
       txHash,
+      // #2970: a zero hash means no real on-chain settlement ran (or was
+      // observed) — see `ZERO_TX_HASH`'s two call sites above. Derived from
+      // the hash itself rather than threaded as a caller flag, so it can
+      // never drift from what `paymentResponse.transaction` (below) says.
+      settled: txHash !== ZERO_TX_HASH,
       paymentResponse: response,
       paymentResponseHeader: encodePaymentResponseHeader(response),
     }

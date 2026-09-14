@@ -63,7 +63,7 @@ const boundary: ClientBoundary = {
   ],
   publicMembers: [
     "async authorizeX402(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Receipt>",
-    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; }>",
+    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; }>",
     "async createIntent(request: PaymentRequest): Promise<PaymentIntent>",
     "async createX402Intent(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Intent>",
     "async discoverTools(options: { category?: string; search?: string; rail?: 'x402' | 'mpp'; verified?: 'any' | 'verified' | 'operator'; } = {}): Promise<HavenCatalogEntry[]>",
@@ -480,6 +480,7 @@ describe('HavenClient structural boundary', () => {
       'isFundAccountOrRaiseAllowance',
       'isSupportedNodeVersion',
       'isSweepableChain',
+      'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
@@ -542,6 +543,7 @@ describe('HavenClient structural boundary', () => {
       'AgentPurchaseSummary',
       'CatalogSubmissionAccepted',
       'ClaudeTool',
+      'EvidenceReportOutcome', // #2970
       'HavenAgent',
       'HavenAgentAllowanceSummary',
       'HavenAgentReadiness',

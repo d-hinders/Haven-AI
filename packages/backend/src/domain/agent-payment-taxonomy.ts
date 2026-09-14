@@ -39,6 +39,8 @@ export const AgentPaymentNextAction = {
   PaymentWindowExpired: 'payment_window_expired',
   FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
   SweepStrandedFunds: 'sweep_stranded_funds',
+  /** #2970: a `submitted` erc7710 x402 intent past its settlement window with no verified evidence. */
+  AwaitingSettlementEvidence: 'awaiting_settlement_evidence',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
@@ -91,6 +93,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
     'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
+  [AgentPaymentNextAction.AwaitingSettlementEvidence]:
+    'The settlement window passed with no verified on-chain evidence. Polling will not resolve this — report the settlement transaction hash instead, then check status again.',
 }
 
 /**

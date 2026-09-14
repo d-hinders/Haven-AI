@@ -979,6 +979,17 @@ export const AgentPaymentNextAction = {
    * return those funds to the originating Safe.
    */
   SweepStrandedFunds: 'sweep_stranded_funds',
+  /**
+   * #2970: a `submitted` erc7710 x402 intent whose settlement window has
+   * passed with no on-chain settlement evidence Haven could verify. Distinct
+   * from {@link CheckStatusLater}, which this REPLACES once the window is
+   * past: polling again promises a resolution nothing will produce, because
+   * nothing is watching for this settlement except a report. Report the
+   * settlement transaction hash — via the evidence path (the hosted settle/
+   * complete tools do this automatically) or `haven_report_x402_outcome` —
+   * to resolve it.
+   */
+  AwaitingSettlementEvidence: 'awaiting_settlement_evidence',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
@@ -1160,6 +1171,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
     'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
+  [AgentPaymentNextAction.AwaitingSettlementEvidence]:
+    'The settlement window passed with no verified on-chain evidence. Polling will not resolve this — report the settlement transaction hash instead, then check status again.',
 }
 
 export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode, string> = {

@@ -61,6 +61,8 @@ interface MerchantStrings {
   paymentRequirementsHeading: string
   resendHint: string
   purchaseConfirmed: string
+  /** #2970: heading for the two zero-hash paths — delivered, not settled. */
+  deliveredUnsettled: string
   productLabel: string
   paidLabel: string
   fromDelegate: (from: string) => string
@@ -87,6 +89,7 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     paymentRequirementsHeading: 'x402 payment requirements:',
     resendHint: 'Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header.',
     purchaseConfirmed: '✅ Purchase confirmed!',
+    deliveredUnsettled: '⚠️ Delivered — not confirmed on-chain. Haven has no verified settlement evidence for this payment.',
     productLabel: 'Product',
     paidLabel: 'Paid',
     fromDelegate: (from) => `From:     ${from} (delegate account — the payment is drawn from the owner's treasury)`,
@@ -113,6 +116,7 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     paymentRequirementsHeading: 'x402 betalningskrav:',
     resendHint: 'Skicka om samma HTTP-anrop med PAYMENT-SIGNATURE eller X-PAYMENT header.',
     purchaseConfirmed: '✅ Köp bekräftat!',
+    deliveredUnsettled: '⚠️ Levererad — ej bekräftad på kedjan. Haven har inget verifierat betalningsbevis för denna betalning.',
     productLabel: 'Produkt',
     paidLabel: 'Betalat',
     fromDelegate: (from) => `Från:     ${from} (delegatkonto — betalningen dras från ägarens treasury)`,
@@ -143,7 +147,13 @@ const RESULT_DETAIL_PARAM = z
 // price or caller input), so the summary cannot silently drift from what was
 // actually settled on-chain.
 export interface PurchaseSummary {
-  status: 'confirmed'
+  /**
+   * #2970: 'confirmed' is the default and unchanged for every existing
+   * caller. 'delivered_unsettled' is reachable ONLY on the demo merchant's
+   * two zero-hash paths (`SettledPayment.settled === false`) — the goods were
+   * delivered, but Haven has no verified on-chain settlement for it.
+   */
+  status: 'confirmed' | 'delivered_unsettled'
   product_id: ProductId
   product_name: string
   invoice_id: string
@@ -157,13 +167,14 @@ export interface PurchaseSummary {
   settlement_tx_hash: string
 }
 
-/** Built only from an ALREADY-SETTLED payment — status: 'confirmed' is reachable
+/** Built only from an ALREADY-SETTLED payment (`status: 'confirmed'`) — or,
+ *  on the two zero-hash paths ONLY, `status: 'delivered_unsettled'` — reachable
  *  only via this function, and only after `waitForReceipt` has proven the
  *  on-chain transaction succeeded (see x402.ts `confirmSubmittedPayment`). */
 export function buildPurchaseSummary(payment: SettledPayment, invoice: Invoice): PurchaseSummary {
   const product = PRODUCTS[payment.productId]
   return {
-    status: 'confirmed',
+    status: payment.settled === false ? 'delivered_unsettled' : 'confirmed',
     product_id: payment.productId,
     product_name: product.name,
     invoice_id: invoice.json.fakturanummer,
@@ -352,8 +363,12 @@ function completePurchase(
     return { content: [{ type: 'text' as const, text: cachedText }], structuredContent: { summary } }
   }
 
+  // #2970: the two zero-hash paths (skip-settle QA hook, already-used
+  // recovery) are delivered but never settled Haven-verifiably — say so, and
+  // never print a Tx: line for a hash that is not a real transaction.
+  const isSettled = payment.settled !== false
   const header =
-    `${t.purchaseConfirmed}\n\n` +
+    `${isSettled ? t.purchaseConfirmed : t.deliveredUnsettled}\n\n` +
     `${t.productLabel}:  ${product.name}\n` +
     `${t.paidLabel}:     $${formatUsdc(payment.value)} USDC\n` +
     // #1472, decision recorded: the receipt says what the address IS. On
@@ -364,7 +379,7 @@ function completePurchase(
     (payment.settlementMethod === 'erc7710'
       ? `${t.fromDelegate(payment.from)}\n`
       : `${t.fromLabel}:     ${payment.from}\n`) +
-    `Tx:       ${payment.txHash}\n` +
+    (isSettled ? `Tx:       ${payment.txHash}\n` : '') +
     `Nonce:    ${payment.nonce}\n`
 
   const text =

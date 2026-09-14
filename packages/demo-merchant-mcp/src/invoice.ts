@@ -75,6 +75,12 @@ export interface InvoiceParams {
   authorizationNonce: string
   /** Tx hash if settled, otherwise undefined */
   txHash?: string
+  /**
+   * #2970: false ONLY for the demo merchant's two zero-hash paths (see
+   * `SettledPayment.settled`). Default true — every existing caller/fixture
+   * that omits this keeps producing `status: 'Betald'`, byte-identical.
+   */
+  settled?: boolean
 }
 
 export interface Invoice {
@@ -109,7 +115,13 @@ export interface InvoiceJson {
   valuta: 'USDC'
   betalningssatt: 'Kryptovaluta (USDC på Base)'
   blockkedje_referens: string
-  status: 'Betald'
+  /**
+   * #2970: 'Betald' (settled, the default — unchanged for every existing
+   * caller) or, ONLY on the demo merchant's two zero-hash paths (skip-settle,
+   * already-used-recovery), the honest alternative — delivered, but Haven has
+   * no verified on-chain settlement for it.
+   */
+  status: 'Betald' | 'Levererad — ej bekräftad på kedjan'
 }
 
 interface InvoiceRow {
@@ -169,7 +181,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     valuta: 'USDC',
     betalningssatt: 'Kryptovaluta (USDC på Base)',
     blockkedje_referens: blockRef,
-    status: 'Betald',
+    status: params.settled === false ? 'Levererad — ej bekräftad på kedjan' : 'Betald',
   }
 
   const text = buildInvoiceText(json, product.name)
@@ -283,7 +295,7 @@ SERVICES
 BLOCKCHAIN REFERENCE
   ${inv.blockkedje_referens}
 
-  Status: Paid
+  Status: ${inv.status === 'Betald' ? 'Paid' : 'Delivered — not confirmed on-chain'}
 
 ════════════════════════════════════════════════════════════
   Thank you for purchasing ${productName}!
@@ -316,6 +328,7 @@ export function invoiceForPayment(payment: SettledPayment, productId: ProductId)
     payerRole: payment.settlementMethod === 'erc7710' ? 'agent_delegate_account' : 'agent_delegate',
     authorizationNonce: payment.nonce,
     txHash: payment.txHash,
+    settled: payment.settled,
   })
   invoicesByPayment.set(payment, invoice)
   return invoice

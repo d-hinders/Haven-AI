@@ -184,6 +184,11 @@ export type { X402Erc7710Settlement } from './types.js'
 
 // #2292: the plain-HTTP merchant-outcome report (HavenClient.reportX402MerchantOutcome).
 export type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
+// #2970: the hosted erc7710 settle/complete gate's inputs — what an evidence
+// report learned, and the zero-hash recognizer shared with the demo merchant's
+// own marker.
+export type { EvidenceReportOutcome } from './merchant-completion.js'
+export { isZeroSettlementTxHash } from './merchant-completion.js'
 
 export {
   SWEEP_BASE_CHAIN_ID,

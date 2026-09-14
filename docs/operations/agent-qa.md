@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-09-09"
+last-verified: "2026-09-14"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -531,6 +531,19 @@ the same settling product `x402-hosted-mcp-signer` uses — **never** CloudNest
 `MERCHANT_SKIP_SETTLE_PRODUCT` verify-without-settle fixture on dev
 (`x402-delegation-3009-sweep`'s fixture): funds would strand on the delegate by
 design, and this leg's zero-residual assertion would be asserting a lie.
+
+**#2970 — the skip-settle fixture's new observable.** Buying the fixture
+through the hosted erc7710 settle/complete tools no longer reads as a normal
+purchase: the merchant's confirmation and invoice say "delivered — not
+confirmed on-chain" (no `Tx:` line, since the zero hash the fixture hands back
+is not a real transaction), and the hosted tool answers `settled: false`,
+`code: 'DELIVERED_UNSETTLED'`, `next_action: check_status_later`. This is the
+honest shape for a fixture that deliberately never settles — before #2970 it
+answered `settled: true` on the zero hash, which is the F2 finding this issue
+closed. `haven_get_payment_status` on the same payment answers
+`check_status_later` inside the settlement window and
+`awaiting_settlement_evidence` once it passes, since nothing will ever report
+evidence for a deliberately-skipped settlement.
 
 Two skip conditions are specific to this leg, both unmet-precondition, never a
 code defect:

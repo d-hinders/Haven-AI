@@ -155,6 +155,22 @@ last-verified: "2026-09-14"
 > strict-input, schemas and descriptions still come from the #2807 contracts
 > module, and the #2282 fail-closed ordering (merchant-call context resolved
 > BEFORE any funding relay, on both schemes) moved with the handlers verbatim.
+>
+> **Recent re-verification (#2970):** "settled means verified" — the erc7710
+> branch of `haven_settle_mcp_tool`/`haven_complete_mcp_tool`
+> (`paid-mcp-completion.ts`) now reports `settled: true` only once the backend
+> has confirmed the merchant's reported settlement hash on-chain (reusing the
+> SDK's existing evidence report, `HavenClient.completeX402MerchantCall` →
+> `MerchantCompletion.reportEvidence`), and otherwise returns
+> `code: 'DELIVERED_UNSETTLED'` or `code: 'SETTLEMENT_PENDING'` with
+> `next_action: check_status_later`. This is an ADDITIVE response-shape change
+> on the same two tool names, same schemas, same strict-input policy, same
+> #2282 fail-closed ordering — nothing here changes tool identity, the local
+> signer contract, or version skew. `haven_get_payment_status` gains a new
+> additive `next_action` value, `awaiting_settlement_evidence`, for a
+> `submitted` erc7710 intent whose settlement window has passed with no
+> verified evidence — the local runtime forwards it unchanged, same as every
+> other `next_action` value.
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

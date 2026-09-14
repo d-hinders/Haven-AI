@@ -487,7 +487,7 @@ export class MerchantCompletion {
     paymentProofHeader?: string
     protocolReceiptHeaderName?: string
     protocolReceiptHeader?: string
-  }): Promise<void> {
+  }): Promise<EvidenceReportOutcome> {
     const body = {
         paymentId: input.paymentId,
         rail: input.rail,
@@ -511,18 +511,60 @@ export class MerchantCompletion {
     // swallowed identically to a terminal one. On erc7710 this report is the
     // only thing that produces an evidence row, and therefore the only thing
     // that puts the payment in the user's books.
+    //
+    // #2970: the RETURN value is now load-bearing too, not just the retry
+    // decision. The hosted erc7710 settle/complete gate reads this outcome to
+    // decide whether `settled: true` is honest — a caller that only awaited
+    // this for its side effect (the local retryRequest path, #1620) is
+    // unaffected: the resolved value is simply ignored there.
     for (let attempt = 0; ; attempt += 1) {
       try {
         await this.post('/machine-payments/evidence', body)
-        return
+        return { outcome: 'confirmed' }
       } catch (err) {
-        const retryable =
-          err instanceof HavenApiError && err.statusCode === EVIDENCE_RETRYABLE_STATUS
-        if (!retryable || attempt >= EVIDENCE_RETRY_DELAYS_MS.length) return
+        const statusCode = err instanceof HavenApiError ? err.statusCode : undefined
+        const retryable = statusCode === EVIDENCE_RETRYABLE_STATUS
+        if (!retryable) {
+          return { outcome: 'refused', statusCode: statusCode ?? 0 }
+        }
+        if (attempt >= EVIDENCE_RETRY_DELAYS_MS.length) {
+          return { outcome: 'retryable', statusCode }
+        }
         await this.sleep(EVIDENCE_RETRY_DELAYS_MS[attempt])
       }
     }
   }
+}
+
+/**
+ * #2970: what `reportEvidence` learned about the report it just made.
+ *
+ * `confirmed` mirrors the backend's 202 (`modules/mpp/evidence.ts`) — the
+ * intent is now `confirmed` (or was already, on the funding-leg path) with
+ * THIS hash recorded. `retryable` mirrors its 503 (`settlement_unobservable`,
+ * exhausted the retry budget above): the chain could not be read, or the
+ * transaction is not mined yet — ask again later. `refused` mirrors every
+ * terminal refusal (409 `settlement_unverified`, a validation error, an
+ * unknown payment id, or a transport failure with no HTTP status at all,
+ * reported as `statusCode: 0`) — reporting the same hash again will not
+ * change the answer.
+ */
+export type EvidenceReportOutcome =
+  | { outcome: 'confirmed' }
+  | { outcome: 'retryable'; statusCode: number | undefined }
+  | { outcome: 'refused'; statusCode: number }
+
+/**
+ * #2970: a hash of the form `0x00…00` is never a real transaction — it is the
+ * demo merchant's own "delivered, not settled" marker (`ZERO_TX_HASH` in
+ * `packages/demo-merchant-mcp/src/x402.ts`), reused rather than invented here
+ * so the hosted gate and any other consumer recognise it the same way. Treated
+ * as equivalent to "no hash was reported": there is nothing on-chain to verify,
+ * so asking the backend to look is a wasted round trip that can only ever
+ * resolve to a refusal.
+ */
+export function isZeroSettlementTxHash(hash: string | null | undefined): boolean {
+  return typeof hash === 'string' && /^0x0+$/i.test(hash)
 }
 
 export function parseMerchantSettlement(header: string | null): {

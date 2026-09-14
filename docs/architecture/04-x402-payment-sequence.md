@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
   - packages/backend/src/modules/payments/agent-payment-status.ts

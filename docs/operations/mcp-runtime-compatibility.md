@@ -254,6 +254,14 @@ The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
 signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`,
 and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 
+> **Re-verification (changelog-heading gap, 2026-09-14):** this doc's covered
+> trees changed only by a CHANGELOG heading — `release-bump.mjs` now rewrites
+> `## Unreleased` to `## <version> — <date>` in the five published packages.
+> No version constant, tool, capability or version-skew surface moved, so the
+> Supported Runtime Manifest table and every compatibility claim below stand
+> unchanged. Recorded rather than date-stamped because the table is what a
+> consumer reads to know which versions work together.
+
 **Do not re-pin the four `@haven_ai/*` rows by hand.** Since
 [#1790](https://github.com/d-hinders/Haven-AI/issues/1790) `npm run release:bump`
 writes them, and a check compares each row against its own constant — on every

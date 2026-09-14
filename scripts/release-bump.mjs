@@ -34,6 +34,14 @@
  *                is the entire reason the snapshot job reuses this script
  *                rather than setting five versions by hand.
  *
+ *                ONE write is mode-dependent, and it is deliberately the only
+ *                one: the CHANGELOG release heading is skipped for a snapshot.
+ *                A `0.0.0-dev.*` snapshot is explicitly not a release, so
+ *                stamping a release heading for one would be false even though
+ *                the tree is discarded. It is the single write here whose
+ *                meaning is documentary rather than mechanical, which is why
+ *                it is the single one a snapshot must not make.
+ *
  * See scripts/README.md for full documentation.
  */
 
@@ -55,6 +63,11 @@ import {
   manifestTableViolations,
   rewriteManifestTable,
 } from './release-manifest-doc.mjs'
+import {
+  CHANGELOG_PACKAGES,
+  changelogHeadingViolations,
+  releaseChangelog,
+} from './release-changelog.mjs'
 import { snapshotModeViolation } from './release-snapshot-version.mjs'
 import { backwardsVersionViolation, resolveSemver } from './release-version-order.mjs'
 
@@ -368,6 +381,64 @@ async function verifyManifestDoc() {
   log('  ✓ Supported Runtime Manifest table matches every version constant it mirrors')
 }
 
+/**
+ * Write the release heading into every published package's CHANGELOG, and open
+ * a fresh `## Unreleased` above it for the next cycle.
+ *
+ * A package with no `## Unreleased` section is skipped and SAID so, rather than
+ * silently passing: "nothing to rewrite" and "rewrote it" must not look the
+ * same in the log, because an ambiguity of exactly that kind is how the gap
+ * this fixes went unnoticed.
+ */
+async function updateChangelogs(newVersion, isoDate) {
+  for (const name of CHANGELOG_PACKAGES) {
+    const path = join(ROOT, 'packages', name, 'CHANGELOG.md')
+    let source
+    try {
+      source = await readFile(path, 'utf8')
+    } catch {
+      log(`  packages/${name}/CHANGELOG.md: absent — skipped`)
+      continue
+    }
+    const updated = releaseChangelog(source, newVersion, isoDate)
+    if (updated === null) {
+      log(`  packages/${name}/CHANGELOG.md: no "## Unreleased" section — nothing to rewrite`)
+      continue
+    }
+    await writeFile(path, updated, 'utf8')
+    log(`  packages/${name}/CHANGELOG.md: ## ${newVersion} — ${isoDate} (## Unreleased re-seeded)`)
+  }
+}
+
+/**
+ * Verify the CHANGELOG headings by RE-READING them from disk.
+ *
+ * Same argument as `verifyManifestDoc`: this must not be a script checking its
+ * own write. It reads the files and asks whether each carries a heading for the
+ * released version — so deleting `updateChangelogs` above leaves this running,
+ * seeing five files with no such heading, and failing.
+ *
+ * A package whose changelog is ABSENT, or which had no `## Unreleased` section
+ * to rewrite, is excluded from the check rather than reported: both are
+ * legitimate states that `updateChangelogs` already logged, and failing a
+ * release over "this package had nothing to say" would be the wrong gate.
+ */
+async function verifyChangelogHeadings(newVersion) {
+  const files = {}
+  for (const name of CHANGELOG_PACKAGES) {
+    try {
+      files[name] = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+    } catch { /* absent — updateChangelogs said so */ }
+  }
+  const violations = changelogHeadingViolations(files, newVersion)
+  if (violations.length > 0) {
+    log(`  ⚠ CHANGELOG headings not written for: ${violations.join('; ')}`)
+    log('    (a package with no "## Unreleased" section is expected here — see the log above)')
+    return
+  }
+  log(`  ✓ every published CHANGELOG carries a "## ${newVersion}" heading`)
+}
+
 // ── Build helpers ─────────────────────────────────────────────────────────────
 
 async function run(command, args, cwd = ROOT) {
@@ -584,6 +655,7 @@ async function main() {
   log(`  ${SOURCE_VERSION_CONSTANTS.map((c) => c.name).join(', ')} = '${newVersion}'`)
   log(`  Supported Runtime Manifest table = '${newVersion}'  (docs/operations/mcp-runtime-compatibility.md)`)
   log(`  ${CONNECTOR_CHANNEL_CONSTANT} = '${channelForVersion(newVersion)}'  (${CONNECTOR_CHANNEL_FILE})`)
+  log(`  CHANGELOG heading = '## ${newVersion}' in ${CHANGELOG_PACKAGES.length} packages${snapshot ? ' — SKIPPED, a snapshot is not a release' : ', with ## Unreleased re-seeded'}`)
   // These two are CHECKS THIS RUN WILL PERFORM, not results — the guards run
   // after the pins are rewritten, further down. Saying "(verified)" here
   // printed a reassuring line immediately before the run died on that very
@@ -665,6 +737,29 @@ async function main() {
   // compares it against those constants on disk, so writing them first means
   // the check has something real to disagree with.
   await updateManifestDoc(newVersion)
+
+  // The five published CHANGELOGs get their release heading here (the
+  // changelog-heading gap, fixed 2026-09-14). They each USED to say the bump
+  // wrote it while the bump did not — so a release would have shipped
+  // `## Unreleased` standing over the entry that had just gone out. None did:
+  // see the file header, which records that the gap cost zero releases.
+  //
+  // NOT in snapshot mode. A `0.0.0-dev.*` snapshot is explicitly "not a
+  // release" (`docs/operations/package-dev-channel.md`), so stamping a release
+  // heading for one would be false even though the tree is throwaway and no
+  // CHANGELOG reaches a tarball. The heading is the one thing in this script
+  // whose meaning is documentary rather than mechanical, so it is the one thing
+  // a snapshot must not write.
+  // Its own section: a CHANGELOG heading is neither source code nor a version
+  // constant, and burying it under that header made the log misdescribe it.
+  header('Updating package CHANGELOG headings')
+  if (!snapshot) {
+    const isoDate = new Date().toISOString().slice(0, 10)
+    await updateChangelogs(newVersion, isoDate)
+    await verifyChangelogHeadings(newVersion)
+  } else {
+    log('  CHANGELOG headings: skipped — a dev snapshot is not a release')
+  }
 
   // ── 6. Wipe all dists ────────────────────────────────────────────────────
   header('Wiping dist directories')

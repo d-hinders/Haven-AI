@@ -1,10 +1,12 @@
 # @haven_ai/sdk
 
-Release headers are written **by hand at release time**. `release-bump.mjs`
-does not touch this file — it owns versions, cross-package pins, source version
-constants and the Supported Runtime Manifest table, and nothing else. This line
-used to claim the opposite, and all five package changelogs consequently still
-read `## Unreleased` at the 0.1.37-alpha.0 release commit.
+Release headers are written by the release bump (`npm run release:bump`), never by
+hand — true since the changelog-heading gap, and stated here only because it was asserted for a long
+time while being false. The bump rewrites the `## Unreleased` heading below into
+`## <version> — <date>`; add entries under `## Unreleased` and leave the heading
+alone.
+
+## Unreleased
 
 ## 0.2.0-alpha.0 — 2026-09-14
 

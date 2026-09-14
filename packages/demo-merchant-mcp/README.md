@@ -229,9 +229,9 @@ fail, with no way to have known beforehand.
 
 `POST /mcp` now reads the same `readiness()` signal (cached per server for
 `readinessCacheMs`, default 15s, so a busy merchant does not turn every tool
-call into an extra RPC read) at two points for every PAID tool call: before a
-402 challenge is issued, and again immediately before settling a paid retry —
-the wallet can drain in the window between the two.
+call into an extra RPC read) on every PAID tool call — the unpaid call that
+would receive the 402 challenge and the agent's signed retry alike, so a
+wallet that drains between the two is caught before anything is settled.
 
 - **`fail`**: the call is refused with `HTTP 503` and no 402 is ever issued
   (or, on the paid retry, nothing is settled):

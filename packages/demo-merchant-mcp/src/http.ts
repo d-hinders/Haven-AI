@@ -261,11 +261,13 @@ async function handlePaymentGate(
 ): Promise<SettledPayment | null> {
   const { productId, product, description, settlementMethod } = paymentToolInfo
 
-  // #2979: gate BEFORE the 402 challenge is issued. Skip the QA fixture that
-  // settles nothing on-chain (`isSkipSettleProduct`) — a drained wallet
-  // cannot block a settlement that never runs. This is the FIRST of two gate
-  // reads: the wallet can also drain in the window between this challenge and
-  // the settlement below, so that call site gates again.
+  // #2979: gate on settlement readiness. This runs on EVERY paid tool call —
+  // the unpaid one that would receive the 402 challenge AND the agent's
+  // signed retry, which enters this same function before its header is
+  // read — so a wallet that drains between the challenge and the retry is
+  // caught here too (the drain test in http.test.ts). Skip the QA fixture
+  // that settles nothing on-chain (`isSkipSettleProduct`) — a drained wallet
+  // cannot block a settlement that never runs.
   if (!isSkipSettleProduct(productId) && (await refuseIfNotReady(res, options))) {
     return null
   }
@@ -290,15 +292,6 @@ async function handlePaymentGate(
 
   if (!paymentHeader) {
     writePaymentRequired(res, options, paymentRequired)
-    return null
-  }
-
-  // #2979: gate again immediately before settling. The wallet the FIRST check
-  // read could have drained between issuing the challenge and the agent's
-  // signed retry landing here — an agent must never be told to sign an
-  // authorization the merchant then discovers, at settlement time, it cannot
-  // pay gas for.
-  if (!isSkipSettleProduct(productId) && (await refuseIfNotReady(res, options))) {
     return null
   }
 

@@ -355,6 +355,11 @@ export function classifySettlementEvidenceReport(
   paymentId: string,
   settlementTxHash: string,
   outcome: EvidenceReportOutcome,
+  // #2973 review: the payment's status as Haven READ it after the refusal —
+  // a 409 may sit on an already-confirmed intent with a different hash, so
+  // the summary must not assert `submitted`. `null` when the read itself
+  // failed (a foreign payment 404s here too).
+  observedStatus: string | null = null,
 ): Record<string, unknown> {
   if (outcome.outcome === 'confirmed') {
     return {
@@ -389,7 +394,7 @@ export function classifySettlementEvidenceReport(
         : 'Haven could not verify this transaction against this payment on-chain — it does not ' +
           "match this payment's transfer shape or window, or the payment could not be found for " +
           'this agent. Reporting it again will not change that; poll next_tool for the current status.',
-      summary: { payment_id: paymentId, status: 'submitted' },
+      summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
     }),
   }
 }
@@ -595,6 +600,16 @@ export function createPaidMcpCompletionHandlers(
             }
           }
           const pending = gate.outcome === 'settlement_pending'
+          // #2972: on the pending branch the agent demonstrably holds the
+          // merchant's real hash (it is echoed right here), so the machine-
+          // readable remedy is to hand it back through
+          // `haven_report_settlement_evidence` once the chain is readable —
+          // not merely to poll. DELIVERED_UNSETTLED keeps the status poll as
+          // next_tool: the hash was missing, zero, or already refused, and
+          // the sweep is the remaining passive path.
+          const heldHash = merchant7710.settlement_tx_hash
+          const canReport =
+            pending && typeof heldHash === 'string' && !isZeroSettlementTxHash(heldHash)
           return {
             payment_id: args.payment_id,
             settlement_scheme: 'erc7710',
@@ -608,19 +623,27 @@ export function createPaidMcpCompletionHandlers(
             allowance: summary7710.allowance,
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.CheckStatusLater,
-              nextTool: 'mcp__haven__haven_get_payment_status',
-              nextArguments: { payment_id: args.payment_id },
+              nextTool: canReport
+                ? 'mcp__haven__haven_report_settlement_evidence'
+                : 'mcp__haven__haven_get_payment_status',
+              nextArguments: canReport
+                ? { payment_id: args.payment_id, settlement_tx_hash: heldHash }
+                : { payment_id: args.payment_id },
               safeToContinue: true,
               reason: pending
                 ? 'The merchant delivered the result and reported a settlement transaction, but ' +
                   'Haven could not yet verify it on-chain (the RPC was unreachable, or the ' +
-                  'transaction is not mined yet). This is worth checking again — poll next_tool.'
+                  'transaction is not mined yet). This is worth checking again — call next_tool ' +
+                  'with next_arguments shortly (it hands the same settlement_tx_hash back to ' +
+                  'Haven for verification); haven_get_payment_status shows the current status.'
                 : 'The merchant delivered the result, but Haven has no verified on-chain settlement ' +
                   'evidence for this payment — the reported settlement hash was missing, zero, or ' +
                   "could not be verified. Haven's settlement sweep may still attribute it within " +
-                  'about two minutes; poll next_tool once more after that. If it still shows no ' +
-                  'evidence, tell the user the goods were delivered but Haven holds no verified ' +
-                  'settlement evidence for this payment.',
+                  'about two minutes; poll next_tool once more after that. If you hold a real ' +
+                  'settlement transaction hash from the merchant, haven_report_settlement_evidence ' +
+                  'hands it to Haven for verification. If it still shows no evidence, tell the ' +
+                  'user the goods were delivered but Haven holds no verified settlement evidence ' +
+                  'for this payment.',
               summary: {
                 payment_id: args.payment_id,
                 status: summary7710.payment?.status ?? (pending ? 'settlement_pending' : 'delivered_unsettled'),
@@ -727,7 +750,25 @@ export function createPaidMcpCompletionHandlers(
           args.payment_id,
           args.settlement_tx_hash,
         )
-        return classifySettlementEvidenceReport(args.payment_id, args.settlement_tx_hash, outcome)
+        if (outcome.outcome === 'confirmed') {
+          return classifySettlementEvidenceReport(args.payment_id, args.settlement_tx_hash, outcome)
+        }
+        // Refused or pending: read the status Haven actually holds rather than
+        // asserting one. A foreign/non-existent payment 404s on this read as
+        // well — reported as `unknown`, which is the truth from this agent's
+        // side.
+        let observedStatus: string | null = null
+        try {
+          observedStatus = (await haven.getPaymentStatus(args.payment_id)).status
+        } catch {
+          observedStatus = null
+        }
+        return classifySettlementEvidenceReport(
+          args.payment_id,
+          args.settlement_tx_hash,
+          outcome,
+          observedStatus,
+        )
       }),
   }
 }

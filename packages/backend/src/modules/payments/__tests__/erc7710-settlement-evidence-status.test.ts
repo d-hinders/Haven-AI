@@ -100,6 +100,8 @@ describeDb('#2970 — erc7710 settlement-evidence status honesty', () => {
     // names the settlement sweep's own residual attribution window instead.
     expect(status?.message).toMatch(/settlement sweep/i)
     expect(status?.message).not.toMatch(/haven_report_x402_outcome/)
+    // #2972: the remedy for an agent that holds the merchant's real hash.
+    expect(status?.message).toMatch(/haven_report_settlement_evidence/)
     expect(status?.message).not.toMatch(/^Poll/)
   })
 

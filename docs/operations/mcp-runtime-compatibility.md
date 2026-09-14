@@ -195,9 +195,14 @@ last-verified: "2026-09-14"
 > `MerchantCompletion.reportSettlementEvidence`). No local-runtime twin: this
 > is a hosted-only tool, so the version-skew contract, the consent hash, and
 > the local signer surface are all unchanged. `haven_get_payment_status`'s
-> `awaiting_settlement_evidence` message and the #2970 `DELIVERED_UNSETTLED` /
-> `SETTLEMENT_PENDING` guidance now name this tool as the remedy when the
-> agent holds a hash.
+> `awaiting_settlement_evidence` message names this tool as the remedy when
+> the agent holds a hash; on the #2970 settle gate, `SETTLEMENT_PENDING` (the
+> agent demonstrably holds a non-zero hash — it is echoed in the same
+> response) points `next_tool` / `next_arguments` at this tool with that
+> hash, while `DELIVERED_UNSETTLED` keeps `haven_get_payment_status` as
+> `next_tool` and names this tool in prose for a hash the agent may still
+> obtain. On a refusal the tool reads the payment's status for its summary
+> rather than asserting one (`unknown` when the read itself is refused).
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
@@ -1086,7 +1091,7 @@ Read it as an argument-name mismatch, not an out-of-date package. Two things
 worth knowing before you reach for an upgrade:
 
 - **The affected tools are a declared list — and since #2353's switch that
-  list is 20 of the 22.** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
+  list is 21 of the 23 (#2972 added `haven_report_settlement_evidence` to both counts).** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
   in the hosted server's contracts module (`src/tools/contracts.ts`, behind
   the `tools.ts` facade). It began (#2312) with the money-path
   tools that read from the payment record rather than from arguments, #2348

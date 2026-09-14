@@ -1701,6 +1701,13 @@ describe('hosted erc7710 (#1456)', () => {
       expect(res.data.retryable).toBe(true)
       expect(res.data.agent_summary.status).toBe('submitted')
       expect(res.data.next_action).toBe('check_status_later')
+      // #2972: the agent holds the merchant's real hash here, so next_tool is
+      // the evidence-report tool with that hash — not a bare status poll.
+      expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+      expect(res.data.next_arguments).toEqual({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: '0x' + 'ab'.repeat(32),
+      })
     })
 
     it('a terminal backend refusal (mismatch/reverted) is delivered_unsettled, not settlement_pending', async () => {
@@ -1733,6 +1740,11 @@ describe('hosted erc7710 (#1456)', () => {
       expect(res.data.code).toBe('DELIVERED_UNSETTLED')
       expect(res.data.retryable).toBeUndefined()
       expect(res.data.agent_summary.status).toBe('submitted')
+      // #2972: a refused hash is not re-reported by next_tool — the status
+      // poll stays; the report tool is named in prose for a hash the agent
+      // may still obtain.
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.reason).toContain('haven_report_settlement_evidence')
     })
   })
 
@@ -1851,9 +1863,18 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
   const SETTLEMENT_TX = '0x' + 'cd'.repeat(32)
   const ZERO_TX = '0x' + '0'.repeat(64)
 
-  function stubReport(evidenceRoute: { status: number; body?: unknown }) {
+  function stubReport(
+    evidenceRoute: { status: number; body?: unknown },
+    statusRoute?: { status: number; body?: unknown },
+  ) {
     stubFetch({
       'POST /machine-payments/evidence': evidenceRoute,
+      // #2973 review: on a refusal the tool READS the payment's status for the
+      // summary rather than asserting `submitted`.
+      'GET /machine-payments/pay_7710/status': statusRoute ?? {
+        status: 200,
+        body: { payment_id: 'pay_7710', kind: 'payment_intent', status: 'submitted', rail: 'x402' },
+      },
     })
   }
 
@@ -1890,6 +1911,28 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
     expect(res.data.retryable).toBeUndefined()
     expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
     expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+    expect(res.data.agent_summary.status).toBe('submitted')
+  })
+
+  it('a 409 on an already-confirmed intent (different hash) reports the status Haven holds, not "submitted"', async () => {
+    stubReport(
+      { status: 409, body: { error: 'settlement_unverified' } },
+      {
+        status: 200,
+        body: { payment_id: 'pay_7710', kind: 'payment_intent', status: 'confirmed', rail: 'x402' },
+      },
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: SETTLEMENT_TX,
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    expect(res.data.agent_summary.status).toBe('confirmed')
   })
 
   it(
@@ -1920,7 +1963,11 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
     // does not own resolves to null, and attachEvidenceHandler answers 404
     // ("Payment not found") without writing anything. That is the ENTIRE
     // enforcement: this tool carries no separate ownership check of its own.
-    stubReport({ status: 404, body: { error: 'Payment not found' } })
+    stubFetch({
+      'POST /machine-payments/evidence': { status: 404, body: { error: 'Payment not found' } },
+      // The status read is scoped the same way — the same 404.
+      'GET /machine-payments/pay_not_mine/status': { status: 404, body: { error: 'Payment not found' } },
+    })
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
 
     const res = ok(
@@ -1934,12 +1981,18 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
     // never treated as confirmed, never retried indefinitely.
     expect(res.data.settled).toBe(false)
     expect(res.data.code).toBe('DELIVERED_UNSETTLED')
-    // The one real HTTP call was the evidence report itself, which the
+    // The status read after the refusal 404s for the same reason (not this
+    // agent's payment) — reported as `unknown`, never invented.
+    expect(res.data.agent_summary.status).toBe('unknown')
+    // The one real WRITE attempt was the evidence report itself, which the
     // backend refused with 404 — "never a write" means no SUCCESSFUL write,
     // not "no attempt": the attempt is exactly what proves the backend (not
-    // this tool) is the enforcement boundary.
-    expect(recordedCalls()).toHaveLength(1)
-    expect(recordedCalls()[0].url).toContain('/machine-payments/evidence')
+    // this tool) is the enforcement boundary. The second call is the GET
+    // status read for the summary.
+    const posts = recordedCalls().filter((c) => c.method === 'POST')
+    expect(posts).toHaveLength(1)
+    expect(posts[0].url).toContain('/machine-payments/evidence')
+    expect(recordedCalls()).toHaveLength(2)
   })
 
   it('a zero settlement hash is refused at the boundary and never reaches the network', async () => {

@@ -83,6 +83,8 @@ async function signSkipSettleHeader(
     ...(pr.extensions ? { extensions: pr.extensions } : {}),
   }
   return encodePaymentSignatureHeader(payload)
+}
+
 /** Same env-stub + fresh-module-graph pattern as `importX402With`, extended to
  *  pull in `http.js` and `products.js` too — both read chain config at import
  *  time, same as `x402.js` does. */

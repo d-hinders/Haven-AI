@@ -1359,6 +1359,12 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
 //     order — contact name (Klara Data AB), receipt merchant name (NordShield
 //     VPN), address-only (the row whose label IS its address) — so one capture
 //     shows every label source the product can produce.
+//   - Wire types follow B exactly: every fiat field is a numeric STRING
+//     (`totals.spent/spent_previous/refused_amount`, `fees.amount/.previous`,
+//     `spent_by_agent` values, `agents[].spent`, `merchants[].spent`,
+//     `balance_by_day[].value`), while counts and `share` stay numbers —
+//     B's repositories book fiat via `::text` in SQL and its route passes
+//     the strings through with no Number() coercion.
 //   - Merchant rows sum EXACTLY to `totals.spent`, and `by_day` sums exactly
 //     to it too: a fixture whose parts disagree with its own total would
 //     photograph a page no backend could serve.
@@ -1378,29 +1384,29 @@ export const ANALYTICS_RANGE = {
 export const FIXTURE_ANALYTICS_MERCHANTS = [
   {
     label: 'NordShield VPN', address: ADDR.merchant,
-    spent: 225.0, payments: 3, agent_ids: ['agent-research'],
+    spent: '225.00', payments: 3, agent_ids: ['agent-research'],
     first_seen: '2026-07-08T09:15:00.000Z', last_seen: '2026-07-10T08:12:00.000Z',
   },
   {
     label: 'Klara Data AB', address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
-    spent: 87.25, payments: 1, agent_ids: ['agent-research'],
+    spent: '87.25', payments: 1, agent_ids: ['agent-research'],
     first_seen: '2026-07-09T10:00:00.000Z', last_seen: '2026-07-09T10:00:00.000Z',
   },
   {
     // Address-only: no contact, no receipt name — the label IS the address.
     label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
     address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
-    spent: 12.5, payments: 1, agent_ids: ['agent-retired'],
+    spent: '12.50', payments: 1, agent_ids: ['agent-retired'],
     first_seen: '2026-07-10T12:30:00.000Z', last_seen: '2026-07-10T12:30:00.000Z',
   },
 ]
 // Four by-day rows that sum exactly to `totals.spent` (312.25 research +
 // 12.5 retired = 324.75) and whose refusals sum to `totals.refused_count`.
 export const FIXTURE_ANALYTICS_BY_DAY = [
-  { date: '2026-07-07', spent_by_agent: { 'agent-research': 85.75, 'agent-retired': 12.5 }, refusals: 0 },
-  { date: '2026-07-08', spent_by_agent: { 'agent-research': 112.5 }, refusals: 0 },
-  { date: '2026-07-09', spent_by_agent: { 'agent-research': 87.25 }, refusals: 1 },
-  { date: '2026-07-10', spent_by_agent: { 'agent-research': 26.75 }, refusals: 1 },
+  { date: '2026-07-07', spent_by_agent: { 'agent-research': '85.75', 'agent-retired': '12.50' }, refusals: 0 },
+  { date: '2026-07-08', spent_by_agent: { 'agent-research': '112.50' }, refusals: 0 },
+  { date: '2026-07-09', spent_by_agent: { 'agent-research': '87.25' }, refusals: 1 },
+  { date: '2026-07-10', spent_by_agent: { 'agent-research': '26.75' }, refusals: 1 },
 ]
 // 30 absolute daily snapshot values, deterministic (no randomness — a capture
 // must re-render identically), ending on the dashboard's own account total so
@@ -1411,9 +1417,12 @@ const ANALYTICS_BALANCE_START = 12_354.52
 const ANALYTICS_BALANCE_END = FIXTURE_OVERVIEW.totals.usd
 const ANALYTICS_BALANCE_DAY_MS = Date.UTC(2026, 5, 12) // range `from` + 1 day
 const analyticsBalanceDate = (i) => new Date(ANALYTICS_BALANCE_DAY_MS + i * 86_400_000).toISOString().slice(0, 10)
+// Wire shape (B #2946): `value` is a numeric STRING like every money field on
+// the response, so the generator's number is stringified here, not at render.
+const analyticsBalanceValue = (raw) => (Math.round(raw * 100) / 100).toFixed(2)
 export const FIXTURE_ANALYTICS_BALANCE_BY_DAY = Array.from({ length: ANALYTICS_RANGE.days }, (_, i) => ({
   date: analyticsBalanceDate(i),
-  value: Math.round((ANALYTICS_BALANCE_START + ((ANALYTICS_BALANCE_END - ANALYTICS_BALANCE_START) * i) / (ANALYTICS_RANGE.days - 1) + (i % 3 === 0 ? -12.4 : 0)) * 100) / 100,
+  value: analyticsBalanceValue(ANALYTICS_BALANCE_START + ((ANALYTICS_BALANCE_END - ANALYTICS_BALANCE_START) * i) / (ANALYTICS_RANGE.days - 1) + (i % 3 === 0 ? -12.4 : 0)),
 }))
 export const FIXTURE_ANALYTICS_OVERVIEW = {
   range: ANALYTICS_RANGE,
@@ -1425,44 +1434,51 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
     snapshot_days: 30, tz: 'UTC',
   },
   totals: {
-    spent: 324.75, spent_previous: 280.1,
-    refused_count: 2, refused_attempts: 3, refused_amount: 3.0, refused_previous_count: 1,
+    spent: '324.75', spent_previous: '280.10',
+    refused_count: 2, refused_attempts: 3, refused_amount: '3.00', refused_previous_count: 1,
     budget_bands: { above_75: 1, above_50: 1, agents_with_budget: 2 },
     // flag_on false is the honest "Haven is not charging fees" state — the
     // tile must say so, not render a bare 0 (the doc's Fees section).
-    fees: { amount: 0, previous: 0, flag_on: false },
+    fees: { amount: '0', previous: '0', flag_on: false },
     gas_sponsored_ops: 7,
   },
   by_day: FIXTURE_ANALYTICS_BY_DAY,
-  agents: [
-    {
-      id: 'agent-research', name: 'Research agent', status: 'active',
-      spent: 312.25, share: 0.962, payments: 4, refusals: 1, refusal_attempts: 2,
-      budgets: [{
-        token: 'USDC', recipient: null,
-        // 214 of 250 USDC — the >75% band the budget_bands count reflects.
-        used_atomic: '214000000', budget_atomic: '250000000',
-        remaining_from_chain: true,
-        period_start: '2026-07-04T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
-      }],
-      top_merchant: { label: 'NordShield VPN', address: ADDR.merchant },
-      last_payment_at: '2026-07-10T08:12:00.000Z',
-    },
-    {
-      id: 'agent-retired', name: 'Data-feed agent', status: 'paused',
-      spent: 12.5, share: 0.038, payments: 1, refusals: 1, refusal_attempts: 1,
-      budgets: [{
-        token: 'USDC', recipient: '0x9995F3aB1e2C4d6087A1b3E5f6C7D890aB1244E2',
-        // The fallback case: remaining_from_chain false → the page's
-        // "read from Haven's last snapshot" hint (slice C's agents table).
-        used_atomic: '5000000', budget_atomic: '500000000',
-        remaining_from_chain: false,
-        period_start: '2026-07-10T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
-      }],
-      top_merchant: { label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128', address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
-      last_payment_at: '2026-07-10T12:30:00.000Z',
-    },
-  ],
+  // Wire shape (B #2946): `spent` numeric strings; `share` is B's one
+  // number-typed money-adjacent field, DERIVED here (not hand-typed) so the
+  // ratios cannot drift from the sums they are shares of.
+  agents: (() => {
+    const raw = [
+      {
+        id: 'agent-research', name: 'Research agent', status: 'active',
+        spent: '312.25', payments: 4, refusals: 1, refusal_attempts: 2,
+        budgets: [{
+          token: 'USDC', recipient: null,
+          // 214 of 250 USDC — the >75% band the budget_bands count reflects.
+          used_atomic: '214000000', budget_atomic: '250000000',
+          remaining_from_chain: true,
+          period_start: '2026-07-04T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
+        }],
+        top_merchant: { label: 'NordShield VPN', address: ADDR.merchant },
+        last_payment_at: '2026-07-10T08:12:00.000Z',
+      },
+      {
+        id: 'agent-retired', name: 'Data-feed agent', status: 'paused',
+        spent: '12.50', payments: 1, refusals: 1, refusal_attempts: 1,
+        budgets: [{
+          token: 'USDC', recipient: '0x9995F3aB1e2C4d6087A1b3E5f6C7D890aB1244E2',
+          // The fallback case: remaining_from_chain false → the page's
+          // "read from Haven's last snapshot" hint (slice C's agents table).
+          used_atomic: '5000000', budget_atomic: '500000000',
+          remaining_from_chain: false,
+          period_start: '2026-07-10T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
+        }],
+        top_merchant: { label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128', address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
+        last_payment_at: '2026-07-10T12:30:00.000Z',
+      },
+    ]
+    const total = raw.reduce((s, a) => s + Number(a.spent), 0)
+    return raw.map((a) => ({ ...a, share: Number(a.spent) / total }))
+  })(),
   merchants: FIXTURE_ANALYTICS_MERCHANTS,
   balance_by_day: FIXTURE_ANALYTICS_BALANCE_BY_DAY,
 }
@@ -1483,10 +1499,10 @@ export const FIXTURE_ANALYTICS_OVERVIEW_EMPTY = {
     snapshot_days: 0, tz: 'UTC',
   },
   totals: {
-    spent: 0, spent_previous: 0,
-    refused_count: 0, refused_attempts: 0, refused_amount: 0, refused_previous_count: 0,
+    spent: '0.00', spent_previous: '0.00',
+    refused_count: 0, refused_attempts: 0, refused_amount: '0.00', refused_previous_count: 0,
     budget_bands: { above_75: 0, above_50: 0, agents_with_budget: 0 },
-    fees: { amount: 0, previous: 0, flag_on: false },
+    fees: { amount: '0', previous: '0', flag_on: false },
     gas_sponsored_ops: 0,
   },
   by_day: [],
@@ -4697,7 +4713,8 @@ export const SCENARIOS = {
   // The endpoint fixture is the shared route-keyed `/analytics/overview` key
   // (FIXTURE_ANALYTICS_OVERVIEW), not a scenario api() hook: slice C's page
   // reads the same key, so page captures and the parity test hold ONE shape.
-  // `analytics-empty` is the exception — it answers 503 itself (below).
+  // `analytics-empty` serves the exported empty variant (same idiom as
+  // SCREENSHOT_FIXTURE=empty); the FAILURE path is its own scenario below.
   'analytics-populated': {
     description:
       'Analytics over the populated overview fixture (#2949): merchants showing all three label resolutions (contact, receipt name, address-only), agents with a chain-read and a fallback budget, fees-off, refusals with attempts. Route is slice C (#2947) — until it lands, the scenario is exercised by the screenshot-fixture parity pins only.',
@@ -4713,7 +4730,29 @@ export const SCENARIOS = {
   },
   'analytics-empty': {
     description:
-      'Analytics when the overview endpoint fails — a 503 via ScenarioHttpError (#1725 shape), so the capture shows the page\'s failure path, not a fabricated empty state (#2949). Route is slice C (#2947).',
+      'Analytics over the all-zero overview fixture (#2949) — an account with no payments, agents, merchants or balance rows in range: the page\'s own empty state, not an error. Route is slice C (#2947) — until it lands, the scenario is exercised by the screenshot-fixture parity pins only.',
+    api(apiPath) {
+      if (apiPath === '/analytics/overview') {
+        return FIXTURE_ANALYTICS_OVERVIEW_EMPTY
+      }
+      return undefined
+    },
+    async run(args) {
+      await runAnalyticsScenario(args, async (page) => {
+        // The empty state is slice C's to design; the shared body has already
+        // waited for the page itself. What this scenario additionally proves:
+        // the endpoint ANSWERED, so failure copy must be absent — asserted
+        // loudly, not left to photograph an outage as an empty state.
+        const failureCopy = await page.getByText(/could not load|try again/i).count()
+        if (failureCopy > 0) {
+          throw new Error('analytics-empty: the overview fixture answered, but failure copy is on screen')
+        }
+      })
+    },
+  },
+  'analytics-error': {
+    description:
+      'Analytics when the overview endpoint fails — a 503 via ScenarioHttpError (#1725 shape), so the capture shows the page\'s failure path (#2949). Route is slice C (#2947).',
     api(apiPath) {
       if (apiPath === '/analytics/overview') {
         return httpError(503, { error: 'Service Unavailable' })

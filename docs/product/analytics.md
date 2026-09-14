@@ -92,10 +92,10 @@ not in the sum.
   of the same length, on exactly the same definitions — a delta is never
   taken against a differently-scoped number.
 - **Refusals.** Recorded in the `payment_refusals` ledger, which exists from
-  migration 086 (14 September 2026). Ranges that reach before that date show
-  refusals only from it; the page's empty states derive their earliest
-  recorded date from the API's `basis` rather than hardcoding one. Refusals
-  are recorded with attempts. Price-cap refusals raised inside the agent's
+  migration 086 (14 September 2026). A range reaching before that date simply
+  has no refusal rows for the days before it — the page shows an honest empty
+  there, and neither it nor the API claims a coverage floor it cannot read.
+  Refusals are recorded with attempts. Price-cap refusals raised inside the agent's
   own runtime are not recorded — the ledger sees what Haven's authorization
   step saw, and a runtime that declines before asking leaves no row.
 - **Sponsored gas.** Haven relays agent payments, and the relay's network fee
@@ -134,19 +134,24 @@ the endpoint (#2946) before it can appear in a demo run.
 
 ## Capturing and testing this screen
 
-Two screenshot-harness scenarios are registered for this screen in
+Three screenshot-harness scenarios are registered for this screen in
 `packages/frontend/scripts/screenshot.mjs`:
 
 - `analytics-populated` — the endpoint answers a populated overview whose
   merchants include a contact-labelled row, a receipt-named row and an
   address-only row, so all three label resolutions are on the capture.
-- `analytics-empty` — the endpoint answers `503` via the harness's
-  `ScenarioHttpError`, so the capture shows the page's failure path rather
-  than a fake empty state.
+- `analytics-empty` — the endpoint answers the all-zero overview (no
+  payments, agents, merchants or balance rows in range): the page's own
+  empty state for an account with nothing in the range, not an error.
+- `analytics-error` — the endpoint answers `503` via the harness's
+  `ScenarioHttpError`, so the capture shows the page's failure path.
 
 The fixture keys they serve are pinned by
 `packages/frontend/src/__tests__/screenshot-fixture.test.ts`, which fails if
-the harness and the test fixture drift apart. The scenarios are gated on the
+the harness and the test fixture drift apart — including the wire types: the
+fixture's fiat fields are the numeric strings slice B's endpoint books, and a
+revert to JS numbers goes red. The scenarios are gated on the
 `/analytics` route (#2947): until it lands they are exercised by the parity
-test, and `npm run screenshot -- --scenario=analytics-populated,analytics-empty`
+test, and
+`npm run screenshot -- --scenario=analytics-populated,analytics-empty,analytics-error`
 produces the desktop and 390px captures, both themes, once it exists.

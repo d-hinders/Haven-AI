@@ -543,7 +543,13 @@ answered `settled: true` on the zero hash, which is the F2 finding this issue
 closed. `haven_get_payment_status` on the same payment answers
 `check_status_later` inside the settlement window and
 `awaiting_settlement_evidence` once it passes, since nothing will ever report
-evidence for a deliberately-skipped settlement.
+evidence for a deliberately-skipped settlement. **#2972 — this stays true even
+with the new remedy tool.** `haven_report_settlement_evidence` refuses a zero
+settlement hash client-side before any network call
+(`isZeroSettlementTxHash`, the same recognizer the fixture's own marker
+matches), so there is no way to "unstick" this fixture's payment by reporting
+its zero hash back to Haven — the tool is a remedy for a REAL hash the agent
+is holding, not a way to force-settle a deliberately-skipped one.
 
 Two skip conditions are specific to this leg, both unmet-precondition, never a
 code defect:

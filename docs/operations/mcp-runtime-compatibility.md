@@ -174,6 +174,35 @@ last-verified: "2026-09-14"
 > `submitted` erc7710 intent whose settlement window has passed with no
 > verified evidence — the local runtime forwards it unchanged, same as every
 > other `next_action` value.
+>
+> **Recent re-verification (#2972):** a new HOSTED-only tool,
+> `haven_report_settlement_evidence { payment_id, settlement_tx_hash }`, is
+> the remedy #2970's guidance could not name — an agent holding the
+> merchant's real erc7710 settlement transaction hash (from
+> `PAYMENT-RESPONSE.transaction`, or a prior settle/complete result's
+> `settlement_tx_hash`) can now hand it to Haven directly instead of only
+> waiting on the settlement sweep or the 3009-shaped `haven_report_x402_outcome`
+> (which takes no hash and refuses a non-`confirmed` intent). It reuses the
+> SAME backend seam (`POST /machine-payments/evidence` →
+> `observeErc7710Settlement`, fail-closed, #2092) and reports the same three
+> outcomes as the #2970 settle/complete gate: `settled: true` only once Haven
+> verified the hash on-chain, else `code: 'DELIVERED_UNSETTLED'` or
+> `code: 'SETTLEMENT_PENDING'`. Strict input (23rd hosted tool, in
+> `STRICT_INPUT_TOOLS`), agent-scoped (a foreign `payment_id` 404s and is
+> classified `DELIVERED_UNSETTLED`, never a write), a zero settlement hash is
+> refused client-side before any network call
+> (`HavenClient.reportSettlementEvidence` /
+> `MerchantCompletion.reportSettlementEvidence`). No local-runtime twin: this
+> is a hosted-only tool, so the version-skew contract, the consent hash, and
+> the local signer surface are all unchanged. `haven_get_payment_status`'s
+> `awaiting_settlement_evidence` message names this tool as the remedy when
+> the agent holds a hash; on the #2970 settle gate, `SETTLEMENT_PENDING` (the
+> agent demonstrably holds a non-zero hash — it is echoed in the same
+> response) points `next_tool` / `next_arguments` at this tool with that
+> hash, while `DELIVERED_UNSETTLED` keeps `haven_get_payment_status` as
+> `next_tool` and names this tool in prose for a hash the agent may still
+> obtain. On a refusal the tool reads the payment's status for its summary
+> rather than asserting one (`unknown` when the read itself is refused).
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
@@ -1062,7 +1091,7 @@ Read it as an argument-name mismatch, not an out-of-date package. Two things
 worth knowing before you reach for an upgrade:
 
 - **The affected tools are a declared list — and since #2353's switch that
-  list is 20 of the 22.** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
+  list is 21 of the 23 (#2972 added `haven_report_settlement_evidence` to both counts).** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
   in the hosted server's contracts module (`src/tools/contracts.ts`, behind
   the `tools.ts` facade). It began (#2312) with the money-path
   tools that read from the payment record rather than from arguments, #2348

@@ -62,6 +62,7 @@ export type HostedToolName =
   | 'haven_pay_x402_quote'
   | 'haven_resume_x402_payment'
   | 'haven_report_x402_outcome'
+  | 'haven_report_settlement_evidence'
   | 'haven_get_payment_status'
   | 'haven_get_resume_state'
   | 'haven_list_receipts'
@@ -343,6 +344,21 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     // not a receipt.
     merchant_body: z.string().max(4096).optional(),
   },
+  haven_report_settlement_evidence: {
+    // #2972: the remedy #2970's guidance could not name — an erc7710 agent
+    // holding the merchant's real settlement transaction hash
+    // (PAYMENT-RESPONSE.transaction, or a prior settle/complete result's
+    // settlement_tx_hash) while Haven holds none. Nothing else is taken: the
+    // payment's rail, amount, and merchant are read from Haven's own record,
+    // scoped to this agent, exactly like haven_report_x402_outcome.
+    payment_id: z.string().min(1),
+    settlement_tx_hash: z
+      .string()
+      .regex(
+        /^0x[0-9a-fA-F]{64}$/,
+        'settlement_tx_hash must be a 0x-prefixed transaction hash: 0x followed by exactly 64 hex characters (case-insensitive).',
+      ),
+  },
   haven_get_payment_status: {
     payment_id: z.string().min(1),
   },
@@ -579,6 +595,12 @@ export const STRICT_INPUT_TOOLS = {
   haven_report_x402_outcome:
     'The funding transaction, resource URL and amount are read from the payment record, ' +
     'so a report cannot be pointed at a different payment.',
+  // #2972: takes exactly payment_id and settlement_tx_hash — the rail, amount
+  // and merchant are read from the payment's own record (scoped to this
+  // agent), the same reason haven_report_x402_outcome is on this list.
+  haven_report_settlement_evidence:
+    'The rail, amount and merchant are read from the payment record, scoped to this agent, ' +
+    'so a report cannot be pointed at a different payment or a different agent\'s payment.',
   // The relay leg. Everything except which payment and which signature — the
   // amount, the recipient, the rail, the typed data that was signed — comes
   // from the stored intent. A stripped key here means relaying a signature for
@@ -1002,6 +1024,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
   haven_report_x402_outcome: REPORT_X402_OUTCOME_DESCRIPTION,
+  haven_report_settlement_evidence: composeDescription(sharedDescriptions.reportSettlementEvidence),
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),

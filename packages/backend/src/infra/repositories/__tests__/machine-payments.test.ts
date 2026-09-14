@@ -14,6 +14,7 @@ import {
   claimPreparedSweep,
   claimPreparedSweepForBoundAgent,
   findEvidenceAnchorForAgent,
+  findIntentForEvidenceScoped,
   insertPreparedSweepForBoundAgent,
   insertMerchantReceiptOnce,
   listEvidenceReceiptsForAgent,
@@ -427,6 +428,12 @@ describeDb('machine-payments repository (#1224)', () => {
     await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId }))
 
     expect(await findEvidenceAnchorForAgent(intentId, other.agentId)).toBeNull()
+    // #2972/#2973 review: the evidence LOOKUP (`POST /machine-payments/evidence`
+    // → `attachMachinePaymentEvidence`) is agent-scoped on the real DB, not
+    // only in the route mock's SQL-text regex — a foreign agent resolves
+    // nothing, the owner resolves the row.
+    expect(await findIntentForEvidenceScoped(intentId, other.agentId)).toBeNull()
+    expect((await findIntentForEvidenceScoped(intentId, agent.agentId))?.id).toBe(intentId)
 
     const receipts = await listEvidenceReceiptsForAgent<{ settlement_scheme: string }>(
       agent.agentId,

@@ -3,6 +3,7 @@ import {
   AgentPaymentPhase,
   HavenApiError,
   HavenPaymentStateError,
+  HavenZeroSettlementHashError,
 } from './types.js'
 import type {
   PaymentStatusResult,
@@ -479,8 +480,18 @@ export class MerchantCompletion {
     paymentId: string
     rail: string
     txHash: string
-    resourceUrl: string
-    merchantStatus: number
+    /**
+     * #2972: OPTIONAL — `haven_report_settlement_evidence` reports a hash the
+     * agent holds out of band, with no fresh merchant HTTP exchange to read a
+     * resource URL or status from. Omitting it is safe: the backend only
+     * enforces a MATCH (`input.resourceUrl && input.resourceUrl !== resourceUrl`
+     * in `modules/mpp/evidence.ts`) when one is supplied, never that one is
+     * present. The funding-leg callers above keep passing the one Haven's own
+     * record already named.
+     */
+    resourceUrl?: string
+    /** #2972: OPTIONAL for the same reason as `resourceUrl` — see there. */
+    merchantStatus?: number
     challengePayload?: Record<string, unknown>
     selectedPayment?: Record<string, unknown>
     paymentProofHeaderName?: string
@@ -533,6 +544,43 @@ export class MerchantCompletion {
         await this.sleep(EVIDENCE_RETRY_DELAYS_MS[attempt])
       }
     }
+  }
+
+  /**
+   * #2972: report the merchant's REAL settlement transaction hash for an
+   * erc7710 x402 payment out of band — the remedy #2970's guidance could not
+   * name, because no hosted tool accepted a hash. An agent reaches this after
+   * `haven_settle_mcp_tool` / `haven_complete_mcp_tool` answered
+   * `DELIVERED_UNSETTLED` or `SETTLEMENT_PENDING`, or after
+   * `haven_get_payment_status` reports `awaiting_settlement_evidence` — in
+   * every one of those cases the agent may be holding the merchant's own
+   * `PAYMENT-RESPONSE.transaction` while Haven has nothing.
+   *
+   * Reuses `reportEvidence` — same backend seam
+   * (`POST /machine-payments/evidence` → `observeErc7710Settlement`,
+   * fail-closed — see `settlement-observed.ts`), same three-outcome contract.
+   * `resourceUrl` and `merchantStatus` are omitted: this call has no fresh
+   * merchant HTTP exchange to read either from, and both are optional at the
+   * backend (see the parameter doc on `reportEvidence`).
+   *
+   * The zero hash is refused HERE, client-side, before any network call —
+   * never posted. `isZeroSettlementTxHash` is the same recognizer the #2970
+   * gate uses, so a caller cannot "fix" a missing hash by reporting the demo
+   * merchant's own marker and getting a different verdict than the settle
+   * path already gave it.
+   */
+  async reportSettlementEvidence(
+    paymentId: string,
+    settlementTxHash: string,
+  ): Promise<EvidenceReportOutcome> {
+    if (isZeroSettlementTxHash(settlementTxHash)) {
+      throw new HavenZeroSettlementHashError(paymentId)
+    }
+    return this.reportEvidence({
+      paymentId,
+      rail: 'x402',
+      txHash: settlementTxHash,
+    })
   }
 }
 

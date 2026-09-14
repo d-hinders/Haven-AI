@@ -55,6 +55,7 @@ describe('buildHostedMcpServer', () => {
         'haven_pay_x402_quote',
         'haven_quote_x402',
         'haven_report_x402_outcome',
+        'haven_report_settlement_evidence',
         'haven_resume_x402_payment',
         'haven_send',
         'haven_submit',

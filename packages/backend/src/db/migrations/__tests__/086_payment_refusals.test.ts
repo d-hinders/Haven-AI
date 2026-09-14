@@ -21,6 +21,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb, withMigrationReverted } from '../../../infra/__tests__/helpers/db-harness.js'
+import { DELETE_USER_ACCOUNT_SQL, ORPHAN_AGENTS_FOR_ACCOUNT_SQL } from '../../../infra/repositories/smart-accounts.js'
+import { recordPaymentRefusal } from '../../../infra/repositories/payment-refusals.js'
 import { up, down, version } from '../086_payment_refusals.js'
 
 async function constraintExists(table: string, conname: string): Promise<boolean> {
@@ -118,6 +120,69 @@ describeDb('migration 086: payment_refusals ledger (#2945)', () => {
     expect(await constraintExists('payment_refusals', 'payment_refusals_account_id_fkey')).toBe(true)
     const def = await constraintDef('payment_refusals', 'payment_refusals_account_id_fkey')
     expect(def).toContain('smart_accounts')
+  })
+
+  // The delete action is the load-bearing half of this FK. Without it the
+  // column's nullability is a lie: an existing refusal row blocks the account
+  // unlink (PG 23503), so a telemetry table permanently breaks a self-custody
+  // revocation control. Pinned structurally here AND behaviourally below.
+  it('the account FK is ON DELETE SET NULL, not the NO ACTION default', async () => {
+    const def = await constraintDef('payment_refusals', 'payment_refusals_account_id_fkey')
+    expect(def).toContain('ON DELETE SET NULL')
+    // The NO ACTION default renders without any ON clause; asserting its
+    // absence is what makes this fail if the clause is dropped from 086.
+    expect(def).not.toMatch(/ON DELETE (NO ACTION|RESTRICT|CASCADE|SET DEFAULT)/)
+  })
+
+  it('the account unlink succeeds once a refusal row carries the account_id, and the audit row survives with a NULL account_id', async () => {
+    // Reproduces the shape `deleteAccountForUser` runs (routes/user-safes.ts
+    // -> DELETE /user/safes/:safeId): orphan the agents, then delete the
+    // account row. The refusal row is written first — the record-then-unlink
+    // direction that threw 23503 at the reviewed head.
+    const userId = await seedUser()
+    const accountId = await insertAccount(userId, 510)
+    const agentId = await seedAgent(userId)
+    await db.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId])
+
+    const { id: refusalId } = await recordPaymentRefusal({
+      userId,
+      accountId,
+      agentId,
+      chainId: 84532,
+      tokenSymbol: 'USDC',
+      amountAtomic: '10000',
+      usdValue: null,
+      eurValue: null,
+      reason: 'onchain_revert',
+      source: 'x402_authorize',
+    })
+
+    // The row is attached to the account before the unlink touches it.
+    const before = await db.query<{ account_id: string | null }>(
+      `SELECT account_id FROM payment_refusals WHERE id = $1`,
+      [refusalId],
+    )
+    expect(before.rows[0].account_id).toBe(accountId)
+
+    // The write half of the real unlink transaction. This DELETE is where the
+    // NO ACTION FK raised 23503; with SET NULL it must simply succeed.
+    await expect(db.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId])).resolves.toBeTruthy()
+    await expect(db.query(DELETE_USER_ACCOUNT_SQL, [accountId])).resolves.toBeTruthy()
+
+    // The audit trail outlives the account: row retained, account_id cleared.
+    const after = await db.query<{ account_id: string | null }>(
+      `SELECT account_id FROM payment_refusals WHERE id = $1`,
+      [refusalId],
+    )
+    expect(after.rows).toHaveLength(1)
+    expect(after.rows[0].account_id).toBeNull()
+
+    // And the account really is gone — this is not a rolled-back no-op.
+    const account = await db.query<{ one: number }>(
+      `SELECT 1 AS one FROM smart_accounts WHERE id = $1`,
+      [accountId],
+    )
+    expect(account.rows).toHaveLength(0)
   })
 
   it('a refusal whose account_id names a real smart_account row is accepted (FK live)', async () => {

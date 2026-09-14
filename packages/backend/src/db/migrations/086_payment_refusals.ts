@@ -62,6 +62,21 @@ export const version = '086_payment_refusals'
  * requires the remainder to be empty, so an extra key is a constraint
  * violation at write time, not a convention.
  *
+ * ## The account FK is `ON DELETE SET NULL`, not the default NO ACTION
+ *
+ * `account_id` is nullable BY DESIGN — the ledger records the refusal even
+ * when the account has since been unbound — but nullability only means that
+ * if the FK tolerates the account row going away first. With the default NO
+ * ACTION, an existing refusal row would BLOCK `DELETE FROM smart_accounts`
+ * in the unlink transaction (PG 23503 on `payment_refusals_account_id_fkey`),
+ * and `DELETE /user/safes/:safeId` has no catch for it: a telemetry table
+ * would permanently break a self-custody revocation control, which the CASP
+ * guardrails doc forbids. `ON DELETE SET NULL` is what makes the module's
+ * "records the refusal even when the account has since been unbound" true:
+ * the row is retained, its `account_id` is cleared, the audit trail
+ * outlives the account. Same posture as `agents.account_id`, which the
+ * unlink orphans explicitly (`ORPHAN_AGENTS_FOR_ACCOUNT_SQL`).
+ *
  * ## Growth bound, booked here as a constraint story
  *
  * A refused attempt costs the caller nothing, so a retry loop against
@@ -112,7 +127,7 @@ export async function up(client: PoolClient): Promise<void> {
 
     ALTER TABLE payment_refusals
       ADD CONSTRAINT payment_refusals_account_id_fkey
-      FOREIGN KEY (account_id) REFERENCES smart_accounts(id);
+      FOREIGN KEY (account_id) REFERENCES smart_accounts(id) ON DELETE SET NULL;
 
     CREATE INDEX IF NOT EXISTS idx_payment_refusals_user_created
       ON payment_refusals (user_id, created_at);

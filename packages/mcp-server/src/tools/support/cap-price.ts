@@ -15,7 +15,6 @@ import {
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
   HavenApiError,
-  HavenError,
   resolveTokenFromAddress,
   selectErc7710PaymentOption,
   selectX402SettlementScheme,
@@ -75,22 +74,31 @@ export function assertWithinMaxAmount(
     authorized = BigInt(authorizedAtomic)
     cap = BigInt(maxAmount)
   } catch {
-    throw new HavenError(
-      'max_amount and the authorized amount must be decimal atomic amounts.',
-      'INVALID_MAX_AMOUNT',
-      400,
-    )
+    // #2975: HostedToolError, not HavenError — normalizeError only serialises
+    // next_action for the former, and the cap contract promises every refusal
+    // carries it.
+    throw new HostedToolError({
+      code: 'INVALID_MAX_AMOUNT',
+      message: 'max_amount and the authorized amount must be decimal atomic amounts.',
+      statusCode: 400,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+    })
   }
   if (authorized > cap) {
     const unit = token ? `${token}, atomic units` : 'atomic units'
     const capText = capLabel ? `${capLabel} (= ${maxAmount} atomic)` : `max_amount ${maxAmount}`
-    throw new HavenError(
-      `Authorized amount ${authorizedAtomic} exceeds ${capText} (${unit}); ` +
+    // #2975: the documented remedy is re-quote → confirm with the user →
+    // retry with a larger cap, so say so in the machine-readable fields too.
+    throw new HostedToolError({
+      code: AgentPaymentFailureCode.PriceExceedsMax,
+      message:
+        `Authorized amount ${authorizedAtomic} exceeds ${capText} (${unit}); ` +
         `this is the ceiling the merchant can settle at. No funds were moved. ` +
         `Confirm the higher amount with the user before retrying with a larger cap.`,
-      AgentPaymentFailureCode.PriceExceedsMax,
-      400,
-    )
+      statusCode: 400,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      retryWithNewQuote: true,
+    })
   }
 }
 

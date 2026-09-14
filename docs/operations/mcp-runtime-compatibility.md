@@ -23,6 +23,18 @@ last-verified: "2026-09-14"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#2975):** the hosted server's two cap refusals
+> that still bypassed the guidance envelope — `PRICE_EXCEEDS_MAX` and
+> `INVALID_MAX_AMOUNT` in `src/tools/support/cap-price.ts` — now go through
+> `HostedToolError` like every other refusal in that module, so the wire
+> failure carries `next_action: stop_and_tell_user` (and, for
+> `PRICE_EXCEEDS_MAX`, `retry_with_new_quote: true`). Codes, messages, status
+> and the point of refusal (before any funding intent) are unchanged; no tool
+> added, renamed or re-shaped, so tool identity, the strict-input list, the
+> consent hash and the version-skew contract are untouched. The local
+> runtime forwards the failure fields unchanged. Nothing else in this
+> document was re-verified in this pass.
+>
 > **Recent re-verification (#2908, naming epic #2906 phase 1):** the local
 > runtime's readers accept both the Safe-vocabulary and the account-vocabulary
 > names and prefer the new. Credential FILE: `account_address ?? safe_address

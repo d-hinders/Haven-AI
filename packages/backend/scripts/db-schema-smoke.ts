@@ -39,6 +39,7 @@ import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-sign
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
   HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL,
+  FIND_OWNED_ACCOUNT_ID_BY_ADDRESS_AND_CHAIN_SQL,
 } from '../src/infra/repositories/smart-accounts.js'
 import {
   CLAIM_NEXT_OUTBOUND_TX_SQL,
@@ -387,6 +388,7 @@ const QUERIES: SmokeQuery[] = [
   { name: 'smart-accounts: list for user', sql: LIST_ACCOUNTS_FOR_USER_SQL },
   { name: 'smart-accounts: ownership check (id+address)', sql: FIND_OWNED_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: ownership check (id+is_default)', sql: FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL },
+  { name: 'smart-accounts: refusal-ledger account resolution', sql: FIND_OWNED_ACCOUNT_ID_BY_ADDRESS_AND_CHAIN_SQL },
   { name: 'smart-accounts: legacy users.account_address mirror', sql: SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: legacy users.account_address clear', sql: CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: rename (tenant-scoped)', sql: RENAME_ACCOUNT_FOR_USER_SQL },

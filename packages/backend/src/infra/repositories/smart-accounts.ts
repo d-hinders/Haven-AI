@@ -191,6 +191,32 @@ export async function findOwnedAccountDefaultFlag(
   return result.rows[0] ?? null
 }
 
+// The refusal ledger's (#2945) account resolution: the agent's account_address
+// + chain against smart_accounts, the post-084 account vocabulary the
+// payment_refusals FK targets. Extracted verbatim from
+// modules/payments/refusal-ledger.ts so the boundary rules hold (the module
+// may not import the pool, and the query is PREPARE-checked in CI like the
+// rest of this directory). LIMIT 1 keeps a hypothetical duplicate
+// (user_id, account_address, chain_id) row deterministic.
+
+export const FIND_OWNED_ACCOUNT_ID_BY_ADDRESS_AND_CHAIN_SQL = `SELECT id FROM smart_accounts
+  WHERE user_id = $1 AND account_address = $2 AND chain_id = $3
+  LIMIT 1`
+
+export async function findOwnedAccountIdByAddressAndChain(
+  userId: string,
+  accountAddress: string,
+  chainId: number,
+  db: Executor = pool,
+): Promise<string | null> {
+  const result = await db.query<{ id: string }>(FIND_OWNED_ACCOUNT_ID_BY_ADDRESS_AND_CHAIN_SQL, [
+    userId,
+    accountAddress,
+    chainId,
+  ])
+  return result.rows[0]?.id ?? null
+}
+
 // ── Writes ───────────────────────────────────────────────────────────────────
 
 /**

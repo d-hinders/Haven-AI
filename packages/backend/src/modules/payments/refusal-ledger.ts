@@ -47,8 +47,8 @@
  * caller skips the write.
  */
 
-import pool from '../../db.js'
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
+import { findOwnedAccountIdByAddressAndChain } from '../../infra/repositories/smart-accounts.js'
 import {
   recordPaymentRefusal,
   REFUSAL_DETAIL_KEYS,
@@ -191,13 +191,7 @@ function humanAmount(chainId: number, tokenSymbol: string, amountAtomic: string)
 async function resolveAccountId(userId: string, accountAddress: string | null | undefined, chainId: number): Promise<string | null> {
   if (!accountAddress) return null
   try {
-    const result = await pool.query<{ id: string }>(
-      `SELECT id FROM smart_accounts
-        WHERE user_id = $1 AND account_address = $2 AND chain_id = $3
-        LIMIT 1`,
-      [userId, accountAddress, chainId],
-    )
-    return result.rows[0]?.id ?? null
+    return await findOwnedAccountIdByAddressAndChain(userId, accountAddress, chainId)
   } catch {
     // The lookup must never make the ledger write (or the refusal) fail.
     return null

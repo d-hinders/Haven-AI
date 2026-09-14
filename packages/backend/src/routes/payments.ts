@@ -27,7 +27,7 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { recordRefusalFireAndForget, classifyRevertForLedger } from '../modules/payments/refusal-ledger.js'
+import { recordRefusalFireAndForget, classifyRevertForLedger } from '../modules/payments/index.js'
 import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's

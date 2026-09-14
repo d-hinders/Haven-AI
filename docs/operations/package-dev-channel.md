@@ -103,6 +103,16 @@ and the `release` skill.
 
 ## The loop: test a package change on dev without a prod release
 
+> **Re-verification (changelog-heading gap, 2026-09-14):** `release-bump.mjs`
+> gained one responsibility — rewriting `## Unreleased` to
+> `## <version> — <date>` in each published package's CHANGELOG — and the
+> snapshot path deliberately does **not** take it. A `0.0.0-dev.*` snapshot is
+> not a release, so stamping a release heading for one would be false even
+> though the tree is throwaway and no CHANGELOG reaches a tarball; the bump
+> logs `CHANGELOG headings: skipped — a dev snapshot is not a release` instead,
+> and a test pins the `!snapshot` guard. Nothing about the snapshot version
+> format, the five guards, `HAVEN_CONNECTOR_CHANNEL` or the publish job moved.
+
 > **Re-verification (#2908, naming epic #2906 phase 1):** the connector's
 > covered files changed in what they WRITE and READ, not in how the channel
 > works — `runtime.ts` hands `writeCredentials` an `accountAddress` (written to

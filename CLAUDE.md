@@ -267,8 +267,12 @@ from branches; `@haven_ai/core` is workspace-private.
 - A package-touching push to `dev` also publishes a `0.0.0-dev.*` snapshot under
   a separate `dev` dist-tag; the channels cannot cross.
   [`package-dev-channel.md`](docs/operations/package-dev-channel.md).
-- **Never hand-edit version fields, cross-package dep pins, or the Supported
-  Runtime Manifest table** — `release-bump.mjs` owns all three atomically.
+- **Never hand-edit version fields, cross-package dep pins, the Supported
+  Runtime Manifest table, or a published package's CHANGELOG release heading** —
+  `release-bump.mjs` owns all four atomically. The heading joined the list on
+  2026-09-14: the five changelogs had asserted the bump wrote it since they were
+  created while the bump did not touch them, so every release shipped
+  `## Unreleased` over the entry it had just published.
   Published packages pin internal `@haven_ai/*` deps exactly; workspace-private
   consumers (`backend`, `qa-agent`, `frontend`, `mcp-server`) use `"*"`. The
   dividing line is `private: true`, not "is it on npm" — `mcp-server` is

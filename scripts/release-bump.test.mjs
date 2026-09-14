@@ -19,6 +19,12 @@ import {
   rewriteManifestTable,
 } from './release-manifest-doc.mjs'
 import {
+  CHANGELOG_PACKAGES,
+  changelogHeadingViolations,
+  hasUnreleasedHeading,
+  releaseChangelog,
+} from './release-changelog.mjs'
+import {
   formatSnapshotVersion,
   isSnapshotVersion,
   snapshotModeViolation,
@@ -2068,5 +2074,114 @@ test('#2681: release guidance does not recreate retired verification blocks', as
   for (const [file, text] of [['release-bump.mjs', script], ['scripts/README.md', readme]]) {
     assert.doesNotMatch(text, /prepend (?:an entry to )?(?:a |the )?`verified:`/i, `${file} must not instruct a retired block`)
     assert.match(text, /last-verified/, `${file} keeps the date-only release instruction`)
+  }
+})
+
+// ── Package CHANGELOG release headings ───────────────────────────────────────
+//
+// The five CHANGELOGs were created by #2933 carrying "Release headers are
+// written by the release bump … never by hand" while the bump did not touch
+// them. NO release shipped a stale heading — the next release hand-stamped it
+// and hand-corrected the prose — so the defect was a file asserting behaviour
+// the code lacked, caught within a day. An earlier draft of these tests named
+// "the 0.1.37-alpha.0 release commit" as the instance; the files were created
+// ten hours after it and did not exist there.
+
+test('changelog headings — the release heading is written and ## Unreleased re-seeded', () => {
+  const source = '# @haven_ai/sdk\n\nblurb\n\n## Unreleased\n\n### Added\n\n- thing\n'
+  const out = releaseChangelog(source, '0.3.0-alpha.0', '2026-09-14')
+  assert.match(out, /^## 0\.3\.0-alpha\.0 — 2026-09-14$/m)
+  assert.ok(hasUnreleasedHeading(out), 'the next cycle needs a fresh ## Unreleased')
+  assert.ok(
+    out.indexOf('## Unreleased') < out.indexOf('## 0.3.0-alpha.0'),
+    'the re-seeded heading goes ABOVE the release it precedes',
+  )
+  assert.match(out, /- thing/, 'the entry under the heading is untouched')
+})
+
+test('changelog headings — the mechanism survives repeated releases', () => {
+  // Without the re-seed this works exactly once: the sentinel is consumed and
+  // every later release finds nothing to rewrite, while the file's own prose
+  // still tells contributors to add entries under a heading that is gone.
+  let text = '# @haven_ai/sdk\n\n## Unreleased\n\n- first\n'
+  text = releaseChangelog(text, '0.3.0-alpha.0', '2026-09-14')
+  assert.notEqual(text, null)
+  text = releaseChangelog(text, '0.4.0-alpha.0', '2026-09-20')
+  assert.notEqual(text, null, 'a second release must still find a sentinel')
+  assert.match(text, /## 0\.4\.0-alpha\.0 — 2026-09-20/)
+  assert.match(text, /## 0\.3\.0-alpha\.0 — 2026-09-14/, 'the earlier release survives')
+  assert.ok(
+    text.indexOf('## 0.4.0-alpha.0') < text.indexOf('## 0.3.0-alpha.0'),
+    'newest first',
+  )
+})
+
+test('changelog headings — no Unreleased section returns null rather than inventing one', () => {
+  const source = '# @haven_ai/sdk\n\n## 0.2.0-alpha.0 — 2026-09-14\n\n- shipped\n'
+  assert.equal(releaseChangelog(source, '0.3.0-alpha.0', '2026-09-14'), null)
+})
+
+test('changelog headings — only the FIRST Unreleased heading is consumed', () => {
+  const source = '## Unreleased\n\n- new\n\n## Unreleased\n\n- older mistake\n'
+  const out = releaseChangelog(source, '0.3.0-alpha.0', '2026-09-14')
+  // One re-seeded + one left alone in the history = two; a global replace gives three.
+  assert.equal((out.match(/## Unreleased/g) || []).length, 2, 'history must not be rewritten too')
+})
+
+test('changelog headings — a $ in the version is inserted literally, not as a replacement pattern', () => {
+  // Unreachable through the bump (semver.valid gates it), but the helper is
+  // exported and has no guard of its own, so the replacer must be a function.
+  const out = releaseChangelog('## Unreleased\n', '0.3.0-$&-alpha.0', '2026-09-14')
+  assert.match(out, /## 0\.3\.0-\$&-alpha\.0 — 2026-09-14/)
+})
+
+test('changelog headings — the violation check reads files, never a computed version', () => {
+  const missing = { sdk: '# x\n\n## Unreleased\n\n- shipped\n' }
+  assert.deepEqual(
+    changelogHeadingViolations(missing, '0.3.0-alpha.0'),
+    ['packages/sdk/CHANGELOG.md has no "## 0.3.0-alpha.0 — <date>" heading'],
+  )
+  // The post-release state: a re-seeded Unreleased ABOVE the new heading is fine.
+  const done = { sdk: '# x\n\n## Unreleased\n\n## 0.3.0-alpha.0 — 2026-09-14\n' }
+  assert.deepEqual(changelogHeadingViolations(done, '0.3.0-alpha.0'), [])
+  assert.deepEqual(changelogHeadingViolations({}, '0.3.0-alpha.0'), [])
+})
+
+test('changelog headings — DRIFT GUARD: the real files carry a heading for the repo version', async () => {
+  // This is what makes changelogHeadingViolations a guard rather than a
+  // formality: it runs here, in CI, on every pull request, against the actual
+  // repository files and the actual released version — no release in sight.
+  const { version } = JSON.parse(await readFile(join(ROOT, 'packages', 'sdk', 'package.json'), 'utf8'))
+  const files = {}
+  for (const name of CHANGELOG_PACKAGES) {
+    files[name] = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+  }
+  assert.deepEqual(changelogHeadingViolations(files, version), [])
+})
+
+test('changelog headings — release-bump writes them, verifies them, and skips them for a snapshot', async () => {
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const write = source.indexOf('await updateChangelogs(newVersion, isoDate)')
+  const verify = source.indexOf('await verifyChangelogHeadings(newVersion)')
+  const versions = source.indexOf('await updatePackageVersion(name, newVersion)')
+  assert.notEqual(write, -1, 'release-bump.mjs no longer calls updateChangelogs')
+  assert.notEqual(verify, -1, 'the write is no longer verified by re-reading from disk')
+  assert.ok(versions < write, 'the heading must be written after the versions it names')
+  assert.ok(write < verify, 'verification must follow the write')
+  assert.match(
+    source,
+    /if \(!snapshot\) \{\s*\n\s*const isoDate/,
+    'a 0.0.0-dev.* snapshot is not a release and must not stamp a release heading',
+  )
+})
+
+test('changelog headings — no CHANGELOG reaches a tarball, so this is a repo-record concern', async () => {
+  for (const name of CHANGELOG_PACKAGES) {
+    const pkg = JSON.parse(await readFile(join(ROOT, 'packages', name, 'package.json'), 'utf8'))
+    assert.ok(Array.isArray(pkg.files), `packages/${name} must declare a files allowlist`)
+    assert.ok(
+      !pkg.files.some((f) => /CHANGELOG/i.test(f)),
+      `packages/${name} would publish its CHANGELOG — this premise no longer holds`,
+    )
   }
 })

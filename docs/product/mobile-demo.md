@@ -94,6 +94,16 @@ Sign in on both installs if the demo will show both.
    `3f9ba290`), so the completed purchase is on screen the moment the phone
    shows it — nobody touches pull-to-refresh, and narrate that: the phone
    found out by itself.
+6. **On the phone: open Analytics.** From the sidebar (the More sheet on the
+   phone), open Analytics and show what the purchase just did to the numbers:
+   the amount in **Spent**, the merchant in **Top merchants**, and — if the
+   run's budget allows — the **Budget used** band for the agent that paid.
+   Point out **Refused** while you are there: the same screen that shows what
+   the agent spent shows what it was not allowed to spend. Nothing on this
+   screen is an action; it is the "what did that cost?" answer, and it stays
+   read-only in front of an audience. (The screen ships with the analytics
+   epic, #2944; its capture evidence is the `analytics-populated` harness
+   scenario, described in [analytics.md](./analytics.md).)
 
 ## Why the phone never signs
 

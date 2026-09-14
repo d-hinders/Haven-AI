@@ -5,6 +5,8 @@ import {
   fixtureFor,
   FIXTURE_AGENTS,
   FIXTURE_USER,
+  FIXTURE_ANALYTICS_OVERVIEW,
+  FIXTURE_ANALYTICS_OVERVIEW_EMPTY,
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
@@ -921,6 +923,134 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
       it('refuses an unknown stage', () => {
         expect(() => feed.stage('off')).toThrow(/unknown stage/)
+      })
+    })
+
+    /**
+     * #2949 (epic #2944 slice E): the analytics scenarios. The route and the
+     * page are slice C (#2947), gated on slice B (#2946) — so at filing there
+     * is nothing to point a browser at, and these pins are the scenarios'
+     * exercised half. They hold the SHARED fixture to the shape slice B's
+     * PR (#2957) specifies, so that when C lands, page captures and these
+     * assertions describe the same answer. The route-keyed
+     * `/analytics/overview` key is deliberately the fixture the POPULATED
+     * scenario serves (no scenario api() override), so the page and this test
+     * cannot drift into two shapes.
+     */
+    describe('analytics (#2949)', () => {
+      /**
+       * Look the populated scenario up WITHOUT the `scenarioWithApi` helper:
+       * the assertion IS that it has no api hook. `scenarioWithApi` throws on
+       * exactly that, which would make the no-override contract untestable.
+       */
+      const populated = (SCENARIOS as Record<string, Partial<ScenarioShape>>)['analytics-populated']
+      expect(populated).toBeDefined()
+
+      it('the parity guard holds: analytics-populated serves the shared /analytics/overview key, not a private shape', () => {
+        // NO api() override, deliberately: an override here would let the
+        // scenario and the page (which reads the shared key) disagree
+        // silently — the exact drift the fixture contract exists to prevent.
+        expect(populated!.api).toBeUndefined()
+        expect(fx('/analytics/overview')).toBe(FIXTURE_ANALYTICS_OVERVIEW)
+      })
+
+      it('serves the overview sections slice B specifies, with every sum self-consistent', () => {
+        const overview = fx('/analytics/overview') as {
+          range: { from: string; to: string; days: number; previous_from: string; previous_to: string }
+          currency: string
+          basis: Record<string, number | string>
+          totals: {
+            spent: number; refused_count: number; refused_attempts: number
+            budget_bands: { above_75: number; above_50: number; agents_with_budget: number }
+            fees: { amount: number; flag_on: boolean }
+          }
+          by_day: { date: string; spent_by_agent: Record<string, number>; refusals: number }[]
+          agents: { id: string; status: string; spent: number; budgets: Record<string, unknown>[] }[]
+          merchants: { label: string; address: string; spent: number; payments: number; agent_ids: string[]; first_seen: string; last_seen: string }[]
+          balance_by_day: { date: string; value: number }[]
+        }
+        // The envelope: one range, one currency, the basis block the page
+        // quotes its sentences from.
+        expect(overview.range).toMatchObject({ days: 30, to: '2026-07-11T00:00:00.000Z' })
+        expect(overview.currency).toBe('usd')
+        expect(overview.basis).toMatchObject({ payments_counted: 5, unsettled_submitted: 1, tz: 'UTC' })
+        // Sections sum EXACTLY to the total — a fixture whose parts disagreed
+        // with its own total would photograph a page no backend could serve.
+        const spentSum = overview.merchants.reduce((s, m) => s + m.spent, 0)
+        const daySum = overview.by_day.reduce((s, d) => s + Object.values(d.spent_by_agent).reduce((a, b) => a + b, 0), 0)
+        const agentSum = overview.agents.reduce((s, a) => s + a.spent, 0)
+        expect(spentSum).toBe(overview.totals.spent)
+        expect(daySum).toBe(overview.totals.spent)
+        expect(agentSum).toBe(overview.totals.spent)
+        const refusalSum = overview.by_day.reduce((s, d) => s + d.refusals, 0)
+        expect(refusalSum).toBe(overview.totals.refused_count)
+      })
+
+      it('merchant rows demonstrate all three label resolutions the API defines (#2949)', () => {
+        // contact name → receipt name → address, in that order (issue #2946);
+        // one capture must show every label source the product can produce.
+        const overview = fx('/analytics/overview') as { merchants: { label: string; address: string; spent: number }[] }
+        const labels = overview.merchants.map((m) => m.label)
+        expect(labels).toContain('Klara Data AB') // contact name
+        expect(labels).toContain('NordShield VPN') // receipt merchant name
+        const addressOnly = overview.merchants.find((m) => m.label === m.address)
+        expect(addressOnly).toBeDefined()
+        // Top of the table is by spent, descending.
+        const spent = overview.merchants.map((m) => m.spent)
+        expect([...spent].sort((a, b) => b - a)).toEqual(spent)
+      })
+
+      it('agents carry both budget truth-states: a chain read and the snapshot fallback (#2946)', () => {
+        // `remaining_from_chain: false` is what slice C's "read from Haven's
+        // last snapshot" hint keys on; a fixture with only the happy path
+        // would leave that hint uncapturable.
+        const overview = fx('/analytics/overview') as { agents: { budgets: { remaining_from_chain: boolean; used_atomic: string; budget_atomic: string }[] }[] }
+        const states = overview.agents.map((a) => a.budgets[0].remaining_from_chain)
+        expect(states).toContain(true)
+        expect(states).toContain(false)
+        // The >75% band count is derivable from the rows — a tile and its
+        // detail rows must never disagree in a capture.
+        const above75 = overview.agents.filter((a) => {
+          const b = a.budgets[0]
+          return Number(b.used_atomic) / Number(b.budget_atomic) > 0.75
+        }).length
+        const totals = fx('/analytics/overview') as { totals: { budget_bands: { above_75: number } } }
+        expect(totals.totals.budget_bands.above_75).toBe(above75)
+        expect(above75).toBeGreaterThan(0)
+      })
+
+      it('the balance series is 30 unique absolute dates ending on the dashboard total', () => {
+        const overview = fx('/analytics/overview') as { balance_by_day: { date: string; value: number }[] }
+        expect(overview.balance_by_day).toHaveLength(30)
+        const dates = overview.balance_by_day.map((r) => r.date)
+        expect(new Set(dates).size).toBe(30)
+        expect([...dates].sort()).toEqual(dates) // ascending, no duplicate
+        // Ends on FIXTURE_OVERVIEW.totals.usd — the analytics page and the
+        // dashboard must never quote two different balances in one capture set.
+        expect(overview.balance_by_day.at(-1)!.value).toBe(12_640.55)
+      })
+
+      it('the empty variant is the same envelope with every section empty, not a different shape', () => {
+        const empty = FIXTURE_ANALYTICS_OVERVIEW_EMPTY as Record<string, unknown>
+        const overview = fx('/analytics/overview') as Record<string, unknown>
+        expect(Object.keys(empty).sort()).toEqual(Object.keys(overview).sort())
+        expect(empty.basis).toMatchObject({ payments_counted: 0, snapshot_days: 0, tz: 'UTC' })
+        expect(empty.merchants).toEqual([])
+        expect(empty.by_day).toEqual([])
+        expect(empty.agents).toEqual([])
+        expect(empty.balance_by_day).toEqual([])
+      })
+
+      it('analytics-empty answers 503 for the overview route only (#1725)', () => {
+        const failure = scenarioWithApi('analytics-empty')
+        const answer = failure.api('/analytics/overview', 'GET') as { status: number }
+        expect(answer).toBeInstanceOf(ScenarioHttpError)
+        expect(answer.status).toBe(503)
+        // Everything else falls through to the shared fixture (#1075): the
+        // page's shell data (auth, agents) must still resolve so the failure
+        // is the ENDPOINT's, not the session's.
+        expect(failure.api('/auth/me', 'GET')).toBeUndefined()
+        expect(failure.api('/agents', 'GET')).toBeUndefined()
       })
     })
 

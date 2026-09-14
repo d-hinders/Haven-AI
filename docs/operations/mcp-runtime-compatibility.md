@@ -26,8 +26,9 @@ last-verified: "2026-09-14"
 > **Recent re-verification (#2983):** the local runtime (`packages/mcp/src/tools.ts`,
 > `haven_pay_mcp_tool`) now mirrors the hosted mapping below — a merchant
 > `503 { error: 'merchant_not_ready', … }` refusal on the quote path is
-> reported as `MERCHANT_NOT_READY` (`next_action: stop_and_tell_user`,
-> `retry_with_new_quote: true`, the merchant's `reason_code` / `retry_after_s`
+> reported as `MERCHANT_NOT_READY` (on the local envelope the field is spelled
+> `nextAction: stop_and_tell_user` — its failure shape is camelCase, unlike
+> the hosted `next_action`; `retry_with_new_quote: true`; the merchant's `reason_code` / `retry_after_s`
 > in the message) BEFORE the #1301 same-origin discovery fallback, on both the
 > original probe and a retry against a discovered endpoint. A bare 503 (no
 > matching JSON body) still falls through to today's discovery-miss path

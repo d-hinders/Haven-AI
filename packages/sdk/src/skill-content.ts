@@ -302,8 +302,12 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
   retry later (the message carries \`retry_after_s\` when the merchant gave
   one) — this is not a wrong or broken endpoint.
 - \`MERCHANT_REJECTED_AFTER_FUNDING\`: the merchant refused the paid retry.
-  Stop-and-sweep — stop retrying the merchant and use
-  \`mcp__haven__haven_sweep_delegate\` to recover stranded delegate funds.
+  On eip3009 (\`rail\` not \`erc7710\`): Stop-and-sweep — stop retrying the
+  merchant and use \`mcp__haven__haven_sweep_delegate\` to recover stranded
+  delegate funds. On erc7710 there is no funding leg and nothing to sweep:
+  follow the message — it says whether the merchant declined to settle
+  (re-quote later) or whether to check \`haven_get_payment_status\` after
+  the payment window first.
 - \`MERCHANT_UNRESPONSIVE_AFTER_FUNDING\`: funding confirmed on-chain, but the
   merchant never answered the paid retry. This is NOT proof of rejection — the
   merchant may still settle late. Verify-then-sweep, never a blind sweep:

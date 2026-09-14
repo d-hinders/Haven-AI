@@ -300,24 +300,45 @@ export async function deliverMerchantPayment(
       // — no delegate balance to strand, nothing to sweep. The eip3009
       // guidance below is false here and would tell the agent to "reconcile"
       // a balance that was never created. Say what is true instead.
+      // #2987 review: the categorical "nothing moved, re-quote" is only
+      // safe when the merchant SAID it did not attempt settlement — the
+      // `merchant_not_ready` body. On any other non-2xx the merchant still
+      // holds a single-use settlement authorization valid for the window
+      // (`maxTimeoutSeconds`, default 300 s) and may have redeemed it before
+      // answering (an upstream 502/504 lands here as a response, not a
+      // timeout) — telling the agent to re-quote NOW could pay twice. So a
+      // generic refusal is verify-then-act, the same discipline
+      // MERCHANT_UNRESPONSIVE_AFTER_FUNDING uses; in neither case is there a
+      // delegate balance to sweep, and the skill's code-keyed
+      // "stop-and-sweep" advice is overridden explicitly in the message.
       const notReady = merchantNotReadyBodyFor(result.body)
-      const notReadyGuidance = notReady
-        ? ' The merchant reported it cannot settle right now' +
+      const message = notReady
+        ? `Merchant refused to deliver the resource (HTTP ${result.status}) and reported it ` +
+          `cannot settle right now` +
           (notReady.reasonCode ? ` (reason_code: ${notReady.reasonCode})` : '') +
-          (notReady.retryAfterS ? `; retry after approximately ${notReady.retryAfterS}s.` : '.')
-        : ''
+          `. erc7710 has no funding leg and the merchant did not attempt settlement, so no ` +
+          `funds moved — the agent's budget is intact. Ignore this code's sweep guidance: there ` +
+          `is no delegate balance to sweep. Re-quote` +
+          (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later') +
+          `. Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+        : `Merchant refused to deliver the resource (HTTP ${result.status}). erc7710 has no ` +
+          `funding leg, so there is no delegate balance to sweep — ignore this code's sweep ` +
+          `guidance. Haven has NOT observed a settlement, but the merchant held a single-use ` +
+          `settlement authorization valid for up to the payment window (typically 300s) and ` +
+          `may have redeemed it before answering: check haven_get_payment_status after that ` +
+          `window and re-quote only if it shows no settlement. ` +
+          `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
       throw new HostedToolError({
         code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
-        message:
-          `Merchant refused to deliver the resource (HTTP ${result.status}). erc7710 has no ` +
-          `funding leg, so no settlement occurred and no funds moved — the agent's budget is ` +
-          `intact.${notReadyGuidance} Re-quote and try again later; there is nothing to sweep. ` +
-          `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
+        message,
         statusCode: result.status,
         paymentId: args.payment_id,
         status: status?.status ?? 'merchant_rejected_after_funding',
         phase: status?.phase ?? 'not_delivered',
-        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextAction: notReady
+          ? AgentPaymentNextAction.StopAndTellUser
+          : AgentPaymentNextAction.CheckStatusLater,
+        ...(notReady ? {} : { suggestedTool: 'haven_get_payment_status' }),
         rail: status?.rail ?? 'erc7710',
         idempotencyKey: status?.idempotencyKey,
         retryWithNewQuote: true,

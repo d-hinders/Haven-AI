@@ -1518,6 +1518,37 @@ describe('haven_pay_mcp_tool: merchant_not_ready parity (#2983)', () => {
     expect(calls.some((c) => c.url.includes('.well-known'))).toBe(false)
   })
 
+  // #2987 review: the mapping also runs on the retry against a DISCOVERED
+  // endpoint — a base URL that 404s, resolves through .well-known, and then
+  // answers merchant_not_ready at the real /mcp. Mutation target: dropping the
+  // post-discovery check reports this as a discovery miss at the discovered
+  // endpoint.
+  it('a merchant_not_ready 503 at the DISCOVERED endpoint is still MERCHANT_NOT_READY', async () => {
+    const calls = installFetch({
+      'POST http://merchant.test/': { status: 404, body: { error: 'Not found' } },
+      'GET http://merchant.test/.well-known/haven-demo-merchant': {
+        status: 200,
+        body: { name: 'Haven Demo Merchant', mcp_url: 'http://merchant.test/mcp' },
+      },
+      'POST http://merchant.test/mcp': {
+        status: 503,
+        body: { error: 'merchant_not_ready', reason_code: 'fail_floor_reached', settlements_remaining: 0, retry_after_s: 30 },
+      },
+    })
+
+    const result = await notReadyHandlers().haven_pay_mcp_tool({
+      merchant_url: 'http://merchant.test/',
+      tool_name: 'buy_vpn',
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('MERCHANT_NOT_READY')
+    expect(result.message).not.toMatch(/DISCOVERED endpoint|discovery document/)
+    expect(result.message).toMatch(/reason_code: fail_floor_reached/)
+    expect(calls.some((c) => c.url.includes('.well-known'))).toBe(true)
+  })
+
   it('negative pin: a bare 503 (no matching body) keeps today\'s discovery path, not MERCHANT_NOT_READY', async () => {
     installFetch({
       'POST http://merchant.test/mcp': { status: 503, body: { error: 'service_unavailable' } },

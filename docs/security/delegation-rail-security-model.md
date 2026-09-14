@@ -259,6 +259,18 @@ in-flight live operation cannot lose its Safe binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
 
+> **Re-verified #2946 (analytics overview, slice B of #2944):** this diff
+> touched one file in this document's coverage list,
+> `middleware/owner-cli.ts`, by adding one entry to the allow-list —
+> `GET /analytics/overview`, a read-only, owner-scoped aggregate over booked
+> payment, refusal, fee, gas-count and snapshot rows (`DELEGATION_RAIL_ONLY`
+> on every join; every statement a `SELECT`). The entry is a literal spec path
+> (naming-epic decision), it sits behind `authMiddleware`, and
+> `owner-cli-route-census.test.ts` discovered the route and measured
+> `routeAllowsOwnerCli` at the door without a hand-edited count — exactly
+> the §9 discipline. Nothing an owner-CLI token can now reach signs, moves
+> funds or changes authority. §9 otherwise unchanged; nothing else re-read.
+
 > **Re-verified #2945 (payment-refusals ledger, dep-boundary rework):** this
 > diff touched one file in this document's coverage list,
 > `infra/repositories/smart-accounts.ts`, by pure addition: the refusal

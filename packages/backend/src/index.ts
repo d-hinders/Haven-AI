@@ -64,6 +64,7 @@ import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
+import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
@@ -281,6 +282,13 @@ await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
+// #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
+// internal onboarding funnel above owns `/analytics/funnel`, this owns
+// `/analytics/overview`. Two modules on one prefix are just two path
+// strings under one mount point (see `catalogRoutes` + `catalogSubmissionRoutes`
+// on `/catalog` above for the same pattern); neither declares the other's
+// sub-path, so there is nothing to register twice or fight over.
+await app.register(analyticsOverviewRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 // #2862: provider-generic connections (`/accounting/providers`,
 // `/accounting/connections/*`) replaced the Fortnox-shaped router.

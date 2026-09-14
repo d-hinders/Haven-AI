@@ -4674,6 +4674,202 @@ export const openapiSpec = {
         },
       },
     },
+    '/analytics/overview': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getAnalyticsOverview',
+        summary: 'One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.',
+        description:
+          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          {
+            name: 'range',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', enum: ['7d', '30d', '90d'] },
+            description: 'Window length ending now.',
+          },
+          {
+            name: 'currency',
+            in: 'query',
+            schema: { type: 'string', enum: ['usd', 'eur'], default: 'usd' },
+            description: 'Display currency — a sum of already-booked values, never re-converted.',
+          },
+          {
+            name: 'tz',
+            in: 'query',
+            schema: { type: 'string', default: 'UTC' },
+            description: 'IANA time zone used to bucket `by_day`. Defaults to UTC; an unrecognized zone is a 400.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The full analytics-overview aggregate for the requested window.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['range', 'currency', 'basis', 'totals', 'by_day', 'agents', 'merchants', 'balance_by_day'],
+                  properties: {
+                    range: {
+                      type: 'object',
+                      required: ['from', 'to', 'days', 'previous_from', 'previous_to'],
+                      properties: {
+                        from: { type: 'string', format: 'date-time' },
+                        to: { type: 'string', format: 'date-time' },
+                        days: { type: 'integer', enum: [7, 30, 90] },
+                        previous_from: { type: 'string', format: 'date-time' },
+                        previous_to: { type: 'string', format: 'date-time' },
+                      },
+                    },
+                    currency: { type: 'string', enum: ['usd', 'eur'] },
+                    basis: {
+                      type: 'object',
+                      required: [
+                        'payments_counted', 'unsettled_submitted', 'refusals_counted', 'refusal_attempts',
+                        'fee_rows', 'gas_sponsored_ops', 'snapshot_days', 'tz',
+                      ],
+                      properties: {
+                        payments_counted: { type: 'integer', description: 'CONFIRMED payments summed into `totals.spent`.' },
+                        unsettled_submitted: { type: 'integer', description: '`submitted` rows in range, not counted as spend.' },
+                        refusals_counted: { type: 'integer', description: 'Distinct `payment_refusals` rows (the dedupe makes rows != attempts).' },
+                        refusal_attempts: { type: 'integer' },
+                        fee_rows: { type: 'integer' },
+                        gas_sponsored_ops: { type: 'integer' },
+                        snapshot_days: { type: 'integer' },
+                        tz: { type: 'string', description: 'The zone actually used to bucket `by_day` — UTC when the request gave none.' },
+                      },
+                    },
+                    totals: {
+                      type: 'object',
+                      required: [
+                        'spent', 'spent_previous', 'refused_count', 'refused_attempts', 'refused_amount',
+                        'refused_previous_count', 'budget_bands', 'fees', 'gas_sponsored_ops',
+                      ],
+                      properties: {
+                        spent: { type: 'string', description: 'Sum of booked fiat, CONFIRMED only.' },
+                        spent_previous: { type: 'string' },
+                        refused_count: { type: 'integer' },
+                        refused_attempts: { type: 'integer' },
+                        refused_amount: { type: 'string', description: 'Attempted amount — never "saved". A numeric string like every other money field on this response.' },
+                        refused_previous_count: { type: 'integer' },
+                        budget_bands: {
+                          type: 'object',
+                          required: ['above_75', 'above_50', 'agents_with_budget'],
+                          properties: {
+                            above_75: { type: 'integer', description: "Agents whose worst active delegation's used/budget ratio exceeds 75%." },
+                            above_50: { type: 'integer' },
+                            agents_with_budget: { type: 'integer' },
+                          },
+                        },
+                        fees: {
+                          type: 'object',
+                          required: ['amount', 'previous', 'flag_on'],
+                          properties: {
+                            amount: { type: 'string', description: '"0" while the fee flag is off — honest, not a placeholder.' },
+                            previous: { type: 'string' },
+                            flag_on: { type: 'boolean' },
+                          },
+                        },
+                        gas_sponsored_ops: { type: 'integer', description: 'A COUNT on value-bearing chains only — never a fiat figure.' },
+                      },
+                    },
+                    by_day: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['date', 'spent_by_agent', 'refusals'],
+                        properties: {
+                          date: { type: 'string', description: 'YYYY-MM-DD in the `tz` zone.' },
+                          spent_by_agent: { type: 'object', additionalProperties: { type: 'string' } },
+                          refusals: { type: 'integer' },
+                        },
+                      },
+                    },
+                    agents: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: [
+                          'id', 'name', 'status', 'spent', 'share', 'payments', 'refusals', 'refusal_attempts',
+                          'budgets', 'top_merchant', 'last_payment_at',
+                        ],
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string' },
+                          status: { type: 'string' },
+                          spent: { type: 'string' },
+                          share: { type: 'number', description: 'This agent’s share of total spend across delegation-rail agents, in [0, 1].' },
+                          payments: { type: 'integer' },
+                          refusals: { type: 'integer' },
+                          refusal_attempts: { type: 'integer' },
+                          budgets: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['token', 'recipient', 'used_atomic', 'budget_atomic', 'remaining_from_chain', 'period_start', 'period_end'],
+                              properties: {
+                                token: { type: 'string' },
+                                recipient: { type: ['string', 'null'] },
+                                used_atomic: { type: 'string' },
+                                budget_atomic: { type: 'string' },
+                                remaining_from_chain: { type: 'boolean', description: 'False when the on-chain read fell back to the configured budget.' },
+                                period_start: { type: 'string', format: 'date-time' },
+                                period_end: { type: 'string', format: 'date-time' },
+                              },
+                            },
+                          },
+                          top_merchant: {
+                            type: ['object', 'null'],
+                            required: ['label', 'address'],
+                            properties: {
+                              label: { type: 'string' },
+                              address: address,
+                            },
+                          },
+                          last_payment_at: { type: ['string', 'null'], format: 'date-time' },
+                        },
+                      },
+                    },
+                    merchants: {
+                      type: 'array',
+                      description: 'Top 10 by spend.',
+                      items: {
+                        type: 'object',
+                        required: ['label', 'address', 'spent', 'payments', 'agent_ids', 'first_seen', 'last_seen'],
+                        properties: {
+                          label: { type: 'string', description: 'The user’s contact name where the address matches, else the receipt’s merchant name, else the address.' },
+                          address: address,
+                          spent: { type: 'string' },
+                          payments: { type: 'integer' },
+                          agent_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                          first_seen: { type: 'string', format: 'date-time' },
+                          last_seen: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                    balance_by_day: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['date', 'value'],
+                        properties: {
+                          date: { type: 'string' },
+                          value: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'range/currency outside the enum, or tz is not a recognized IANA zone.' },
+          '401': errorResponse,
+        },
+      },
+    },
     // ── Routes previously excluded one by one (#1446, final slice) ──────────
     // These ten sat in KNOWN_UNDOCUMENTED_ROUTES rather than in a deferred
     // module. Two of their reasons no longer hold: GET /chains' own entry said

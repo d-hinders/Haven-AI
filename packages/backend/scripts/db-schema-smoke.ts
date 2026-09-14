@@ -323,6 +323,21 @@ import {
   INSERT_HYBRID_ACCOUNT_SQL,
 } from '../src/infra/repositories/smart-accounts.js'
 import { INSERT_HYBRID_ACCOUNT_PASSKEY_SQL } from '../src/infra/repositories/hybrid-signers.js'
+import {
+  TOTALS_SPEND_SQL,
+  COUNT_UNSETTLED_SUBMITTED_SQL,
+  BY_DAY_SPEND_SQL,
+  PER_AGENT_SPEND_SQL,
+  PER_AGENT_TOP_MERCHANT_SQL,
+  TOP_MERCHANTS_SQL,
+  RECEIPT_MERCHANT_NAMES_SQL,
+  BALANCE_BY_DAY_SQL,
+  FEES_TOTALS_SQL,
+  GAS_EVENTS_BY_CHAIN_SQL,
+  ACTIVE_DELEGATIONS_FOR_USER_SQL,
+  AGGREGATE_REFUSALS_FOR_USER_SQL,
+  REFUSALS_BY_DAY_SQL,
+} from '../src/infra/repositories/analytics.js'
 
 interface SmokeQuery {
   name: string
@@ -334,6 +349,23 @@ interface SmokeQuery {
  * Keep each verbatim from its source so the check tracks the real query.
  */
 const QUERIES: SmokeQuery[] = [
+  // #2946 (epic #2944 slice B): the analytics-overview aggregate, one entry
+  // per grouped-aggregate statement `infra/repositories/analytics.ts` exports.
+  { name: 'analytics: totals spend (current + previous window)', sql: TOTALS_SPEND_SQL },
+  { name: 'analytics: unsettled-submitted count', sql: COUNT_UNSETTLED_SUBMITTED_SQL },
+  { name: 'analytics: by-day spend, tz-bucketed', sql: BY_DAY_SPEND_SQL },
+  { name: 'analytics: per-agent spend', sql: PER_AGENT_SPEND_SQL },
+  { name: 'analytics: per-agent top merchant', sql: PER_AGENT_TOP_MERCHANT_SQL },
+  { name: 'analytics: top 10 merchants', sql: TOP_MERCHANTS_SQL },
+  { name: 'analytics: receipt merchant-name fallback', sql: RECEIPT_MERCHANT_NAMES_SQL },
+  { name: 'analytics: balance by day', sql: BALANCE_BY_DAY_SQL },
+  { name: 'analytics: fees totals (current + previous window)', sql: FEES_TOTALS_SQL },
+  { name: 'analytics: gas events by chain', sql: GAS_EVENTS_BY_CHAIN_SQL },
+  { name: 'analytics: active delegations for user', sql: ACTIVE_DELEGATIONS_FOR_USER_SQL },
+  // Added on review of #2946: replaced a 10,000-row full fetch that was
+  // folding `refused_amount`/by-day counts in application code.
+  { name: 'analytics: refusal amount + count aggregate', sql: AGGREGATE_REFUSALS_FOR_USER_SQL },
+  { name: 'analytics: refusals by day, tz-bucketed', sql: REFUSALS_BY_DAY_SQL },
   // Connect Agent 2 setup flow (#985). IMPORTED from the repository, so these
   // track the real queries — this is the first block extraction made reachable
   // by this script at all; before #985 every one of them was inline in a route.

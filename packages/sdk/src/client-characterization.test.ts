@@ -476,6 +476,18 @@ describe('catalog discovery + submission (#1716)', () => {
         // this is exactly the case the hard-coded `false` used to hide.
         source: 'operator', domain_verified: false, verified_payable: true,
       },
+      {
+        // Review of PR #2981: a shape the backend cannot emit today
+        // (`serializeIngestion` hard-codes true), modelled anyway so the filter
+        // is proven to be on the BADGE, not on provenance — widening it with
+        // `|| source === 'ingestion'` must fail this test.
+        id: 'dir_unverified', name: 'Unverified Directory Merchant', description: 'd', category: 'ai',
+        resource_url: 'https://dir-unverified.example.com/paid', rail: 'x402', protocol: 'http',
+        tool_name: null, tool_arguments: null,
+        price_display: '$0.03 USDC', price_atomic: '30000', asset: 'USDC', network: 'eip155:8453',
+        status: 'active', verified_at: null,
+        source: 'ingestion', domain_verified: true, verified_payable: false,
+      },
     ],
   }
 
@@ -487,13 +499,11 @@ describe('catalog discovery + submission (#1716)', () => {
     const verified = await client().discoverTools({ verified: 'verified' })
     // Included: the ingestion entry (verifiedPayable true) AND the operator
     // entry that the refresh probe verified (verifiedPayable true).
-    // Excluded: the operator entry with verifiedPayable false.
-    // An ingestion entry with verifiedPayable false is not modeled here: the
-    // backend's ingestion listing query (`listVerifiedCatalogSubmissions`)
-    // only ever returns rows that have already reached `verified_payable` in
-    // the submission lifecycle, so `source: 'ingestion', verified_payable:
-    // false` cannot occur from the real endpoint. The filter below is on the
-    // badge field regardless, so it excludes that shape defensively too.
+    // Excluded: the operator entry with verifiedPayable false AND the
+    // ingestion entry with verifiedPayable false (the backend cannot emit
+    // that shape today — `listVerifiedCatalogSubmissions` only returns rows
+    // that reached `verified_payable` — but the filter is on the badge, not
+    // on provenance, and this row proves it).
     expect(verified.map((e) => e.id).sort()).toEqual(['dir_1', 'op_verified'])
     expect(verified.every((e) => e.verifiedPayable === true)).toBe(true)
     routes.assertAllUsed()

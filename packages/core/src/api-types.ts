@@ -2767,7 +2767,7 @@ export type components = {
             source: "operator" | "ingestion";
             /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows: no ownership proof ever runs for them, and this field must not claim one. */
             domain_verified: boolean;
-            /** @description True when Haven watched this endpoint answer a real x402 (or MPP) quote in its periodic probe: for `ingestion` rows that is the SSRF-hardened directory probe; for `operator` rows it is the catalog refresh probe (`status === active && verified_at` set) — same observation, no domain-ownership claim attached. False for a never-probed or degraded row of either source. Never treat this badge as proof of merchant honesty, quality, or settlement reliability. */
+            /** @description True when Haven watched this endpoint answer a real x402 (or MPP) quote in its periodic probe: for `ingestion` rows that is the SSRF-hardened directory probe; for `operator` rows it is the catalog refresh probe (`status === active && verified_at` set) — same observation, no domain-ownership claim attached. False for a degraded row, or an operator row with no `verified_at` (migration 058 seeds its demo rows with one, so on a fresh database those carry the badge before the first refresh tick). Never treat this badge as proof of merchant honesty, quality, or settlement reliability. */
             verified_payable: boolean;
         };
         CatalogSubmitRequest: {

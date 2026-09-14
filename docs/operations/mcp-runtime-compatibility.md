@@ -236,7 +236,12 @@ still filters on provenance alone. The result is still read-only discovery
 metadata: catalog prices are indicative hints, never payment authority.
 `verified_payable` means the endpoint answered a live probe; `domain_verified`
 is the separate, stronger claim that ownership of the domain was proven —
-operator rows can carry the former without the latter.
+operator rows can carry the former without the latter. Version skew, stated:
+the filter runs in `@haven_ai/sdk`, so the hosted server (deployed from
+`dev`) applies the badge semantics as soon as #2978 lands, while a published
+local runtime keeps the older provenance semantics (`source === 'ingestion'`)
+until the next release bump republishes the sdk pin — the surface is
+skew-flat, the meaning of `verified=verified` is not, for that window.
 
 The default hosted MCP + local signer topology additionally exposes
 `haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are

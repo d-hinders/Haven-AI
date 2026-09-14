@@ -23,6 +23,21 @@ last-verified: "2026-09-14"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#2979):** the hosted server's shared MCP quote
+> probe (`src/tools/support/mcp-context.ts`, `quoteMcpToolCall`) now
+> recognises a merchant's own `503 { error: 'merchant_not_ready', … }`
+> refusal and reports it as the additive failure code `MERCHANT_NOT_READY`
+> (`next_action: stop_and_tell_user`, `retry_with_new_quote: true`, the
+> merchant's `reason_code` / `retry_after_s` in the message) BEFORE the #1271
+> same-origin discovery fallback, which used to report any non-402 status
+> as `API_ERROR` "no discovery document". The SDK's
+> `X402UnexpectedStatusError` now carries the merchant's JSON body. No tool
+> added, renamed or re-shaped; strict-input list, consent hash and
+> version-skew contract untouched. The local runtime (`packages/mcp`) is
+> not on this path — the demo merchant's readiness gate is a merchant-side
+> change (see `packages/demo-merchant-mcp/README.md`). Nothing else in this
+> document was re-verified in this pass.
+>
 > **Recent re-verification (#2975):** the hosted server's two cap refusals
 > that still bypassed the guidance envelope — `PRICE_EXCEEDS_MAX` and
 > `INVALID_MAX_AMOUNT` in `src/tools/support/cap-price.ts` — now go through

@@ -260,9 +260,10 @@ preflight's `/healthz` read
 `/healthz` reporting `fail` only stopped a QA run that checked it first — the
 merchant's own `POST /mcp` still issued 402 challenges and let an agent sign
 an authorization it could never settle. Now every PAID `tools/call` is gated
-on the same `readiness()` read (cached ~15s per merchant process) both before
-the 402 challenge and again immediately before settling the paid retry — the
-wallet can drain between the two. In the `fail` band the merchant answers
+on the same `readiness()` read (cached ~15s per merchant process) — on the
+unpaid call that would receive the 402 challenge and on the agent's signed
+retry alike, so a wallet that drains between the two is caught before
+settlement. In the `fail` band the merchant answers
 `HTTP 503 { error: 'merchant_not_ready', reason_code:
 'settlement_wallet_out_of_gas', settlements_remaining, fail_floor,
 retry_after_s }` with a matching `Retry-After` header, and no 402 is ever

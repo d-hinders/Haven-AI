@@ -19,6 +19,33 @@
   exists to make. `verifyPrivateConsumersUnpinned`, `verifyNoWildcardInternalDeps`,
   `verifyConnectBundle` and `verifyManifestDoc` are byte-identical.
 
+  Taking the § *Release plumbing is in scope* enumeration item by item, because
+  that section requires a shard to state which of them moved: **version fields**
+  — unchanged; **cross-package dep pins** — unchanged; **connect's pinned
+  `sdkVersion`/`signerVersion`** — unchanged; **dist-tag selection** — unchanged,
+  and untouchable from here, since it lives in `release-channel.mjs` and
+  `publish.yml`, neither of which this diff opens; **the publish trigger and the
+  ref it builds from** — unchanged, `publish.yml` is not in this diff;
+  **build order** — unchanged; **the credential path** — unchanged, no token,
+  OIDC claim or environment binding is read or written differently; **the
+  wildcard-pin re-check** — intact and byte-identical. The one thing that moved
+  is a write to five `CHANGELOG.md` files, none of which reaches a tarball.
+
+  **The parent's "a CASP shard is never generated" blockquote was re-read and
+  deliberately NOT edited.** It says the #1790 precedent — that a bump may write
+  a contract doc — "stops at the manifest table", and this change extends what a
+  bump writes. The rule it states is nevertheless untouched: it forbids a
+  *generated perimeter argument*, and it forbids it because `satisfied-by:` is
+  cleared by file **presence**. No `satisfied-by:` glob anywhere in the repo
+  matches a package `CHANGELOG.md` — the changelogs appear in the coupling graph
+  only as *covered code* under `docs/contributing/ship-playbooks/sdk.md`, which
+  is the opposite direction — so nothing this change generates can excuse a gate,
+  and no shard becomes generable. Read against `scripts/release-bump.mjs` and
+  `packages/signer/CHANGELOG.md` as changed on this branch, which are the two
+  files the coupling gate named for the re-read. Scope: that blockquote and the
+  § *Release plumbing is in scope* enumeration above; `last-verified` deliberately
+  not bumped, because the document was not re-verified as a whole.
+
   **No CHANGELOG reaches a tarball.** Every published package's `files` field is
   `dist` + `README.md` (+ `examples` on the sdk), asserted by a new test rather
   than stated — so nothing this change writes can reach a user's disk. It is a
@@ -47,14 +74,14 @@
 
   **Pure logic in its own module, and a guard that can fail.**
   `scripts/release-changelog.mjs` follows the house split that
-  `release-manifest-doc.mjs` states at length: `rewriteChangelogHeading()`
+  `release-manifest-doc.mjs` states at length: `releaseChangelog()`
   produces the text, `changelogHeadingViolations()` compares files on disk
   against a version and never against what a bump run computed — so a script
-  that writes a value cannot pass by verifying its own write. Six tests, two
-  mutation-proven: removing the `updateChangelogs` call fails the call-site
-  test, and rewriting every `## Unreleased` rather than the first fails the
-  history-preservation test, and dropping the `## Unreleased` re-seed fails the
-  repeated-release test.
+  that writes a value cannot pass by verifying its own write. Nine new tests,
+  three mutation-proven: removing the `updateChangelogs` call fails the
+  call-site test, rewriting every `## Unreleased` rather than the first fails
+  the history-preservation test, and dropping the `## Unreleased` re-seed fails
+  the repeated-release test.
 
   **One consequence accepted rather than fixed, recorded here for the decision
   it is.** `packages/signer/**` is a money-path glob, so the signer's CHANGELOG

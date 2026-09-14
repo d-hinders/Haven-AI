@@ -95,6 +95,9 @@ export function isMerchantEndpointMiss(err: unknown): boolean {
 export function merchantNotReadyErrorFor(err: unknown): HostedToolError | null {
   if (!(err instanceof X402UnexpectedStatusError) || err.statusCode !== 503) return null
   const body = err.body
+  // Only the merchant's OWN refusal shape maps here. A bare 503 (a load
+  // balancer, an HTML outage page, a non-JSON body) is not a capacity
+  // signal and keeps going through the #1271 discovery path.
   if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
     return null
   }

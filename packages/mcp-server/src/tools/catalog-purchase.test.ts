@@ -2129,6 +2129,23 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
       expect((res as { retry_with_new_quote?: boolean }).retry_with_new_quote).toBe(true)
     })
 
+    it('a bare 503 without the merchant_not_ready body is NOT reported as MERCHANT_NOT_READY (review of #2982)', async () => {
+      // A load balancer / outage page: the merchant said nothing about its
+      // capacity, so the mapping must not invent a capacity refusal — the
+      // request keeps going through the #1271 discovery path as before.
+      stubFetch({
+        'POST /mcp': { status: 503, body: { error: 'upstream unavailable' } },
+      })
+      const res = await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).not.toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { message?: string }).message ?? '').not.toContain('cannot settle a payment right now')
+    })
+
     it('never spends the bounded #1271 discovery retry on an honest 503', async () => {
       await quoteAgainstNotReadyMerchant()
       // The MCP session lifecycle (initialize, notifications/initialized,

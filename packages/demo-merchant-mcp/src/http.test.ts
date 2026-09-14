@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { BaseError, ContractFunctionExecutionError, InsufficientFundsError, TimeoutError } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
@@ -577,7 +578,7 @@ describe('demo merchant MCP x402 flow', () => {
   })
 
   // #2979: /mcp must consult the same readiness signal /healthz already does,
-  // gated BOTH before the 402 challenge is issued and again before settling —
+  // gated on every paid call — the unpaid challenge request and the signed retry alike —
   // a wallet can drain between the two. `fail` refuses with 503 and never
   // lets an agent sign an authorization the merchant already knows it cannot
   // settle; `warn` and an `unknown` (throwing) read must both proceed
@@ -697,6 +698,56 @@ describe('demo merchant MCP x402 flow', () => {
 
       expect(res.status).toBe(200)
     })
+
+    // Review of #2982: every test above runs with the cache DISABLED. These
+    // pin the production configuration (a 15 s window) on a fake clock: a
+    // verdict is reused inside the window, re-read after it (so a `fail`
+    // cannot latch until restart), and a thrown read is cached as unknown
+    // for the window — the stated trade-off, pinned so it cannot drift.
+    describe('readiness cache (production window, fake clock)', () => {
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it('reuses the verdict inside the window and re-reads after it — a fail band does not latch', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date('2026-09-14T20:00:00Z'))
+        let balance = 255_000_000_000n // fail
+        const readiness = vi.fn(() => Promise.resolve(settlementReadiness(MERCHANT, balance)))
+        const { url } = await startServer({ readiness }, { readinessCacheMs: 15_000 })
+
+        expect((await unpaidBuy(url)).status).toBe(503)
+        expect(readiness).toHaveBeenCalledTimes(1)
+
+        // Wallet topped up inside the window: the cached fail still answers,
+        // and the RPC is not hit again.
+        balance = SETTLEMENT_COST_WEI * 30n
+        vi.setSystemTime(new Date('2026-09-14T20:00:10Z'))
+        expect((await unpaidBuy(url)).status).toBe(503)
+        expect(readiness).toHaveBeenCalledTimes(1)
+
+        // Past the window: re-read, the top-up is honoured.
+        vi.setSystemTime(new Date('2026-09-14T20:00:16Z'))
+        expect((await unpaidBuy(url)).status).toBe(402)
+        expect(readiness).toHaveBeenCalledTimes(2)
+      })
+
+      it('caches a thrown read as unknown for the window (fails open, does not re-poll a dead RPC per request)', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date('2026-09-14T20:00:00Z'))
+        const readiness = vi.fn(() => Promise.reject(new Error('RPC unreachable')))
+        const { url } = await startServer({ readiness }, { readinessCacheMs: 15_000 })
+
+        expect((await unpaidBuy(url)).status).toBe(402)
+        vi.setSystemTime(new Date('2026-09-14T20:00:05Z'))
+        expect((await unpaidBuy(url)).status).toBe(402)
+        expect(readiness).toHaveBeenCalledTimes(1)
+
+        vi.setSystemTime(new Date('2026-09-14T20:00:16Z'))
+        expect((await unpaidBuy(url)).status).toBe(402)
+        expect(readiness).toHaveBeenCalledTimes(2)
+      })
+    })
   })
 
   /**
@@ -780,6 +831,38 @@ describe('demo merchant MCP x402 flow', () => {
       })
       const { status, body } = await payAndCaptureError({
         submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(outOfGas),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_wallet_out_of_gas')
+    })
+
+    // Review of #2982: what viem's `writeContract` ACTUALLY throws is an outer
+    // ContractFunctionExecutionError with the cause nested — the classifier
+    // must walk the chain, not read the outer name. A timeout is the Base
+    // Sepolia RPC's most common real "unreachable" shape.
+    it('classifies a viem timeout nested under ContractFunctionExecutionError as settlement_rpc_unreachable', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const nested = new ContractFunctionExecutionError(
+        new TimeoutError({ body: {}, url: 'https://sepolia.base.org' }),
+        { abi: [], functionName: 'transferWithAuthorization' },
+      )
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(nested),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_rpc_unreachable')
+    })
+
+    it('classifies a nested viem InsufficientFundsError as settlement_wallet_out_of_gas', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const nested = new ContractFunctionExecutionError(
+        new InsufficientFundsError({ cause: new BaseError('exceeds transaction sender account balance') }),
+        { abi: [], functionName: 'transferWithAuthorization' },
+      )
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(nested),
       })
 
       expect(status).toBe(402)

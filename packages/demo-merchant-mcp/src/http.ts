@@ -27,7 +27,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
-import type { Address } from 'viem'
+import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { SettlementClient } from './x402.js'
 
 export interface DemoMerchantServerOptions {
@@ -355,6 +355,17 @@ type FaultReasonCode = 'settlement_wallet_out_of_gas' | 'settlement_rpc_unreacha
  * `merchant_fault` code rather than guessing a specific one.
  */
 function classifyFaultReasonCode(err: unknown): FaultReasonCode {
+  // Review of PR #2982: what `submit` actually throws is viem's outer
+  // `ContractFunctionExecutionError` with the real cause nested — a name
+  // match on the outer error never sees `TimeoutError`. Walk the cause chain
+  // with viem's own predicates first; the substring fallback stays for
+  // non-viem shapes (a plain `Error('fetch failed')` from a custom client).
+  if (err instanceof BaseError) {
+    if (err.walk((e) => e instanceof InsufficientFundsError)) return 'settlement_wallet_out_of_gas'
+    if (err.walk((e) => e instanceof HttpRequestError || e instanceof TimeoutError)) {
+      return 'settlement_rpc_unreachable'
+    }
+  }
   const name = err instanceof Error && err.name ? err.name : ''
   const message = err instanceof Error ? err.message : String(err)
   const haystack = `${name} ${message}`.toLowerCase()

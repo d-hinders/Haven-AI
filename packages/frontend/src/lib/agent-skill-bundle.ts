@@ -286,6 +286,11 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
   Round the cap, or send an exact atomic \`max_amount\`.
 - \`PAYMENT_WINDOW_EXPIRED\`: re-run the quote/prepare tool with the same
   \`idempotency_key\`, then sign the fresh payload.
+- \`MERCHANT_NOT_READY\`: the merchant refused the quote with its own
+  "cannot settle right now" signal (a 503 \`merchant_not_ready\` with a
+  \`reason_code\`) instead of a 402. No payment was created. Tell the user;
+  retry later (the message carries \`retry_after_s\` when the merchant gave
+  one) — this is not a wrong or broken endpoint.
 - \`MERCHANT_REJECTED_AFTER_FUNDING\`: the merchant refused the paid retry.
   Stop-and-sweep — stop retrying the merchant and use
   \`mcp__haven__haven_sweep_delegate\` to recover stranded delegate funds.

@@ -254,6 +254,31 @@ no `status`, and the harness falls back to the old single-boolean behaviour
 merchant that predates the whole block still reports unknown and does not
 block, as before.
 
+**The merchant enforces the same fail band on `/mcp` itself, not only on the
+preflight's `/healthz` read
+([#2979](https://github.com/d-hinders/Haven-AI/issues/2979)).** Before this,
+`/healthz` reporting `fail` only stopped a QA run that checked it first — the
+merchant's own `POST /mcp` still issued 402 challenges and let an agent sign
+an authorization it could never settle. Now every PAID `tools/call` is gated
+on the same `readiness()` read (cached ~15s per merchant process) — on the
+unpaid call that would receive the 402 challenge and on the agent's signed
+retry alike, so a wallet that drains between the two is caught before
+settlement. In the `fail` band the merchant answers
+`HTTP 503 { error: 'merchant_not_ready', reason_code:
+'settlement_wallet_out_of_gas', settlements_remaining, fail_floor,
+retry_after_s }` with a matching `Retry-After` header, and no 402 is ever
+issued. `warn` and an unknown (throwing) read both proceed unchanged, same
+rule as `/healthz`; free tools and the `MERCHANT_SKIP_SETTLE_PRODUCT` fixture
+below are exempt because they settle nothing. This is a second, independent
+line of defense — a QA harness that skips the preflight, or races a topped-up
+run against a wallet draining mid-flight, still cannot get a merchant to sign
+away goods it cannot pay to settle.
+
+The existing merchant-fault 402 body also now carries a machine-readable
+`reason_code` (`settlement_wallet_out_of_gas` / `settlement_rpc_unreachable`
+/ `merchant_fault`), additive to the existing fault-class message — useful
+when triaging a run's red legs without re-reading the prose.
+
 ### 4. Run the seed locally
 
 ```bash

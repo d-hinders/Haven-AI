@@ -6,6 +6,7 @@
  * Module-load guard, so each case re-imports x402.ts fresh under stubbed env.
  */
 import { randomBytes } from 'node:crypto'
+import type { Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
@@ -82,6 +83,20 @@ async function signSkipSettleHeader(
     ...(pr.extensions ? { extensions: pr.extensions } : {}),
   }
   return encodePaymentSignatureHeader(payload)
+}
+
+/** Same env-stub + fresh-module-graph pattern as `importX402With`, extended to
+ *  pull in `http.js` and `products.js` too — both read chain config at import
+ *  time, same as `x402.js` does. */
+async function importHttpWith(env: Record<string, string>) {
+  vi.resetModules()
+  for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+  const [x402, http, products] = await Promise.all([
+    import('./x402.js'),
+    import('./http.js'),
+    import('./products.js'),
+  ])
+  return { x402, http, products }
 }
 
 describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
@@ -256,4 +271,85 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   }, 20000)
+})
+
+// #2979: the settlement-readiness gate must exempt this fixture — it settles
+// nothing on-chain (see x402.ts's `SKIP_SETTLE_PRODUCTS` branch), so a
+// drained settlement wallet cannot block a settlement that never runs. Driven
+// at the real HTTP layer (`createDemoMerchantServer`), same as the gate
+// itself, not the in-process `verifyAndSettle` call.
+describe('MERCHANT_SKIP_SETTLE_PRODUCT is exempt from the settlement-readiness gate (#2979)', () => {
+  it('still serves the fixture product, unsettled, when the wallet is in the fail band', async () => {
+    const { x402, http, products } = await importHttpWith({
+      MERCHANT_CHAIN_ID: '84532',
+      MERCHANT_SKIP_SETTLE_PRODUCT: 'vpn_basic',
+    })
+    const submit = vi.fn<import('./x402.js').SettlementClient['submit']>()
+    const waitForReceipt = vi.fn<import('./x402.js').SettlementClient['waitForReceipt']>()
+    const readiness = vi
+      .fn<NonNullable<import('./x402.js').SettlementClient['readiness']>>()
+      .mockResolvedValue(x402.settlementReadiness(MERCHANT, 255_000_000_000n))
+    const settlementClient = { submit, waitForReceipt, readiness }
+
+    const server: Server = http.createDemoMerchantServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      paymentProcessor: x402.createX402PaymentProcessor(settlementClient),
+      settlementClient,
+      readinessCacheMs: 0,
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('No test server port')
+      const url = `http://127.0.0.1:${address.port}/mcp`
+
+      // Exempt at the CHALLENGE step: a 402, not the 503 a non-exempt product
+      // would get in the fail band.
+      const unpaid = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+        }),
+      })
+      expect(unpaid.status).toBe(402)
+      const paymentRequired = (await unpaid.json()) as PaymentRequired
+
+      const paymentHeader = await signSkipSettleHeader(x402, products.CHAIN_ID, paymentRequired)
+
+      // Exempt at the SETTLE step too: served (200), still with the wallet in
+      // the fail band, and the settlement client's `submit` is never called —
+      // exactly what "settles nothing" means for this fixture.
+      const paid = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          [x402.PAYMENT_SIGNATURE_HEADER]: paymentHeader,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/call',
+          params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+        }),
+      })
+
+      expect(paid.status).toBe(200)
+      expect(submit).not.toHaveBeenCalled()
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }, 15000)
 })

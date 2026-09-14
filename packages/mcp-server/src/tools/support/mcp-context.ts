@@ -15,6 +15,7 @@
  * capability module.
  */
 import {
+  AgentPaymentFailureCode,
   AgentPaymentNextAction,
   HavenApiError,
   X402UnexpectedStatusError,
@@ -76,6 +77,52 @@ export function isMerchantEndpointMiss(err: unknown): boolean {
 }
 
 /**
+ * #2979: the merchant answered the `tools/call` probe with its OWN
+ * machine-readable "cannot settle right now" refusal — the demo merchant's
+ * `/mcp` settlement-readiness gate answers `503
+ * { error: 'merchant_not_ready', reason_code, settlements_remaining,
+ * fail_floor, retry_after_s }` before ever issuing a 402 — rather than a
+ * genuine "this is not the x402 endpoint" miss.
+ *
+ * Before this, BOTH shapes were just "some non-402 status" to
+ * `isMerchantEndpointMiss`, so this one was funnelled into the #1271
+ * same-origin discovery fallback below, which (rightly) also failed to find
+ * a document at a URL that already WAS the correct endpoint — and the agent
+ * was told "no discovery document was found", discarding the merchant's own,
+ * perfectly clear reason entirely. Checked FIRST, before the discovery
+ * heuristic, so an honest capacity refusal is reported as itself.
+ */
+export function merchantNotReadyErrorFor(err: unknown): HostedToolError | null {
+  if (!(err instanceof X402UnexpectedStatusError) || err.statusCode !== 503) return null
+  const body = err.body
+  // Only the merchant's OWN refusal shape maps here. A bare 503 (a load
+  // balancer, an HTML outage page, a non-JSON body) is not a capacity
+  // signal and keeps going through the #1271 discovery path.
+  if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
+    return null
+  }
+  const { reason_code, settlements_remaining, retry_after_s } = body as Record<string, unknown>
+  return new HostedToolError({
+    code: AgentPaymentFailureCode.MerchantNotReady,
+    message:
+      'The merchant refused this call: it cannot settle a payment right now' +
+      (typeof reason_code === 'string' ? ` (reason_code: ${reason_code})` : '') +
+      (typeof settlements_remaining === 'number'
+        ? `, settlements_remaining: ${settlements_remaining}`
+        : '') +
+      '. No payment was created.' +
+      (typeof retry_after_s === 'number'
+        ? ` Retry after approximately ${retry_after_s}s.`
+        : ' This is often transient; retry later.'),
+    statusCode: 503,
+    nextAction: AgentPaymentNextAction.StopAndTellUser,
+    // Genuinely retryable — unlike a rejection, nothing about THIS call was
+    // wrong; the merchant's own wallet needs to recover first.
+    retryWithNewQuote: true,
+  })
+}
+
+/**
  * Keep the original probe error authoritative, but tell the agent what
  * discovery tried — the pre-#1271 failure mode was silent hand-probing.
  */
@@ -129,6 +176,11 @@ export async function quoteMcpToolCall(
     const quote = await probe()
     return { quote, merchantUrl }
   } catch (probeErr) {
+    // #2979: an honest, machine-readable merchant refusal is reported as
+    // itself, BEFORE the #1271 "wrong endpoint" heuristic ever runs — see
+    // `merchantNotReadyErrorFor`'s own comment for why the ordering matters.
+    const notReady = merchantNotReadyErrorFor(probeErr)
+    if (notReady) throw notReady
     if (!isMerchantEndpointMiss(probeErr)) throw probeErr
     const discovered = await discoverMerchantMcpUrl(merchantUrl)
     // Trailing-slash/case echoes of the input are "same URL" — spend the one
@@ -142,6 +194,8 @@ export async function quoteMcpToolCall(
       const quote = await probe()
       return { quote, merchantUrl }
     } catch (retryErr) {
+      const notReadyAtDiscovered = merchantNotReadyErrorFor(retryErr)
+      if (notReadyAtDiscovered) throw notReadyAtDiscovered
       // Label which URL failed — the agent otherwise cannot tell the
       // discovered endpoint's miss from the original probe's.
       if (retryErr instanceof HavenApiError) {

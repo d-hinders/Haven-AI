@@ -241,7 +241,9 @@ throughout.
 
    The doctor reports the installed signer and SDK versions (the snapshot),
    starts the local signer for a real stdio handshake and prints its advertised
-   compat versions. Every "re-run `npx @haven_ai/connect@<tag>`" hint the
+   compat versions. Its hosted MCP row proves endpoint reachability; the
+   `identity_match` row is the authenticated stored-credential check. Every
+   "re-run `npx @haven_ai/connect@<tag>`" hint the
    snapshot's packages print names **`@dev`**, because the tag is a build-time
    constant (`HAVEN_CONNECTOR_CHANNEL` in `packages/sdk/src/connector-channel.ts`)
    that the snapshot bump rewrote from the version — a snapshot telling its
@@ -397,8 +399,8 @@ installed `@haven_ai/signer@0.0.0-dev.202609040858.f4467bb`, and every re-run
 hint it and `--doctor` printed named `@dev`: the connector's own next-steps, the
 tombstone advice, the repair advice. That is #2423 confirmed in the shipped
 artifact rather than in the source it was built from. `--doctor` additionally
-reported the hosted MCP reachable and authorized at the dev URL, the stored API
-key authenticating as the agent whose signing key is in that directory, and a
+reported the hosted MCP endpoint reachable at the dev URL, the stored API key
+authenticating as the agent whose signing key is in that directory, and a
 signer stdio handshake at that same snapshot version.
 
 Two checks are deliberately NOT claimed here, because they need a fresh client

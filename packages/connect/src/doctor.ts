@@ -634,14 +634,12 @@ async function checksForAgent(
       label: 'Hosted Haven MCP',
       ok: probe.status === 'ok',
       detail: probe.status === 'ok'
-        ? `Reachable and authorized (${hostedUrl}).`
-        : `Probe failed: ${probe.status} (${hostedUrl}).`,
+        ? `MCP tools endpoint is reachable (${hostedUrl}).`
+        : `MCP tools endpoint probe failed: ${probe.status} (${hostedUrl}).`,
       ...(probe.status === 'ok'
         ? {}
         : {
-            repair: probe.status === 'unauthorized'
-              ? `The stored API key was rejected — re-run the full setup with a fresh token: ${RERUN} --setup <token>.`
-              : 'Check network access to the hosted MCP URL, then re-run --doctor.',
+            repair: 'Check network access and runtime configuration for the hosted MCP URL, then re-run --doctor.',
           }),
     })
   } else {
@@ -992,15 +990,20 @@ export async function runDoctor(
       // so re-deriving would label the same directory by its slug here and by
       // its real agent id in the "Other agents" section, for the same entry.
       const otherAgent = entry.agentId ?? basename(entry.directory)
-      const otherUrl = identity?.hosted_mcp_url
-        ?? (identity?.api_url ? `${identity.api_url}/mcp` : undefined)
-      if (!identity?.api_key || !otherUrl) {
+      if (!identity?.api_key || !identity.api_url) {
         if (tombstone) retired.push(`${otherAgent} (retired ${tombstone.retired_at})`)
-        else unverifiable.push(`${otherAgent} (no stored key/URL to probe)`)
+        else unverifiable.push(`${otherAgent} (no stored key/API URL to probe)`)
         continue
       }
       const suffix = tombstone ? ' [tombstoned — key material still present]' : ''
-      const probe = await (deps.probeHosted ?? probeHostedMcpTools)(identity.api_key, otherUrl, deps.fetch)
+      // `tools/list` is intentionally static and does not authenticate its
+      // bearer. A spend-capability verdict therefore needs the authenticated
+      // agent-identity endpoint, not merely a reachable hosted MCP URL.
+      const probe = await (deps.probeHostedIdentity ?? probeHostedAgentIdentity)(
+        identity.api_key,
+        identity.api_url,
+        deps.fetch,
+      )
       if (probe.status === 'ok') live.push({ label: `${otherAgent}${suffix}`, entry })
       else if (probe.status === 'unauthorized') revoked.push(`${otherAgent}${suffix}`)
       // network_error / bad_response: neither a false "still live" failure

@@ -166,7 +166,7 @@ describe('runDoctor (#1589)', () => {
     expect(check?.detail).toContain('npx')
   })
 
-  it('unauthorized hosted probe: names the fresh-token recovery', async () => {
+  it('hosted MCP endpoint failure names URL/configuration recovery without claiming an auth verdict', async () => {
     const { homeDir } = await healthyHome()
     const report = await runDoctor({ runtime: 'codex-cli' }, {
       homeDir,
@@ -175,7 +175,9 @@ describe('runDoctor (#1589)', () => {
     })
     const check = report.checks.find((c) => c.id === 'hosted_mcp')
     expect(check?.ok).toBe(false)
-    expect(check?.repair).toContain('--setup <token>')
+    expect(check?.detail).toContain('MCP tools endpoint probe failed')
+    expect(check?.repair).toContain('hosted MCP URL')
+    expect(check?.repair).not.toContain('--setup <token>')
   })
 
   it('emptied runtime dir: signer_runtime fails as stale/empty with the repair action', async () => {
@@ -308,10 +310,14 @@ describe('superseded agent credentials (#1688)', () => {
     return { homeDir, oldDir }
   }
 
-  function depsWithOldKeyProbing(oldStatus: 'ok' | 'unauthorized' | 'network_error') {
+  function depsWithOldKeyProbing(oldStatus: 'ok' | 'unauthorized' | 'network_error' | 'bad_response') {
     const deps = healthyDeps()
-    deps.probeHosted.mockImplementation(async (apiKey: string) =>
-      apiKey === OLD_KEY ? { status: oldStatus } : { status: 'ok' },
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) =>
+      apiKey === OLD_KEY
+        ? oldStatus === 'ok'
+          ? { status: 'ok', agentId: 'agent-old', delegateAddress: DELEGATE_ADDRESS }
+          : { status: oldStatus }
+        : { status: 'ok', agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS },
     )
     return deps
   }
@@ -349,6 +355,17 @@ describe('superseded agent credentials (#1688)', () => {
     expect(check?.ok).toBe(true)
     expect(check?.detail).toContain('could not verify')
     expect(check?.detail).not.toMatch(/SPEND-CAPABLE/)
+  })
+
+  it('a malformed authenticated identity response is unverifiable, never a revocation verdict', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('bad_response') })
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('could not verify')
+    expect(check?.detail).toContain('bad_response')
+    expect(check?.detail).not.toMatch(/SPEND-CAPABLE|already revoked/)
   })
 
   it('the old cosmetic "N dirs found; examining the newest" note is gone — subsumed by the check', async () => {
@@ -389,9 +406,9 @@ describe('superseded agent credentials (#1688)', () => {
 
     const deps = healthyDeps()
     const probedKeys: string[] = []
-    deps.probeHosted.mockImplementation(async (apiKey: string) => {
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) => {
       probedKeys.push(apiKey)
-      return { status: 'ok' as const }
+      return { status: 'ok' as const, agentId: 'agent-sibling', delegateAddress: DELEGATE_ADDRESS }
     })
 
     const report = await runDoctor(
@@ -401,7 +418,9 @@ describe('superseded agent credentials (#1688)', () => {
 
     const check = report.checks.find((c) => c.id === 'superseded_agents')
     expect(check?.detail).toContain('agent-sibling')
-    // The default root's OLD key must never have been probed.
+    // The custom-root sibling is checked, while the default root's OLD key is
+    // not even considered.
+    expect(probedKeys).toContain('sk_agent_sibsecret')
     expect(probedKeys).not.toContain(OLD_KEY)
     expect(check?.detail).not.toContain('agent-old')
   })
@@ -1139,8 +1158,10 @@ describe('an abandoned parked key elsewhere reaches the exit code (#1911, review
   /** Healthy deps, except the other directory's key reads as already revoked. */
   function depsWithRevokedOther() {
     const deps = healthyDeps()
-    deps.probeHosted = vi.fn(async (apiKey: string) => (
-      apiKey === OTHER_KEY ? { status: 'unauthorized' as const } : { status: 'ok' as const }
+    deps.probeHostedIdentity = vi.fn(async (apiKey: string) => (
+      apiKey === OTHER_KEY
+        ? { status: 'unauthorized' as const }
+        : { status: 'ok' as const, agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS }
     ))
     return deps
   }

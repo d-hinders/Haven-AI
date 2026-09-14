@@ -63,9 +63,14 @@ prose. `supported_settlement_methods` always lists `eip3009` first when present;
 Haven's registered DelegationManager — see below).
 
 A successful `buy_vpn`/`buy_cloud_storage` call also returns a
-`structuredContent.summary` object — `{ status: 'confirmed', product_id,
-product_name, invoice_id, amount_atomic, amount, asset, network,
-settlement_tx_hash }` — for agent-facing purchase reporting. It is
+`structuredContent.summary` object — `{ status, product_id, product_name,
+invoice_id, amount_atomic, amount, asset, network, settlement_tx_hash }` — for
+agent-facing purchase reporting. `status` is `'confirmed'` with a real
+`settlement_tx_hash` on a verified settlement; on the two paths with no
+observed settlement (#2969) it is `'already_settled_earlier'` (the
+authorization moved the money in an earlier transaction this process never
+saw) or `'delivered_unsettled'` (the `MERCHANT_SKIP_SETTLE_PRODUCT` QA hook),
+and `settlement_tx_hash` is `null` — never the zero hash. It is
 **display/reporting data only**: it never replaces the `x-receipt-json` header,
 the invoice, or on-chain settlement state as the source of truth for
 bookkeeping/reconciliation, and every field is read off the already-settled

@@ -68,6 +68,9 @@ interface MerchantStrings {
   alreadySettledEarlier: string
   productLabel: string
   paidLabel: string
+  /** #2969: amount label on `settlement_unknown` — nothing was paid, so the
+   *  line must not say so (review finding on PR #2977). */
+  amountLabel: string
   fromDelegate: (from: string) => string
   fromLabel: string
   invoiceJsonHeading: string
@@ -96,6 +99,7 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     alreadySettledEarlier: '⚠️ Paid in an earlier transaction — the settlement reference is unavailable.',
     productLabel: 'Product',
     paidLabel: 'Paid',
+    amountLabel: 'Amount',
     fromDelegate: (from) => `From:     ${from} (delegate account — the payment is drawn from the owner's treasury)`,
     fromLabel: 'From',
     invoiceJsonHeading: 'Invoice details as JSON (for bookkeeping):',
@@ -124,6 +128,7 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     alreadySettledEarlier: '⚠️ Betald i en tidigare transaktion — betalningsreferensen är inte tillgänglig.',
     productLabel: 'Produkt',
     paidLabel: 'Betalat',
+    amountLabel: 'Belopp',
     fromDelegate: (from) => `Från:     ${from} (delegatkonto — betalningen dras från ägarens treasury)`,
     fromLabel: 'Från',
     invoiceJsonHeading: 'Fakturadetaljerna som JSON (för bokföring):',
@@ -393,7 +398,8 @@ function completePurchase(
   const header =
     `${heading}\n\n` +
     `${t.productLabel}:  ${product.name}\n` +
-    `${t.paidLabel}:     $${formatUsdc(payment.value)} USDC\n` +
+    // #2969: `settlement_unknown` never paid — label the amount, not a payment.
+    `${payment.settlement === 'settlement_unknown' ? t.amountLabel : t.paidLabel}:     $${formatUsdc(payment.value)} USDC\n` +
     // #1472, decision recorded: the receipt says what the address IS. On
     // erc7710 `payment.from` is the DELEGATE ACCOUNT (the header's delegator)
     // — the funds provably leave the owner's treasury, not this address, so

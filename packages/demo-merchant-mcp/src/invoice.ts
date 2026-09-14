@@ -73,8 +73,9 @@ export interface InvoiceParams {
   payerRole: 'agent_delegate' | 'agent_delegate_account'
   /** EIP-3009 authorization nonce (hex bytes32) */
   authorizationNonce: string
-  /** Tx hash if settled, otherwise undefined */
-  txHash?: string
+  /** The wire hash — rendered only when `settlement === 'settled_onchain'`
+   *  (the zero hash on the two non-settled states, never printed). */
+  txHash: string
   /** #2969: explicit settlement truth — see `SettlementState`. */
   settlement: SettlementState
 }

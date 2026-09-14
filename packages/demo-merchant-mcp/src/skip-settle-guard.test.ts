@@ -170,4 +170,90 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
     expect(settled.txHash).toBe(ZERO_TX_HASH)
     expect(settled.paymentResponse.transaction).toBe(ZERO_TX_HASH)
   }, 15000)
+
+  // #2969 acceptance criterion 5: the RENDERED output of the skip-settle
+  // fixture, through the real HTTP + MCP layer — the exact surface d-hinders'
+  // report quoted ("✅ Purchase confirmed! … Tx: 0x000…0 … Status: Paid").
+  // Mutation targets: the skip-settle heading falling back to
+  // `purchaseConfirmed`, or `isSettled` computed as anything but
+  // `=== 'settled_onchain'` (which prints the zero hash), must fail this.
+  it('the skip-settle fixture renders as delivered-unsettled — never "Purchase confirmed", never the zero hash (#2969)', async () => {
+    const mod = await importX402With({
+      MERCHANT_CHAIN_ID: '84532',
+      MERCHANT_SKIP_SETTLE_PRODUCT: 'vpn_basic',
+    })
+    const products = await import('./products.js')
+    const http = await import('./http.js')
+    const submit = vi.fn().mockResolvedValue(`0x${'cd'.repeat(32)}`)
+    const waitForReceipt = vi.fn().mockResolvedValue(undefined)
+    const server = http.createDemoMerchantServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      paymentProcessor: mod.createX402PaymentProcessor({ submit, waitForReceipt }),
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('no address')
+      const url = `http://127.0.0.1:${address.port}/mcp`
+      const post = (body: unknown, headers: Record<string, string> = {}) =>
+        fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/event-stream',
+            ...headers,
+          },
+          body: JSON.stringify(body),
+        })
+      const init = await post({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+      })
+      const sessionId = init.headers.get('mcp-session-id')!
+      const call = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic' } } }
+      const unpaid = await post(call, { 'mcp-session-id': sessionId })
+      expect(unpaid.status).toBe(402)
+      const pr = (await unpaid.json()) as PaymentRequired
+      const paid = await post(
+        { ...call, id: 3 },
+        { 'mcp-session-id': sessionId, [mod.PAYMENT_SIGNATURE_HEADER]: await signSkipSettleHeader(mod, products.CHAIN_ID, pr) },
+      )
+      const text = await paid.text()
+
+      // Goods delivered (the hook is verify-without-settle by design)...
+      expect(paid.status).toBe(200)
+      expect(submit).not.toHaveBeenCalled()
+      // ...and the receipt says exactly that, nothing more.
+      expect(text).toContain('Delivered — not confirmed on-chain')
+      expect(text).not.toContain('Purchase confirmed')
+      expect(text).not.toContain('Paid in an earlier transaction')
+      expect(text).toContain('"status":"delivered_unsettled"')
+      expect(text).toContain('"settlement_tx_hash":null')
+      expect(text).not.toContain('Tx:')
+      // Nothing was paid: the amount line is labelled as an amount, not a payment.
+      expect(text).toContain('Amount:')
+      expect(text).not.toContain('Paid:')
+      expect(text).not.toContain('Status: Paid\n')
+      expect(text).not.toContain('"status": "Betald"')
+      expect(text).not.toContain(ZERO_TX_HASH)
+
+      const receiptHeader = paid.headers.get('x-receipt-json')
+      expect(receiptHeader).toBeTruthy()
+      const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
+      expect(receipt.status).toBe('Levererad — ej bekräftad på kedjan')
+      expect(receipt.blockkedje_referens).toBeNull()
+      expect(JSON.stringify(receipt)).not.toContain(ZERO_TX_HASH)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }, 20000)
 })

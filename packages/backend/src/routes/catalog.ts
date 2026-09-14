@@ -6,10 +6,15 @@
  *   - the `haven_discover_tools` MCP tool via the SDK (agent API key auth)
  *
  * The listing merges two sources, each with an honest provenance label
- * (epic #1717, #1715):
- *   - operator-curated rows from `merchant_catalog` (`source: 'operator'`,
- *     no verification badges — the operator curates them, which is a
- *     different trust story from the directory's badges);
+ * (epic #1717, #1715, #2978):
+ *   - operator-curated rows from `merchant_catalog` (`source: 'operator'`).
+ *     `refreshCatalog` (`modules/catalog/merchant-catalog.ts`) probes every
+ *     non-delisted row and expects a real 402 challenge, so `verified_payable`
+ *     reflects that observation (`status === 'active' && verified_at !==
+ *     null`) — the same "we watched this endpoint answer a live quote" claim
+ *     the ingestion badge makes. `domain_verified` stays false: no
+ *     ownership proof ever runs for an operator row, and the badge must not
+ *     claim one;
  *   - self-submitted entries that have passed domain-ownership proof AND the
  *     SSRF-hardened quote probe (`source: 'ingestion'`,
  *     `domain_verified`/`verified_payable` both true — exactly the badge
@@ -158,8 +163,17 @@ function serialize(row: CatalogRow) {
     status: row.status,
     verified_at: row.verified_at,
     source: 'operator' as const,
+    // #2978: no ownership proof runs for an operator row, so this badge must
+    // never claim one.
     domain_verified: false,
-    verified_payable: false,
+    // #2978: `refreshCatalog` (merchant-catalog.ts) probes every non-delisted
+    // row and expects a real x402/MPP 402 challenge, exactly the observation
+    // the ingestion probe makes. `status === 'active' && verified_at !== null`
+    // IS that observation succeeding at least once and not yet degrading —
+    // the same truth the operator dashboard already shows as "active". A
+    // never-probed row (verified_at null) or one that failed three
+    // consecutive probes (status 'degraded') stays unbadged.
+    verified_payable: row.status === 'active' && row.verified_at !== null,
   }
 }
 

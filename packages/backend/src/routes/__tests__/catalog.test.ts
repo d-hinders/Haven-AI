@@ -447,8 +447,11 @@ describe('catalog routes', () => {
     expect(res.statusCode).toBe(200)
     const entries = res.json().entries
     expect(entries).toHaveLength(2)
-    // Operator row first, ingestion row second.
-    expect(entries[0]).toMatchObject({ id: 'cat-1', source: 'operator', domain_verified: false, verified_payable: false })
+    // Operator row first, ingestion row second. ENTRY is active with
+    // verified_at set (probed OK, #2978), so it carries the payable badge
+    // without the ownership badge — see the dedicated #2978 tests below for
+    // the degraded / never-probed cases.
+    expect(entries[0]).toMatchObject({ id: 'cat-1', source: 'operator', domain_verified: false, verified_payable: true })
     expect(entries[1]).toMatchObject({
       id: '00000000-0000-4000-8000-000000000002',
       name: 'Directory Summarizer',
@@ -460,6 +463,52 @@ describe('catalog routes', () => {
       protocol: 'mcp',
       tool_name: 'summarize',
       verified_at: '2026-08-23T10:00:00.000Z',
+    })
+  })
+
+  it('badges an active, probed operator row verified_payable — the refresh probe already proved it (#2978)', async () => {
+    // Mutation: revert `serialize()`'s `verified_payable` to the hard-coded
+    // `false` and this assertion fails, because the row IS active with a
+    // verified_at timestamp — exactly what `refreshCatalog` sets on a
+    // successful 402 probe (merchant-catalog.ts).
+    mockCatalogWithIngestion([{ ...ENTRY, status: 'active', verified_at: '2026-06-10T00:00:00.000Z' }])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0]).toMatchObject({
+      id: 'cat-1',
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: true,
+    })
+  })
+
+  it('keeps verified_payable false for a degraded operator row', async () => {
+    mockCatalogWithIngestion([{ ...ENTRY, status: 'degraded', verified_at: '2026-06-10T00:00:00.000Z' }])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0]).toMatchObject({
+      id: 'cat-1',
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: false,
+    })
+  })
+
+  it('keeps verified_payable false for an operator row that was never probed (verified_at null)', async () => {
+    mockCatalogWithIngestion([{ ...ENTRY, status: 'active', verified_at: null }])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0]).toMatchObject({
+      id: 'cat-1',
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: false,
     })
   })
 

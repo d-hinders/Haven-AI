@@ -459,6 +459,46 @@ describe('catalog discovery + submission (#1716)', () => {
     routes.assertAllUsed()
   })
 
+  // #2978: `verified=verified` filters on the badge (`verifiedPayable`), not
+  // on provenance — an operator row that keeps passing its periodic 402
+  // probe carries the badge just like a self-submitted, domain-proven one.
+  const BADGE_MIX = {
+    entries: [
+      MIXED.entries[0], // ingestion, domainVerified true, verifiedPayable true
+      MIXED.entries[1], // operator, both false (never probed / degraded)
+      {
+        id: 'op_verified', name: 'Probed Operator Merchant', description: 'd', category: 'ai',
+        resource_url: 'https://operator.example.com/paid', rail: 'x402', protocol: 'http',
+        tool_name: null, tool_arguments: null,
+        price_display: '$0.02 USDC', price_atomic: '20000', asset: 'USDC', network: 'eip155:8453',
+        status: 'active', verified_at: '2026-09-10T00:00:00.000Z',
+        // Operator provenance, but the catalog refresh probe verified it —
+        // this is exactly the case the hard-coded `false` used to hide.
+        source: 'operator', domain_verified: false, verified_payable: true,
+      },
+    ],
+  }
+
+  it('verified=verified includes a probe-verified operator entry and excludes an unverified one (#2978)', async () => {
+    const routes = installRoutes({
+      'GET https://haven.test/catalog': [() => json(BADGE_MIX)],
+    })
+
+    const verified = await client().discoverTools({ verified: 'verified' })
+    // Included: the ingestion entry (verifiedPayable true) AND the operator
+    // entry that the refresh probe verified (verifiedPayable true).
+    // Excluded: the operator entry with verifiedPayable false.
+    // An ingestion entry with verifiedPayable false is not modeled here: the
+    // backend's ingestion listing query (`listVerifiedCatalogSubmissions`)
+    // only ever returns rows that have already reached `verified_payable` in
+    // the submission lifecycle, so `source: 'ingestion', verified_payable:
+    // false` cannot occur from the real endpoint. The filter below is on the
+    // badge field regardless, so it excludes that shape defensively too.
+    expect(verified.map((e) => e.id).sort()).toEqual(['dir_1', 'op_verified'])
+    expect(verified.every((e) => e.verifiedPayable === true)).toBe(true)
+    routes.assertAllUsed()
+  })
+
   it('submits a catalog entry and maps the token response', async () => {
     const routes = installRoutes({
       'POST https://haven.test/catalog/submit': (call) => {

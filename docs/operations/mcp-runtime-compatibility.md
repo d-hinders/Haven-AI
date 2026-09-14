@@ -226,12 +226,17 @@ surfaces, alongside the existing `category` and `rail` filters. `category`
 matching is case-insensitive after trim, `search` matches catalog `name`,
 `description`, or `category`, and omitting the new field preserves the older
 request shape exactly. Since #1716 both surfaces also accept the same optional
-`verified` (`any` | `verified` | `operator`) provenance filter and return the
-`source` / `domain_verified` / `verified_payable` badge fields on each entry —
-added to BOTH surfaces together, so the skew-flat claim holds unchanged. The
-result is still read-only discovery metadata: catalog prices are indicative
-hints, never payment authority, and the badges mean domain-controlled and
-verified-payable only.
+`verified` filter (`any` | `verified` | `operator`) and return the `source` /
+`domain_verified` / `verified_payable` badge fields on each entry — added to
+BOTH surfaces together, so the skew-flat claim holds unchanged. Since #2978,
+`verified` is not a pure provenance filter: `verified=verified` returns any
+entry, operator-curated or self-submitted, whose endpoint Haven watched
+answer a live quote probe (`verified_payable === true`); `verified=operator`
+still filters on provenance alone. The result is still read-only discovery
+metadata: catalog prices are indicative hints, never payment authority.
+`verified_payable` means the endpoint answered a live probe; `domain_verified`
+is the separate, stronger claim that ownership of the domain was proven —
+operator rows can carry the former without the latter.
 
 The default hosted MCP + local signer topology additionally exposes
 `haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are

@@ -85,9 +85,13 @@ shows up in your Haven dashboard activity feed.
 ## Step-by-Step API
 
 Discovery and listing: `discoverTools({ verified?: 'any' | 'verified' | 'operator' })` returns the merged
-catalog — operator-curated plus `verified_payable` directory entries (epic #1717), each with `source`,
-`domainVerified` and `verifiedPayable`. `submitCatalogEntry(resourceUrl)` submits a merchant endpoint to
-the Verified Payable Directory (queue-only; the seller still must prove domain ownership before listing),
+catalog — operator-curated rows plus self-submitted directory entries (epic #1717), each with `source`,
+`domainVerified` and `verifiedPayable`. `verified: 'verified'` (#2978) filters on the badge, not the
+source: it returns any entry, from either source, whose endpoint Haven watched answer a live quote
+probe (`verifiedPayable === true`); `domainVerified` stays true only for entries that also proved
+domain ownership. `verified: 'operator'` filters on provenance alone. `submitCatalogEntry(resourceUrl)`
+submits a merchant endpoint to the Verified Payable Directory (queue-only; the seller still must prove
+domain ownership before listing),
 and `getCatalogSubmissionStatus(id)` returns coarse status plus the ownership-proof instructions while
 the submission can still prove ownership.
 

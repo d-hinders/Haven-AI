@@ -169,6 +169,26 @@ export async function resolveMerchantCallContext(
  * via haven_sweep_delegate. The X-PAYMENT header is a signed authorization the
  * edge signer produced — Haven relays it but never holds the key.
  */
+/**
+ * #2983: the merchant may refuse the paid retry with its OWN
+ * `merchant_not_ready` capacity signal (same shape `merchantNotReadyErrorFor`
+ * in `support/mcp-context.ts` reads on the quote path) rather than a generic
+ * rejection. Best-effort: any other shape (or a non-JSON body) yields `null`,
+ * and the caller falls back to the generic refusal message.
+ */
+function merchantNotReadyBodyFor(
+  body: unknown,
+): { reasonCode?: string; retryAfterS?: number } | null {
+  if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
+    return null
+  }
+  const { reason_code, retry_after_s } = body as Record<string, unknown>
+  return {
+    reasonCode: typeof reason_code === 'string' ? reason_code : undefined,
+    retryAfterS: typeof retry_after_s === 'number' ? retry_after_s : undefined,
+  }
+}
+
 export async function deliverMerchantPayment(
   haven: HavenClient,
   // Parsed haven_complete_mcp_tool / haven_settle_mcp_tool args (Zod-validated).
@@ -270,6 +290,59 @@ export async function deliverMerchantPayment(
       status = await haven.getPaymentStatus(args.payment_id)
     } catch {
       // Preserve the merchant rejection even if status lookup is unavailable.
+    }
+    // #2983: `noFundingLeg` (set true ONLY on the erc7710 call sites, above)
+    // is the same scheme signal `ensureFundingConfirmed`'s gate reads — reuse
+    // it rather than re-deriving "which scheme is this" a second way.
+    if (options?.noFundingLeg) {
+      // On erc7710 the signature IS the settlement child (#1456): there is no
+      // funding leg, so a merchant refusal at this point means NOTHING moved
+      // — no delegate balance to strand, nothing to sweep. The eip3009
+      // guidance below is false here and would tell the agent to "reconcile"
+      // a balance that was never created. Say what is true instead.
+      // #2987 review: the categorical "nothing moved, re-quote" is only
+      // safe when the merchant SAID it did not attempt settlement — the
+      // `merchant_not_ready` body. On any other non-2xx the merchant still
+      // holds a single-use settlement authorization valid for the window
+      // (`maxTimeoutSeconds`, default 300 s) and may have redeemed it before
+      // answering (an upstream 502/504 lands here as a response, not a
+      // timeout) — telling the agent to re-quote NOW could pay twice. So a
+      // generic refusal is verify-then-act, the same discipline
+      // MERCHANT_UNRESPONSIVE_AFTER_FUNDING uses; in neither case is there a
+      // delegate balance to sweep, and the skill's code-keyed
+      // "stop-and-sweep" advice is overridden explicitly in the message.
+      const notReady = merchantNotReadyBodyFor(result.body)
+      const message = notReady
+        ? `Merchant refused to deliver the resource (HTTP ${result.status}) and reported it ` +
+          `cannot settle right now` +
+          (notReady.reasonCode ? ` (reason_code: ${notReady.reasonCode})` : '') +
+          `. erc7710 has no funding leg and the merchant did not attempt settlement, so no ` +
+          `funds moved — the agent's budget is intact. Ignore this code's sweep guidance: there ` +
+          `is no delegate balance to sweep. Re-quote` +
+          (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later') +
+          `. Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+        : `Merchant refused to deliver the resource (HTTP ${result.status}). erc7710 has no ` +
+          `funding leg, so there is no delegate balance to sweep — ignore this code's sweep ` +
+          `guidance. Haven has NOT observed a settlement, but the merchant held a single-use ` +
+          `settlement authorization valid for up to the payment window (typically 300s) and ` +
+          `may have redeemed it before answering: check haven_get_payment_status after that ` +
+          `window and re-quote only if it shows no settlement. ` +
+          `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+      throw new HostedToolError({
+        code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
+        message,
+        statusCode: result.status,
+        paymentId: args.payment_id,
+        status: status?.status ?? 'merchant_rejected_after_funding',
+        phase: status?.phase ?? 'not_delivered',
+        nextAction: notReady
+          ? AgentPaymentNextAction.StopAndTellUser
+          : AgentPaymentNextAction.CheckStatusLater,
+        ...(notReady ? {} : { suggestedTool: 'haven_get_payment_status' }),
+        rail: status?.rail ?? 'erc7710',
+        idempotencyKey: status?.idempotencyKey,
+        retryWithNewQuote: true,
+      })
     }
     throw new HostedToolError({
       code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,

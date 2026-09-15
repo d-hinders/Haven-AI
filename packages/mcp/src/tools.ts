@@ -9,6 +9,7 @@
  * which is where URL-hardening would matter.)
  */
 import {
+  AgentPaymentFailureCode,
   AgentPaymentNextAction,
   HavenApiError,
   HavenClient,
@@ -168,6 +169,13 @@ export interface ToolFailure {
   nextAction?: string
   resume_state?: unknown
   body?: unknown
+  /**
+   * #2983: carried on `MERCHANT_NOT_READY` — mirrors the hosted MCP's
+   * `retry_with_new_quote` (`mcp-context.ts`'s `merchantNotReadyErrorFor`).
+   * Genuinely retryable: nothing about the CALL was wrong, the merchant's
+   * own wallet needs to recover first.
+   */
+  retry_with_new_quote?: boolean
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
@@ -257,6 +265,15 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
 
         let response = await attempt()
         if (!response.ok) {
+          // #2983: mirror the hosted `merchantNotReadyErrorFor` — an honest,
+          // machine-readable merchant refusal is reported as itself, BEFORE
+          // the #1301 "wrong endpoint" discovery heuristic ever runs. Without
+          // this, every local `merchant_not_ready` 503 fell into the
+          // discovery path below and came back as "no discovery document was
+          // found", discarding the merchant's own reason entirely — the same
+          // misreport #2979 fixed on the hosted side.
+          const notReady = await merchantNotReadyErrorFor(response)
+          if (notReady) throw notReady
           const discovered = await discoverMerchantMcpUrl(merchantUrl)
           // Trailing-slash/case echoes of the input are "same URL" — spend
           // the one retry only on a genuinely different endpoint.
@@ -267,6 +284,8 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           merchantUrl = discovered
           const retryResponse = await attempt()
           if (!retryResponse.ok) {
+            const notReadyAtDiscovered = await merchantNotReadyErrorFor(retryResponse)
+            if (notReadyAtDiscovered) throw notReadyAtDiscovered
             // Label which URL failed — the agent otherwise cannot tell the
             // discovered endpoint's miss from the original probe's.
             throw discoveryMissError(retryResponse, merchantUrl, discovered, inputUrl)
@@ -608,6 +627,62 @@ function parseMaybeJson(text: string): unknown {
 }
 
 /**
+ * #2983: the local-flow counterpart of mcp-server's `HostedToolError` for the
+ * `MERCHANT_NOT_READY` failure — carries the same wire fields
+ * (`code`, `next_action`, `retry_with_new_quote`) `normalizeError` below
+ * reads off it. Not a `HavenApiError`: that class's `code` is hardcoded to
+ * `'API_ERROR'`, and this failure needs its own code on the wire.
+ */
+class MerchantNotReadyError extends Error {
+  readonly code = AgentPaymentFailureCode.MerchantNotReady
+  readonly statusCode = 503
+  readonly nextAction = AgentPaymentNextAction.StopAndTellUser
+  // Genuinely retryable — unlike a rejection, nothing about THIS call was
+  // wrong; the merchant's own wallet needs to recover first.
+  readonly retryWithNewQuote = true
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'MerchantNotReadyError'
+  }
+}
+
+/**
+ * #2983: mirrors mcp-server's `merchantNotReadyErrorFor` (`mcp-context.ts`)
+ * for the local runtime. Only the merchant's OWN refusal shape — `503
+ * { error: 'merchant_not_ready', reason_code, settlements_remaining,
+ * retry_after_s }` — maps here. A bare 503 (a load balancer, an HTML outage
+ * page, a non-JSON body) is not a capacity signal and keeps going through
+ * the #1301 discovery path. `response.clone()` because the caller still
+ * needs to read the ORIGINAL response (for `discoveryMissError`'s status)
+ * when this returns null.
+ */
+async function merchantNotReadyErrorFor(response: Response): Promise<MerchantNotReadyError | null> {
+  if (response.status !== 503) return null
+  let body: unknown
+  try {
+    body = await response.clone().json()
+  } catch {
+    return null
+  }
+  if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
+    return null
+  }
+  const { reason_code, settlements_remaining, retry_after_s } = body as Record<string, unknown>
+  return new MerchantNotReadyError(
+    'The merchant refused this call: it cannot settle a payment right now' +
+      (typeof reason_code === 'string' ? ` (reason_code: ${reason_code})` : '') +
+      (typeof settlements_remaining === 'number'
+        ? `, settlements_remaining: ${settlements_remaining}`
+        : '') +
+      '. No payment was created.' +
+      (typeof retry_after_s === 'number'
+        ? ` Retry after approximately ${retry_after_s}s.`
+        : ' This is often transient; retry later.'),
+  )
+}
+
+/**
  * #1301: the local-flow counterpart of mcp-server's `withDiscoveryGuidance`
  * (kept there, not shared — that helper rewrites a thrown `HavenApiError`;
  * this one builds a fresh failure from a non-ok `Response`, since the local
@@ -637,6 +712,17 @@ function discoveryMissError(
 }
 
 function normalizeError(err: unknown): ToolFailure {
+  if (err instanceof MerchantNotReadyError) {
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      statusCode: err.statusCode,
+      nextAction: err.nextAction,
+      retry_with_new_quote: err.retryWithNewQuote,
+    }
+  }
+
   if (err instanceof HavenPaymentStateError) {
     return {
       success: false,

@@ -23,6 +23,29 @@ last-verified: "2026-09-14"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#2983):** the local runtime (`packages/mcp/src/tools.ts`,
+> `haven_pay_mcp_tool`) now mirrors the hosted mapping below — a merchant
+> `503 { error: 'merchant_not_ready', … }` refusal on the quote path is
+> reported as `MERCHANT_NOT_READY` (on the local envelope the field is spelled
+> `nextAction: stop_and_tell_user` — its failure shape is camelCase, unlike
+> the hosted `next_action`; `retry_with_new_quote: true`; the merchant's `reason_code` / `retry_after_s`
+> in the message) BEFORE the #1301 same-origin discovery fallback, on both the
+> original probe and a retry against a discovered endpoint. A bare 503 (no
+> matching JSON body) still falls through to today's discovery-miss path
+> unchanged. The two runtimes are at parity on this refusal now; no tool
+> added, renamed or re-shaped, and the wire code is imported from
+> `@haven_ai/sdk`'s `AgentPaymentFailureCode`, never redefined locally.
+> Separately, the hosted paid-retry refusal (`MERCHANT_REJECTED_AFTER_FUNDING`,
+> `deliverMerchantPayment` in `packages/mcp-server/src/tools/paid-mcp-completion.ts`)
+> is now scheme-aware: on erc7710 (no funding leg — the signature IS the
+> settlement child) the refusal no longer carries `sweep_stranded_funds`
+> guidance or a stranded-funds claim, since nothing moved; it says the
+> merchant refused delivery, no settlement ran, and the budget is intact, and
+> surfaces the merchant's `reason_code` / `retry_after_s` when its body is
+> `merchant_not_ready`. The eip3009 branch is unchanged — the delegate wallet
+> genuinely may hold stranded funds there, and the sweep guidance stays.
+> Nothing else in this document was re-verified in this pass.
+>
 > **Recent re-verification (#2985):** the signer's one network call —
 > `fetchX402SignContext` (`packages/signer/src/sign-context.ts`, the
 > authenticated `GET /x402/:id/sign-context` read behind the `{ payment_id }`
@@ -44,10 +67,10 @@ last-verified: "2026-09-14"
 > as `API_ERROR` "no discovery document". The SDK's
 > `X402UnexpectedStatusError` now carries the merchant's JSON body. No tool
 > added, renamed or re-shaped; strict-input list, consent hash and
-> version-skew contract untouched. The local runtime (`packages/mcp`) is
-> not on this path — the demo merchant's readiness gate is a merchant-side
-> change (see `packages/demo-merchant-mcp/README.md`). Nothing else in this
-> document was re-verified in this pass.
+> version-skew contract untouched. At the time of this pass the local runtime
+> (`packages/mcp`) was NOT on this path — since corrected to parity, see the
+> #2983 re-verification above. Nothing else in this document was re-verified
+> in this pass.
 >
 > **Recent re-verification (#2975):** the hosted server's two cap refusals
 > that still bypassed the guidance envelope — `PRICE_EXCEEDS_MAX` and

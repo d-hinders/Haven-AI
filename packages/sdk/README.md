@@ -362,7 +362,7 @@ Terminal from any non-confirmed phase:
 
 x402 tool-window failures:
    expired funding/quote window → PAYMENT_WINDOW_EXPIRED → re-quote with same idempotency_key
-   merchant rejection after funding → MERCHANT_REJECTED_AFTER_FUNDING → haven_sweep_delegate
+   merchant rejection after funding → MERCHANT_REJECTED_AFTER_FUNDING → haven_sweep_delegate (eip3009 only; erc7710: nothing to sweep, follow the message)
 ```
 
 ### `phase` reference
@@ -408,7 +408,7 @@ Hosted MCP and signer tools also return stable `code` values on recoverable x402
 | `MAX_AMOUNT_UNCONVERTIBLE` | `max_amount_human` could not be converted against this quote's asset — its decimals are unknown to Haven, or the cap has more decimal places than the asset supports. Nothing was spent. | Round the cap to the asset's decimals, or re-send it as an exact atomic `max_amount`. |
 | `MERCHANT_NOT_READY` | The merchant answered the quote probe with its own `503 { error: 'merchant_not_ready', reason_code, retry_after_s }` instead of a 402 — it cannot settle right now (e.g. its settlement wallet is out of gas). No payment was created. | Tell the user and retry later (`retry_after_s` in the message when given); do not treat it as a wrong endpoint. Payloads carry `next_action: stop_and_tell_user` and `retry_with_new_quote: true`. |
 | `PAYMENT_WINDOW_EXPIRED` | The funding/quote window closed before `haven_x402_sign_header`, `haven_submit`, or `haven_complete_mcp_tool` could finish. | Re-run `haven_pay_mcp_tool` with the same `idempotency_key`, then sign and complete the fresh quote. Payloads include `retry_with_new_quote: true`. |
-| `MERCHANT_REJECTED_AFTER_FUNDING` | Haven's funding leg succeeded, but the merchant rejected the paid retry. | Stop retrying the merchant and call `haven_sweep_delegate` so the user can recover stranded delegate USDC. |
+| `MERCHANT_REJECTED_AFTER_FUNDING` | The merchant rejected the paid retry. On eip3009 Haven's funding leg had succeeded; on erc7710 there is no funding leg (#2983). | eip3009: stop retrying the merchant and call `haven_sweep_delegate` so the user can recover stranded delegate USDC. erc7710: nothing to sweep — follow the message (re-quote later if the merchant declined to settle; otherwise check `haven_get_payment_status` after the payment window before re-quoting). |
 
 ## Payments outside the agent's budget
 

@@ -1058,7 +1058,8 @@ export const AgentPaymentFailureCode = {
   PriceExceedsMax: 'PRICE_EXCEEDS_MAX',
   /** The x402 funding/quote window expired before the signer or hosted settle step could finish. */
   PaymentWindowExpired: 'PAYMENT_WINDOW_EXPIRED',
-  /** The Haven funding leg succeeded, but the merchant rejected the paid retry. */
+  /** The merchant rejected the paid retry. On eip3009 the funding leg had succeeded (sweep);
+   *  on erc7710 there is no funding leg — nothing to sweep, follow the message (#2983). */
   MerchantRejectedAfterFunding: 'MERCHANT_REJECTED_AFTER_FUNDING',
   /** #1300 review: funding is on-chain but the merchant never ANSWERED the
    *  paid retry within the timeout. NOT proof of rejection — the merchant
@@ -1199,7 +1200,7 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
   [AgentPaymentFailureCode.PaymentWindowExpired]:
     'The x402 funding/quote window expired before the signer or hosted settle step could finish. Re-quote via haven_pay_mcp_tool with the same idempotency key to avoid duplicate funding.',
   [AgentPaymentFailureCode.MerchantRejectedAfterFunding]:
-    'The Haven funding leg succeeded, but the merchant rejected the paid retry. Stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate.',
+    'The merchant rejected the paid retry. eip3009: the funding leg succeeded — stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate. erc7710: no funding leg, nothing to sweep — follow the message (re-quote later, or check haven_get_payment_status after the window first).',
   [AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding]:
     'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
   [AgentPaymentFailureCode.MerchantCallContextUnavailable]:

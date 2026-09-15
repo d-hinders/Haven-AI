@@ -81,7 +81,7 @@ describe('config wires its boolean flags through parseBooleanFlag (#3015)', () =
     expect(mod.config.accountingEnabled).toBe(true)
   })
 
-  it('the NEW name still wins over the deprecated one, and its refusal is the one that surfaces', async () => {
+  it('an unparseable DEPRECATED name never refuses the boot while the new name is set', async () => {
     for (const name of ALL_NAMES) delete process.env[name]
     process.env.HAVEN_ACCOUNTING_ENABLED = 'false'
     process.env.HAVEN_REPORTING_FEED_ENABLED = 'TRUE'
@@ -89,8 +89,37 @@ describe('config wires its boolean flags through parseBooleanFlag (#3015)', () =
 
     // The precedence rule (#2859) is unchanged by #3015: the new name wins
     // whenever SET, so a stale — even unparseable — old value is never
-    // consulted and cannot refuse the boot.
+    // consulted and cannot refuse the boot. Discriminating: if precedence
+    // were reversed this import would reject.
     const mod = await import('../config.js')
     expect(mod.config.accountingEnabled).toBe(false)
+  })
+
+  it('and when the NEW name is the bad one, ITS refusal is what surfaces', async () => {
+    // The other half of precedence, which the test above does not cover: the
+    // refusal must name the variable the operator actually has to fix, not
+    // the deprecated one that happens to be well-formed.
+    for (const name of ALL_NAMES) delete process.env[name]
+    process.env.HAVEN_ACCOUNTING_ENABLED = 'TRUE'
+    process.env.HAVEN_REPORTING_FEED_ENABLED = 'true'
+    vi.resetModules()
+
+    await expect(import('../config.js')).rejects.toThrow(/HAVEN_ACCOUNTING_ENABLED is set to "TRUE"/)
+  })
+
+  it('the #2859 deprecation warning fires BEFORE the refusal, so a bad old value still gets the rename nudge', async () => {
+    // Ordering, not content: moving the warn below the parse would drop the
+    // nudge for exactly the operator who most needs it — one still on the old
+    // name AND carrying a value that will not parse.
+    for (const name of ALL_NAMES) delete process.env[name]
+    process.env.HAVEN_REPORTING_FEED_ENABLED = 'TRUE'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.resetModules()
+
+    await expect(import('../config.js')).rejects.toThrow(/HAVEN_REPORTING_FEED_ENABLED is set to "TRUE"/)
+    expect(
+      warn.mock.calls.map((c) => String(c[0])).filter((m) => /HAVEN_REPORTING_FEED_ENABLED is deprecated/.test(m)),
+    ).toHaveLength(1)
+    warn.mockRestore()
   })
 })

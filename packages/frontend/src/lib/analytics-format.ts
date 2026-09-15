@@ -46,6 +46,7 @@ export function formatAnalyticsAmountCompact(amount: string, currency: Analytics
     style: 'currency',
     currency,
     notation: 'compact',
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number.parseFloat(amount))
 }

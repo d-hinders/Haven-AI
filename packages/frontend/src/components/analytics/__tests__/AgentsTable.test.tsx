@@ -88,7 +88,8 @@ describe('AgentsTable — the desktop table', () => {
     const text = row.textContent ?? ''
     expect(text).toMatch(/\$312\.25/) // spent, via the money formatter
     expect(text).toMatch(/96%/) // share, rounded
-    expect(text).toMatch(/>\s*4\s*<\/td>/) // payments, as the integer it is
+    const cells = row.querySelectorAll('td')
+    expect(cells[3].textContent).toBe('4') // payments, as the integer it is
     expect(text).toMatch(/1 · 2 attempts/) // refusals plus the attempts behind them
     expect(text).toMatch(/214\.00 of 250\.00 USDC/) // the delegation's own units
     expect(text).toMatch(/NordShield VPN/) // a label the API resolved, not this table
@@ -99,7 +100,7 @@ describe('AgentsTable — the desktop table', () => {
     // the pair every time would train the reader to stop parsing the cell.
     const { container } = mount()
     const retired = container.querySelectorAll('tbody tr')[1]
-    expect(retired.textContent ?? '').toMatch(/>\s*1\s*<\/td>/)
+    expect(retired.querySelectorAll('td')[4].textContent).toBe('1') // refusals: one row, no attempts clause
     expect(retired.textContent ?? '').not.toMatch(/1 · 1 attempts/)
   })
 

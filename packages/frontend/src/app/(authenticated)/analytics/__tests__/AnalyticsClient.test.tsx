@@ -132,7 +132,12 @@ describe('Analytics — loading', () => {
     // downward as the figures arrive.
     render(<AnalyticsClient />)
     const skeleton = screen.getByTestId('analytics-skeleton')
-    expect(within(skeleton).getAllByRole('status', { hidden: true })).toBeTruthy()
+    // Four tile placeholders over one table frame: the skeleton is the settled
+    // page's block structure, not a spinner, which is what stops the layout
+    // collapsing downward while the figures arrive.
+    expect(skeleton.children.length).toBe(2)
+    expect(skeleton.children[0].children.length).toBe(4) // the four tiles
+    expect(skeleton.children[1].children.length).toBe(4) // header bar plus three rows
     expect(skeleton.querySelectorAll('[class*="rounded-"]').length).toBeGreaterThan(4)
     expect(screen.getByText('Last 30 days')).toBeTruthy()
   })
@@ -273,8 +278,11 @@ describe('Analytics — the populated page', () => {
   it('shows the trend figures and the agents table once there are three days of data', () => {
     render(<AnalyticsClient />)
     expect(screen.queryByTestId('analytics-sparse-line')).toBeNull()
-    expect(within(screen.getByTestId('analytics-page')).getByText('Research agent')).toBeTruthy()
-    expect(within(screen.getByTestId('analytics-page')).getByText('Data-feed agent')).toBeTruthy()
+    // Desktop table and mobile rows: the AgentsTable's complementary pair,
+    // both present in the DOM — the two-renderings rule at the page level.
+    const page = screen.getByTestId('analytics-page')
+    expect(within(page).getAllByText('Research agent')).toHaveLength(2)
+    expect(within(page).getAllByText('Data-feed agent')).toHaveLength(2)
   })
 })
 

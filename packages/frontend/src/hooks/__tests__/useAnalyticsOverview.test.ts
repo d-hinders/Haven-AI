@@ -34,7 +34,7 @@ vi.mock('@/lib/api', () => ({
 import { useAnalyticsOverview } from '@/hooks/useAnalyticsOverview'
 import { browserTimeZone } from '@/lib/analytics-range'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../scripts/screenshot.mjs'
-import type { AnalyticsOverviewResponse } from '@/types/analytics'
+import type { AnalyticsOverviewResponse, AnalyticsRangeValue } from '@/types/analytics'
 
 const OVERVIEW = FIXTURE_ANALYTICS_OVERVIEW as AnalyticsOverviewResponse
 /** A second, distinguishable window, derived so the two cannot be confused by
@@ -100,8 +100,9 @@ describe('useAnalyticsOverview', () => {
 
   it('re-asks nothing when a re-render changes no answer', async () => {
     mockApiGet.mockResolvedValue(OVERVIEW)
-    const { result, rerender } = renderHook((props: { range: '30d' }) =>
-      useAnalyticsOverview(props.range, 'usd'),
+    const { result, rerender } = renderHook(
+      ({ range }: { range: AnalyticsRangeValue }) => useAnalyticsOverview(range, 'usd'),
+      { initialProps: { range: '30d' } },
     )
     await waitFor(() => expect(result.current.loading).toBe(false))
     rerender({ range: '30d' })
@@ -116,8 +117,9 @@ describe('useAnalyticsOverview', () => {
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise)
 
-    const { result, rerender } = renderHook((props: { range: '30d' | '7d' }) =>
-      useAnalyticsOverview(props.range, 'usd'),
+    const { result, rerender } = renderHook(
+      ({ range }: { range: AnalyticsRangeValue }) => useAnalyticsOverview(range, 'usd'),
+      { initialProps: { range: '30d' } },
     )
 
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(1))

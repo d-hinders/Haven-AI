@@ -89,6 +89,11 @@ High-level voice rules:
 ## 3. Information Architecture
 
 - Collection routes are plural: `/accounts`, `/agents`, `/contacts`, `/transactions`.
+- `/analytics` is the reporting surface of the authenticated app (epic
+  [#2944](https://github.com/d-hinders/Haven-AI/issues/2944)): what the
+  account's agents did with their money in a chosen window, read-only, with
+  its sidebar entry after *Transactions* and its recipe in
+  [screen-recipes.md](./screen-recipes.md#analytics).
 - Detail routes use an id: `/accounts/[accountId]`, `/agents/[agentId]`.
 - Legacy singular collection routes should redirect to the plural route.
 - Navigation items are stable nouns. Actions such as Send, Receive, Add funds, and Approve live inside the relevant screen.

@@ -68,7 +68,9 @@ describe('useAgents visible-only polling (#2732)', () => {
   })
 
   it('does not queue the skipped tick: one fetch after the rejected one resolves', async () => {
-    mockApiGet.mockResolvedValue({ agents: [] })
+    // `Once`: a persistent `mockResolvedValue` would replace the routed
+    // implementation for every later case in this file (re-review nit).
+    mockApiGet.mockResolvedValueOnce({ agents: [] })
     const { result } = renderHook(() => useAgents())
     await act(async () => {
       await Promise.resolve()

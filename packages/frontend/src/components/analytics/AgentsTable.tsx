@@ -9,10 +9,10 @@ import {
   formatBudgetTokenValue,
   formatSharePercent,
   lastPaymentCaption,
+  merchantLabel,
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
-import { isValidAddress, truncate } from '@/lib/format'
 import { useState } from 'react'
 import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
@@ -123,31 +123,10 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
 }
 
 /**
- * The ONE merchant-label rule, shared by the desktop cell and the mobile
- * disclosure line (the two renderings are the same data, so a truncation that
- * exists on one side and not the other is a disagreement between them).
- *
- * The label is the API's — contact, else receipt name, else address — and the
- * table never re-resolves it, because a second resolution here is a second place
- * the same merchant can be named two different ways. What this does is narrower:
- * it does not decide WHO the merchant is, only how a label that is still an
- * address is displayed. Such a label goes through `lib/format.truncate`, the
- * one truncation rule in the app (#853), because an un-truncated `0x…` at table
- * width clipped mid-glyph with no ellipsis and no way to read the whole thing.
- * The full string rides in `title` so the reader can still get it; contacts and
- * receipt names are not addresses, keep their own characters, and get no title.
- *
- * `isValidAddress` is `@haven_ai/core`'s (re-exported through `lib/format`) —
- * the same check the rest of the app uses, deliberately not viem's, which
- * validates the EIP-55 checksum and so would reject a lowercase address into
- * the non-address branch.
+ * The ONE merchant-label rule lives in `lib/analytics-format.merchantLabel`
+ * (shared with slice E's MerchantsTable, so the two tables cannot diverge on
+ * how an unresolved address reads). It is imported, not restated here.
  */
-function merchantLabel(label: string): { value: string; title?: string } {
-  if (isValidAddress(label)) {
-    return { value: truncate(label), title: label }
-  }
-  return { value: label }
-}
 
 function MerchantCell({ agent }: { agent: AnalyticsAgentRow }) {
   if (agent.top_merchant === null) {

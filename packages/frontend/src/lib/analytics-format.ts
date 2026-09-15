@@ -1,4 +1,4 @@
-import { timeAgo } from '@/lib/format'
+import { timeAgo, truncate, isValidAddress } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import type { AnalyticsDelegationBudget } from '@/types/analytics'
 
@@ -170,5 +170,69 @@ export function refusalsCaption(refusedCount: number, refusedAttempts: number): 
   const payments = refusedCount === 1 ? 'refused payment' : 'refused payments'
   if (refusedAttempts === refusedCount) return `${refusedCount} ${payments}`
   return `${refusedCount} ${payments} · across ${refusedAttempts} attempts`
+}
+
+/**
+ * How a merchant label that is still an address is DISPLAYED (#2949).
+ *
+ * This decides nobody's identity — the label is the API's (contact, else
+ * receipt name, else address), and neither of the two tables that use it
+ * re-resolves, because a second resolution is a second place the same merchant
+ * can be named two ways. What it does is the display half only: such a label
+ * goes through `lib/format.truncate`, the one truncation rule in the app
+ * (#853), because an un-truncated `0x…` at table width clips mid-glyph with no
+ * ellipsis and no way to read the whole thing. The full string rides in the
+ * returned `title` so the reader can still get it; contacts and receipt names
+ * are not addresses, keep their own characters, and get no title.
+ *
+ * `isValidAddress` is `@haven_ai/core`'s (re-exported through `lib/format`),
+ * deliberately not viem's, which validates the EIP-55 checksum and so would
+ * reject a lowercase address into the non-address branch.
+ *
+ * It lives here rather than beside either table because BOTH tables use it —
+ * the agents table's top-merchant cell and slice E's merchants table render
+ * the same field — and a truncation that exists on one side and not the other
+ * is a disagreement between them, exactly the class this module exists to
+ * prevent.
+ */
+export function merchantLabel(label: string): { value: string; title?: string } {
+  if (isValidAddress(label)) {
+    return { value: truncate(label), title: label }
+  }
+  return { value: label }
+}
+
+/**
+ * The day label the balance chart and the merchants table print: "11 Jul",
+ * the same `en-GB` day+short-month voice `formatBudgetResetDate` already uses,
+ * so one page does not hold two dialects of a date. Takes the endpoint's
+ * `YYYY-MM-DD` bucket string; `isValidDateString`-style validation is not
+ * performed because the endpoint owns the format and the parity fixtures
+ * prove it, and an unparseable date renders as its own raw string rather than
+ * as an invented one.
+ */
+export function formatAnalyticsDay(dayIso: string): string {
+  const date = new Date(`${dayIso}T00:00:00.000Z`)
+  if (Number.isNaN(date.getTime())) return dayIso
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(date)
+}
+
+/**
+ * The compacted balance figure for the chart's ticks and its table: a number
+ * through `Intl`, in the same voice `formatAnalyticsAmount` gives the tiles —
+ * but it takes a NUMBER because that is what `AreaChart`'s `formatValue`
+ * contract fixes (the caller formats every money figure; the primitive prints
+ * none). The string→number parse for a wire row happens ONCE, at the row
+ * mapping in `BalanceSection` — the same edge parse `formatAnalyticsAmount`
+ * performs for the tiles — so the wire's numeric strings are never re-typed
+ * into numbers anywhere else.
+ */
+export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
 }
 

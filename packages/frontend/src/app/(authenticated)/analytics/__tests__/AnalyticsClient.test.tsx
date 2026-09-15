@@ -298,9 +298,12 @@ describe('Analytics — the populated page', () => {
     expect(screen.queryByTestId('analytics-sparse-line')).toBeNull()
     // Desktop table and mobile rows: the AgentsTable's complementary pair,
     // both present in the DOM — the two-renderings rule at the page level.
-    const page = screen.getByTestId('analytics-page')
-    expect(within(page).getAllByText('Research agent')).toHaveLength(2)
-    expect(within(page).getAllByText('Data-feed agent')).toHaveLength(2)
+    // Scoped to the agents section because the merchants roster names the
+    // same agents on purpose (one roster, both tables), so a page-wide count
+    // of a name would be counting four renderings of one truth.
+    const agentsSection = screen.getByTestId('analytics-agents-section')
+    expect(within(agentsSection).getAllByText('Research agent')).toHaveLength(2)
+    expect(within(agentsSection).getAllByText('Data-feed agent')).toHaveLength(2)
   })
 })
 
@@ -397,5 +400,217 @@ describe('Analytics — the currency is the one the Settings surface owns', () =
     render(<AnalyticsClient />)
     expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'usd')
     expect(screen.getByTestId('stat-tile-spent').textContent).toMatch(/\$324\.75/)
+  })
+})
+
+/**
+ * ── Slice E (#2949): the two sections the wire contract parked here ───────
+ *
+ * `MerchantsTable` and the balance-over-time chart, mounted. What the page
+ * is under test for is the GUARDING, not the internals of either component —
+ * those suites pin their own behaviour (`MerchantsTable.test.tsx` owns the
+ * table's columns, the label rule and the link target; the chart's own
+ * primitives are pinned at their homes in the design system). What belongs to
+ * the page is the question of WHEN each section appears, and that question
+ * has one answer with three parts:
+ *
+ *   1. one request owns the whole page — every figure below is read off the
+ *      same `data` the tiles were rendered from, and the hook is asked
+* exactly once;
+ *   2. a section appears when ITS OWN array is populated: an endpoint that
+ *      reported no merchants gets no table, and a balance series shorter
+ *      than the chartable floor gets no chart — either rendered anyway would
+ *      be the page asserting a figure it was not given;
+ *   3. the sparse branch still withholds BOTH bands together, which is the
+ *      point those bands were created for.
+ *
+ * The fixtures are the capture harness's again, imported and not re-typed —
+ * the same bytes `screenshot.mjs` serves under `/analytics/overview` for the
+ * `analytics-*` captures. The balance series is the 30 absolute snapshots
+ * ending on the dashboard's own account total, so this suite and the PNGs
+ * describe one endpoint.
+ */
+import {
+  FIXTURE_ANALYTICS_BALANCE_BY_DAY,
+  FIXTURE_ANALYTICS_MERCHANTS,
+} from '../../../../../scripts/screenshot.mjs'
+import { formatAnalyticsValue } from '@/lib/analytics-format'
+
+const FIRST_SNAPSHOT = FIXTURE_ANALYTICS_BALANCE_BY_DAY[0]
+const LAST_SNAPSHOT = FIXTURE_ANALYTICS_BALANCE_BY_DAY[FIXTURE_ANALYTICS_BALANCE_BY_DAY.length - 1]
+
+/** Derived from the populated fixture, so the figures stay the harness's and
+ *  only the array under test moves — the idiom of SPARSE above. */
+const NO_MERCHANTS: AnalyticsOverviewResponse = { ...POPULATED, merchants: [] }
+const SHORT_BALANCE: AnalyticsOverviewResponse = {
+  ...POPULATED,
+  balance_by_day: POPULATED.balance_by_day.slice(0, 2),
+}
+const LONGER_LAST: AnalyticsOverviewResponse = {
+  ...POPULATED,
+  balance_by_day: [...POPULATED.balance_by_day.slice(0, -1), { ...LAST_SNAPSHOT, value: '9999.00' }],
+}
+
+function settledWith(data: AnalyticsOverviewResponse) {
+  return { data, loading: false, failed: false, refetch: mockRefetch }
+}
+
+describe('Analytics — the merchants and balance sections (slice E, #2949)', () => {
+  it('mounts both sections off the one response the page already has', () => {
+    // The whole point of slice B's single round-trip contract: the merchants
+    // and the balance arrive on the same response as the tiles and the
+    // agents, so mounting them must not spend a second request.
+    render(<AnalyticsClient />)
+    expect(screen.getByTestId('analytics-merchants-section')).toBeTruthy()
+    expect(screen.getByTestId('analytics-balance-section')).toBeTruthy()
+    expect(mockUseAnalyticsOverview).toHaveBeenCalledTimes(1)
+  })
+
+  it('lists the three harness merchants under a heading, in the endpoint’s order', () => {
+    // The heading is what the capture harness waits on for the populated
+    // scenario, so it is pinned at the page that renders it and not only at
+    // the card that provides it. The order is the endpoint's ranking by
+    // spend, which the page inherits rather than re-sorts.
+    render(<AnalyticsClient />)
+    const page = screen.getByTestId('analytics-page')
+    const heading = within(page).getByRole('heading', { level: 2, name: 'Top merchants' })
+    expect(heading).toBeTruthy()
+    const rows = Array.from(
+      screen.getByTestId('analytics-merchants-section').querySelectorAll('tbody tr'),
+    )
+    expect(rows.map((row) => row.querySelectorAll('td')[0].textContent)).toEqual([
+      FIXTURE_ANALYTICS_MERCHANTS[0].label,
+      FIXTURE_ANALYTICS_MERCHANTS[1].label,
+      // The third label IS its address, and the table's one shared rule
+      // truncates it — the full string rides on in the title.
+      '0x71C2…7128',
+    ])
+  })
+
+  it('renders the chart’s accessible name from the wire rows, not from a typed sentence', () => {
+    // The summary is computed from the very series it draws (#2948's
+    // precedent, which `BalanceSection` follows): a sentence typed next to
+    // the data can drift from it. So the two figures the label states must
+    // be the first and last snapshot of THIS response, formatted by the
+    // voice the tiles use — and moving the last snapshot on the wire moves
+    // the sentence with it.
+    render(<AnalyticsClient />)
+    const svg = screen.getByTestId('analytics-balance-section').querySelector('svg[role="img"]')
+    const label = svg?.getAttribute('aria-label') ?? ''
+    expect(label).toMatch(/^Balance over 30 days:/)
+    expect(label).toContain(`started at ${formatAnalyticsValue(Number(FIRST_SNAPSHOT.value), 'USD')}`)
+    expect(label).toContain(`ended at ${formatAnalyticsValue(Number(LAST_SNAPSHOT.value), 'USD')}`)
+  })
+
+  it('follows the wire: change the last snapshot and the summary sentence changes', () => {
+    mockUseAnalyticsOverview.mockReturnValue(settledWith(LONGER_LAST))
+    render(<AnalyticsClient />)
+    const svg = screen.getByTestId('analytics-balance-section').querySelector('svg[role="img"]')
+    expect(svg?.getAttribute('aria-label')).toContain(
+      `ended at ${formatAnalyticsValue(9_999, 'USD')}`,
+    )
+  })
+
+  it('speaks the chart in the currency the Settings surface owns, as it speaks the tiles', () => {
+    // One preference, two sections: the chart must not hold a dollar while
+    // the tile spends a euro, which is why both take `currency` from the
+    // page and neither reads the response's own echo of it.
+    preferences('EUR')
+    render(<AnalyticsClient />)
+    const svg = screen.getByTestId('analytics-balance-section').querySelector('svg[role="img"]')
+    const label = svg?.getAttribute('aria-label') ?? ''
+    expect(label).toContain(formatAnalyticsValue(Number(LAST_SNAPSHOT.value), 'EUR'))
+    expect(label).not.toContain('$')
+  })
+
+  it('hands the chart the two-renderings pair, so a phone gets a narrower plot and not a second request', () => {
+    const { container } = render(<AnalyticsClient />)
+    const section = container.querySelector('[data-testid="analytics-balance-section"]') as HTMLElement
+    const charts = Array.from(section.querySelectorAll('[data-testid="area-chart"]'))
+    expect(charts).toHaveLength(2)
+    const wrappers = charts.map((el) => el.parentElement?.className ?? '')
+    expect(wrappers.some((c) => c.includes('hidden') && c.includes('lg:block'))).toBe(true)
+    expect(wrappers.some((c) => c.includes('lg:hidden'))).toBe(true)
+  })
+
+  it('withholds the merchants table when the endpoint reported no merchant', () => {
+    // An empty list renders no rows and, at the page, no table either: the
+    // frame would be the component asserting a section the response did not
+    // populate. The agents table and the chart are not moved — a range can
+    // have agents and snapshots without a single resolved merchant.
+    mockUseAnalyticsOverview.mockReturnValue(settledWith(NO_MERCHANTS))
+    render(<AnalyticsClient />)
+    expect(screen.queryByTestId('analytics-merchants-section')).toBeNull()
+    expect(screen.queryByText('Top merchants')).toBeNull()
+    expect(screen.getByTestId('analytics-balance-section')).toBeTruthy()
+    const agentsSection = screen.getByTestId('analytics-agents-section')
+    expect(within(agentsSection).getAllByText('Research agent')).toHaveLength(2)
+  })
+
+  it('withholds the chart when the balance series is shorter than the chartable floor', () => {
+    // Two snapshots are not a trend: a line through two points agrees with
+    // every trend whatsoever and proves none of them, and the floor is the
+    // chart system's own constant, imported here rather than restated. The
+    // merchants table stands — it reports rows, not a shape, and two days
+    // of it are as true as thirty.
+    mockUseAnalyticsOverview.mockReturnValue(settledWith(SHORT_BALANCE))
+    render(<AnalyticsClient />)
+    expect(screen.queryByTestId('analytics-balance-section')).toBeNull()
+    expect(screen.getByTestId('analytics-merchants-section')).toBeTruthy()
+  })
+
+  it('withholds both bands together while the window is sparse', () => {
+    // The sparse branch returns before either section is reached, so a
+    // two-day window reports the reason on the face of the page instead of
+    // leaving a chart region and a table region to be diagnosed as bugs.
+    mockUseAnalyticsOverview.mockReturnValue({
+      data: SPARSE,
+      loading: false,
+      failed: false,
+      refetch: mockRefetch,
+    })
+    render(<AnalyticsClient />)
+    expect(screen.getByTestId('analytics-sparse-line')).toBeTruthy()
+    expect(screen.queryByTestId('analytics-merchants-section')).toBeNull()
+    expect(screen.queryByTestId('analytics-balance-section')).toBeNull()
+  })
+
+  it('renders neither section in the empty window, where the page answers with its own state', () => {
+    mockUseAnalyticsOverview.mockReturnValue({
+      data: EMPTY,
+      loading: false,
+      failed: false,
+      refetch: mockRefetch,
+    })
+    const { container } = render(<AnalyticsClient />)
+    expect(container.textContent).toMatch(/No agent activity in this range/)
+    expect(screen.queryByTestId('analytics-merchants-section')).toBeNull()
+    expect(screen.queryByTestId('analytics-balance-section')).toBeNull()
+  })
+
+  it('renders neither section on a failed request, which is an error and not an absence', () => {
+    // The distinction slice C made and slice E must keep: an outage does not
+    // report zero merchants, and a zero-looking page of figures would be the
+    // most dangerous screenshot the product has ever rendered.
+    mockUseAnalyticsOverview.mockReturnValue({
+      data: null,
+      loading: false,
+      failed: true,
+      refetch: mockRefetch,
+    })
+    render(<AnalyticsClient />)
+    expect(screen.queryByTestId('analytics-merchants-section')).toBeNull()
+    expect(screen.queryByTestId('analytics-balance-section')).toBeNull()
+    expect(screen.getByRole('alert')).toBeTruthy()
+  })
+
+  it('reports money and never savings, in the two sections as in the tiles', () => {
+    // The copy doctrine of the epic, asserted over the whole page rather
+    // than over one component, because a banned word in any one of the
+    // sections is a page-wide failure.
+    render(<AnalyticsClient />)
+    const page = screen.getByTestId('analytics-page').textContent ?? ''
+    expect(page).not.toMatch(/\bsavings\b/i)
+    expect(page).not.toMatch(/\bwallet\b/i)
   })
 })

@@ -4,7 +4,12 @@ status: current
 covers:
   - packages/frontend/scripts/screenshot.mjs
   - packages/frontend/src/__tests__/screenshot-fixture.test.ts
-last-verified: "2026-09-14"
+  - packages/frontend/src/app/(authenticated)/analytics/AnalyticsClient.tsx
+  - packages/frontend/src/components/analytics/MerchantsTable.tsx
+  - packages/frontend/src/components/analytics/BalanceSection.tsx
+  - packages/backend/src/routes/analytics-overview.ts
+  - packages/backend/src/infra/repositories/analytics.ts
+last-verified: "2026-09-15"
 ---
 
 # Analytics
@@ -150,8 +155,8 @@ The fixture keys they serve are pinned by
 `packages/frontend/src/__tests__/screenshot-fixture.test.ts`, which fails if
 the harness and the test fixture drift apart — including the wire types: the
 fixture's fiat fields are the numeric strings slice B's endpoint books, and a
-revert to JS numbers goes red. The scenarios are gated on the
-`/analytics` route (#2947): until it lands they are exercised by the parity
-test, and
+revert to JS numbers goes red. The `/analytics` route (#2947) and the
+merchants and balance sections (#2949) have both landed, so all three
+scenarios capture against the real page:
 `npm run screenshot -- --scenario=analytics-populated,analytics-empty,analytics-error`
-produces the desktop and 390px captures, both themes, once it exists.
+produces the desktop and 390px captures, both themes.

@@ -25,6 +25,7 @@ import {
   AgentPaymentPhase,
   HavenApiError,
   HavenClient,
+  MerchantTimeoutError,
 } from '@haven_ai/sdk'
 import { createToolHandlers } from '../tools.js'
 import {
@@ -487,6 +488,45 @@ describe('haven_settle_mcp_tool', () => {
 
     expect(data.settled).toBe(true)
     expect(data.settlement_tx_hash).toBeNull()
+  })
+
+  /**
+   * #3000 (follow-up from #2983's review): the timeout branch had the same
+   * defect as the rejection branch — verify-then-sweep guidance said
+   * unconditionally, even though erc7710 has no funding leg and nothing was
+   * ever staged in a delegate wallet to strand. This pins the erc7710 side;
+   * the eip3009 timeout test in `tools.test.ts` (#1300) pins the side where
+   * the sweep guidance stays true.
+   */
+  it('a merchant TIMEOUT after an erc7710 settle is verify-then-check — no sweep, no stranded claim', async () => {
+    const SIG7710 = '0x' + '33'.repeat(65)
+    stubFetch({
+      'POST /x402/pay_7710_timeout/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(
+      new MerchantTimeoutError('Merchant request timed out after 300000ms: http://merchant.test/mcp'),
+    )
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710_timeout',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding)
+    expect(payload.statusCode).toBe(504)
+    expect(payload.paymentId).toBe('pay_7710_timeout')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
+    expect(payload.suggested_tool).toBe('haven_get_payment_status')
+    expect(payload.message).not.toMatch(/stranded/)
+    expect(payload.message).not.toMatch(/sweep_stranded|haven_sweep_delegate/)
+    expect(payload.message).toMatch(/ignore this code's sweep guidance/i)
+    expect(payload.message).toMatch(/may still settle late/)
+    expect(payload.message).toMatch(/haven_get_payment_status/)
   })
 })
 

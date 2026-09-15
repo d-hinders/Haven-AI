@@ -267,6 +267,32 @@ export async function deliverMerchantPayment(
     // its own guidance (verify-then-sweep), never the bare 504 and never a
     // blind sweep that could race a late settlement.
     if (err instanceof MerchantTimeoutError) {
+      // #3000: same scheme split as #2983's rejection branch, applied to the
+      // timeout branch — erc7710 has no funding leg, so there is never a
+      // delegate balance to strand or sweep here either. `next_action:
+      // check_status_later` is honest on BOTH schemes (the merchant may still
+      // settle late), but eip3009 additionally has a real stranded-funds risk
+      // the sweep guidance below describes; erc7710 does not, so that
+      // guidance is dropped rather than branched around, mirroring the
+      // rejection message's "ignore this code's sweep guidance" framing.
+      if (options?.noFundingLeg) {
+        throw new HostedToolError({
+          code: AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding,
+          message:
+            `The settlement authorization was submitted, but the merchant did not answer the ` +
+            `paid retry before the timeout. erc7710 has no funding leg, so there is no delegate ` +
+            `balance to sweep — ignore this code's sweep guidance. The merchant may still settle ` +
+            `late: check haven_get_payment_status, and retry haven_complete_mcp_tool ONCE before ` +
+            `re-quoting — only re-quote if it shows no settlement. ${err.message}`,
+          statusCode: 504,
+          paymentId: args.payment_id,
+          status: 'merchant_unresponsive_after_funding',
+          phase: 'funded_but_unsettled',
+          nextAction: AgentPaymentNextAction.CheckStatusLater,
+          rail: 'erc7710',
+          suggestedTool: 'haven_get_payment_status',
+        })
+      }
       throw new HostedToolError({
         code: AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding,
         message:

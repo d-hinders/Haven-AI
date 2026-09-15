@@ -23,6 +23,17 @@ last-verified: "2026-09-15"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#3000):** the hosted server's
+> `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of
+> `deliverMerchantPayment` in `src/tools/paid-mcp-completion.ts`) now branches
+> on the settlement scheme the way #2983 made `MERCHANT_REJECTED_AFTER_FUNDING`
+> do: on erc7710 (no funding leg) it drops every sweep mention and points at
+> `haven_get_payment_status` (`next_action: check_status_later`); eip3009 keeps
+> verify-then-sweep. The code-keyed texts (`skill-content.ts`, its frontend
+> mirror, `AgentPaymentFailureCodeDescriptions`, the SDK README) branch on
+> scheme too. No tool added, renamed or re-shaped; the local runtime is not on
+> this path. Nothing else in this document was re-verified in this pass.
+>
 > **Recent re-verification (#3001):** the signer's `fetchX402SignContext`
 > (`packages/signer/src/sign-context.ts`, the authenticated
 > `GET /x402/:id/sign-context` read behind the `{ payment_id }` form of

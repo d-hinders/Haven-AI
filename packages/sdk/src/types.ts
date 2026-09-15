@@ -1078,8 +1078,9 @@ export const AgentPaymentFailureCode = {
   MerchantRejectedAfterFunding: 'MERCHANT_REJECTED_AFTER_FUNDING',
   /** #1300 review: funding is on-chain but the merchant never ANSWERED the
    *  paid retry within the timeout. NOT proof of rejection — the merchant
-   *  holds a valid EIP-3009 authorization and may still settle late, so the
-   *  guidance is verify-then-sweep, never blind sweep. */
+   *  may still settle late, so the guidance is verify-then-act. On eip3009
+   *  the funding leg had succeeded (verify-then-sweep); on erc7710 there is
+   *  no funding leg — nothing to sweep, follow the message (#3000). */
   MerchantUnresponsiveAfterFunding: 'MERCHANT_UNRESPONSIVE_AFTER_FUNDING',
   /**
    * #1307: the caller omitted merchant_url/tool_name (asking Haven to
@@ -1217,7 +1218,7 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
   [AgentPaymentFailureCode.MerchantRejectedAfterFunding]:
     'The merchant rejected the paid retry. eip3009: the funding leg succeeded — stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate. erc7710: no funding leg, nothing to sweep — follow the message (re-quote later, or check haven_get_payment_status after the window first).',
   [AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding]:
-    'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
+    'The merchant did not answer the paid retry before the timeout. The merchant may still settle late. eip3009: the funding leg succeeded — check haven_get_payment_status, retry haven_complete_mcp_tool once, sweep only if no settlement appears. erc7710: no funding leg, nothing to sweep, and haven_complete_mcp_tool has no erc7710 branch — do not retry it; check haven_get_payment_status after the payment window and re-quote only if it shows no settlement.',
   [AgentPaymentFailureCode.MerchantCallContextUnavailable]:
     'merchant_url/tool_name were omitted and no stored merchant call context is available for this payment_id. Re-send merchant_url, tool_name, arguments, and mcp_transport explicitly.',
   [AgentPaymentFailureCode.AmbiguousMaxAmount]:

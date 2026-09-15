@@ -283,6 +283,11 @@ describe('haven_quote_x402', () => {
         status: 402,
         responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader },
       },
+      // #2999: the quote now also prefetches the agent, to predict the
+      // scheme haven_pay_x402_quote will select — that is a Haven call, not
+      // a payment. Stubbed here so this test still measures "no PAYMENT was
+      // created", not "no Haven call was ever made".
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
     })
 
     const result = ok<{
@@ -292,10 +297,123 @@ describe('haven_quote_x402', () => {
     }>(await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }))
 
     expect(result.data.payment_required).toBeDefined()
-    // Haven was never contacted — only the merchant URL.
-    expect(recordedCalls().every((c) => c.url.includes('merchant.test'))).toBe(true)
-    // No x402 intent created.
+    // No x402 intent/payment was created — the only Haven call is the #2999
+    // agent prefetch, never a write.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    expect(
+      recordedCalls().every(
+        (c) => c.url.includes('merchant.test') || c.url.endsWith('/machine-payments/agent'),
+      ),
+    ).toBe(true)
+  })
+
+  // ── #2999: expected_settlement_scheme / expected_funding_leg / expected_settleable ──
+  //
+  // Reuses the same non-throwing agent-prefetch convention haven_pay_x402_quote
+  // already used, and the SAME selectX402SettlementScheme call via the shared
+  // `settlementPredictionFields` support helper (#2991), so this can never
+  // disagree with what haven_pay_x402_quote actually selects next.
+
+  const SCHEME_FACILITATOR = '0x4444444444444444444444444444444444444444'
+  const SCHEME_ERC7710_ATOMIC = '2500000'
+  /** A merchant advertising BOTH a standard entry and an erc7710 one. */
+  const BOTH_ENTRIES_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      ...PAYMENT_REQUIRED.accepts,
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: SCHEME_ERC7710_ATOMIC,
+        maxAmountRequired: SCHEME_ERC7710_ATOMIC,
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [SCHEME_FACILITATOR] },
+      },
+    ],
+  }
+  const SCHEME_DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const SCHEME_LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+
+  function quoteWithHeader(paymentRequired: unknown, agent?: Record<string, unknown>) {
+    stubFetch({
+      'GET /paid': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(paymentRequired)) },
+      },
+      ...(agent ? { 'GET /machine-payments/agent': { status: 200, body: agent } } : {}),
+    })
+    return handlers().haven_quote_x402({ url: 'http://merchant.test/paid' })
+  }
+
+  it('both entries + a delegation-rail agent: predicts erc7710, no funding leg, settleable', async () => {
+    const result = ok<Record<string, any>>(
+      await quoteWithHeader(BOTH_ENTRIES_PAYMENT_REQUIRED, SCHEME_DELEGATION_AGENT),
+    )
+    expect(result.data.expected_settlement_scheme).toBe('erc7710')
+    expect(result.data.expected_funding_leg).toBe(false)
+    expect(result.data.expected_settleable).toBe(true)
+    expect(result.data.warnings).toBeUndefined()
+  })
+
+  it('the same both-entries merchant + a LEGACY-rail agent: predicts eip3009, funding leg, NOT settleable', async () => {
+    const result = ok<Record<string, any>>(
+      await quoteWithHeader(BOTH_ENTRIES_PAYMENT_REQUIRED, SCHEME_LEGACY_AGENT),
+    )
+    expect(result.data.expected_settlement_scheme).toBe('eip3009')
+    expect(result.data.expected_funding_leg).toBe(true)
+    expect(result.data.expected_settleable).toBe(false)
+    expect(result.data.warnings).toBeUndefined()
+  })
+
+  it('a failed agent read predicts nothing and carries the X402_SCHEME_UNKNOWN warning', async () => {
+    stubFetch({
+      'GET /paid': {
+        status: 402,
+        responseHeaders: {
+          'PAYMENT-REQUIRED': btoa(JSON.stringify(BOTH_ENTRIES_PAYMENT_REQUIRED)),
+        },
+      },
+      // A genuine read FAILURE (500), not merely absent — the prefetch's
+      // non-throwing `.then(a => a, () => undefined)` turns this into
+      // `undefined`, same convention haven_pay_x402_quote already uses.
+      'GET /machine-payments/agent': { status: 500, body: {} },
+    })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    expect(result.data.expected_settlement_scheme).toBeNull()
+    expect(result.data.expected_funding_leg).toBeNull()
+    expect(result.data.expected_settleable).toBeUndefined()
+    expect(result.data.warnings).toEqual([
+      expect.objectContaining({ code: 'X402_SCHEME_UNKNOWN' }),
+    ])
+  })
+
+  it('a pay immediately after the quote selects exactly what the quote predicted', async () => {
+    const quote = ok<Record<string, any>>(
+      await quoteWithHeader(BOTH_ENTRIES_PAYMENT_REQUIRED, SCHEME_DELEGATION_AGENT),
+    )
+    expect(quote.data.expected_settlement_scheme).toBe('erc7710')
+
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: SCHEME_DELEGATION_AGENT },
+      'POST /x402': {
+        status: 201,
+        body: {
+          payment_id: 'pay_quote_predicted',
+          status: 'pending_signature',
+          sign_data: {
+            hash: '0x' + '22'.repeat(32),
+            signature_scheme: 'eip712_delegation',
+            typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+          },
+        },
+      },
+    })
+    const pay = ok<Record<string, any>>(
+      await handlers().haven_pay_x402_quote({
+        payment_required: quote.data.payment_required,
+      }),
+    )
+    expect(pay.data.settlement_scheme).toBe('erc7710')
   })
 })
 

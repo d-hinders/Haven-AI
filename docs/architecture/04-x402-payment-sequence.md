@@ -1604,6 +1604,19 @@ merchant selects eip3009 — pre-existing), the same no-guess stance as
 `requireSettleableSelection` treats an unknown rail at prepare/pay. Read-only:
 the quote still reserves no price and creates no intent.
 
+[#2999](https://github.com/d-hinders/Haven-AI/issues/2999) gives the plain-HTTP
+`haven_quote_x402` — the third and last hosted quote surface — the same four
+fields, built through the identical `settlementPredictionFields` support
+helper the two MCP quote tools now call (`predictSettlementScheme` itself
+stayed private; the helper is the exported, single seam). `haven_quote_x402`
+prefetches the agent with the same non-throwing convention its own pay
+sibling `haven_pay_x402_quote` already used at prepare time, so the quote can
+never predict a scheme that pay then disagrees with. All three hosted quote
+tools now carry `expected_settlement_scheme` / `expected_funding_leg` /
+`expected_settleable` / a possible `X402_SCHEME_UNKNOWN` warning; only the
+signing/funding tools remain outside this contract, because they no longer
+need to predict — they select.
+
 **Still unproven end to end, and worth stating rather than assuming.** The
 nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately
 excludes the SDK, so nothing yet demonstrates a full purchase through

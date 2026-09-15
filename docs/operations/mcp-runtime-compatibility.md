@@ -343,18 +343,23 @@ merchant's only compatible entry (or the rail could not be read). It is a
 argument changed, no capability handshake, no signer surface, and the Supported
 Runtime Manifest table is untouched.
 
-As of #2991 the two **hosted** quote tools additionally gain
+As of #2991 (the two MCP quote tools) and #2999 (the hosted plain-HTTP
+`haven_quote_x402`), all THREE **hosted** quote tools gain
 `expected_settlement_scheme: 'erc7710' | 'eip3009' | null` and
 `expected_funding_leg: boolean | null` (and `expected_settleable: boolean`
 when the rail is known — `false` where prepare/pay will refuse with
 `ERC7710_RAIL_REQUIRED`) — the scheme
-`haven_prepare_catalog_purchase` / `haven_pay_mcp_tool` will actually select
-for THIS account, computed by the identical selector, versus `accepted_scheme`
-which only ever describes the merchant's offer. Another deliberate local/hosted
-skew, same shape as the one above: this is response shaping specific to
-`buildMcpToolQuoteResponse` (hosted only), so the local stdio `haven_quote_x402`
-passthrough gains neither field — it has no server-side agent read to predict
-from, and a local caller already holds its own key/rail state.
+`haven_prepare_catalog_purchase` / `haven_pay_mcp_tool` / `haven_pay_x402_quote`
+will actually select for THIS account, computed by the identical selector,
+versus `accepted_scheme` which only ever describes the merchant's offer. All
+three now go through the same `settlementPredictionFields` support helper, so
+none can disagree with the others on an identical accepts[]/agent pair.
+Another deliberate local/hosted skew, same shape as the one above: this is
+response shaping specific to the hosted capability modules
+(`buildMcpToolQuoteResponse`, and the hosted `haven_quote_x402` handler
+directly), so the local stdio `haven_quote_x402` passthrough gains none of
+these fields — it has no server-side agent read to predict from, and a local
+caller already holds its own key/rail state.
 
 One **deliberate local/hosted skew**, recorded because this table exists to
 catch exactly that: the **local stdio** `haven_quote_x402` is a bare

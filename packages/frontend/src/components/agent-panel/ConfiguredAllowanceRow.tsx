@@ -37,8 +37,10 @@ import { formatConfiguredAllowance } from './agent-display'
  * here unchanged: *"These are the terms of the delegation you signed"* — the
  * signed terms, not a fresh chain read. Inventing a third phrasing for one
  * fact is the defect #2195 just fixed one surface over, so this row keeps
- * that page's wording rather than mint a new one — this component is now
- * where it lives, with no second surface left to borrow it from.
+ * that page's "enforced on-chain" caption rather than mint a new one. The
+ * caveat sentence itself is rendered nowhere since #3024; it survives as the
+ * reference wording in `docs/regulatory/casp-risk-guardrails.md`, which is
+ * where to borrow it from when a surface needs it.
  *
  * ── Why the "fallback" framing in the old header was wrong too ───────────────
  *

@@ -89,7 +89,7 @@ export const en = {
       body:
         'The accounting feed is part of the hosted Haven service and is not available on a self-hosted deployment. Nothing is fed from this installation.',
     },
-    /** The Admin → Accounting nav item's markers (#2869). */
+    /** The Money → Accounting nav item's markers (#2869; group per #3024). */
     nav: {
       /** Screen-reader text for the attention dot. */
       attention: 'needs attention',

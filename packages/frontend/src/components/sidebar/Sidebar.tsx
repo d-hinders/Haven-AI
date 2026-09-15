@@ -198,7 +198,8 @@ export default function Sidebar() {
   // could only ever lead to a dead end. The delegation rail enforces budgets
   // on-chain and produces no approvals at all.
 
-  // #2869: the Admin → Accounting entry in its three feed states.
+  // #2869: the Accounting entry (last item of the Money group since #3024)
+  // in its three feed states.
   //   flag on               — plain, plus the attention dot when the
   //                           destination needs a reconnect or a sync is
   //                           `exhausted` (`accountingNeedsAttention`).

@@ -29,6 +29,7 @@ vi.mock('@/components/ui/Tooltip', () => ({
 }))
 
 import Sidebar from '@/components/sidebar/Sidebar'
+import { TAB_ROUTES } from '@/components/sidebar/MobileTabBar'
 import { LocaleProvider } from '@/context/LocaleContext'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { en } from '@/lib/i18n/messages/en'
@@ -147,7 +148,7 @@ describe('Sidebar', () => {
   it('the More sheet lists the remaining items in the same section order as desktop', () => {
     render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     const nav = document.querySelector('nav[aria-label="All sections"]')!
-    const tabRoutes = new Set(['/dashboard', '/agents', '/transactions', '/accounts'])
+    const tabRoutes = new Set<string>(TAB_ROUTES)
     const remaining = Array.from(nav.querySelectorAll('a'))
       .map((a) => a.getAttribute('href'))
       .filter((href): href is string => href !== null && !tabRoutes.has(href))

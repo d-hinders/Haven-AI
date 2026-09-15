@@ -6,7 +6,7 @@ covers:
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
-last-verified: "2026-09-07"
+last-verified: "2026-09-15"
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")

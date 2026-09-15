@@ -293,6 +293,25 @@ Listed products are also exempt from the `/mcp` settlement-readiness gate
 afford it, and this fixture settles nothing, so a fail-band wallet cannot
 block it either.
 
+**Disclosed to the agent, not just to the operator (#2989).** Before this, a
+cold agent buying a listed product got an honest "Delivered — not confirmed
+on-chain" receipt with no way to know beforehand that the outcome was by
+design — a quality scan spent 30 minutes chasing it as a stuck payment. Every
+surface an agent reads now carries the same marker on that product, and only
+that product:
+
+- `list_products`: a `qa_fixture: { kind: "skip_settle", settles_on_chain: false }`
+  field in the matching `structuredContent.products` entry, plus a text line
+  ("QA fixture: verified but never settled on-chain — the receipt will read
+  'Delivered — not confirmed on-chain'", localized for `locale: 'sv'`).
+- The product's 402 challenge `description` — visible to the agent at quote
+  time, before it signs.
+- The discovery document (`GET /` / `GET /.well-known/haven-demo-merchant`) —
+  the same `qa_fixture` field on the product's entry.
+
+Absent (not `null` or `undefined`-valued) on every other product and on every
+other chain, so the prod shape this fixture is inert on is unchanged.
+
 ## ERC-7710 Smart-Account Payments
 
 ERC-7710 is the preferred smart-account demo flow when the required

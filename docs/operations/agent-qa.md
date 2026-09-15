@@ -152,7 +152,13 @@ MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb
 ```
 
 The second setting creates the deterministic stranded-balance condition used by
-the sweep-recovery scenario.
+the sweep-recovery scenario. Since #2989, the merchant discloses the fixture to
+any agent that queries it — `list_products` (structured `qa_fixture` field plus
+a text line), the product's 402 challenge `description`, and the discovery
+document (`GET /` / `GET /.well-known/haven-demo-merchant`) all carry it on
+`storage_50gb` only, so a cold agent sees at quote time — before signing — that
+this specific purchase settles nothing on-chain and its receipt will read
+"Delivered — not confirmed on-chain".
 
 ### Preflight: resources every run consumes (#1530)
 

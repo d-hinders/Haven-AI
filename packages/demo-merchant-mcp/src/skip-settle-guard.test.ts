@@ -353,3 +353,190 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT is exempt from the settlement-readiness g
     }
   }, 15000)
 })
+
+/**
+ * #2989: nothing an agent reads distinguished the skip-settle fixture from a
+ * product that settles — `list_products`, the 402 challenge, and the
+ * discovery document all presented it identically. A cold agent bought it,
+ * got an honest "Delivered — not confirmed on-chain" receipt, and had no way
+ * to know beforehand that this was by design (quality-scan finding B6).
+ *
+ * Mutation-proved: deleting the `isSkipSettleProduct` branch in
+ * `list_products` / `extractPaymentToolInfo` / `buildDiscovery` fails the two
+ * positive assertions below; hard-coding `qa_fixture` onto every product
+ * (instead of gating it) fails the absence assertions.
+ */
+describe('skip-settle qa_fixture marker (#2989)', () => {
+  it('marks the skip-settle product — and ONLY it — with the flag set on Base Sepolia', async () => {
+    const { http, products } = await importHttpWith({
+      MERCHANT_CHAIN_ID: '84532',
+      MERCHANT_SKIP_SETTLE_PRODUCT: 'vpn_basic',
+    })
+    const submit = vi.fn().mockResolvedValue(`0x${'cd'.repeat(32)}`)
+    const waitForReceipt = vi.fn().mockResolvedValue(undefined)
+    const mod = await import('./x402.js')
+    const server = http.createDemoMerchantServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      paymentProcessor: mod.createX402PaymentProcessor({ submit, waitForReceipt }),
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('no address')
+      const url = `http://127.0.0.1:${address.port}/mcp`
+      const origin = `http://127.0.0.1:${address.port}`
+      const post = (body: unknown) =>
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+          body: JSON.stringify(body),
+        })
+
+      // list_products: structured qa_fixture on vpn_basic only, plus the
+      // disclosure line in the text.
+      const listed = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_products', arguments: {} } })
+      const listedRaw = await listed.text()
+      const listedDataLine = listedRaw.split('\n').find((line) => line.startsWith('data:'))
+      const listedBody = JSON.parse(listedDataLine ? listedDataLine.slice('data:'.length).trim() : listedRaw) as {
+        result: {
+          content: Array<{ type: string; text: string }>
+          structuredContent: { products: Array<Record<string, unknown>> }
+        }
+      }
+      const listedProducts = listedBody.result.structuredContent.products
+      const fixture = listedProducts.find((p) => p.product_id === 'vpn_basic')
+      expect(fixture?.qa_fixture).toEqual({ kind: 'skip_settle', settles_on_chain: false })
+      for (const other of listedProducts.filter((p) => p.product_id !== 'vpn_basic')) {
+        expect(other).not.toHaveProperty('qa_fixture')
+      }
+      expect(listedBody.result.content[0]?.text).toContain('QA fixture: verified but never settled on-chain')
+
+      // The 402 for that product carries the same suffix in its description,
+      // visible to the agent BEFORE it signs.
+      const quote = await post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic' } } })
+      expect(quote.status).toBe(402)
+      const paymentRequired = (await quote.json()) as { resource: { description: string } }
+      expect(paymentRequired.resource.description).toContain('QA fixture: verified but never settled on-chain')
+      const otherQuote = await post({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'pro' } } })
+      const otherPaymentRequired = (await otherQuote.json()) as { resource: { description: string } }
+      expect(otherPaymentRequired.resource.description).not.toContain('QA fixture')
+
+      // The discovery document carries the same marker on that product only.
+      const discovery = await fetch(`${origin}/`)
+      const discoveryBody = (await discovery.json()) as { products: Array<Record<string, unknown>> }
+      const discoveredFixture = discoveryBody.products.find((p) => p.id === 'vpn_basic')
+      expect(discoveredFixture?.qa_fixture).toEqual({ kind: 'skip_settle', settles_on_chain: false })
+      for (const other of discoveryBody.products.filter((p) => p.id !== 'vpn_basic')) {
+        expect(other).not.toHaveProperty('qa_fixture')
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }, 20000)
+
+  it('never carries qa_fixture on any product without the flag, even on Base Sepolia', async () => {
+    const { http } = await importHttpWith({ MERCHANT_CHAIN_ID: '84532' })
+    const mod = await import('./x402.js')
+    const submit = vi.fn().mockResolvedValue(`0x${'cd'.repeat(32)}`)
+    const waitForReceipt = vi.fn().mockResolvedValue(undefined)
+    const server = http.createDemoMerchantServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      paymentProcessor: mod.createX402PaymentProcessor({ submit, waitForReceipt }),
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('no address')
+      const url = `http://127.0.0.1:${address.port}/mcp`
+      const origin = `http://127.0.0.1:${address.port}`
+      const post = (body: unknown) =>
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+          body: JSON.stringify(body),
+        })
+
+      const listed = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_products', arguments: {} } })
+      const listedRaw = await listed.text()
+      const listedDataLine = listedRaw.split('\n').find((line) => line.startsWith('data:'))
+      const listedBody = JSON.parse(listedDataLine ? listedDataLine.slice('data:'.length).trim() : listedRaw) as {
+        result: { structuredContent: { products: Array<Record<string, unknown>> } }
+      }
+      for (const product of listedBody.result.structuredContent.products) {
+        expect(product).not.toHaveProperty('qa_fixture')
+      }
+
+      const quote = await post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic' } } })
+      const paymentRequired = (await quote.json()) as { resource: { description: string } }
+      expect(paymentRequired.resource.description).not.toContain('QA fixture')
+
+      const discovery = await fetch(`${origin}/`)
+      const discoveryBody = (await discovery.json()) as { products: Array<Record<string, unknown>> }
+      for (const product of discoveryBody.products) {
+        expect(product).not.toHaveProperty('qa_fixture')
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }, 20000)
+
+  it('never carries qa_fixture on any product on the unflagged mainnet path', async () => {
+    const { http } = await importHttpWith({ MERCHANT_CHAIN_ID: '8453' })
+    const mod = await import('./x402.js')
+    const submit = vi.fn().mockResolvedValue(`0x${'cd'.repeat(32)}`)
+    const waitForReceipt = vi.fn().mockResolvedValue(undefined)
+    const server = http.createDemoMerchantServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      paymentProcessor: mod.createX402PaymentProcessor({ submit, waitForReceipt }),
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+    try {
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('no address')
+      const origin = `http://127.0.0.1:${address.port}`
+      const url = `http://127.0.0.1:${address.port}/mcp`
+      const listed = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_products', arguments: {} } }),
+      })
+      const listedRaw = await listed.text()
+      const listedDataLine = listedRaw.split('\n').find((line) => line.startsWith('data:'))
+      const listedBody = JSON.parse(listedDataLine ? listedDataLine.slice('data:'.length).trim() : listedRaw) as {
+        result: { structuredContent: { products: Array<Record<string, unknown>> } }
+      }
+      for (const product of listedBody.result.structuredContent.products) {
+        expect(product).not.toHaveProperty('qa_fixture')
+      }
+
+      const discovery = await fetch(`${origin}/`)
+      const discoveryBody = (await discovery.json()) as { products: Array<Record<string, unknown>> }
+      for (const product of discoveryBody.products) {
+        expect(product).not.toHaveProperty('qa_fixture')
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }, 20000)
+})

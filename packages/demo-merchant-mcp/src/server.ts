@@ -18,6 +18,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment, renderInvoiceText, type Invoice } from './invoice.js'
+import { QA_FIXTURE_DESCRIPTION_SUFFIX, isSkipSettleProduct } from './x402.js'
 import type { SettledPayment, SettlementState, X402PaymentProcessor } from './x402.js'
 import type { Address } from 'viem'
 
@@ -75,6 +76,9 @@ interface MerchantStrings {
   fromLabel: string
   invoiceJsonHeading: string
   summaryTail: string
+  /** #2989: appended to a skip-settle product's `list_products` line — see
+   *  `isSkipSettleProduct` in x402.ts. */
+  qaFixtureLine: string
 }
 
 const STRINGS: Record<MerchantLocale, MerchantStrings> = {
@@ -106,6 +110,7 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     summaryTail:
       'Full invoice omitted (result_detail: "summary") — re-call with result_detail: "full" for the ' +
       'rendered invoice + bookkeeping JSON; the same document also travels as the x-receipt-json response header.',
+    qaFixtureLine: QA_FIXTURE_DESCRIPTION_SUFFIX.trim(),
   },
   sv: {
     monthSubscription: '1 månads abonnemang',
@@ -135,6 +140,9 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     summaryTail:
       'Fullständig faktura utelämnad (result_detail: "summary") — anropa igen med result_detail: "full" för den ' +
       'renderade fakturan + bokförings-JSON; samma dokument skickas också som svarsheadern x-receipt-json.',
+    qaFixtureLine:
+      'QA-fixtur: verifierad men aldrig avräknad on-chain — kvittot kommer att visa ' +
+      '"Levererad – inte bekräftad on-chain".',
   },
 }
 
@@ -238,7 +246,11 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       // #1274: one builder shared per product so metadata and its display text
       // can never drift from each other or from the erc7710 gate resolved upstream.
       const metadata = Object.values(PRODUCTS).map((p) =>
-        buildProductMetadata(p, { enabledSettlementMethods: settlementMethods, mcpUrl: `${config.baseUrl}/mcp` }),
+        buildProductMetadata(p, {
+          enabledSettlementMethods: settlementMethods,
+          mcpUrl: `${config.baseUrl}/mcp`,
+          qaFixture: isSkipSettleProduct(p.id),
+        }),
       )
 
       const text = Object.values(PRODUCTS)
@@ -250,7 +262,8 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
             `  x402: ${m.network} USDC, settlement_methods=${m.supported_settlement_methods.join(',')}, default=${m.default_settlement_method}\n` +
             `  Merchant MCP URL: ${m.mcp_url}\n` +
             `  Hosted routing: dev=${HOSTED_DEMO_MERCHANT_URLS.dev}/mcp, prod=${HOSTED_DEMO_MERCHANT_URLS.prod}/mcp\n` +
-            `  ${productDescription(p, locale ?? DEFAULT_MERCHANT_LOCALE)}`
+            `  ${productDescription(p, locale ?? DEFAULT_MERCHANT_LOCALE)}` +
+            (m.qa_fixture ? `\n  ${t.qaFixtureLine}` : '')
           )
         })
         .join('\n\n')
@@ -343,11 +356,14 @@ function completePurchase(
   const payment = paymentStorage.getStore()
 
   if (!payment || payment.productId !== productId) {
+    // #2989: an agent must see this at QUOTE TIME — before signing — not
+    // only after receiving a settle-less receipt. Same suffix the discovery
+    // document and list_products carry, so all three read as one fact.
     const requirements = config.buildPaymentRequired({
       merchantAddress: config.merchantAddress,
       amountUsdc: product.price_usdc,
       resource,
-      description,
+      description: isSkipSettleProduct(productId) ? `${description}${QA_FIXTURE_DESCRIPTION_SUFFIX}` : description,
       settlementMethod,
     })
     return {

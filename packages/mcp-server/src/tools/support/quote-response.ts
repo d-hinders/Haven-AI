@@ -7,7 +7,10 @@
  * quote (#2054 same-field contract); `isPendingApproval` is the retained
  * fail-closed predicate (#2101) read from handler bodies in every planned
  * capability slice (#2809–#2812); `resolveResumeState` validates an
- * explicitly-passed resume_state's rail instead of trusting it. All live in
+ * explicitly-passed resume_state's rail instead of trusting it.
+ * `settlementPredictionFields` (#2999) is the same #2991 prediction, exported
+ * so `haven_quote_x402` in `plain-http-x402.ts` (#2811) carries it too — a
+ * third caller alongside `buildMcpToolQuoteResponse`'s own two. All live in
  * shared support — never copied.
  *
  * One-direction dependencies: imports the SDK, the #2807 contract seam, and
@@ -80,6 +83,49 @@ function predictSettlementScheme(
 }
 
 /**
+ * #2999 — the `expected_settlement_scheme` / `expected_funding_leg` /
+ * `expected_settleable` / `warnings` field set #2991 gave the two MCP quote
+ * tools, built from the SAME `predictSettlementScheme` call above so a third
+ * quote surface (the plain-HTTP `haven_quote_x402`) can carry the identical
+ * prediction without re-deriving the field shape or the warning text. Kept
+ * here rather than inlined at each call site because the warning message is
+ * part of the prediction's contract, not the caller's — the two existing
+ * callers of `predictSettlementScheme` (`buildMcpToolQuoteResponse` below,
+ * and `haven_quote_x402` in `plain-http-x402.ts`) now go through this instead
+ * of duplicating the null-check/warning pairing.
+ */
+export function settlementPredictionFields(
+  accepts: X402PaymentOption[],
+  agent: HavenAgent | undefined,
+  // #3007 review: the warning names the pay sibling(s) that will select the
+  // scheme — different per quote surface.
+  paySiblings = 'haven_prepare_catalog_purchase / haven_pay_mcp_tool',
+): {
+  expected_settlement_scheme: 'erc7710' | 'eip3009' | null
+  expected_funding_leg: boolean | null
+  expected_settleable?: boolean
+  warnings?: AgentPaymentWarning[]
+} {
+  const prediction = predictSettlementScheme(accepts, agent)
+  const warnings: AgentPaymentWarning[] = []
+  if (prediction === null) {
+    warnings.push({
+      code: AgentPaymentWarningCode.X402SchemeUnknown,
+      message:
+        "This agent's account rail could not be read from Haven, so the settlement scheme " +
+        `${paySiblings} will select cannot be predicted here. Retry when haven_get_agent ` +
+        'succeeds, or proceed to prepare/pay directly — that step reads the rail fresh regardless.',
+    })
+  }
+  return {
+    expected_settlement_scheme: prediction?.scheme ?? null,
+    expected_funding_leg: prediction ? prediction.fundingLeg : null,
+    ...(prediction ? { expected_settleable: prediction.settleable !== false } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
+  }
+}
+
+/**
  * Build the compact, non-authorizing response shared by the generic and
  * catalog MCP quote tools. Deliberately omit payment_required, idempotency,
  * and every signing/funding field: callers must start a fresh paid flow after
@@ -99,18 +145,7 @@ export function buildMcpToolQuoteResponse(input: {
   agent: HavenAgent | undefined
 }) {
   const { quote, merchantUrl, requestedMerchantUrl, toolName, toolArguments, catalog, agent } = input
-  const prediction = predictSettlementScheme(quote.paymentRequired.accepts, agent)
-  const warnings: AgentPaymentWarning[] = []
-  if (prediction === null) {
-    warnings.push({
-      code: AgentPaymentWarningCode.X402SchemeUnknown,
-      message:
-        "This agent's account rail could not be read from Haven, so the settlement scheme " +
-        'haven_prepare_catalog_purchase / haven_pay_mcp_tool will select cannot be predicted ' +
-        'here. Retry when haven_get_agent succeeds, or proceed to prepare/pay directly — that ' +
-        'step reads the rail fresh regardless.',
-    })
-  }
+  const prediction = settlementPredictionFields(quote.paymentRequired.accepts, agent)
   return {
     rail: quote.rail,
     merchant_url: merchantUrl,
@@ -140,15 +175,14 @@ export function buildMcpToolQuoteResponse(input: {
     // describes the merchant's offer and can legitimately disagree (a
     // delegation-rail account is quoted accepted_scheme: 'standard' at a
     // merchant advertising both, but prepare/pay still PREFER erc7710).
-    expected_settlement_scheme: prediction?.scheme ?? null,
-    expected_funding_leg: prediction ? prediction.fundingLeg : null,
-    // #2991 review: false when prepare/pay will REFUSE for this agent's rail —
-    // ERC7710_RAIL_REQUIRED at an erc7710-only merchant, or Haven's own 410
-    // on any retired (non-delegation) rail — the scheme above is then what
-    // the selector picks, not what Haven will do. Omitted when the rail is
-    // unknown.
-    ...(prediction ? { expected_settleable: prediction.settleable !== false } : {}),
-    ...(warnings.length > 0 ? { warnings } : {}),
+    // #2991 review: expected_settleable is false when prepare/pay will REFUSE
+    // for this agent's rail — ERC7710_RAIL_REQUIRED at an erc7710-only
+    // merchant, or Haven's own 410 on any retired (non-delegation) rail — the
+    // scheme above is then what the selector picks, not what Haven will do.
+    // Omitted when the rail is unknown. #2999: these four fields now come
+    // from settlementPredictionFields (see above) instead of being derived
+    // inline, so a third quote surface can share the exact same shape.
+    ...prediction,
     ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
     ...(catalog
       ? {

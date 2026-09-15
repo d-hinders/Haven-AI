@@ -187,6 +187,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
   wrongTool: { module: 'quote-response', slices: ['s2811'] },
   resolveResumeState: { module: 'quote-response', slices: ['s2811'] },
+  // #2999: the #2991 prediction field set, shared between
+  // buildMcpToolQuoteResponse's own two callers (s2810) and haven_quote_x402's
+  // direct call (s2811) — the third hosted quote surface to carry it.
+  settlementPredictionFields: { module: 'quote-response', slices: ['s2810', 's2811'] },
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
@@ -373,6 +377,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'isPendingApproval',
     'wrongTool',
     'resolveResumeState',
+    'settlementPredictionFields',
   ],
   'signer-compat': ['SIGNER_CAPABILITY_KEY', 'signerCompatibilityNotice'],
 }

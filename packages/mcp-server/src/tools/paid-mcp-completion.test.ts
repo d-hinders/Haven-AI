@@ -40,6 +40,7 @@ import {
   ok,
   recordedCalls,
   stubFetch,
+  keylessClient,
   VALID_PAYMENT_HEADER_REF,
   type RouteDefinition,
 } from '../test-support/hosted-mcp.js'
@@ -354,6 +355,138 @@ describe('haven_settle_mcp_tool', () => {
     expect(payload.message).toMatch(/may have redeemed it/i)
     expect(payload.message).toMatch(/check haven_get_payment_status after that window/i)
     expect(payload.message).toMatch(/ignore this code's sweep guidance/i)
+  })
+
+  // ── #2968 regression: the merchant answered 200 but Haven holds no verified
+  // on-chain settlement evidence. This is the response the live dev QA run
+  // caught (`settled: true` + the zero hash + `warnings: []` +
+  // `next_action: "none"` beside an agent_summary still saying submitted). The
+  // demo merchant's skip-settle fixture is the convenient trigger, not the
+  // bug: any merchant that answers 2xx without a redeemable settlement — e.g.
+  // the AuthorizationAlreadyUsedError path — lands here. RED/GREEN contract:
+  // revert the classify gate or the response-level zero-hash nulling and this
+  // test fails against the old body.
+  it('reports settled:false with an unconfirmed-settlement warning when the merchant returns 200 but no on-chain confirmation exists', async () => {
+    const ZERO_HASH = '0x' + '0'.repeat(64)
+    stubFetch({})
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    // No payment_header => erc7710 branch: the signature IS the settlement child.
+    vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue('HEADER_FROM_HAVEN')
+    // The merchant answered 200 and delivered the goods — but the settlement
+    // marker it returned is the ZERO hash ("delivered, not settled"), so the
+    // SDK's evidence report is refused: there is nothing on-chain to verify.
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { result: { content: [{ type: 'text', text: 'storage unlocked' }] } },
+      settlementTxHash: ZERO_HASH,
+      evidenceOutcome: { outcome: 'refused', statusCode: 400 },
+    })
+    // Haven's own records: submitted, no tx, an expiry on the window.
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: {
+        paymentId: 'pay_7710_unsettled',
+        kind: 'payment_intent',
+        rail: 'erc7710',
+        status: 'submitted',
+        phase: 'payment_submitted',
+        nextAction: 'check_status_later',
+        amount: '500',
+        token: 'USDC',
+        resourceUrl: 'http://merchant.test/mcp',
+        merchantAddress: null,
+        txHash: null,
+        expiresAt: '2026-09-15T12:00:00.000Z',
+        chainId: 84532,
+        message: 'The payment was submitted and is waiting for confirmation.',
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710_unsettled',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_cloud_storage',
+        arguments: { tier: '50gb' },
+      }),
+    )
+    const data = result.data as Record<string, any>
+
+    // THE contract: an unverified settlement never claims settled.
+    expect(data.settled).toBe(false)
+    // The zero hash is never emitted as a transaction — null means "none known".
+    expect(data.settlement_tx_hash).toBeNull()
+    // Merchant delivery is its own fact: the goods are real, the money is not
+    // proven, and the two facts travel in separate fields.
+    expect(data.delivered).toBe(true)
+    expect(data.code).toBe('DELIVERED_UNSETTLED')
+    // agent_summary mirrors the payment intent (submitted = not confirmed), so
+    // the response agrees with itself: settled:false beside submitted. The
+    // forbidden pairing — settled:true + submitted — cannot be built.
+    expect(data.agent_summary.status).toBe('submitted')
+    expect(data.agent_summary.expires_at).toBe('2026-09-15T12:00:00.000Z')
+    // The most important fact in the response does not ride silently: a
+    // machine-readable warning carrying the intent's expiry.
+    const warnings = data.warnings as Array<{ code: string; message: string }>
+    expect(warnings.map((w) => w.code)).toContain('SETTLEMENT_UNCONFIRMED')
+    const unconfirmed = warnings.find((w) => w.code === 'SETTLEMENT_UNCONFIRMED')!
+    expect(unconfirmed.message).toContain('2026-09-15T12:00:00.000Z')
+    // The next action is actionable, and the reason describes what HAPPENED —
+    // not the per-scheme constant that is false in this outcome.
+    expect(data.next_action).toBe('check_status_later')
+    expect(data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(data.reason).toMatch(/no verified on-chain settlement/)
+    expect(data.reason).not.toMatch(/nothing to sweep/)
+  })
+
+  // The zero-hash ban lives at the SHARED response boundary
+  // (deliverMerchantPayment), not in the erc7710 branch: a facilitator that
+  // accepts but does not settle produces the same sentinel on the eip3009 arm
+  // (AuthorizationAlreadyUsedError shape). settled stays true there — funding
+  // DID confirm on-chain above, which is what 3009's settled means — but the
+  // sentinel is collapsed to null, never rendered as a transaction.
+  it('never emits the zero hash as settlement_tx_hash on the eip3009 arm either (#2968 response-level ban)', async () => {
+    const ZERO_HASH = '0x' + '0'.repeat(64)
+    stubFetch({
+      'POST /payments/pay_zero_hash/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { result: 'ok' },
+      settlementTxHash: ZERO_HASH,
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: null,
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_zero_hash',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+    const data = result.data as Record<string, any>
+
+    expect(data.settled).toBe(true)
+    expect(data.settlement_tx_hash).toBeNull()
   })
 })
 

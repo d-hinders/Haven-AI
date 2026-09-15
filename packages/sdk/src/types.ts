@@ -1258,6 +1258,15 @@ export const AgentPaymentWarningCode = {
    * guess. `accepted_scheme` (the merchant's offer) is unaffected.
    */
   X402SchemeUnknown: 'X402_SCHEME_UNKNOWN',
+  /**
+   * #2968: the merchant answered 200 and handed over goods, but Haven holds NO
+   * on-chain evidence that the payment moved. `settled: false` beside this code
+   * is not a failure — it is the absence of proof, and the two must travel
+   * together so an agent can tell "the user has the goods" apart from "the
+   * money moved". Carries the intent's `expires_at`: after that instant the
+   * settlement can no longer land at all.
+   */
+  SettlementUnconfirmed: 'SETTLEMENT_UNCONFIRMED',
 } as const
 
 export type AgentPaymentWarningCode =

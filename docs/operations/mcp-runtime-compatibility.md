@@ -14,7 +14,7 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-15"
 ---
 
 # MCP Runtime Compatibility
@@ -264,6 +264,30 @@ last-verified: "2026-09-14"
 > `next_tool` and names this tool in prose for a hash the agent may still
 > obtain. On a refusal the tool reads the payment's status for its summary
 > rather than asserting one (`unknown` when the read itself is refused).
+>
+> **Recent re-verification (#2968):** the response vocabulary is completed at
+> the agent-facing surface, additively. `deliverMerchantPayment` now collapses
+> a zero/placeholder `settlementTxHash` (the demo merchant's `ZERO_TX_HASH`
+> "delivered, not settled" marker, recognised by the SDK's
+> `isZeroSettlementTxHash`) to `null` at the response boundary on BOTH
+> schemes — a sentinel shaped like a hash is never handed to an agent as one,
+> and `null` means "no transaction known". The erc7710 settled arm also emits
+> `delivered: true` (the delivery half of the vocabulary rides on every arm,
+> so `settled` and `delivered` cannot disagree in either direction), and an
+> unconfirmed erc7710 settlement additionally carries a machine-readable
+> `SETTLEMENT_UNCONFIRMED` warning — new additive
+> `AgentPaymentWarningCode.SettlementUnconfirmed` in `@haven_ai/sdk` types —
+> whose message carries the intent's `expires_at`; the summary gains an
+> additive `expires_at` on the same arm. Tool-contract wording on
+> `haven_settle_mcp_tool` and the hosted `instructions` state the rule
+> (settled = on-chain verified, never merchant 2xx; null hash rule), and the
+> hosted instructions' post-funding sweep line is now scheme-aware to match
+> #2983's erc7710 refusal guidance. Same tools, same schemas, same strict-
+> input policy, same fail-closed ordering; no route, migration, or signer
+> change, and the #2970 gate decides settlement exactly as before — these
+> changes only narrow what the response claims. Regression tests are
+> mutation-proven (removing the classify gate or the zero-hash nulling
+> re-fails them).
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent

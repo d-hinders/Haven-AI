@@ -601,10 +601,21 @@ export async function reconcileDelegateResidueAfterSettlement(
  */
 function deriveReceiptTxHashes(row: {
   tx_hash: string
+  rail: string
   settlement_scheme?: string | null
   protocol_receipt_payload: Record<string, unknown> | null
 }): { funding_tx_hash: string | null; settlement_tx_hash: string | null } {
   if (row.settlement_scheme === 'erc7710') {
+    return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
+  }
+  // #3006 review: a scheme-less row is a retired-rail receipt (#1328 keeps
+  // them readable). On the retired x402 rails the sequence was funding then
+  // EIP-3009, so `tx_hash` was the funding leg — same as eip3009 below. On
+  // the retired mpp rails (`mpp_demo`) the ONE transaction moved
+  // account → merchant directly (`safe_allowance_transfer`): that `tx_hash`
+  // IS the settlement and there was no funding leg. Labelling it "funding"
+  // would be the exact lie this field exists to remove.
+  if (!row.settlement_scheme && row.rail !== 'x402') {
     return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
   }
 

@@ -1240,12 +1240,11 @@ describe('machine payment routes', () => {
         rail: 'mpp_demo',
         proof_status: 'protocol_receipt_attached',
         tx_hash: TX_HASH,
-        // #2998: scheme-less here (no `settlement_scheme` on the fixture
-        // row) — falls into the eip3009-shaped branch: `tx_hash` is the
-        // funding leg, and this payload has no `transaction` field, so
-        // there is no reported settlement.
-        funding_tx_hash: TX_HASH,
-        settlement_tx_hash: null,
+        // #2998 (#3006 review): scheme-less mpp_demo row — the retired mpp
+        // rail moved account → merchant in ONE transaction, so `tx_hash` IS
+        // the settlement and there was no funding leg.
+        funding_tx_hash: null,
+        settlement_tx_hash: TX_HASH,
         payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
         protocol_receipt_header_name: 'Payment-Receipt',
         protocol_receipt_payload: { status: 'settled' },

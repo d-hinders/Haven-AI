@@ -33,7 +33,7 @@ async function seedAgent(): Promise<{ agentId: string; userId: string }> {
 async function seedIntent(
   agentId: string,
   userId: string,
-  settlementScheme: 'eip3009' | 'erc7710',
+  settlementScheme: 'eip3009' | 'erc7710' | null,
 ): Promise<string> {
   const r = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
@@ -51,7 +51,7 @@ async function seedIntent(
       ADDR('aa'),
       ADDR('d1'),
       `0x${String(++seq).padStart(64, 'a')}`.slice(0, 66),
-      JSON.stringify({ settlement_scheme: settlementScheme }),
+      JSON.stringify(settlementScheme ? { settlement_scheme: settlementScheme } : {}),
     ],
   )
   return r.rows[0].id
@@ -174,6 +174,33 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
 
     const [receipt] = await listReceipts(agent.agentId, 10)
     expect(receipt.tx_hash).toBe(settleHash)
+    expect(receipt.funding_tx_hash).toBeNull()
+    expect(receipt.settlement_tx_hash).toBe(settleHash)
+  })
+
+  // #3006 review: retired-rail rows have no settlement_scheme (#1328 keeps
+  // them readable). Their tx_hash means different things per rail.
+  it('scheme-less retired x402 row: funding then EIP-3009 — tx_hash was the funding leg', async () => {
+    const agent = await seedAgent()
+    const intentId = await seedIntent(agent.agentId, agent.userId, null)
+    const fundingHash = `0x${'66'.repeat(32)}`
+
+    await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId, txHash: fundingHash, rail: 'x402' }))
+
+    const [receipt] = await listReceipts(agent.agentId, 10)
+    expect(receipt.settlement_scheme ?? null).toBeNull()
+    expect(receipt.funding_tx_hash).toBe(fundingHash)
+    expect(receipt.settlement_tx_hash).toBeNull()
+  })
+
+  it('scheme-less retired mpp_demo row: one direct account → merchant transaction — tx_hash IS the settlement', async () => {
+    const agent = await seedAgent()
+    const intentId = await seedIntent(agent.agentId, agent.userId, null)
+    const settleHash = `0x${'77'.repeat(32)}`
+
+    await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId, txHash: settleHash, rail: 'mpp_demo' }))
+
+    const [receipt] = await listReceipts(agent.agentId, 10)
     expect(receipt.funding_tx_hash).toBeNull()
     expect(receipt.settlement_tx_hash).toBe(settleHash)
   })

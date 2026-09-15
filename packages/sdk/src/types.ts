@@ -769,15 +769,20 @@ export interface HavenPaymentReceipt {
   rail: string
   proofStatus: string
   /**
-   * @deprecated (#2998) meaning depends on the settlement scheme — Haven's
-   * own funding transaction on eip3009, the (only) settlement transaction on
-   * erc7710. Prefer {@link fundingTxHash} / {@link settlementTxHash}, which
+   * @deprecated (#2998) meaning depends on the settlement scheme — the
+   * account → delegate funding transaction on eip3009, the (only) settlement
+   * transaction on erc7710. Prefer {@link fundingTxHash} / {@link settlementTxHash}, which
    * name which is which.
    */
   txHash: string
-  /** Haven's treasury → delegate funding transaction (#2998); null on erc7710, which has no funding leg. */
+  /** The account → delegate funding transaction, relayed by Haven (#2998); null on erc7710 (no funding leg) and on retired mpp-rail rows. */
   fundingTxHash: string | null
-  /** The delegate → merchant settlement transaction (#2998); `txHash` itself on erc7710. */
+  /**
+   * The delegate → merchant settlement transaction (#2998). Trust level differs
+   * by scheme: on erc7710 it is `txHash` itself and Haven VERIFIED it on-chain
+   * before the receipt existed; on eip3009 it is the merchant's claim as relayed
+   * (PAYMENT-RESPONSE), NOT verified on-chain by Haven — cite it as such.
+   */
   settlementTxHash: string | null
   chainId: number
   resourceUrl: string

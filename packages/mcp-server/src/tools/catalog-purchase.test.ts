@@ -2211,3 +2211,262 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
   })
 })
 
+// ── #2991 — the quote's expected_settlement_scheme/expected_funding_leg
+// predict the SAME scheme haven_prepare_catalog_purchase / haven_pay_mcp_tool
+// will actually select, computed by the IDENTICAL selectX402SettlementScheme
+// call those tools run — so a delegation-rail agent quoted
+// accepted_scheme: 'standard' at a merchant advertising both entries (the
+// demo merchant's shape) is told up front that prepare/pay will still PREFER
+// erc7710, rather than being left to infer a settlement shape from a field
+// that only ever describes the merchant's offer.
+describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+  const FACILITATORS = ['0x4444444444444444444444444444444444444444']
+
+  /** Both a standard AND an erc7710-tagged entry — the demo-merchant shape. */
+  function bothEntriesMerchant() {
+    const base = PAYMENT_REQUIRED.accepts[0]
+    return {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...base },
+        { ...base, extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS } },
+      ],
+    }
+  }
+
+  const ERC7710_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS },
+      },
+    ],
+  }
+
+  const CATALOG_ENTRY = {
+    id: 'cat_2991',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  function allowances(remaining: string) {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [
+        {
+          id: 'delegation-1',
+          token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+          token_symbol: 'USDC',
+          allowance_amount: '5.000000',
+          reset_period_min: 1440,
+          onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
+        },
+      ],
+    }
+  }
+
+  it('both entries + delegation rail: predicts erc7710 with no funding leg, even though accepted_scheme is "standard"', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+    })
+    const res = ok<{
+      accepted_scheme: string
+      expected_settlement_scheme: string | null
+      expected_funding_leg: boolean | null
+    }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(res.data.accepted_scheme).toBe('standard')
+    expect(res.data.expected_settlement_scheme).toBe('erc7710')
+    expect(res.data.expected_funding_leg).toBe(false)
+  })
+
+  it('same merchant + agent on the legacy/3009 rail: predicts eip3009 WITH a funding leg — and NOT settleable (Haven refuses retired rails with 410)', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: LEGACY_AGENT },
+    })
+    const res = ok<{ expected_settlement_scheme: string | null; expected_funding_leg: boolean | null; expected_settleable?: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(res.data.expected_settlement_scheme).toBe('eip3009')
+    expect(res.data.expected_funding_leg).toBe(true)
+    // The selector's answer — but Haven's x402 entry points 410 every retired
+    // rail, so the purchase is not settleable for this account.
+    expect(res.data.expected_settleable).toBe(false)
+  })
+
+  // #2993 review: the catalog quote — the tool B12 was filed against — carries
+  // the same prediction; severing `agent` on that site must go red here.
+  it('haven_quote_catalog_purchase carries the same prediction as the generic quote', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': {
+        status: 200,
+        body: {
+          id: 'cat_1', name: 'Demo VPN', description: 'd', category: 'vpn',
+          resource_url: 'http://merchant.test/mcp', rail: 'x402', protocol: 'mcp',
+          tool_name: 'create_text', tool_arguments: { prompt: 'Hello' },
+          price_display: '$1.50 USDC', price_atomic: '1500000',
+          asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:8453',
+          status: 'active', verified_at: '2026-06-16T08:50:39.772Z',
+        },
+      },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+    })
+    const res = ok<{
+      accepted_scheme: string
+      expected_settlement_scheme: string | null
+      expected_funding_leg: boolean | null
+      expected_settleable?: boolean
+      warnings?: unknown[]
+    }>(await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_1' }))
+    expect(res.data.accepted_scheme).toBe('standard')
+    expect(res.data.expected_settlement_scheme).toBe('erc7710')
+    expect(res.data.expected_funding_leg).toBe(false)
+    expect(res.data.expected_settleable).toBe(true)
+    expect(res.data.warnings).toBeUndefined()
+  })
+
+  it('an erc7710-only merchant predicts erc7710 regardless of the account rail — and says whether THIS agent can settle it', async () => {
+    // Legacy rail at an erc7710-only merchant: prepare will refuse with
+    // ERC7710_RAIL_REQUIRED, so the prediction names the scheme the merchant
+    // demands and `expected_settleable: false` (review of #2991) — a bare
+    // 'erc7710' would read as "prepare will settle it".
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(ERC7710_ONLY_PR)) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: LEGACY_AGENT },
+    })
+    const legacy = ok<{ expected_settlement_scheme: string | null; expected_funding_leg: boolean | null; expected_settleable?: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(legacy.data.expected_settlement_scheme).toBe('erc7710')
+    expect(legacy.data.expected_funding_leg).toBe(false)
+    expect(legacy.data.expected_settleable).toBe(false)
+
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(ERC7710_ONLY_PR)) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+    })
+    const delegation = ok<{ expected_settlement_scheme: string | null; expected_settleable?: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(delegation.data.expected_settlement_scheme).toBe('erc7710')
+    expect(delegation.data.expected_settleable).toBe(true)
+  })
+
+  it('a FAILED agent read yields expected_settlement_scheme: null with a warning, never a guess', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 500, body: {} },
+    })
+    const res = ok<{
+      expected_settlement_scheme: string | null
+      warnings?: Array<{ code: string }>
+    }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(res.data.expected_settlement_scheme).toBeNull()
+    expect(res.data.warnings?.some((w) => w.code === 'X402_SCHEME_UNKNOWN')).toBe(true)
+  })
+
+  it('a prepare run right after the quote selects the SAME scheme the quote predicted (agreement pin)', async () => {
+    stubFetch({
+      'GET /catalog/cat_2991': { status: 200, body: CATALOG_ENTRY },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'GET /machine-payments/allowances': { status: 200, body: allowances('5000000000') },
+      'POST /x402': {
+        status: 201,
+        body: {
+          payment_id: 'pay_2991',
+          status: 'pending_signature',
+          sign_data: {
+            hash: '0x' + '33'.repeat(32),
+            signature_scheme: 'eip712_delegation',
+            typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+          },
+        },
+      },
+    })
+
+    const quote = ok<{ expected_settlement_scheme: string | null }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(quote.data.expected_settlement_scheme).toBe('erc7710')
+
+    const prepared = ok<{ settlement_scheme: string }>(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_2991',
+        max_amount_human: '3',
+      }),
+    )
+    // The point of this suite: quote and prepare must never disagree.
+    expect(prepared.data.settlement_scheme).toBe(quote.data.expected_settlement_scheme)
+  })
+})
+

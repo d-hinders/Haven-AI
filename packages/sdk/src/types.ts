@@ -1250,6 +1250,14 @@ export const AgentPaymentWarningCode = {
    * guidance shown here may be optimistic.
    */
   AllowanceReadOptimistic: 'ALLOWANCE_READ_OPTIMISTIC',
+  /**
+   * #2991: the quote tools' `expected_settlement_scheme` prediction of what
+   * `haven_prepare_catalog_purchase` / `haven_pay_mcp_tool` will actually
+   * select could not be computed — the agent's execution rail could not be
+   * read from Haven, so `expected_settlement_scheme` is `null` rather than a
+   * guess. `accepted_scheme` (the merchant's offer) is unaffected.
+   */
+  X402SchemeUnknown: 'X402_SCHEME_UNKNOWN',
 } as const
 
 export type AgentPaymentWarningCode =

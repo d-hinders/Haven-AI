@@ -1578,6 +1578,32 @@ guaranteed-non-null selection removed the `?? quote.accepted` display
 fallbacks, so the quote shown, the cap checked (`priceSelectedOption`), and
 the amount authorized all read the SAME selected option (#2051's invariant).
 
+As of [#2991](https://github.com/d-hinders/Haven-AI/issues/2991) the two quote
+tools add `expected_settlement_scheme: 'erc7710' | 'eip3009' | null` and
+`expected_funding_leg: boolean | null` (plus `expected_settleable: boolean`
+whenever the rail is known — `false` when prepare/pay will refuse with
+`ERC7710_RAIL_REQUIRED`, i.e. an erc7710-only merchant and an account not
+on the delegation rail; the scheme is then what the merchant demands, not
+what Haven will do), computed by running the IDENTICAL
+`selectX402SettlementScheme` call `haven_prepare_catalog_purchase` /
+`haven_pay_mcp_tool` run at prepare/pay time — same function, same predicate
+shape — so a quote and the following prepare/pay disagree only if an INPUT
+moved between the two calls: the merchant's `accepts[]` on a fresh 402, or
+the account's rail (prepare re-reads it). `expected_settleable: false` also
+covers a non-delegation account at ANY merchant: the selector still names
+eip3009 there, but Haven's x402 entry points refuse every retired rail with
+410, so nothing will be settled. This closes a gap `accepted_scheme` left open:
+at a merchant advertising BOTH entries, a delegation-rail account is quoted
+`accepted_scheme: 'standard'` (the merchant's own offer), yet prepare/pay
+still PREFER erc7710 for that account — `expected_settlement_scheme` says so
+up front instead of leaving the agent to find out from a different signature
+shape after the cap decision. `null` (with an `X402_SCHEME_UNKNOWN` warning)
+replaces a guess when the agent's rail could not be read (prepare then
+re-reads the rail itself and refuses hard on failure; pay at a both-entries
+merchant selects eip3009 — pre-existing), the same no-guess stance as
+`requireSettleableSelection` treats an unknown rail at prepare/pay. Read-only:
+the quote still reserves no price and creates no intent.
+
 **Still unproven end to end, and worth stating rather than assuming.** The
 nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately
 excludes the SDK, so nothing yet demonstrates a full purchase through

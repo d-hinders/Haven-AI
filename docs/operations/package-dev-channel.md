@@ -18,7 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-15"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -157,7 +157,11 @@ against #2911 (phase 3, the schema rename): that PR's only touch to
 (a stray mechanical rename briefly turned it into `.account_id`, which
 `CreateSetupBody` does not declare — caught by `tsc`, reverted before
 merge) — no change to `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
-`config.connectorChannel`, or `/discovery`:
+`config.connectorChannel`, or `/discovery`. Re-verified 2026-09-15 against
+#3015 (boolean env flags refuse the boot on an unrecognised value): that PR
+adds `parseBooleanFlag` next to `parseConnectorChannel` in `config.ts` and
+applies it to the six boolean flags; `parseConnectorChannel`,
+`config.connectorChannel` and `/discovery` are untouched:
 
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'

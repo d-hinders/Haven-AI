@@ -8,7 +8,7 @@ covers:
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-15"
 ---
 
 # Dev environment
@@ -195,6 +195,16 @@ The template is [`.env.dev.example`](../../.env.dev.example) at the repo root. I
 mirrors `.env.example` with dev-isolated values. Set these in the **dev Railway
 project** (backend / mcp-server) and the **dev Vercel project** (frontend) —
 never in code. **Every secret MUST differ from production.**
+
+**Boolean flags accept only lowercase `true` / `false` (#3015).** Every
+boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
+`HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
+`HAVEN_ACCOUNTING_ENABLED` and the deprecated `HAVEN_REPORTING_FEED_ENABLED` —
+goes through `parseBooleanFlag`: unset or blank means false; any other value
+(`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
+variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
+and silently read as off. Before a deploy that carries #3015, audit the
+Railway project's values for all six — exact bytes, revealed not assumed.
 
 Isolation rules that are non-negotiable for a payments product:
 

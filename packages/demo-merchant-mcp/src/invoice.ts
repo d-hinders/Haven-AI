@@ -38,7 +38,7 @@ export function createInvoiceNumberer(seedMs: number = Date.now()): () => string
   return () => {
     invoiceSeq++
     const year = new Date().getFullYear()
-    return `FAK-${year}-${String(invoiceSeq).padStart(5, '0')}`
+    return `FAK-${year}-${invoiceSeq}`
   }
 }
 

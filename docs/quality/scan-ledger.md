@@ -5,15 +5,15 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
-last-verified: "2026-09-08"
+last-verified: "2026-09-15"
 ---
 
 # Quality-Scan Ledger
 
 Append-only record of every [`quality-scan`](../../.agents/skills/quality-scan/SKILL.md)
-run: date, scope, findings, and each finding's **disposition** — `shipped`,
+run: date, scope, structural findings, improvement candidates, and their **disposition** — `shipped`,
 `accepted-as-debt`, or `rejected`, with the reason. The skill reads this
-BEFORE scanning and excludes prior findings unless it can cite evidence of
+BEFORE scanning and excludes prior findings and candidates unless it can cite evidence of
 material worsening against the numbers recorded here. Never rewrite an old
 entry; a changed disposition gets a new dated line under the finding.
 
@@ -26,19 +26,26 @@ entries predate them and stand as written):
   one lives with its kind there — there is no `scripts/quality/`). This is
   what makes the
   exclusion rule's delta check a one-command re-measurement.
-- **Probed clean:** every entry ends with a `Probed clean:` section —
-  `dimension → command → number` for each dimension probed without a
-  qualifying finding. These are the next run's diff baselines.
-- **Disposition upkeep:** when a scan-born epic closes, the closer appends
+- **Probed clean:** retain this heading as a coverage record. New entries
+  follow the skill's examined / partial / not examined format, naming the
+  revision, command/result, sample boundaries, and missing verification/reason.
+  No unexecuted check supplies a clean result. Prior entries retain their
+  historical format.
+- **Disposition upkeep:** when a scan-born epic closes or a standalone
+  scan-candidate task merges, the closer appends
   the dated disposition line in the same pass — `ship-next`'s closeout names
-  this in its ready-to-close report, so the update is owned by the process,
+  this in its closeout, so the update is owned by the process,
   not by memory.
 - **Wave-dimension coverage (#2501, binding for entries from 2026-09-03
-  on):** `Probed clean:` names each of the seven blocks in the skill's
+  on):** `Probed clean:` names each current numbered block in the skill's
   `references/dimensions.md` by number — `block N → command → number` —
   including a block whose number became a finding. A block missing from the
-  section means the run did not take it; a reader must never have to guess
-  whether "no finding" meant "looked" or "did not look".
+  section in an older entry means the run did not take it; new entries name
+  even unexamined blocks explicitly. Never infer “clean” from missing evidence.
+- **Candidate decisions (#3025):** apply the same exclusions to both output
+  levels. Append pending owner decisions, later dispositions and approved
+  issue links without rewriting runs. Implementation progress belongs in
+  GitHub, not a parallel ledger queue.
 
 ---
 

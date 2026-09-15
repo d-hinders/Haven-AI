@@ -1032,6 +1032,11 @@ exclusion rule only works if dispositions land when the state changes, not when
 someone happens to remember (#1554's line landed on memory alone, in a separate
 docs PR).
 
+For a merged standalone task originating from a quality-scan improvement
+candidate, likewise append its dated `shipped` disposition and merge evidence
+to the candidate's ledger record. Preserve the run and prior decisions; the
+ledger records disposition, while GitHub remains the implementation tracker.
+
 **Acceptance-criteria evidence.** When the issue body has acceptance-criteria
 checkboxes, the closing comment ticks each one with a link to its evidence (test
 name, PR, tx link, doc section). A criterion without evidence stays unticked and

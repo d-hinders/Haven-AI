@@ -58,8 +58,10 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
 ## Epics
 
 A request whose remedy spans several disjoint pull requests is an **epic**: file
-one tracking issue plus one issue per slice. A [quality-scan](../quality-scan/SKILL.md)
-finding always arrives in this shape.
+one tracking issue plus one issue per slice. Approved [quality-scan](../quality-scan/SKILL.md) structural findings use
+this shape when they require multiple PRs; a one-PR improvement candidate
+uses the standalone task workflow above. The scan handoff does not waive
+prior-art checks, defect reproduction, or the backlog default.
 
 The canonical shape is the repository's own epic template,
 `.github/ISSUE_TEMPLATE/loop-epic.md` — read it and follow it rather than

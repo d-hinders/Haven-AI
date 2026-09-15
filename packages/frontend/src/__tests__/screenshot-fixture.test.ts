@@ -135,11 +135,12 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(fx('/contacts/ct-1/history')).toBeNull()
   })
 
-  // #2106: `/custody` renders a delegation-rail account's real spend
-  // authority from this endpoint. Both recipient states are seeded on
-  // purpose — a PINNED recipient (an AllowedCalldataEnforcer caveat) and an
-  // open one — because the page presents them differently and a fixture with
-  // only one of them cannot evidence that.
+  // #2106: `/agents/:id`'s budget card (formerly also `/custody`, deleted in
+  // #3024) renders a delegation-rail account's real spend authority from this
+  // endpoint. Both recipient states are seeded on purpose — a PINNED recipient
+  // (an AllowedCalldataEnforcer caveat) and an open one — because the card
+  // presents them differently and a fixture with only one of them cannot
+  // evidence that.
   describe('delegation budgets (#2106)', () => {
     it('keys the delegations endpoint for the fixture agents', () => {
       const pinned = fx('/agents/agent-research/delegations') as {

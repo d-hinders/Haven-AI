@@ -8,9 +8,10 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  * The shared account — on the LIVE delegation rail (#2264, epic #1440).
  *
  * It carried no `account_type` at all until #2264, and `railOf` reads
- * anything-but-`delegator_hybrid` as the legacy Safe rail
- * (`lib/custody-rail.ts`), so every spec in this suite rendered the app as it
- * looks for a **retired-rail** user. `browser_smoke` and `design_visual` were
+ * anything-but-`delegator_hybrid` as the legacy Safe rail (the retired custody
+ * page's rail helper, deleted with the page itself in #3024), so every spec
+ * in this suite rendered the app as it looks for a **retired-rail** user.
+ * `browser_smoke` and `design_visual` were
  * therefore pinning the pixel-and-DOM behaviour of a configuration that answers
  * HTTP 410 in production (#1986): green, and true about nobody.
  *

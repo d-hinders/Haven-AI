@@ -6,7 +6,6 @@ covers:
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
-  - packages/frontend/src/app/(authenticated)/custody/page.tsx
 last-verified: "2026-09-07"
 ---
 

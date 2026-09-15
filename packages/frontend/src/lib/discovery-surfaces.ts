@@ -64,7 +64,6 @@ export const AUTH_MARKED_PREFIXES = [
   '/analytics',
   '/catalog',
   '/contacts',
-  '/custody',
   '/dashboard',
   '/design-system',
   '/device',

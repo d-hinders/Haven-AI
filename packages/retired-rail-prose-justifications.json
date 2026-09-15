@@ -125,12 +125,6 @@
       "note": "Live user-facing subtitle: historical agent records remain readable. Verified true — archived agents (#1401/#1402) stay under Removed with their history."
     }
   },
-  "packages/frontend/src/app/(authenticated)/custody/page.tsx": {
-    "remain-readable": {
-      "category": "past-tense-history",
-      "note": "A #2673 correction note quoting what the OLD text said ('while legacy accounts remain readable') and why it is gone; past-tense, not a present claim."
-    }
-  },
   "packages/frontend/src/components/AgentPanel.tsx": {
     "stays-readable": {
       "category": "archived-agents",

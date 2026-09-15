@@ -128,7 +128,7 @@ Both pixel jobs still **run** on any diff under `packages/frontend/`: `scripts/c
 
 - **Whole-page**, at the viewports that spec committed: `/design-system`, `/dashboard` and `/transactions` (the last two desktop-only).
 - **Element-scoped only.** `/agents` is the one to know: `agent-panel-states` and `focus-visible` both `goto('/agents')` and commit clips of the agent-card states, the empty states and the driven focus targets — real coverage, but of *elements*. A whole-page `/agents` regression outside those boxes is compared against nothing.
-- **Nothing at all**: `/accounts`, `/custody`, agent detail, the connect flow.
+- **Nothing at all**: `/accounts`, agent detail, the connect flow.
 
 On the last two grades, the job runs and compares nothing in the area you changed, and trigger 3 is the *only* check that a "logic-only" change really was.
 
@@ -211,7 +211,7 @@ The spawned child is watched throughout, so a dev server that **dies** ends the 
 
 ```
 npm run dev -w packages/frontend -- --hostname 127.0.0.1 --port 3161   # once; wait for it
-SCREENSHOT_BASE_URL=http://127.0.0.1:3161 npm run screenshot -w packages/frontend -- /custody
+SCREENSHOT_BASE_URL=http://127.0.0.1:3161 npm run screenshot -w packages/frontend -- /accounts
 ```
 
 `SCREENSHOT_BASE_URL` sets `OWN_SERVER = false`, which skips the spawn and the readiness wait entirely. **It does not skip the [#1800](https://github.com/d-hinders/Haven-AI/issues/1800) identity check** — `verifyServerIdentity` still runs, still refuses a server that cannot prove it is this worktree's app, and the run still prints `screenshot: server identity verified`. So PNGs produced this way are provably from the right branch and are fine as committed PR evidence. (The escape hatch that *does* weaken the claim is a different variable: `SCREENSHOT_ALLOW_UNVERIFIED_SERVER=1`, which stamps `identity_verified: false` in the manifest.) Before #2108 this was undiscoverable, and every agent needing captures rediscovered it privately; it is written here so nobody re-derives it, and the harness's own compile-timeout message now prints the same two commands.

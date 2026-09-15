@@ -24,8 +24,9 @@ import type { NavItem } from './Sidebar'
  * ## Selection is by ROUTE, never by index
  *
  * `baseNavItems` is ordered for the drawer (Dashboard, Accounts, Transactions,
- * Agents); the bar's order is the issue's (Dashboard, Agents, Transactions,
- * Accounts). Reading it by position would silently reorder the bar the next
+ * Accounting, Agents, Catalog, Contacts — regrouped by #3024); the bar's order
+ * is the issue's (Dashboard, Agents, Transactions, Accounts), unchanged by that
+ * regroup. Reading it by position would silently reorder the bar the next
  * time someone inserts a drawer entry, so the tabs are picked by `href` and the
  * lookup throws nothing — a route that disappears simply drops out, and the
  * count assertion in the e2e spec is what notices.

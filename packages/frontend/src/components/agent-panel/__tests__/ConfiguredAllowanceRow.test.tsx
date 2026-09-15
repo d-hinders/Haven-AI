@@ -115,7 +115,8 @@ describe('ConfiguredAllowanceRow — configuration, not measurement (#1846)', ()
  * `formatConfiguredAllowance` used to tell them apart BY EXCEPTION —
  * `BigInt('250.000000')` throws and a bare `catch` returned the string
  * untouched — so `/agents` rendered `"250.000000 USDC per week"` where
- * `/dashboard` and `/custody` rendered `250.00` for the same delegation.
+ * `/dashboard` and the custody page (retired in #3024) rendered `250.00` for
+ * the same delegation.
  *
  * Why BOTH shapes are pinned here, not just the one that was broken: the
  * atomic case was already covered (`configured()`'s fixture is atomic) and
@@ -198,8 +199,8 @@ describe('ConfiguredAllowanceRow — both wire shapes of allowance_amount (#2283
  * (`infra/repositories/agents.ts:232-237`, #1440/#2020), so this component
  * cannot render one at all. The number is therefore always the terms of a
  * signed delegation enforced on-chain by the caveat enforcers — never a
- * Haven-held figure — and "Configured in Haven" inverted the claim `/custody`
- * exists to make.
+ * Haven-held figure — and "Configured in Haven" inverted the claim this row
+ * exists to make (the claim used to belong to `/custody`, retired in #3024).
  *
  * ── Why the assertion is written both ways ──────────────────────────────────
  *
@@ -216,7 +217,7 @@ describe('ConfiguredAllowanceRow — both wire shapes of allowance_amount (#2283
  * reusing the constant cannot drift from what is pinned here.
  */
 describe('ConfiguredAllowanceRow — the caption names on-chain enforcement (#2224)', () => {
-  it('says the budget is enforced on-chain, in /custody’s words', () => {
+  it('says the budget is enforced on-chain, in the row’s own words', () => {
     const { container } = render(
       <ConfiguredAllowanceRow allowance={configured()} chainId={CHAIN_ID} />,
     )
@@ -233,9 +234,10 @@ describe('ConfiguredAllowanceRow — the caption names on-chain enforcement (#22
       <ConfiguredAllowanceRow allowance={configured()} chainId={CHAIN_ID} />,
     )
     const text = container.textContent ?? ''
-    // The exact old caption, and the weaker claim it belongs to. `/custody`
+    // The exact old caption, and the weaker claim it belongs to. This row
     // says these limits are "enforced on-chain by your account, not by Haven's
-    // database"; a budget row on the same screen family must not say the
+    // database" (the wording the now-retired custody page, #3024, used to
+    // carry); a budget row on the same screen family must not say the
     // opposite about the same delegation.
     expect(text).not.toContain('Configured in Haven')
     expect(text).not.toMatch(/\bin Haven\b/)

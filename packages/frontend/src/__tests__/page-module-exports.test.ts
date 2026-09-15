@@ -3,7 +3,8 @@
  * (#2106).
  *
  * This guard exists because the repo had no local signal for it. `npm run
- * typecheck` (`tsc --noEmit`) passed green while `next build` failed:
+ * typecheck` (`tsc --noEmit`) passed green while `next build` failed, on the
+ * custody page that #3024 later deleted outright:
  *
  *     Type error: Page "src/app/(authenticated)/custody/page.tsx" does not
  *     match the required types of a Next.js Page.
@@ -94,7 +95,9 @@ describe('Next page modules export only route conventions (#2106)', () => {
     // pass forever while checking nothing, which is the failure mode this
     // repo keeps finding in its own guards.
     expect(files.length).toBeGreaterThan(5)
-    expect(files).toContain('src/app/(authenticated)/custody/page.tsx')
+    // `/custody` is gone (#3024) — `/dashboard` is the stand-in positive
+    // example that a page this glob is supposed to find is actually found.
+    expect(files).toContain('src/app/(authenticated)/dashboard/page.tsx')
   })
 
   it.each(files)('%s exports nothing Next will reject', (file) => {

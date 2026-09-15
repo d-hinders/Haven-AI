@@ -10,6 +10,16 @@ export const en = {
   common: {
     comingSoon: 'Coming soon',
   },
+  /**
+   * `Sidebar`'s three headed groups (#3024, owner decision 2026-09-15; the
+   * Overview group was the issue's stated shape once Analytics shipped, and
+   * #2947 landed first). Settings and Profile are the unlabeled bottom section.
+   */
+  sidebar: {
+    overviewGroup: 'Overview',
+    moneyGroup: 'Money',
+    agentsGroup: 'Agents',
+  },
   /** The per-transaction accounting badge (#2870). */
   accountingBadge: {
     /** `provider` is the display name, e.g. "Fortnox". */

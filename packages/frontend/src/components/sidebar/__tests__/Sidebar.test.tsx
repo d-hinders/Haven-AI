@@ -82,15 +82,23 @@ describe('Sidebar', () => {
     })
   })
 
-  it('renders three labeled clusters with the core money loop first (#858)', () => {
+  it('renders Overview, Money and Agents (#3024, owner decision 2026-09-15; Overview once Analytics shipped)', () => {
     render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
-    const labels = ['Money', 'Agent tools', 'Admin'].map((l) => screen.getByText(l))
+    // 'Admin' and 'Agent tools' are RETIRED labels (#3024): Custody was the
+    // group's last reason to exist, and Contacts (the user's address book)
+    // never belonged in "Agent tools" to begin with.
+    expect(screen.queryByText('Admin')).toBeNull()
+    expect(screen.queryByText('Agent tools')).toBeNull()
+    // `selector: 'p'`: the group HEADER, not the "Agents" nav link's own label
+    // — both render the text "Agents" and a bare `getByText` cannot tell them
+    // apart.
+    const labels = ['Overview', 'Money', 'Agents'].map((l) => screen.getByText(l, { selector: 'p' }))
     expect(labels).toHaveLength(3)
-    // Core loop order and routes unchanged (scoped to the nav — the logo also links to /dashboard):
+    // Order and routes (scoped to the nav — the logo also links to /dashboard):
     // Scoped to the DRAWER's landmark by name (#2731). `querySelector('nav')`
     // took the first `<nav>` in the DOM, and the mobile tab bar now renders
     // before this one — the assertion silently started measuring four tab
-    // routes instead of the drawer's eight.
+    // routes instead of the drawer's own.
     const links = Array.from(
       document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a'),
     ).map((a) =>
@@ -99,18 +107,58 @@ describe('Sidebar', () => {
     const nav = links.filter((href) =>
       ['/dashboard', '/accounts', '/transactions', '/analytics', '/agents', '/approvals', '/catalog', '/contacts', '/accounting', '/custody'].includes(href ?? ''),
     )
-    // '/approvals' stays in the FILTER above deliberately: the filter is what
-    // makes this assertion able to see a re-added Approvals entry. Removing it
-    // from both sides would turn the equality into a guard over the empty set.
+    // '/approvals' and '/custody' stay in the FILTER above deliberately: the
+    // filter is what makes this assertion able to see a re-added Approvals
+    // entry, or a Custody entry that crept back in. Removing either from both
+    // sides would turn the equality into a guard over a smaller set.
     expect(nav).toEqual([
-      '/dashboard', '/accounts', '/transactions', '/analytics', '/agents',
-      '/catalog', '/contacts',
-      '/accounting', '/custody',
+      '/dashboard', '/analytics',
+      '/accounts', '/transactions', '/accounting',
+      '/agents', '/catalog', '/contacts',
     ])
-    // The Money label precedes the Agent tools label in the DOM:
-    const money = screen.getByText('Money')
-    const tools = screen.getByText('Agent tools')
-    expect(money.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Header order in the DOM: Overview, then Money, then Agents — and
+    // Dashboard sits UNDER the Overview header, not above it (the pre-#2947
+    // ungrouped shape #3024 described as the interim). Scoped to the drawer's
+    // `<nav>`, not `getByRole` — the mobile tab bar renders its own
+    // "Dashboard" link too.
+    const overview = screen.getByText('Overview', { selector: 'p' })
+    const dashboard = document.querySelector('nav[aria-label="All sections"] a[href="/dashboard"]')!
+    const money = screen.getByText('Money', { selector: 'p' })
+    const agentsHeader = screen.getByText('Agents', { selector: 'p' })
+    expect(overview.compareDocumentPosition(dashboard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(dashboard.compareDocumentPosition(money) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(money.compareDocumentPosition(agentsHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  /**
+   * The mobile *More* sheet (#3024 acceptance criteria).
+   *
+   * There is no separate sheet component to render below `lg` (`Sidebar.tsx`'s
+   * own comment: "below `lg` this aside IS the More sheet", #2820) — the drawer
+   * asserted above is what a phone opens, so its DOM order already answers this
+   * question. What this test pins that the one above does not: the items the
+   * five mobile TABS already cover (`MobileTabBar`'s `TAB_ROUTES` — Dashboard,
+   * Accounts, Transactions, Agents) are filtered OUT, and what remains must
+   * read in the same section order desktop uses for them — Analytics (end of
+   * Overview), Accounting (end of Money), then Catalog, Contacts (end of
+   * Agents) — with Settings and Profile
+   * after, in the unchanged bottom section.
+   */
+  it('the More sheet lists the remaining items in the same section order as desktop', () => {
+    render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
+    const nav = document.querySelector('nav[aria-label="All sections"]')!
+    const tabRoutes = new Set(['/dashboard', '/agents', '/transactions', '/accounts'])
+    const remaining = Array.from(nav.querySelectorAll('a'))
+      .map((a) => a.getAttribute('href'))
+      .filter((href): href is string => href !== null && !tabRoutes.has(href))
+    expect(remaining).toEqual(['/analytics', '/accounting', '/catalog', '/contacts'])
+    // Settings and Profile — the unchanged bottom section — come after, in the
+    // drawer's footer rather than the labeled `<nav>`.
+    const settingsLink = screen.getByRole('link', { name: 'Settings' })
+    const profileLink = screen.getByRole('link', { name: /^Open profile for/ })
+    const lastRemaining = document.querySelector('nav[aria-label="All sections"] a[href="/contacts"]')!
+    expect(lastRemaining.compareDocumentPosition(settingsLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(settingsLink.compareDocumentPosition(profileLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   // #1989 (epic #1440): the Approvals entry and its live badge are DELETED, for
@@ -232,8 +280,8 @@ describe('Sidebar', () => {
       )
       render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).toBeNull()
-      // Positive control: the rest of the Admin cluster is untouched.
-      expect(document.querySelector('nav[aria-label="All sections"] a[href="/custody"]')).not.toBeNull()
+      // Positive control: the rest of the Money and Agents clusters are untouched.
+      expect(document.querySelector('nav[aria-label="All sections"] a[href="/contacts"]')).not.toBeNull()
       const navText = document.querySelector('nav[aria-label="All sections"]')!.textContent ?? ''
       expect(navText).not.toContain(en.common.comingSoon)
       expect(navText).not.toContain(en.accountingPage.nav.comingSoon)
@@ -244,8 +292,8 @@ describe('Sidebar', () => {
       render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
       expect(accountingLink()).toBeNull()
       expect(attentionDot()).toBeNull()
-      // Positive control: the rest of the Admin cluster does not wait.
-      expect(document.querySelector('nav[aria-label="All sections"] a[href="/custody"]')).not.toBeNull()
+      // Positive control: the rest of the Money and Agents clusters do not wait.
+      expect(document.querySelector('nav[aria-label="All sections"] a[href="/contacts"]')).not.toBeNull()
     })
 
     it('the status answers after mount: the entry appears once, in its final state', () => {

@@ -18,6 +18,9 @@ const { mockApi, mockReplace, searchParamsRef } = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
+  // `mockApi` stays a hoisted spy set because the suite asserts on
+  // `post`/`patch`/`delete` and swaps `get` per test; `serve()`/`serveOff()`
+  // below route every `get` through the typed builder (#3027).
   return { ApiRequestError: actual.ApiRequestError, api: mockApi }
 })
 vi.mock('next/navigation', () => ({
@@ -27,18 +30,38 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/hooks/useScrollEdgeCue', () => ({ useScrollEdgeCue: () => false }))
 
 import { ConnectionsCard, readConnectOutcome } from '@/components/accounting/ConnectionsCard'
+import { apiMock } from '../../../../e2e/fixtures/api-mock'
+
+// #3027 acceptance criteria: a wrong field in an `apiMock()` override is a
+// compile error, not a runtime surprise. `legacySafe` does not exist on the
+// generated `listAccountingProviders` response shape — this line is the
+// typecheck proof (`npx tsc --noEmit`), not a runtime assertion; it is never
+// invoked.
+function unusedTypeCheckOnly_apiMockRejectsUnknownFields() {
+  // @ts-expect-error 'legacySafe' is not a field of the accounting providers response (#3027 typed override contract)
+  return apiMock({ '/accounting/providers': { providers: [{ legacySafe: true }] } })
+}
+void unusedTypeCheckOnly_apiMockRejectsUnknownFields
 
 const PROVIDERS = [provider(), ...COMING_SOON]
 
+/**
+ * #3027: the three reads the card makes go through `apiMock()`'s typed route
+ * table — `PROVIDERS`, the connection rows and the feed status are checked
+ * against the generated `listAccountingProviders` / `listAccountingConnections`
+ * / `getAccountingFeedStatus` response shapes at `tsc` time, and an unrouted
+ * path rejects loudly. The `vi.fn` in `mockApi` is kept so `mockApi.get` can
+ * still be re-pointed mid-test (the refetch race below).
+ */
 function serve(connections: ReturnType<typeof connection>[], status = feedStatus()) {
-  mockApi.get.mockImplementation((url: string) => {
-    if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
-    if (url === '/accounting/connections') return Promise.resolve({ connections })
+  const { api } = apiMock({
+    '/accounting/providers': { providers: PROVIDERS },
+    '/accounting/connections': { connections },
     // #2869: the card reads the feed status too — it renders its providers in
     // the matching off state instead of offering Connect.
-    if (url === '/accounting/feed/status') return Promise.resolve(status)
-    return Promise.reject(new Error(`unexpected GET ${url}`))
+    '/accounting/feed/status': status,
   })
+  mockApi.get.mockImplementation(api.get)
 }
 
 function renderCard() {
@@ -290,12 +313,14 @@ describe('ConnectionsCard', () => {
    * render the off state, never the load error.
    */
   function serveOff(status: ReturnType<typeof feedStatus>) {
-    mockApi.get.mockImplementation((url: string) => {
-      if (url === '/accounting/providers') return Promise.resolve({ providers: PROVIDERS })
-      if (url === '/accounting/feed/status') return Promise.resolve(status)
-      if (url === '/accounting/connections') return Promise.reject(Object.assign(new Error('Not found'), { status: 404 }))
-      return Promise.reject(new Error(`unexpected GET ${url}`))
+    const { api } = apiMock({
+      '/accounting/providers': { providers: PROVIDERS },
+      '/accounting/feed/status': status,
+      // The gated read answers 404 while the feed is off (#2918) — a function
+      // override, since the route table has no shape for a refusal.
+      '/accounting/connections': () => Promise.reject(Object.assign(new Error('Not found'), { status: 404 })),
     })
+    mockApi.get.mockImplementation(api.get)
   }
 
   describe('the feed is off (#2869)', () => {

@@ -44,6 +44,8 @@ Run the matching items from the **Captain Self-Check Preflight** in [`../ai-agen
 
 Verify the change in the **browser**, or — when the browser path is unavailable/flaky — add a **named headless equivalent** (vitest) that covers the skipped animation, layout, routing, loading, or interaction risk. Include empty, loading, error, and success states when the screen can enter them; check mobile and desktop.
 
+**Mock `@/lib/api` through `apiMock()`, not an inline literal ([#3027](https://github.com/d-hinders/Haven-AI/issues/3027)).** `e2e/fixtures/api-mock.ts` exports a typed builder over the same constants `e2e/fixtures/haven-api.ts` serves to Playwright — its route table's value types come from `@haven_ai/core`'s generated OpenAPI types, so a wrong or invented field in an override is a `tsc` error, not a screen that silently renders `undefined`. `src/hooks/__tests__/useAgents.test.ts` and `src/components/accounting/__tests__/ConnectionsCard.test.tsx` are the worked conversions. The 32 files that still mock `@/lib/api` with an inline `unknown`-typed literal are **not** a backlog to burn down on a schedule — no ratchet gates them — convert one opportunistically whenever you are already touching its test, the same way the naming epic (#2913) converts a file as it touches it.
+
 **Which viewports actually gate ([#1768](https://github.com/d-hinders/Haven-AI/issues/1768)).** The *Frontend browser smoke* job runs **both** Playwright projects on every frontend PR, with no dispatch required:
 
 | Project | Emulation | Runs | Gates a PR |

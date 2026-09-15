@@ -1,15 +1,19 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mockApiGet = vi.fn()
+// #3027: mocked through the typed builder rather than a hand-rolled literal.
+// This suite overrides every call's resolution directly on the spy
+// (`mockApiGet.mockResolvedValueOnce(...)` below) rather than reading the
+// builder's route-table defaults, so `apiMock()` is called with no overrides
+// — `api.get` IS `apiMock()`'s `get` spy (a plain `vi.fn`), which is what
+// makes every existing assertion and `mockResolvedValueOnce` call keep
+// working unchanged.
+vi.mock('@/lib/api', async () => (await import('../../../e2e/fixtures/api-mock')).apiMock())
 
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: (...args: unknown[]) => mockApiGet(...args),
-  },
-}))
-
+import { api } from '@/lib/api'
 import { useAgents } from '@/hooks/useAgents'
+
+const mockApiGet = api.get as unknown as ReturnType<typeof vi.fn>
 
 describe('useAgents visible-only polling (#2732)', () => {
   beforeEach(() => {

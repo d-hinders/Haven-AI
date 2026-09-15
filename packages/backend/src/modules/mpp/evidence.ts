@@ -34,6 +34,7 @@ import { isProtocolPaymentRail } from './rail-dispatch.js'
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 import { withParties } from '../../openapi/party-model.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
+import { isZeroSettlementTxHash } from '@haven_ai/sdk'
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
 
@@ -583,6 +584,49 @@ export async function reconcileDelegateResidueAfterSettlement(
  * (`modules/x402/delegation-authorize.ts`) — null on rows authorized before
  * #2960 and on the legacy rail.
  */
+/**
+ * #2998: names the two hashes a receipt can carry, additive alongside the
+ * deprecated-in-description `tx_hash`. erc7710 settles in one transaction —
+ * `tx_hash` IS the settlement, there is no funding leg. eip3009 is a
+ * two-leg bridge — `tx_hash` is Haven's own FUNDING transaction
+ * (treasury → delegate), and the merchant's SETTLEMENT transaction, if any,
+ * lives in `protocol_receipt_payload.transaction` (the header the merchant
+ * returns, #2092's completion seam). A scheme-less (legacy-rail) row falls
+ * into the same branch as eip3009: its `tx_hash` was that era's payment
+ * transaction, and it has no settlement leg of its own to report.
+ * `isZeroSettlementTxHash` is the same zero-hash recognizer the #2970
+ * hosted gate uses (a demo-merchant "delivered, not settled" marker, never
+ * a real transaction) — applied here so `settlement_tx_hash` never surfaces
+ * that placeholder as if it were one.
+ */
+function deriveReceiptTxHashes(row: {
+  tx_hash: string
+  rail: string
+  settlement_scheme?: string | null
+  protocol_receipt_payload: Record<string, unknown> | null
+}): { funding_tx_hash: string | null; settlement_tx_hash: string | null } {
+  if (row.settlement_scheme === 'erc7710') {
+    return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
+  }
+  // #3006 review: a scheme-less row is a retired-rail receipt (#1328 keeps
+  // them readable). On the retired x402 rails the sequence was funding then
+  // EIP-3009, so `tx_hash` was the funding leg — same as eip3009 below. On
+  // the retired mpp rails (`mpp_demo`) the ONE transaction moved
+  // account → merchant directly (`safe_allowance_transfer`): that `tx_hash`
+  // IS the settlement and there was no funding leg. Labelling it "funding"
+  // would be the exact lie this field exists to remove.
+  if (!row.settlement_scheme && row.rail !== 'x402') {
+    return { funding_tx_hash: null, settlement_tx_hash: row.tx_hash }
+  }
+
+  const candidate = row.protocol_receipt_payload?.transaction
+  const settlementTxHash =
+    typeof candidate === 'string' && TX_HASH_RE.test(candidate) && !isZeroSettlementTxHash(candidate)
+      ? candidate
+      : null
+  return { funding_tx_hash: row.tx_hash, settlement_tx_hash: settlementTxHash }
+}
+
 export function mapEvidence(row: MachinePaymentEvidenceRow) {
   return withParties(
     {
@@ -595,6 +639,7 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       rail: row.rail,
       proof_status: row.proof_status,
       tx_hash: row.tx_hash,
+      ...deriveReceiptTxHashes(row),
       chain_id: row.chain_id,
       resource_url: row.resource_url,
       merchant_address: row.merchant_address,

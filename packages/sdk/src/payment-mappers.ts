@@ -108,6 +108,8 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
     rail: raw.rail,
     proofStatus: raw.proof_status,
     txHash: raw.tx_hash,
+    fundingTxHash: raw.funding_tx_hash ?? null,
+    settlementTxHash: raw.settlement_tx_hash ?? null,
     chainId: raw.chain_id,
     resourceUrl: raw.resource_url,
     merchantAddress: raw.merchant_address,

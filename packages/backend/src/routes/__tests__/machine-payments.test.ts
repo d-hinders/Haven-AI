@@ -666,6 +666,11 @@ describe('machine payment routes', () => {
         rail: 'mpp_demo',
         proof_status: 'payment_confirmed',
         tx_hash: TX_HASH,
+        // #2998: eip3009 — `tx_hash` is Haven's funding leg;
+        // `protocol_receipt_payload` here has no `transaction` field, so
+        // there is no reported merchant settlement.
+        funding_tx_hash: TX_HASH,
+        settlement_tx_hash: null,
         chain_id: 8453,
         resource_url: challenge.resource,
         merchant_address: RECIPIENT.toLowerCase(),
@@ -754,13 +759,23 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    const body = response.json() as { receipts: Array<{ parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string } }> }
+    const body = response.json() as {
+      receipts: Array<{
+        parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string }
+        funding_tx_hash: string | null
+        settlement_tx_hash: string | null
+      }>
+    }
     expect(body.receipts[0].parties).toEqual({
       treasury_account: AGENT.account_address.toLowerCase(),
       delegate: AGENT.delegate_address,
       delegate_account: delegateAccount,
       merchant: RECIPIENT.toLowerCase(),
     })
+    // #2998: erc7710 — one transaction, `tx_hash` IS the settlement, no
+    // funding leg.
+    expect(body.receipts[0].funding_tx_hash).toBeNull()
+    expect(body.receipts[0].settlement_tx_hash).toBe(TX_HASH)
     expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
   })
 
@@ -1225,6 +1240,11 @@ describe('machine payment routes', () => {
         rail: 'mpp_demo',
         proof_status: 'protocol_receipt_attached',
         tx_hash: TX_HASH,
+        // #2998 (#3006 review): scheme-less mpp_demo row — the retired mpp
+        // rail moved account → merchant in ONE transaction, so `tx_hash` IS
+        // the settlement and there was no funding leg.
+        funding_tx_hash: null,
+        settlement_tx_hash: TX_HASH,
         payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
         protocol_receipt_header_name: 'Payment-Receipt',
         protocol_receipt_payload: { status: 'settled' },

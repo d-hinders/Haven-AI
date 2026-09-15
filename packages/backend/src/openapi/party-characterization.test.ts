@@ -32,12 +32,22 @@ function loadFixture(slug: string): { _base: string; body: unknown } {
 }
 
 /** Strip the additive `parties` key, recursively into arrays — the ONLY key #2960 adds to these two shapes. */
+/**
+ * Fields added AFTER the base fixture was recorded, each named here on
+ * purpose: the replay pins that every base field is byte-identical, and an
+ * addition has to be declared to pass — not absorbed by a looser matcher.
+ *   - `parties` — #2960 (this file's own change)
+ *   - `funding_tx_hash` / `settlement_tx_hash` — #2998, the two hashes
+ *     named beside the unlabeled `tx_hash`; asserted separately below.
+ */
+const ADDITIVE_SINCE_BASE = new Set(['parties', 'funding_tx_hash', 'settlement_tx_hash'])
+
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)
   if (value === null || typeof value !== 'object') return value
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (k === 'parties') continue
+    if (ADDITIVE_SINCE_BASE.has(k)) continue
     out[k] = stripParties(v)
   }
   return out
@@ -104,13 +114,20 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
 
     expect(stripParties(liveBody)).toEqual(stripParties(fixture.body))
 
-    const live = liveBody[0] as { parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string } }
+    const live = liveBody[0] as {
+      parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string }
+      funding_tx_hash: string | null
+      settlement_tx_hash: string | null
+    }
     expect(live.parties).toEqual({
       treasury_account: '0x3333333333333333333333333333333333333333', // == payer_address
       delegate: intentDelegateAddress,
       delegate_account: null, // #2960: base fixture's machine_metadata is null (pre-#2960)
       merchant: '0x2222222222222222222222222222222222222222', // == merchant_address
     })
+    // #2998: erc7710 has one transaction — it is the settlement, there is no funding leg.
+    expect(live.funding_tx_hash).toBeNull()
+    expect(live.settlement_tx_hash).toBe('0x' + 'cd'.repeat(32))
   })
 
   it('rekeyed agent: receipts and status both show the delegate that PAID, not the agent row\'s current delegate', async () => {

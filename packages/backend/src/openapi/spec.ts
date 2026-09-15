@@ -8364,7 +8364,31 @@ export const openapiSpec = {
             type: 'string',
             enum: ['payment_confirmed', 'merchant_response_observed', 'protocol_receipt_attached'],
           },
-          tx_hash: { type: 'string' },
+          tx_hash: {
+            type: 'string',
+            description:
+              'Deprecated (#2998) — kept for wire compatibility. Meaning depends on `settlement_scheme`: ' +
+              'the account → delegate funding transaction on eip3009, the (only) settlement transaction on erc7710. ' +
+              'Prefer `funding_tx_hash` / `settlement_tx_hash`, which name which is which.',
+          },
+          funding_tx_hash: {
+            type: ['string', 'null'],
+            description:
+              'The account → delegate funding transaction, relayed by Haven (#2998). Set on eip3009 and on ' +
+              'scheme-less retired-x402-rail rows; null on erc7710 (no funding leg) and on scheme-less retired ' +
+              'mpp-rail rows (one direct account → merchant transaction, which is the settlement).',
+          },
+          settlement_tx_hash: {
+            type: ['string', 'null'],
+            description:
+              'The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself ' +
+              '(the one transaction). On eip3009 this is the merchant-reported ' +
+              '`protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null ' +
+              '— the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not ' +
+              'settled" marker. Trust level differs by scheme: on erc7710 Haven verified this hash on-chain ' +
+              'before the receipt existed; on eip3009 it is the merchant\'s claim as relayed (PAYMENT-RESPONSE), ' +
+              'NOT verified on-chain by Haven. On scheme-less retired mpp-rail rows it is `tx_hash` itself.',
+          },
           chain_id: { type: 'integer' },
           resource_url: { type: 'string', format: 'uri' },
           merchant_address: { anyOf: [address, { type: 'null' }] },

@@ -8,7 +8,7 @@ covers:
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-15"
 ---
 
 # Dev environment

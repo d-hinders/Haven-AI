@@ -290,6 +290,53 @@ export function parseConnectorChannel(raw: string | undefined | null): string {
   return value
 }
 
+/**
+ * A boolean feature flag read from the environment: `true` or `false`, and
+ * **nothing else silently**.
+ *
+ * Every flag here used to be `process.env.X === 'true'`, which reads `TRUE`,
+ * `1`, `yes` and `true ` as OFF. That is the worst shape a flag can have,
+ * because a silently-off flag is indistinguishable from a deliberately-off
+ * one: nothing logs, nothing warns, and the observable behaviour is exactly
+ * what an operator who meant to disable the feature would see.
+ *
+ * It reached production. `HAVEN_HOSTED` was set to `TRUE` on the prod backend,
+ * so `config.hosted` was false and `/accounting` told users of the HOSTED
+ * service that the feed "is not available on a self-hosted deployment"
+ * (#3015, found 2026-09-15 while closing out epic #2858). The variable was
+ * present in the dashboard, looked set, and did nothing.
+ *
+ * So an unrecognised value refuses the boot instead — the shape
+ * `parseConnectorChannel` above and `parseAccountingEntitlementMode` below
+ * already use. Normalising case was the alternative and was rejected by the
+ * owner on 2026-09-15 ("flags should fail loudly"): lower-casing fixes `TRUE`
+ * and still reads `1`, `yes` and `on` as off, which is the same defect with a
+ * smaller blast radius.
+ *
+ * Unset, `null` and empty-after-trim are all `false` — "the operator cleared
+ * it" lands on the same signal as "never configured" rather than a third
+ * state, matching `parseConnectorChannel`. Whitespace AROUND a real value is
+ * accepted and trimmed, because a padded value is a dashboard paste artefact
+ * and the operator's intent is not in doubt; `warnPublicRpc` trims for the
+ * same reason. `null` is accepted alongside `undefined` for the reason given
+ * on `parseConnectorChannel`: a reader that hands us one should get the
+ * designed refusal, not a `TypeError` from `.trim()`.
+ */
+export function parseBooleanFlag(name: string, raw: string | undefined | null): boolean {
+  if (raw === undefined || raw === null) return false
+  const value = raw.trim()
+  if (value === '') return false
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new Error(
+    `${name} is set to ${JSON.stringify(raw)}, which is not a boolean: it must be exactly ` +
+    '"true" or "false", lower-case. Refusing to start rather than reading it as false, ' +
+    'because a flag that is silently off looks identical to one that is deliberately off ' +
+    `— which is how ${JSON.stringify('TRUE')} left HAVEN_HOSTED inert in production (#3015). ` +
+    `Unset ${name} to get false deliberately.`,
+  )
+}
+
 // Validate on import — fail fast at startup
 export const RETRY_SWEEP_INTERVAL_DEFAULT_MS = 5 * 60 * 1000
 export const RETRY_SWEEP_INTERVAL_FLOOR_MS = 10_000
@@ -369,7 +416,7 @@ export const config = {
   // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
   // default — it calls an external catalog API and inserts rows, so it's
   // opt-in. The URL is overridable for testing/self-hosted facilitators.
-  catalogDiscoveryEnabled: process.env.CATALOG_DISCOVERY_ENABLED === 'true',
+  catalogDiscoveryEnabled: parseBooleanFlag('CATALOG_DISCOVERY_ENABLED', process.env.CATALOG_DISCOVERY_ENABLED),
   catalogDiscoveryUrl: optionalEnv(
     'CATALOG_DISCOVERY_URL',
     'https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources',
@@ -388,16 +435,16 @@ export const config = {
 
   // Platform fee module (#386). Dark by default — when false the fee is always
   // zero and no funds move. Real pricing + on-chain collection are deferred.
-  feeEnabled: process.env.HAVEN_FEE_ENABLED === 'true',
+  feeEnabled: parseBooleanFlag('HAVEN_FEE_ENABLED', process.env.HAVEN_FEE_ENABLED),
 
   // Legacy asserting bookkeeping (epic #462). Dark by default — superseded by
   // the non-asserting reporting feed (#491). Code retained; surfaces gated:
   // SIE export, finished voucher push, and any asserted-VAT output.
-  legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
+  legacyBookkeepingEnabled: parseBooleanFlag('HAVEN_LEGACY_BOOKKEEPING_ENABLED', process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED),
 
   // Managed-deployment marker — true only on Haven's hosted backend. The
   // accounting feed (#491) is a hosted-only add-on and never runs elsewhere.
-  hosted: process.env.HAVEN_HOSTED === 'true',
+  hosted: parseBooleanFlag('HAVEN_HOSTED', process.env.HAVEN_HOSTED),
   // Global kill-switch for the accounting feed; dark by default.
   //
   // #2859 renamed this from HAVEN_REPORTING_FEED_ENABLED. The old name is still
@@ -454,13 +501,13 @@ export function relayerPrivateKeyForChain(chainId: number): string {
 function readAccountingEnabled(): boolean {
   const current = process.env.HAVEN_ACCOUNTING_ENABLED
   const deprecated = process.env.HAVEN_REPORTING_FEED_ENABLED
-  if (current !== undefined) return current === 'true'
+  if (current !== undefined) return parseBooleanFlag('HAVEN_ACCOUNTING_ENABLED', current)
   if (deprecated !== undefined) {
     console.warn(
       '[config] HAVEN_REPORTING_FEED_ENABLED is deprecated (#2859) — rename it to ' +
         'HAVEN_ACCOUNTING_ENABLED. The old name is still honoured for now.',
     )
-    return deprecated === 'true'
+    return parseBooleanFlag('HAVEN_REPORTING_FEED_ENABLED', deprecated)
   }
   return false
 }

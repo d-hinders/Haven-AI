@@ -18,7 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-15"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -333,7 +333,10 @@ the live state of an environment is read from the environment, not from prose.
       (`parseConnectorChannel`, `packages/backend/src/config.ts`); unrelated
       backend configuration such as `HAVEN_OPS_TOKEN` or the accounting feed's
       `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` (#2861, the same refuse-the-boot
-      shape for its own two values) and
+      shape for its own two values), the boolean flags `HAVEN_HOSTED` /
+      `HAVEN_FEE_ENABLED` / `HAVEN_LEGACY_BOOKKEEPING_ENABLED` /
+      `CATALOG_DISCOVERY_ENABLED` (#3015, that shape again — exactly `true` or
+      `false`, lower-case, anything else refuses the boot) and
       `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` (#2866, a plain
       `Number(...) || default`) does not affect this
       package-selection path; anything else

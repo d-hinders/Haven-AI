@@ -8364,7 +8364,28 @@ export const openapiSpec = {
             type: 'string',
             enum: ['payment_confirmed', 'merchant_response_observed', 'protocol_receipt_attached'],
           },
-          tx_hash: { type: 'string' },
+          tx_hash: {
+            type: 'string',
+            description:
+              'Deprecated (#2998) — kept for wire compatibility. Meaning depends on `settlement_scheme`: ' +
+              'Haven\'s own funding transaction on eip3009, the (only) settlement transaction on erc7710. ' +
+              'Prefer `funding_tx_hash` / `settlement_tx_hash`, which name which is which.',
+          },
+          funding_tx_hash: {
+            type: ['string', 'null'],
+            description:
+              'Haven\'s treasury → delegate funding transaction (#2998). Set on eip3009 (and scheme-less ' +
+              'legacy-rail rows); always null on erc7710, which has no funding leg.',
+          },
+          settlement_tx_hash: {
+            type: ['string', 'null'],
+            description:
+              'The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself ' +
+              '(the one transaction). On eip3009 this is the merchant-reported ' +
+              '`protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null ' +
+              '— the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not ' +
+              'settled" marker.',
+          },
           chain_id: { type: 'integer' },
           resource_url: { type: 'string', format: 'uri' },
           merchant_address: { anyOf: [address, { type: 'null' }] },

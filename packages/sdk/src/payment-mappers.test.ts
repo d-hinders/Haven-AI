@@ -171,6 +171,30 @@ describe('payment result mappers', () => {
     expect(withOwners.challengePayload).toBeUndefined()
   })
 
+  // #2998: additive alongside deprecated `txHash`/`tx_hash` — names which
+  // hash is funding and which is settlement, defaulting to null when the
+  // server omits either (older backend, or the field genuinely has no
+  // value on this row).
+  it('mapPaymentReceipt carries funding_tx_hash / settlement_tx_hash, defaulting to null when absent', () => {
+    const withoutEither = mapPaymentReceipt(rawReceipt())
+    expect(withoutEither.fundingTxHash).toBeNull()
+    expect(withoutEither.settlementTxHash).toBeNull()
+
+    const withBoth = mapPaymentReceipt(rawReceipt({
+      funding_tx_hash: '0xfunding',
+      settlement_tx_hash: '0xsettlement',
+    }))
+    expect(withBoth.fundingTxHash).toBe('0xfunding')
+    expect(withBoth.settlementTxHash).toBe('0xsettlement')
+
+    const erc7710Shape = mapPaymentReceipt(rawReceipt({
+      funding_tx_hash: null,
+      settlement_tx_hash: '0xsettlement',
+    }))
+    expect(erc7710Shape.fundingTxHash).toBeNull()
+    expect(erc7710Shape.settlementTxHash).toBe('0xsettlement')
+  })
+
   // #2960: additive alongside `payerAddress`/`payer_address` — camelCases
   // the wire `parties` object, absent when the server does not send it.
   it('mapPaymentReceipt carries parties when present, undefined when absent', () => {

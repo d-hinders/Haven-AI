@@ -3759,7 +3759,12 @@ export type components = {
             budget_delegation_hash?: string | null;
             /** @enum {string} */
             proof_status: "payment_confirmed" | "merchant_response_observed" | "protocol_receipt_attached";
+            /** @description Deprecated (#2998) — kept for wire compatibility. Meaning depends on `settlement_scheme`: Haven's own funding transaction on eip3009, the (only) settlement transaction on erc7710. Prefer `funding_tx_hash` / `settlement_tx_hash`, which name which is which. */
             tx_hash: string;
+            /** @description Haven's treasury → delegate funding transaction (#2998). Set on eip3009 (and scheme-less legacy-rail rows); always null on erc7710, which has no funding leg. */
+            funding_tx_hash?: string | null;
+            /** @description The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself (the one transaction). On eip3009 this is the merchant-reported `protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null — the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not settled" marker. */
+            settlement_tx_hash?: string | null;
             chain_id: number;
             /** Format: uri */
             resource_url: string;

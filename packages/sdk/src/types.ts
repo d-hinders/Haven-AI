@@ -768,7 +768,17 @@ export interface HavenPaymentReceipt {
   approvalRequestId?: string | null
   rail: string
   proofStatus: string
+  /**
+   * @deprecated (#2998) meaning depends on the settlement scheme — Haven's
+   * own funding transaction on eip3009, the (only) settlement transaction on
+   * erc7710. Prefer {@link fundingTxHash} / {@link settlementTxHash}, which
+   * name which is which.
+   */
   txHash: string
+  /** Haven's treasury → delegate funding transaction (#2998); null on erc7710, which has no funding leg. */
+  fundingTxHash: string | null
+  /** The delegate → merchant settlement transaction (#2998); `txHash` itself on erc7710. */
+  settlementTxHash: string | null
   chainId: number
   resourceUrl: string
   merchantAddress: string | null
@@ -1733,7 +1743,10 @@ export interface RawHavenPaymentReceipt {
   approval_request_id?: string | null
   rail: string
   proof_status: string
+  /** @deprecated (#2998) — see `funding_tx_hash` / `settlement_tx_hash`. */
   tx_hash: string
+  funding_tx_hash?: string | null
+  settlement_tx_hash?: string | null
   chain_id: number
   resource_url: string
   merchant_address: string | null

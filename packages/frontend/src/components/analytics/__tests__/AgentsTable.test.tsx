@@ -95,6 +95,23 @@ describe('AgentsTable — the desktop table', () => {
     expect(text).toMatch(/NordShield VPN/) // a label the API resolved, not this table
   })
 
+  it('truncates a merchant whose label never resolved to a name, and keeps the whole thing readable', () => {
+    // The endpoint returns the address itself when there is no contact and no
+    // receipt name behind it. At table width an un-truncated `0x…` clipped
+    // mid-glyph: no ellipsis, no way to read the whole thing. So it goes through
+    // `lib/format.truncate` — the app's one address rule (#853) — and the full
+    // string rides in the title so the reader can still get it. NordShield VPN
+    // is pinned un-truncated by the formatter test above, which is what keeps
+    // this from passing if the address branch inverts.
+    const { container } = mount()
+    const retired = container.querySelectorAll('tbody tr')[1]
+    const cell = retired.querySelectorAll('td')[6]
+    expect(cell.textContent).toBe('0x71C2…7128')
+    expect(cell.querySelector('span[title]')?.getAttribute('title')).toBe(
+      '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
+    )
+  })
+
   it('does not pad the refusals cell with an attempts clause when the two agree', () => {
     // A dedupe upstream makes rows and attempts usually equal, and spelling
     // the pair every time would train the reader to stop parsing the cell.

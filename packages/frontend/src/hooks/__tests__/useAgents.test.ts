@@ -2,22 +2,24 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // #3027: mocked through the typed builder rather than a hand-rolled literal.
-// This suite overrides every call's resolution directly on the spy
-// (`mockApiGet.mockResolvedValueOnce(...)` below) rather than reading the
-// builder's route-table defaults, so `apiMock()` is called with no overrides
-// — `api.get` IS `apiMock()`'s `get` spy (a plain `vi.fn`), which is what
-// makes every existing assertion and `mockResolvedValueOnce` call keep
-// working unchanged.
+// The mount tick reads the builder's `/agents` default (the e2e fixture's
+// agent, schema-checked against `@haven_ai/core`); later ticks are queued on
+// the same spy with `mockResolvedValueOnce`/`mockRejectedValueOnce`, which
+// take one call each ahead of the routed implementation. `beforeEach` uses
+// `mockClear`, not `mockReset` — a reset would drop the route table and every
+// call would resolve `undefined` (the inert shape review caught on the first
+// push of this PR).
 vi.mock('@/lib/api', async () => (await import('../../../e2e/fixtures/api-mock')).apiMock())
 
 import { api } from '@/lib/api'
+import { testAgent } from '../../../e2e/fixtures/haven-api'
 import { useAgents } from '@/hooks/useAgents'
 
 const mockApiGet = api.get as unknown as ReturnType<typeof vi.fn>
 
 describe('useAgents visible-only polling (#2732)', () => {
   beforeEach(() => {
-    mockApiGet.mockReset()
+    mockApiGet.mockClear()
     vi.useFakeTimers()
   })
 
@@ -26,13 +28,17 @@ describe('useAgents visible-only polling (#2732)', () => {
   })
 
   it('a successful silent tick refreshes the list without the loading flag', async () => {
-    mockApiGet.mockResolvedValueOnce({ agents: [{ id: 'a1', name: 'First' }] })
+    // Mount tick: served by the typed route table, no override queued.
     const { result } = renderHook(() => useAgents())
     await act(async () => {
       await Promise.resolve()
     })
+    expect(mockApiGet).toHaveBeenCalledWith('/agents')
     expect(result.current.loading).toBe(false)
     expect(result.current.agents).toHaveLength(1)
+    // Pinned to the e2e constant, not to the builder's own table — a builder
+    // default that drifts from the fixture must show up here.
+    expect(result.current.agents[0]!.id).toBe(testAgent.id)
 
     mockApiGet.mockResolvedValueOnce({
       agents: [{ id: 'a1', name: 'First' }, { id: 'a2', name: 'Second' }],

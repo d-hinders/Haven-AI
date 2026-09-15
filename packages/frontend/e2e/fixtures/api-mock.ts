@@ -28,39 +28,46 @@ import {
  *
  * ## Usage
  *
- * `vi.mock` factories are hoisted above imports, so the working shape is:
+ * `vi.mock` factories are hoisted above every import, so the ONLY safe shape
+ * is the one that imports this module inside the factory:
  *
  * ```ts
  * vi.mock('@/lib/api', async () =>
  *   (await import('../../../e2e/fixtures/api-mock')).apiMock({
- *     '/agents': { agents: [{ status: 'paused' }] },
+ *     '/agents': { agents: [{ ...API_MOCK_DEFAULTS['/agents'].agents[0], status: 'paused' }] },
  *   }),
  * )
  * ```
  *
- * A plain top-level `vi.mock('@/lib/api', () => apiMock(...))` also runs
- * correctly under this repo's vitest config (jsdom, `vi.mock` hoisting is a
- * static transform keyed on the `vi.mock(...)` call, not on what the factory
- * closes over) — `vi.hoisted` is NOT required here because `apiMock` and the
- * e2e fixture constants are imported at module scope, not captured from an
- * outer local. Reach for the `async () => (await import(...))` form only when
- * a test also needs `vi.hoisted` state (e.g. shared spies referenced from
- * `beforeEach`) alongside it — `ConnectionsCard.test.tsx` in this repo already
- * does that with its own hand-rolled mock, unconverted, for exactly that
- * reason (see its file header note).
+ * Do NOT write `vi.mock('@/lib/api', () => apiMock(...))` with `apiMock`
+ * imported at module scope: vitest rewrites the static imports to sequential
+ * dynamic imports and calls the factory when `@/lib/api` is first loaded, so
+ * it works only if this module's import happens to be sorted BEFORE the
+ * `@/lib/api` import — the other order fails to load with `ReferenceError:
+ * Cannot access '__vi_import_1__' before initialization` (measured under
+ * vitest 3.2 in the #3034 review). A suite that also needs `vi.hoisted`
+ * state (shared `post`/`patch`/`delete` spies) keeps its hoisted spy set and
+ * points `get` at the builder per test — `ConnectionsCard.test.tsx`'s
+ * `serve()` is that shape.
  *
  * `api.get`/`api.post`/`api.patch`/`api.delete`/`api.getText` are `vi.fn()`
- * spies, so a converted test can still assert calls and still override a
- * single call's resolution with `spies.get.mockResolvedValueOnce(...)` —
- * `useAgents.test.ts` does both.
+ * spies, so a converted test can still assert calls and still queue a single
+ * call's resolution with `spies.get.mockResolvedValueOnce(...)` —
+ * `useAgents.test.ts` does both (the mount tick is routed, later ticks are
+ * queued).
  *
  * ## Design notes
  *
- * - `overrides` merges SHALLOWLY over the defaults, per top-level route key
- *   only — `{ '/agents': { agents: [...] } }` replaces the whole `/agents`
- *   response, it does not deep-merge into the default's `agents` array. A
- *   test that wants "the default plus one changed field" spreads the default
- *   itself: `{ '/agents': { agents: [{ ...API_MOCK_DEFAULTS['/agents'].agents[0], status: 'paused' }] } }`.
+ * - An override is typed `Partial<Route>`: each TOP-LEVEL key of the response
+ *   is optional, and any key you do give must be the COMPLETE wire value —
+ *   a nested object or array element is never partial. That matches what
+ *   `mergeRoute` does (one level of spread, everything beneath replaced
+ *   wholesale), so a dropped required field inside `agents[0]` is a `tsc`
+ *   error, not a screen rendering `undefined`. The first cut of this file
+ *   typed overrides `DeepPartial` while merging shallowly — the type admitted
+ *   exactly the dropped-key gap the file exists to close (review of #3034).
+ *   "The default plus one changed field" is a spread of the default, as in
+ *   the Usage example.
  * - An override may also be a function `(path: string) => unknown` for a
  *   route whose response depends on the exact path/query string.
  * - `get(path)` matches by PATHNAME (a leading `?query` is stripped), and an
@@ -94,12 +101,12 @@ import {
  * `Record<string, unknown> | null` destination row.
  *
  * `/auth/me` (`getSession`) is NOT in the typed route table: `testUser.safes`
- * (built from `testSafe`) is missing `value_bearing_chain` and
- * `needs_backup_recommendation` (both required on the session's `safes[]`
- * entries), and unlike the twins above there is no existing real value in the
- * e2e fixture to reuse — inventing one would be exactly the fabrication this
- * file's design note above forbids. `/auth/me` is served UNTYPED
- * (`testUser` as-is) with the gap named here rather than hidden by a cast.
+ * (built from `testSafe`) is missing `value_bearing_chain` (required
+ * `boolean`, no fixture value to reuse — inventing one would be the
+ * fabrication the note above forbids) and `needs_backup_recommendation`
+ * (`boolean | null`, so `null` WOULD be an admitted completion — but it does
+ * not rescue the row on its own). `/auth/me` is served UNTYPED (`testUser`
+ * as-is) with the gap named here rather than hidden by a cast.
  */
 
 type Agent = ApiSchema<'Agent'>
@@ -216,18 +223,13 @@ export const API_MOCK_DEFAULTS: ApiRoutes = {
 }
 
 /**
- * A route's override: the whole response (or a `DeepPartial` of it, shallow
- * on collections — see the file header), or a function of the exact
- * requested path for query-string-dependent routing.
+ * A route's override: top-level keys optional, each given key a COMPLETE wire
+ * value (see the design notes — this is exactly as deep as `mergeRoute`
+ * merges), or a function of the exact requested path for query-string- or
+ * refusal-dependent routing (`() => Promise.reject(...)` for a 404).
  */
-export type DeepPartial<T> = T extends (infer U)[]
-  ? DeepPartial<U>[]
-  : T extends object
-    ? { [K in keyof T]?: DeepPartial<T[K]> }
-    : T
-
 export type ApiMockOverrides = {
-  [P in keyof ApiRoutes]?: DeepPartial<ApiRoutes[P]> | ((path: string) => unknown)
+  [P in keyof ApiRoutes]?: (ApiRoutes[P] extends object ? Partial<ApiRoutes[P]> : ApiRoutes[P]) | ((path: string) => unknown)
 }
 
 function pathnameOf(path: string): string {

@@ -21,9 +21,16 @@ Three rules hold for every block:
   produced a non-zero — the figures under each block, taken on
   `origin/dev@893d74f6` (2026-09-03), are that control until a later run
   supersedes them in the ledger.
-- **The bar is unchanged.** These blocks produce evidence; whether it is one
-  of the run's two findings is decided by § *The bar*, and the skill still
-  implements nothing and files nothing.
+- **The bar is unchanged.** These blocks produce evidence; whether it qualifies as a
+  structural finding or improvement candidate is decided by the canonical
+  skill's respective bar. The skill still implements nothing and files nothing.
+
+**Coverage applies to every block.** Follow the canonical skill's coverage
+record: examined / partial / not examined, revision and command/result,
+sample boundaries, and missing verification with its reason. “Clean” below
+means clean within the stated, executed sample. A sample not run is never a
+zero; report it as partial or not examined. A block may support an improvement
+candidate without meeting the structural bar, but still needs evidence.
 
 **1. Guard falsifiability — by execution, not by reading.** This replaces the
 #1602 *guard effectiveness* bullet, keeping its ledger name. 56 money-path
@@ -180,7 +187,8 @@ counted separately, never as drift. **Bar interaction, stated so a future run
 does not suppress it:** the remedy is one ruleset edit
 (`allowed_merge_methods: ["squash"]` on `dev`, the mirror of #2165 on
 `main`), so this dimension never yields an epic — it yields a `Probed clean`
-baseline and, on drift, a `new-task`.
+baseline and, on evidenced drift, a possible improvement candidate. Filing
+requires explicit approval and the canonical skill's new-task handoff.
 
 ```bash
 # Sample: every first-parent landing on dev in the window. Record the SHA

@@ -11,6 +11,19 @@ It is distinct from the issue-driven autonomous PR loop
 differential campaigns (`docs/contributing/loop-engineering.md`), which are a
 different concept and stay where they are.
 
+## Scan output and coverage
+
+Apply the [canonical skill's output levels](../SKILL.md): strict structural
+findings and bounded improvement candidates. One-PR opportunities can be
+candidates when evidence shows a failure mechanism or contributor burden.
+The implementation steps below describe verification expectations for approved
+work; they do not authorize a scan to edit code, file issues, or ship.
+
+Record each dimension as examined, partial, or not examined with the revision,
+commands, results, sample boundaries and missing verification/reason. An
+unexecuted check contributes no clean result. Use the canonical skill's ledger
+exclusions and approval handoff rather than keeping a second candidate queue.
+
 ## Run a quality pass
 
 1. Discover against current code and recent commits, not a dated backlog.

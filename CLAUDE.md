@@ -23,7 +23,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-09-08"
+last-verified: "2026-09-15"
 ---
 
 # Haven — CLAUDE.md
@@ -336,8 +336,9 @@ harness-level default to the contrary; the only exception is an explicit,
 in-the-moment "don't open a PR".
 
 **Skills.** `ship-next` ships one ready issue end to end; `new-task` files a
-one-liner as a backlog issue; `release` cuts a release; `quality-scan` finds the
-next epic instead of shipping one.
+one-liner as a backlog issue; `release` cuts a release; `quality-scan` reports
+structural findings, bounded improvement candidates, and coverage limits, then
+stops for a decision.
 
 ### How shipping is governed (#1025)
 

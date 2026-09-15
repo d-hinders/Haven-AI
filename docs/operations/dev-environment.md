@@ -203,8 +203,12 @@ boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
 goes through `parseBooleanFlag`: unset or blank means false; any other value
 (`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
 variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
-and silently read as off. Before a deploy that carries #3015, audit the
-Railway project's values for all six — exact bytes, revealed not assumed.
+and silently read as off. Precision: the deprecated alias is parsed only when
+`HAVEN_ACCOUNTING_ENABLED` is unset (the new name shadows it), so a boot that
+succeeds proves the five active flags clean, not the alias. Before a deploy
+that carries #3015, audit the Railway project's values for all six — exact
+bytes, revealed not assumed (the 2026-09-04 prod reading shows
+`HAVEN_REPORTING_FEED_ENABLED` present there).
 
 Isolation rules that are non-negotiable for a payments product:
 

@@ -30,7 +30,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-12"
+last-verified: "2026-09-15"
 ---
 
 # Haven Screen Recipes

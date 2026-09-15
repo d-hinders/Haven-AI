@@ -5,7 +5,10 @@ covers:
   - packages/frontend/src/app/manifest.ts
   - packages/frontend/src/components/sidebar/*
   - packages/frontend/src/hooks/useVisiblePolling.ts
-last-verified: "2026-09-10"
+  - packages/frontend/src/context/ThemeContext.tsx
+  - packages/frontend/src/components/ui/ThemeToggle.tsx
+  - packages/frontend/src/lib/installed-app.ts
+last-verified: "2026-09-15"
 ---
 
 # Mobile demo runbook
@@ -14,7 +17,7 @@ Everything needed to put Haven on an iPhone as two installed apps (production
 and dev) and run the agent-purchase demo from the phone, written so a
 first-time reader can do it without asking anyone. The laptop half of the
 presentation — connecting the agent, granting the budget, the Fortnox and SIE
-acts — is [`../../operations/demo-agent-purchase-runbook.md`](../operations/demo-agent-purchase-runbook.md);
+acts — is [`../operations/demo-agent-purchase-runbook.md`](../operations/demo-agent-purchase-runbook.md);
 this document is the phone half and the choreography between the two.
 
 Why `covers` names the sidebar directory rather than a single file: when this
@@ -134,12 +137,14 @@ capture manifest.
 ## Device checklist
 
 One row per check, filled in on the demo phone. The "first end-to-end run"
-row is the epic's first full pass; it ships as `pending-operator` until
-someone runs this on a real iPhone.
+row is the epic's first full pass. When this document shipped, row 9 read
+`pending-operator` and the other rows' Result cells were blank; all ten are
+filled in now, so a blank or `pending-operator` cell here means a check was
+added and not yet run, never that the checklist is new.
 
 | # | Check | iPhone model | iOS version | Date | Tester | Result |
 |---|---|---|---|---|---|---|
-| 1 | Both installs side by side from the share sheet, labels "Haven" and "Haven Dev", icons distinguishable | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **blocked** — prod serves no manifest until the `dev → main` promotion, so a prod install today yields a Safari stub. Dev half verified (label "Haven Dev", badged icon) on the #2729 pass. |
+| 1 | Both installs side by side from the share sheet, labels "Haven" and "Haven Dev", icons distinguishable | iPhone 12 | iOS 26.6.1 | 2026-09-15 | @d-hinders | **pass** — unblocked by the `dev → main` promotion **`626e6151`** (2026-09-12), which is the commit that put `app/manifest.ts` on `main`; the later `2580de6e` carried the dark-mode work row 10 covers and touched no manifest file. Installed from the prod alias alongside the existing dev install: two labels ("Haven", "Haven Dev"), the DEV badge telling the icons apart at arm's length, and each icon launching its **own** app rather than one shared shell. The coexistence is what the row attests. It does **not** isolate a cause: the two installs differ in origin *and* in manifest `id`, and either alone would produce two apps, so a device cannot tell you which one iOS honoured. The `id` split (`haven` vs `haven-dev`) is verified in code, at `installedAppIdentity` in `lib/installed-app.ts`. |
 | 2 | Standalone launch: no Safari chrome, status bar reads as part of the app | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass** |
 | 3 | Sign-in by email + password, autofilled by the cloud password manager inside the installed shell | iPhone 12 | iOS 26.6.1 | 2026-09-09 | @d-hinders | **pass** — carried from the #2729 device pass |
 | 4 | Login persists: force-quit and relaunch lands on the dashboard, no sign-in | iPhone 12 | iOS 26.6.1 | 2026-09-09 | @d-hinders | **pass** — carried from the #2729 device pass |
@@ -147,7 +152,8 @@ someone runs this on a real iPhone.
 | 6 | Tap targets as physical points: sidebar toggle and every MobileTabBar item land in their intended 44px areas | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass** — all five slots navigate, including taps near the bottom edge; no slot press was swallowed by the iOS home-indicator swipe. |
 | 7 | Demo end to end: agent told to buy at the harness, product picked and go-ahead on the phone, purchase lands with no refresh | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass**, both halves. Three x402 purchases of 0.001 USDC from `services.sandbox.ampersend.ai/api/joke` on Base Sepolia, driven through the real agent path (quote → local sign → relay → merchant retry). Foreground: row appeared unaided, "just now", no interaction. Backgrounded: app closed at the home screen during the purchase, and on reopen the row was **already present** — the visibility handler fires an immediate fetch on return rather than waiting out the 10s interval. No spinner or skeleton flashed over the balance, the stat cards or the list in either half, and the page held its scroll position — the refetch is silent, which is the qualifier that separates "appears without a refresh" from "appears acceptably". Evidence below. |
 | 8 | Budget-change variant: passkey ceremony from the installed shell completes (per #2729 device checklist) | iPhone 12 | iOS 26.6.1 | 2026-09-09 | @d-hinders | **pass** — carried from the #2729 device pass, on an account the phone had never seen |
-| 9 | First end-to-end demo run for epic #2736 | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **partial** — every phone-side behaviour the epic claims is verified (rows 2–8). Outstanding: row 1, which needs the promotion, and a full rehearsal with the laptop-side acts of the demo script. |
+| 9 | First end-to-end demo run for epic #2736 | iPhone 12 | iOS 26.6.1 | 2026-09-15 | @d-hinders | **pass, phone side** — every phone-side behaviour the epic claims is verified: rows 1–8 all pass, row 1 included now that prod serves a manifest. What is **not** covered is the laptop-side choreography of the demo script — all of it, Acts 0–5 of [`../operations/demo-agent-purchase-runbook.md`](../operations/demo-agent-purchase-runbook.md), the Fortnox and SIE bookkeeping act and the fallbacks included — deliberately not run before closeout (owner decision, 2026-09-15). That is presentation rehearsal, not a product claim — row 7 already drove the real agent path end to end. Anyone presenting this cold should still walk the script once. |
+| 10 | Theme: `System` follows the OS live, and an explicit `Light` / `Dark` overrides it — content, safe-area bands and status bar (epic #2925) | iPhone 12 | iOS 26.6.1 | 2026-09-15 | @d-hinders | **pass**, all three states, on the prod install. `System`: flipping iOS appearance from Control Centre with the app foregrounded repaints it live. Explicit `Light` under a dark OS and explicit `Dark` under a light OS both hold their own palette against the device. The status bar followed in every state. Attributing that correctly matters, because the obvious explanation is the wrong one on this device: the runtime `theme-color` override tag `ThemeContext` appends is documented in both `ThemeContext.tsx` and `lib/installed-app.ts` as the **Android** path (the build-time media pair beneath it is platform-generic), and iOS ships `statusBarStyle: 'default'`, under which the status bar reads through the page rather than from a meta tag. So what rows 2 and 5 already credit is what carried it here too: `viewport-fit: cover`, plus bands painted with `--v2-bg` — `<body>` above, the tab bar's own background below — which both dark blocks in `globals.css` redefine. Not the `--v2-safe-*` tokens: those are `env()` lengths and carry no colour to swap. The `theme-color` override remains **unverified on device** — it needs an Android phone in standalone mode, which this epic never had. Note for future testers: the quick sun/moon toggle is **two-state** by decision (#2953), so one tap leaves `System` permanently — `System` is reachable only from Settings → Theme, and an app that "stops following the phone" has almost certainly just been pinned. |
 
 ### Row 7 evidence — the 2026-09-10 payoff run
 
@@ -172,7 +178,7 @@ No stranded delegate balance resulted, so no sweep was needed.
 
 What this run does **not** cover, since the operator drove the agent from a session rather than
 from the demo harness: the laptop-side choreography of the demo script itself (Acts 0–3 of
-`../../operations/demo-agent-purchase-runbook.md`). The phone-side claim — a purchase landing
+`../operations/demo-agent-purchase-runbook.md`). The phone-side claim — a purchase landing
 with no manual refresh — is what row 7 asserts, and that is verified.
 
 ## Troubleshooting

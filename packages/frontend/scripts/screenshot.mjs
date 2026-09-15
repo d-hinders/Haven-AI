@@ -4725,8 +4725,26 @@ export const SCENARIOS = {
         // Wait for the section the slice is ABOUT, so the capture cannot be a
         // skeleton that happens to carry the right title: the top-merchants
         // heading with the contact-labelled row's merchant name on screen.
+        //
+        // The VISIBLE one, and that word is load-bearing. `NordShield VPN`
+        // exists in two tables on this page: the merchants table (slice E,
+        // where the row's label is the merchant) and the agents table's
+        // `revealAt="xl"` "Top merchant" cell, which the Table primitive's
+        // container-keyed staging hides at the capture width (#1999 — the
+        // collapse is keyed on the container, not the viewport, and the
+        // capture's content column leaves the cell display:none). A plain
+        // `.first()` is DOM order, so it resolves to the hidden cell and the
+        // wait times out on an element Playwright can see and a reader
+        // cannot — the two-renderings rule biting at the harness. The filter
+        // asks for the rendering the reader is looking at: the desktop table
+        // at the desktop width, the mobile row at 390px, and a run where
+        // NEITHER shows the row still fails, loudly, with this call log.
         await page.getByText('Top merchants', { exact: true }).waitFor({ timeout: 15_000 })
-        await page.getByText('NordShield VPN', { exact: true }).first().waitFor({ timeout: 15_000 })
+        await page
+          .getByText('NordShield VPN', { exact: true })
+          .filter({ visible: true })
+          .first()
+          .waitFor({ timeout: 15_000 })
       })
     },
   },

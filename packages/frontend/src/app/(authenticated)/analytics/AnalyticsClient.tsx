@@ -21,7 +21,14 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatTile } from '@/components/ui/StatTile'
 import { AgentsTable } from '@/components/analytics/AgentsTable'
+import { BalanceSection } from '@/components/analytics/BalanceSection'
+import { MerchantsTable } from '@/components/analytics/MerchantsTable'
 import { RangeControl } from '@/components/analytics/RangeControl'
+// The floor slice D fixed for "too little data to chart", read here so the
+// wrapper below carries no empty margin when BalanceSection decides not to
+// draw. Importing the constant rather than comparing to `3` is what keeps the
+// page and the primitive on one rule with one home.
+import { MIN_CHARTABLE_DAYS } from '@/components/charts/chart-scale'
 import {
   AnalyticsErrorState,
   NoActivityEmptyState,
@@ -291,18 +298,41 @@ export default function AnalyticsClient() {
                 sparse branch above keeps this band empty for fewer than
                 MIN_DAYS_FOR_CHARTS days of data. */}
             {data.agents.length > 0 && (
-              <div className="mt-4">
+              <div className="mt-4" data-testid="analytics-agents-section">
                 <AgentsTable agents={data.agents} currency={currency} />
               </div>
             )}
             {/* ── Merchants and balance (slice E, #2949) ────────────────────
-                `MerchantsTable` and the balance placeholder mount below the
-                agents table when `feat/2949-analytics-merchants-doc` (head
-                f88bd69d) lands, reading the `merchants` and `balance_by_day`
-                arrays of this same response. The "Top merchants" heading is
-                E's own, not C's (the wire contract is recorded on card
-                t_e80f7218, comment 139); C does not render it so that the
-                capture that waits on it proves E's section arrived. */}
+                The two sections the wire contract parked here, now mounted:
+                the top-merchants table over `merchants` and the
+                balance-over-time chart over `balance_by_day`, both read off
+                THIS same response — one request still owns the whole page.
+                Each guards on its own array rather than on the other's: a
+                range can have agents without a reported merchant row, or a
+                balance series with no merchants, and rendering a section the
+                endpoint did not populate would be the page asserting figures
+                it was not given. The "Top merchants" heading is E's own, on
+                the card, and the sparse branch above keeps the whole band
+                empty for fewer than MIN_DAYS_FOR_CHARTS days of data —
+                including these. */}
+            {data.merchants.length > 0 && (
+              <div className="mt-4" data-testid="analytics-merchants-section">
+                <MerchantsTable
+                  merchants={data.merchants}
+                  agents={data.agents}
+                  currency={currency}
+                />
+              </div>
+            )}
+            {data.balance_by_day.length >= MIN_CHARTABLE_DAYS && (
+              <div className="mt-4">
+                <BalanceSection
+                  balanceByDay={data.balance_by_day}
+                  currency={currency}
+                  rangeDays={days === 7 || days === 90 ? days : 30}
+                />
+              </div>
+            )}
           </>
         )}
       </>

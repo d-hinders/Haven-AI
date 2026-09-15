@@ -157,6 +157,14 @@ const RETIRED_RAIL_SYMBOLS = [
  * reads-only survivor — `rails/allowance-module` under its pre-#2850 name
  * (kept below as a tombstone) and `infra/chain/relayer-reads`, the same
  * module's name since #2850 renamed it to what it is.
+ *
+ * What qualifies a file for this list (#2997): a route module through which
+ * an agent request can START a payment — create an intent, submit a
+ * signature, or authorize a delegation. Read-only routes (status, receipts,
+ * catalog) and internal modules do not belong here; they are covered by the
+ * backend-wide rules instead. `routes/x402-resources.ts` was on this list
+ * until #2270 deleted it — the count is whatever the list says, never a
+ * literal in a comment (a "five" outlived that deletion).
  */
 const PAYMENT_ENTRY_POINTS = [
   'routes/payments.ts',
@@ -263,7 +271,7 @@ describe('safe-retirement (#1993): nothing routes to the retired AllowanceModule
     // measurement rather than an argument: adding
     // `await import('../../domain/payment-coverage.js')` to
     // `modules/accounts/mainnet-gate.ts` — a real backend file that is not one
-    // of the five pinned entry points — passed all twelve tests. Rule 3 would
+    // of the `PAYMENT_ENTRY_POINTS` entries — passed all twelve tests. Rule 3 would
     // have caught the same edit on an entry point; nothing caught it anywhere
     // else. `codeStringLiterals` is a superset of every static specifier, so
     // widening loses no coverage and closes `import()`, `require()` and any

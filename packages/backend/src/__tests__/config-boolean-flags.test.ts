@@ -6,8 +6,8 @@ import { parseBooleanFlag } from '../config.js'
  * unset and empty land on the production-safe value; an unrecognised non-empty
  * value throws at import time and refuses the boot.
  *
- * The case these exist for is `TRUE`. Under the previous
- * `process.env.X === 'true'` it read as OFF, silently — which is how
+ * The case these exist for is `TRUE`. Under the previous bare `=== 'true'`
+ * comparison it read as OFF, silently — which is how
  * `HAVEN_HOSTED=TRUE` left `config.hosted` false in production and made
  * `/accounting` tell users of the hosted service that the feed was
  * unavailable on a self-hosted deployment. `'TRUE'` throwing is the whole

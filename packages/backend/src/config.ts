@@ -294,8 +294,9 @@ export function parseConnectorChannel(raw: string | undefined | null): string {
  * A boolean feature flag read from the environment: `true` or `false`, and
  * **nothing else silently**.
  *
- * Every flag here used to be `process.env.X === 'true'`, which reads `TRUE`,
- * `1`, `yes` and `true ` as OFF. That is the worst shape a flag can have,
+ * Every flag here used to compare the raw environment string to `'true'` with
+ * a bare `===`, which reads `TRUE`, `1`, `yes` and `true ` as OFF. That is the
+ * worst shape a flag can have,
  * because a silently-off flag is indistinguishable from a deliberately-off
  * one: nothing logs, nothing warns, and the observable behaviour is exactly
  * what an operator who meant to disable the feature would see.

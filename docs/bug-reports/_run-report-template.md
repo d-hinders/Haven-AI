@@ -22,7 +22,7 @@ covers:
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
   - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-09-06"
+last-verified: "2026-09-15"
 ---
 
 <!--

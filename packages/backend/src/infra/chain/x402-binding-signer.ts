@@ -14,6 +14,51 @@
  */
 import { ethers } from 'ethers'
 import { buildX402ExpectedMessage, type X402ExpectedContext } from '@haven_ai/sdk'
+import { parseBooleanFlag } from '../../config.js'
+
+/**
+ * #3021 (#3015 follow-up): the emit flip used to be `!== '1'` read at every
+ * call — `X402_EMIT_PAYER_CONTEXT=true` or `=on` read as OFF with nothing
+ * logged, and the failure mode is a wire-format flip (payer context silently
+ * not emitted). It now goes through `parseBooleanFlag` once, at boot: the
+ * documented literal `1` still means on (every doc and env template says
+ * `=1`), `true`/`false` are accepted, unset/blank is off, and anything else
+ * refuses the boot naming the variable. Exported for the test; the module
+ * constant below is what the two emit helpers read.
+ */
+export function readEmitPayerContext(
+  raw: string | undefined | null,
+  log: Pick<Console, 'warn' | 'info'> = console,
+): boolean {
+  // `1` is the compatibility spelling every #1690 doc, env template and code
+  // comment names — honoured, trimmed like every other value (a pasted
+  // trailing space must not refuse the boot on the one literal operators
+  // were told to use), and warned once so the dialect is visible.
+  if (typeof raw === 'string' && raw.trim() === '1') {
+    log.warn(
+      '[config] X402_EMIT_PAYER_CONTEXT=1 is the compatibility spelling (#1690); ' +
+        'set it to "true" — both mean on, and "1" is still honoured (#3021).',
+    )
+    return true
+  }
+  try {
+    return parseBooleanFlag('X402_EMIT_PAYER_CONTEXT', raw)
+  } catch (err) {
+    // #3023 review: the shared refusal names the two literals; for THIS flag
+    // the accepted set also includes the documented `1`, so say so.
+    throw new Error(
+      `${err instanceof Error ? err.message : String(err)} For X402_EMIT_PAYER_CONTEXT the ` +
+        'documented compatibility literal "1" is also accepted (meaning true).',
+    )
+  }
+}
+
+const EMIT_PAYER_CONTEXT = readEmitPayerContext(process.env.X402_EMIT_PAYER_CONTEXT)
+if (EMIT_PAYER_CONTEXT) {
+  // #3023 review: the wire-format decision must be visible in the boot log,
+  // not inferred from payment behaviour.
+  console.info('[config] X402_EMIT_PAYER_CONTEXT is on: x402 expected contexts carry the payer identity (version 3, #1690).')
+}
 
 /**
  * Sign an x402 "expected context" with the dedicated binding-signer key, so
@@ -93,7 +138,7 @@ export function x402PayerContextFields(agent: {
   id: string
   delegate_address: string
 }): { payerDelegate: string; payerAgentId: string } | Record<string, never> {
-  if (process.env.X402_EMIT_PAYER_CONTEXT !== '1') return {}
+  if (!EMIT_PAYER_CONTEXT) return {}
   return {
     payerDelegate: agent.delegate_address.toLowerCase(),
     payerAgentId: agent.id,
@@ -110,7 +155,7 @@ export function x402PayerWireFields(agent: {
   id: string
   delegate_address: string
 }): { payer_delegate: string; payer_agent_id: string } | Record<string, never> {
-  if (process.env.X402_EMIT_PAYER_CONTEXT !== '1') return {}
+  if (!EMIT_PAYER_CONTEXT) return {}
   return {
     payer_delegate: agent.delegate_address.toLowerCase(),
     payer_agent_id: agent.id,

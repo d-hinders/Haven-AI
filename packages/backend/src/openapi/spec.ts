@@ -4728,7 +4728,7 @@ export const openapiSpec = {
                       type: 'object',
                       required: [
                         'payments_counted', 'unsettled_submitted', 'refusals_counted', 'refusal_attempts',
-                        'fee_rows', 'gas_sponsored_ops', 'snapshot_days', 'tz',
+                        'fee_rows', 'gas_sponsored_ops', 'snapshot_days', 'tz', 'refusals_recorded_from',
                       ],
                       properties: {
                         payments_counted: { type: 'integer', description: 'CONFIRMED payments summed into `totals.spent`.' },
@@ -4739,6 +4739,11 @@ export const openapiSpec = {
                         gas_sponsored_ops: { type: 'integer' },
                         snapshot_days: { type: 'integer' },
                         tz: { type: 'string', description: 'The zone actually used to bucket `by_day` — UTC when the request gave none.' },
+                        refusals_recorded_from: {
+                          type: ['string', 'null'],
+                          description:
+                            'The ledger floor (#3013): the earliest `payment_refusals` day (UTC `YYYY-MM-DD`) with rows, inside NO window bound — a property of the ledger, not of the requested range. `null` only when the ledger has no rows at all, so a window behind the floor reads a coverage caveat ("nothing was recorded"), not a clean zero.',
+                        },
                       },
                     },
                     totals: {

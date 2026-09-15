@@ -11,6 +11,7 @@ import {
   recordPaymentRefusal,
   listRefusalsForUser,
   aggregateRefusalsForUserByAgent,
+  firstRefusalDayForUser,
   REFUSAL_DEDUPE_WINDOW_SECONDS,
   type RecordRefusalInput,
 } from '../payment-refusals.js'
@@ -301,5 +302,62 @@ describeDb('payment_refusals repository (#2945)', () => {
       toInclusive: '2999-01-01T00:01:00Z',
     })
     expect(empty).toEqual([])
+  })
+
+  // ── The ledger floor (#3013) ────────────────────────────────────────────
+  //
+  // `refusals_recorded_from` on the overview response is a trust claim: the
+  // day emitted is the day the ledger actually has rows. Proven against real
+  // Postgres because only a real database owns "what the earliest row is" —
+  // a mock would just restate the fixture.
+
+  it('firstRefusalDayForUser is null on an empty ledger and the earliest UTC day once rows exist', async () => {
+    const fix = await seedFixtures()
+
+    // Empty ledger → null (MIN over an empty set returns one NULL row).
+    expect(await firstRefusalDayForUser(fix.userId)).toBeNull()
+
+    // Two rows, deliberately out of insertion order, spanning a UTC midnight:
+    // the floor must be the EARLIEST row's day, not the first written one.
+    await recordPaymentRefusal(refusalInput(fix, { resourceUrl: 'https://a.example/late' }))
+    await recordPaymentRefusal(refusalInput(fix, { resourceUrl: 'https://a.example/early' }))
+    await db.query(
+      `UPDATE payment_refusals SET created_at = '2030-05-30T23:59:59Z'
+        WHERE user_id = $1 AND resource_url = 'https://a.example/early'`,
+      [fix.userId],
+    )
+    await db.query(
+      `UPDATE payment_refusals SET created_at = '2030-06-01T00:00:01Z'
+        WHERE user_id = $1 AND resource_url = 'https://a.example/late'`,
+      [fix.userId],
+    )
+
+    expect(await firstRefusalDayForUser(fix.userId)).toBe('2030-05-30')
+  })
+
+  it('firstRefusalDayForUser is tenant-scoped and honours NO window bound — it is a ledger property, not a range one', async () => {
+    const fix = await seedFixtures()
+    const other = await seedFixtures()
+
+    await recordPaymentRefusal(refusalInput(fix))
+    await recordPaymentRefusal(refusalInput(other))
+    // fix's only row is ancient; other's row is recent. If the read were
+    // range-scoped like the analytics aggregates, a modern window would
+    // return null for fix — it must still return fix's floor day.
+    await db.query(
+      `UPDATE payment_refusals SET created_at = '2030-01-15T12:00:00Z' WHERE user_id = $1`,
+      [fix.userId],
+    )
+    // Leave `other`'s row at NOW().
+
+    expect(await firstRefusalDayForUser(fix.userId)).toBe('2030-01-15')
+
+    // Tenant isolation: fix's floor never leaks into other's read, even
+    // though other's ledger also has a row.
+    expect(await firstRefusalDayForUser(other.userId)).not.toBe('2030-01-15')
+
+    // A user with NO rows at all stays null while a seeded sibling has rows.
+    const third = await seedFixtures()
+    expect(await firstRefusalDayForUser(third.userId)).toBeNull()
   })
 })

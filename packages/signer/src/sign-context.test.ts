@@ -209,12 +209,14 @@ describe('fetchX402SignContext throws HavenSignContextError with a structured re
 
   it('SIGN_CONTEXT_REFUSED with http_status on a 410', async () => {
     const fetchImpl = (async () =>
-      new Response(JSON.stringify({ error: 'Payment window expired' }), { status: 410 })) as typeof fetch
+      new Response(JSON.stringify({ error: 'Payment window expired', error_code: 'expired' }), { status: 410 })) as typeof fetch
     const err = await caught(fetchImpl)
     expect(err.code).toBe('SIGN_CONTEXT_REFUSED')
     expect(err.http_status).toBe(410)
-    expect(err.fallback).toBe('typed_data_b64')
-    expect(err.next_action).toBe('stop_and_tell_user')
+    expect(err.backend_error_code).toBe('expired')
+    expect(err.fallback).toBeUndefined()
+    expect(err.next_action).toBe('payment_window_expired')
+    expect(err.retry_with_new_quote).toBe(true)
   })
 
   it('SIGN_CONTEXT_REFUSED with http_status on a 404', async () => {
@@ -223,7 +225,7 @@ describe('fetchX402SignContext throws HavenSignContextError with a structured re
     const err = await caught(fetchImpl)
     expect(err.code).toBe('SIGN_CONTEXT_REFUSED')
     expect(err.http_status).toBe(404)
-    expect(err.fallback).toBe('typed_data_b64')
+    expect(err.fallback).toBeUndefined()
     expect(err.next_action).toBe('stop_and_tell_user')
   })
 

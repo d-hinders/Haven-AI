@@ -59,24 +59,51 @@ export type SignContextErrorCode =
  */
 export class HavenSignContextError extends HavenSigningError {
   declare readonly code: SignContextErrorCode
-  /** #3001: the one recovery path every sign-context refusal names. */
-  readonly fallback = 'typed_data_b64' as const
   /**
-   * #3001: reuses the same `AgentPaymentNextAction` value the version-mismatch
-   * refusal emits (`tools.ts` `normalizeError`) rather than inventing a
-   * parallel vocabulary — a sign-context fetch failure is the same shape of
-   * problem: stop, don't retry the exact same call, tell the user the
-   * fallback.
+   * #3001 / #3010 review: the recovery path, when signing OTHER bytes is
+   * actually a remedy — a transport failure (timeout, unreachable) or a
+   * body this signer could not read. `typed_data_b64` is NOT in the default
+   * quote result since #1272: obtain it by re-running the SAME quote tool
+   * with the SAME idempotency_key plus `include_signing_payload: true`.
+   * Absent on a backend REFUSAL: an expired, executed or unsignable intent
+   * cannot be rescued by re-signing its bytes.
    */
-  readonly next_action: string = AgentPaymentNextAction.StopAndTellUser
+  readonly fallback?: 'typed_data_b64'
+  /**
+   * #3001: `AgentPaymentNextAction` values the signer already emits — the
+   * version-mismatch refusal's `stop_and_tell_user` for the classes where
+   * retrying the same call cannot help, and `payment_window_expired` (with
+   * `retry_with_new_quote`) for the backend's 410 `expired`, exactly as the
+   * plain `HavenError` branch already does for that code.
+   */
+  readonly next_action: string
+  readonly retry_with_new_quote?: true
   /** Present only for `SIGN_CONTEXT_REFUSED` (the backend's HTTP status). */
   readonly http_status?: number
+  /** Present only for `SIGN_CONTEXT_REFUSED`: the backend's own `error_code`. */
+  readonly backend_error_code?: string
 
-  constructor(message: string, code: SignContextErrorCode, httpStatus?: number) {
+  constructor(
+    message: string,
+    code: SignContextErrorCode,
+    refusal?: { httpStatus: number; errorCode?: string },
+  ) {
     super(message)
     ;(this as { code: string }).code = code
-    this.http_status = httpStatus
     this.name = 'HavenSignContextError'
+    if (code === 'SIGN_CONTEXT_REFUSED') {
+      this.http_status = refusal?.httpStatus
+      this.backend_error_code = refusal?.errorCode
+      if (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired') {
+        this.next_action = AgentPaymentNextAction.PaymentWindowExpired
+        this.retry_with_new_quote = true
+      } else {
+        this.next_action = AgentPaymentNextAction.StopAndTellUser
+      }
+    } else {
+      this.fallback = 'typed_data_b64'
+      this.next_action = AgentPaymentNextAction.StopAndTellUser
+    }
   }
 }
 
@@ -191,7 +218,7 @@ export async function fetchX402SignContext(
             ? ' Re-run the quote with the same idempotency key, then sign the fresh payment_id.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
-      response.status,
+      { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
     )
   }
   const signData = body.sign_data as Record<string, unknown> | undefined

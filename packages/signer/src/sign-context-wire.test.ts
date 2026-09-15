@@ -69,12 +69,17 @@ describe('sign-context refusals reach the wire with code/fallback/next_action, n
 
   it('SIGN_CONTEXT_REFUSED (410) carries the http_status', async () => {
     const fetchImpl = (async () =>
-      new Response(JSON.stringify({ error: 'Payment window expired' }), { status: 410 })) as typeof fetch
+      new Response(JSON.stringify({ error: 'Payment window expired', error_code: 'expired' }), { status: 410 })) as typeof fetch
     const result = await refusal(fetchImpl)
     expect(result.code).toBe('SIGN_CONTEXT_REFUSED')
     expect(result.http_status).toBe(410)
-    expect(result.fallback).toBe('typed_data_b64')
-    expect(result.next_action).toBe('stop_and_tell_user')
+    // #3010 review: an expired window is the one refusal with a live remedy —
+    // the same next_action the plain HavenError branch emits for
+    // PAYMENT_WINDOW_EXPIRED. Re-signing the stale bytes is not it: no fallback.
+    expect(result.next_action).toBe('payment_window_expired')
+    expect(result.retry_with_new_quote).toBe(true)
+    expect(result.fallback).toBeUndefined()
+    expect(result.backend_error_code).toBe('expired')
   })
 
   it('SIGN_CONTEXT_REFUSED (404) carries the http_status', async () => {
@@ -83,7 +88,22 @@ describe('sign-context refusals reach the wire with code/fallback/next_action, n
     const result = await refusal(fetchImpl)
     expect(result.code).toBe('SIGN_CONTEXT_REFUSED')
     expect(result.http_status).toBe(404)
-    expect(result.fallback).toBe('typed_data_b64')
+    // Not this agent's quote: re-signing other bytes is no remedy — no fallback.
+    expect(result.fallback).toBeUndefined()
+    expect(result.retry_with_new_quote).toBeUndefined()
+    expect(result.next_action).toBe('stop_and_tell_user')
+  })
+
+  it('SIGN_CONTEXT_REFUSED (409 already_executed): stop, no fallback, backend code carried', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: 'already executed', error_code: 'already_executed' }), { status: 409 })) as typeof fetch
+    const result = await refusal(fetchImpl)
+    expect(result.code).toBe('SIGN_CONTEXT_REFUSED')
+    expect(result.http_status).toBe(409)
+    expect(result.backend_error_code).toBe('already_executed')
+    // Re-signing an executed intent's bytes is not a remedy.
+    expect(result.fallback).toBeUndefined()
+    expect(result.retry_with_new_quote).toBeUndefined()
     expect(result.next_action).toBe('stop_and_tell_user')
   })
 

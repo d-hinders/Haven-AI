@@ -23,8 +23,9 @@ import type { NavItem } from './Sidebar'
  *
  * ## Selection is by ROUTE, never by index
  *
- * `baseNavItems` is ordered for the drawer (Dashboard, Accounts, Transactions,
- * Accounting, Agents, Catalog, Contacts — regrouped by #3024); the bar's order
+ * `baseNavItems` is ordered for the drawer (Dashboard, Analytics, Accounts,
+ * Transactions, Accounting, Agents, Catalog, Contacts — regrouped by #3024,
+ * Analytics from #2947); the bar's order
  * is the issue's (Dashboard, Agents, Transactions, Accounts), unchanged by that
  * regroup. Reading it by position would silently reorder the bar the next
  * time someone inserts a drawer entry, so the tabs are picked by `href` and the

@@ -73,9 +73,18 @@ const TEST_FILE_RE = /\.test\.ts$/
  */
 export const MOCK_SPEC_QUOTES = `'"\``
 
-/** Count every `vi.mock` whose specifier is a RELATIVE path, in any quote style. */
+/**
+ * The ONE definition of a mock CALL: `vi.mock(` or `vi.doMock(`. #2997 (scan
+ * finding B10): three backend test files use `vi.doMock` and were invisible
+ * to this guard — the same phantom-key defect class, one call name over.
+ * Detector and auditor both read this expression, for the reason MOCK_SPEC_QUOTES
+ * exists.
+ */
+export const MOCK_CALL = /vi\.(?:do)?[mM]ock\(/g
+
+/** Count every `vi.mock` / `vi.doMock` whose specifier is a RELATIVE path, in any quote style. */
 export function countRelativeMockCalls(src: string): number {
-  return (src.match(/vi\.mock\(\s*['"`]\./g) ?? []).length
+  return (src.match(/vi\.(?:do)?[mM]ock\(\s*['"`]\./g) ?? []).length
 }
 
 export function listTestFiles(root: string): string[] {
@@ -287,7 +296,7 @@ function factoriesIn(
   src: string,
 ): { spec: string; keys: string[] | null; ident?: string; reason?: string; autoMock?: boolean }[] {
   const out: { spec: string; keys: string[] | null; ident?: string; reason?: string; autoMock?: boolean }[] = []
-  const call = /vi\.mock\(/g
+  const call = new RegExp(MOCK_CALL.source, 'g')
   let m: RegExpExecArray | null
   while ((m = call.exec(src))) {
     const openParen = m.index + m[0].length - 1

@@ -23,6 +23,29 @@ last-verified: "2026-09-15"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#3001):** the signer's `fetchX402SignContext`
+> (`packages/signer/src/sign-context.ts`, the authenticated
+> `GET /x402/:id/sign-context` read behind the `{ payment_id }` form of
+> `haven_sign` / `haven_sign_x402`) now throws a typed `HavenSignContextError`
+> at each of its four throw sites — timeout, unreachable host, a non-ok
+> backend response (404/410/…), a malformed body — instead of the generic
+> `HavenSigningError` #2985 described below. `normalizeError` in
+> `packages/signer/src/tools.ts` serialises it with `code`
+> (`SIGN_CONTEXT_TIMEOUT` / `SIGN_CONTEXT_UNREACHABLE` /
+> `SIGN_CONTEXT_REFUSED` / `SIGN_CONTEXT_MALFORMED`) and `next_action`, routed
+> per refusal class: transport failures and unreadable bodies carry
+> `fallback: 'typed_data_b64'` + `stop_and_tell_user`; a backend REFUSAL
+> carries `http_status` + `backend_error_code` and no fallback, with 410
+> `expired` → `payment_window_expired` + `retry_with_new_quote` (the signer's
+> existing `PAYMENT_WINDOW_EXPIRED` routing) and the rest `stop_and_tell_user`
+> — the same shape `HavenUnsupportedSignerVersionError` already carried, so a
+> caller can route on `code` instead of parsing `message`.
+> These codes are signer-local, never part of `@haven_ai/sdk`'s
+> `AgentPaymentFailureCode` taxonomy, and never reach the backend's
+> REST/OpenAPI surface. `message` text and every other refusal in this
+> document are unchanged; `instanceof HavenSigningError` still holds for the
+> new class. Nothing else in this document was re-verified in this pass.
+>
 > **Recent re-verification (#2983):** the local runtime (`packages/mcp/src/tools.ts`,
 > `haven_pay_mcp_tool`) now mirrors the hosted mapping below — a merchant
 > `503 { error: 'merchant_not_ready', … }` refusal on the quote path is

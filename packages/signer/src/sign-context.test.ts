@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadHavenIdentity, fetchX402SignContext, SIGN_CONTEXT_TIMEOUT_MS } from './sign-context.js'
+import {
+  loadHavenIdentity,
+  fetchX402SignContext,
+  HavenSignContextError,
+  SIGN_CONTEXT_TIMEOUT_MS,
+} from './sign-context.js'
 
 const IDENTITY = { api_key: 'sk_agent_test_1263', api_url: 'https://haven.test/' }
 
@@ -136,5 +141,99 @@ describe('fetchX402SignContext (#1263)', () => {
     await expect(fetchX402SignContext(identity, 'pay_x', fetchImpl)).rejects.toThrow(
       /typed_data_b64/,
     )
+  })
+})
+
+/**
+ * #3001: every throw site in `fetchX402SignContext` is a `HavenSignContextError`
+ * carrying a stable `code` / `fallback` / `next_action` — not just prose inside
+ * a generic `HavenSigningError`. `instanceof HavenSigningError` must still hold
+ * (nothing in the codebase catches the narrower class specifically today).
+ */
+describe('fetchX402SignContext throws HavenSignContextError with a structured refusal (#3001)', () => {
+  const identity = { apiKey: 'sk_agent_test_3001', apiUrl: 'https://haven.test' }
+
+  async function caught(fetchImpl: typeof fetch, timeoutMs?: number): Promise<HavenSignContextError> {
+    const err = await fetchX402SignContext(identity, 'pay_3001', fetchImpl, timeoutMs).catch(
+      (e: unknown) => e,
+    )
+    if (!(err instanceof HavenSignContextError)) {
+      throw new Error(`expected a HavenSignContextError, got ${String(err)}`)
+    }
+    return err
+  }
+
+  it('SIGN_CONTEXT_TIMEOUT on an aborted request', async () => {
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' })),
+        )
+      })) as typeof fetch
+    const err = await caught(fetchImpl, 20)
+    expect(err.code).toBe('SIGN_CONTEXT_TIMEOUT')
+    expect(err.fallback).toBe('typed_data_b64')
+    expect(err.next_action).toBe('stop_and_tell_user')
+    expect(err.http_status).toBeUndefined()
+    expect(err).toBeInstanceOf(Error)
+  }, 2_000)
+
+  it('SIGN_CONTEXT_TIMEOUT on a stalled body read', async () => {
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' })),
+            )
+          }),
+      } as unknown as Response)) as typeof fetch
+    const err = await caught(fetchImpl, 20)
+    expect(err.code).toBe('SIGN_CONTEXT_TIMEOUT')
+    expect(err.fallback).toBe('typed_data_b64')
+    expect(err.next_action).toBe('stop_and_tell_user')
+  }, 2_000)
+
+  it('SIGN_CONTEXT_UNREACHABLE on a network error', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('getaddrinfo ENOTFOUND haven.test')
+    }) as typeof fetch
+    const err = await caught(fetchImpl)
+    expect(err.code).toBe('SIGN_CONTEXT_UNREACHABLE')
+    expect(err.fallback).toBe('typed_data_b64')
+    expect(err.next_action).toBe('stop_and_tell_user')
+    expect(err.http_status).toBeUndefined()
+  })
+
+  it('SIGN_CONTEXT_REFUSED with http_status on a 410', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: 'Payment window expired' }), { status: 410 })) as typeof fetch
+    const err = await caught(fetchImpl)
+    expect(err.code).toBe('SIGN_CONTEXT_REFUSED')
+    expect(err.http_status).toBe(410)
+    expect(err.fallback).toBe('typed_data_b64')
+    expect(err.next_action).toBe('stop_and_tell_user')
+  })
+
+  it('SIGN_CONTEXT_REFUSED with http_status on a 404', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: 'not found' }), { status: 404 })) as typeof fetch
+    const err = await caught(fetchImpl)
+    expect(err.code).toBe('SIGN_CONTEXT_REFUSED')
+    expect(err.http_status).toBe(404)
+    expect(err.fallback).toBe('typed_data_b64')
+    expect(err.next_action).toBe('stop_and_tell_user')
+  })
+
+  it('SIGN_CONTEXT_MALFORMED on a response missing the signing payload', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ payment_id: 'pay_3001' }), { status: 200 })) as typeof fetch
+    const err = await caught(fetchImpl)
+    expect(err.code).toBe('SIGN_CONTEXT_MALFORMED')
+    expect(err.fallback).toBe('typed_data_b64')
+    expect(err.next_action).toBe('stop_and_tell_user')
+    expect(err.http_status).toBeUndefined()
   })
 })

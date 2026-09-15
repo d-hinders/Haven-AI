@@ -195,6 +195,31 @@ what a payload means; they re-derive it.
   the token/chain canonicality check, but not independently re-derived. Prefer
   a credential file that carries the account address.
 
+## Sign-context refusal codes
+
+`{ payment_id }` calls (`haven_sign` / `haven_sign_x402`) fetch the exact
+signing payload from Haven (`GET /x402/:id/sign-context`, see
+[Custody](#custody)). Every refusal on that fetch is a `HavenSignContextError`
+(#3001) — a `HavenSigningError` subclass, so `instanceof HavenSigningError`
+still holds everywhere it did before, but structured like the version-mismatch
+refusal below rather than prose alone: `code`, `fallback`, `next_action`, and
+`http_status` when the backend answered. `message` is unchanged.
+
+| `code` | When | `http_status` |
+|---|---|---|
+| `SIGN_CONTEXT_TIMEOUT` | The fetch (or its body read) did not finish within `SIGN_CONTEXT_TIMEOUT_MS` | — |
+| `SIGN_CONTEXT_UNREACHABLE` | The fetch failed before any response (DNS, connection refused, TLS, …) | — |
+| `SIGN_CONTEXT_REFUSED` | Haven answered non-2xx — expired (410), unknown `payment_id` (404), or another refusal | the backend's HTTP status |
+| `SIGN_CONTEXT_MALFORMED` | The response body was missing `sign_data.typed_data` or `x402_expected` (a pre-#1263 backend) | — |
+
+Every one of these carries `fallback: 'typed_data_b64'` and
+`next_action: 'stop_and_tell_user'` — the same recovery the `message` already
+names in prose: pass `typed_data_b64` (plus `payload_hash` / `x402_expected`)
+from the quote result instead of `payment_id`. These codes are signer-local,
+not part of `@haven_ai/sdk`'s `AgentPaymentFailureCode` taxonomy, since they
+describe a local fetch failure, not a payment-domain outcome, and never reach
+the backend's REST/OpenAPI surface — only this package's MCP tool responses.
+
 ## Custody
 
 The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
@@ -209,9 +234,12 @@ that agents never have to relay multi-KB EIP-712 payloads through a model's
 context window. **Only the Bearer API key goes out; the delegate key is never
 part of that request or its response.** Since #2985 that read is bounded:
 it aborts after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a
-`HavenSigningError` naming the timeout and the `typed_data_b64` fallback,
+`HavenSignContextError` naming the timeout and the `typed_data_b64` fallback,
 so a hung backend cannot hang the signer — and the agent — past the funding
-window. Nothing else in the package reaches the
+window. Every refusal on this fetch (timeout, unreachable host, a non-ok
+backend response, a malformed body) is structured the same way, not just
+prose — see [Sign-context refusal codes](#sign-context-refusal-codes) below.
+Nothing else in the package reaches the
 network: `haven_x402_sign_header` and `haven_sign_sweep_delegate` never fetch,
 the library surface above (`createEdgeSigner` and its six signing methods, over
 the network-free `src/core.ts`) never fetches, and passing the payload as

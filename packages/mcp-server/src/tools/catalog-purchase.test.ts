@@ -2307,7 +2307,7 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
     expect(res.data.expected_funding_leg).toBe(false)
   })
 
-  it('same merchant + agent on the legacy/3009 rail: predicts eip3009 WITH a funding leg', async () => {
+  it('same merchant + agent on the legacy/3009 rail: predicts eip3009 WITH a funding leg — and NOT settleable (Haven refuses retired rails with 410)', async () => {
     stubFetch({
       'POST /mcp': {
         status: 402,
@@ -2315,7 +2315,7 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
       },
       'GET /machine-payments/agent': { status: 200, body: LEGACY_AGENT },
     })
-    const res = ok<{ expected_settlement_scheme: string | null; expected_funding_leg: boolean | null }>(
+    const res = ok<{ expected_settlement_scheme: string | null; expected_funding_leg: boolean | null; expected_settleable?: boolean }>(
       await handlers().haven_quote_mcp_tool({
         merchant_url: 'http://merchant.test/mcp',
         tool_name: 'create_text',
@@ -2324,6 +2324,44 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
     )
     expect(res.data.expected_settlement_scheme).toBe('eip3009')
     expect(res.data.expected_funding_leg).toBe(true)
+    // The selector's answer — but Haven's x402 entry points 410 every retired
+    // rail, so the purchase is not settleable for this account.
+    expect(res.data.expected_settleable).toBe(false)
+  })
+
+  // #2993 review: the catalog quote — the tool B12 was filed against — carries
+  // the same prediction; severing `agent` on that site must go red here.
+  it('haven_quote_catalog_purchase carries the same prediction as the generic quote', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': {
+        status: 200,
+        body: {
+          id: 'cat_1', name: 'Demo VPN', description: 'd', category: 'vpn',
+          resource_url: 'http://merchant.test/mcp', rail: 'x402', protocol: 'mcp',
+          tool_name: 'create_text', tool_arguments: { prompt: 'Hello' },
+          price_display: '$1.50 USDC', price_atomic: '1500000',
+          asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:8453',
+          status: 'active', verified_at: '2026-06-16T08:50:39.772Z',
+        },
+      },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+    })
+    const res = ok<{
+      accepted_scheme: string
+      expected_settlement_scheme: string | null
+      expected_funding_leg: boolean | null
+      expected_settleable?: boolean
+      warnings?: unknown[]
+    }>(await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_1' }))
+    expect(res.data.accepted_scheme).toBe('standard')
+    expect(res.data.expected_settlement_scheme).toBe('erc7710')
+    expect(res.data.expected_funding_leg).toBe(false)
+    expect(res.data.expected_settleable).toBe(true)
+    expect(res.data.warnings).toBeUndefined()
   })
 
   it('an erc7710-only merchant predicts erc7710 regardless of the account rail — and says whether THIS agent can settle it', async () => {

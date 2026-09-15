@@ -57,7 +57,18 @@ function predictSettlementScheme(
   const selection = selectX402SettlementScheme(accepts, {
     delegationRail: agent.executionRail === 'delegation',
   })
-  if (selection) return { scheme: selection.scheme, fundingLeg: selection.scheme === 'eip3009' }
+  if (selection) {
+    // #2993 review: the selector still yields eip3009 for a non-delegation
+    // account, but Haven's x402 entry points refuse every retired rail with
+    // 410 before anything is written (`modules/x402/authorize.ts`) — only the
+    // delegation rail executes. So the prediction is the selector's scheme,
+    // and `settleable` is whether Haven will actually take it.
+    return {
+      scheme: selection.scheme,
+      fundingLeg: selection.scheme === 'eip3009',
+      ...(agent.executionRail === 'delegation' ? {} : { settleable: false as const }),
+    }
+  }
   // No settleable option for THIS agent's rail: an erc7710-only merchant and
   // an agent not on the delegation rail. Prepare/pay will refuse this with
   // ERC7710_RAIL_REQUIRED (`requireSettleableSelection`), so the honest
@@ -131,9 +142,11 @@ export function buildMcpToolQuoteResponse(input: {
     // merchant advertising both, but prepare/pay still PREFER erc7710).
     expected_settlement_scheme: prediction?.scheme ?? null,
     expected_funding_leg: prediction ? prediction.fundingLeg : null,
-    // #2991 review: false when prepare/pay will REFUSE for this agent's rail
-    // (ERC7710_RAIL_REQUIRED) — the scheme above is then what the merchant
-    // demands, not what Haven will do. Omitted when the rail is unknown.
+    // #2991 review: false when prepare/pay will REFUSE for this agent's rail —
+    // ERC7710_RAIL_REQUIRED at an erc7710-only merchant, or Haven's own 410
+    // on any retired (non-delegation) rail — the scheme above is then what
+    // the selector picks, not what Haven will do. Omitted when the rail is
+    // unknown.
     ...(prediction ? { expected_settleable: prediction.settleable !== false } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),

@@ -46,7 +46,20 @@
  * puts them around the keyword itself.
  */
 function undecorate(line) {
-  return line.replace(/\*\*/g, '').replace(/^[\s>*_-]*/, '').trimStart()
+  return line.replace(/\*\*/g, '').replace(/^[\s*_-]*/, '').trimStart()
+}
+
+/**
+ * A quoted line is someone reporting a claim, never making one.
+ *
+ * GitHub's "Quote reply" button produces `> 🔒 CLAIM #2970 …`, so this is the
+ * DEFAULT way one session repeats another's claim. Treating it as a claim would
+ * assign the quoter — and because assignment ADDS, the real owner's later
+ * RELEASE removes only the real owner, leaving the quoter on the issue forever
+ * with nothing in the thread to explain it.
+ */
+function isQuoted(line) {
+  return /^\s*>/.test(line)
 }
 
 /**
@@ -100,7 +113,10 @@ function refsOn(line, keyword) {
  */
 function claimLine(line) {
   const t = undecorate(line)
-  return /^🔒\s*claim\b/i.test(t) || /^claim\b/i.test(t)
+  // The bare-word arm is the historical `**CLAIM** (Antonio's session):` form,
+  // which survives undecorate as `CLAIM`. Requiring uppercase keeps every
+  // corpus case and drops ordinary prose like "Claim checks pass now."
+  return /^🔒\s*claim\b/i.test(t) || /^CLAIM\b/.test(t)
 }
 
 /**
@@ -131,7 +147,18 @@ export function parse({ body, onIssue = null, channelIssue = 1289 }) {
   const claim = []
   const release = []
 
+  let inFence = false
+
   for (const line of String(body ?? '').split('\n')) {
+    // A marker inside a code fence is documentation of the protocol, not a use
+    // of it — any comment explaining the format by example would otherwise
+    // assign its author.
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence || isQuoted(line)) continue
+
     const isClaim = claimLine(line)
     const isRelease = releaseLine(line)
     if (!isClaim && !isRelease) continue
@@ -143,11 +170,18 @@ export function parse({ body, onIssue = null, channelIssue = 1289 }) {
     const keyword = leadsWithRef ? null : isRelease ? /releas(e|ed)\b:?/i : /claim\b/i
     let refs = refsOn(clean, keyword)
 
-    // A claim made ON its own issue may not restate the number:
-    // "🔒 CLAIM — branch feat/x — touches: …" posted on #2947. Fall back to the
-    // containing issue, but never on the coordination thread, where a bare
-    // claim would otherwise assign #1289 itself.
-    if (refs.length === 0 && onIssue && onIssue !== channelIssue) refs = [onIssue]
+    // A marker made ON its own issue may not restate the number:
+    // "🔒 CLAIM — branch feat/x — touches: …" posted on #2947.
+    //
+    // The fallback is NOT open to generously-matched releases. `releaseLine`
+    // deliberately matches any line leading with the word, so a sentence like
+    // "Release 0.1.21 promoting tonight" — about a version, carrying no issue
+    // number — would otherwise unassign the issue it was posted on, erasing a
+    // live claim. That is the exact failure this module exists to avoid, and it
+    // would fire on the owner, whose claim it erases. An explicit 🔓 is a
+    // deliberate use of the protocol and keeps the fallback.
+    const mayFallBack = isClaim || /^\s*🔓/.test(undecorate(line))
+    if (refs.length === 0 && mayFallBack && onIssue && onIssue !== channelIssue) refs = [onIssue]
 
     for (const n of refs) {
       if (n === channelIssue) continue // never assign the standing thread

@@ -160,6 +160,8 @@ More than one agent session works this repo (different users, different machines
 
 Two consequences worth knowing. The projection reads only the LEADING run of issue numbers on a marker line, so `🔒 CLAIM #2044 — … the Red Line #4 suite` claims #2044 and not #4; put the issues you are claiming immediately after the keyword and everything else after. And a claim quoted inside a bullet or mid-sentence is deliberately ignored, so you can report someone else's claim in an FYI without stealing it.
 
+The projection only sees comments posted from the day it shipped, so it starts near-empty and fills as work is claimed. Until it has: **an empty assignee does not mean unowned** — read the thread. It is safe to trust a field that IS set, never a field that is not.
+
 The field is an index, never the protocol. It cannot carry the branch, and it cannot carry `touches:` — and `touches:` is what catches a collision between two DIFFERENT issues writing the same file, which is what actually went wrong in the #2968/#2970 overlap on 2026-09-14. Keep claiming in comments.
 
 **FYI cross-cutting changes** in #1289 (`📣 FYI — …`): release promotions, PRs that will conflict with in-flight branches, shared-surface refactors.

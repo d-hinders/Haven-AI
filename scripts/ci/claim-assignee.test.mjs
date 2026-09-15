@@ -10,7 +10,14 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parse } from './claim-assignee.mjs'
+
+const CLI = fileURLToPath(new URL('./claim-assignee.mjs', import.meta.url))
 
 const on1289 = (body) => parse({ body, onIssue: 1289 })
 
@@ -73,7 +80,10 @@ describe('releases, matched generously because a stale assignee misleads', () =>
   for (const [name, body, expected] of cases) {
     test(name, () => {
       const r = on1289(body)
-      assert.ok(r.release.includes(expected), `expected #${expected} released, got ${JSON.stringify(r)}`)
+      // deepEqual, not includes: two of these lines name the PR that carried
+      // the work, and the whole point of dropping `PR #n` is that the PR number
+      // must NOT also be released. `includes` would pass either way.
+      assert.deepEqual(r.release, [expected], `got ${JSON.stringify(r)}`)
       assert.deepEqual(r.claim, [], 'a release must not also claim')
     })
   }
@@ -104,6 +114,113 @@ describe('reported claims must not be stolen', () => {
   test('but a real claim on the next line still registers', () => {
     const r = on1289(`${FYI}\n🔒 CLAIM #2999 — branch \`feat/2999-x\` — touches: packages/core/`)
     assert.deepEqual(r.claim, [2999])
+  })
+})
+
+describe('a quoted claim is reported, never made', () => {
+  // GitHub's "Quote reply" button emits `> 🔒 CLAIM …`, so this is the DEFAULT
+  // way one session repeats another's claim. Taking it as a claim would assign
+  // the quoter — and since assignment ADDS, the real owner's later RELEASE
+  // removes only the owner, stranding the quoter on the issue with nothing in
+  // the thread to explain it.
+  test('a quote-reply of a claim assigns nobody', () => {
+    const r = on1289('> 🔒 CLAIM #2970 — branch `feat/2970-settled-verified`\n\nThanks, standing down.')
+    assert.deepEqual(r.claim, [])
+    assert.deepEqual(r.release, [])
+  })
+
+  test('a nested quote too', () => {
+    assert.deepEqual(on1289('>> 🔒 CLAIM #2970').claim, [])
+  })
+
+  test('a quoted RELEASE is ignored as well', () => {
+    assert.deepEqual(on1289('> 🔓 RELEASE #2968 — landed').release, [])
+  })
+
+  test('an unquoted claim below a quoted one still registers', () => {
+    const r = on1289('> 🔒 CLAIM #2970 — theirs\n\n🔒 CLAIM #2999 — branch `feat/2999-x`')
+    assert.deepEqual(r.claim, [2999])
+  })
+})
+
+describe('a marker inside a code fence is documentation, not a claim', () => {
+  test('fenced claim assigns nobody', () => {
+    const r = on1289('The format is:\n```\n🔒 CLAIM #2947 — branch `feat/x` — touches: …\n```\nPost that on the issue.')
+    assert.deepEqual(r.claim, [])
+  })
+
+  test('a real claim after the fence closes still registers', () => {
+    const r = on1289('Example:\n```\n🔒 CLAIM #1111 — sample\n```\n🔒 CLAIM #2947 — branch `feat/real`')
+    assert.deepEqual(r.claim, [2947])
+  })
+})
+
+describe('the bare-issue fallback is claims-only', () => {
+  // `releaseLine` matches any line leading with the word, on purpose. Composed
+  // with a fallback to the containing issue, an ordinary sentence about a
+  // VERSION would have unassigned the issue it was posted on — erasing a live
+  // claim, and firing on the owner whose claim it erases.
+  test('a sentence about a release version does not unassign the issue', () => {
+    const r = parse({ body: 'Release 0.1.21 promoting tonight; #2900 and #2901 ride it.', onIssue: 2947 })
+    assert.deepEqual(r.release, [])
+    assert.deepEqual(r.claim, [])
+  })
+
+  test('nor does prose that merely starts with Released', () => {
+    assert.deepEqual(parse({ body: 'Released to prod this morning, all good.', onIssue: 2947 }).release, [])
+  })
+
+  test('but an explicit padlock with no number still releases the containing issue', () => {
+    // A deliberate use of the protocol, so the fallback is kept for it.
+    const r = parse({ body: '🔓 RELEASE — landed as PR #2955', onIssue: 2947 })
+    assert.deepEqual(r.release, [2947])
+  })
+
+  test('prose beginning with the word Claim does not assign', () => {
+    assert.deepEqual(parse({ body: 'Claim checks pass now.', onIssue: 2947 }).claim, [])
+  })
+})
+
+describe('CLI contract the workflow depends on', () => {
+  const run = (body, onIssue) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'claim-'))
+    writeFileSync(path.join(dir, 'c.txt'), body)
+    const args = [CLI, '--body', 'c.txt']
+    if (onIssue) args.push('--on-issue', String(onIssue))
+    return execFileSync(process.execPath, args, { cwd: dir, encoding: 'utf8' })
+  }
+
+  test('every emitted line is a verb and a plain number', () => {
+    // This output is the only thing between a public comment box and `gh` argv.
+    // No line may ever begin with a dash or carry anything but digits.
+    const hostile = [
+      '🔒 CLAIM #2947 --repo evil/repo — branch x',
+      '🔒 CLAIM #-5 and #2948',
+      '🔓 RELEASE #2945; rm -rf /',
+      '🔒 CLAIM #2999 `$(whoami)`',
+    ].join('\n')
+    for (const line of run(hostile, 1289).split('\n').filter(Boolean)) {
+      assert.match(line, /^(claim|release)=\d{1,6}$/, `unsafe CLI line: ${JSON.stringify(line)}`)
+    }
+  })
+
+  test('a comment with nothing to do prints nothing', () => {
+    assert.equal(run('LGTM, nice work.', 1289), '')
+  })
+
+  test('output ends with a newline so the shell read loop sees the last line', () => {
+    const out = run('🔒 CLAIM #2947 — branch x', 1289)
+    assert.equal(out, 'claim=2947\n')
+  })
+
+  test('missing --body exits non-zero', () => {
+    let code = 0
+    try {
+      execFileSync(process.execPath, [CLI], { encoding: 'utf8', stdio: 'pipe' })
+    } catch (e) {
+      code = e.status
+    }
+    assert.notEqual(code, 0)
   })
 })
 

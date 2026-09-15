@@ -29,22 +29,35 @@ name: Claim to assignee
 # non-collaborator, but the UNassign path needs no permissions at all, so the
 # gate is what closes it.
 #
+# `COLLABORATOR` on a user-owned repo includes read- and triage-level
+# collaborators, who cannot assign through the UI but can through this workflow
+# — to themselves only, on an issue they claimed in the open. Acceptable for
+# this repo's membership, and stated so it is a decision rather than an
+# oversight.
+#
 # Never fails the build: a comment that parses to nothing is the common case,
 # and an API refusal is logged, not raised. This workflow only ever adds or
 # removes an assignee — it never comments, closes, labels or edits a body.
 
 on:
   issue_comment:
-    types: [created, edited]
+    # `created` only. An `edited` trigger re-fires with the comment's ORIGINAL
+    # body and author, so editing a two-month-old claim would re-apply it long
+    # after its release — a replay with no upside, since a mistyped claim is
+    # fixed by posting a corrected one, which the protocol expects anyway.
+    types: [created]
 
 permissions:
   issues: write # assign/unassign only
 
-concurrency:
-  # Serialise per issue so two comments in the same second cannot interleave a
-  # claim and a release into the wrong final state.
-  group: claim-assignee-${{ github.event.issue.number }}
-  cancel-in-progress: false
+# No `concurrency` group, deliberately. Keying on the commented-on issue would
+# not serialise what matters — most claims are posted on #1289 ABOUT another
+# issue, so a claim of #2947 from #1289 and a release of #2947 posted on #2947
+# land in different groups anyway. Worse, a group makes this less safe at 15+
+# fires a day: GitHub cancels a PENDING run when a newer one queues, so a burst
+# on #1289 can drop the middle one, and a dropped 🔓 RELEASE is a permanently
+# stale assignee. Both operations are idempotent and scoped to the comment
+# author, so running them in parallel is safe.
 
 jobs:
   project:
@@ -88,18 +101,24 @@ jobs:
           while IFS='=' read -r verb number; do
             [ -n "${number:-}" ] || continue
 
-            # An assignee on a closed issue means nothing, and assigning one
-            # would leave residue no release will ever clear. Releases still
-            # apply, so a late RELEASE on a closed issue tidies up.
-            state=$(gh api "repos/$REPO/issues/$number" --jq '.state' 2>/dev/null || echo "unknown")
-            if [ "$verb" = "claim" ] && [ "$state" != "open" ]; then
-              echo "  skip claim #$number — issue is $state"
-              continue
-            fi
+            # The parser only ever emits digits, but this loop feeds a public
+            # comment box into `gh` argv, so the guarantee is re-stated where it
+            # is relied on rather than trusted from another file.
+            case "$number" in
+              ''|*[!0-9]*) echo "  skip malformed '$verb=$number'"; continue ;;
+            esac
 
             case "$verb" in
               claim)
-                if gh issue edit "$number" --repo "$REPO" --add-assignee "$COMMENT_AUTHOR" >/dev/null 2>&1; then
+                # An assignee on a closed issue means nothing, and assigning one
+                # would leave residue no release will ever clear. Releases are
+                # not gated, so a late RELEASE on a closed issue tidies up.
+                state=$(gh api "repos/$REPO/issues/$number" --jq '.state' </dev/null 2>/dev/null || echo unknown)
+                if [ "$state" != "open" ]; then
+                  echo "  skip claim #$number — issue is $state"
+                  continue
+                fi
+                if gh issue edit "$number" --repo "$REPO" --add-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
                   echo "  assigned #$number to @$COMMENT_AUTHOR"
                   echo "- assigned **#$number** to @$COMMENT_AUTHOR" >> "$GITHUB_STEP_SUMMARY"
                 else
@@ -109,7 +128,7 @@ jobs:
                 fi
                 ;;
               release)
-                if gh issue edit "$number" --repo "$REPO" --remove-assignee "$COMMENT_AUTHOR" >/dev/null 2>&1; then
+                if gh issue edit "$number" --repo "$REPO" --remove-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
                   echo "  unassigned #$number from @$COMMENT_AUTHOR"
                   echo "- unassigned **#$number** from @$COMMENT_AUTHOR" >> "$GITHUB_STEP_SUMMARY"
                 else

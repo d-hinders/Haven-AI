@@ -84,7 +84,8 @@ export const MOCK_CALL = /vi\.(?:do)?[mM]ock\(/g
 
 /** Count every `vi.mock` / `vi.doMock` whose specifier is a RELATIVE path, in any quote style. */
 export function countRelativeMockCalls(src: string): number {
-  return (src.match(/vi\.(?:do)?[mM]ock\(\s*['"`]\./g) ?? []).length
+  // Composed from MOCK_CALL so the auditor cannot drift from the detector.
+  return (src.match(new RegExp(MOCK_CALL.source + String.raw`\s*['"\`]\.`, 'g')) ?? []).length
 }
 
 export function listTestFiles(root: string): string[] {

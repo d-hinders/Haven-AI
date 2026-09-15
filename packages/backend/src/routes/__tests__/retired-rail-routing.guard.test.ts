@@ -163,7 +163,7 @@ const RETIRED_RAIL_SYMBOLS = [
  * signature, or authorize a delegation. Read-only routes (status, receipts,
  * catalog) and internal modules do not belong here; they are covered by the
  * backend-wide rules instead. `routes/x402-resources.ts` was on this list
- * until #2855 deleted it — the count is whatever the list says, never a
+ * until #2270 deleted it — the count is whatever the list says, never a
  * literal in a comment (a "five" outlived that deletion).
  */
 const PAYMENT_ENTRY_POINTS = [

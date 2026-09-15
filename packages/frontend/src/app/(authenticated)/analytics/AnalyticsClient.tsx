@@ -320,7 +320,6 @@ export default function AnalyticsClient() {
             <RangeControl value={range} onChange={changeRange} />
           </div>
         }
-        inlineActions
       />
       {body}
     </div>

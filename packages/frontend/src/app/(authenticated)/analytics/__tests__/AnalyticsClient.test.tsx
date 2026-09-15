@@ -89,6 +89,24 @@ describe('Analytics — the header the capture harness waits on', () => {
     expect(screen.getByText('What your agents did with your money.')).toBeTruthy()
   })
 
+  it('stacks the range control under the title below `sm` rather than beside it', () => {
+    // The header primitive marks its actions beside the title ONLY for a
+    // single icon-only control (`inlineActions`); for a row of labelled
+    // buttons — the three-way range control — the default variant stacks it
+    // below `sm`, because a forced row starves the `min-w-0` title column:
+    // the capture harness proved this at 390px, where the heading resolved to
+    // zero width and every mobile scenario refused to wait for it. jsdom runs
+    // no media queries, so the visible proof is the capture; the structural
+    // pin that the primitive is in its stacking form is this class list.
+    render(<AnalyticsClient />)
+    const header = screen.getByTestId('analytics-page').querySelector('header') as HTMLElement
+    expect(header.className).toContain('flex-col')
+    expect(header.className).toContain('sm:flex-row')
+    // A bare `flex-row` (no `sm:` prefix) at base is the forced-row variant,
+    // and it is the exact regression this pin exists to catch.
+    expect(header.className.split(/\s+/)).not.toContain('flex-row')
+  })
+
   it('names the window the figures cover, from the response own range', () => {
     render(<AnalyticsClient />)
     // The caption is the endpoint's `range.days`, not the control's label, so

@@ -155,10 +155,23 @@ describe('browserTimeZone', () => {
       expect(browserTimeZone()).toBeUndefined()
     } finally {
       // Restore it at the end, and every time: the whole suite shares Intl.
-      // The restore is asserted, because a leaked stub here would poison the
-      // two tests above that run after this one in file order.
+      // The restore is proven BY IDENTITY against the constructor captured
+      // above, never by calling `browserTimeZone()` again: that call would
+      // assert what the HOST resolves, and CI runners resolve `UTC`, which
+      // analytics-range.ts deliberately maps to `undefined`. What the old line
+      // was meant to show — that the function still reads through the
+      // collaborator we swapped — is asserted against a pinned zone instead
+      // of the environment, so no assertion in this file depends on where the
+      // suite runs (#2947, CI-UTC red at 68d11b06).
       ;(globalThis as any).Intl.DateTimeFormat = Original
-      expect(browserTimeZone()).not.toBeUndefined()
+      expect((globalThis as any).Intl.DateTimeFormat).toBe(Original)
+      ;(globalThis as any).Intl.DateTimeFormat = class Stub {
+        resolvedOptions() {
+          return { timeZone: 'Europe/Stockholm' }
+        }
+      }
+      expect(browserTimeZone()).toBe('Europe/Stockholm')
+      ;(globalThis as any).Intl.DateTimeFormat = Original
     }
   })
 })

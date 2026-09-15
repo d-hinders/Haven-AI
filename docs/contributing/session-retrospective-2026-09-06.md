@@ -14,7 +14,7 @@ covers:
   - docs/contributing/ai-agent-workflow.md
   - docs/contributing/ai-review-patterns.md
   - docs/bug-reports/qa-explore-agent-onboarding-2026-09-06.md
-last-verified: "2026-09-06"
+last-verified: "2026-09-15"
 ---
 
 # The one-session retrospective (2026-09-06)

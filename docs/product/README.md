@@ -19,7 +19,7 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-09-07"
+last-verified: "2026-09-15"
 ---
 
 # Haven Product & UX Guide
@@ -41,7 +41,13 @@ When these docs overlap, use this order of authority:
 3. This file for product doctrine, IA, accessibility, and money-movement UX rules.
 4. `screen-recipes.md` for repeatable product structures and `design-review.md` for closeout review.
 
-The old dark app system is retired. Do not extend old dark token patterns, gradient buttons, glow shadows, or dark modal surfaces unless a future design-system doc explicitly reintroduces them.
+The old dark app system is retired. Dark mode since #2927 is a different thing:
+the sanctioned v2 token set now carries a dark palette (re-declared in the two
+mechanically-enforced blocks in `globals.css`), `ThemeProvider` and
+`ThemeToggle` exist, and users choose light, dark, or system in Settings → Theme. Do
+not extend old dark token patterns, gradient buttons, glow shadows, or hard
+dark-modal surfaces — dark styling comes from the v2 tokens flipping under the
+active theme, not from one-off dark classes.
 
 ---
 
@@ -105,17 +111,21 @@ Use [design-system.md](./design-system.md) for exact tokens and classes.
 
 Core rules:
 
-- Page backgrounds use the v2 light system.
+- Page backgrounds and surfaces follow the active theme: the v2 light system is
+  the default, and the #2927 dark palette flips the same v2 tokens under
+  `color-scheme`/`data-theme` — never hard-coded light-only colors.
 - Primary buttons use solid brand color: `bg-[var(--v2-brand)]` with `hover:bg-[var(--v2-brand-strong)]`.
 - No gradient buttons. The brand gradient is reserved for the app wordmark and one restrained hero accent phrase.
-- Flat cards are white with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
-- Raised cards are prominent white page anchors such as the account detail total balance card; the dashboard balance hero uses the tinted anchor surface with the raised shadow rather than a white raised card.
+- Flat cards use the `--v2-surface` token (white in light, its dark counterpart
+  in dark) with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
+- Raised cards are prominent page anchors such as the account detail total balance card; the dashboard balance hero uses the tinted anchor surface with the raised shadow rather than a white raised card.
 - Other elevations already present in the shared `Card` primitive, including
   the restrained tinted `anchor` tier, must match the live `/design-system`
   reference and remain secondary to the page's primary anchor. The static
   `design-system.md` card table does not yet document `anchor`; treat that as
   documentation debt, not permission to invent another tier.
-- Modals use white surfaces and a darkened blurred backdrop.
+- Modals use the themed surface token and a darkened blurred backdrop (the
+  backdrop darkens whichever theme is active).
 - Avoid old dark app classes for new work: `bg-gray-*`, `text-gray-*`, dark-only `zinc` surfaces, glow shadows, and white alpha borders.
 - Use semantic colors only for their meaning: success, warning, danger.
 - Use `.v2-tabular` on financial values, counters, percentages, addresses, and other numeric strings that need visual stability.
@@ -129,7 +139,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 ### Buttons
 
 - Primary: solid brand, white text, v2 button shadow.
-- Secondary/ghost: white background, subtle border, dark text.
+- Secondary/ghost: themed surface background, subtle border, themed ink text.
 - Destructive: danger color and explicit verb label.
 - Loading buttons keep their dimensions and clearly indicate work is in progress.
 
@@ -163,7 +173,8 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 - Modal body should fit within the viewport and scroll internally when needed.
 - Close affordances: close button, Escape, and backdrop click unless an irreversible signing/execution step is running.
-- Backdrop should blur and slightly darken the page so the modal stands out on white surfaces.
+- Backdrop should blur and slightly darken the page so the modal stands out on
+  the themed surfaces behind it.
 - Modals must use dialog semantics, labelled titles, focus trap, and focus return after close.
 - Never nest modals. Use inline confirmation panels or close the parent before opening a confirm dialog.
 

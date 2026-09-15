@@ -15,15 +15,58 @@
  */
 import {
   AgentPaymentNextAction,
+  AgentPaymentWarningCode,
   HavenApiError,
   HavenClient,
+  selectErc7710PaymentOption,
+  selectX402SettlementScheme,
+  type AgentPaymentWarning,
+  type HavenAgent,
   type HavenCatalogEntry,
   type X402McpTransport,
+  type X402PaymentOption,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
 import type { ToolFailure } from '../contracts.js'
 import { serializeMcpTransport } from './mcp-context.js'
+
+/**
+ * #2991 — predict the settlement scheme `haven_prepare_catalog_purchase` /
+ * `haven_pay_mcp_tool` will ACTUALLY select for this account, using the
+ * IDENTICAL `selectX402SettlementScheme` call those tools run at prepare/pay
+ * time (`catalog-purchase.ts` steps 3-4 / the pay tool's #1456 selection) —
+ * so a quote can never disagree with what prepare does next. `agent` is
+ * `undefined` exactly when the `getAgent` prefetch failed (same non-throwing
+ * `.then(a => a, () => undefined)` convention prepare/pay use), and this
+ * returns `null` rather than guess a rail it could not read.
+ *
+ * A `null` selection from the selector itself (an erc7710-ONLY merchant next
+ * to an account whose rail does not qualify) is NOT "unknown" — the scheme
+ * that merchant will settle with, if it settles at all, is still erc7710;
+ * the rail mismatch is what `requireSettleableSelection` refuses at
+ * prepare/pay, not the existence of a predictable scheme. This mirrors
+ * `buildX402Quote`'s own `acceptedScheme`, which already reports 'erc7710'
+ * for such a merchant regardless of the (unknown, at quote time) rail.
+ */
+function predictSettlementScheme(
+  accepts: X402PaymentOption[],
+  agent: HavenAgent | undefined,
+): { scheme: 'erc7710' | 'eip3009'; fundingLeg: boolean; settleable?: false } | null {
+  if (!agent) return null
+  const selection = selectX402SettlementScheme(accepts, {
+    delegationRail: agent.executionRail === 'delegation',
+  })
+  if (selection) return { scheme: selection.scheme, fundingLeg: selection.scheme === 'eip3009' }
+  // No settleable option for THIS agent's rail: an erc7710-only merchant and
+  // an agent not on the delegation rail. Prepare/pay will refuse this with
+  // ERC7710_RAIL_REQUIRED (`requireSettleableSelection`), so the honest
+  // prediction is the scheme the merchant demands plus `settleable: false`
+  // — not a bare 'erc7710' that reads as "prepare will settle it".
+  return selectErc7710PaymentOption(accepts)
+    ? { scheme: 'erc7710', fundingLeg: false, settleable: false }
+    : null
+}
 
 /**
  * Build the compact, non-authorizing response shared by the generic and
@@ -38,8 +81,25 @@ export function buildMcpToolQuoteResponse(input: {
   toolName: string
   toolArguments: Record<string, unknown>
   catalog?: HavenCatalogEntry
+  // #2991: the prefetched agent (undefined when the read failed) — used ONLY
+  // to predict expected_settlement_scheme/expected_funding_leg below, never
+  // to change accepted_scheme/erc7710_only, which describe the MERCHANT's
+  // offer and stay exactly as `buildX402Quote` computed them.
+  agent: HavenAgent | undefined
 }) {
-  const { quote, merchantUrl, requestedMerchantUrl, toolName, toolArguments, catalog } = input
+  const { quote, merchantUrl, requestedMerchantUrl, toolName, toolArguments, catalog, agent } = input
+  const prediction = predictSettlementScheme(quote.paymentRequired.accepts, agent)
+  const warnings: AgentPaymentWarning[] = []
+  if (prediction === null) {
+    warnings.push({
+      code: AgentPaymentWarningCode.X402SchemeUnknown,
+      message:
+        "This agent's account rail could not be read from Haven, so the settlement scheme " +
+        'haven_prepare_catalog_purchase / haven_pay_mcp_tool will select cannot be predicted ' +
+        'here. Retry when haven_get_agent succeeds, or proceed to prepare/pay directly — that ' +
+        'step reads the rail fresh regardless.',
+    })
+  }
   return {
     rail: quote.rail,
     merchant_url: merchantUrl,
@@ -64,6 +124,18 @@ export function buildMcpToolQuoteResponse(input: {
     // tell the user BEFORE calling them.
     accepted_scheme: quote.acceptedScheme,
     ...(quote.acceptedScheme === 'erc7710' ? { erc7710_only: true } : {}),
+    // #2991: what prepare/pay will ACTUALLY do for this account, computed by
+    // the identical selector — never derived from accepted_scheme, which
+    // describes the merchant's offer and can legitimately disagree (a
+    // delegation-rail account is quoted accepted_scheme: 'standard' at a
+    // merchant advertising both, but prepare/pay still PREFER erc7710).
+    expected_settlement_scheme: prediction?.scheme ?? null,
+    expected_funding_leg: prediction ? prediction.fundingLeg : null,
+    // #2991 review: false when prepare/pay will REFUSE for this agent's rail
+    // (ERC7710_RAIL_REQUIRED) — the scheme above is then what the merchant
+    // demands, not what Haven will do. Omitted when the rail is unknown.
+    ...(prediction ? { expected_settleable: prediction.settleable !== false } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
     ...(quote.mcpTransport ? { mcp_transport: serializeMcpTransport(quote.mcpTransport) } : {}),
     ...(catalog
       ? {

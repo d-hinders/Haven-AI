@@ -399,17 +399,31 @@ export function createCatalogPurchaseHandlers(
       runTool(async () => {
         const args = parseStrict('haven_quote_mcp_tool', input)
         const toolArguments = (args.arguments as Record<string, unknown> | undefined) ?? {}
+        // #2991: prefetch the agent so the quote can PREDICT the settlement
+        // scheme prepare/pay will actually select (expected_settlement_scheme
+        // / expected_funding_leg). Started BEFORE quoteMcpToolCall so it
+        // dedupes with quoteMcpX402's own internal getAgent() read
+        // (AccountReads' in-flight cache — #1456's one-round-trip budget is
+        // unaffected). Non-throwing, same `.then(a => a, () => undefined)`
+        // convention as the pay/prepare prefetches: a failed read degrades
+        // the prediction to null + a warning, never a quote-tool failure.
+        const agentPrefetch = haven.getAgent().then(
+          (a) => a,
+          () => undefined,
+        )
         const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
           merchantUrl: args.merchant_url as string,
           toolName: args.tool_name as string,
           toolArguments,
         })
+        const agent = await agentPrefetch
         return buildMcpToolQuoteResponse({
           quote,
           merchantUrl,
           toolName: args.tool_name as string,
           toolArguments,
           requestedMerchantUrl: args.merchant_url as string,
+          agent,
         })
       }),
 
@@ -800,11 +814,19 @@ export function createCatalogPurchaseHandlers(
         const args = parseStrict('haven_quote_catalog_purchase', input)
         const entry = await getUsableCatalogMcpEntry(haven, args.catalog_id as string)
         const toolArguments = entry.toolArguments ?? {}
+        // #2991: same non-throwing prefetch as haven_quote_mcp_tool, started
+        // BEFORE quoteMcpToolCall so it dedupes with its internal getAgent()
+        // read — see that tool's comment for the full rationale.
+        const agentPrefetch = haven.getAgent().then(
+          (a) => a,
+          () => undefined,
+        )
         const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
           merchantUrl: entry.resourceUrl,
           toolName: entry.toolName,
           toolArguments,
         })
+        const agent = await agentPrefetch
         return buildMcpToolQuoteResponse({
           quote,
           merchantUrl,
@@ -812,6 +834,7 @@ export function createCatalogPurchaseHandlers(
           toolArguments,
           requestedMerchantUrl: entry.resourceUrl,
           catalog: entry,
+          agent,
         })
       }),
 

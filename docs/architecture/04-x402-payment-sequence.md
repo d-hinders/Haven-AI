@@ -1578,6 +1578,25 @@ guaranteed-non-null selection removed the `?? quote.accepted` display
 fallbacks, so the quote shown, the cap checked (`priceSelectedOption`), and
 the amount authorized all read the SAME selected option (#2051's invariant).
 
+As of [#2991](https://github.com/d-hinders/Haven-AI/issues/2991) the two quote
+tools add `expected_settlement_scheme: 'erc7710' | 'eip3009' | null` and
+`expected_funding_leg: boolean | null` (plus `expected_settleable: boolean`
+whenever the rail is known — `false` when prepare/pay will refuse with
+`ERC7710_RAIL_REQUIRED`, i.e. an erc7710-only merchant and an account not
+on the delegation rail; the scheme is then what the merchant demands, not
+what Haven will do), computed by running the IDENTICAL
+`selectX402SettlementScheme` call `haven_prepare_catalog_purchase` /
+`haven_pay_mcp_tool` run at prepare/pay time, so a quote can never disagree
+with what those tools do next. This closes a gap `accepted_scheme` left open:
+at a merchant advertising BOTH entries, a delegation-rail account is quoted
+`accepted_scheme: 'standard'` (the merchant's own offer), yet prepare/pay
+still PREFER erc7710 for that account — `expected_settlement_scheme` says so
+up front instead of leaving the agent to find out from a different signature
+shape after the cap decision. `null` (with an `X402_SCHEME_UNKNOWN` warning)
+replaces a guess when the agent's rail could not be read, mirroring how
+`requireSettleableSelection` treats an unknown rail at prepare/pay. Read-only:
+the quote still reserves no price and creates no intent.
+
 **Still unproven end to end, and worth stating rather than assuming.** The
 nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately
 excludes the SDK, so nothing yet demonstrates a full purchase through

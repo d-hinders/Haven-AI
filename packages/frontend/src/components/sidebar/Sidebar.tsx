@@ -7,6 +7,7 @@ import {
   ArrowLeftRight,
   BadgeCheck,
   Bot,
+  ChartColumn,
   CircleUserRound,
   EllipsisVertical,
   FileText,
@@ -61,6 +62,7 @@ const icons = {
   dashboard: <Icon icon={LayoutGrid} className="w-full h-full" />,
   account: <Icon icon={ShieldCheck} className="w-full h-full" />,
   transactions: <Icon icon={ArrowLeftRight} className="w-full h-full" />,
+  analytics: <Icon icon={ChartColumn} className="w-full h-full" />,
   agents: <Icon icon={Bot} className="w-full h-full" />,
   catalog: <Icon icon={Store} className="w-full h-full" />,
   contacts: <Icon icon={Users} className="w-full h-full" />,
@@ -83,6 +85,7 @@ export const baseNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: icons.dashboard },
   { label: 'Accounts', href: '/accounts', icon: icons.account },
   { label: 'Transactions', href: '/transactions', icon: icons.transactions },
+  { label: 'Analytics', href: '/analytics', icon: icons.analytics },
   { label: 'Agents', href: '/agents', icon: icons.agents },
   { label: 'Catalog', href: '/catalog', icon: icons.catalog },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
@@ -207,7 +210,7 @@ export default function Sidebar() {
   const accountingOff = accountingFeedOffState(accountingStatus)
   const accountingPending = accountingLoading && !accountingStatus
   const accountingItem: NavItem = {
-    ...baseNavItems[6],
+    ...baseNavItems[7],
     ...(accountingOff === 'coming_soon'
       ? { badge: t.accountingPage.nav.comingSoon, badgeTitle: t.common.comingSoon, badgeTone: 'muted' as const }
       : accountingNeedsAttention(accountingStatus)
@@ -224,14 +227,15 @@ export default function Sidebar() {
         baseNavItems[0], // Dashboard
         baseNavItems[1], // Accounts
         baseNavItems[2], // Transactions
-        baseNavItems[3], // Agents
+        baseNavItems[3], // Analytics
+        baseNavItems[4], // Agents
       ],
     },
     {
       label: 'Agent tools',
       items: [
-        baseNavItems[4], // Catalog
-        baseNavItems[5], // Contacts
+        baseNavItems[5], // Catalog
+        baseNavItems[6], // Contacts
       ],
     },
     {
@@ -239,7 +243,7 @@ export default function Sidebar() {
       items: [
         // Accounting (#2869): markers per state; hidden on self-hosted; absent until the status has answered.
         ...(accountingPending || accountingOff === 'self_hosted' ? [] : [accountingItem]),
-        baseNavItems[7], // Custody
+        baseNavItems[8], // Custody
       ],
     },
   ]

@@ -39,6 +39,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { StatTile } from '@/components/ui/StatTile'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
@@ -818,6 +819,52 @@ export default function DesignSystemPage() {
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
               works without extra wiring. Never hand-roll a second control of this shape.
+            </p>
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Stat tile</h3>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <StatTile
+                label="Spent"
+                value="$324.75"
+                polarity="neutral"
+                delta={15.9}
+                deltaCaption="vs previous 30 days"
+                footnote="based on 5 payments · 1 awaiting settlement evidence is not counted"
+              />
+              <StatTile
+                label="Refused"
+                value="2"
+                polarity="higher-is-bad"
+                delta={100}
+                deltaCaption="vs previous 30 days"
+                footnote="2 refused payments · across 3 attempts · $3.00 attempted"
+              />
+              <StatTile
+                label="Budget used"
+                value="1/2"
+                polarity="higher-is-warning"
+                footnote="1 of 2 agents above 75% of their period budget"
+              />
+              <StatTile label="Fees paid to Haven" value="No fees yet" polarity="neutral" footnote="Haven is not charging fees. Haven sponsored 7 operations' gas." />
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              The figure with the sentence under it (<code className="rounded bg-[var(--v2-surface)] px-1">ui/StatTile</code>,
+              #2947): the four numbers the Analytics page answers with, so the fourth cannot drift from the first in
+              size, rhythm, or what its colour MEANS. A delta chip is a judgement, and the caller does not hand the
+              tile a tone — it declares what a <em>rising</em> value of that figure means via{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">polarity</code>: more refusals is worse
+              (<code className="rounded bg-[var(--v2-surface)] px-1">higher-is-bad</code>, so an increase is the danger
+              tone), spend and fees are activity rather than loss (<code className="rounded bg-[var(--v2-surface)] px-1">neutral</code>,
+              so neither direction is news), and a nearly-spent budget is the condition worth warning about
+              (<code className="rounded bg-[var(--v2-surface)] px-1">higher-is-warning</code>). A flat delta is neutral
+              under every reading. The rule that makes the whole thing checkable is that <em>the value never carries
+              colour</em>: the figure is ink in every state, because a reading that goes red with volume stops being a
+              reading. The judgement belongs to the chip alone. A delta without a{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">polarity</code> throws — there is no safe default
+              for a judgement. Values arrive already formatted, from the endpoint's own numeric strings; the tile does
+              not convert money.
             </p>
           </Card>
 

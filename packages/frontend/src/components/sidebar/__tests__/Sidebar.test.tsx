@@ -97,13 +97,13 @@ describe('Sidebar', () => {
       a.getAttribute('href'),
     )
     const nav = links.filter((href) =>
-      ['/dashboard', '/accounts', '/transactions', '/agents', '/approvals', '/catalog', '/contacts', '/accounting', '/custody'].includes(href ?? ''),
+      ['/dashboard', '/accounts', '/transactions', '/analytics', '/agents', '/approvals', '/catalog', '/contacts', '/accounting', '/custody'].includes(href ?? ''),
     )
     // '/approvals' stays in the FILTER above deliberately: the filter is what
     // makes this assertion able to see a re-added Approvals entry. Removing it
     // from both sides would turn the equality into a guard over the empty set.
     expect(nav).toEqual([
-      '/dashboard', '/accounts', '/transactions', '/agents',
+      '/dashboard', '/accounts', '/transactions', '/analytics', '/agents',
       '/catalog', '/contacts',
       '/accounting', '/custody',
     ])

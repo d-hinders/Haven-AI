@@ -42,8 +42,22 @@
     "CI job runs.",
     "",
     "NOT a completeness claim about jobs. Whether every package HAS a job, and",
-    "whether every job is reachable, is #1626."
+    "whether every job is reachable, is #1626.",
+    "",
+    "EXCEPTION: `noOwnJob` (#2996). scripts/ci/package-dependencies.test.mjs also",
+    "scans every packages/*/package.json on disk for a `test` script and fails if",
+    "the workspace has neither an entry in `packages` above nor a listed reason",
+    "here -- the gap #2996 found: packages/demo-merchant-mcp had 142 tests and a",
+    "`test` script, and nothing in this table, .github/workflows/ci.yml, or this",
+    "manifest ever noticed. Add a package here ONLY when leaving it un-run is a",
+    "deliberate, stated choice with the follow-up that removes it named in the",
+    "reason (core and qa-agent today, see #3005) -- never",
+    "as a way to silence this check."
   ],
+  "noOwnJob": {
+    "core": "Shared kernel with no job of its own. A core change routes to the full matrix, but NO job runs `npm run test -w packages/core` — its 3 test files (incl. the DEFAULT_CHAIN_ID guard) do not run in CI today. Exempted so this pin stays honest, not because the gap is acceptable: #3005 adds the job and removes this entry.",
+    "qa-agent": "Private workspace; its `vitest run` (24 test files) runs in NO workflow — qa-dev.yml runs the live scenario runner, not the unit tests. Exempted so this pin stays honest: #3005 adds a unit-test job and removes this entry."
+  },
   "packages": {
     "frontend": {
       "dependsOn": [],
@@ -74,6 +88,10 @@
     "cli": {
       "dependsOn": [],
       "note": "Declares no internal dependencies at all, which is why an SDK change does not fan out to it."
+    },
+    "demo_merchant": {
+      "dependsOn": [],
+      "note": "packages/demo-merchant-mcp (#2996). Declares no @haven_ai/* dependency today -- checked, not assumed: it does not import @haven_ai/sdk or any sibling package, so an SDK change does not fan out to it. If it starts consuming one, package-dependencies.test.mjs's real-manifest check catches the mismatch."
     }
   }
 }

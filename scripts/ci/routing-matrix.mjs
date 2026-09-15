@@ -37,7 +37,7 @@ export const RETAINED = 'retained'
  * its expectation from the code under test cannot fail when that code is wrong,
  * which is the one thing a characterization table must not do.
  */
-const ALL = ['code', 'frontend', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'full']
+const ALL = ['code', 'frontend', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'full']
 
 /**
  * @typedef {object} RoutingCase
@@ -134,6 +134,12 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'cli'],
     kind: CONTRACT,
     why: 'cli is a leaf of the dependency graph — it consumes the SDK, but nothing consumes it, so it fans out to nothing.',
+  },
+  {
+    files: ['packages/demo-merchant-mcp/src/index.ts'],
+    expect: ['code', 'demo_merchant'],
+    kind: CONTRACT,
+    why: 'demo_merchant is a leaf of the dependency graph (#2996) — it declares no internal @haven_ai/* dependency today, checked against the real package.json, and nothing consumes it, so it fans out to nothing in either direction.',
   },
 
   // ─── Dependency propagation ────────────────────────────────────────────────

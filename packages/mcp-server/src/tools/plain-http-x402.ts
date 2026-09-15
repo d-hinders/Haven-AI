@@ -132,11 +132,12 @@ export function createPlainHttpX402Handlers(
       // #2999: started BEFORE the quote fetch, same non-throwing
       // `.then(a => a, () => undefined)` convention as haven_pay_x402_quote's
       // own prefetch below — `undefined` means the read failed, not that the
-      // agent has no rail. The SDK's `getAgent` in-flight dedupe
-      // (`AccountReads.agentInFlight`) means a `haven_pay_x402_quote` call
-      // that follows immediately reuses this same request rather than firing
-      // a second one, so the "exactly N agent calls" pins on this file do not
-      // move.
+      // agent has no rail. This is one read-only GET per quote (the plain-HTTP
+      // quote made none before #2999); a `haven_pay_x402_quote` that follows
+      // as a separate tool call makes its own read — the SDK's in-flight
+      // dedupe (`AccountReads.agentInFlight`) only collapses reads issued
+      // within the same tick. The "exactly ONE agent fetch" pin on this file
+      // measures the pay tool alone and is unaffected.
       const agentPromise = haven.getAgent().then(
         (a) => a,
         () => undefined,
@@ -148,7 +149,11 @@ export function createPlainHttpX402Handlers(
         // built from the identical selector via the shared support helper —
         // never derived here, so this can never disagree with what
         // haven_pay_x402_quote actually selects next.
-        const prediction = settlementPredictionFields(quote.paymentRequired.accepts, agent)
+        const prediction = settlementPredictionFields(
+          quote.paymentRequired.accepts,
+          agent,
+          'haven_pay_x402_quote',
+        )
         // Return the full quote — the agent passes paymentRequired to haven_pay_x402_quote.
         // Omit the captured request snapshot (it's server-side context, not useful at the agent).
         return {

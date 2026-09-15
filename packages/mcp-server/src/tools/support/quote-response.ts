@@ -97,6 +97,9 @@ function predictSettlementScheme(
 export function settlementPredictionFields(
   accepts: X402PaymentOption[],
   agent: HavenAgent | undefined,
+  // #3007 review: the warning names the pay sibling(s) that will select the
+  // scheme — different per quote surface.
+  paySiblings = 'haven_prepare_catalog_purchase / haven_pay_mcp_tool',
 ): {
   expected_settlement_scheme: 'erc7710' | 'eip3009' | null
   expected_funding_leg: boolean | null
@@ -110,9 +113,8 @@ export function settlementPredictionFields(
       code: AgentPaymentWarningCode.X402SchemeUnknown,
       message:
         "This agent's account rail could not be read from Haven, so the settlement scheme " +
-        'haven_prepare_catalog_purchase / haven_pay_mcp_tool will select cannot be predicted ' +
-        'here. Retry when haven_get_agent succeeds, or proceed to prepare/pay directly — that ' +
-        'step reads the rail fresh regardless.',
+        `${paySiblings} will select cannot be predicted here. Retry when haven_get_agent ` +
+        'succeeds, or proceed to prepare/pay directly — that step reads the rail fresh regardless.',
     })
   }
   return {

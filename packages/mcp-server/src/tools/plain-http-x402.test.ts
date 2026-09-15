@@ -385,6 +385,9 @@ describe('haven_quote_x402', () => {
     expect(result.data.warnings).toEqual([
       expect.objectContaining({ code: 'X402_SCHEME_UNKNOWN' }),
     ])
+    // #3007 review: the warning names THIS surface's pay sibling, not the MCP ones.
+    expect(result.data.warnings?.[0]?.message).toContain('haven_pay_x402_quote')
+    expect(result.data.warnings?.[0]?.message).not.toContain('haven_pay_mcp_tool')
   })
 
   it('a pay immediately after the quote selects exactly what the quote predicted', async () => {

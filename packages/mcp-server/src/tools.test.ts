@@ -376,6 +376,13 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.message).toMatch(/may still settle late/)
     expect(payload.message).toMatch(/haven_get_payment_status/)
     expect(payload.suggested_tool).toBe('haven_get_payment_status')
+    // #3011 review: this is the eip3009 side of the #3000 scheme split — the
+    // sweep guidance must STAY here (funds sit on the delegate). Forcing the
+    // erc7710 branch onto this path must go red.
+    expect(payload.message).toMatch(/sweep only if no settlement appears/)
+    expect(payload.message).not.toMatch(/ignore this code's sweep guidance/)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.SweepStrandedFunds)
+    expect(payload.rail).toBe('x402')
   })
 
   it('haven_complete_mcp_tool fails with a typed sweep hint when the merchant rejects after funding', async () => {

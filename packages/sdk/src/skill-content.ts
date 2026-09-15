@@ -314,10 +314,12 @@ present and surface \`message\` or \`error\` verbatim. Common cases:
   never a blind sweep — check \`mcp__haven__haven_get_payment_status\`, retry
   \`mcp__haven__haven_complete_mcp_tool\` ONCE, and only sweep with
   \`mcp__haven__haven_sweep_delegate\` if no settlement appears. On erc7710
-  there is no funding leg and nothing to sweep: check
-  \`mcp__haven__haven_get_payment_status\`, retry
-  \`mcp__haven__haven_complete_mcp_tool\` ONCE, and only re-quote if that shows
-  no settlement.
+  there is no funding leg and nothing to sweep, and
+  \`mcp__haven__haven_complete_mcp_tool\` has no erc7710 branch (it refuses a
+  submitted intent) — do not retry it: the merchant may still redeem the
+  settlement authorization within the payment window, so check
+  \`mcp__haven__haven_get_payment_status\` after that window and re-quote only
+  if it shows no settlement.
 - Budget exceeded: tell the user how much remains (from
   \`mcp__haven__haven_get_allowances\`) and that they can raise the budget in
   Haven.

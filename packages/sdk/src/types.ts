@@ -1218,7 +1218,7 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
   [AgentPaymentFailureCode.MerchantRejectedAfterFunding]:
     'The merchant rejected the paid retry. eip3009: the funding leg succeeded — stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate. erc7710: no funding leg, nothing to sweep — follow the message (re-quote later, or check haven_get_payment_status after the window first).',
   [AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding]:
-    'The merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) before considering anything else. eip3009: the Haven funding leg succeeded — sweep only if no settlement appears. erc7710: no funding leg, nothing to sweep — follow the message.',
+    'The merchant did not answer the paid retry before the timeout. The merchant may still settle late. eip3009: the funding leg succeeded — check haven_get_payment_status, retry haven_complete_mcp_tool once, sweep only if no settlement appears. erc7710: no funding leg, nothing to sweep, and haven_complete_mcp_tool has no erc7710 branch — do not retry it; check haven_get_payment_status after the payment window and re-quote only if it shows no settlement.',
   [AgentPaymentFailureCode.MerchantCallContextUnavailable]:
     'merchant_url/tool_name were omitted and no stored merchant call context is available for this payment_id. Re-send merchant_url, tool_name, arguments, and mcp_transport explicitly.',
   [AgentPaymentFailureCode.AmbiguousMaxAmount]:

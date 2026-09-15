@@ -525,8 +525,15 @@ describe('haven_settle_mcp_tool', () => {
     expect(payload.message).not.toMatch(/stranded/)
     expect(payload.message).not.toMatch(/sweep_stranded|haven_sweep_delegate/)
     expect(payload.message).toMatch(/ignore this code's sweep guidance/i)
-    expect(payload.message).toMatch(/may still settle late/)
+    expect(payload.message).toMatch(/may still redeem it/)
     expect(payload.message).toMatch(/haven_get_payment_status/)
+    // #3011 review: haven_complete_mcp_tool has no erc7710 branch (a submitted
+    // intent 409s there) — the guidance must not send the agent into it, and
+    // must name the window before re-quoting.
+    expect(payload.message).toMatch(/do NOT retry haven_complete_mcp_tool/)
+    expect(payload.message).toMatch(/after that window/)
+    expect(payload.rail).toBe('erc7710')
+    expect(payload.phase).toBe('not_delivered')
   })
 })
 

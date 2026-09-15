@@ -281,13 +281,17 @@ export async function deliverMerchantPayment(
           message:
             `The settlement authorization was submitted, but the merchant did not answer the ` +
             `paid retry before the timeout. erc7710 has no funding leg, so there is no delegate ` +
-            `balance to sweep — ignore this code's sweep guidance. The merchant may still settle ` +
-            `late: check haven_get_payment_status, and retry haven_complete_mcp_tool ONCE before ` +
-            `re-quoting — only re-quote if it shows no settlement. ${err.message}`,
+            `balance to sweep — ignore this code's sweep guidance. The merchant held a single-use ` +
+            `settlement authorization valid for up to the payment window (typically 300s) and may ` +
+            `still redeem it: do NOT retry haven_complete_mcp_tool (it has no erc7710 branch and ` +
+            `refuses a submitted intent). Check haven_get_payment_status after that window and ` +
+            `re-quote only if it shows no settlement. ${err.message}`,
           statusCode: 504,
           paymentId: args.payment_id,
           status: 'merchant_unresponsive_after_funding',
-          phase: 'funded_but_unsettled',
+          // #3011 review: nothing was funded on erc7710 — same phase the
+          // erc7710 rejection branch uses.
+          phase: 'not_delivered',
           nextAction: AgentPaymentNextAction.CheckStatusLater,
           rail: 'erc7710',
           suggestedTool: 'haven_get_payment_status',

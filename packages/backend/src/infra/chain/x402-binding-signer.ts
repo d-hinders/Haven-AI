@@ -14,6 +14,23 @@
  */
 import { ethers } from 'ethers'
 import { buildX402ExpectedMessage, type X402ExpectedContext } from '@haven_ai/sdk'
+import { parseBooleanFlag } from '../../config.js'
+
+/**
+ * #3021 (#3015 follow-up): the emit flip used to be `!== '1'` read at every
+ * call — `X402_EMIT_PAYER_CONTEXT=true` or `=on` read as OFF with nothing
+ * logged, and the failure mode is a wire-format flip (payer context silently
+ * not emitted). It now goes through `parseBooleanFlag` once, at boot: the
+ * documented literal `1` still means on (every doc and env template says
+ * `=1`), `true`/`false` are accepted, unset/blank is off, and anything else
+ * refuses the boot naming the variable. Exported for the test; the module
+ * constant below is what the two emit helpers read.
+ */
+export function readEmitPayerContext(raw: string | undefined | null): boolean {
+  return parseBooleanFlag('X402_EMIT_PAYER_CONTEXT', raw === '1' ? 'true' : raw)
+}
+
+const EMIT_PAYER_CONTEXT = readEmitPayerContext(process.env.X402_EMIT_PAYER_CONTEXT)
 
 /**
  * Sign an x402 "expected context" with the dedicated binding-signer key, so
@@ -93,7 +110,7 @@ export function x402PayerContextFields(agent: {
   id: string
   delegate_address: string
 }): { payerDelegate: string; payerAgentId: string } | Record<string, never> {
-  if (process.env.X402_EMIT_PAYER_CONTEXT !== '1') return {}
+  if (!EMIT_PAYER_CONTEXT) return {}
   return {
     payerDelegate: agent.delegate_address.toLowerCase(),
     payerAgentId: agent.id,
@@ -110,7 +127,7 @@ export function x402PayerWireFields(agent: {
   id: string
   delegate_address: string
 }): { payer_delegate: string; payer_agent_id: string } | Record<string, never> {
-  if (process.env.X402_EMIT_PAYER_CONTEXT !== '1') return {}
+  if (!EMIT_PAYER_CONTEXT) return {}
   return {
     payer_delegate: agent.delegate_address.toLowerCase(),
     payer_agent_id: agent.id,

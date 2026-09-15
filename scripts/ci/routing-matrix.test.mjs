@@ -40,7 +40,7 @@ function expectedOutputs(expect) {
 
 const label = (row) => `${row.kind}: ${row.files.length ? row.files.join(' + ') : '(empty diff)'}`
 
-describe('the routing matrix — all ten outputs per row', () => {
+describe('the routing matrix — all thirteen outputs per row', () => {
   for (const row of ROUTING_MATRIX) {
     test(label(row), () => {
       assert.deepEqual(

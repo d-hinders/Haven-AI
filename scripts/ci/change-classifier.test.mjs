@@ -45,7 +45,7 @@ const on = (files) =>
     .sort()
 
 describe('the contract with ci.yml', () => {
-  test('the workflow publishes exactly the ten outputs this script emits', () => {
+  test('the workflow publishes exactly the eleven outputs this script emits', () => {
     // Targeted reader rather than a YAML dependency: the `outputs:` block of
     // the `changes` job is a fixed shape, so if the shape changes this reads
     // nothing and the assertion fails loudly instead of passing vacuously.
@@ -86,7 +86,7 @@ describe('the contract with ci.yml', () => {
 })
 
 describe('workflow_dispatch forces everything', () => {
-  test('allSurfaces sets all ten true', () => {
+  test('allSurfaces sets all eleven true', () => {
     const outputs = allSurfaces()
     assert.equal(Object.keys(outputs).length, OUTPUT_NAMES.length)
     for (const name of OUTPUT_NAMES) assert.equal(outputs[name], true, `${name} must be true`)
@@ -211,7 +211,7 @@ describe('base-SHA handling', () => {
 // NOTE: the routing rules themselves — which file turns which flag on, the
 // cross-surface guard arms, the doc-only skips, the CLAUDE.md exception, the
 // package fan-out — are characterized in routing-matrix.mjs and asserted by
-// routing-matrix.test.mjs on all ten outputs (#1623). They deliberately do NOT
+// routing-matrix.test.mjs on all eleven outputs (#1623). They deliberately do NOT
 // also live here: two places asserting the same rule is how one of them drifts
 // and starts passing vacuously, which is the failure this epic exists to fix.
 //
@@ -228,7 +228,7 @@ describe('list handling', () => {
     ])
   })
 
-  test('an empty list produces ten falses, not an empty object', () => {
+  test('an empty list produces eleven falses, not an empty object', () => {
     // The shape matters as much as the values: a downstream job reads
     // needs.changes.outputs.<name>, and a missing key is not the same as false.
     const outputs = classifyChangedFiles([])

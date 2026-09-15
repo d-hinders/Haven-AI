@@ -310,16 +310,16 @@ export const PROPAGATION_RULES = Object.freeze([
   ),
 ])
 
-/** All ten flags false. */
+/** All eleven flags false. */
 const noSurfaces = () => Object.fromEntries(OUTPUT_NAMES.map((name) => [name, false]))
 
-/** All ten flags true — what `workflow_dispatch` forces. */
+/** All eleven flags true — what `workflow_dispatch` forces. */
 export function allSurfaces() {
   return Object.fromEntries(OUTPUT_NAMES.map((name) => [name, true]))
 }
 
 /**
- * Classify an explicit list of changed paths into the ten output flags.
+ * Classify an explicit list of changed paths into the eleven output flags.
  *
  * `propagationRules` is a seam for tests, not a runtime knob — CI always uses
  * the default. It exists so the characterization matrix can ask "would any

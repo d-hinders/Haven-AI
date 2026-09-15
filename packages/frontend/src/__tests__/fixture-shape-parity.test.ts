@@ -183,7 +183,8 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
  * The rail default (#2264, epic #1440).
  *
  * Until #2264 the e2e `testSafe` carried NO `account_type` at all, `railOf`
- * read that as the legacy Safe rail (`lib/custody-rail.ts`), and so
+ * read that as the legacy Safe rail (the retired custody page's rail helper,
+ * deleted with the page itself in #3024), and so
  * `browser_smoke` (28 spec files) and `design_visual` pinned the rendered
  * behaviour of a configuration that answers HTTP 410 in production (#1986).
  * Every green run was a true statement about a rail no user is on.

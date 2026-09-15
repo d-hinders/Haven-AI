@@ -902,8 +902,9 @@ export const FIXTURE_AGENTS = [
     created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
     // #2106: a PAUSED agent whose on-chain delegation is still live. That
     // combination is deliberate evidence, not an oversight — pausing an agent
-    // in Haven does not revoke what it signed, so `/custody` must still show
-    // the budget as constraining spend. Projection matches its delegation
+    // in Haven does not revoke what it signed, so the agent's budget card
+    // must still show the budget as constraining spend (formerly also
+    // `/custody`, deleted in #3024). Projection matches its delegation
     // (500 USDC / 86400s), same rule as agent-research above.
     allowances: [{
       id: 'alw-retired', agent_id: 'agent-retired',
@@ -1585,9 +1586,10 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
     // #2106: the delegation rail's actual spend authority, as
-    // `GET /agents/:id/delegations` returns it. `/custody` renders this on a
-    // `delegator_hybrid` account instead of the retired AllowanceModule read,
-    // so the capture has to carry both recipient states — PINNED (an
+    // `GET /agents/:id/delegations` returns it. The agent's budget card
+    // renders this on a `delegator_hybrid` account instead of the retired
+    // AllowanceModule read (formerly also `/custody`, deleted in #3024), so
+    // the capture has to carry both recipient states — PINNED (an
     // AllowedCalldataEnforcer caveat) and open — or the rendered review never
     // sees the branch that was wrong.
     if (pathname === `/agents/agent-research/delegations`) {
@@ -4303,9 +4305,9 @@ export const SCENARIOS = {
     //
     // #2202: this used to DROP `account_type` rather than set it. `railOf`
     // read the two identically at the time (it is deleted since #2413, and
-    // `lib/custody-rail.ts` now only records its removal), so nothing
-    // rendered differently — but an ABSENT `account_type` is not a state the
-    // API can serve: the column is `NOT NULL DEFAULT 'safe'`
+    // the custody page that once recorded its removal is itself deleted now,
+    // #3024), so nothing rendered differently — but an ABSENT `account_type`
+    // is not a state the API can serve: the column is `NOT NULL DEFAULT 'safe'`
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
     // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {

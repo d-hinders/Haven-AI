@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   ArrowLeftRight,
-  BadgeCheck,
   Bot,
   ChartColumn,
   CircleUserRound,
@@ -71,7 +70,6 @@ const icons = {
   logout: <Icon icon={LogOut} className="w-full h-full" />,
   dotsVertical: <Icon icon={EllipsisVertical} className="w-full h-full" />,
   accounting: <Icon icon={FileText} className="w-full h-full" />,
-  custody: <Icon icon={BadgeCheck} className="w-full h-full" />,
 }
 
 /**
@@ -80,17 +78,27 @@ const icons = {
  * and an inserted entry would otherwise reorder it silently. The index reads
  * inside `navGroups` below predate that and are left alone: they are grouped by
  * cluster, not selected by route, so they are a different kind of read.
+ *
+ * Order regrouped by #3024 (owner decision 2026-09-15) to match what the
+ * pages do rather than the accident of when each shipped: Dashboard and
+ * Analytics are "how are things" (#3024 wrote them down as an Overview group
+ * the moment Analytics shipped, which #2947 did first); Accounts,
+ * Transactions and Accounting are "my money and its record"; Agents, Catalog and Contacts are "what I let
+ * agents do and with whom" — on the delegation rail an agent only ever pays a
+ * contact, so Catalog and Contacts are the two answers to "where can the
+ * money go". Custody is gone outright (#3024): its two facts, the account's
+ * signer set and each agent's delegation terms, already render on
+ * `/accounts/:id` and `/agents/:id`.
  */
 export const baseNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: icons.dashboard },
+  { label: 'Analytics', href: '/analytics', icon: icons.analytics },
   { label: 'Accounts', href: '/accounts', icon: icons.account },
   { label: 'Transactions', href: '/transactions', icon: icons.transactions },
-  { label: 'Analytics', href: '/analytics', icon: icons.analytics },
+  { label: 'Accounting', href: '/accounting', icon: icons.accounting },
   { label: 'Agents', href: '/agents', icon: icons.agents },
   { label: 'Catalog', href: '/catalog', icon: icons.catalog },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
-  { label: 'Accounting', href: '/accounting', icon: icons.accounting },
-  { label: 'Custody', href: '/custody', icon: icons.custody },
 ]
 
 const DESKTOP_BREAKPOINT_PX = 1024
@@ -190,7 +198,8 @@ export default function Sidebar() {
   // could only ever lead to a dead end. The delegation rail enforces budgets
   // on-chain and produces no approvals at all.
 
-  // #2869: the Admin → Accounting entry in its three feed states.
+  // #2869: the Accounting entry (last item of the Money group since #3024)
+  // in its three feed states.
   //   flag on               — plain, plus the attention dot when the
   //                           destination needs a reconnect or a sync is
   //                           `exhausted` (`accountingNeedsAttention`).
@@ -210,7 +219,7 @@ export default function Sidebar() {
   const accountingOff = accountingFeedOffState(accountingStatus)
   const accountingPending = accountingLoading && !accountingStatus
   const accountingItem: NavItem = {
-    ...baseNavItems[7],
+    ...baseNavItems[4],
     ...(accountingOff === 'coming_soon'
       ? { badge: t.accountingPage.nav.comingSoon, badgeTitle: t.common.comingSoon, badgeTone: 'muted' as const }
       : accountingNeedsAttention(accountingStatus)
@@ -218,32 +227,36 @@ export default function Sidebar() {
         : {}),
   }
 
-  // Labeled clusters (#858): the core money loop first, tools and admin
-  // after — same routes, same order within each cluster as before.
+  // Labeled clusters, regrouped by #3024 (owner decision 2026-09-15) to match
+  // the user's mental model rather than a "core loop vs. tools vs. admin"
+  // split that no longer fit once Custody was the only thing left in Admin:
+  // Overview is "how are things"; Money is "my money and its record"; Agents
+  // is "what I let agents do and with whom". Re-derived from `baseNavItems`' new order
+  // below rather than renumbered by hand — the file's own rule, restated
+  // above the array.
   const navGroups: Array<{ label: string; items: NavItem[] }> = [
     {
-      label: 'Money',
+      label: t.sidebar.overviewGroup,
       items: [
         baseNavItems[0], // Dashboard
-        baseNavItems[1], // Accounts
-        baseNavItems[2], // Transactions
-        baseNavItems[3], // Analytics
-        baseNavItems[4], // Agents
+        baseNavItems[1], // Analytics
       ],
     },
     {
-      label: 'Agent tools',
+      label: t.sidebar.moneyGroup,
       items: [
-        baseNavItems[5], // Catalog
-        baseNavItems[6], // Contacts
-      ],
-    },
-    {
-      label: 'Admin',
-      items: [
+        baseNavItems[2], // Accounts
+        baseNavItems[3], // Transactions
         // Accounting (#2869): markers per state; hidden on self-hosted; absent until the status has answered.
         ...(accountingPending || accountingOff === 'self_hosted' ? [] : [accountingItem]),
-        baseNavItems[8], // Custody
+      ],
+    },
+    {
+      label: t.sidebar.agentsGroup,
+      items: [
+        baseNavItems[5], // Agents
+        baseNavItems[6], // Catalog
+        baseNavItems[7], // Contacts
       ],
     },
   ]
@@ -575,7 +588,7 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        {/* Main nav — labeled clusters, core money loop first (#858) */}
+        {/* Main nav — labeled clusters (#858, regrouped #3024) */}
         {/* Named because #2731 gave the shell a SECOND navigation. Two
             unnamed `<nav>` landmarks are ambiguous to a screen reader and to
             every `getByRole('navigation')` in the suite — `Sidebar.test.tsx`

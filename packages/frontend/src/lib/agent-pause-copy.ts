@@ -16,9 +16,10 @@
  * ── WHICH WORDING WAS TAKEN, AND WHY IT WAS TAKEN RATHER THAN WRITTEN ────────
  *
  * The detail page's — "wallet rules". Taking a settled phrasing rather than
- * inventing a third is #2233's own lesson on this component, where `/custody`'s
- * "Enforced on-chain" was adopted for exactly this reason. Three independent
- * readings agree on which of these two is the settled one:
+ * inventing a third is #2233's own lesson on this component, where the
+ * custody page's (retired in #3024) "Enforced on-chain" was adopted for
+ * exactly this reason. Three independent readings agree on which of these two
+ * is the settled one:
  *
  * 1. **Usage.** "wallet rules" is what the product already says everywhere
  *    else — `packages/connect/README.md` (twice), `packages/connect/src/

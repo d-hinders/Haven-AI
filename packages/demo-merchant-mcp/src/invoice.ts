@@ -21,16 +21,28 @@ const MERCHANT = {
   crypto_address: process.env.MERCHANT_ADDRESS ?? '0x0000000000000000000000000000000000000000',
 }
 
-// Invoice counter seeded from Unix timestamp (seconds) at startup so restarts
-// don't produce the same sequence and collide with earlier invoices.
-// For production, persist this counter in a database.
-let invoiceSeq = Math.floor(Date.now() / 1000)
-
-function nextInvoiceNumber(): string {
-  invoiceSeq++
-  const year = new Date().getFullYear()
-  return `FAK-${year}-${String(invoiceSeq).padStart(5, '0')}`
+/**
+ * Invoice numbering. The demo merchant has no store, so the counter is
+ * seeded from the clock at startup and incremented per invoice. #2988: the
+ * seed is MILLISECONDS — a seconds seed collided after a restart whenever
+ * more invoices had been issued than seconds had elapsed since the previous
+ * start (a 100-invoice QA run, then a redeploy 30 s later, re-issued 70
+ * existing numbers — and, via `generateOcr`, 70 existing OCRs). A
+ * millisecond seed needs more than 1 000 invoices per second before a
+ * restart to collide. A persisted counter is still deliberately not used:
+ * this merchant is a demo with no database, and the accounting feed keys on
+ * the payment id, not on this number.
+ */
+export function createInvoiceNumberer(seedMs: number = Date.now()): () => string {
+  let invoiceSeq = seedMs
+  return () => {
+    invoiceSeq++
+    const year = new Date().getFullYear()
+    return `FAK-${year}-${invoiceSeq}`
+  }
 }
+
+const nextInvoiceNumber = createInvoiceNumberer()
 
 /** Luhn-based check digit for Swedish OCR. */
 function luhnCheck(digits: string): number {

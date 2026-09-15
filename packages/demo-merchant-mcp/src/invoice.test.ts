@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { generateInvoice, renderInvoiceText } from './invoice.js'
+import { createInvoiceNumberer, generateInvoice, renderInvoiceText } from './invoice.js'
 
 const BASE_PARAMS = {
   invoiceNumber: 'FAK-2026-00099',
@@ -107,5 +107,31 @@ describe('generateInvoice — settlement state (#2969)', () => {
     const sv = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'sv')
     expect(sv).toContain('BLOCKKEDJEREFERENS')
     expect(sv).toContain(BASE_PARAMS.txHash)
+  })
+})
+
+// #2988: two merchant processes started one second apart — the first having
+// issued more invoices than seconds elapsed — must not re-issue each other's
+// numbers. With the old seconds seed the second process's first number was
+// the first process's second number.
+describe('invoice numbering across restarts (#2988)', () => {
+  it('a restart one second later does not re-issue numbers the previous process already used', () => {
+    const t0 = Date.parse('2026-09-15T08:00:00.000Z')
+    const first = createInvoiceNumberer(t0)
+    const issuedBeforeRestart = new Set(Array.from({ length: 50 }, () => first()))
+
+    const second = createInvoiceNumberer(t0 + 1_000)
+    const issuedAfterRestart = Array.from({ length: 50 }, () => second())
+
+    for (const n of issuedAfterRestart) expect(issuedBeforeRestart.has(n)).toBe(false)
+    expect(issuedAfterRestart[0]).toMatch(/^FAK-\d{4}-\d+$/)
+  })
+
+  it('the default seed is the millisecond clock, not seconds', () => {
+    const before = Date.now()
+    const n = createInvoiceNumberer()()
+    const seq = Number(n.split('-')[2])
+    expect(seq).toBeGreaterThan(before) // seed + 1 ≥ now + 1
+    expect(seq).toBeLessThanOrEqual(Date.now() + 1)
   })
 })

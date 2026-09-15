@@ -321,6 +321,16 @@ export function parseConnectorChannel(raw: string | undefined | null): string {
  * same reason. `null` is accepted alongside `undefined` for the reason given
  * on `parseConnectorChannel`: a reader that hands us one should get the
  * designed refusal, not a `TypeError` from `.trim()`.
+ *
+ * Trimming is the one place this is NOT a pure tightening, so say it plainly:
+ * `" true "` read as FALSE under `=== 'true'` and reads as TRUE here, which
+ * can turn a flag on rather than merely refusing. It was checked against both
+ * Railway projects before shipping (#3015); a future flag added to this family
+ * deserves the same check rather than the assumption.
+ *
+ * The refusal quotes the value, so it lands in the boot log. That is the point
+ * for a feature flag and wrong for anything credential-adjacent — do not reuse
+ * this for a secret.
  */
 export function parseBooleanFlag(name: string, raw: string | undefined | null): boolean {
   if (raw === undefined || raw === null) return false
@@ -329,11 +339,11 @@ export function parseBooleanFlag(name: string, raw: string | undefined | null): 
   if (value === 'true') return true
   if (value === 'false') return false
   throw new Error(
-    `${name} is set to ${JSON.stringify(raw)}, which is not a boolean: it must be exactly ` +
-    '"true" or "false", lower-case. Refusing to start rather than reading it as false, ' +
-    'because a flag that is silently off looks identical to one that is deliberately off ' +
-    `— which is how ${JSON.stringify('TRUE')} left HAVEN_HOSTED inert in production (#3015). ` +
-    `Unset ${name} to get false deliberately.`,
+    `${name} is set to ${JSON.stringify(raw)}, which is not a boolean. Accepted values are ` +
+    '"true" and "false", lower-case; surrounding whitespace is trimmed, case is not ' +
+    `normalised. Set ${name}=false to turn the feature off, or unset it. Refusing to start ` +
+    'rather than reading an unrecognised value as false, because a flag that is silently off ' +
+    'looks identical to one that is deliberately off (#3015).',
   )
 }
 

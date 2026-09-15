@@ -59,11 +59,17 @@ describe('parseBooleanFlag (#3015)', () => {
     expect(() => parseBooleanFlag('HAVEN_HOSTED', 'tr ue')).toThrow(/"tr ue"/)
   })
 
-  it('the refusal says what to do instead, both directions', () => {
+  it('the refusal says what to do instead, and leads with the deliberate way to say no', () => {
     const run = () => parseBooleanFlag('HAVEN_FEE_ENABLED', 'yes')
-    // How to say yes…
-    expect(run).toThrow(/exactly "true" or "false", lower-case/)
-    // …and how to say no without guessing.
-    expect(run).toThrow(/Unset HAVEN_FEE_ENABLED to get false deliberately/)
+    expect(run).toThrow(/Accepted values are "true" and "false", lower-case/)
+    // `false` is an accepted value and is the more deliberate way to turn a
+    // feature off, so the remedy names it before "or unset it".
+    expect(run).toThrow(/Set HAVEN_FEE_ENABLED=false to turn the feature off, or unset it/)
+  })
+
+  it('the refusal states the trim/case asymmetry, because accepting " true " while refusing "True" is otherwise a puzzle', () => {
+    expect(() => parseBooleanFlag('HAVEN_HOSTED', 'True')).toThrow(
+      /surrounding whitespace is trimmed, case is not normalised/,
+    )
   })
 })

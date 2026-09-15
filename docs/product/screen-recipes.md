@@ -17,6 +17,10 @@ covers:
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
+  - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/frontend/src/components/analytics/AgentsTable.tsx
+  - packages/frontend/src/components/analytics/EmptyStates.tsx
+  - packages/frontend/src/components/analytics/RangeControl.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx

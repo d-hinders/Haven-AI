@@ -30,10 +30,8 @@
     "",
     "Keys are OUTPUT FLAGS, not directory names: packages/mcp-server is the",
     "`mcp_server` flag. Only packages that have a CI job of their own appear.",
-    "packages/core and packages/qa-agent deliberately do not: neither has a job,",
-    "and both fall to the packages/* catch-all that forces the full matrix. That",
-    "is over-routing rather than under-routing, and is pinned as a RETAINED row",
-    "in scripts/ci/routing-matrix.mjs for #1626 to decide on.",
+    "Every workspace with a `test` script has an entry today (#3005 gave core",
+    "and qa-agent their own jobs); the on-disk scan below enforces that.",
     "",
     "CHECKED, NOT DECLARED. scripts/ci/package-dependencies.test.mjs reads every",
     "package.json and fails if this table disagrees with the real @haven_ai/*",
@@ -51,21 +49,24 @@
     "`test` script, and nothing in this table, .github/workflows/ci.yml, or this",
     "manifest ever noticed. Add a package here ONLY when leaving it un-run is a",
     "deliberate, stated choice with the follow-up that removes it named in the",
-    "reason (core and qa-agent today, see #3005) -- never",
-    "as a way to silence this check."
+    "reason -- never as a way to silence this check. #3005 emptied this object:",
+    "both exemptions (core, qa-agent) became real jobs and real table entries.",
+    "The key and its three validation tests stay, so the NEXT workspace with a",
+    "test script has somewhere deliberate to be recorded."
   ],
-  "noOwnJob": {
-    "core": "Shared kernel with no job of its own. A core change routes to the full matrix, but NO job runs `npm run test -w packages/core` — its 3 test files (incl. the DEFAULT_CHAIN_ID guard) do not run in CI today. Exempted so this pin stays honest, not because the gap is acceptable: #3005 adds the job and removes this entry.",
-    "qa-agent": "Private workspace; its `vitest run` (24 test files) runs in NO workflow — qa-dev.yml runs the live scenario runner, not the unit tests. Exempted so this pin stays honest: #3005 adds a unit-test job and removes this entry."
-  },
+  "noOwnJob": {},
   "packages": {
-    "frontend": {
+    "core": {
       "dependsOn": [],
-      "note": "Consumes @haven_ai/core, which has no job flag, so there is nothing to fan out to. A core change forces the full matrix by the packages/* catch-all instead."
+      "note": "packages/core (#3005). The shared kernel frontend and backend consume — the one entry that is a DEPENDENCY of other packages without importing any itself. Declares no @haven_ai/* dependency, so nothing fans out to it; frontend and backend list it below, so a core change runs their suites through the edges they declare."
+    },
+    "frontend": {
+      "dependsOn": ["core"],
+      "note": "Consumes @haven_ai/core and declares it, so a core change runs this suite (the packages/* catch-all that used to cover that ran cli and signer jobs that cannot see core)."
     },
     "backend": {
-      "dependsOn": ["sdk"],
-      "note": "Also consumes @haven_ai/core; same as frontend, core carries no job flag."
+      "dependsOn": ["core", "sdk"],
+      "note": "Also consumes @haven_ai/core; declared since #3005 gave core a job flag for the fan-out to hook."
     },
     "sdk": {
       "dependsOn": [],
@@ -92,6 +93,10 @@
     "demo_merchant": {
       "dependsOn": [],
       "note": "packages/demo-merchant-mcp (#2996). Declares no @haven_ai/* dependency today -- checked, not assumed: it does not import @haven_ai/sdk or any sibling package, so an SDK change does not fan out to it. If it starts consuming one, package-dependencies.test.mjs's real-manifest check catches the mismatch."
+    },
+    "qa_agent": {
+      "dependsOn": ["sdk", "signer"],
+      "note": "packages/qa-agent (#3005). Private QA harness; imports @haven_ai/sdk and @haven_ai/signer in src (checked against the real package.json), so both fan out to it. Its job runs the unit tests only -- the live scenario runner is qa-dev.yml's, on QA_* secrets."
     }
   }
 }

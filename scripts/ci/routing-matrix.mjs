@@ -1,7 +1,7 @@
 // The package-to-job routing matrix (#1623, epic #1621).
 //
 // One row per routing decision the CI change classifier makes, with the FULL
-// expected output — all ten flags, not just the one that turns true. This is a
+// expected output — all thirteen flags, not just the one that turns true. This is a
 // characterization fixture: it is written to describe what routing does today,
 // before #1624/#1625 make the rule data declarative and #1626 starts enforcing
 // completeness. Refactors are supposed to leave it untouched. A row that has to
@@ -37,7 +37,7 @@ export const RETAINED = 'retained'
  * its expectation from the code under test cannot fail when that code is wrong,
  * which is the one thing a characterization table must not do.
  */
-const ALL = ['code', 'frontend', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'full']
+const ALL = ['code', 'frontend', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'core', 'qa_agent', 'full']
 
 /**
  * @typedef {object} RoutingCase
@@ -141,13 +141,36 @@ export const ROUTING_MATRIX = [
     kind: CONTRACT,
     why: 'demo_merchant is a leaf of the dependency graph (#2996) — it declares no internal @haven_ai/* dependency today, checked against the real package.json, and nothing consumes it, so it fans out to nothing in either direction.',
   },
+  {
+    files: ['packages/core/src/chains.ts'],
+    expect: ['code', 'core', 'frontend', 'backend'],
+    kind: CONTRACT,
+    why: 'The shared kernel got its own job in #3005, and frontend and backend declare @haven_ai/core, so the table fans both out: the suites that consume core run on a core change WITHOUT the full matrix. Until #3005 this routed ALL — over-routing that ran cli and signer suites blind to core.',
+  },
+  {
+    files: ['packages/qa-agent/src/run.ts'],
+    expect: ['code', 'qa_agent'],
+    kind: CONTRACT,
+    why: 'The QA harness got its own unit-test job in #3005 and fans out to nothing in reverse — no package consumes it. sdk and signer fan out TO it (its tests import both), so this is the direction that stays a leaf.',
+  },
+  {
+    files: ['packages/brand-new-workspace/src/index.ts'],
+    expect: ALL,
+    kind: CONTRACT,
+    why:
+      'The packages/* catch-all, characterized directly. Every real workspace now has its own ' +
+      'arm above it (#3005 moved the last two, core and qa-agent, out), so the first match that ' +
+      'reaches this rule is a workspace that does not exist yet — and routing it EVERYTHING is ' +
+      'the safe direction for the unknown, the same over-routing the old core/qa-agent RETAINED ' +
+      'rows pinned. This row is what keeps the arm honest now that no real file exercises it.',
+  },
 
   // ─── Dependency propagation ────────────────────────────────────────────────
   {
     files: ['packages/sdk/src/client.ts'],
-    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer'],
+    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent'],
     kind: CONTRACT,
-    why: 'Every published package builds on the SDK and the backend is pinned against its wire types, so an SDK edit must run all of them. The widest fan-out in the graph; frontend stays out because it consumes @haven_ai/core, not the SDK.',
+    why: 'Every published package builds on the SDK and the backend is pinned against its wire types, so an SDK edit must run all of them. qa_agent joined in #3005: its tests import the SDK, and its job runs those tests. Frontend stays out because it consumes @haven_ai/core, not the SDK.',
   },
   {
     files: ['packages/mcp/src/index.ts'],
@@ -157,9 +180,9 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/signer/src/index.ts'],
-    expect: ['code', 'signer', 'connect', 'mcp_server'],
+    expect: ['code', 'signer', 'connect', 'mcp_server', 'qa_agent'],
     kind: CONTRACT,
-    why: 'connect bundles the signer, and mcp_server consumes it too — its hosted-signer-integration test imports @haven_ai/signer, and mcp_server_checks runs that test. mcp_server was MISSING here until #1625 derived fan-out from the real dependency graph; a signer change could break that test with its job never running.',
+    why: 'connect bundles the signer, and mcp_server consumes it too — its hosted-signer-integration test imports @haven_ai/signer, and mcp_server_checks runs that test. mcp_server was MISSING here until #1625 derived fan-out from the real dependency graph; a signer change could break that test with its job never running. qa_agent joined for the same reason in #3005: its tests run the real signer in-process.',
   },
   {
     files: ['packages/frontend/src/app/page.tsx', 'packages/cli/src/index.ts'],
@@ -239,7 +262,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/sdk/src/agent-guidance.ts'],
-    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer'],
+    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent'],
     kind: CONTRACT,
     why:
       'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
@@ -265,6 +288,7 @@ export const ROUTING_MATRIX = [
       'mcp',
       'mcp_server',
       'signer',
+      'qa_agent',
     ],
     kind: CONTRACT,
     why:
@@ -298,6 +322,7 @@ export const ROUTING_MATRIX = [
       'mcp',
       'mcp_server',
       'signer',
+      'qa_agent',
     ],
     kind: CONTRACT,
     why:
@@ -307,9 +332,9 @@ export const ROUTING_MATRIX = [
       'siblings in public/ routed `frontend` — the other Markdown file there, 402.md, was ' +
       'swallowed too, which is why DOC_EXCEPTIONS also carries a general arm for the ' +
       'directory. #2727 routed the SOURCE; this row routes the COPY, the other direction. ' +
-      'As above, only `sdk`, `cli` and `frontend` are decided by the arm — the other five come ' +
-      'from `dependentsOf(sdk)` — and `cli`/`frontend` are named by hand because both declare ' +
-      '`dependsOn: []` and fan-out structurally cannot reach them.',
+      'As above, only `sdk`, `cli` and `frontend` are decided by the arm — the other six come ' +
+      'from `dependentsOf(sdk)` (qa_agent joined in #3005) — and `cli`/`frontend` are named by ' +
+      'hand because both declare no SDK-dependency fan-out can reach.',
   },
   {
     files: ['packages/sdk/src/skill-content.ts'],
@@ -322,6 +347,7 @@ export const ROUTING_MATRIX = [
       'mcp',
       'mcp_server',
       'signer',
+      'qa_agent',
     ],
     kind: CONTRACT,
     why:
@@ -329,14 +355,14 @@ export const ROUTING_MATRIX = [
       'so it can deploy standalone, and agent-skill-bundle.test.ts imports THIS file to assert ' +
       'byte parity — a test that runs only in frontend_checks. #2727 closed this shape for ' +
       'agent-guidance.ts and left this file behind: sdk routed, frontend did not, so a mutation ' +
-      'here failed a test in a job that never ran. Of the eight surfaces, only `sdk` and ' +
-      '`frontend` are decided here: backend, connect, mcp, mcp_server and signer arrive by ' +
-      '`dependentsOf(sdk)` fanning out through .github/package-dependencies.json. That is also ' +
-      'why an entry was the ONLY available mechanism — `frontend` and `cli` both declare ' +
-      '`dependsOn: []`, so no SDK change can ever reach either by propagation, which is what ' +
-      'made them the two surfaces both #2727 and #2743 had to name by hand. `cli` is absent ' +
-      'here for a product reason on top of that: the CLI holds no copy of the skill, only of ' +
-      'the runbook.',
+      'here failed a test in a job that never ran. Of the nine surfaces, only `sdk` and ' +
+      '`frontend` are decided here: backend, connect, mcp, mcp_server, signer and (since #3005) ' +
+      'qa_agent arrive by `dependentsOf(sdk)` fanning out through .github/package-dependencies.json. ' +
+      'That is also why an entry was the ONLY available mechanism — `frontend` and `cli` both ' +
+      'have no dependents and no SDK-reachable fan-in, so no propagation can ever reach either, ' +
+      'which is what made them the two surfaces both #2727 and #2743 had to name by hand. ' +
+      '`cli` is absent here for a product reason on top of that: the CLI holds no copy of the ' +
+      'skill, only of the runbook.',
   },
   {
     files: ['scripts/dep-lint.test.mjs'],
@@ -452,24 +478,12 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/network-map-pins.test.mjs'],
-    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server'],
+    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server', 'qa_agent'],
     kind: CONTRACT,
-    why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server appear without being named by the rule.',
+    why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server (and qa_agent since #3005) appear without being named by the rule.',
   },
 
   // ─── Retained: routes nowhere today, and that is arguable ──────────────────
-  {
-    files: ['packages/core/src/chains.ts'],
-    expect: ALL,
-    kind: RETAINED,
-    why: 'packages/core is the shared kernel backend and frontend both consume, but it has no job of its own, so it falls to the packages/* catch-all and runs EVERYTHING. Safe but blunt — a core edit runs cli and signer suites that cannot see it. A dedicated core arm is #1626’s call.',
-  },
-  {
-    files: ['packages/qa-agent/src/run.ts'],
-    expect: ALL,
-    kind: RETAINED,
-    why: 'Same catch-all. qa-agent is a private workspace whose code no product job builds, so the full matrix is pure cost here — the opposite trade-off from core.',
-  },
   {
     files: ['.github/labeler.yml'],
     expect: [],
@@ -524,7 +538,7 @@ export const ROUTING_MATRIX = [
     files: [],
     expect: [],
     kind: CONTRACT,
-    why: 'An empty diff routes nothing — and must still emit all ten flags rather than an empty object.',
+    why: 'An empty diff routes nothing — and must still emit all thirteen flags rather than an empty object.',
   },
   {
     files: ['', '   ', 'packages/cli/src/index.ts'],

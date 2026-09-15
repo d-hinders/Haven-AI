@@ -1,0 +1,139 @@
+name: Claim to assignee
+
+# Keeps GitHub's assignee field in step with the claim protocol in AGENTS.md
+# § Cross-session agent coordination. A `🔒 CLAIM #n` comment assigns its author
+# to #n; a `🔓 RELEASE #n` unassigns them.
+#
+# ## Why the field is a projection and not the protocol
+#
+# The claim comment stays authoritative because it carries what an assignee
+# structurally cannot: the BRANCH, which exists long before a PR, and
+# `touches:`, which is file-level. File-level is what catches a collision
+# between two DIFFERENT issues — the #2968/#2970 overlap on 2026-09-14 was two
+# owners writing the same `paid-mcp-completion.ts`, and no assignee field can
+# express that, because both issues were correctly owned.
+#
+# What the field adds is cheapness. It is one queryable value that every GitHub
+# view and every tool can read without parsing a 1,200-comment thread. The
+# morning report got #2947 wrong on 2026-09-15 precisely because reading
+# ownership properly took three API calls that nobody had told it to make.
+#
+# Maintaining that index by hand would mean two records drifting apart, so it is
+# maintained by machine at the two moments the protocol already has.
+#
+# ## Only collaborators, because this repository is public
+#
+# `issue_comment` fires for anyone who can comment. Without the association
+# gate a stranger could post `🔓 RELEASE #2947` and unassign live work, or claim
+# an issue to look like its owner. GitHub would silently drop an assignment to a
+# non-collaborator, but the UNassign path needs no permissions at all, so the
+# gate is what closes it.
+#
+# `COLLABORATOR` on a user-owned repo includes read- and triage-level
+# collaborators, who cannot assign through the UI but can through this workflow
+# — to themselves only, on an issue they claimed in the open. Acceptable for
+# this repo's membership, and stated so it is a decision rather than an
+# oversight.
+#
+# Never fails the build: a comment that parses to nothing is the common case,
+# and an API refusal is logged, not raised. This workflow only ever adds or
+# removes an assignee — it never comments, closes, labels or edits a body.
+
+on:
+  issue_comment:
+    # `created` only. An `edited` trigger re-fires with the comment's ORIGINAL
+    # body and author, so editing a two-month-old claim would re-apply it long
+    # after its release — a replay with no upside, since a mistyped claim is
+    # fixed by posting a corrected one, which the protocol expects anyway.
+    types: [created]
+
+permissions:
+  issues: write # assign/unassign only
+
+# No `concurrency` group, deliberately. Keying on the commented-on issue would
+# not serialise what matters — most claims are posted on #1289 ABOUT another
+# issue, so a claim of #2947 from #1289 and a release of #2947 posted on #2947
+# land in different groups anyway. Worse, a group makes this less safe at 15+
+# fires a day: GitHub cancels a PENDING run when a newer one queues, so a burst
+# on #1289 can drop the middle one, and a dropped 🔓 RELEASE is a permanently
+# stale assignee. Both operations are idempotent and scoped to the comment
+# author, so running them in parallel is safe.
+
+jobs:
+  project:
+    name: Project the claim onto the assignee field
+    # Collaborators only, and never on a pull request's comment thread.
+    if: >-
+      github.repository == 'd-hinders/Haven-AI' &&
+      !github.event.issue.pull_request &&
+      github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Parse the comment and apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Via env, never interpolated into the script: the body is arbitrary
+          # text from a public repository's comment box.
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          ON_ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$COMMENT_BODY" > comment.txt
+          node scripts/ci/claim-assignee.mjs --body comment.txt --on-issue "$ON_ISSUE" > actions.txt
+
+          if [ ! -s actions.txt ]; then
+            echo "No claim or release in this comment — nothing to do."
+            exit 0
+          fi
+
+          echo "Parsed:" && cat actions.txt
+
+          while IFS='=' read -r verb number; do
+            [ -n "${number:-}" ] || continue
+
+            # The parser only ever emits digits, but this loop feeds a public
+            # comment box into `gh` argv, so the guarantee is re-stated where it
+            # is relied on rather than trusted from another file.
+            case "$number" in
+              ''|*[!0-9]*) echo "  skip malformed '$verb=$number'"; continue ;;
+            esac
+
+            case "$verb" in
+              claim)
+                # An assignee on a closed issue means nothing, and assigning one
+                # would leave residue no release will ever clear. Releases are
+                # not gated, so a late RELEASE on a closed issue tidies up.
+                state=$(gh api "repos/$REPO/issues/$number" --jq '.state' </dev/null 2>/dev/null || echo unknown)
+                if [ "$state" != "open" ]; then
+                  echo "  skip claim #$number — issue is $state"
+                  continue
+                fi
+                if gh issue edit "$number" --repo "$REPO" --add-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
+                  echo "  assigned #$number to @$COMMENT_AUTHOR"
+                  echo "- assigned **#$number** to @$COMMENT_AUTHOR" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  # Most likely: the author is not assignable on this repo.
+                  # Not an error — the claim comment is still the record.
+                  echo "  could not assign #$number to @$COMMENT_AUTHOR (skipped)"
+                fi
+                ;;
+              release)
+                if gh issue edit "$number" --repo "$REPO" --remove-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
+                  echo "  unassigned #$number from @$COMMENT_AUTHOR"
+                  echo "- unassigned **#$number** from @$COMMENT_AUTHOR" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "  could not unassign #$number (skipped)"
+                fi
+                ;;
+            esac
+          done < actions.txt

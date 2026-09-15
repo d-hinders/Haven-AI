@@ -274,6 +274,33 @@ export const DEFAULT_CONNECTOR_CHANNEL = 'alpha'
 // input is the divergence the cross-package agreement test in
 // `__tests__/connector-channel.test.ts` exists to prevent, so the gap is closed
 // rather than documented: found by review, and that test now covers `null`.
+/**
+ * #3015: boolean env flags refuse the boot on a value they do not recognise.
+ * `HAVEN_HOSTED=TRUE` reached production and read as OFF — `'TRUE' === 'true'`
+ * is false — so the hosted service rendered the self-hosted copy, and nothing
+ * logged, warned or looked different from a deliberate off. A silently-off
+ * flag is indistinguishable from a deliberately-off one; presence in a
+ * dashboard does not imply effect. Same shape as `parseConnectorChannel` /
+ * `parseAccountingEntitlementMode`: unset / null / blank → false (never
+ * configured), the two literals, anything else throws naming the variable and
+ * the offending bytes. Normalising case was rejected (owner decision
+ * 2026-09-15, "flags should fail loudly"): it fixes `TRUE` but still reads
+ * `1`, `yes` and `on` as off.
+ */
+export function parseBooleanFlag(name: string, raw: string | undefined | null): boolean {
+  if (raw === undefined || raw === null) return false
+  const value = raw.trim()
+  if (value === '') return false
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new Error(
+    `${name} is set to ${JSON.stringify(raw)}, which is not a boolean flag value: only the ` +
+      'lowercase literals "true" and "false" are accepted (or unset it, which means false). ' +
+      'Refusing to start rather than reading it as off, because a silently-off flag is ' +
+      'indistinguishable from a deliberately-off one (#3015).',
+  )
+}
+
 export function parseConnectorChannel(raw: string | undefined | null): string {
   if (raw === undefined || raw === null) return DEFAULT_CONNECTOR_CHANNEL
   const value = raw.trim()
@@ -369,7 +396,7 @@ export const config = {
   // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
   // default — it calls an external catalog API and inserts rows, so it's
   // opt-in. The URL is overridable for testing/self-hosted facilitators.
-  catalogDiscoveryEnabled: process.env.CATALOG_DISCOVERY_ENABLED === 'true',
+  catalogDiscoveryEnabled: parseBooleanFlag('CATALOG_DISCOVERY_ENABLED', process.env.CATALOG_DISCOVERY_ENABLED),
   catalogDiscoveryUrl: optionalEnv(
     'CATALOG_DISCOVERY_URL',
     'https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources',
@@ -388,16 +415,16 @@ export const config = {
 
   // Platform fee module (#386). Dark by default — when false the fee is always
   // zero and no funds move. Real pricing + on-chain collection are deferred.
-  feeEnabled: process.env.HAVEN_FEE_ENABLED === 'true',
+  feeEnabled: parseBooleanFlag('HAVEN_FEE_ENABLED', process.env.HAVEN_FEE_ENABLED),
 
   // Legacy asserting bookkeeping (epic #462). Dark by default — superseded by
   // the non-asserting reporting feed (#491). Code retained; surfaces gated:
   // SIE export, finished voucher push, and any asserted-VAT output.
-  legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
+  legacyBookkeepingEnabled: parseBooleanFlag('HAVEN_LEGACY_BOOKKEEPING_ENABLED', process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED),
 
   // Managed-deployment marker — true only on Haven's hosted backend. The
   // accounting feed (#491) is a hosted-only add-on and never runs elsewhere.
-  hosted: process.env.HAVEN_HOSTED === 'true',
+  hosted: parseBooleanFlag('HAVEN_HOSTED', process.env.HAVEN_HOSTED),
   // Global kill-switch for the accounting feed; dark by default.
   //
   // #2859 renamed this from HAVEN_REPORTING_FEED_ENABLED. The old name is still
@@ -454,13 +481,13 @@ export function relayerPrivateKeyForChain(chainId: number): string {
 function readAccountingEnabled(): boolean {
   const current = process.env.HAVEN_ACCOUNTING_ENABLED
   const deprecated = process.env.HAVEN_REPORTING_FEED_ENABLED
-  if (current !== undefined) return current === 'true'
+  if (current !== undefined) return parseBooleanFlag('HAVEN_ACCOUNTING_ENABLED', current)
   if (deprecated !== undefined) {
     console.warn(
       '[config] HAVEN_REPORTING_FEED_ENABLED is deprecated (#2859) — rename it to ' +
         'HAVEN_ACCOUNTING_ENABLED. The old name is still honoured for now.',
     )
-    return deprecated === 'true'
+    return parseBooleanFlag('HAVEN_REPORTING_FEED_ENABLED', deprecated)
   }
   return false
 }

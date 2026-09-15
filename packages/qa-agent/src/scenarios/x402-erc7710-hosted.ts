@@ -173,7 +173,36 @@ export const x402Erc7710Hosted: Scenario = {
       throw err
     }
 
-    if (!settle.settled) return fail('hosted settle did not settle — the merchant leg never ran')
+    // #2968/#2970: the delivery half is the deterministic gate here — `settled`
+    // now waits for Haven to VERIFY the settlement against the chain, and that
+    // verification is asynchronous. Asserting `settled` here would red a run
+    // whose money really did move, which step 4's on-chain balance read exists
+    // to settle. What can never race: the two fields must AGREE. A `settled:
+    // true` without `delivered` — or an unconfirmed `settled` beside a
+    // non-SETTLEMENT_PENDING `code` — is the #2968 contradiction.
+    if (!settle.settled && !settle.delivered) {
+      return fail('hosted settle reported neither settlement nor delivery — the merchant leg never ran')
+    }
+    if (settle.settled === true && !settle.delivered) {
+      return fail('settle reported settled:true without delivered:true — a settlement claim for goods nobody handed over')
+    }
+    if (
+      settle.settled !== true &&
+      settle.code != null &&
+      settle.code !== 'SETTLEMENT_PENDING' &&
+      settle.code !== 'DELIVERED_UNSETTLED'
+    ) {
+      return fail(
+        `settle reported an unverified settlement with unexpected code ${JSON.stringify(settle.code)} — ` +
+          'expected SETTLEMENT_PENDING or DELIVERED_UNSETTLED',
+      )
+    }
+    if (settle.settlement_tx_hash != null && /^0x0+$/i.test(settle.settlement_tx_hash)) {
+      return fail(
+        'settle emitted the 32-zero hash in settlement_tx_hash — the #2968 zero-hash ban regressed ' +
+          '(a sentinel shaped like a hash gets rendered like one)',
+      )
+    }
     if (settle.settlement_scheme !== 'erc7710') {
       return fail(
         `settle reported scheme ${JSON.stringify(settle.settlement_scheme)} — a quote that chose ` +

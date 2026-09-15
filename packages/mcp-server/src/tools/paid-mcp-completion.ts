@@ -50,6 +50,7 @@ import { randomUUID } from 'node:crypto'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  AgentPaymentWarningCode,
   HavenApiError,
   HavenClient,
   MerchantTimeoutError,
@@ -364,7 +365,19 @@ export async function deliverMerchantPayment(
     status: result.status,
     ok: result.ok,
     result: result.body,
-    settlement_tx_hash: result.settlementTxHash ?? null,
+    // #2968: the response-level zero-hash ban. `settlementTxHash` here is the
+    // MERCHANT's word (the PAYMENT-RESPONSE header), and the demo merchant's
+    // own "delivered, not settled" marker is `0x00…00` — a value shaped like a
+    // hash gets rendered like one by every consumer downstream, so a sentinel
+    // is collapsed to null at this boundary instead of being handed out as a
+    // transaction. `null` says "no transaction known"; the settlement gate
+    // (`classifyErc7710Settlement`) already refuses to treat null as proof.
+    // Same recognizer #2970 landed in the SDK (`isZeroSettlementTxHash`), so
+    // every surface that touches this value accepts and refuses the same set.
+    settlement_tx_hash:
+      result.settlementTxHash != null && !isZeroSettlementTxHash(result.settlementTxHash)
+        ? result.settlementTxHash
+        : null,
     evidence_outcome: result.evidenceOutcome,
   }
 }
@@ -652,6 +665,12 @@ export function createPaidMcpCompletionHandlers(
               settlement_scheme: 'erc7710',
               funding_tx_hash: null,
               settled: true,
+              // #2968: the delivery half of the vocabulary rides on the settled
+              // arm too — settled:true implies the merchant handed over the
+              // goods, and the qa-agent scenarios assert the two fields AGREE
+              // (settled:true without delivered:true is the #2968 contradiction
+              // in reverse). Absence of `code` remains the settled marker.
+              delivered: true,
               settlement_tx_hash: merchant7710.settlement_tx_hash,
               result: merchant7710.result,
               allowance: summary7710.allowance,
@@ -673,6 +692,25 @@ export function createPaidMcpCompletionHandlers(
             }
           }
           const pending = gate.outcome === 'settlement_pending'
+          // #2968: the unconfirmed settlement is the most important fact in
+          // this response, so it does not ride silently — a machine-readable
+          // warning travels with it, carrying the intent's expiry so the agent
+          // can say how long "later" still means. After that instant the
+          // settlement can no longer land at all.
+          const expiresAt =
+            typeof summary7710.payment?.expiresAt === 'string' && summary7710.payment.expiresAt.length > 0
+              ? summary7710.payment.expiresAt
+              : null
+          const settlementUnconfirmedWarning = {
+            code: AgentPaymentWarningCode.SettlementUnconfirmed,
+            message:
+              `No on-chain confirmation for payment ${args.payment_id}: the merchant delivered, ` +
+              'but Haven holds no verified settlement evidence. ' +
+              (expiresAt
+                ? `Check haven_get_payment_status again before this payment expires at ${expiresAt}. `
+                : 'Check haven_get_payment_status again later. ') +
+              'Report the delivered goods to the user, but do not report the payment as settled.',
+          }
           // #2972: on the pending branch the agent demonstrably holds the
           // merchant's real hash (it is echoed right here), so the machine-
           // readable remedy is to hand it back through
@@ -721,8 +759,9 @@ export function createPaidMcpCompletionHandlers(
                 payment_id: args.payment_id,
                 status: summary7710.payment?.status ?? (pending ? 'settlement_pending' : 'delivered_unsettled'),
                 product: args.tool_name,
+                ...(expiresAt ? { expires_at: expiresAt } : {}),
               },
-              warnings: summary7710.warnings,
+              warnings: [...summary7710.warnings, settlementUnconfirmedWarning],
             }),
           }
         }

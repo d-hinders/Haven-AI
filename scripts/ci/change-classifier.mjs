@@ -46,6 +46,7 @@ export const OUTPUT_NAMES = Object.freeze([
   'mcp_server',
   'signer',
   'cli',
+  'demo_merchant',
   'full',
 ])
 
@@ -232,6 +233,7 @@ export const SURFACE_RULES = Object.freeze([
   { patterns: ['packages/mcp-server/*'], surfaces: ['code', 'mcp_server'] },
   { patterns: ['packages/signer/*'], surfaces: ['code', 'signer'] },
   { patterns: ['packages/cli/*'], surfaces: ['code', 'cli'] },
+  { patterns: ['packages/demo-merchant-mcp/*'], surfaces: ['code', 'demo_merchant'] },
   {
     // Any other workspace — including packages/core, the shared kernel that
     // backend and frontend both consume — is not individually routed, so it

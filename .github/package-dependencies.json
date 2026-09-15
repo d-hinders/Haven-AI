@@ -42,8 +42,22 @@
     "CI job runs.",
     "",
     "NOT a completeness claim about jobs. Whether every package HAS a job, and",
-    "whether every job is reachable, is #1626."
+    "whether every job is reachable, is #1626.",
+    "",
+    "EXCEPTION: `noOwnJob` (#2996). scripts/ci/package-dependencies.test.mjs also",
+    "scans every packages/*/package.json on disk for a `test` script and fails if",
+    "the workspace has neither an entry in `packages` above nor a listed reason",
+    "here -- the gap #2996 found: packages/demo-merchant-mcp had 142 tests and a",
+    "`test` script, and nothing in this table, .github/workflows/ci.yml, or this",
+    "manifest ever noticed. Add a package here ONLY when leaving it un-run is a",
+    "deliberate, argued choice (core and qa-agent fall to the packages/* catch-all",
+    "on purpose, per the RETAINED rows in scripts/ci/routing-matrix.mjs) -- never",
+    "as a way to silence this check."
   ],
+  "noOwnJob": {
+    "core": "Shared kernel with no job of its own; falls to the packages/* catch-all, which forces the full matrix. RETAINED row in scripts/ci/routing-matrix.mjs, #1626's call.",
+    "qa-agent": "Private workspace whose code no product job builds; the full matrix is pure cost here. RETAINED row in scripts/ci/routing-matrix.mjs, #1626's call."
+  },
   "packages": {
     "frontend": {
       "dependsOn": [],
@@ -74,6 +88,10 @@
     "cli": {
       "dependsOn": [],
       "note": "Declares no internal dependencies at all, which is why an SDK change does not fan out to it."
+    },
+    "demo_merchant": {
+      "dependsOn": [],
+      "note": "packages/demo-merchant-mcp (#2996). Declares no @haven_ai/* dependency today -- checked, not assumed: it does not import @haven_ai/sdk or any sibling package, so an SDK change does not fan out to it. If it starts consuming one, package-dependencies.test.mjs's real-manifest check catches the mismatch."
     }
   }
 }

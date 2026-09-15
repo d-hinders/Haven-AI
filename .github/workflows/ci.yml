@@ -30,6 +30,7 @@ jobs:
       mcp_server: ${{ steps.filter.outputs.mcp_server }}
       signer: ${{ steps.filter.outputs.signer }}
       cli: ${{ steps.filter.outputs.cli }}
+      demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
       full: ${{ steps.filter.outputs.full }}
 
     steps:
@@ -216,6 +217,33 @@ jobs:
 
       - name: Build CLI
         run: npm run build -w packages/cli
+
+  demo_merchant_checks:
+    name: Demo merchant checks
+    needs: changes
+    if: needs.changes.outputs.demo_merchant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check demo merchant
+        run: npm run typecheck -w packages/demo-merchant-mcp
+
+      - name: Run demo merchant unit tests
+        run: npm run test -w packages/demo-merchant-mcp
+
+      - name: Build demo merchant
+        run: npm run build -w packages/demo-merchant-mcp
 
   backend_checks:
     name: Backend checks
@@ -804,7 +832,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -875,6 +903,11 @@ jobs:
 
           if [ "${{ needs.changes.outputs.cli }}" = "true" ] && [ "${{ needs.cli_checks.result }}" != "success" ]; then
             echo "CLI checks result: ${{ needs.cli_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.demo_merchant }}" = "true" ] && [ "${{ needs.demo_merchant_checks.result }}" != "success" ]; then
+            echo "Demo merchant checks result: ${{ needs.demo_merchant_checks.result }}"
             exit 1
           fi
 

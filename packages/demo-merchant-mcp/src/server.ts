@@ -81,7 +81,9 @@ interface MerchantStrings {
   qaFixtureLine: string
 }
 
-const STRINGS: Record<MerchantLocale, MerchantStrings> = {
+// Exported for the #2989 pin test only: the QA-fixture disclosure quotes the
+// receipt heading, and the two must be the same bytes.
+export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
   en: {
     monthSubscription: '1 month subscription',
     monthStorage: '1 month of storage',
@@ -141,8 +143,8 @@ const STRINGS: Record<MerchantLocale, MerchantStrings> = {
       'Fullständig faktura utelämnad (result_detail: "summary") — anropa igen med result_detail: "full" för den ' +
       'renderade fakturan + bokförings-JSON; samma dokument skickas också som svarsheadern x-receipt-json.',
     qaFixtureLine:
-      'QA-fixtur: verifierad men aldrig avräknad on-chain — kvittot kommer att visa ' +
-      '"Levererad – inte bekräftad on-chain".',
+      'QA-fixtur: verifierad men aldrig avräknad på kedjan — kvittot kommer att visa ' +
+      '"Levererad — ej bekräftad på kedjan".',
   },
 }
 

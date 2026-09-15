@@ -366,6 +366,31 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT is exempt from the settlement-readiness g
  * positive assertions below; hard-coding `qa_fixture` onto every product
  * (instead of gating it) fails the absence assertions.
  */
+// #2992 review: the disclosure QUOTES the receipt heading. A quote that drifts
+// from the heading is exactly the "grep the receipt for the promised phrase,
+// miss, chase a stuck payment" failure this marker exists to prevent — so
+// the promise is bound to the heading in both locales, not restated.
+describe('the QA-fixture disclosure quotes the real receipt heading (#2989)', () => {
+  it('en: the 402 suffix and list_products line quote STRINGS.en.deliveredUnsettled', async () => {
+    const [{ QA_FIXTURE_DESCRIPTION_SUFFIX }, { STRINGS }] = await Promise.all([
+      import('./x402.js'),
+      import('./server.js'),
+    ])
+    const promised = /"([^"]+)"/.exec(QA_FIXTURE_DESCRIPTION_SUFFIX)?.[1]
+    expect(promised).toBeTruthy()
+    expect(STRINGS.en.deliveredUnsettled).toContain(promised!)
+    const promisedInList = /"([^"]+)"/.exec(STRINGS.en.qaFixtureLine)?.[1]
+    expect(STRINGS.en.deliveredUnsettled).toContain(promisedInList!)
+  })
+
+  it('sv: the list_products line quotes STRINGS.sv.deliveredUnsettled', async () => {
+    const { STRINGS } = await import('./server.js')
+    const promised = /"([^"]+)"/.exec(STRINGS.sv.qaFixtureLine)?.[1]
+    expect(promised).toBeTruthy()
+    expect(STRINGS.sv.deliveredUnsettled).toContain(promised!)
+  })
+})
+
 describe('skip-settle qa_fixture marker (#2989)', () => {
   it('marks the skip-settle product — and ONLY it — with the flag set on Base Sepolia', async () => {
     const { http, products } = await importHttpWith({

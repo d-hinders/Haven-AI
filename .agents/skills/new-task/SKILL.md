@@ -31,6 +31,18 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
 5. Check GitHub for a materially duplicate open issue — and for an open issue this
    would be a "still" of. A "still" reopens or widens that issue; it never files a
    sibling ([ship-next § *Filing bar*](../ship-next/SKILL.md#filing-bar-2767)).
+   **GitHub is the source of truth for what is filed. It is not the only place a
+   finding sits.** Also sweep [`docs/quality/scan-ledger.md`](../../../docs/quality/scan-ledger.md)
+   and `docs/bug-reports/` for the same surface —
+   `git grep -in '<surface keyword>' docs/quality/scan-ledger.md docs/bug-reports/` —
+   because a quality-scan or a QA run records findings there *before* anyone files
+   them, so they carry no issue number and no GitHub search can see them. Read the
+   hit's **disposition** first: `rejected` and `accepted-as-debt` are decisions
+   already taken, and re-filing one un-changed is nagging, not filing — only a
+   worsening delta reopens it. Otherwise the hit is prior art: file that finding,
+   citing the report and its identifier (`F2`, `B5` live in the report, not in the
+   ledger entry), and record the issue on the ledger's **disposition line** — the
+   entry itself is append-only history and is never edited.
 6. **A defect-type task carries a reproduction before it is queued (#2767).** When
    the task reports something broken — a product defect, missing product behaviour,
    or a required check that is red for a false reason or green over a real defect —

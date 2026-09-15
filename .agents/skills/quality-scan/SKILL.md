@@ -52,6 +52,15 @@ with the reason. Before scanning:
 After a run, append the new entry (date, scope, findings, dispositions once
 decided). The ledger is committed history — never rewrite old entries.
 
+**The ledger is read back as prior art, not only by the next scan.**
+[new-task](../new-task/SKILL.md) sweeps it — and `docs/bug-reports/` — before
+filing, because a finding recorded here carries no issue number and no GitHub
+search can see it. Until someone files it, this entry is the only record that
+the defect is known; a reader who rediscovers it live will otherwise file a
+sibling. So name the surface precisely enough to be matched on: the file or
+tool at fault, not just the theme. (#2968 duplicated the 2026-09-13 scan's F2
+30 hours after it was recorded.)
+
 Two conventions make an entry re-measurable by a future run (the ledger header
 also records a third — disposition upkeep — owned by
 [ship-next](../ship-next/SKILL.md)'s closeout, not by this skill):

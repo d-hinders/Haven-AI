@@ -7,6 +7,7 @@ import {
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
+  QA_FIXTURE_DESCRIPTION_SUFFIX,
   PaymentError,
   isSkipSettleProduct,
   type SettledPayment,
@@ -18,6 +19,7 @@ import {
   DEFAULT_SETTLEMENT_METHOD,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
+  SKIP_SETTLE_QA_FIXTURE,
   SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   isSettlementMethod,
@@ -536,6 +538,9 @@ function buildDiscovery(
         ? product.x402.defaultSettlementMethod
         : settlementMethods[0],
       tools: product.category === 'vpn' ? ['buy_vpn'] : ['buy_cloud_storage'],
+      // #2989: same shape list_products' structuredContent carries — see
+      // `isSkipSettleProduct` in x402.ts. Absent for every other product.
+      ...(isSkipSettleProduct(product.id) ? { qa_fixture: SKIP_SETTLE_QA_FIXTURE } : {}),
     })),
   }
 }
@@ -573,7 +578,13 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
 
   if (!productId) return null
   const product = PRODUCTS[productId]
-  return { productId, product, description: `${product.name} — ${descriptionSuffix}`, settlementMethod }
+  // #2989: the 402 `description` is what the hosted quote/prepare surfaces to
+  // the agent BEFORE it signs — the fixture must be disclosed here, not only
+  // in `list_products` prose the agent may never re-read at purchase time.
+  const description = isSkipSettleProduct(productId)
+    ? `${product.name} — ${descriptionSuffix}${QA_FIXTURE_DESCRIPTION_SUFFIX}`
+    : `${product.name} — ${descriptionSuffix}`
+  return { productId, product, description, settlementMethod }
 }
 
 function isInitializeRequest(body: unknown): boolean {

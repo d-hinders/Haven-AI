@@ -93,6 +93,18 @@ export function isSkipSettleProduct(productId: ProductId): boolean {
   return SKIP_SETTLE_PRODUCTS.has(productId)
 }
 
+/**
+ * #2989: appended to a skip-settle product's 402 `description` (what the
+ * hosted quote/prepare surfaces to the agent) and to its `list_products` text
+ * line, so an agent sees — at QUOTE TIME, before signing — that this specific
+ * product's receipt will not confirm on-chain settlement. The exact receipt
+ * wording ("Delivered — not confirmed on-chain") is produced by
+ * `deliveredUnsettled` in server.ts (#2969/#2970); quoted here so the two
+ * texts describe the same fact rather than two independent guesses at it.
+ */
+export const QA_FIXTURE_DESCRIPTION_SUFFIX =
+  ' QA fixture: verified but never settled on-chain — the receipt will read "Delivered — not confirmed on-chain".'
+
 export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED'
 export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE'
 export const LEGACY_PAYMENT_SIGNATURE_HEADER = 'X-PAYMENT'

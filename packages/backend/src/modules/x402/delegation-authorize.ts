@@ -31,7 +31,7 @@ import {
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
-import { recordRefusalFireAndForget } from '../payments/refusal-ledger.js'
+import { recordRefusalFireAndForget, classifyRevertForLedger } from '../payments/refusal-ledger.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
@@ -245,6 +245,41 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       )
     } catch (err) {
       // Caveat rejection (budget/expiry) or bundler failure — database untouched.
+      // #3052: the 502 is untouched; this is the ledger write that the
+      // sibling for the identical condition already had and this one did not.
+      // The same callee on POST /payments classifies this error and books a
+      // refusal (`routes/payments.ts`, whose `prepareDelegationPayment` catch
+      // runs `classifyRevertForLedger` with no wrapping); on this leg nothing
+      // was recorded, so an expired or over-budget funding redemption on the
+      // x402 authorize path stayed invisible to the audit trail while the
+      // byte-identical direct payment was booked. The classifier is
+      // deliberately four-way: a caveat revert names a refusal, while anything
+      // that is not a revert (a transport failure, an RPC auth/config error)
+      // returns null and writes NOTHING, because an outage is not a refusal
+      // and the ledger must not fill up with infrastructure failures. The
+      // response below cannot be changed by the write: the recorder returns
+      // synchronously and swallows its own failures (see refusal-ledger.ts).
+      // #3053 (slice 2 of epic #3056) migrates this call site behind the
+      // shared choke point that slice introduces.
+      const fundingRefusalReason = classifyRevertForLedger(err)
+      if (fundingRefusalReason) {
+        recordRefusalFireAndForget({
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          // NOT `payTo`, which on this leg is the agent's own funding EOA.
+          // The real merchant is the separate field, exactly as the #2706
+          // pre-check writer above books it.
+          merchantTo: merchantPayTo.toLowerCase(),
+          resourceUrl: url,
+          reason: fundingRefusalReason,
+          source: 'x402_authorize',
+          detail: { error_code: fundingRefusalReason },
+        })
+      }
       return {
         code: 502,
         body: {
@@ -254,6 +289,31 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       }
     }
     if (!fundingAuth) {
+      // #3052: the sibling writers for this condition — the erc7710
+      // no-delegation 403 below and the funding-leg 403 on POST /payments —
+      // already recorded it; this leg answered the same refusal with nothing
+      // in the audit trail. Same reason, same source, same address fields as
+      // the pre-check writer above: `merchantTo` is the MERCHANT, never
+      // `payTo`, which here is the agent's own funding EOA (a refusal that
+      // booked the funding target as the merchant would be the account
+      // confusion the migration 086 allowlist exists to make impossible).
+      // Fire-and-forget: the write cannot change the 403 below, whether it
+      // succeeds or fails (see refusal-ledger.ts).
+      // #3053 (slice 2 of epic #3056) migrates this call site behind the
+      // shared choke point that slice introduces.
+      recordRefusalFireAndForget({
+        userId: agent.user_id,
+        agentId: agent.id,
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        amountAtomic: amountRaw.toString(),
+        accountAddress: agent.account_address,
+        merchantTo: merchantPayTo.toLowerCase(),
+        resourceUrl: url,
+        reason: 'no_delegation_for_target',
+        source: 'x402_authorize',
+        detail: { error_code: 'no_delegation_for_target' },
+      })
       return {
         code: 403,
         body: {

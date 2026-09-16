@@ -1742,6 +1742,46 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
   })
 
+  it('#3045 a key whose rows are ALL expired is free again: authorize mints a fresh intent', async () => {
+    // The endpoint of the #3045 walk: after the duplicated key's rows have
+    // each been lazily expired in turn, the lookup returns the newest EXPIRED
+    // row (the lone-stale #961 semantics are unchanged), delegationReplay
+    // nulls on the non-pending status WITHOUT writing anything, and the fresh
+    // insert succeeds — pre-fix this same lookup result was the permanent 409.
+    const updates: string[] = []
+    mockQuery.mockImplementation((sql: string) => {
+      updates.push(String(sql))
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) return Promise.resolve({ rows: [{ cnt: '0' }] })
+      if (/x402_idempotency_key = \$2/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ ...PENDING_3009_ROW, status: 'expired' }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+    // Non-positional on purpose (#1227 ratchet): each mock answers exactly one
+    // call in this test and `beforeEach` resets both, so mockResolvedValue/
+    // mockImplementation wiring pins the same responses without lengthening
+    // the positional chain the ratchet exists to shrink.
+    mockPrepareFunding.mockResolvedValue(PREPARED)
+    mockCreateIntent.mockImplementation(async () => ({
+      id: 'fresh-mint',
+      status: 'pending_signature',
+      expires_at: 'x',
+    }))
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-dead' }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().payment_id).toBe('fresh-mint')
+    // No lazy-expire write ran — the row was already expired; there is
+    // nothing to free (an expire write here would be a wasted guarded UPDATE
+    // that can never match).
+    expect(updates.some((u) => /SET status = 'expired'/.test(u))).toBe(false)
+    expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
+  })
+
   it('a scheme flip on the same key 409s via the funding_to mismatch (#961)', async () => {
     // The stored intent is 3009 (funding to the EOA); the retry asks erc7710
     // (payTo = merchant) with the SAME key — must never leak the original
@@ -1778,6 +1818,40 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toMatch(/One-shot/)
     expect(mockPrepareFunding).not.toHaveBeenCalled()
+  })
+
+  it('an idempotent replay returns BEFORE the hourly cap read — no 429 on a replay (#3045)', async () => {
+    // #3045 keeps the #961 invariant while it widens which row the lookup can
+    // reach: a replay creates nothing and runs no estimation, so it must
+    // never be rate-limited. withHourlyCapQueries answers the cap reads with
+    // an UNCAPPED agent, so a 429 here could only mean the cap comparison ran
+    // on a replayed request — pin the ORDERING directly instead: when the
+    // lookup finds a live row and replays it, the cap's COUNT query must
+    // never be reached.
+    const capQueries: string[] = []
+    mockQuery.mockImplementation((sql: string) => {
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) {
+        capQueries.push(String(sql))
+        return Promise.resolve({ rows: [{ cnt: '100' }] }) // AT the cap — any cap read that reaches the comparator 429s
+      }
+      if (/x402_idempotency_key = \$2/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ ...PENDING_3009_ROW, expires_at: new Date(Date.now() + 300_000).toISOString() }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().idempotent_replay).toBe(true)
+    // The replay answered from the lookup alone: the hourly-cap COUNT read
+    // (agentHourlyX402CapExceeded) never ran on it.
+    expect(capQueries).toHaveLength(0)
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+    expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
   it('the per-agent hourly cap 429s BEFORE any sponsored estimation (#961)', async () => {

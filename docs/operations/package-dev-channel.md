@@ -41,6 +41,26 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verification (0.2.1-alpha.0 release, 2026-09-16):** this doc is coupled
+> to the release because the bump rewrites `CONNECTOR_VERSION`
+> (`packages/connect/src/runtime.ts`), which is in this doc's `covers:` list.
+> **In THIS release the coupling is carried by that file alone**: an earlier
+> draft of this note also claimed `HAVEN_CONNECTOR_CHANNEL`
+> (`packages/sdk/src/connector-channel.ts`) was "re-pinned", and independent
+> review found that file is not in the commit at all — the channel was already
+> `alpha`, so the bump's write produced no diff. Verified rather than asserted:
+> channel `alpha` (unchanged, no diff),
+> version `0.2.1-alpha.0`, agreeing across the source, the built connect bundle,
+> and the SDK that bundle resolves. **No channel behaviour changed** — nothing in
+> this release touches `publish.yml`, `release-channel.mjs`,
+> `release-snapshot-version.mjs` or `release-version-order.mjs`, so the
+> `0.0.0-dev.*` snapshot path and the rule that the two channels cannot cross are
+> untouched. `last-verified` is deliberately NOT bumped: it already reads
+> 2026-09-16 from an earlier change today, and re-stamping it would assert a
+> whole-document re-verification this release did not perform. Scope of this
+> note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
+> else in this document was re-verified.
+
 ## What `@dev` is, and is not
 
 - **Which packages.** The five the publish loop names — `sdk`, `signer`, `mcp`,

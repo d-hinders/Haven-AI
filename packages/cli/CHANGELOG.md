@@ -8,6 +8,12 @@ alone.
 
 ## Unreleased
 
+## 0.2.1-alpha.0 — 2026-09-16
+
+- **No source change in this release.** `@haven_ai/cli` is republished so its version and
+  its internal `@haven_ai/*` pins stay in lockstep with the other four packages; the CLI
+  behaves identically to 0.2.0-alpha.0.
+
 ## 0.2.0-alpha.0 — 2026-09-14
 
 ### Naming epic #2906, phase 1 (#2908) — new paths, dual-emit on stdout

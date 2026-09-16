@@ -8,6 +8,14 @@ alone.
 
 ## Unreleased
 
+## 0.2.1-alpha.0 — 2026-09-16
+
+### Fixed
+
+- `--doctor` reports an outdated-but-intact signer runtime as version drift rather than
+  "stale or empty", which sent operators to reinstall a working runtime (#2974).
+- Superseded doctor probes are authenticated (#2964).
+
 ## 0.2.0-alpha.0 — 2026-09-14
 
 ### Naming epic #2906, phase 1 (#2908) — writes the new name only

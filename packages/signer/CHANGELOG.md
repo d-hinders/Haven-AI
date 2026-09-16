@@ -8,6 +8,19 @@ alone.
 
 ## Unreleased
 
+## 0.2.1-alpha.0 — 2026-09-16
+
+### Added
+
+- Sign-context refusals carry `code`, `fallback` and `next_action`, matching the shape
+  the version-mismatch refusal already used (#3001). Additive: no refusal was removed
+  and no field became required.
+
+### Fixed
+
+- `fetchX402SignContext` aborts after 15 seconds instead of hanging the agent
+  indefinitely (#2985). A timeout is a refusal to proceed, never a decision to sign.
+
 ## 0.2.0-alpha.0 — 2026-09-14
 
 ### Naming epic #2906, phase 1 (#2908) — reads both names, prefers the new

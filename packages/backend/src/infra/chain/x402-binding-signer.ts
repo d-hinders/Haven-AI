@@ -14,7 +14,7 @@
  */
 import { ethers } from 'ethers'
 import { buildX402ExpectedMessage, type X402ExpectedContext } from '@haven_ai/sdk'
-import { parseBooleanFlag } from '../../config.js'
+import { parseBooleanFlag } from '../../config/boolean-flag.js'
 
 /**
  * #3021 (#3015 follow-up): the emit flip used to be `!== '1'` read at every

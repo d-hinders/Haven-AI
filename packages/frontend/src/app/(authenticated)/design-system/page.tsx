@@ -27,7 +27,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
-import { StackedBarChart } from '@/components/ui/StackedBarChart'
+import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
 import type { AreaPoint } from '@/components/ui/AreaChart'
@@ -2453,7 +2453,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="StackedBarChart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the agents table's share column. Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its name in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
@@ -2462,6 +2462,16 @@ export default function DesignSystemPage() {
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
           />
+          {/* The swatch a table row carries to key itself to the chart above —
+              the same `seriesColor(index)` the segments and the legend read. */}
+          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]">
+            {DS_CHART_DAYS[0]?.series.map((s) => (
+              <li key={s.id} className="inline-flex items-center gap-1.5">
+                <SeriesSwatch seriesIndex={s.seriesIndex} />
+                <span>{s.name} — table row swatch</span>
+              </li>
+            ))}
+          </ul>
         </Card>
       </Section>
 

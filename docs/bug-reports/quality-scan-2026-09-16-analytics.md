@@ -104,4 +104,4 @@ The epic's owner decision 2 made refusals a **first-class metric** ("count and a
 
 ## 5. Dispositions
 
-Owner decision 2026-09-16: **F1 filed as epic #3056** (sub-issues #3052–#3055, `pending-review`); **C1 filed as #3051 and shipped** (the PR that carries this report). C2–C5 pending owner decision.
+Owner decision 2026-09-16: **F1 filed as epic #3056** (sub-issues #3052–#3055, `pending-review`); **C1 filed as #3051 and shipped in PR #3057** (the PR that carries this report). C2–C5 pending owner decision.

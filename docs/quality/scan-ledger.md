@@ -664,7 +664,7 @@ prior ledger finding covers this surface; none re-surfaced.
   failing test; the enum is closed and a new refusal class has nowhere to go.
 - Disposition: **filed as epic #3056** (sub-issues #3052–#3055) on 2026-09-16.
 
-**Candidates (five, one PR each):** C1 (**filed and shipped as #3051**) the spend-by-agent chart with the
+**Candidates (five, one PR each):** C1 (**filed as #3051, shipped in PR #3057**) the spend-by-agent chart with the
 refusal marker series is built, tested, showcased and never mounted on the
 page (deferred from D to C in a PR body, lost); C2 route-seam guards for the
 two executed survivors, the untested merchant-label order and the refusal

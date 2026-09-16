@@ -1035,7 +1035,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         }
         // The envelope: one range, one currency, the basis block the page
         // quotes its sentences from.
-        expect(overview.range).toMatchObject({ days: 30, to: '2026-07-11T00:00:00.000Z' })
+        // `to` sits at 14:30Z, not midnight (#3051): the endpoint's window ends
+        // at the moment of the request, so the last `by_day` bucket (10 Jul)
+        // is a partial day and the captures show the lighter bar and its note.
+        expect(overview.range).toMatchObject({ days: 30, to: '2026-07-10T14:30:00.000Z' })
         expect(overview.currency).toBe('usd')
         expect(overview.basis).toMatchObject({ payments_counted: 5, unsettled_submitted: 1, tz: 'UTC' })
         // The ledger floor rides on the basis (#3013): the earliest day the

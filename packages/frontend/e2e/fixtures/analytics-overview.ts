@@ -61,11 +61,11 @@ import type { AnalyticsOverviewResponse } from '../../src/types/analytics'
 export const analyticsOverview =
   {
     "range": {
-      "from": "2026-06-11T00:00:00.000Z",
-      "to": "2026-07-11T00:00:00.000Z",
+      "from": "2026-06-10T14:30:00.000Z",
+      "to": "2026-07-10T14:30:00.000Z",
       "days": 30,
-      "previous_from": "2026-05-12T00:00:00.000Z",
-      "previous_to": "2026-06-11T00:00:00.000Z"
+      "previous_from": "2026-05-11T14:30:00.000Z",
+      "previous_to": "2026-06-10T14:30:00.000Z"
     },
     "currency": "usd",
     "basis": {

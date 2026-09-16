@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { AgentsTable } from '../AgentsTable'
 import { seriesColor } from '@/components/ui/StackedBarChart'
+import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
+import type { AnalyticsDayBucket } from '@/types/analytics'
 import type { AnalyticsAgentRow } from '@/types/analytics'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../../scripts/screenshot.mjs'
 
@@ -196,8 +198,10 @@ describe('AgentsTable — the desktop table', () => {
 })
 
 describe('AgentsTable — one colour per agent, shared with the spend chart (#3051)', () => {
-  it('puts the series swatch for row i beside the name, in both renderings, keyed on the endpoint order', () => {
-    const { container } = mount()
+  it('puts the series swatch beside each plotted agent, in both renderings, from the one shared map', () => {
+    const agents = orderAgentsForDisplay([RESEARCH, RETIRED])
+    const map = seriesIndexByAgent(agents, FIXTURE_ANALYTICS_OVERVIEW.by_day as AnalyticsDayBucket[])
+    const { container } = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={map} />)
     const desktop = desktopOf(container)!
     const mobile = mobileOf(container)!
     const desktopSwatches = desktop.querySelectorAll('[data-testid="series-swatch"]')
@@ -209,6 +213,16 @@ describe('AgentsTable — one colour per agent, shared with the spend chart (#30
     // The colour is the chart's own token by index — the same
     // `seriesColor(0)` the first stacked segment is filled with.
     expect((desktopSwatches[0] as HTMLElement).style.backgroundColor).toBe(seriesColor(0))
+  })
+
+  it('renders no swatch for an agent the chart does not plot, and none at all without the map', () => {
+    const agents = orderAgentsForDisplay([RESEARCH, RETIRED])
+    const onlyResearch = seriesIndexByAgent(agents, [{ date: '2026-07-07', spent_by_agent: { [RESEARCH.id]: '1.00' }, refusals: 0 }])
+    const one = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={onlyResearch} />)
+    expect(desktopOf(one.container)!.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(1)
+    one.unmount()
+    const none = mount()
+    expect(none.container.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(0)
   })
 })
 

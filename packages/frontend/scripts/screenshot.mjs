@@ -1376,11 +1376,11 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
 //     endpoint defaults to UTC; the doc (docs/product/analytics.md) states the
 //     page sends the user's zone in a real browser.
 export const ANALYTICS_RANGE = {
-  from: '2026-06-11T00:00:00.000Z',
-  to: '2026-07-11T00:00:00.000Z',
+  from: '2026-06-10T14:30:00.000Z',
+  to: '2026-07-10T14:30:00.000Z',
   days: 30,
-  previous_from: '2026-05-12T00:00:00.000Z',
-  previous_to: '2026-06-11T00:00:00.000Z',
+  previous_from: '2026-05-11T14:30:00.000Z',
+  previous_to: '2026-06-10T14:30:00.000Z',
 }
 export const FIXTURE_ANALYTICS_MERCHANTS = [
   {

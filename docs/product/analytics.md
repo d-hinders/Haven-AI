@@ -55,16 +55,20 @@ While fee charging is switched off, the tile says so plainly ("No fees yet —
 Haven is not charging fees") rather than rendering a bare 0. The API reports
 whether the flag is on so the tile cannot go stale in either direction.
 
-**Spend over time.** One bar per day of the range, stacked by agent, in the
-display currency; a marker cap above a bar means the guardrails refused at
-least one payment that day (the tooltip and the data table say how many). The
-bars are the same booked values the Spent tile sums, bucketed server-side in
-the page's time zone; an agent keeps one colour across the chart, its legend
-and the agents table below. The window starts and ends at the moment the
-page loads, not at midnight, so its first and last bar usually cover part of
-a day: those two are drawn lighter and named as partial, never dropped or
-stretched. Below three days of data the chart is not drawn (see the sparse
-rule below) — a line through one point agrees with every trend.
+**Spend over time.** One bar per day *with activity* in the range — a day
+with no payment and no refusal is not drawn, so the axis is the days that
+carry a figure, not the calendar — stacked by agent, in the display currency;
+a marker cap above a bar means the guardrails refused at least one payment
+that day (the tooltip and the data table say how many). The bars are the same
+booked values the Spent tile sums, bucketed server-side in the page's time
+zone. Agents are ordered by spend, then id, and an agent that appears on the
+chart keeps one colour across the chart, its legend and the swatch beside its
+name in the agents table below. The window starts and ends at the moment the
+page loads, not at midnight, so a bar on the window's first or last local day
+covers part of a day: it is drawn lighter and named as partial (the note
+under the chart says which end), never dropped or stretched. Below three days
+of data the chart is not drawn (see the sparse rule below) — a line through
+one point agrees with every trend.
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
 A merchant's label is resolved by the API in a fixed order: your contact's

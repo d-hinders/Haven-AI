@@ -24,10 +24,12 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
 /**
  * The agents table (#2947, epic #2944 slice C).
  *
- * One row per agent that spent in the range, in the order the endpoint already
- * sent them — `GET /analytics/overview` ranks by spend, so the table inherits
- * that ranking rather than choosing its own (two orders would be two answers
- * to "which agent spent most"). Every column is a field on one agent in the
+ * One row per agent that spent in the range, in the page's display order —
+ * spend descending, then id (`lib/analytics-series.ts`): the wire's
+ * `agents[]` carries no ORDER BY, so the page sorts once and every section
+ * (this table, the spend chart, the merchants roster) inherits that one order
+ * rather than choosing its own (two orders would be two answers to "which
+ * agent spent most"). Every column is a field on one agent in the
  * response; the table computes nothing about the money.
  *
  * ── Why there are two renderings ────────────────────────────────────────────
@@ -58,15 +60,16 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
 
 const COLUMN_PAD = 'px-4 py-3'
 
-function StatusCell({ agent, seriesIndex }: { agent: AnalyticsAgentRow; seriesIndex: number }) {
+function StatusCell({ agent, seriesIndex }: { agent: AnalyticsAgentRow; seriesIndex: number | undefined }) {
   const presentation = agentStatusPresentation(agent.status)
   const revoked = agent.status === 'revoked'
   return (
     <span className="inline-flex items-center gap-2 min-w-0">
-      {/* #3051: the same series token the spend chart paints this agent with —
-          the index is the agent's position in `agents[]`, the one order the
-          endpoint sent and the chart (`SpendSection`) keys its colours on. */}
-      <SeriesSwatch seriesIndex={seriesIndex} />
+      {/* #3051: the same series token the spend chart paints this agent with,
+          from the ONE map the page builds (`lib/analytics-series.ts`). An
+          agent with no bar on the chart gets no swatch — a colour that
+          matches nothing would be a key to nothing. */}
+      {seriesIndex !== undefined && <SeriesSwatch seriesIndex={seriesIndex} />}
       <span className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</span>
       {/* A revoked agent stays in the table rather than dropping out of it: it
           still spent money in this range, and hiding the row would hide the
@@ -154,9 +157,13 @@ function MerchantCell({ agent }: { agent: AnalyticsAgentRow }) {
 export function AgentsTable({
   agents,
   currency,
+  seriesIndexById,
 }: {
+  /** In display order — the page sorts once (`orderAgentsForDisplay`). */
   agents: AnalyticsAgentRow[]
   currency: AnalyticsCurrency
+  /** `seriesIndexByAgent(agents, byDay)`; absent → no swatches (the table alone). */
+  seriesIndexById?: Map<string, number>
 }) {
   return (
     <Card hover={false} className="overflow-hidden">
@@ -181,14 +188,14 @@ export function AgentsTable({
             </tr>
           </Table.Head>
           <Table.Body>
-            {agents.map((agent, index) => (
+            {agents.map((agent) => (
               <tr key={agent.id} className="hover:bg-[var(--v2-surface-hover)] transition-colors duration-150">
                 <td className={COLUMN_PAD}>
                   <Link
                     href={`/agents/${agent.id}`}
                     className="inline-flex items-center gap-2 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
                   >
-                    <StatusCell agent={agent} seriesIndex={index} />
+                    <StatusCell agent={agent} seriesIndex={seriesIndexById?.get(agent.id)} />
                   </Link>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
@@ -235,8 +242,8 @@ export function AgentsTable({
       </div>
 
       <div className="lg:hidden divide-y divide-[var(--v2-table-row-border)]">
-        {agents.map((agent, index) => (
-          <MobileAgentRow key={agent.id} agent={agent} currency={currency} seriesIndex={index} />
+        {agents.map((agent) => (
+          <MobileAgentRow key={agent.id} agent={agent} currency={currency} seriesIndex={seriesIndexById?.get(agent.id)} />
         ))}
       </div>
     </Card>
@@ -258,7 +265,7 @@ function MobileAgentRow({
 }: {
   agent: AnalyticsAgentRow
   currency: AnalyticsCurrency
-  seriesIndex: number
+  seriesIndex: number | undefined
 }) {
   const [open, setOpen] = useState(false)
   const presentation = agentStatusPresentation(agent.status)
@@ -272,7 +279,7 @@ function MobileAgentRow({
       <Row
         title={
           <span className="inline-flex items-center gap-2 min-w-0">
-            <SeriesSwatch seriesIndex={seriesIndex} />
+            {seriesIndex !== undefined && <SeriesSwatch seriesIndex={seriesIndex} />}
             <span className="truncate">{agent.name}</span>
             {agent.status === 'revoked' && <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>}
           </span>

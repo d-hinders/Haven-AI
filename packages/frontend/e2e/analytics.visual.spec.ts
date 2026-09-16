@@ -205,6 +205,8 @@ const COPY = {
   merchantsHeading: 'Top merchants',
   balanceHeading: 'Balance over time',
   spendHeading: 'Spend over time',
+  /** The fixture window ends at 14:30Z with `tz: UTC`, so the last bucket (10 Jul) is a partial day: one lighter bar and this note (#3051). */
+  spendPartialNote: 'The last bar is drawn lighter',
   nordshield: 'NordShield VPN',
   emptyTitle: 'No agent activity in this range',
   emptyBody: 'This window has no payments, refusals or fees to report.',
@@ -333,6 +335,11 @@ const SCENARIOS: Scenario[] = [
       await expect(spend.getByRole('heading', { name: COPY.spendHeading })).toHaveCount(1)
       await expect(spend.getByTestId('stacked-bar-chart').filter({ visible: true })).toHaveCount(1)
       await expect(spend.getByTestId('chart-refusal-marker')).toHaveCount(4)
+      // The partial-day treatment on the capture itself: the window's last
+      // bucket is cut (14:30Z end), so exactly one day per rendering is marked
+      // and the note names that end.
+      await expect(spend.locator('[data-testid="chart-day"][data-partial="true"]')).toHaveCount(2)
+      await expect(spend.getByText(COPY.spendPartialNote, { exact: false })).toHaveCount(1)
 
       // ── The range control, in its resting state ───────────────────────────
       // The default window is 30d (`DEFAULT_ANALYTICS_RANGE`) and the fixture's

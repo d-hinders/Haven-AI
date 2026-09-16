@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
   - packages/backend/src/infra/chain/relayer-reads.ts
+  - packages/backend/src/openapi/request-validation.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/modules/mpp/**

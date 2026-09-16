@@ -1,6 +1,7 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
 import { httpErrorHandler } from './infra/http-error-handler.js'
+import { installRequestValidation } from './openapi/request-validation.js'
 
 import Fastify, { type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
@@ -94,6 +95,20 @@ const app = Fastify({
 
 // --- Global error handler (extracted for testability, #1464) ---
 app.setErrorHandler(httpErrorHandler)
+
+// --- Request validation (#3029, epic #3028 slice 1) ---
+// EVERY route's request is compiled against the OpenAPI spec from here down —
+// shadow mode logs would-be refusals and counts them (`request_validation` on
+// GET /health/ops) without changing any answer; the contacts proof module is
+// enforced via enforcedPrefixes. MUST sit after setErrorHandler (the enforced
+// route handler delegates non-validation errors to it) and before the first
+// app.register — it is a root-scope install, not an encapsulated plugin, so
+// its onRoute/compiler/formatter are the ones every child module inherits
+// (spiked: an encapsulated plugin's onRoute sees no later routes).
+installRequestValidation(app, {
+  mode: config.requestValidationMode,
+  enforcedPrefixes: ['/contacts'],
+})
 
 // --- Process-level error handlers ---
 process.on('unhandledRejection', (reason) => {

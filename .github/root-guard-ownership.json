@@ -132,6 +132,26 @@
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
+      "path": "scripts/lint-request-schemas.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:request-schemas"
+      ],
+      "reason": "The shrink-only ratchet over the request-validation rollout (#3029, epic #3028): per route file, whether any registered route is still shadowed and how many hand-rolled typeof request guards remain. It scans packages/backend routes but only backend_checks runs it."
+    },
+    {
+      "path": "scripts/lint-request-schemas.test.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:request-schemas:test"
+      ],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
       "path": "scripts/generate-api-types.mjs",
       "jobs": [
         "backend"
@@ -151,7 +171,7 @@
         "lint:db-mocks",
         "lint:wire-types"
       ],
-      "reason": "The shared ratchet ENGINE, backing SIX gates as of #2747: the backend db-mock and retired-rail-prose ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, and scripts/docs/ui-gate-wording. An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason two jobs are named here."
+      "reason": "The shared ratchet ENGINE, backing SEVEN gates as of #3029 (six as of #2747): the backend db-mock, retired-rail-prose and request-schema ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, and scripts/docs/ui-gate-wording. An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason two jobs are named here."
     },
     {
       "path": "scripts/lib/ratchet.test.mjs",

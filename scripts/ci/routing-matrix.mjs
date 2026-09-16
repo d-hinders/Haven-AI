@@ -440,6 +440,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-request-schemas.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The shrink-only request-schema ratchet (#3029) polices packages/backend route modules but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-request-schemas.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
     files: ['scripts/generate-api-types.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,
@@ -462,11 +474,13 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend', 'frontend'],
     kind: CONTRACT,
     why:
-      'The shared ratchet engine backs SIX gates as of #2747: the backend db-mock gate, the ' +
+      'The shared ratchet engine backs SEVEN gates as of #3029 (six as of #2747): the ' +
+      'backend db-mock gate, the ' +
       'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
       'lint, packages/frontend/scripts/design-lint.mjs — which an earlier draft of this row ' +
-      'missed, and which had the same missing `--update` refusal the copy lint did — and ' +
-      'scripts/docs/ui-gate-wording.mjs. All six share one `updateRefusals`; the count is ' +
+      'missed, and which had the same missing `--update` refusal the copy lint did — ' +
+      'scripts/docs/ui-gate-wording.mjs, and the request-schema ratchet ' +
+      '(scripts/lint-request-schemas.mjs, #3029). All seven share one `updateRefusals`; the count is ' +
       'pinned by scripts/lib/ratchet.test.mjs rather than trusted, because this row has now ' +
       'been stale twice. Weakening the module must run both surfaces; ' +
       'routing it to one would leave the other unguarded. Copy lint and design lint are ' +

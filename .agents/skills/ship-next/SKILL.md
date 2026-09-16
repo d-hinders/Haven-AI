@@ -679,6 +679,13 @@ you need the reasoning. Never edit one without the other — CI will not let you
   review, which found the delegate balance monitor unlisted while its equally
   read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
   the two even share an alert channel);
+- `packages/backend/src/openapi/request-validation.ts` (#3029, epic #3028 — the
+  request-validation plugin. Runtime, not control: it sits IN FRONT OF every
+  payment route, so a green money-flow QA run exercises it on every leg from
+  the day it lands. In epic #3028 slice 1 it refuses only on the contacts
+  proof module and shadow-logs everywhere else; it is a shape VALIDATOR —
+  it reads the request against the spec, refuses or logs, and never
+  authorizes, alters, or constructs spend intent);
 - `routes/hybrid-accounts.ts` (user-signed execution and account provisioning;
   the approval queue's route file was deleted with its table by #2055, so its
   glob left the perimeter rather than being repointed — the code is dead, not

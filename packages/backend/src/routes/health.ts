@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { matchesOpsToken } from '../middleware/ops-token.js'
 import type { AccountingOpsCounters } from '../modules/accounting/index.js'
+import { requestValidationOpsSnapshot, type RequestValidationSnapshot } from '../openapi/request-validation.js'
 
 type RelayerStatus = ReturnType<typeof import('../infra/relayer-balance-monitor.js')['getRelayerBalanceStatus']>
 type PassportStatus = ReturnType<typeof import('../modules/passport/index.js')['passportReadiness']>
@@ -87,6 +88,10 @@ export function registerHealthRoutes(app: FastifyInstance, options: HealthRouteO
         authRateLimitArmed: options.trustProxyHops > 0,
       },
       accounting,
+      // The request-validation shadow counter (#3029): mode, would-refuse
+      // total, and the per route+field breakdown. In-memory read, cannot
+      // throw; per-process by design (no generic counter module exists).
+      request_validation: requestValidationOpsSnapshot() satisfies RequestValidationSnapshot,
     }
   })
 }

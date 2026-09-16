@@ -59,9 +59,19 @@ const EXEMPT_RE = /\/\/ db-mock-exempt: .{20,}/
  * 6 → 7 on PR #3044 with zero new calls). Only comments are removed; the
  * text is replaced with spaces so nothing else shifts. Strings are tracked
  * because a `//` inside `'https://…'` is not a comment, and template
- * literals because a backtick string may span lines. Regex literals are not
- * tracked: a `//` inside one (`/\/\//`) would be read as a comment start,
- * which in a test file is rare enough to name here rather than parse.
+ * literals because a backtick string may span lines. Regex literals are NOT
+ * tracked — three consequences, all absent from the tree today (review of
+ * #3049 probed every backend test file): a `//` inside a regex (`/\/\//`)
+ * blanks the rest of that line, so a real call AFTER it on the same line is
+ * missed; a `/*` inside a regex (`/\/*$/`) opens a phantom block comment
+ * that swallows real calls until the next `*` `/`; a quote inside a regex
+ * (`/'/`) followed by a comment naming the token over-counts it. Parsing
+ * regex literals is what a real tokenizer is for; if one of these shapes
+ * ever lands in a test, this is the comment to come back to. The two other
+ * strippers in the repo were not reused on purpose:
+ * `scripts/ci/lib/strip-comments.mjs` is the prose-claim scanner's (no
+ * string tracking, joins literals) and `stripCommentsOutsideStrings` in
+ * `packages/backend/src/openapi/route-inventory.ts` is TypeScript.
  */
 export function stripComments(source) {
   let out = ''

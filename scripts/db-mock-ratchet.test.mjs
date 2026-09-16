@@ -44,10 +44,13 @@ test('stripComments keeps string and template literals — a // inside a URL str
     const tpl = \`multi
       // not a comment: inside a template literal, mockResolvedValueOnce
       line\`
-    const esc = 'it\\'s // still a string'
+    const esc = 'it\\'s // mockResolvedValueOnce named INSIDE the string, after the escaped quote'
     mockQuery.mockResolvedValueOnce({ rows: [tpl, esc] })
   `
-  assert.deepEqual(scanSource(src), { positional: 3 })
+  // 4, not 3: the token after the escaped quote is string content. Without
+  // the escape branch the string would close at \\' and the rest of that
+  // line would be blanked as a comment — the review's surviving mutant.
+  assert.deepEqual(scanSource(src), { positional: 4 })
   // Blanking, not deleting: line count and column positions survive.
   assert.equal(stripComments(src).split('\n').length, src.split('\n').length)
   assert.equal(stripComments(src).length, src.length)

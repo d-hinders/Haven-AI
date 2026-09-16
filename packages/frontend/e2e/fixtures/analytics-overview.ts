@@ -71,6 +71,7 @@ export const analyticsOverview =
     "basis": {
       "payments_counted": 5,
       "unsettled_submitted": 1,
+      "refusals_recorded_from": "2026-05-28",
       "refusals_counted": 2,
       "refusal_attempts": 3,
       "fee_rows": 2,
@@ -359,6 +360,7 @@ export const analyticsOverviewEmpty =
     "basis": {
       "payments_counted": 0,
       "unsettled_submitted": 0,
+      "refusals_recorded_from": null,
       "refusals_counted": 0,
       "refusal_attempts": 0,
       "fee_rows": 0,

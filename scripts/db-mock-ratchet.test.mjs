@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { newViolations } from './lib/ratchet.mjs'
-import { scanSource, scanAll, BASELINE_PATH } from './db-mock-ratchet.mjs'
+import { scanSource, scanAll, stripComments, BASELINE_PATH } from './db-mock-ratchet.mjs'
 
 test('scanSource counts db.js mocks and positional calls', () => {
   const src = `
@@ -17,6 +17,44 @@ test('scanSource counts db.js mocks and positional calls', () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ id: 1 }] })
   `
   assert.deepEqual(scanSource(src), { 'db-mock': 1, positional: 2 })
+})
+
+// #3048: the ratchet counts code, not prose. PR #3044 went red on
+// `contacts.test.ts [positional]: baseline 6, now 7` from ONE doc comment
+// that named the token — house comments name it constantly because it is
+// the ratchet's own subject.
+test('a token inside a line comment or a block comment is NOT counted; the same token at a call site IS', () => {
+  const onlyComments = `
+    // counts only \`mockResolvedValueOnce\` chains (db-mock-ratchet.mjs:50),
+    /* the positional mockResolvedValueOnce chain
+       that #775 re-shuffles */
+    mockQuery.mockResolvedValue({ rows: [] })
+  `
+  assert.deepEqual(scanSource(onlyComments), {})
+  const withCall = onlyComments + `\n    mockQuery.mockResolvedValueOnce({ rows: [] })\n`
+  assert.deepEqual(scanSource(withCall), { positional: 1 })
+  // The exact line from contacts.test.ts:134 stays prose.
+  assert.deepEqual(scanSource('// counts only `mockResolvedValueOnce` chains (db-mock-ratchet.mjs:50),'), {})
+})
+
+test('stripComments keeps string and template literals — a // inside a URL string is not a comment', () => {
+  const src = `
+    const url = 'https://merchant.test/mcp' // mockResolvedValueOnce named here
+    mockQuery.mockResolvedValueOnce({ rows: [url] })
+    const tpl = \`multi
+      // not a comment: inside a template literal, mockResolvedValueOnce
+      line\`
+    const esc = 'it\\'s // still a string'
+    mockQuery.mockResolvedValueOnce({ rows: [tpl, esc] })
+  `
+  assert.deepEqual(scanSource(src), { positional: 3 })
+  // Blanking, not deleting: line count and column positions survive.
+  assert.equal(stripComments(src).split('\n').length, src.split('\n').length)
+  assert.equal(stripComments(src).length, src.length)
+})
+
+test('the exemption marker is still read from the raw source (it IS a comment)', () => {
+  assert.equal(scanSource('// db-mock-exempt: uses the real-Postgres harness end to end\nmockQuery.mockResolvedValueOnce({})'), null)
 })
 
 test('a deeper relative path and double quotes still count as a db.js mock', () => {

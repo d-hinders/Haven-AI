@@ -67,6 +67,15 @@ const EMPTY = FIXTURE_ANALYTICS_OVERVIEW_EMPTY as AnalyticsOverviewResponse
  *  ones the harness declares and only the day-count moves. */
 const SPARSE: AnalyticsOverviewResponse = { ...POPULATED, by_day: POPULATED.by_day.slice(0, 2) }
 
+/** The populated figures with an EMPTY ledger: `refusals_recorded_from: null`
+ *  is what the endpoint sends when payment_refusals has no rows at all —
+ *  distinct from any day value, so the page can refuse to name a floor it was
+ *  not given. */
+const NO_FLOOR: AnalyticsOverviewResponse = {
+  ...POPULATED,
+  basis: { ...POPULATED.basis, refusals_recorded_from: null },
+}
+
 function settled(overrides: Record<string, unknown> = {}) {
   return { data: POPULATED, loading: false, failed: false, refetch: mockRefetch, ...overrides }
 }
@@ -270,6 +279,32 @@ describe('Analytics — the populated page', () => {
     expect(tile.textContent).toMatch(/\$3\.00 attempted/)
     // The limit of the count, stated rather than left to be inferred: what
     // the runtime refused on its own never reached this ledger.
+    expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
+  })
+
+  it('names the ledger floor when the endpoint reports one, and stays silent when it does not (#3013)', () => {
+    // The populated fixture carries `refusals_recorded_from: '2026-05-28'`:
+    // the renderer formats it (en-GB day + short month) and the clause sits
+    // inside the Refused tile — the count above it stays the truth for the
+    // part of the window the ledger covers. The expected label below is the
+    // same expression the production formatter uses, so this pin follows the
+    // formatter rather than restating it.
+    render(<AnalyticsClient />)
+    const tile = screen.getByTestId('stat-tile-refused')
+    const expected = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(
+      new Date('2026-05-28'),
+    )
+    expect(tile.textContent).toMatch(new RegExp(`Refusals are recorded from ${expected}\\.`))
+  })
+
+  it('renders NO floor line from a null `refusals_recorded_from` — an empty ledger names no day', () => {
+    mockUseAnalyticsOverview.mockReturnValue(settled({ data: NO_FLOOR }))
+    render(<AnalyticsClient />)
+    const tile = screen.getByTestId('stat-tile-refused')
+    expect(tile.textContent).not.toMatch(/Refusals are recorded from/)
+    // The rest of the refusal sentence stays: the count and the price-cap
+    // limit are independent of the ledger floor.
+    expect(tile.textContent).toMatch(/2 refused payments/)
     expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
   })
 

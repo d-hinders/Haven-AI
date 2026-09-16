@@ -123,11 +123,11 @@ function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currenc
     </>
   )
 
-  // The ledger's own floor, when the endpoint names it. `refusals_recorded_from`
-  // is not on the response today, so this branch does not render yet; the wire
-  // for it is filed with the follow-up named in the handoff. A date invented
+  // The ledger's own floor, when the ledger has rows (#3013: the endpoint now
+  // reports it, so this line renders whenever it is non-null). A date invented
   // here would report a coverage the product does not hold, which is the one
-  // thing this line must not do.
+  // thing this line must not do — the value is the response's, never the
+  // client's.
   const refusalLedgerFloor =
     basis.refusals_recorded_from != null ? (
       <>

@@ -1430,6 +1430,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
   currency: 'usd',
   basis: {
     payments_counted: 5, unsettled_submitted: 1,
+    refusals_recorded_from: '2026-05-28',
     refusals_counted: 2, refusal_attempts: 3,
     fee_rows: 2, gas_sponsored_ops: 7,
     snapshot_days: 30, tz: 'UTC',
@@ -1495,6 +1496,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW_EMPTY = {
   currency: 'usd',
   basis: {
     payments_counted: 0, unsettled_submitted: 0,
+    refusals_recorded_from: null,
     refusals_counted: 0, refusal_attempts: 0,
     fee_rows: 0, gas_sponsored_ops: 0,
     snapshot_days: 0, tz: 'UTC',

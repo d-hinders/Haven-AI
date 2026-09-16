@@ -1,27 +1,5 @@
 import type { ApiPaths } from '@haven_ai/core'
 
-/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */
-/**
- * The ONE front-end-side extension on the generated overview shape, and it is
- * additive and optional, so the generated type stays the single source for
- * every field the endpoint actually emits (#984's rule; the precedent for the
- * form is `types/transactions.ts`, which extends `ApiSchema<'TransactionBase'>`
- * the same way for #2097).
- *
- * `refusals_recorded_from` is the day from which the refusal ledger has rows,
- * the floor slice C renders as "Refusals are recorded from <date>" when a
- * window reaches back behind it (#2947 scope item 5). It is NOT in the
- * OpenAPI response today: slice B (#2946) ships `basis` without it, and the
- * page therefore never renders this line until the endpoint says it. A date
- * invented in the front end would put a confident day on a claim about the
- * ledger's coverage that the product does not hold, which is the one thing
- * this line must not do. `EmptyStates.ReusalsRecordedFromFootnote` is the
- * renderer; `AnalyticsClient` feeds it nothing while the field is absent.
- * The follow-up asking the API for it is recorded in the handoff.
- */
-// ui-local: additive field awaiting its OpenAPI counterpart, named here so the name exists exactly once B's follow-up lands the row in the spec
-type AnalyticsBasisExtensions = { refusals_recorded_from?: string | null }
-
 /**
  * Wire shapes for `GET /analytics/overview` (#2947, epic #2944 slice C).
  *
@@ -43,31 +21,25 @@ type AnalyticsBasisExtensions = { refusals_recorded_from?: string | null }
 
 /**
  * The 200 body exactly as the generated spec declares it — the single source
- * for every field the endpoint emits, before the one additive optional field
- * declared above.
+ * for every field the endpoint emits. Slice B's ledger floor
+ * (`basis.refusals_recorded_from`, #3013) is IN the generated shape now, so
+ * this file carries no extension on it: the renderer
+ * (`EmptyStates.RefusalsRecordedFromFootnote`) reads the generated field
+ * directly, and the date comes from the response, never from the client.
  */
 type GeneratedAnalyticsOverviewResponse =
   ApiPaths['/analytics/overview']['get']['responses']['200']['content']['application/json']
 
 /**
- * The basis the page reads: the generated field plus the optional ledger
- * floor. Derived from the GENERATED shape (not from `AnalyticsOverviewResponse`)
- * so the pair stays non-circular, and the extension lands on the field's
- * shape rather than on whether a basis may be absent at all — `basis` stays
- * required on the response below.
+ * The basis the page reads. `basis` stays required on the response below.
  */
-export type AnalyticsBasis = GeneratedAnalyticsOverviewResponse['basis'] & AnalyticsBasisExtensions
+export type AnalyticsBasis = GeneratedAnalyticsOverviewResponse['basis']
 
 /**
- * The 200 body of `GET /analytics/overview`, whole. The generated shape with
- * `basis` swapped for its extended self: an `Omit`-and-overwrite rather than a
- * restatement, so the only thing authored in this file beyond aliases remains
- * the one field the spec is about to gain, and every field the endpoint
- * actually reports still comes from the generated spec verbatim.
+ * The 200 body of `GET /analytics/overview`, whole — the generated shape
+ * verbatim (#984, #1447).
  */
-export type AnalyticsOverviewResponse = Omit<GeneratedAnalyticsOverviewResponse, 'basis'> & {
-  basis: AnalyticsBasis
-}
+export type AnalyticsOverviewResponse = GeneratedAnalyticsOverviewResponse
 
 /** The validated window the server resolved the request to. */
 export type AnalyticsRange = GeneratedAnalyticsOverviewResponse['range']

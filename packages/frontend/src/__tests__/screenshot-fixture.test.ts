@@ -1038,6 +1038,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(overview.range).toMatchObject({ days: 30, to: '2026-07-11T00:00:00.000Z' })
         expect(overview.currency).toBe('usd')
         expect(overview.basis).toMatchObject({ payments_counted: 5, unsettled_submitted: 1, tz: 'UTC' })
+        // The ledger floor rides on the basis (#3013): the earliest day the
+        // refusal ledger has rows for — the exact value the Refused tile
+        // renders as "Refusals are recorded from <date>".
+        expect(overview.basis.refusals_recorded_from).toBe('2026-05-28')
         // Sections sum EXACTLY to the total — a fixture whose parts disagreed
         // with its own total would photograph a page no backend could serve.
         // Fiat fields are numeric STRINGS on B's wire, so the folds go through
@@ -1117,6 +1121,9 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         const overview = fx('/analytics/overview') as Record<string, unknown>
         expect(Object.keys(empty).sort()).toEqual(Object.keys(overview).sort())
         expect(empty.basis).toMatchObject({ payments_counted: 0, snapshot_days: 0, tz: 'UTC' })
+        // An empty ledger reports the floor as null (#3013) — present in the
+        // envelope, but never a day the ledger cannot name.
+        expect((empty.basis as Record<string, unknown>).refusals_recorded_from).toBeNull()
         expect(empty.merchants).toEqual([])
         expect(empty.by_day).toEqual([])
         expect(empty.agents).toEqual([])

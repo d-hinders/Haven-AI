@@ -112,7 +112,9 @@ const TIP_REST_TOP = 12
 const TIP_GAP = 6
 const TIP_MIN_VISIBLE = 12
 /** The legend's `mt-3` under the svg: the whitespace a dropped callout may
- *  run into (its bottom on the legend's top edge) without covering a row. */
+ *  run into (its bottom `TIP_GAP` above the legend's top edge, so it floats
+ *  over the label rather than standing on the first row) without covering
+ *  a row. */
 const LEGEND_GAP = 12
 
 const AXIS_COLOR = 'var(--v2-border)'
@@ -385,7 +387,7 @@ export function StackedBarChart({
   // — would sit under the callout's box, the callout drops below the bar's
   // top, but only where that leaves at least `TIP_MIN_VISIBLE` of the bar
   // in view above it: its bottom `TIP_GAP` above the axis baseline when the
-  // bar is tall enough to hold it, else its bottom on the legend's top edge
+  // bar is tall enough to hold it, else its bottom just above the legend
   // — over that day's axis label whole (the label it repeats), never half of
   // it and never over a legend row. A bar too short for either (the
   // callout would swallow its body, the label and the legend to save a
@@ -416,7 +418,7 @@ export function StackedBarChart({
     // but never stands in for the bar's own top.
     const least = Math.max(barTop + TIP_GAP, markTop + TIP_MIN_VISIBLE)
     const aboveBaseline = cssY(baseY) - tip.offsetHeight - TIP_GAP
-    const onLegendTop = svg.clientHeight + LEGEND_GAP - tip.offsetHeight
+    const onLegendTop = svg.clientHeight + LEGEND_GAP - TIP_GAP - tip.offsetHeight
     const top = aboveBaseline >= least ? aboveBaseline : onLegendTop >= least ? onLegendTop : null
     setTipTop(top === null ? null : Number(top.toFixed(1)))
   })

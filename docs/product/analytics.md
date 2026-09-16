@@ -72,8 +72,8 @@ note under the chart says which end), never dropped or stretched. On a wide
 screen a day's detail opens as a callout anchored over that bar, kept inside
 the plot at either edge; when the bar (or its refusal cap) is tall enough to
 reach under the callout, the callout drops below the bar's top instead — its
-bottom just above the axis when the bar can hold it, otherwise on the
-legend's top edge, over that day's own date label — so the bar's top, its
+bottom just above the axis when the bar can hold it, otherwise just above
+the legend, over that day's own date label — so the bar's top, its
 height against its neighbours and any refusal cap stay visible while it is
 open. A bar too short for either (the drop would cover the whole bar to
 save a sliver) keeps the resting callout and loses its top instead. On a

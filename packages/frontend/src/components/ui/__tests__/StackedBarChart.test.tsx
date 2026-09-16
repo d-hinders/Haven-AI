@@ -286,7 +286,7 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
   // The fixture's totals are 150 / 250 / 450 on a 600 scale, a 200px svg:
   // bar tops at CSS y 132.7 / 106.1 / 52.7 (Tue 9 also carries a refusal
   // cap 10 viewBox units higher: 97.0); baseline 172.7, svg bottom 200,
-  // legend top 212. A 90px callout at rest spans 12..102 and needs 6px of
+  // legend top 212 (a dropped callout stops 6px above it: 206). A 90px callout at rest spans 12..102 and needs 6px of
   // clearance (bottom 108), so it hides Tue 9 and Wed 10 but not Mon 8. A
   // dropped callout must leave 12px of the day's marks above it and clear
   // the bar's own top by 6.
@@ -322,11 +322,11 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     expect(tip.style.left).toMatch(/^82\.8/)
   })
 
-  it('drops onto the legend\'s top edge — over the label whole, not a legend row — when the bar cannot hold the callout above the baseline', () => {
+  it('drops to just above the legend — over the label whole, not a legend row — when the bar cannot hold the callout above the baseline', () => {
     layOut()
     // A 120px callout over Wed 10 (bar top 52.7): above the baseline it
-    // would start at 46.7 and cover the top; with its bottom on the legend's
-    // top edge (212) it starts at 92, leaving 39px of the bar.
+    // would start at 46.7 and cover the top; with its bottom 6px above the
+    // legend (206) it starts at 86, leaving 33px of the bar.
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(120)
     const { container, getByTestId } = render(
       <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
@@ -334,14 +334,14 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     fireEvent.keyDown(container.querySelector('svg')!, { key: 'End' })
     const tip = getByTestId('chart-tooltip')
     expect(tip.getAttribute('data-flipped')).toBe('true')
-    expect(tip.style.top).toBe('92px')
+    expect(tip.style.top).toBe('86px')
   })
 
   it('rests over a bar it would otherwise swallow: a drop that cannot leave 12px of the bar in view is not made', () => {
     layOut()
     // A 130px callout over Mon 8 (bar top 132.7): at rest it hides 22px of
-    // the top; dropped, even to the legend's edge (top 82) it would cover
-    // the whole bar and the label — so it rests.
+    // the top; dropped, even to the legend (top 76) it would cover the
+    // whole bar and the label — so it rests.
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(130)
     const swallowed = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
     fireEvent.keyDown(swallowed.container.querySelector('svg')!, { key: 'Home' })
@@ -349,10 +349,10 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     expect(tip.getAttribute('data-flipped')).toBeNull()
     expect(tip.className).toContain('top-3')
     swallowed.unmount()
-    // A 150px callout over Wed 10 (bar top 52.7) lands at 62 on the
-    // legend's edge: 9.3px of the bar — clear of its top edge, but under
-    // the 12px that reads as a bar — so it rests too.
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(150)
+    // A 145px callout over Wed 10 (bar top 52.7) lands at 61 above the
+    // legend: 8.3px of the bar — clear of its top edge, but under the 12px
+    // that reads as a bar — so it rests too.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(145)
     const sliver = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
     fireEvent.keyDown(sliver.container.querySelector('svg')!, { key: 'End' })
     tip = sliver.getByTestId('chart-tooltip')
@@ -364,18 +364,18 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     // Tue 9's bar top is at 106.1, the 90px callout's resting bottom at
     // 108 → drops on the bar alone. Shrink the callout to 80px (bottom at
     // 98): the bar clears it, the cap (97.0) does not — so it still drops
-    // with the cap (onto the legend's edge: 132, leaving the cap and 26px
+    // with the cap (to just above the legend: 126, leaving the cap and 20px
     // of the bar) and rests without it.
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80)
     const withCap = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
     fireEvent.keyDown(withCap.container.querySelector('svg')!, { key: 'ArrowRight' })
     expect(withCap.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBe('true')
-    expect(withCap.getByTestId('chart-tooltip').style.top).toBe('132px')
+    expect(withCap.getByTestId('chart-tooltip').style.top).toBe('126px')
     withCap.unmount()
     // The cap counts towards the 12px of marks but never stands in for the
-    // bar's own top edge: a 101px callout lands at 111 — 14px under the
+    // bar's own top edge: a 95px callout lands at 111 — 14px under the
     // cap, but only 4.9px under the bar's top — so it rests.
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(101)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(95)
     const tooTall = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
     fireEvent.keyDown(tooTall.container.querySelector('svg')!, { key: 'ArrowRight' })
     expect(tooTall.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()

@@ -419,6 +419,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-request-schemas.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The shrink-only request-schema ratchet (#3029) polices packages/backend route modules but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-request-schemas.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
     files: ['scripts/generate-api-types.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

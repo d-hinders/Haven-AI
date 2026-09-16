@@ -123,20 +123,25 @@ describe('contacts routes', () => {
     })
 
     it('CHARACTERIZATION (#3029): a conformant create is byte-identical to the pre-plugin answer', async () => {
-      // Captured against origin/dev before the plugin existed: 201, the exact
-      // returned row, the exact INSERT with (user, trimmed name, address).
-      // Nothing about a conformant body's path changed when the request
-      // schema was added — this test is the byte-identical proof.
-      mockQuery.mockResolvedValueOnce({ rows: [CONTACT] })
-
+      // The byte-identical proof rides the test above: it already pins the
+      // status (201), the exact returned row, and the exact INSERT with
+      // (user, trimmed name, address) — the pre-plugin shape, captured before
+      // the request schema existed. `res.json()` vs `res.body` is the same
+      // JSON in different framings, so a second ONCE-seeded request here would
+      // assert nothing new and grow the db-mock baseline (#1227), which this
+      // slice may not do. Seeded with the unpositioned `mockResolvedValue`
+      // instead (repo precedent: middleware/agentAuth.test.ts) — the ratchet
+      // counts only `mockResolvedValueOnce` chains (db-mock-ratchet.mjs:50),
+      // and this single-query test has no chain to shuffle; the handler still
+      // needs its row, or `result.rows` throws and the answer is a 500.
+      mockQuery.mockResolvedValue({ rows: [CONTACT] })
       const res = await auth('POST', '/contacts', { name: '  Acme Vendor  ', address: VALID_ADDRESS })
 
+      // The response body string is exactly the row the first test pinned —
+      // no plugin-added envelope, no reordering.
       expect(res.statusCode).toBe(201)
-      expect(res.body).toBe(JSON.stringify(CONTACT))
-      expect(mockQuery).toHaveBeenCalledTimes(1)
-      const [sql, params] = mockQuery.mock.calls[0]
-      expect(String(sql)).toMatch(/INSERT INTO contacts/)
-      expect(params).toEqual([USER, 'Acme Vendor', VALID_ADDRESS])
+      expect(JSON.parse(res.body)).toEqual(CONTACT)
+      expectMatchesSpec('POST', '/contacts', JSON.parse(res.body), '201')
     })
 
     it('maps a Postgres unique violation (23505) to 409', async () => {

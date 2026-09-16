@@ -18,7 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-16"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -336,9 +336,11 @@ the live state of an environment is read from the environment, not from prose.
       shape for its own two values), the boolean flags `HAVEN_HOSTED` /
       `HAVEN_FEE_ENABLED` / `HAVEN_LEGACY_BOOKKEEPING_ENABLED` /
       `CATALOG_DISCOVERY_ENABLED` (#3015, that shape again — exactly `true` or
-      `false`, lower-case, anything else refuses the boot) and
+      `false`, lower-case, anything else refuses the boot),
       `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` (#2866, a plain
-      `Number(...) || default`) does not affect this
+      `Number(...) || default`) and `HAVEN_REQUEST_VALIDATION` (#3029, that
+      shape a third time — `off`/`shadow`/`enforce`, default `shadow`, a mode
+      change is a restart) does not affect this
       package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than
       fall back to `alpha`. Verify by creating a setup in the dev dashboard and

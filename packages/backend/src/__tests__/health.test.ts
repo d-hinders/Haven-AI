@@ -113,6 +113,10 @@ describe('GET /health/ops', () => {
       passport: { configured: true },
       trustProxy: { hops: 1, authRateLimitArmed: true },
       accounting: { exhaustedSyncs: 0, connectionsNeedingAttention: 0 },
+      // The request-validation shadow counters (#3029). This bare app installs
+      // no plugin, so the module-level counters sit at their pre-install
+      // default: mode 'off', nothing counted (vitest isolates per test file).
+      request_validation: { mode: 'off', wouldRefuse: 0, byRouteField: {} },
     })
   })
 
@@ -160,6 +164,9 @@ describe('GET /health/ops', () => {
       passport: { configured: true },
       trustProxy: { hops: 1, authRateLimitArmed: true },
       accounting: { exhaustedSyncs: null, connectionsNeedingAttention: null, unavailable: true },
+      // The request-validation shadow counters (#3029); pre-install default,
+      // same reason as the valid-token test above — no plugin on this app.
+      request_validation: { mode: 'off', wouldRefuse: 0, byRouteField: {} },
     })
     // The failure is logged at warn with the error's class only — never its message.
     expect(log.warn).toHaveBeenCalledTimes(1)

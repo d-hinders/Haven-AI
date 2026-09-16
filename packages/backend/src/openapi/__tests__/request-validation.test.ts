@@ -13,8 +13,10 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { readFile } from 'node:fs/promises'
 
-const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
-vi.mock('../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
+// A plain fn the probe handlers await — no module mock here: nothing in this
+// file's import graph imports the DB, and a vi.mock of a module the scanner
+// cannot resolve breaks the mock-factory census equation (261 ≠ 262).
+const mockQuery = vi.fn()
 
 import { installRequestValidation, requestValidationOpsSnapshot, requestSchemaForOperation, prefixIsEnforced } from '../request-validation.js'
 import { openapiSpec } from '../spec.js'
@@ -32,7 +34,8 @@ describe('requestSchemaForOperation (#3029)', () => {
     expect(schema).not.toBeNull()
     expect(schema?.body).toMatchObject({ type: 'object', required: ['name'] })
     expect(schema?.params).toMatchObject({ type: 'object' })
-    expect(schema?.params?.properties?.id).toMatchObject({ format: 'uuid' })
+    const params = (schema?.params?.properties ?? {}) as Record<string, unknown>
+    expect(params.id).toMatchObject({ format: 'uuid' })
     expect(schema?.params?.required).toEqual(['id'])
     expect(schema?.querystring).toBeUndefined()
   })
@@ -46,9 +49,11 @@ describe('requestSchemaForOperation (#3029)', () => {
     // /agent-activity/{id}/activity carries path + query params on the operation.
     const get = spec.paths['/agent-activity/{id}/activity'].get
     const schema = requestSchemaForOperation(get)
-    expect(schema?.params?.properties?.id).toMatchObject({ format: 'uuid' })
-    expect(schema?.querystring?.properties?.limit).toMatchObject({ type: 'integer', minimum: 1 })
-    expect(schema?.querystring?.properties?.offset).toMatchObject({ type: 'integer', minimum: 0 })
+    const params = (schema?.params?.properties ?? {}) as Record<string, unknown>
+    const query = (schema?.querystring?.properties ?? {}) as Record<string, unknown>
+    expect(params.id).toMatchObject({ format: 'uuid' })
+    expect(query.limit).toMatchObject({ type: 'integer', minimum: 1 })
+    expect(query.offset).toMatchObject({ type: 'integer', minimum: 0 })
   })
 })
 
@@ -93,7 +98,6 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
   it('an off-spec body takes the NORMAL path — status and body unchanged', async () => {
     // The spec's POST /contacts schema requires `address`; the probe handler
     // itself never validates. Shadow must not change the answer.
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     const res = await auth('POST', '/contacts', { name: 'Acme' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ created: { name: 'Acme' } })
@@ -107,7 +111,6 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
       return originalInfo(obj as never, msg as never)
     }
 
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     await auth('POST', '/contacts', { name: 'Acme' })
 
     expect(lines.length).toBe(1)
@@ -121,14 +124,12 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
 
   it('a conformant body produces NO log line and no counter movement', async () => {
     const before = requestValidationOpsSnapshot().wouldRefuse
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     await auth('POST', '/contacts', { name: 'Acme', address: '0x' + 'ab'.repeat(20) })
     expect(requestValidationOpsSnapshot().wouldRefuse).toBe(before)
   })
 
   it('the shadow counter records route+field and /health/ops shape via requestValidationOpsSnapshot', async () => {
     const before = requestValidationOpsSnapshot()
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     await auth('POST', '/contacts', { name: 'Acme' })
     const after = requestValidationOpsSnapshot()
 
@@ -140,7 +141,6 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
   })
 
   it('a typed query parameter (limit=10, a string on the wire) is ACCEPTED — coercion proven', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     // /agent-activity/{id}/activity is the spec'd GET with typed params
     // (uuid path, integer limit/offset query) — the plugin injects its schema.
     const res = await auth('GET', '/agent-activity/7c41b8e0-2d95-4a63-b1f7-8e5c39a0d264/activity?limit=10')
@@ -178,7 +178,6 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     }
 
     const before = requestValidationOpsSnapshot()
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     const res = await auth('POST', '/x402/authorize', {
       url: 'https://merchant.example/mcp',
       payTo: '0x' + 'ab'.repeat(20),
@@ -207,7 +206,6 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     // Proves the log above is caused by the undeclared field specifically —
     // the conformant shape passes the spec as written today.
     const before = requestValidationOpsSnapshot()
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     const res = await auth('POST', '/x402/authorize', {
       url: 'https://merchant.example/mcp',
       payTo: '0x' + 'ab'.repeat(20),
@@ -245,7 +243,6 @@ describe('installRequestValidation — off mode (#3029)', () => {
     }
 
     const before = requestValidationOpsSnapshot()
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     const res = await app.inject({
       method: 'POST',
       url: '/contacts',
@@ -262,7 +259,6 @@ describe('installRequestValidation — off mode (#3029)', () => {
   it('off does not disable an enforcedPrefixes module — the proof-module override holds', async () => {
     // Re-installed below in its own app; asserted there. Here we pin that the
     // OFF app did not inject a schema at all (the probe answers regardless).
-    mockQuery.mockResolvedValueOnce({ rows: [] })
     const res = await app.inject({
       method: 'POST',
       url: '/contacts',

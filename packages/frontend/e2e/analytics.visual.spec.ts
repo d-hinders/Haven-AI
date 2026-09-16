@@ -206,7 +206,7 @@ const COPY = {
   balanceHeading: 'Balance over time',
   spendHeading: 'Spend over time',
   /** The fixture window ends at 14:30Z with `tz: UTC`, so the last bucket (10 Jul) is a partial day: one lighter bar and this note (#3051). */
-  spendPartialNote: 'The last bar is drawn lighter',
+  spendPartialNote: 'The last bar is striped',
   nordshield: 'NordShield VPN',
   emptyTitle: 'No agent activity in this range',
   emptyBody: 'This window has no payments, refusals or fees to report.',

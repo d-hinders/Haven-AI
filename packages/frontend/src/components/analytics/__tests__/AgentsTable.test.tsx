@@ -198,7 +198,7 @@ describe('AgentsTable — the desktop table', () => {
 })
 
 describe('AgentsTable — one colour per agent, shared with the spend chart (#3051)', () => {
-  it('puts the series swatch beside each plotted agent, in both renderings, from the one shared map', () => {
+  it('puts the series swatch beside each plotted agent\'s SPEND figure, in both renderings, from the one shared map — never beside the name', () => {
     const agents = orderAgentsForDisplay([RESEARCH, RETIRED])
     const map = seriesIndexByAgent(agents, FIXTURE_ANALYTICS_OVERVIEW.by_day as AnalyticsDayBucket[])
     const { container } = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={map} />)
@@ -210,6 +210,12 @@ describe('AgentsTable — one colour per agent, shared with the spend chart (#30
     expect(mobileSwatches).toHaveLength(2)
     expect(Array.from(desktopSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
     expect(Array.from(mobileSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
+    // Desktop: the swatch shares a cell with the spend figure, not the name
+    // link (a dot beside a name is the status-light idiom).
+    const spendCell = desktopSwatches[0]!.closest('td')!
+    expect(spendCell.textContent).toContain('$')
+    expect(spendCell.querySelector('a')).toBeNull()
+    expect(desktop.querySelector('a [data-testid="series-swatch"]')).toBeNull()
     // The colour is the chart's own token by index — the same
     // `seriesColor(0)` the first stacked segment is filled with.
     expect((desktopSwatches[0] as HTMLElement).style.backgroundColor).toBe(seriesColor(0))

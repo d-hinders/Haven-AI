@@ -2453,15 +2453,26 @@ export default function DesignSystemPage() {
 
       <Section
         title="StackedBarChart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its name in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped, not faded: an opacity blend reads lighter on the light ground and darker on the dark one. Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
-            days={DS_CHART_DAYS}
+            days={DS_CHART_DAYS.map((d, i) => (i === DS_CHART_DAYS.length - 1 ? { ...d, partial: true } : d))}
             currency="USD"
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
           />
+          {/* The narrow treatment, as the page mounts it below `lg`: wider
+              tick gutter, dot legend, tap-to-pin panel. */}
+          <div className="mt-4 max-w-[320px]">
+            <StackedBarChart
+              days={DS_CHART_DAYS.map((d, i) => (i === DS_CHART_DAYS.length - 1 ? { ...d, partial: true } : d))}
+              currency="USD"
+              ariaLabel={DS_CHART_SUMMARY}
+              formatValue={dsMoney}
+              narrow
+            />
+          </div>
           {/* The swatch a table row carries to key itself to the chart above —
               the same `seriesColor(index)` the segments and the legend read. */}
           <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]">

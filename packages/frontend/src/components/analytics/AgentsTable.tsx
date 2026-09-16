@@ -60,16 +60,11 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
 
 const COLUMN_PAD = 'px-4 py-3'
 
-function StatusCell({ agent, seriesIndex }: { agent: AnalyticsAgentRow; seriesIndex: number | undefined }) {
+function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
   const presentation = agentStatusPresentation(agent.status)
   const revoked = agent.status === 'revoked'
   return (
     <span className="inline-flex items-center gap-2 min-w-0">
-      {/* #3051: the same series token the spend chart paints this agent with,
-          from the ONE map the page builds (`lib/analytics-series.ts`). An
-          agent with no bar on the chart gets no swatch — a colour that
-          matches nothing would be a key to nothing. */}
-      {seriesIndex !== undefined && <SeriesSwatch seriesIndex={seriesIndex} />}
       <span className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</span>
       {/* A revoked agent stays in the table rather than dropping out of it: it
           still spent money in this range, and hiding the row would hide the
@@ -195,12 +190,23 @@ export function AgentsTable({
                     href={`/agents/${agent.id}`}
                     className="inline-flex items-center gap-2 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
                   >
-                    <StatusCell agent={agent} seriesIndex={seriesIndexById?.get(agent.id)} />
+                    <StatusCell agent={agent} />
                   </Link>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
-                  <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
-                    {formatAnalyticsAmount(agent.spent, currency)}
+                  {/* #3051: the series token the spend chart paints this agent
+                      with, from the ONE map the page builds
+                      (`lib/analytics-series.ts`), beside the SPEND figure —
+                      the money the bar is made of — and never beside the
+                      name, where a coloured dot reads as a status light. An
+                      agent with no bar gets no swatch. */}
+                  <span className="inline-flex items-center justify-end gap-2">
+                    {seriesIndexById?.get(agent.id) !== undefined && (
+                      <SeriesSwatch seriesIndex={seriesIndexById.get(agent.id)!} />
+                    )}
+                    <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
+                      {formatAnalyticsAmount(agent.spent, currency)}
+                    </span>
                   </span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right ${tableColumnClass('xl')}`}>
@@ -279,14 +285,16 @@ function MobileAgentRow({
       <Row
         title={
           <span className="inline-flex items-center gap-2 min-w-0">
-            {seriesIndex !== undefined && <SeriesSwatch seriesIndex={seriesIndex} />}
             <span className="truncate">{agent.name}</span>
             {agent.status === 'revoked' && <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>}
           </span>
         }
         subtitle={
-          <span className="v2-tabular">
-            {formatAnalyticsAmountCompact(agent.spent, currency)} spent · {agent.refusals} refused
+          <span className="v2-tabular inline-flex items-center gap-1.5">
+            {seriesIndex !== undefined && <SeriesSwatch seriesIndex={seriesIndex} />}
+            <span>
+              {formatAnalyticsAmountCompact(agent.spent, currency)} spent · {agent.refusals} refused
+            </span>
           </span>
         }
         trailing={

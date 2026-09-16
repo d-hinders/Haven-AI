@@ -206,7 +206,7 @@ describe('StackedBarChart — the drawing says what the data says', () => {
 })
 
 describe('StackedBarChart — a partial day is drawn as one (#3051)', () => {
-  it('lightens the bar, marks the group, and names it in the data table and the tooltip', () => {
+  it('hatches the bar with its own series token, marks the group, and names it in the data table and the tooltip', () => {
     const days: StackedBarDay[] = THREE_DAYS.map((d) => ({ ...d }))
     days[0] = { ...days[0]!, partial: true }
     const { container, getByTestId } = render(
@@ -217,13 +217,55 @@ describe('StackedBarChart — a partial day is drawn as one (#3051)', () => {
     expect(groups[1]!.getAttribute('data-partial')).toBeNull()
     const cutSegment = groups[0]!.querySelector('[data-testid="chart-segment"]')!
     const fullSegment = groups[1]!.querySelector('[data-testid="chart-segment"]')!
-    expect(Number(cutSegment.getAttribute('fill-opacity'))).toBeLessThan(Number(fullSegment.getAttribute('fill-opacity')))
+    // Striped, not faded: the partial segment fills from a <pattern> whose
+    // base rect is the SAME series token the full segment is filled with, so
+    // the mark is identical on both themes and the token's contrast holds.
+    expect(cutSegment.getAttribute('data-hatched')).toBe('true')
+    expect(fullSegment.getAttribute('data-hatched')).toBeNull()
+    const fill = cutSegment.getAttribute('fill')!
+    expect(fill).toMatch(/^url\(#.*-hatch-\d+\)$/)
+    const patternId = fill.slice(5, -1)
+    const pattern = container.querySelector(`[data-testid="chart-hatch-pattern"][id="${patternId}"]`)!
+    expect(pattern.querySelector('rect')!.getAttribute('fill')).toBe(fullSegment.getAttribute('fill'))
+    expect(pattern.querySelector('line')!.getAttribute('stroke')).toBe('var(--v2-bg)')
+    // Opacity is no longer the encoding: both segments carry the resting value.
+    expect(cutSegment.getAttribute('fill-opacity')).toBe(fullSegment.getAttribute('fill-opacity'))
     const table = getByTestId('chart-data-table')
     expect(table.textContent).toContain(`${days[0]!.label} (partial day)`)
     expect(table.textContent).not.toContain(`${days[1]!.label} (partial day)`)
     const svg = container.querySelector('svg')!
     fireEvent.keyDown(svg, { key: 'Home' })
     expect(getByTestId('chart-tooltip-partial').textContent).toContain('partial day')
+  })
+})
+
+describe('StackedBarChart — ticks fit the gutter at 390 (#3051 design review)', () => {
+  it('formats ticks with formatTick when given, and widens the gutter on the narrow treatment', () => {
+    const compact = (n: number) => `$${Math.round(n)}`
+    const wide = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} formatTick={compact} />,
+    )
+    const wideTicks = wide.getAllByTestId('chart-tick-label')
+    expect(wideTicks.every((t) => /^\$\d+$/.test(t.textContent ?? ''))).toBe(true)
+    const wideGutter = (wideTicks[0] as HTMLElement).style.width
+    wide.unmount()
+    const narrow = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} formatTick={compact} narrow />,
+    )
+    const narrowGutter = (narrow.getAllByTestId('chart-tick-label')[0] as HTMLElement).style.width
+    expect(parseFloat(narrowGutter)).toBeGreaterThan(parseFloat(wideGutter))
+    // The bars still start to the right of the wider gutter.
+    const firstBar = narrow.container.querySelector('[data-testid="chart-segment"]')!
+    expect(Number(firstBar.getAttribute('x'))).toBeGreaterThan(70)
+  })
+
+  it('falls back to formatValue for ticks when no tick formatter is given', () => {
+    const { getAllByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    // Every tick goes through `fmt` (which prints cents) when no compact
+    // formatter is given.
+    expect(getAllByTestId('chart-tick-label').every((t) => /\.\d\d$/.test(t.textContent ?? ''))).toBe(true)
   })
 })
 

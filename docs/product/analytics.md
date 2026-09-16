@@ -63,12 +63,12 @@ that day (the tooltip and the data table say how many). The bars are the same
 booked values the Spent tile sums, bucketed server-side in the page's time
 zone. Agents are ordered by spend, then id, and an agent that appears on the
 chart keeps one colour across the chart, its legend and the swatch beside its
-name in the agents table below. The window starts and ends at the moment the
-page loads, not at midnight, so a bar on the window's first or last local day
-covers part of a day: it is drawn lighter and named as partial (the note
-under the chart says which end), never dropped or stretched. Below three days
-of data the chart is not drawn (see the sparse rule below) — a line through
-one point agrees with every trend.
+spend figure in the agents table above it. The window starts and ends at the
+moment the page loads, not at midnight, so a bar on the window's first or
+last local day covers part of a day: it is striped and named as partial (the
+note under the chart says which end), never dropped or stretched. Below three
+days of data the chart is not drawn (see the sparse rule below) — a line
+through one point agrees with every trend.
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
 A merchant's label is resolved by the API in a fixed order: your contact's

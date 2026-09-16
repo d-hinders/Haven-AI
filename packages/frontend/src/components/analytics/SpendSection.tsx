@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import { Card } from '@/components/ui/Card'
 import { StackedBarChart, type StackedBarDay } from '@/components/ui/StackedBarChart'
 import { MIN_CHARTABLE_DAYS } from '@/components/charts/chart-scale'
-import { formatAnalyticsDay, formatAnalyticsValue } from '@/lib/analytics-format'
+import { formatAnalyticsDay, formatAnalyticsTick, formatAnalyticsValue } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsRange } from '@/types/analytics'
 
@@ -125,13 +125,13 @@ export function partialEdges(days: StackedBarDay[]): { first: boolean; last: boo
 
 export function partialNote(edges: { first: boolean; last: boolean }): string | null {
   if (edges.first && edges.last) {
-    return 'The first and last bars are drawn lighter: the range starts and ends at this moment, not at midnight, so each covers part of a day.'
+    return 'The first and last bars are striped: the range starts and ends at this moment, not at midnight, so each covers part of a day.'
   }
   if (edges.last) {
-    return 'The last bar is drawn lighter: the range ends at this moment, not at midnight, so it covers part of today.'
+    return 'The last bar is striped: the range ends at this moment, not at midnight, so it covers part of today.'
   }
   if (edges.first) {
-    return 'The first bar is drawn lighter: the range starts at this moment of that day, not at midnight, so it covers part of a day.'
+    return 'The first bar is striped: the range starts at this moment of that day, not at midnight, so it covers part of a day.'
   }
   return null
 }
@@ -175,6 +175,9 @@ export function SpendSection({
 
   const ariaLabel = spendSummary(days, currency, rangeDays)
   const formatValue = (value: number) => formatAnalyticsValue(value, currency)
+  // Ticks without cents: an axis needs no more precision than its grid, and
+  // `$100.00` did not fit the 390 gutter (#3051 design review).
+  const formatTick = (value: number) => formatAnalyticsTick(value, currency)
   const note = partialNote(partialEdges(days))
 
   return (
@@ -183,14 +186,14 @@ export function SpendSection({
         <Card.Header
           as="h2"
           title="Spend over time"
-          description="One bar per day with activity, stacked by agent, with the days the guardrails refused a payment marked above the bar. Booked values only, in your display currency; days with nothing to show are not drawn."
+          description="One bar per day with activity, stacked by agent; a cap above a bar marks refused payments that day. Booked values in your display currency."
         />
         <div className="px-5 pb-5 pt-2">
           <div className="hidden lg:block" data-testid="analytics-spend-desktop">
-            <StackedBarChart days={days} currency={currency} ariaLabel={ariaLabel} formatValue={formatValue} />
+            <StackedBarChart days={days} currency={currency} ariaLabel={ariaLabel} formatValue={formatValue} formatTick={formatTick} />
           </div>
           <div className="lg:hidden" data-testid="analytics-spend-narrow">
-            <StackedBarChart days={days} currency={currency} ariaLabel={ariaLabel} formatValue={formatValue} narrow />
+            <StackedBarChart days={days} currency={currency} ariaLabel={ariaLabel} formatValue={formatValue} formatTick={formatTick} narrow />
           </div>
           {note !== null && (
             <p data-testid="analytics-spend-partial-note" className="mt-3 text-xs text-[var(--v2-ink-3)]">

@@ -80,9 +80,9 @@ describe('partial edge buckets — the window cuts its first and last day', () =
   })
 
   it('says which end is cut, not always both', () => {
-    expect(partialNote({ first: true, last: true })).toMatch(/^The first and last bars/)
-    expect(partialNote({ first: false, last: true })).toMatch(/^The last bar/)
-    expect(partialNote({ first: true, last: false })).toMatch(/^The first bar/)
+    expect(partialNote({ first: true, last: true })).toMatch(/^The first and last bars are striped/)
+    expect(partialNote({ first: false, last: true })).toMatch(/^The last bar is striped/)
+    expect(partialNote({ first: true, last: false })).toMatch(/^The first bar is striped/)
     expect(partialNote({ first: false, last: false })).toBeNull()
     // Only the LAST bucket flagged when the window's first day had no activity.
     const lastOnly = toStackedBarDays(BY_DAY, AGENTS, SERIES, { from: '2026-06-10T14:30:00.000Z', to: '2026-07-10T14:30:00.000Z' }, 'UTC')

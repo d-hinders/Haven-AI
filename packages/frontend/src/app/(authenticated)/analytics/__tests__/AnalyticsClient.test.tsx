@@ -328,7 +328,7 @@ describe('Analytics — the populated page', () => {
     expect(within(tile).queryByText(/^\+|^-/)).toBeNull()
   })
 
-  it('mounts the spend chart off the same response, above the agents table (#3051)', () => {
+  it('mounts the spend chart off the same response, below the agents table and above merchants (#3051; recipe item 5)', () => {
     render(<AnalyticsClient />)
     const spend = screen.getByTestId('analytics-spend-section')
     expect(within(spend).getByRole('heading', { name: 'Spend over time' })).toBeTruthy()
@@ -336,9 +336,12 @@ describe('Analytics — the populated page', () => {
     expect(within(spend).getAllByTestId('stacked-bar-chart')).toHaveLength(2)
     // Four fixture days, two with refusals: two marker caps per rendering.
     expect(within(spend).getAllByTestId('chart-refusal-marker')).toHaveLength(4)
-    // Order: the chart precedes the table in the DOM.
+    // Order: table, then the chart, then merchants — the table is the first
+    // screen's reading surface (screen-recipes.md § Analytics, item 5).
     const table = screen.getByTestId('analytics-agents-section')
-    expect(spend.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const merchants = screen.getByTestId('analytics-merchants-section')
+    expect(table.compareDocumentPosition(spend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(spend.compareDocumentPosition(merchants) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('shows the trend figures and the agents table once there are three days of data', () => {

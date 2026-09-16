@@ -84,7 +84,7 @@
  * media list to honour it.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useId, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
 
@@ -96,6 +96,11 @@ import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/char
 const VIEW_W = 640
 const VIEW_H = 220
 const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
+/** The narrow treatment widens the tick gutter: at 390 the desktop 48/640
+ *  is ~21 CSS px, and a currency tick painted over the first bar (#3051
+ *  design review). Ticks also go through `formatTick`, which callers keep
+ *  compact (no cents) for the same reason. */
+const PAD_NARROW = { ...PAD, left: 78 }
 /** The cap above a bar that refused something, in viewBox units. */
 const REFUSAL_MARKER_H = 7
 
@@ -121,8 +126,12 @@ export interface StackedBarDay {
    * `range.from`/`to` are UTC instants while `by_day` is bucketed in the
    * caller's zone, so the first and last bucket of a window are usually
    * partial — a bar that is short because the day was cut, not because the
-   * agents spent little. Drawn lighter, named in the tooltip and the data
-   * table; never dropped (a partial day with a payment is a day with data).
+   * agents spent little. Drawn HATCHED (diagonal stripes of the ground over
+   * the series token at full strength — an opacity blend reads lighter on
+   * the light ground and darker on the dark one, and drops the token under
+   * the 3:1 the palette guarantees; #3051 design review), named in the
+   * tooltip and the data table; never dropped (a partial day with a payment
+   * is a day with data).
    */
   partial?: boolean
 }
@@ -158,6 +167,9 @@ export interface StackedBarChartProps {
    *  fraction digits) — the same callback the tiles and the agents table
    *  print with, so one voice reads the page. */
   formatValue: (amount: number) => string
+  /** The y-axis tick formatter; defaults to `formatValue`. Callers pass a
+   *  compact form (no cents) so a tick fits the gutter at 390 (#3051). */
+  formatTick?: (amount: number) => string
   /** Fewer x ticks, a dot legend, a tap-to-pin panel: the 390px treatment,
    *  decided by the caller's breakpoint (see the file's header). */
   narrow?: boolean
@@ -231,9 +243,14 @@ export function StackedBarChart({
   currency,
   ariaLabel,
   formatValue,
+  formatTick = formatValue,
   narrow = false,
   className = '',
 }: StackedBarChartProps) {
+  // Pattern ids must be unique per mounted chart — the page mounts the
+  // desktop and narrow pair, and /design-system a third — or one chart's
+  // <defs> would serve another's fills.
+  const patternId = useId()
   const [hovered, setHovered] = useState<number | null>(null)
   const [pinned, setPinned] = useState<number | null>(null)
   const [caret, setCaret] = useState<number | null>(null)
@@ -273,14 +290,21 @@ export function StackedBarChart({
   // nothing" into a React crash.
   const chartable = entries.length >= MIN_CHARTABLE_DAYS
 
-  const plotW = VIEW_W - PAD.left - PAD.right
-  const plotH = VIEW_H - PAD.top - PAD.bottom
-  const baseY = PAD.top + plotH
+  const pad = narrow ? PAD_NARROW : PAD
+  const plotW = VIEW_W - pad.left - pad.right
+  const plotH = VIEW_H - pad.top - pad.bottom
+  const baseY = pad.top + plotH
   const band = entries.length === 0 ? plotW : plotW / entries.length
   const barW = Math.max(2, band * 0.64)
 
   const yOf = (value: number) => baseY - (scale.max === 0 ? 0 : value / scale.max) * plotH
-  const xOf = (index: number) => PAD.left + band * index + (band - barW) / 2
+  const xOf = (index: number) => pad.left + band * index + (band - barW) / 2
+  // The series indexes that need a hatch pattern: only partial days use one.
+  const hatched = useMemo(() => {
+    const set = new Set<number>()
+    for (const e of entries) if (e.partial) for (const s of e.segments) set.add(s.seriesIndex)
+    return [...set]
+  }, [entries])
 
   const active = caret ?? pinned ?? hovered
   const entry = active === null ? null : entries[active] ?? null
@@ -343,8 +367,8 @@ export function StackedBarChart({
             <line
               key={`grid-${tick}`}
               data-testid="chart-gridline"
-              x1={PAD.left}
-              x2={VIEW_W - PAD.right}
+              x1={pad.left}
+              x2={VIEW_W - pad.right}
               y1={yOf(tick)}
               y2={yOf(tick)}
               stroke={AXIS_COLOR}
@@ -352,9 +376,30 @@ export function StackedBarChart({
             />
           ))}
           {/* The abscissa. */}
+          {/* Hatch patterns for partial days: the series token at full
+              strength with diagonal ground-coloured stripes, so the mark is
+              the same on both themes and the token's contrast survives. */}
+          {hatched.length > 0 && (
+            <defs>
+              {hatched.map((i) => (
+                <pattern
+                  key={`hatch-${i}`}
+                  id={`${patternId}-hatch-${i}`}
+                  data-testid="chart-hatch-pattern"
+                  patternUnits="userSpaceOnUse"
+                  width="6"
+                  height="6"
+                  patternTransform="rotate(45)"
+                >
+                  <rect width="6" height="6" fill={seriesColor(i)} />
+                  <line x1="0" y1="0" x2="0" y2="6" stroke="var(--v2-bg)" strokeWidth="2" />
+                </pattern>
+              ))}
+            </defs>
+          )}
           <line
-            x1={PAD.left}
-            x2={VIEW_W - PAD.right}
+            x1={pad.left}
+            x2={VIEW_W - pad.right}
             y1={baseY}
             y2={baseY}
             stroke={AXIS_COLOR}
@@ -389,10 +434,11 @@ export function StackedBarChart({
                       y={bottom}
                       width={barW}
                       height={Math.max(0, height)}
-                      fill={seriesColor(s.seriesIndex)}
-                      // A partial day is drawn lighter so a cut day does not
-                      // read as a quiet one (see `StackedBarDay.partial`).
-                      fillOpacity={e.partial ? (isHl ? 0.7 : 0.5) : isHl ? 1 : 0.88}
+                      // A partial day is hatched so a cut day does not read
+                      // as a quiet one (see `StackedBarDay.partial`).
+                      fill={e.partial ? `url(#${patternId}-hatch-${s.seriesIndex})` : seriesColor(s.seriesIndex)}
+                      data-hatched={e.partial ? 'true' : undefined}
+                      fillOpacity={isHl ? 1 : 0.88}
                     />
                   )
                 })}
@@ -425,12 +471,12 @@ export function StackedBarChart({
             className="absolute block text-right text-xs leading-none text-[var(--v2-ink-3)]"
             style={{
               left: 0,
-              width: pct(PAD.left - 6, VIEW_W),
+              width: pct(pad.left - 6, VIEW_W),
               top: pct(yOf(tick), VIEW_H),
               transform: 'translateY(-50%)',
             }}
           >
-            {formatValue(tick)}
+            {formatTick(tick)}
           </span>
         ))}
         {labelIdx.map((i) => (
@@ -485,7 +531,16 @@ export function StackedBarChart({
           className={
             narrow
               ? 'mt-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3'
-              : 'absolute left-1/2 top-3 w-max max-w-full -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover'
+              : 'absolute top-3 w-max max-w-[60%] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover'
+          }
+          // Anchored over the day it describes rather than the plot's
+          // centre (which covered its neighbours' bars and refusal caps —
+          // #3051 design review), clamped so the callout stays inside the
+          // card at either edge.
+          style={
+            narrow || active === null
+              ? undefined
+              : { left: `${Math.min(70, Math.max(30, ((xOf(active) + barW / 2) / VIEW_W) * 100))}%` }
           }
           onMouseEnter={() => setPinned(active)}
           onMouseLeave={() => {

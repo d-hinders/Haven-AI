@@ -293,18 +293,19 @@ export default function AnalyticsClient() {
           </div>
         ) : (
           <>
-            {/* ── Spend over time (#3051; epic #2944 item 2, slice D's
-                StackedBarChart) ─────────────────────────────────────────────
-                The day-buckets the endpoint returns in `by_day`, keyed to the
-                agents in the table below — the same `agents[]` order gives
-                the chart and the table one colour per agent. Mounted above
-                the table because the bars are what the table's numbers sum
-                to; the sparse branch above keeps the whole band empty below
-                MIN_CHARTABLE_DAYS days of data. */}
-            {/* No `by_day.length` guard here: the sparse branch above already
-                requires MIN_CHARTABLE_DAYS entries in it, so the section's own
-                floor can never fire on this path (the balance section's
-                guard below is a DIFFERENT array). */}
+            {agents.length > 0 && (
+              <div className="mt-4" data-testid="analytics-agents-section">
+                <AgentsTable agents={agents} currency={currency} seriesIndexById={seriesIndexById} />
+              </div>
+            )}
+            {/* Below the table, per the screen recipe ("the chart band and
+                the merchants section below the table"): the table is the
+                page's primary reading surface and stays on the first screen;
+                the chart is the same figures over time. No `by_day.length`
+                guard here: the sparse branch above already requires
+                MIN_CHARTABLE_DAYS entries in it, so the section's own floor
+                can never fire on this path (the balance guard below is a
+                DIFFERENT array). */}
             <div className="mt-4">
               <SpendSection
                 byDay={data.by_day}
@@ -316,11 +317,6 @@ export default function AnalyticsClient() {
                 rangeDays={rangeDays}
               />
             </div>
-            {agents.length > 0 && (
-              <div className="mt-4" data-testid="analytics-agents-section">
-                <AgentsTable agents={agents} currency={currency} seriesIndexById={seriesIndexById} />
-              </div>
-            )}
             {/* ── Merchants and balance (slice E, #2949) ────────────────────
                 The two sections the wire contract parked here, now mounted:
                 the top-merchants table over `merchants` and the

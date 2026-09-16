@@ -101,15 +101,29 @@ export function toStackedBarDays(
 ): StackedBarDay[] {
   const nameById = new Map(agents.map((a) => [a.id, a.name]))
   const partial = partialEdgeDates(range, tz)
-  // Segments in display order (the map's insertion order IS the display
-  // order), so every bar stacks the agents the same way the table lists them.
+  // An id the map does not carry (not producible by this endpoint) takes the
+  // next free slot, each its own, so two strays never share a colour.
+  const fallback = new Map<string, number>()
+  const indexOf = (agentId: string): number => {
+    const known = seriesIndexById.get(agentId)
+    if (known !== undefined) return known
+    let slot = fallback.get(agentId)
+    if (slot === undefined) {
+      slot = seriesIndexById.size + fallback.size
+      fallback.set(agentId, slot)
+    }
+    return slot
+  }
+  // Segments in display order — the wire's `spent_by_agent` key order is the
+  // SQL's row order, not the page's — so every bar stacks the agents the same
+  // way the table lists them.
   return byDay.map((day) => ({
     label: formatAnalyticsDay(day.date),
     series: Object.entries(day.spent_by_agent)
       .map(([agentId, amount]) => ({
         id: agentId,
         name: nameById.get(agentId) ?? agentId,
-        seriesIndex: seriesIndexById.get(agentId) ?? seriesIndexById.size,
+        seriesIndex: indexOf(agentId),
         amount: Number(amount),
       }))
       .sort((a, b) => a.seriesIndex - b.seriesIndex),

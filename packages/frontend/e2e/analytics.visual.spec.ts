@@ -72,7 +72,7 @@
  *     "22h ago") — a frozen clock that freezes both rows onto the same string
  *     would pin the calendar and prove nothing about the column.
  *   - Everything else the page paints is absolute already, by the fixture's
- *     own contract (`ANALYTICS_RANGE` is a fixed window ending 2026-07-11, and
+ *     own contract (`ANALYTICS_RANGE` is a fixed window ending 2026-07-10T14:30Z, and
  *     every date on the response is an absolute ISO string), so no other cell
  *     moves with the date of the run.
  *   - Fonts settled, network idle, no skeleton left on screen: the three
@@ -151,9 +151,10 @@ const FULL_PAGE_MAX_DIFF_PIXELS = 150
 const PIXEL_THRESHOLD = 0.02
 
 /**
- * The frozen instant. One day and nine hours past the fixture window's `to`
- * (2026-07-11T00:00:00Z), which puts the two agents' `last_payment_at` rows
- * into different `timeAgo` buckets — see the Determinism note in the header.
+ * The frozen instant. One day and eighteen-and-a-half hours past the fixture
+ * window's `to` (2026-07-10T14:30:00Z; `timeAgo` reads `last_payment_at`, not
+ * `range.to`, so the distance only has to keep the two agents' rows in
+ * different `timeAgo` buckets — see the Determinism note in the header).
  */
 const FROZEN_NOW = new Date('2026-07-12T09:00:00.000Z')
 

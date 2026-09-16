@@ -46,6 +46,26 @@ describe('toStackedBarDays — the wire becomes the primitive input', () => {
     expect(days.map((d) => d.refusals)).toEqual([0, 0, 1, 1])
   })
 
+  it('stacks every bar in display order even when the wire lists the agents the other way round', () => {
+    // The endpoint's `spent_by_agent` key order is the SQL's row order; the
+    // page's display order is spend-desc. A bucket keyed retired-first must
+    // still stack research (index 0) first.
+    const reversed: AnalyticsDayBucket[] = [
+      { date: '2026-07-07', spent_by_agent: { 'agent-retired': '12.50', 'agent-research': '85.75' }, refusals: 0 },
+    ]
+    const [day] = toStackedBarDays(reversed, AGENTS, seriesIndexByAgent(AGENTS, reversed), ALIGNED_RANGE, 'UTC')
+    expect(day!.series.map((s) => [s.id, s.seriesIndex])).toEqual([
+      ['agent-research', 0],
+      ['agent-retired', 1],
+    ])
+  })
+
+  it('gives two stray ids two different colours', () => {
+    const stray: AnalyticsDayBucket[] = [{ date: '2026-07-07', spent_by_agent: { x: '1', y: '2' }, refusals: 0 }]
+    const [day] = toStackedBarDays(stray, AGENTS, new Map([['c', 0]]), ALIGNED_RANGE, 'UTC')
+    expect(day!.series.map((s) => s.seriesIndex)).toEqual([1, 2])
+  })
+
   it('names an agent id the roster does not carry rather than dropping its money, on a colour past the roster', () => {
     const stray: AnalyticsDayBucket[] = [
       { date: '2026-07-07', spent_by_agent: { 'agent-ghost': '3.00' }, refusals: 0 },

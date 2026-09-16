@@ -34,9 +34,9 @@ function tx(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransaction {
     blockNumber: 45_725_826,
     isError: false,
     chainId: 8453,
-    safeId: 'safe-1',
-    safeAddress: '0xsafe',
-    safeName: 'Main',
+    accountId: 'account-1',
+    accountAddress: '0xsafe',
+    accountName: 'Main',
     ...overrides,
   }
 }

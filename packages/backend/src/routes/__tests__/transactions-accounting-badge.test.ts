@@ -56,7 +56,7 @@ function x402Rows() {
     agent_name: 'Buyer',
     account_id: BASE_SAFE_ID,
     account_address: BASE_SAFE,
-    safe_name: 'Base account',
+    account_name: 'Base account',
     chain_id: 8453,
     token_symbol: 'USDC',
     token_address: USDC,

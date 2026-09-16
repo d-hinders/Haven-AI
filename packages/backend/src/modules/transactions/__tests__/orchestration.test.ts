@@ -17,9 +17,9 @@ function enriched(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransac
     blockNumber: 100,
     isError: false,
     chainId: 8453,
-    safeId: 'safe-1',
-    safeAddress: '0xsafe',
-    safeName: 'Main',
+    accountId: 'safe-1',
+    accountAddress: '0xsafe',
+    accountName: 'Main',
     ...overrides,
   }
 }
@@ -142,14 +142,14 @@ describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
       false,
     )
 
-    expect(result.failedSafeIds).toEqual(['safe-fail'])
+    expect(result.failedAccountIds).toEqual(['safe-fail'])
     expect(result.merged).toHaveLength(1)
     expect(result.merged[0]).toMatchObject({
       hash: '0xsafe-ok',
-      safeId: 'safe-ok',
+      accountId: 'safe-ok',
       chainId: 8453,
-      safeAddress: '0xok',
-      safeName: 'OK',
+      accountAddress: '0xok',
+      accountName: 'OK',
     })
   })
 
@@ -172,10 +172,10 @@ describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
     )
 
     expect(result.merged).toEqual([])
-    expect(result.failedSafeIds).toEqual(['safe-1'])
+    expect(result.failedAccountIds).toEqual(['safe-1'])
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: 'safe-1' }),
-      'Safe transaction aggregation failed',
+      'Account transaction aggregation failed',
     )
   })
 })

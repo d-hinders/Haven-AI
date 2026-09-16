@@ -91,7 +91,7 @@ describeDb('agent-connection-setups repository (#1225)', () => {
     const row = await findSetupForUser(setup.id, userId)
     expect(row).not.toBeNull()
     expect(row!.status).toBe('awaiting_connection')
-    expect(row!.safe_chain_id).toBe(84532) // the smart_accounts join carries the wallet
+    expect(row!.account_chain_id).toBe(84532) // the smart_accounts join carries the wallet
     expect(await listSetupAllowances(setup.id)).toHaveLength(2)
   })
 

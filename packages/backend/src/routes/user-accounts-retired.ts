@@ -35,19 +35,8 @@
  * Safe-rail refusal, which is a different fact and still true.
  */
 
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-
-/** Every method+path `userAccountsRoutes` served under the retired prefix. */
-const RETIRED_ROUTES = [
-  { method: 'GET', path: '/', replacement: 'GET /user/accounts' },
-  { method: 'POST', path: '/', replacement: 'POST /user/accounts' },
-  { method: 'POST', path: '/deploy', replacement: 'POST /user/accounts/deploy' },
-  { method: 'PUT', path: '/:id', replacement: 'PUT /user/accounts/:accountId' },
-  { method: 'PUT', path: '/:id/default', replacement: 'PUT /user/accounts/:accountId/default' },
-  { method: 'DELETE', path: '/:id', replacement: 'DELETE /user/accounts/:accountId' },
-  { method: 'GET', path: '/:id/funding', replacement: 'GET /user/accounts/:accountId/funding' },
-] as const
 
 /**
  * The refusal body, one producer (the lesson `safe-inflow-retired.ts` records:
@@ -71,17 +60,39 @@ export function retiredSafePath(replacement: string): {
   }
 }
 
-export default async function userSafesRetiredRoutes(app: FastifyInstance) {
+/**
+ * One handler per retired address, naming where that address moved to.
+ *
+ * Named `retired…` deliberately: `qa-seed-routes.test.ts`'s retirement
+ * detector matches `.<method>('<path>', retired*(` and is how the QA seed is
+ * stopped from calling a permanently-gone path. A handler called anything
+ * else leaves these seven addresses uncounted in BOTH directions.
+ */
+function retiredSafePathHandler(replacement: string) {
+  return async (_request: FastifyRequest, reply: FastifyReply) => {
+    const retired = retiredSafePath(replacement)
+    return reply.code(retired.statusCode).send(retired.body)
+  }
+}
+
+export default async function userAccountsRetiredRoutes(app: FastifyInstance) {
   app.addHook('onRequest', authMiddleware)
 
-  for (const { method, path, replacement } of RETIRED_ROUTES) {
-    app.route({
-      method,
-      url: path,
-      handler: async (_request, reply) => {
-        const retired = retiredSafePath(replacement)
-        return reply.code(retired.statusCode).send(retired.body)
-      },
-    })
-  }
+  // Registered one literal `app.<method>('<path>', retired…)` call at a time
+  // rather than looped over a table through `app.route({ method, url })`. The
+  // table was tidier and made this module INVISIBLE to
+  // `openapi/route-inventory.ts`, whose extractor matches
+  // `<ident>.<method>('<path>'` and cannot see a url that arrives as data — so
+  // `owner-cli-route-census.test.ts` and `qa-seed-routes.test.ts` counted
+  // these seven paths as neither live nor retired. A route no census can see
+  // is the failure mode the owner_cli allow-list comment names: it reads as
+  // coverage and is not. The producer stays single, which is the part that
+  // mattered.
+  app.get('/', retiredSafePathHandler('GET /user/accounts'))
+  app.post('/', retiredSafePathHandler('POST /user/accounts'))
+  app.post('/deploy', retiredSafePathHandler('POST /user/accounts/deploy'))
+  app.put('/:id', retiredSafePathHandler('PUT /user/accounts/:accountId'))
+  app.put('/:id/default', retiredSafePathHandler('PUT /user/accounts/:accountId/default'))
+  app.delete('/:id', retiredSafePathHandler('DELETE /user/accounts/:accountId'))
+  app.get('/:id/funding', retiredSafePathHandler('GET /user/accounts/:accountId/funding'))
 }

@@ -162,7 +162,7 @@
       "runsVia": [
         "lint:ratchet:test"
       ],
-      "reason": "The engine's own self-test, which did not exist until #2759 \u2014 six gates imported the module and each gate's suite covered only the paths that gate happens to take, so the engine's contract was tested by nobody. Both surface jobs, mirroring the engine above: a weakening reachable from either surface must run it."
+      "reason": "The engine's own self-test, which did not exist until #2759 — six gates imported the module and each gate's suite covered only the paths that gate happens to take, so the engine's contract was tested by nobody. Both surface jobs, mirroring the engine above: a weakening reachable from either surface must run it."
     },
     {
       "path": "scripts/lint-wire-types.mjs",
@@ -204,7 +204,7 @@
       "runsVia": [
         "visual:baselines"
       ],
-      "reason": "The visual gate's honesty instrument (#2318): it names the baselines that were actually compared, and refuses an EMPTY baseline tree \u2014 the case where the pixel gate passes having compared nothing. It reads packages/frontend/e2e/__screenshots__ but lives under scripts/, and the job that reads it beside the tick (design_visual) is gated on the frontend surface, so a pull request touching only this file must be routed to frontend_checks to run it at all."
+      "reason": "The visual gate's honesty instrument (#2318): it names the baselines that were actually compared, and refuses an EMPTY baseline tree — the case where the pixel gate passes having compared nothing. It reads packages/frontend/e2e/__screenshots__ but lives under scripts/, and the job that reads it beside the tick (design_visual) is gated on the frontend surface, so a pull request touching only this file must be routed to frontend_checks to run it at all."
     },
     {
       "path": "scripts/ci/visual-baseline-inventory.test.mjs",
@@ -224,7 +224,7 @@
       "runsVia": [
         "lint:migration-constraint-scope"
       ],
-      "reason": "Refuses a pg_constraint lookup in packages/backend/src/db/migrations/** that is not anchored to a relation or schema (#2702). `conname` is not unique across schemas, so an unanchored lookup is answered by another schema's copy and the constraint is silently skipped \u2014 measured at 185 and 193 schemas missing three constraints. It lives under scripts/ and only backend_checks runs it, so a PR that only weakens the guard would not route to the job that runs it."
+      "reason": "Refuses a pg_constraint lookup in packages/backend/src/db/migrations/** that is not anchored to a relation or schema (#2702). `conname` is not unique across schemas, so an unanchored lookup is answered by another schema's copy and the constraint is silently skipped — measured at 185 and 193 schemas missing three constraints. It lives under scripts/ and only backend_checks runs it, so a PR that only weakens the guard would not route to the job that runs it."
     },
     {
       "path": "scripts/lint-migration-constraint-scope.test.mjs",

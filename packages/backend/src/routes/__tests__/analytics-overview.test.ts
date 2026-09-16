@@ -30,6 +30,7 @@ const {
   mockAggregateRefusalsForUserByAgent,
   mockAggregateRefusalAmountForUser,
   mockListRefusalsByDayForUser,
+  mockFirstRefusalDayForUser,
 } = vi.hoisted(() => ({
   mockSumTotalsSpendForUser: vi.fn(),
   mockCountUnsettledSubmittedForUser: vi.fn(),
@@ -46,6 +47,7 @@ const {
   mockAggregateRefusalsForUserByAgent: vi.fn(),
   mockAggregateRefusalAmountForUser: vi.fn(),
   mockListRefusalsByDayForUser: vi.fn(),
+  mockFirstRefusalDayForUser: vi.fn(),
 }))
 
 vi.mock('../../infra/repositories/analytics.js', async () => {
@@ -76,6 +78,7 @@ vi.mock('../../infra/repositories/contacts.js', () => ({
 
 vi.mock('../../infra/repositories/payment-refusals.js', () => ({
   aggregateRefusalsForUserByAgent: mockAggregateRefusalsForUserByAgent,
+  firstRefusalDayForUser: mockFirstRefusalDayForUser,
 }))
 
 import analyticsOverviewRoutes from '../analytics-overview.js'
@@ -123,6 +126,7 @@ function emptyFixtures(userId: string) {
     refused_amount_eur: '0',
   })
   mockListRefusalsByDayForUser.mockResolvedValue([])
+  mockFirstRefusalDayForUser.mockResolvedValue(null)
   void userId
 }
 
@@ -321,6 +325,28 @@ describe('GET /analytics/overview', () => {
       USER,
       expect.objectContaining({ from: expect.any(String), to: expect.any(String) }),
     )
+  })
+
+  it('reports the refusal-ledger floor: null on an empty ledger, the earliest recorded day once rows exist (#3013)', async () => {
+    // The default fixture seeds an empty refusal ledger: null — an empty
+    // ledger must stay distinguishable from any day value.
+    const empty = await call('/analytics/overview?range=30d', token)
+    expect(empty.statusCode).toBe(200)
+    expect(empty.json().basis.refusals_recorded_from).toBeNull()
+
+    mockFirstRefusalDayForUser.mockResolvedValue('2030-05-30')
+    const seeded = await call('/analytics/overview?range=7d', token)
+    expect(seeded.statusCode).toBe(200)
+    expect(seeded.json().basis.refusals_recorded_from).toBe('2030-05-30')
+  })
+
+  it('the floor is a LEDGER property, not a range property: the repo read takes only the user, never the window (#3013)', async () => {
+    await call('/analytics/overview?range=90d', token)
+    // No from/to argument — contrast the range-scoped reads above, which all
+    // receive the requested window. A 90d request and a 7d request must read
+    // the same floor.
+    expect(mockFirstRefusalDayForUser).toHaveBeenCalledWith(USER)
+    expect(mockFirstRefusalDayForUser).toHaveBeenCalledTimes(1)
   })
 
   it('returns the documented shape end to end (range, basis, totals, sections)', async () => {

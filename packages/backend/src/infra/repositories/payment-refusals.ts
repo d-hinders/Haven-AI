@@ -222,3 +222,24 @@ export async function aggregateRefusalsForUserByAgent(
     by_reason: (row.by_reason ?? {}) as Partial<Record<PaymentRefusalReason, number>>,
   }))
 }
+
+/**
+ * The ledger's floor day (#3013): the earliest `created_at` in
+ * `payment_refusals` for this user as a `YYYY-MM-DD` UTC calendar day,
+ * inside NO window bound — a property of the ledger, not of any requested
+ * range. A window reaching back behind this day knows which part of itself
+ * has no refusal coverage (a `refused_count: 0` there means "nothing was
+ * recorded", never "nothing happened"). `null` when the ledger has no rows
+ * at all, so an empty ledger stays distinguishable from any day value.
+ * `MIN()` over an empty set yields one row of NULL, so the single-row read
+ * covers both shapes.
+ */
+export async function firstRefusalDayForUser(userId: string): Promise<string | null> {
+  const result = await pool.query<{ day: string | null }>(
+    `SELECT TO_CHAR(MIN(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day
+       FROM payment_refusals
+      WHERE user_id = $1`,
+    [userId],
+  )
+  return result.rows[0]?.day ?? null
+}

@@ -316,6 +316,43 @@ describe('StackedBarChart — what a reader who cannot see the chart is told', (
     )
     expect(screen.getAllByTestId('chart-x-label').length).toBeLessThanOrEqual(5)
   })
+
+  it('inherits the helper\'s endpoint-only right edge on the 30-day range (#3037)', () => {
+    // The bar chart reads the same `xLabelIndices` the area chart does, so
+    // the #3037 min-separation rule is inherited here, not re-implemented:
+    // on the 30-day fixture the stride's day-28 slot drops and the endpoint
+    // closes the axis alone — the same five labels, in the same order, both
+    // treatments, exactly as the scale suite pins them.
+    const days = Array.from({ length: 30 }, (_, i) => ({
+      label: `d${i}`,
+      series: [{ id: 'a', name: 'A', amount: 10 + i, seriesIndex: 0 }],
+    }))
+    const { rerender, unmount } = renderChart({}, days)
+    expect(screen.getAllByTestId('chart-x-label').map((el) => el.textContent)).toEqual([
+      'd0',
+      'd7',
+      'd14',
+      'd21',
+      'd29',
+    ])
+    rerender(
+      <StackedBarChart
+        days={days}
+        currency="USD"
+        ariaLabel={SUMMARY}
+        formatValue={fmt}
+        narrow
+      />,
+    )
+    expect(screen.getAllByTestId('chart-x-label').map((el) => el.textContent)).toEqual([
+      'd0',
+      'd7',
+      'd14',
+      'd21',
+      'd29',
+    ])
+    unmount()
+  })
 })
 
 describe('StackedBarChart — the two things that must not happen', () => {

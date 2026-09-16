@@ -196,6 +196,24 @@ mirrors `.env.example` with dev-isolated values. Set these in the **dev Railway
 project** (backend / mcp-server) and the **dev Vercel project** (frontend) —
 never in code. **Every secret MUST differ from production.**
 
+**Boolean flags accept only lowercase `true` / `false` (#3015).** Every
+boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
+`HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
+`HAVEN_ACCOUNTING_ENABLED` and the deprecated `HAVEN_REPORTING_FEED_ENABLED` —
+goes through `parseBooleanFlag`: unset or blank means false; any other value
+(`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
+variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
+and silently read as off. Precision: the deprecated alias is parsed only when
+`HAVEN_ACCOUNTING_ENABLED` is unset (the new name shadows it), so a boot that
+succeeds proves the five active flags clean, not the alias. The Railway
+audit of all six (both projects, exact bytes) was completed 2026-09-15 and is
+recorded on PR #3022; `X402_EMIT_PAYER_CONTEXT` was not in that table and
+needs its own reading before #3021 deploys. The seventh, `X402_EMIT_PAYER_CONTEXT` (#3021), is the one exception to the
+"only `true`/`false`" rule: it also accepts `1` (on) — the spelling every
+#1690 document and template names — trimmed, with a one-line boot warning
+that `true` is the preferred form. Anything else refuses the boot too. It is
+read once at boot (a flip needs a restart) and logs a line when on.
+
 Isolation rules that are non-negotiable for a payments product:
 
 - **Separate Postgres** from prod (`DATABASE_URL` points at the dev instance).

@@ -12051,6 +12051,8 @@ export interface operations {
                             snapshot_days: number;
                             /** @description The zone actually used to bucket `by_day` — UTC when the request gave none. */
                             tz: string;
+                            /** @description The ledger floor (#3013): the earliest `payment_refusals` day (UTC `YYYY-MM-DD`) with rows, inside NO window bound — a property of the ledger, not of the requested range. `null` only when the ledger has no rows at all, so a window behind the floor reads a coverage caveat ("nothing was recorded"), not a clean zero. */
+                            refusals_recorded_from: string | null;
                         };
                         totals: {
                             /** @description Sum of booked fiat, CONFIRMED only. */

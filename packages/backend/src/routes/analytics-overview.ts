@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
-import { aggregateRefusalsForUserByAgent } from '../infra/repositories/payment-refusals.js'
+import { aggregateRefusalsForUserByAgent, firstRefusalDayForUser } from '../infra/repositories/payment-refusals.js'
 import {
   aggregateRefusalAmountForUser,
   computeBudgetBands,
@@ -114,6 +114,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         refusalsPreviousByAgent,
         refusalAmount,
         refusalsByDayRows,
+        refusalLedgerFloor,
         contacts,
       ] = await Promise.all([
         sumTotalsSpendForUser(sub, current, previous),
@@ -133,6 +134,9 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         // list, and both use the same `[from, to)` boundary as spend.
         aggregateRefusalAmountForUser(sub, current),
         listRefusalsByDayForUser(sub, tz, current),
+        // The ledger floor (#3013) — read inside NO window bound: it is a
+        // property of the ledger, not of the requested range.
+        firstRefusalDayForUser(sub),
         listContactsForUser(sub),
       ])
 
@@ -251,6 +255,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           gas_sponsored_ops: gasSponsoredOps,
           snapshot_days: balanceByDay.length,
           tz,
+          refusals_recorded_from: refusalLedgerFloor,
         },
         totals: {
           spent: cur === 'usd' ? totals.spent_usd : totals.spent_eur,

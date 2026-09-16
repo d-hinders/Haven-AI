@@ -69,7 +69,7 @@ const USER = {
   name: 'Ada Lovelace',
   email: 'ada@example.com',
   wallet_address: null,
-  safe_address: null,
+  account_address: null,
   accounts: [],
 }
 
@@ -154,7 +154,7 @@ describe('OnboardingClient (#1162)', () => {
     await completeCreation()
 
     expect(updateUser).toHaveBeenCalledWith({
-      safe_address: CREATED_ADDRESS,
+      account_address: CREATED_ADDRESS,
       wallet_address: null,
     })
   })
@@ -238,7 +238,7 @@ describe('OnboardingClient (#1162)', () => {
 
   it('bounces a user who already has an account straight to the dashboard', () => {
     mockUseAuth.mockReturnValue(
-      authValue({ user: { ...USER, safe_address: `0x${'11'.repeat(20)}` } }),
+      authValue({ user: { ...USER, account_address: `0x${'11'.repeat(20)}` } }),
     )
 
     render(<OnboardingClient />)
@@ -252,7 +252,7 @@ describe('OnboardingClient (#1162)', () => {
 
     // The auth context now reports the freshly created account — the guard
     // must not fire and skip the success state.
-    mockUseAuth.mockReturnValue(authValue({ user: { ...USER, safe_address: CREATED_ADDRESS } }))
+    mockUseAuth.mockReturnValue(authValue({ user: { ...USER, account_address: CREATED_ADDRESS } }))
     rerender(<OnboardingClient />)
 
     expect(mockReplace).not.toHaveBeenCalled()

@@ -90,7 +90,7 @@ export const x402Erc7710Hosted: Scenario = {
     const mcpUrl = `${ctx.cfg.demoMerchantUrl}/mcp`
 
     const agentInfo = await api.getAgent()
-    const treasury = agentInfo.data.safe_address
+    const treasury = agentInfo.data.account_address
     if (!treasury) return fail("could not read the agent's account address")
 
     const rpc = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)

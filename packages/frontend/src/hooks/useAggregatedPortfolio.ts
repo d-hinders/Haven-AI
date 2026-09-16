@@ -24,7 +24,7 @@ interface SafeBalanceRef {
 function useSafeAddressKey(): { addresses: string[]; balanceRefs: SafeBalanceRef[]; key: string } {
   const { user } = useAuth()
   const balanceRefs = (user?.accounts ?? []).map((s) => ({
-    address: s.safe_address,
+    address: s.account_address,
     chainId: s.chain_id,
   }))
   const addresses = balanceRefs.map((safe) => safe.address)

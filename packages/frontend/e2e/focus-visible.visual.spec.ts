@@ -83,7 +83,7 @@
  * not capture work. #1873 does it, and all of them are reached.
  *
  *   control              needs                                    rendered by
- *   Details              canUseWalletActions === false            a different safe_id
+ *   Details              canUseWalletActions === false            a different account_id
  *   Resume from pause    status: 'paused'                         the paused branch
  *   Remove (delegation)  account_type: 'delegator_hybrid', active the operational branch
  *   Remove (revoked)     status: 'revoked', not archived          the isRevoked branch
@@ -802,15 +802,15 @@ test.describe('driven focus-state visual regression', () => {
   const seededControls = [
     {
       slug: 'details',
-      // `canUseWalletActions` is `agentUsesActiveSafe(agent)`, which compares
-      // `agent.safe_id` to the ACTIVE safe (`safe-main`, seeded into
-      // localStorage by `seedAuthenticatedSession`). A second safe is the only
+      // `canUseWalletActions` is `agentUsesActiveAccount(agent)`, which compares
+      // `agent.account_id` to the ACTIVE account (`safe-main`, seeded into
+      // localStorage by `seedAuthenticatedSession`). A second account is the only
       // way to reach this branch — the flag is derived, never sent.
       agent: agentState({
         id: 'agent-other-safe',
         name: 'Ledger agent',
-        safe_id: 'safe-secondary',
-        safe_name: 'Treasury',
+        account_id: 'safe-secondary',
+        account_name: 'Treasury',
       }),
       control: 'Open details for Ledger agent',
       // #2264: `Remove` joins the row. `canUseWalletActions: false` hides Edit

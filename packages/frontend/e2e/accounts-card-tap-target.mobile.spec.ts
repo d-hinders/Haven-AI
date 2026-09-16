@@ -262,7 +262,7 @@ async function openAccountsWithBothCards(page: Page) {
     {
       ...testSafe,
       id: 'safe-second',
-      safe_address: '0x4444444444444444444444444444444444444444',
+      account_address: '0x4444444444444444444444444444444444444444',
       name: ACTION_CARD,
       is_default: false,
       created_at: '2026-04-20T10:00:00.000Z',

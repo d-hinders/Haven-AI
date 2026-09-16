@@ -32,7 +32,7 @@ function LoginForm() {
   useEffect(() => {
     if (!loading && user) {
       router.replace(
-        postAuthDestination(Boolean(user.accounts?.length > 0 || user.safe_address), nextPath),
+        postAuthDestination(Boolean(user.accounts?.length > 0 || user.account_address), nextPath),
       )
     }
   }, [loading, user, router, nextPath])
@@ -44,7 +44,7 @@ function LoginForm() {
 
     try {
       const u = await login(email, password)
-      router.push(postAuthDestination(Boolean(u.safe_address), nextPath))
+      router.push(postAuthDestination(Boolean(u.account_address), nextPath))
     } catch (err) {
       // Generic message — don't surface raw backend errors here (prevents
       // account-enumeration: "user not found" vs "wrong password").

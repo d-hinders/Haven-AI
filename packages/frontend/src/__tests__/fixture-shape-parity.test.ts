@@ -449,33 +449,28 @@ describe('allowance_amount on /agents is the human-decimal projection in BOTH ha
  * The THIRD family (#3027): `apiMock()`'s typed builder
  * (`e2e/fixtures/api-mock.ts`) re-serves the SAME e2e constants above behind
  * a route table checked against the generated OpenAPI types, but it is a
- * SEPARATE object graph (`satisfies`-derived, with a handful of deprecated
- * "twin" fields completed — see that file's header) — so a hand-edit to the
- * builder that changes a default's shape drifts silently from both the e2e
- * fixture and the screenshot harness unless something pins it. This pins the
+ * SEPARATE object graph (`satisfies`-derived) — so a hand-edit to the builder
+ * that changes a default's shape drifts silently from both the e2e fixture
+ * and the screenshot harness unless something pins it. This pins the
  * builder's defaults key-equal to the e2e constants they are built from, for
- * every route the table covers.
+ * every route the table covers. #2914 removed the schema's deprecated Safe
+ * twins entirely, so the builder no longer needs to complete any of them —
+ * the defaults below are now EXACTLY key-equal, not "plus completions".
  */
 describe('fixture shape parity (apiMock builder ↔ e2e dataset, #3027)', () => {
-  it('/agents: the builder default carries the same top-level keys as testAgent, plus its schema completions', () => {
+  it('/agents: the builder default carries the same top-level keys as testAgent', () => {
     const agent = API_MOCK_DEFAULTS['/agents'].agents[0]!
-    // The builder completes `safe_chain_id` (a real e2e-fixture gap, see the
-    // builder's header) — every OTHER key must be exactly the e2e agent's.
-    expect(keysOf(agent)).toEqual(keysOf({ ...testAgent, safe_chain_id: null }))
+    expect(keysOf(agent)).toEqual(keysOf(testAgent))
     expect(keysOf(agent.allowances[0])).toEqual(keysOf(testAgent.allowances[0]))
   })
 
-  it('/dashboard/overview: the builder default aligns with dashboardOverview, plus its schema completions', () => {
+  it('/dashboard/overview: the builder default aligns with dashboardOverview', () => {
     const overview = API_MOCK_DEFAULTS['/dashboard/overview']
     expect(keysOf(overview)).toEqual(keysOf(dashboardOverview))
     expect(keysOf(overview.totals)).toEqual(keysOf(dashboardOverview.totals))
     expect(keysOf(overview.metrics)).toEqual(keysOf(dashboardOverview.metrics))
-    // The builder completes `safeId` on the dashboard agent preview.
-    expect(keysOf(overview.agents[0])).toEqual(keysOf({ ...dashboardOverview.agents[0], safeId: null }))
-    // …and `safeId` / `safeAddress` on the transaction row.
-    expect(keysOf(overview.transactions[0])).toEqual(
-      keysOf({ ...dashboardTransaction, safeId: null, safeAddress: null }),
-    )
+    expect(keysOf(overview.agents[0])).toEqual(keysOf(dashboardOverview.agents[0]))
+    expect(keysOf(overview.transactions[0])).toEqual(keysOf(dashboardTransaction))
   })
 
   it('/accounting/providers, /accounting/connections, /accounting/feed/status align with the e2e constants', () => {

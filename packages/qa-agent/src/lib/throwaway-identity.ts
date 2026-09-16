@@ -38,8 +38,8 @@ export interface ThrowawayIdentity {
   owner: ethers.HDNodeWallet
   delegate: ethers.HDNodeWallet
   token: string
-  safeId: string
-  safeAddress: string
+  accountId: string
+  accountAddress: string
   agentId: string
   agentApiKey: string
   /**
@@ -86,10 +86,10 @@ export async function provisionThrowawayIdentity(
   if (hybrid.status !== 201) {
     return { error: `hybrid provisioning failed (${hybrid.status}): ${hybrid.json.error ?? ''}` }
   }
-  const me = await userCall<{ safes?: Array<{ id: string; safe_address: string; account_type?: string }> }>(
+  const me = await userCall<{ accounts?: Array<{ id: string; account_address: string; account_type?: string }> }>(
     'GET', '/auth/me', token,
   )
-  const safe = me.json.safes?.find((s) => s.account_type === 'delegator_hybrid')
+  const safe = me.json.accounts?.find((s) => s.account_type === 'delegator_hybrid')
   if (!safe) return { error: 'provisioned account missing from /auth/me' }
 
   // #2020 retired the per-token `allowances` mirror: POST /agents now REFUSES a
@@ -98,7 +98,7 @@ export async function provisionThrowawayIdentity(
   // there is nothing to send here.
   const agentRes = await userCall<{ id?: string; api_key?: string; error?: string }>(
     'POST', '/agents', token,
-    { name: `QA ${options.label} agent`, delegate_address: delegate.address, safe_id: safe.id },
+    { name: `QA ${options.label} agent`, delegate_address: delegate.address, account_id: safe.id },
   )
   const agentId = agentRes.json.id
   const agentApiKey = agentRes.json.api_key
@@ -139,8 +139,8 @@ export async function provisionThrowawayIdentity(
     owner,
     delegate,
     token,
-    safeId: safe.id,
-    safeAddress: safe.safe_address,
+    accountId: safe.id,
+    accountAddress: safe.account_address,
     agentId,
     agentApiKey,
     delegateAccountAddress,

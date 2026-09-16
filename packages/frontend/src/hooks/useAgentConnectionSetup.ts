@@ -342,7 +342,7 @@ export function useAgentConnectionSetup({
 
   const initialAccountId =
     propAccountId ??
-    userAccounts.find((account) => account.safe_address.toLowerCase() === propAccountAddress?.toLowerCase())?.id ??
+    userAccounts.find((account) => account.account_address.toLowerCase() === propAccountAddress?.toLowerCase())?.id ??
     (isSupportedChain(activeAccount?.chain_id) ? activeAccount?.id : undefined) ??
     selectableAccounts.find((account) => account.is_default)?.id ??
     selectableAccounts[0]?.id ??
@@ -372,7 +372,7 @@ export function useAgentConnectionSetup({
   const [manualError, setManualError] = useState<string | null>(null)
 
   const selectedAccount = userAccounts.find((account) => account.id === selectedAccountId) ?? null
-  const accountAddress = selectedAccount?.safe_address ?? propAccountAddress ?? ''
+  const accountAddress = selectedAccount?.account_address ?? propAccountAddress ?? ''
   const accountId = selectedAccount?.id ?? propAccountId ?? null
   const chainId = selectedAccount?.chain_id ?? activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
@@ -542,7 +542,7 @@ export function useAgentConnectionSetup({
       const response = await api.post<CreateSetupResponse>('/agent-connection-setups', {
         name: name.trim(),
         description: description.trim() || undefined,
-        safe_id: accountId,
+        account_id: accountId,
         local_mcp: localMcp ? true : undefined,
         allowances: allowances.map((allowance) => ({
           token_address:

@@ -91,7 +91,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.stubGlobal('fetch', mockFetch)
   mockFetch.mockResolvedValue(new Response('payment required', { status: 402, headers: { 'PAYMENT-REQUIRED': 'x' } }))
-  mockGetAgent.mockResolvedValue({ ok: true, data: { safe_address: TREASURY } })
+  mockGetAgent.mockResolvedValue({ ok: true, data: { account_address: TREASURY } })
   mockAuthorize.mockResolvedValue({
     ok: true, status: 201,
     data: { payment_id: 'pay_2159', sign_data: { signature_scheme: 'eip712_userop', typed_data: {} } },

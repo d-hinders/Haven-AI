@@ -24,7 +24,7 @@ interface Props {
   hasAgents: boolean
   hasFirstAgentPayment: boolean
   /**
-   * #2534: the funding facts from `GET /user/safes/:accountId/funding` — the same
+   * #2534: the funding facts from `GET /user/accounts/:accountId/funding` — the same
    * object `haven wallets funding` prints. The instruction text, the address
    * and the minimum are rendered FROM this payload, so the card and the CLI
    * cannot disagree: `@haven_ai/core` owns the minimum, the endpoint owns the

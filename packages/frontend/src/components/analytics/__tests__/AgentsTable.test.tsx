@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { AgentsTable } from '../AgentsTable'
+import { seriesColor } from '@/components/ui/StackedBarChart'
 import type { AnalyticsAgentRow } from '@/types/analytics'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../../scripts/screenshot.mjs'
 
@@ -191,6 +192,23 @@ describe('AgentsTable — the desktop table', () => {
       th.className.includes('min-width:974px'),
     )
     expect(staged.map((th) => th.textContent)).toEqual(['Share', 'Top merchant'])
+  })
+})
+
+describe('AgentsTable — one colour per agent, shared with the spend chart (#3051)', () => {
+  it('puts the series swatch for row i beside the name, in both renderings, keyed on the endpoint order', () => {
+    const { container } = mount()
+    const desktop = desktopOf(container)!
+    const mobile = mobileOf(container)!
+    const desktopSwatches = desktop.querySelectorAll('[data-testid="series-swatch"]')
+    const mobileSwatches = mobile.querySelectorAll('[data-testid="series-swatch"]')
+    expect(desktopSwatches).toHaveLength(2)
+    expect(mobileSwatches).toHaveLength(2)
+    expect(Array.from(desktopSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
+    expect(Array.from(mobileSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
+    // The colour is the chart's own token by index — the same
+    // `seriesColor(0)` the first stacked segment is filled with.
+    expect((desktopSwatches[0] as HTMLElement).style.backgroundColor).toBe(seriesColor(0))
   })
 })
 

@@ -18,6 +18,7 @@ import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Table, tableColumnClass } from '@/components/ui/Table'
+import { SeriesSwatch } from '@/components/ui/StackedBarChart'
 import type { AnalyticsAgentRow } from '@/types/analytics'
 
 /**
@@ -57,11 +58,15 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
 
 const COLUMN_PAD = 'px-4 py-3'
 
-function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
+function StatusCell({ agent, seriesIndex }: { agent: AnalyticsAgentRow; seriesIndex: number }) {
   const presentation = agentStatusPresentation(agent.status)
   const revoked = agent.status === 'revoked'
   return (
     <span className="inline-flex items-center gap-2 min-w-0">
+      {/* #3051: the same series token the spend chart paints this agent with —
+          the index is the agent's position in `agents[]`, the one order the
+          endpoint sent and the chart (`SpendSection`) keys its colours on. */}
+      <SeriesSwatch seriesIndex={seriesIndex} />
       <span className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</span>
       {/* A revoked agent stays in the table rather than dropping out of it: it
           still spent money in this range, and hiding the row would hide the
@@ -176,14 +181,14 @@ export function AgentsTable({
             </tr>
           </Table.Head>
           <Table.Body>
-            {agents.map((agent) => (
+            {agents.map((agent, index) => (
               <tr key={agent.id} className="hover:bg-[var(--v2-surface-hover)] transition-colors duration-150">
                 <td className={COLUMN_PAD}>
                   <Link
                     href={`/agents/${agent.id}`}
                     className="inline-flex items-center gap-2 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
                   >
-                    <StatusCell agent={agent} />
+                    <StatusCell agent={agent} seriesIndex={index} />
                   </Link>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
@@ -230,8 +235,8 @@ export function AgentsTable({
       </div>
 
       <div className="lg:hidden divide-y divide-[var(--v2-table-row-border)]">
-        {agents.map((agent) => (
-          <MobileAgentRow key={agent.id} agent={agent} currency={currency} />
+        {agents.map((agent, index) => (
+          <MobileAgentRow key={agent.id} agent={agent} currency={currency} seriesIndex={index} />
         ))}
       </div>
     </Card>
@@ -246,7 +251,15 @@ export function AgentsTable({
  * table's remaining columns went, not a second source of truth — every line
  * is the same field the desktop table renders.
  */
-function MobileAgentRow({ agent, currency }: { agent: AnalyticsAgentRow; currency: AnalyticsCurrency }) {
+function MobileAgentRow({
+  agent,
+  currency,
+  seriesIndex,
+}: {
+  agent: AnalyticsAgentRow
+  currency: AnalyticsCurrency
+  seriesIndex: number
+}) {
   const [open, setOpen] = useState(false)
   const presentation = agentStatusPresentation(agent.status)
   const budgetLine =
@@ -259,6 +272,7 @@ function MobileAgentRow({ agent, currency }: { agent: AnalyticsAgentRow; currenc
       <Row
         title={
           <span className="inline-flex items-center gap-2 min-w-0">
+            <SeriesSwatch seriesIndex={seriesIndex} />
             <span className="truncate">{agent.name}</span>
             {agent.status === 'revoked' && <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>}
           </span>

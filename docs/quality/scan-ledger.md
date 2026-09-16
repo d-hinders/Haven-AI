@@ -642,3 +642,57 @@ half of #1442's finding, re-surfaced on the delta recorded, not re-filed.
 - sizing → backend **69,517** source / **83,443** test lines; largest
   non-generated file is the OpenAPI module at **9,042**; largest route file
   1,379.
+
+## 2026-09-16 — Analytics page (epic #2944; owner mandate 2026-09-16)
+
+Full report: [`docs/bug-reports/quality-scan-2026-09-16-analytics.md`](../bug-reports/quality-scan-2026-09-16-analytics.md)
+— file:line evidence lives there; this entry stays path-free. Measured on
+`origin/dev` @ `886781d4`. Method: full read of endpoint, SQL, hook, page,
+doc; 5 executed mutations (block 1); blocks 2, 3, 6; incident clustering;
+a refusal-writer census; a deferral census over 80 merged PR bodies. No
+prior ledger finding covers this surface; none re-surfaced.
+
+**Finding 1 — refusal recording is per-site opt-in with no choke point; the
+"Refused" tile is only as complete as the last grep.**
+- Evidence: `git grep -n "recordRefusalFireAndForget(" -- 'packages/backend/src/**' | grep -v test`
+  → 6 writers; four refusal-shaped returns on the same conditions have no
+  writer beside them (three on the x402 authorize legs, one in the hosted
+  MCP's guided-purchase pre-check, which refuses before any backend call
+  and is not the price cap the page disclaims). A degraded RPC read on the
+  3009 leg turns a recorded refusal into an unwritten one. Cost: the
+  epic's first-class metric under-counts on the preferred path with no
+  failing test; the enum is closed and a new refusal class has nowhere to go.
+- Disposition: **filed as epic #3056** (sub-issues #3052–#3055) on 2026-09-16.
+
+**Candidates (five, one PR each):** C1 (**filed and shipped as #3051**) the spend-by-agent chart with the
+refusal marker series is built, tested, showcased and never mounted on the
+page (deferred from D to C in a PR body, lost); C2 route-seam guards for the
+two executed survivors, the untested merchant-label order and the refusal
+count/amount window mismatch; C3 the product doc contradicts the code since
+the ledger-floor change and the coupling gate blocked nothing (not
+`contract: true`); C4 fee-flag-on and sparse are rendered nowhere; C5 a PR-body
+deferral gets a home on the target issue at closeout. Refused under the bar:
+budget-read latency (hypothesis, unmeasured). C2–C5: pending owner decision.
+
+**Probed clean** (dimension → command → number, all at `886781d4`):
+- block 1 (guard falsifiability) → 5 mutations, real-DB harness + vitest →
+  **3 of 5 caught**; survivors: the route dropping `basis.unsettled_submitted`
+  (19/19 green) and the page's `isEmptyWindow` losing its refusal clause
+  (43/43 green) — both *weak test*.
+- block 2 (`covers:` completeness) → the covers-gaps script (`npm run docs:covers-gaps`) →
+  0 new gaps, the doc absent from the baseline; recipe → declared 7,
+  cited-backticked 2, ~12 claimed in prose. Instrument cannot see prose.
+- block 3 (stale numbers) → every figure re-derived → 4 stale in the doc
+  (one now false), 1 stale placeholder comment hiding C1, 3 stale gate-scope
+  comments ("five spec files" → 8).
+- block 4 (retired vocabulary) → not taken (scope post-dates #1440).
+- block 5 (merge-method drift) → not taken (out of scope).
+- block 6 (nets with holes) → partial: matrix and harness read, not run →
+  fee-flag-on asserted nowhere (`git grep flag_on` → `false` at every site);
+  no sparse visual scenario; 12 analytics baselines inventoried.
+- incident clustering → `gh issue list --search analytics` → 11 since
+  2026-09-13; cross-slice gap ×3.
+- workflow archaeology → `gh run list --limit 200` on the epic's branches →
+  0 reruns, 0 failures.
+- deferral census → 4 of 80 merged PR bodies defer an item to another slice.
+- sizing → 33 files; source 3,383 / tests 4,830 lines.

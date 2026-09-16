@@ -205,6 +205,28 @@ describe('StackedBarChart — the drawing says what the data says', () => {
   })
 })
 
+describe('StackedBarChart — a partial day is drawn as one (#3051)', () => {
+  it('lightens the bar, marks the group, and names it in the data table and the tooltip', () => {
+    const days: StackedBarDay[] = THREE_DAYS.map((d) => ({ ...d }))
+    days[0] = { ...days[0]!, partial: true }
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const groups = container.querySelectorAll('[data-testid="chart-day"]')
+    expect(groups[0]!.getAttribute('data-partial')).toBe('true')
+    expect(groups[1]!.getAttribute('data-partial')).toBeNull()
+    const cutSegment = groups[0]!.querySelector('[data-testid="chart-segment"]')!
+    const fullSegment = groups[1]!.querySelector('[data-testid="chart-segment"]')!
+    expect(Number(cutSegment.getAttribute('fill-opacity'))).toBeLessThan(Number(fullSegment.getAttribute('fill-opacity')))
+    const table = getByTestId('chart-data-table')
+    expect(table.textContent).toContain(`${days[0]!.label} (partial day)`)
+    expect(table.textContent).not.toContain(`${days[1]!.label} (partial day)`)
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    expect(getByTestId('chart-tooltip-partial').textContent).toContain('partial day')
+  })
+})
+
 describe('StackedBarChart — the tooltip, opened two ways', () => {
   it('reveals a day to a keyboard caret, with amounts, tokens, and refusals', () => {
     renderChart()

@@ -116,6 +116,15 @@ export interface StackedBarDay {
   series: StackedBarSeries[]
   /** Refusals recorded that day; `0` or absent draws no cap. */
   refusals?: number
+  /**
+   * The bucket covers less than a full local day (#3051): the endpoint's
+   * `range.from`/`to` are UTC instants while `by_day` is bucketed in the
+   * caller's zone, so the first and last bucket of a window are usually
+   * partial — a bar that is short because the day was cut, not because the
+   * agents spent little. Drawn lighter, named in the tooltip and the data
+   * table; never dropped (a partial day with a payment is a day with data).
+   */
+  partial?: boolean
 }
 
 export interface StackedBarSeries {
@@ -173,9 +182,10 @@ interface StackedBarEntry {
   segments: StackedBarSegment[]
   /** Number of refused payments recorded that day; draws the cap. */
   refusals: number
+  partial: boolean
 }
 
-function seriesColor(seriesIndex: number): string {
+export function seriesColor(seriesIndex: number): string {
   // The six tokens are declared 1..6; a seventh series wraps to 1. The set
   // is deliberately short and the wrap is deliberate: past six agents the
   // legend distinguishes by name rather than by an invented hue.
@@ -196,6 +206,24 @@ function legendRows(entries: StackedBarEntry[]): StackedBarSegment[] {
     }
   }
   return [...seen.values()]
+}
+
+/**
+ * The legend dot as a component, exported so a table beside the chart can
+ * key a row to the same series token (#3051: the agents table's name cell).
+ * One home for "what colour is agent i": the chart's segments, its legend,
+ * its tooltip and the table all read `seriesColor(seriesIndex)`.
+ */
+export function SeriesSwatch({ seriesIndex, className = '' }: { seriesIndex: number; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="series-swatch"
+      data-series-index={seriesIndex}
+      className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${className}`.trim()}
+      style={{ backgroundColor: seriesColor(seriesIndex) }}
+    />
+  )
 }
 
 export function StackedBarChart({
@@ -228,6 +256,7 @@ export function StackedBarChart({
           total: segments.reduce((sum, s) => sum + s.amount, 0),
           segments,
           refusals: day.refusals ?? 0,
+          partial: day.partial === true,
         }
       }),
     [days],
@@ -341,6 +370,7 @@ export function StackedBarChart({
                 key={`bar-${dayIdx}-${e.label}`}
                 data-testid="chart-day"
                 data-day-index={dayIdx}
+                data-partial={e.partial ? 'true' : undefined}
                 aria-hidden="true"
                 className="v2-chart-draw"
                 style={{ transformOrigin: `${xOf(dayIdx) + barW / 2}px ${baseY}px` }}
@@ -360,7 +390,9 @@ export function StackedBarChart({
                       width={barW}
                       height={Math.max(0, height)}
                       fill={seriesColor(s.seriesIndex)}
-                      fillOpacity={isHl ? 1 : 0.88}
+                      // A partial day is drawn lighter so a cut day does not
+                      // read as a quiet one (see `StackedBarDay.partial`).
+                      fillOpacity={e.partial ? (isHl ? 0.7 : 0.5) : isHl ? 1 : 0.88}
                     />
                   )
                 })}
@@ -461,7 +493,14 @@ export function StackedBarChart({
             setHovered(null)
           }}
         >
-          <p className="text-xs font-semibold text-[var(--v2-ink)]">{entry.label}</p>
+          <p className="text-xs font-semibold text-[var(--v2-ink)]">
+            {entry.label}
+            {entry.partial && (
+              <span data-testid="chart-tooltip-partial" className="ml-1.5 font-normal text-[var(--v2-ink-3)]">
+                · partial day
+              </span>
+            )}
+          </p>
           <ul className="mt-1.5 space-y-1">
             {entry.segments.map((s) => (
               <li
@@ -529,7 +568,7 @@ export function StackedBarChart({
         <tbody>
           {entries.map((e, i) => (
             <tr key={`row-${i}-${e.label}`}>
-              <th scope="row">{e.label}</th>
+              <th scope="row">{e.partial ? `${e.label} (partial day)` : e.label}</th>
               {legend.map((row) => (
                 <td key={`c-${i}-${row.seriesId}`}>
                   {formatValue(e.segments.find((s) => s.seriesId === row.seriesId)?.amount ?? 0)}

@@ -328,6 +328,19 @@ describe('Analytics — the populated page', () => {
     expect(within(tile).queryByText(/^\+|^-/)).toBeNull()
   })
 
+  it('mounts the spend chart off the same response, above the agents table (#3051)', () => {
+    render(<AnalyticsClient />)
+    const spend = screen.getByTestId('analytics-spend-section')
+    expect(within(spend).getByRole('heading', { name: 'Spend over time' })).toBeTruthy()
+    // Desktop + narrow: the same complementary pair the balance section keeps.
+    expect(within(spend).getAllByTestId('stacked-bar-chart')).toHaveLength(2)
+    // Four fixture days, two with refusals: two marker caps per rendering.
+    expect(within(spend).getAllByTestId('chart-refusal-marker')).toHaveLength(4)
+    // Order: the chart precedes the table in the DOM.
+    const table = screen.getByTestId('analytics-agents-section')
+    expect(spend.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('shows the trend figures and the agents table once there are three days of data', () => {
     render(<AnalyticsClient />)
     expect(screen.queryByTestId('analytics-sparse-line')).toBeNull()
@@ -366,6 +379,7 @@ describe('Analytics — the sparse window', () => {
   it('withholds the table along with the charts, rather than leaving a blank region to diagnose', () => {
     render(<AnalyticsClient />)
     const page = screen.getByTestId('analytics-page')
+    expect(within(page).queryByTestId('analytics-spend-section')).toBeNull()
     expect(within(page).queryByText('Research agent')).toBeNull()
     expect(within(page).queryByText('Data-feed agent')).toBeNull()
   })

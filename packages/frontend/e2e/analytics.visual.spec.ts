@@ -204,6 +204,7 @@ const COPY = {
   agentRetired: 'Data-feed agent',
   merchantsHeading: 'Top merchants',
   balanceHeading: 'Balance over time',
+  spendHeading: 'Spend over time',
   nordshield: 'NordShield VPN',
   emptyTitle: 'No agent activity in this range',
   emptyBody: 'This window has no payments, refusals or fees to report.',
@@ -322,6 +323,16 @@ const SCENARIOS: Scenario[] = [
       // `analytics-page`, not here (#3038 structure run: scoping it to the
       // tiles grid resolves 0 and every populated capture times out on it).
       await expect(tiles.getByText(COPY.tilesDeltaCaption)).toHaveCount(2)
+
+      // ── Spend over time (#3051): the chart slice D built, on the page ────
+      // One heading, the desktop/narrow chart pair with exactly one visible
+      // at this viewport, and the refusal marker caps the fixture's two
+      // refusal days earn (two per rendering).
+      const spend = section(page, 'analytics-spend-section')
+      await expect(spend).toHaveCount(1)
+      await expect(spend.getByRole('heading', { name: COPY.spendHeading })).toHaveCount(1)
+      await expect(spend.getByTestId('stacked-bar-chart').filter({ visible: true })).toHaveCount(1)
+      await expect(spend.getByTestId('chart-refusal-marker')).toHaveCount(4)
 
       // ── The range control, in its resting state ───────────────────────────
       // The default window is 30d (`DEFAULT_ANALYTICS_RANGE`) and the fixture's

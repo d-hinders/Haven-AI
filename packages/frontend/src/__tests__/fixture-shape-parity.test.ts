@@ -25,7 +25,18 @@ import {
   FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
   FIXTURE_ACCOUNTING_FEED_ATTENTION,
+  FIXTURE_ANALYTICS_OVERVIEW,
+  FIXTURE_ANALYTICS_OVERVIEW_EMPTY,
+  httpError,
 } from '../../scripts/screenshot.mjs'
+// The visual gate's copies of the two overview fixtures (#3038). Pinned below,
+// because the spec that reads them cannot reach the harness itself — see the
+// `analytics-overview.ts` docblock for the measured reason.
+import {
+  analyticsOverview,
+  analyticsOverviewEmpty,
+  analyticsOverviewFailure,
+} from '../../e2e/fixtures/analytics-overview'
 import {
   testUser,
   testSafe,
@@ -483,5 +494,54 @@ describe('fixture shape parity (apiMock builder ↔ e2e dataset, #3027)', () => 
     for (const [i, row] of feedStatus.syncs.entries()) {
       expect(keysOf(row)).toEqual(keysOf(accountingFeedStatus.syncs[i]))
     }
+  })
+})
+
+/**
+ * The e2e visual-gate copies of the `/analytics` overview fixtures are the
+ * harness's OWN values, not a paraphrase of them (#3038).
+ *
+ * `analytics.visual.spec.ts` cannot import `scripts/screenshot.mjs` directly:
+ * the harness is a CLI that reads `import.meta.url` at module scope, and
+ * Playwright's own transform mis-compiles such a `.mjs` as CommonJS, so the
+ * spec dies at collect time on `ReferenceError: exports is not defined in ES
+ * module scope` (measured — a minimal `.mjs` with one `import.meta.url` read
+ * reproduces it and the same file without it does not). The visual gate
+ * therefore reads the two overviews from `e2e/fixtures/analytics-overview.ts`,
+ * which is a SECOND encoding of a Haven-API response — the exact thing this
+ * whole suite exists to police. The pin below is what makes that copy safe:
+ * deep equality against the harness's exported keys, so a change to the single
+ * declared shape reddens here instead of leaving the visual gate photographing
+ * a response no backend can serve. A copy without its pin is the #2968 drift
+ * class waiting to happen; this is the pin.
+ *
+ * Vitest transpiles `.mjs` itself, so this file can reach the harness keys the
+ * Playwright spec cannot — the pin lives on the side of the wall that can.
+ */
+describe('the /analytics overview fixtures are the harness’s, verbatim (#3038)', () => {
+  it('the populated overview is deep-equal to FIXTURE_ANALYTICS_OVERVIEW', () => {
+    expect(analyticsOverview).toEqual(FIXTURE_ANALYTICS_OVERVIEW)
+  })
+
+  it('the empty overview is deep-equal to FIXTURE_ANALYTICS_OVERVIEW_EMPTY', () => {
+    expect(analyticsOverviewEmpty).toEqual(FIXTURE_ANALYTICS_OVERVIEW_EMPTY)
+  })
+
+  it('the served failure is the harness’s httpError(503, …), status and body', () => {
+    // `httpError()` returns a ScenarioHttpError instance, so deep equality
+    // against a plain object would compare prototypes; compare the two fields
+    // the Playwright route actually fulfils, which is what must agree.
+    const harnessFailure = httpError(503, { error: 'Service Unavailable' })
+    expect(analyticsOverviewFailure.status).toBe(harnessFailure.status)
+    expect(analyticsOverviewFailure.body).toEqual(harnessFailure.body)
+  })
+
+  it('the error scenario is the 503 the analytics-error capture scenario sends', () => {
+    // The capture harness reaches the same page through its own scenario key;
+    // if this ever stops being true, the visual gate is photographing an
+    // outage the evidence run does not have.
+    const harnessFailure = httpError(503, { error: 'Service Unavailable' })
+    expect(analyticsOverviewFailure.status).toBe(503)
+    expect(harnessFailure.status).toBe(503)
   })
 })

@@ -37,9 +37,34 @@ const COMING_SOON_CAPABILITIES = { attachments: false, verify: false, revoke: fa
 export const ACCOUNTED: AccountingProvider = {
   id: 'accounted',
   displayName: 'Accounted',
-  authKind: 'oauth2',
-  capabilities: COMING_SOON_CAPABILITIES,
-  availability: 'coming_soon',
+  // #3017 (epic #3016): the second live provider, and the first of the
+  // API-key kind — the user pastes a `gnubok_sk_*` key; there is no redirect,
+  // no grant and no scope string on the stored row (`grantedScope` is null
+  // for this kind). OAuth2 here was the coming-soon placeholder's default,
+  // never a real flow.
+  authKind: 'api_key',
+  // The document IS the object, not an attachment to one (#3018 pushes
+  // documents): no attachment step. Verify is answered from Haven's own
+  // record (epic Notes — the provider read-back is #3019). Accounted keys
+  // are revoked in their dashboard, so disconnect clears the local secrets
+  // only (the product doc says so). `companyInfo` is the connect-time
+  // validation: the key is proven by reading the company it belongs to.
+  capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+  // A constant, as Fortnox's is: there is no per-provider dev gate. The
+  // per-ACCOUNT feature gate (`requireAccountingFeature` /
+  // `HAVEN_ACCOUNTING_ENTITLEMENT_MODE`) is what keeps the whole accounting
+  // feature off production, and Accounted's connector registers
+  // unconditionally (`index.ts`) because keys are per user — unlike Fortnox,
+  // whose instance is credential-gated.
+  availability: 'live',
+  // Per `provider.ts`: empty for api_key providers. `grantedScope` is stored
+  // as null for this kind, so a non-empty list would make
+  // `missingScopesFor` compute against nothing. The required key scopes
+  // (`companies:read`, `documents:write`) are named in the paste-UI copy and
+  // the product doc instead; `documents:read` is NOT required in v1 (nothing
+  // reads back), and the write scope cannot be validated at connect (no
+  // scope-introspection endpoint, `dry_run` unsupported on upload) — the
+  // first push surfaces a short key as `scope_missing` (#2865).
   requiredScopes: [],
 }
 

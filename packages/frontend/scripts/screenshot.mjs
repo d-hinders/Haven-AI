@@ -2863,8 +2863,11 @@ export const SCENARIOS = {
       // Each stage waits on its own distinguishing copy AND its action, and
       // refuses the neighbouring states' actions — a stage that quietly
       // rendered the previous one would otherwise file under the wrong name.
+      // #3017: the chip wait is scoped to the FORTNOX row — with Accounted
+      // live too, its "Not connected" chip is a second match on the card.
+      const fortnoxRow = card.getByTestId('connection-row-fortnox')
       const expectState = async (stage, chip, action, refused) => {
-        await card.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
+        await fortnoxRow.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
         await fortnoxActions.getByRole('button', { name: action, exact: true }).waitFor({ timeout: 15_000 })
         for (const name of refused) {
           await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)

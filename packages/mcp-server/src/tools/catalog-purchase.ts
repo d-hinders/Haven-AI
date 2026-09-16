@@ -223,7 +223,18 @@ export function createCatalogPurchaseHandlers(
           if (paySelection.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
               quote.paymentRequired as X402PaymentRequired,
-              { resourceUrl: merchantUrl, delegationRail: true },
+              {
+                resourceUrl: merchantUrl,
+                delegationRail: true,
+                // #3042 (scan B2, measured live on dev): this branch never
+                // passed the key, so a retried call minted a SECOND
+                // independently-signable settlement child — on this scheme
+                // the signed artifact IS spend authority. The backend has
+                // deduped on it all along (`findX402IntentByIdempotencyKey`
+                // before the shape branch); the 3009 branch below always
+                // sent it. Same expression as there, so the two cannot drift.
+                idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
+              },
             )
             return {
               payment_id: prepared.paymentId,
@@ -635,6 +646,10 @@ export function createCatalogPurchaseHandlers(
                 // call by payment_id — the guided path's no-state-threading
                 // contract (#1305) holds on this scheme too.
                 mcpCallContext: catalogCallContext,
+                // #3042 (scan B2): the key was dropped here too — four live
+                // prepares, two with the SAME explicit key, produced four
+                // erc7710 intents. Same expression as the 3009 branch below.
+                idempotencyKey: args.idempotency_key ?? quote.idempotencyKey,
               },
             )
             return {

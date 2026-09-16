@@ -23,6 +23,19 @@ export const MAX_X_LABELS_MOBILE = 5
 export const MIN_CHARTABLE_DAYS = 3
 
 /**
+ * The smallest fraction of the plot two adjacent x labels may sit apart,
+ * per treatment (#3037). One label-width, expressed the only way a pure
+ * module can: a fraction of the plot. The shortest calendar label ("10 Jul")
+ * is ~36px of `text-xs`, which is ~6% of the plot at desktop widths and
+ * ~11% at a 390px phone — the fraction is set generously to the treatment
+ * that renders smallest. The density bands above already keep most labels
+ * far wider than this; the rule exists for the one place a collision can
+ * actually form, the endpoint label moved next to a stride neighbour.
+ */
+export const MIN_X_LABEL_SEPARATION_WIDE = 0.06
+export const MIN_X_LABEL_SEPARATION_NARROW = 0.11
+
+/**
  * The y-scale: `max` is the ceiling (never below the data), `ticks` are the
  * values the grid lines draw at. `0` is never listed as a tick — the axis floor
  * already draws it, and a scale whose "ticks" are `[0, 400, 800]` reads as a
@@ -106,6 +119,22 @@ export function xLabelIndices(count: number, { narrow = false }: { narrow?: bool
   if (indices[indices.length - 1] !== count - 1) {
     if (indices.length < maxLabels) indices.push(count - 1)
     else indices[indices.length - 1] = count - 1
+  }
+  // The endpoint move can leave its new right-hand neighbour within a
+  // label-width of it — the moved slot was chosen by stride, not by the gap
+  // it lands with — and `text-xs` day labels one index apart print as one
+  // garbled cluster (#3037, seen as `10 Ju11 Jul` on the 30-day fixture).
+  // So after the move, labels are thinned to the minimum separation, from
+  // the right: a label too close to its right neighbour is dropped — never
+  // shifted, a shift would just walk the collision one slot left — and the
+  // endpoint itself is never a candidate, because the right edge always
+  // carries its label. Both charts read this helper, so the rule is one
+  // rule; neither render path special-cases its way around it.
+  const minSeparation = narrow ? MIN_X_LABEL_SEPARATION_NARROW : MIN_X_LABEL_SEPARATION_WIDE
+  for (let i = indices.length - 2; i > 0; i--) {
+    if ((indices[i + 1] - indices[i]) / (count - 1) < minSeparation) {
+      indices.splice(i, 1)
+    }
   }
   return indices
 }

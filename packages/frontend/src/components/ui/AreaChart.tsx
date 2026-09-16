@@ -305,7 +305,7 @@ export function AreaChart({
             key={`x-${i}`}
             data-testid="chart-x-label"
             aria-hidden="true"
-            className="absolute block text-xs leading-none text-[var(--v2-ink-3)]"
+            className="absolute block whitespace-nowrap text-xs leading-none text-[var(--v2-ink-3)]"
             style={{
               left: pct(plot.xOf(i), VIEW_W),
               top: pct(plot.baseY + 8, VIEW_H),

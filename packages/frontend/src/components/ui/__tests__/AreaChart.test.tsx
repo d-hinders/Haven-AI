@@ -158,6 +158,64 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       'gained 110.00 USD',
     )
   })
+
+  it('prints the 30-day right edge as one label: the two right-most label boxes do not intersect (#3037)', () => {
+    // The shipped defect, asserted on the geometry it is: the balance
+    // chart's 30-bucket fixture put the stride's last slot ("10 Jul") one
+    // index behind the endpoint ("11 Jul") and the two `text-xs` labels
+    // printed as one garbled cluster at the right edge. The fix lives in
+    // the scale helper, but the harm was two boxes overlapping, so the pin
+    // reads the rendered spans: each label's `left` is the same plot
+    // fraction the drawing is positioned by, and the box is rebuilt from
+    // the transform the primitive applies — the first label grows right
+    // from the left edge, the endpoint grows left, the rest centre. The
+    // box is 12% of the plot wide — a ~40px `text-xs` calendar label at
+    // the narrow treatment's ~330px plot, and still generous at desktop
+    // widths — generous on purpose, so this pin fails before a real label
+    // could touch. Both treatments must pass because both receive the same
+    // indices from the fixed helper (the 30-day narrow treatment thins
+    // nothing).
+    const LABEL_W = 12
+    const points = Array.from({ length: 30 }, (_, i) => ({ label: `d${i}`, value: 1000 + i }))
+    for (const narrow of [false, true]) {
+      // One mount per treatment with an explicit unmount: renders
+      // accumulate in the document between renders (cleanup runs between
+      // tests, not renders), and a second query would count both charts.
+      const { unmount } = renderChart({ narrow }, points)
+      const labels = screen.getAllByTestId('chart-x-label')
+      expect(labels.map((el) => el.textContent)).toEqual(['d0', 'd7', 'd14', 'd21', 'd29'])
+      const boxes = labels.map((el) => {
+        const x = Number.parseFloat(el.style.left)
+        const label = el.textContent ?? ''
+        if (label === 'd0') return [x, x + LABEL_W]
+        if (label === 'd29') return [x - LABEL_W, x]
+        return [x - LABEL_W / 2, x + LABEL_W / 2]
+      })
+      const pen = boxes[boxes.length - 2]!
+      const end = boxes[boxes.length - 1]!
+      expect(
+        pen[1],
+        `the 30-day ${narrow ? 'narrow' : 'desktop'} penultimate label overlaps the endpoint`,
+      ).toBeLessThanOrEqual(end[0])
+      // The endpoint delta (`area-delta`, the range's spend) hangs from the
+      // plot's top-right corner; the endpoint label sits under the axis.
+      // The non-collision claim (#3037's last criterion) is the row
+      // separation: the delta's top is in the top band of the plot while
+      // every x label starts below the axis line (~90% down), so one
+      // `text-xs` line of type cannot bridge the two rows — and a wider
+      // figure or a thinner endpoint neighbourhood cannot change that,
+      // because the delta is text-right against the right pad while the
+      // endpoint label grows leftward from its own anchor.
+      const delta = screen.getByTestId('area-delta')
+      const deltaTop = Number.parseFloat(delta.style.top)
+      const labelTop = Number.parseFloat(labels[0]!.style.top)
+      // The style values are percentages of the viewBox (0-100): the delta
+      // hangs at ~5.5% of the height, the labels start at ~90%.
+      expect(deltaTop).toBeLessThan(10)
+      expect(labelTop).toBeGreaterThan(80)
+      unmount()
+    }
+  })
 })
 
 describe('AreaChart — what a reader who cannot see the chart is told', () => {

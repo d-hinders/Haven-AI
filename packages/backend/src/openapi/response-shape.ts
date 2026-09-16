@@ -21,13 +21,14 @@
  * point rather than the draft-07 default.
  */
 
-// Two interop details, both load-bearing under `moduleResolution: NodeNext`:
-// the `.js` extension (a bare `ajv/dist/2020` does not resolve, and would throw
-// at runtime in plain node), and the NAMED `Ajv2020` import — ajv sets
-// `module.exports = Ajv2020` on a CJS module, so the default import is typed as
-// the namespace and is not constructable.
-import { Ajv2020, type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js'
-import addFormatsModule, { type FormatsPlugin } from 'ajv-formats'
+// ajv construction lives in `openapi/ajv.ts` (#3029) — the one factory shared
+// with the request-validation plugin. The options and `closeObjects` behaviour
+// here are UNCHANGED from the pre-#3029 instrument; only the construction site
+// moved. The response instance keeps `{ strict: false, allErrors: true }` and
+// the component schemas registered CLOSED — the request side uses the same
+// factory with Fastify's request defaults and open objects, which is exactly
+// why they must be two instances.
+import { makeSpecAjv, closeObjects, type ErrorObject, type ValidateFunction } from './ajv.js'
 import { openapiSpec } from './spec.js'
 
 type Json = Record<string, unknown>
@@ -38,20 +39,10 @@ const spec = openapiSpec as unknown as {
   components: { schemas: Record<string, Json> }
 }
 
-const ajv = new Ajv2020({
-  strict: false, // OpenAPI keywords (`example`, `discriminator`) are not JSON Schema
-  allErrors: true,
-})
-// Without this, `format: 'uuid'` / `'date-time'` are silently IGNORED — ajv logs
-// "unknown format … ignored" and validates nothing. A spec that promises a uuid
-// and a route that returns "banana" would have passed.
-// ajv-formats is CJS (`module.exports = plugin`, with a `.default` alias), so
-// under NodeNext the default import is typed as the namespace rather than the
-// callable. Both shapes point at the same function at runtime.
-const addFormats: FormatsPlugin =
-  (addFormatsModule as unknown as { default?: FormatsPlugin }).default ??
-  (addFormatsModule as unknown as FormatsPlugin)
-addFormats(ajv)
+const ajv = makeSpecAjv(
+  { strict: false, allErrors: true, closeObjects: true },
+  spec.components.schemas,
+)
 
 /**
  * Resolve the response schema the spec declares for one operation.
@@ -91,18 +82,14 @@ export function responseSchema(
 }
 
 /**
- * Every `#/components/schemas/*` the spec defines, registered so `$ref`
- * resolves. Compiled lazily and once — ajv rejects duplicate schema ids.
+ * Every `#/components/schemas/*` is registered — CLOSED — by `makeSpecAjv` at
+ * construction (#3029); compiling a schema here reuses them so `$ref` resolves.
+ * Compiled lazily and once — ajv rejects duplicate schema ids.
  */
 let compiledFor: Map<string, ValidateFunction> | null = null
 
 function compile(schema: Json): ValidateFunction {
-  if (!compiledFor) {
-    compiledFor = new Map()
-    for (const [name, definition] of Object.entries(spec.components.schemas)) {
-      ajv.addSchema(closeObjects(definition) as Json, `#/components/schemas/${name}`)
-    }
-  }
+  if (!compiledFor) compiledFor = new Map()
   const key = JSON.stringify(schema)
   const existing = compiledFor.get(key)
   if (existing) return existing
@@ -112,40 +99,10 @@ function compile(schema: Json): ValidateFunction {
 }
 
 /**
- * Add `additionalProperties: false` to every object schema that does not state
- * a preference, recursively. Returns a copy — the spec object is shared with
- * the served `/openapi.json` and must never be mutated by a test helper.
- *
- * **Never inside an `allOf`.** This is the classic JSON Schema composition
- * trap: `additionalProperties` only sees the properties declared at its OWN
- * level, so closing one `allOf` member makes it reject the properties its
- * sibling members contribute — and a payload that is perfectly valid gets
- * reported as a spec violation. The spec has such shapes today (`mpp`,
- * `AgentConnectionAllowance`); none is on a route asserted here yet, so the
- * bug would have lain dormant until someone widened coverage and hit a
- * baffling false failure. A schema composed with `allOf` is left open.
+ * `closeObjects` itself moved to `openapi/ajv.ts` (#3029) — imported at the top
+ * of this file and applied on registration and compile exactly as before.
+ * Re-exported for the composition tests only — not part of the assertion API.
  */
-function closeObjects(node: unknown, insideAllOf: boolean = false): unknown {
-  if (Array.isArray(node)) return node.map((item) => closeObjects(item, insideAllOf))
-  if (node === null || typeof node !== 'object') return node
-
-  const copy: Json = {}
-  for (const [key, value] of Object.entries(node as Json)) {
-    copy[key] = closeObjects(value, key === 'allOf')
-  }
-  const declaresProperties = 'properties' in copy
-  const statesPreference = 'additionalProperties' in copy
-  const composes = 'allOf' in copy
-  // Only close schemas that actually describe an object's properties on their
-  // own; leaving `anyOf`/`$ref` wrappers and `allOf` composition alone keeps
-  // composed shapes valid.
-  if (declaresProperties && !statesPreference && !composes && !insideAllOf) {
-    copy.additionalProperties = false
-  }
-  return copy
-}
-
-/** Exported for the composition tests only — not part of the assertion API. */
 export const __closeObjectsForTest = closeObjects
 
 export interface ShapeMismatch {
@@ -194,4 +151,57 @@ export function expectMatchesSpec(
       'Either the route changed and the spec is now a lie, or the spec was always wrong. ' +
       'Fix whichever is untrue — do not loosen the schema to make this pass.',
   )
+}
+
+/**
+ * Assert a request the spec refuses IS refused, with the plugin's envelope.
+ *
+ * The request-side twin of `expectMatchesSpec` (#3029): a route test hands it
+ * the app, an off-spec body, and the field the spec's own schema should name,
+ * and the assertion fails unless the answer is the 400
+ * `{ error, statusCode: 400, details, error_code: 'invalid_request' }` the
+ * request-validation plugin produces on an enforced route. Used per handler on
+ * the proof module (`routes/contacts.ts` first); like `expectMatchesSpec`, the
+ * spec's own schema decides — this helper never restates a rule.
+ *
+ * `expectedField` is matched against the start of `details` (e.g. `body/address`),
+ * so a refusal caused by a DIFFERENT field fails the test rather than passing
+ * for the wrong reason.
+ */
+export function expectRejectsOffSpec(
+  app: { inject: (opts: { method: string; url: string; payload?: unknown; headers?: Record<string, string> }) => Promise<{ statusCode: number; json(): unknown }> },
+  route: string,
+  body: unknown,
+  expectedField: string,
+  headers: Record<string, string> = {},
+): Promise<void> {
+  const [method, ...pathParts] = route.split(' ')
+  return app
+    .inject({ method, url: pathParts.join(' '), payload: body, headers })
+    .then((response) => {
+      const problems: string[] = []
+      if (response.statusCode !== 400) {
+        problems.push(`expected 400, got ${response.statusCode}`)
+      }
+      const payload = response.json() as Record<string, unknown>
+      if (payload.error !== 'Request does not match the API spec') {
+        problems.push(`expected the plugin's envelope error, got ${JSON.stringify(payload.error)}`)
+      }
+      if (payload.error_code !== 'invalid_request') {
+        problems.push(`expected error_code 'invalid_request', got ${JSON.stringify(payload.error_code)}`)
+      }
+      const details = typeof payload.details === 'string' ? payload.details : ''
+      if (!details.startsWith(expectedField)) {
+        problems.push(`expected details to name '${expectedField}', got ${JSON.stringify(details)}`)
+      }
+      if (problems.length > 0) {
+        throw new Error(
+          `${route} did not refuse the off-spec body the way the request-validation ` +
+            `plugin refuses it:\n  ${problems.join('\n  ')}\n\n` +
+            'Either the plugin is not installed on this test app with the module enforced, ' +
+            'or the spec stopped describing the request the handler actually accepts. ' +
+            'Fix the wiring or the spec — do not weaken the assertion.',
+        )
+      }
+    })
 }

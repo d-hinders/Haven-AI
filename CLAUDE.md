@@ -214,6 +214,8 @@ All of these must fail for funds to be at risk.
 
 - Explicit types over `any`; `async`/`await`, not callbacks.
 - Structured error responses from every API route.
+- A route's request schema comes from the spec through the request-validation
+  plugin; `lint:request-schemas` is shrink-only.
 - Env config via `.env` files — never commit secrets.
 - Conventional commits; document public endpoints with JSDoc or OpenAPI.
 - Every new doc under `docs/` (and the root gravity files) needs front-matter

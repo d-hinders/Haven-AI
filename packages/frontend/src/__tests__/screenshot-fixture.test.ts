@@ -1035,7 +1035,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         }
         // The envelope: one range, one currency, the basis block the page
         // quotes its sentences from.
-        expect(overview.range).toMatchObject({ days: 30, to: '2026-07-11T00:00:00.000Z' })
+        // `to` sits at 14:30Z, not midnight (#3051): the endpoint's window ends
+        // at the moment of the request, so the last `by_day` bucket (10 Jul)
+        // is a partial day and the captures show the striped bar and its note.
+        expect(overview.range).toMatchObject({ days: 30, to: '2026-07-10T14:30:00.000Z' })
         expect(overview.currency).toBe('usd')
         expect(overview.basis).toMatchObject({ payments_counted: 5, unsettled_submitted: 1, tz: 'UTC' })
         // The ledger floor rides on the basis (#3013): the earliest day the
@@ -1100,12 +1103,22 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(above75).toBeGreaterThan(0)
       })
 
-      it('the balance series is 30 unique absolute dates ending on the dashboard total', () => {
-        const overview = fx('/analytics/overview') as { balance_by_day: { date: string; value: string }[] }
+      it('the balance series is 30 unique absolute dates ending on the dashboard total, inside the range the endpoint would return', () => {
+        const overview = fx('/analytics/overview') as {
+          range: { from: string; to: string }
+          balance_by_day: { date: string; value: string }[]
+        }
         expect(overview.balance_by_day).toHaveLength(30)
         const dates = overview.balance_by_day.map((r) => r.date)
+        // The endpoint bounds snapshots by DATE, inclusive (`snapshot_date >=
+        // from::date AND <= to::date`), so the series must start after from's
+        // date and end on to's date — a row past `to` is one no backend could
+        // serve (re-verification of #3051 found a hand-typed literal a day late,
+        // green on every suite).
         expect(new Set(dates).size).toBe(30)
         expect([...dates].sort()).toEqual(dates) // ascending, no duplicate
+        expect(dates[0]! > overview.range.from.slice(0, 10)).toBe(true)
+        expect(dates.at(-1)).toBe(overview.range.to.slice(0, 10))
         // Wire type follows B (#2946): a snapshot value is a numeric STRING.
         for (const row of overview.balance_by_day) {
           expect(typeof row.value).toBe('string')

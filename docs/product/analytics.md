@@ -6,10 +6,12 @@ covers:
   - packages/frontend/src/__tests__/screenshot-fixture.test.ts
   - packages/frontend/src/app/(authenticated)/analytics/AnalyticsClient.tsx
   - packages/frontend/src/components/analytics/MerchantsTable.tsx
+  - packages/frontend/src/components/analytics/SpendSection.tsx
+  - packages/frontend/src/lib/analytics-series.ts
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
   - packages/backend/src/infra/repositories/analytics.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-16"
 ---
 
 # Analytics
@@ -25,8 +27,9 @@ missing number.
 The page renders from one endpoint, `GET /analytics/overview`
 (`range=7d|30d|90d`, `currency=usd|eur`, `tz=<IANA zone>`), so every tile on
 the page describes the same range, the same currency and the same set of
-payments — one loading state, one "based on N payments" basis. The endpoint is
-built by issue #2946; the page shell by #2947; the charts by #2948.
+payments — one loading state, one "based on N payments" basis. The endpoint
+(#2946), the page shell (#2947), the chart primitives (#2948) and their wiring
+(#2949, #3051) have all shipped; this doc describes what renders.
 
 ## What each figure means
 
@@ -52,6 +55,21 @@ period budget"); per-agent detail lives in the agents table.
 While fee charging is switched off, the tile says so plainly ("No fees yet —
 Haven is not charging fees") rather than rendering a bare 0. The API reports
 whether the flag is on so the tile cannot go stale in either direction.
+
+**Spend over time.** One bar per day *with activity* in the range — a day
+with no payment and no refusal is not drawn, so the axis is the days that
+carry a figure, not the calendar — stacked by agent, in the display currency;
+a marker cap above a bar means the guardrails refused at least one payment
+that day (the tooltip and the data table say how many). The bars are the same
+booked values the Spent tile sums, bucketed server-side in the page's time
+zone. Agents are ordered by spend, then id, and an agent that appears on the
+chart keeps one colour across the chart, its legend and the swatch beside its
+spend figure in the agents table above it. The window starts and ends at the
+moment the page loads, not at midnight, so a bar on the window's first or
+last local day covers part of a day: it is striped and named as partial (the
+note under the chart says which end), never dropped or stretched. Below three
+days of data the chart is not drawn (see the sparse rule below) — a line
+through one point agrees with every trend.
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
 A merchant's label is resolved by the API in a fixed order: your contact's

@@ -1370,17 +1370,19 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
 //     to it too: a fixture whose parts disagree with its own total would
 //     photograph a page no backend could serve.
 //   - Dates are ABSOLUTE (the capture-stability rule above): the range is a
-//     fixed 30-day window ending 2026-07-11, so "last seen", day buckets and
+//     fixed 30-day window ending 2026-07-10T14:30Z — off midnight on purpose
+//     (#3051), so the last `by_day` bucket is a partial day and the capture
+//     shows the striped bar and its note — so "last seen", day buckets and
 //     the balance series render identically on the day the PNG is taken.
 //   - `basis.tz` is 'UTC' — a headless capture browser sends no zone, and the
 //     endpoint defaults to UTC; the doc (docs/product/analytics.md) states the
 //     page sends the user's zone in a real browser.
 export const ANALYTICS_RANGE = {
-  from: '2026-06-11T00:00:00.000Z',
-  to: '2026-07-11T00:00:00.000Z',
+  from: '2026-06-10T14:30:00.000Z',
+  to: '2026-07-10T14:30:00.000Z',
   days: 30,
-  previous_from: '2026-05-12T00:00:00.000Z',
-  previous_to: '2026-06-11T00:00:00.000Z',
+  previous_from: '2026-05-11T14:30:00.000Z',
+  previous_to: '2026-06-10T14:30:00.000Z',
 }
 export const FIXTURE_ANALYTICS_MERCHANTS = [
   {
@@ -1411,12 +1413,21 @@ export const FIXTURE_ANALYTICS_BY_DAY = [
 ]
 // 30 absolute daily snapshot values, deterministic (no randomness — a capture
 // must re-render identically), ending on the dashboard's own account total so
-// the two screens never disagree in a capture. Dates run 2026-06-12 →
-// 2026-07-11 UTC (the range's own window) by epoch arithmetic, not date-string
-// arithmetic — `2026-06-${12 + i}` would roll past the month's end silently.
+// the two screens never disagree in a capture. Dates run 2026-06-11 →
+// 2026-07-10 UTC (the range's own window: `from` + 1 day through the date of
+// `to`) by epoch arithmetic, not date-string arithmetic — `2026-06-${11 + i}`
+// would roll past the month's end silently.
 const ANALYTICS_BALANCE_START = 12_354.52
 const ANALYTICS_BALANCE_END = FIXTURE_OVERVIEW.totals.usd
-const ANALYTICS_BALANCE_DAY_MS = Date.UTC(2026, 5, 12) // range `from` + 1 day
+// Derived from the range, not typed beside it: the day AFTER `from`'s date,
+// so an edit to ANALYTICS_RANGE cannot leave the series outside the window
+// the endpoint would return (re-verification of #3051 found the previous
+// hand-typed literal a day past `to`, green on every suite).
+const ANALYTICS_BALANCE_DAY_MS = Date.UTC(
+  new Date(ANALYTICS_RANGE.from).getUTCFullYear(),
+  new Date(ANALYTICS_RANGE.from).getUTCMonth(),
+  new Date(ANALYTICS_RANGE.from).getUTCDate() + 1,
+)
 const analyticsBalanceDate = (i) => new Date(ANALYTICS_BALANCE_DAY_MS + i * 86_400_000).toISOString().slice(0, 10)
 // Wire shape (B #2946): `value` is a numeric STRING like every money field on
 // the response, so the generator's number is stringified here, not at render.

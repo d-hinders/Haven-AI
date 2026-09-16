@@ -218,7 +218,8 @@ export function formatAnalyticsDay(dayIso: string): string {
 }
 
 /**
- * The compacted balance figure for the chart's ticks and its table: a number
+ * The compacted balance figure for the chart's callout and its table (the
+ * axis ticks have their own, digit-free voice in `formatAnalyticsTick`): a number
  * through `Intl`, in the same voice `formatAnalyticsAmount` gives the tiles —
  * but it takes a NUMBER because that is what `AreaChart`'s `formatValue`
  * contract fixes (the caller formats every money figure; the primitive prints
@@ -236,3 +237,17 @@ export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency)
   }).format(value)
 }
 
+/**
+ * The y-axis tick: the same currency voice as `formatAnalyticsValue`, with
+ * NO fraction digits — an axis needs no more precision than its grid, and a
+ * `$100.00` tick overran the 390 gutter and sat on the first bar (#3051
+ * design review). Values are the scale's own round ticks, never a figure.
+ */
+export function formatAnalyticsTick(value: number, currency: AnalyticsCurrency): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value)
+}

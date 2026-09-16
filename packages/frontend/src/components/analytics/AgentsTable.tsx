@@ -18,15 +18,18 @@ import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Table, tableColumnClass } from '@/components/ui/Table'
+import { SeriesSwatch } from '@/components/ui/StackedBarChart'
 import type { AnalyticsAgentRow } from '@/types/analytics'
 
 /**
  * The agents table (#2947, epic #2944 slice C).
  *
- * One row per agent that spent in the range, in the order the endpoint already
- * sent them — `GET /analytics/overview` ranks by spend, so the table inherits
- * that ranking rather than choosing its own (two orders would be two answers
- * to "which agent spent most"). Every column is a field on one agent in the
+ * One row per agent that spent in the range, in the page's display order —
+ * spend descending, then id (`lib/analytics-series.ts`): the wire's
+ * `agents[]` carries no ORDER BY, so the page sorts once and every section
+ * (this table, the spend chart, the merchants roster) inherits that one order
+ * rather than choosing its own (two orders would be two answers to "which
+ * agent spent most"). Every column is a field on one agent in the
  * response; the table computes nothing about the money.
  *
  * ── Why there are two renderings ────────────────────────────────────────────
@@ -149,9 +152,13 @@ function MerchantCell({ agent }: { agent: AnalyticsAgentRow }) {
 export function AgentsTable({
   agents,
   currency,
+  seriesIndexById,
 }: {
+  /** In display order — the page sorts once (`orderAgentsForDisplay`). */
   agents: AnalyticsAgentRow[]
   currency: AnalyticsCurrency
+  /** `seriesIndexByAgent(agents, byDay)`; absent → no swatches (the table alone). */
+  seriesIndexById?: Map<string, number>
 }) {
   return (
     <Card hover={false} className="overflow-hidden">
@@ -187,8 +194,26 @@ export function AgentsTable({
                   </Link>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
-                  <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
-                    {formatAnalyticsAmount(agent.spent, currency)}
+                  {/* #3051: the series token the spend chart paints this agent
+                      with, from the ONE map the page builds
+                      (`lib/analytics-series.ts`), beside the SPEND figure —
+                      the money the bar is made of — and never beside the
+                      name, where a coloured dot reads as a status light. An
+                      agent with no bar gets no swatch. */}
+                  <span className="inline-flex items-center justify-end gap-2">
+                    {/* A fixed-width slot BEFORE the figure: the dots form one
+                        column whatever the figure's width, and the figure's
+                        right edge stays on the SPEND header's like every other
+                        numeric column — an unplotted agent keeps the empty
+                        slot so its figure lines up too. */}
+                    <span className="inline-flex w-2.5 shrink-0 justify-center" data-testid="series-swatch-slot">
+                      {seriesIndexById?.get(agent.id) !== undefined && (
+                        <SeriesSwatch seriesIndex={seriesIndexById.get(agent.id) as number} />
+                      )}
+                    </span>
+                    <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
+                      {formatAnalyticsAmount(agent.spent, currency)}
+                    </span>
                   </span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right ${tableColumnClass('xl')}`}>
@@ -231,7 +256,7 @@ export function AgentsTable({
 
       <div className="lg:hidden divide-y divide-[var(--v2-table-row-border)]">
         {agents.map((agent) => (
-          <MobileAgentRow key={agent.id} agent={agent} currency={currency} />
+          <MobileAgentRow key={agent.id} agent={agent} currency={currency} seriesIndex={seriesIndexById?.get(agent.id)} />
         ))}
       </div>
     </Card>
@@ -246,7 +271,15 @@ export function AgentsTable({
  * table's remaining columns went, not a second source of truth — every line
  * is the same field the desktop table renders.
  */
-function MobileAgentRow({ agent, currency }: { agent: AnalyticsAgentRow; currency: AnalyticsCurrency }) {
+function MobileAgentRow({
+  agent,
+  currency,
+  seriesIndex,
+}: {
+  agent: AnalyticsAgentRow
+  currency: AnalyticsCurrency
+  seriesIndex: number | undefined
+}) {
   const [open, setOpen] = useState(false)
   const presentation = agentStatusPresentation(agent.status)
   const budgetLine =
@@ -264,8 +297,11 @@ function MobileAgentRow({ agent, currency }: { agent: AnalyticsAgentRow; currenc
           </span>
         }
         subtitle={
-          <span className="v2-tabular">
-            {formatAnalyticsAmountCompact(agent.spent, currency)} spent · {agent.refusals} refused
+          <span className="v2-tabular inline-flex items-center gap-1.5">
+            {seriesIndex !== undefined && <SeriesSwatch seriesIndex={seriesIndex} />}
+            <span>
+              {formatAnalyticsAmountCompact(agent.spent, currency)} spent · {agent.refusals} refused
+            </span>
           </span>
         }
         trailing={

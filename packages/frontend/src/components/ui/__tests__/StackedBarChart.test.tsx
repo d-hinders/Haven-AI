@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StackedBarChart } from '../StackedBarChart'
 import type { StackedBarDay } from '../StackedBarChart'
 
@@ -202,6 +202,109 @@ describe('StackedBarChart — the drawing says what the data says', () => {
     expect(svg!.getAttribute('role')).toBe('img')
     expect(svg!.getAttribute('aria-label')).toBe(SUMMARY)
     expect(svg!.getAttribute('tabindex')).toBe('0')
+  })
+})
+
+describe('StackedBarChart — a partial day is drawn as one (#3051)', () => {
+  it('hatches the bar with its own series token, marks the group, and names it in the data table and the tooltip', () => {
+    const days: StackedBarDay[] = THREE_DAYS.map((d) => ({ ...d }))
+    days[0] = { ...days[0]!, partial: true }
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const groups = container.querySelectorAll('[data-testid="chart-day"]')
+    expect(groups[0]!.getAttribute('data-partial')).toBe('true')
+    expect(groups[1]!.getAttribute('data-partial')).toBeNull()
+    const cutSegment = groups[0]!.querySelector('[data-testid="chart-segment"]')!
+    const fullSegment = groups[1]!.querySelector('[data-testid="chart-segment"]')!
+    // Striped, not faded: the partial segment fills from a <pattern> whose
+    // base rect is the SAME series token the full segment is filled with, so
+    // the mark is identical on both themes and the token's contrast holds.
+    expect(cutSegment.getAttribute('data-hatched')).toBe('true')
+    expect(fullSegment.getAttribute('data-hatched')).toBeNull()
+    const fill = cutSegment.getAttribute('fill')!
+    expect(fill).toMatch(/^url\(#.*-hatch-\d+\)$/)
+    const patternId = fill.slice(5, -1)
+    const pattern = container.querySelector(`[data-testid="chart-hatch-pattern"][id="${patternId}"]`)!
+    expect(pattern.querySelector('rect')!.getAttribute('fill')).toBe(fullSegment.getAttribute('fill'))
+    expect(pattern.querySelector('line')!.getAttribute('stroke')).toBe('var(--v2-bg)')
+    // Opacity is no longer the encoding: both segments carry the resting value.
+    expect(cutSegment.getAttribute('fill-opacity')).toBe(fullSegment.getAttribute('fill-opacity'))
+    const table = getByTestId('chart-data-table')
+    expect(table.textContent).toContain(`${days[0]!.label} (partial day)`)
+    expect(table.textContent).not.toContain(`${days[1]!.label} (partial day)`)
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    expect(getByTestId('chart-tooltip-partial').textContent).toContain('partial day')
+  })
+})
+
+describe('StackedBarChart — the desktop callout is clamped by its own measured width (#3051 design re-review)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('anchors the callout over its day and clamps by the measured half-width, not a fixed 30/70', () => {
+    // jsdom lays nothing out: every box is 0 wide, so the effect bails and
+    // the max-width bound (30%) stands. Give the wrapper 600px and the
+    // callout 300px — a 25% half-width — and the clamp must follow.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(300)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    // Day 0's centre (22.7% of a three-bar plot) sits inside 25%, so the
+    // clamp binds: the callout's left edge lands on the wrapper's (plus
+    // the half-percent cushion) — neither the fixed 30% nor the raw centre.
+    expect(getByTestId('chart-tooltip').style.left).toBe('25.5%')
+    fireEvent.keyDown(svg, { key: 'End' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('74.5%')
+    // The callout is the wrapper's child — the box the measurement and the
+    // `left: %` both resolve against — not the plot's.
+    expect(getByTestId('chart-tooltip').parentElement).toBe(getByTestId('stacked-bar-chart'))
+  })
+
+  it('falls back to the max-width bound where nothing has a width (jsdom, first paint)', () => {
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('30%')
+    fireEvent.keyDown(svg, { key: 'End' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('70%')
+  })
+})
+
+describe('StackedBarChart — ticks fit the gutter at 390 (#3051 design review)', () => {
+  it('formats ticks with formatTick when given, and widens the gutter on the narrow treatment', () => {
+    const compact = (n: number) => `$${Math.round(n)}`
+    const wide = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} formatTick={compact} />,
+    )
+    const wideTicks = wide.getAllByTestId('chart-tick-label')
+    expect(wideTicks.every((t) => /^\$\d+$/.test(t.textContent ?? ''))).toBe(true)
+    const wideGutter = (wideTicks[0] as HTMLElement).style.width
+    wide.unmount()
+    const narrow = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} formatTick={compact} narrow />,
+    )
+    const narrowGutter = (narrow.getAllByTestId('chart-tick-label')[0] as HTMLElement).style.width
+    expect(parseFloat(narrowGutter)).toBeGreaterThan(parseFloat(wideGutter))
+    // The bars still start to the right of the wider gutter.
+    const firstBar = narrow.container.querySelector('[data-testid="chart-segment"]')!
+    expect(Number(firstBar.getAttribute('x'))).toBeGreaterThan(70)
+  })
+
+  it('falls back to formatValue for ticks when no tick formatter is given', () => {
+    const { getAllByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    // Every tick goes through `fmt` (which prints cents) when no compact
+    // formatter is given.
+    expect(getAllByTestId('chart-tick-label').every((t) => /\.\d\d$/.test(t.textContent ?? ''))).toBe(true)
   })
 })
 

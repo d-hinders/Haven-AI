@@ -30,7 +30,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-16"
 ---
 
 # Haven Screen Recipes
@@ -458,8 +458,10 @@ Structure:
 4. The agents table: spend, share, payments, refusals, budget used, top
    merchant, last payment, each row a link into the agent. Budget figures ride
    in the delegation's own token units with a progress bar and the reset date.
-5. The chart band and the merchants section below the table, which arrive with
-   their own slices.
+5. Below the table: the spend-over-time chart (one bar per day with activity,
+   stacked by agent, refusal caps, partial edge days striped; #3051), then the
+   top-merchants table, then the balance-over-time chart (#2949). The table
+   stays on the first screen; the charts are the same figures over time.
 
 Money and risk clarity:
 - A value is a reading, never a judgement: the figure is ink in every state,

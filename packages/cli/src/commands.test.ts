@@ -539,6 +539,30 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
+  it('renders the ACCOUNT column from accountName — the server stopped sending safeName (#2914)', async () => {
+    // The table's ACCOUNT column read `safeName` while the feed emitted it.
+    // #2914 renamed that field to `accountName`, and a stale read here fails
+    // in the quietest possible way: every row renders a BLANK account, with
+    // no error anywhere and an exit code of 0. Nothing else in this suite
+    // touches the column, which is how the stale read survived the rename —
+    // so this asserts the rendered cell, not the request.
+    const transactions = [
+      {
+        hash: '0xa',
+        direction: 'out',
+        valueFormatted: '5',
+        asset: 'USDC',
+        timestamp: 1_700_000_000,
+        accountName: 'Treasury',
+      },
+    ]
+    const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /transactions': { transactions } }) })
+    expect(await run(['activity', 'list'], deps)).toBe(0)
+    const rendered = out.join('\n')
+    expect(rendered).toContain('ACCOUNT')
+    expect(rendered).toContain('Treasury')
+  })
+
   it('reads the wallet address from account_address (#2914: the only name left)', async () => {
     const api = fakeApi({
       'GET /user/accounts': { safes: [{ id: 's1', account_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },

@@ -83,7 +83,7 @@ interface Agent { id: string; name: string; status: string; allowances?: Allowan
 interface Balance { symbol: string; formatted: string; balance: string }
 interface Txn {
   hash: string; direction: 'in' | 'out'; valueFormatted: string; asset: string
-  source?: string; timestamp: number; safeName?: string
+  source?: string; timestamp: number; accountName?: string
   from?: string; to?: string; isError?: boolean
   tokenSymbol?: string; tokenAddress?: string; chainId?: number; accountAddress?: string
   agentName?: string; paymentFlowStatus?: string | null; activityType?: string
@@ -1012,7 +1012,7 @@ async function cmdWalletRename(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
  * mirroring `wallets balances`. Throws if `--safe` was given but matches no
  * wallet, so a typo'd filter fails loudly instead of silently returning all rows.
  */
-async function resolveSafeId(args: ParsedArgs, api: CliApi): Promise<string | undefined> {
+async function resolveAccountId(args: ParsedArgs, api: CliApi): Promise<string | undefined> {
   if (!args.flags.safe) return undefined
   const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
   const safe = pickSafe(safes, args.flags.safe)
@@ -1022,12 +1022,12 @@ async function resolveSafeId(args: ParsedArgs, api: CliApi): Promise<string | un
 
 async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const safeId = await resolveSafeId(args, api)
+  const accountId = await resolveAccountId(args, api)
   const params = new URLSearchParams({
     offset: String(args.flags.offset ?? 0),
     limit: String(args.flags.limit ?? 25),
   })
-  if (safeId) params.set('accountId', safeId)
+  if (accountId) params.set('accountId', accountId)
   if (args.flags.agent) params.set('agentId', args.flags.agent)
   const { transactions } = await api.get<{ transactions: Txn[] }>(`/transactions?${params.toString()}`)
   const visible = args.flags.direction
@@ -1043,7 +1043,7 @@ async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
             t.direction === 'in' ? 'in' : 'out',
             `${t.direction === 'in' ? '+' : '-'}${t.valueFormatted} ${t.asset}`,
             t.source ?? 'transfer',
-            t.safeName ?? '',
+            t.accountName ?? '',
           ]),
         ),
   )
@@ -1053,12 +1053,12 @@ async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
 async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   if (args.flags.format === 'sie') return exportSie(args, d)
   const { api } = await authed(args, d)
-  const safeId = await resolveSafeId(args, api)
+  const accountId = await resolveAccountId(args, api)
   const params = new URLSearchParams({
     offset: String(args.flags.offset ?? 0),
     limit: String(args.flags.limit ?? 1000),
   })
-  if (safeId) params.set('accountId', safeId)
+  if (accountId) params.set('accountId', accountId)
   if (args.flags.agent) params.set('agentId', args.flags.agent)
   const { transactions } = await api.get<{ transactions: Txn[] }>(`/transactions?${params.toString()}`)
   const visible = args.flags.direction
@@ -1147,7 +1147,7 @@ async function resolveWalletAndToken(
   args: ParsedArgs,
   api: CliApi,
   symbol: string,
-): Promise<{ safeId: string; token: BalanceToken }> {
+): Promise<{ accountId: string; token: BalanceToken }> {
   const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
   if (safes.length === 0) {
     throw new HavenCliError('No wallet on this account yet — finish onboarding first.', EXIT.refused)
@@ -1173,7 +1173,7 @@ async function resolveWalletAndToken(
     const known = balances.map((b) => b.symbol).join(', ')
     throw new UsageError(`Unknown token ${symbol} on this wallet's chain. Available: ${known || 'none'}`)
   }
-  return { safeId: safe.id, token }
+  return { accountId: safe.id, token }
 }
 
 /** Poll a setup until it leaves the states that are still in flight. */
@@ -1232,13 +1232,13 @@ async function cmdAgentsConnect(args: ParsedArgs, d: ResolvedDeps): Promise<numb
     throw new UsageError('--budget, --token and --period are required (period is whole minutes; 0 means one-time)')
   }
 
-  const { safeId, token } = await resolveWalletAndToken(args, api, args.flags.token)
+  const { accountId, token } = await resolveWalletAndToken(args, api, args.flags.token)
   const amount = parseTokenAmount(args.flags.budget, token.decimals, token.symbol)
   if (!amount.ok) throw new UsageError(amount.message)
 
   const setup = await api.post<CreateSetupResponse>('/agent-connection-setups', {
     name,
-    account_id: safeId,
+    account_id: accountId,
     allowances: [
       {
         token_address: token.address ?? '0x0000000000000000000000000000000000000000',

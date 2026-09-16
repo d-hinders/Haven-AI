@@ -464,7 +464,11 @@ describe('GET /transactions/export.csv', () => {
     const response = await get('?fresh=1&chainId=100')
     const { header, records } = parseCsv(response.body.slice(1))
 
-    expect(records[0][header.indexOf('safe_address')]).toBe(GNOSIS_SAFE)
+    // #2914: `account_address` is the only address column — the deprecated
+    // `safe_address` twin is gone from the header entirely, so `indexOf`
+    // would return -1 and silently read the LAST cell of the row.
+    expect(header).not.toContain('safe_address')
+    expect(records[0][header.indexOf('account_address')]).toBe(GNOSIS_SAFE)
   })
 
   it('exports every row the pipeline yields, well past one page of the list', async () => {

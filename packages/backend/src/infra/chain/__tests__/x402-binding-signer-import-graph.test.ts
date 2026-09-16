@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// `config.ts` runs `dotenv.config()` on <cwd>/.env and <repo-root>/.env BEFORE
+// `requireEnv`, so in a checkout that carries a root `.env` (every developer
+// machine) deleting the variables from `process.env` is not enough — dotenv
+// puts them straight back and the sanity assertion below would fail with
+// "promise resolved instead of rejecting". Disabling dotenv here makes the
+// test about the import graph, not about whose `.env` is on disk (review of
+// #3047). The mutation below still reddens: with dotenv inert, `config.ts`
+// throws on the bare env exactly as it does in CI.
+vi.mock('dotenv', () => ({
+  default: { config: () => ({ error: new Error('dotenv disabled in this guard (#3046)') }) },
+}))
+
 /**
  * #3046: `x402-binding-signer.ts` must be importable WITHOUT the backend's
  * runtime env. The mcp-server's `x402-expected-wire-contract.test.ts` imports
@@ -13,19 +25,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  */
 describe('x402-binding-signer import graph (#3046)', () => {
   const saved: Record<string, string | undefined> = {}
-  const REQUIRED = ['DATABASE_URL', 'JWT_SECRET'] as const
+  // The flag is cleared too so `readEmitPayerContext` cannot refuse on a
+  // developer's shell value and masquerade as the import-graph failure.
+  const CLEARED = ['DATABASE_URL', 'JWT_SECRET', 'X402_EMIT_PAYER_CONTEXT'] as const
 
   beforeEach(() => {
     vi.resetModules()
-    for (const k of REQUIRED) {
+    for (const k of CLEARED) {
       saved[k] = process.env[k]
       delete process.env[k]
     }
-    delete process.env.X402_EMIT_PAYER_CONTEXT
   })
 
   afterEach(() => {
-    for (const k of REQUIRED) {
+    for (const k of CLEARED) {
       if (saved[k] === undefined) delete process.env[k]
       else process.env[k] = saved[k]
     }

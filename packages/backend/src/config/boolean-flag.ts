@@ -25,7 +25,7 @@
  * present in the dashboard, looked set, and did nothing.
  *
  * So an unrecognised value refuses the boot instead — the shape
- * `parseConnectorChannel` above and `parseAccountingEntitlementMode` below
+ * `parseConnectorChannel` and `parseAccountingEntitlementMode` (both in `config.ts`)
  * already use. Normalising case was the alternative and was rejected by the
  * owner on 2026-09-15 ("flags should fail loudly"): lower-casing fixes `TRUE`
  * and still reads `1`, `yes` and `on` as off, which is the same defect with a

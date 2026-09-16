@@ -162,7 +162,7 @@
       "runsVia": [
         "lint:ratchet:test"
       ],
-      "reason": "The engine's own self-test, which did not exist until #2759 — six gates imported the module and each gate's suite covered only the paths that gate happens to take, so the engine's contract was tested by nobody. Both surface jobs, mirroring the engine above: a weakening reachable from either surface must run it."
+      "reason": "The engine's own self-test, which did not exist until #2759 \u2014 six gates imported the module and each gate's suite covered only the paths that gate happens to take, so the engine's contract was tested by nobody. Both surface jobs, mirroring the engine above: a weakening reachable from either surface must run it."
     },
     {
       "path": "scripts/lint-wire-types.mjs",
@@ -204,7 +204,7 @@
       "runsVia": [
         "visual:baselines"
       ],
-      "reason": "The visual gate's honesty instrument (#2318): it names the baselines that were actually compared, and refuses an EMPTY baseline tree — the case where the pixel gate passes having compared nothing. It reads packages/frontend/e2e/__screenshots__ but lives under scripts/, and the job that reads it beside the tick (design_visual) is gated on the frontend surface, so a pull request touching only this file must be routed to frontend_checks to run it at all."
+      "reason": "The visual gate's honesty instrument (#2318): it names the baselines that were actually compared, and refuses an EMPTY baseline tree \u2014 the case where the pixel gate passes having compared nothing. It reads packages/frontend/e2e/__screenshots__ but lives under scripts/, and the job that reads it beside the tick (design_visual) is gated on the frontend surface, so a pull request touching only this file must be routed to frontend_checks to run it at all."
     },
     {
       "path": "scripts/ci/visual-baseline-inventory.test.mjs",
@@ -224,7 +224,7 @@
       "runsVia": [
         "lint:migration-constraint-scope"
       ],
-      "reason": "Refuses a pg_constraint lookup in packages/backend/src/db/migrations/** that is not anchored to a relation or schema (#2702). `conname` is not unique across schemas, so an unanchored lookup is answered by another schema's copy and the constraint is silently skipped — measured at 185 and 193 schemas missing three constraints. It lives under scripts/ and only backend_checks runs it, so a PR that only weakens the guard would not route to the job that runs it."
+      "reason": "Refuses a pg_constraint lookup in packages/backend/src/db/migrations/** that is not anchored to a relation or schema (#2702). `conname` is not unique across schemas, so an unanchored lookup is answered by another schema's copy and the constraint is silently skipped \u2014 measured at 185 and 193 schemas missing three constraints. It lives under scripts/ and only backend_checks runs it, so a PR that only weakens the guard would not route to the job that runs it."
     },
     {
       "path": "scripts/lint-migration-constraint-scope.test.mjs",
@@ -271,6 +271,30 @@
         "test -w packages/frontend"
       ],
       "reason": "The canonical generic payment skill, and the second SDK source with a cross-package pin. packages/frontend/src/lib/agent-skill-bundle.ts keeps a deliberately decoupled inline copy so the frontend deploys standalone, and packages/frontend/src/lib/__tests__/agent-skill-bundle.test.ts imports THIS file directly to assert byte-for-byte parity -- a test that runs only in frontend_checks. #2727 closed the same hole for agent-guidance.ts and left this one open (#2743): an SDK-only change here routed sdk but not frontend, so mutating a heading exited 0 on lint:runbook-parity (which reads only the two full-text runbook copies, and this is not one of them) while agent-skill-bundle.test.ts failed in a job that never ran. That copy is resolved text composed at build time, so no readable-back lint can cover it; the frontend's own suite is the check, which is why runsVia names it by workspace rather than inventing a second spelling of a check frontend_checks already runs."
+    },
+    {
+      "path": "packages/backend/src/infra/chain/x402-binding-signer.ts",
+      "jobs": [
+        "backend",
+        "mcp_server"
+      ],
+      "runsVia": [
+        "test -w packages/backend",
+        "test -w packages/mcp-server"
+      ],
+      "reason": "The producer of the Haven-signed x402 expected context. packages/mcp-server/src/x402-expected-wire-contract.test.ts imports THIS file across the package boundary to prove the hosted/signer/backend contract byte-for-byte -- the only runtime import of backend/src from any other package -- and that test runs only in mcp_server_checks. #3023 changed this file's import graph (config.ts, which requires DATABASE_URL at evaluation) on a backend-only PR; the MCP job did not run, dev runs skip it by surface, and the contract proof was absent until the next mcp-server PR failed (#3046). Same shape #2727/#2743 closed for the SDK's canonical sources."
+    },
+    {
+      "path": "packages/backend/src/config/boolean-flag.ts",
+      "jobs": [
+        "backend",
+        "mcp_server"
+      ],
+      "runsVia": [
+        "test -w packages/backend",
+        "test -w packages/mcp-server"
+      ],
+      "reason": "The only module x402-binding-signer.ts reaches inside the backend (#3046). It must stay dependency-free so the binding signer stays importable without the backend runtime env; an import added here re-creates the #3046 trap in the mcp-server job, so a change routes that job too."
     }
   ]
 }

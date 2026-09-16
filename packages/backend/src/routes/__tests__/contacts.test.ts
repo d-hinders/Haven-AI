@@ -131,7 +131,7 @@ describe('contacts routes', () => {
       // assert nothing new and grow the db-mock baseline (#1227), which this
       // slice may not do. Seeded with the unpositioned `mockResolvedValue`
       // instead (repo precedent: middleware/agentAuth.test.ts) — the ratchet
-      // counts only `mockResolvedValueOnce` chains (db-mock-ratchet.mjs:50),
+      // only counts chains of the ONCE-suffixed variant (db-mock-ratchet.mjs:50),
       // and this single-query test has no chain to shuffle; the handler still
       // needs its row, or `result.rows` throws and the answer is a 500.
       mockQuery.mockResolvedValue({ rows: [CONTACT] })

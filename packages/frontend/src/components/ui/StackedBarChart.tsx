@@ -104,10 +104,16 @@ const PAD_NARROW = { ...PAD, left: 78 }
 /** The cap above a bar that refused something, in viewBox units. */
 const REFUSAL_MARKER_H = 7
 /** The desktop callout's resting offset under the wrapper's top edge — the
- *  CSS px behind its `top-3` — and the clearance it keeps from the bar's top
- *  (resting) or the axis baseline (flipped, #3063). */
+ *  CSS px behind its `top-3`; the clearance it keeps from the bar's highest
+ *  mark (resting) or the axis baseline (dropped, #3063); and the least of a
+ *  bar's top a dropped callout must leave in view — one `top-3` unit, enough
+ *  to read as "a bar continues here" rather than a line (design review). */
 const TIP_REST_TOP = 12
 const TIP_GAP = 6
+const TIP_MIN_VISIBLE = 12
+/** The legend's `mt-3` under the svg: the whitespace a dropped callout may
+ *  run into (its bottom on the legend's top edge) without covering a row. */
+const LEGEND_GAP = 12
 
 const AXIS_COLOR = 'var(--v2-border)'
 const INK = 'var(--v2-ink)'
@@ -374,18 +380,21 @@ export function StackedBarChart({
     [entries.length],
   )
 
-  // The vertical flip (#3063). The resting callout hangs 12px (`top-3`) under
+  // The vertical drop (#3063). The resting callout hangs 12px (`top-3`) under
   // the wrapper's top edge; if the described bar's top — or its refusal cap
-  // — would sit under the callout's box, drop the callout below that top:
-  // its bottom rests `TIP_GAP` above the axis baseline when the bar is tall
-  // enough to hold it, and otherwise its top sits `TIP_GAP` under the bar's
-  // top (or cap) and the callout runs on past the baseline over that day's
-  // axis label — the label it repeats — rather than back over the top it
-  // exists to keep visible. The svg scales the viewBox to its CSS box without
-  // preserving the ratio, so a viewBox y maps to CSS by
-  // `y / VIEW_H * clientHeight`. Every input is a layout read or a value the
-  // render already fixed, so the second pass reads the same number and the
-  // setter bails out — the same fixed point as the half-width above.
+  // — would sit under the callout's box, the callout drops below the bar's
+  // top, but only where that leaves at least `TIP_MIN_VISIBLE` of the bar
+  // in view above it: its bottom `TIP_GAP` above the axis baseline when the
+  // bar is tall enough to hold it, else its bottom on the legend's top edge
+  // — over that day's axis label whole (the label it repeats), never half of
+  // it and never over a legend row. A bar too short for either (the
+  // callout would swallow its body, the label and the legend to save a
+  // sliver — design review) keeps the resting callout and loses its top
+  // instead. The svg scales the viewBox to its CSS box without preserving
+  // the ratio, so a viewBox y maps to CSS by `y / VIEW_H * clientHeight`.
+  // Every input is a layout read or a value the render already fixed, so the
+  // second pass reads the same number and the setter bails out — the same
+  // fixed point as the half-width above.
   useLayoutEffect(() => {
     const tip = tooltipRef.current
     const svg = svgRef.current
@@ -402,9 +411,14 @@ export function StackedBarChart({
       setTipTop(null)
       return
     }
-    // Below the BAR's top (so the cap and the top edge both stay clear), as
-    // low as the baseline allows.
-    setTipTop(Number(Math.max(barTop + TIP_GAP, cssY(baseY) - tip.offsetHeight - TIP_GAP).toFixed(1)))
+    // Both candidates leave `TIP_MIN_VISIBLE` of the day's marks in view and
+    // clear the BAR's top edge by `TIP_GAP` — a cap counts towards the marks
+    // but never stands in for the bar's own top.
+    const least = Math.max(barTop + TIP_GAP, markTop + TIP_MIN_VISIBLE)
+    const aboveBaseline = cssY(baseY) - tip.offsetHeight - TIP_GAP
+    const onLegendTop = svg.clientHeight + LEGEND_GAP - tip.offsetHeight
+    const top = aboveBaseline >= least ? aboveBaseline : onLegendTop >= least ? onLegendTop : null
+    setTipTop(top === null ? null : Number(top.toFixed(1)))
   })
 
   // The sparse-data render guard: a range with too few days to carry a shape

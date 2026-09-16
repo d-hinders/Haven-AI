@@ -216,6 +216,10 @@ describe('AgentsTable — one colour per agent, shared with the spend chart (#30
     expect(spendCell.textContent).toContain('$')
     expect(spendCell.querySelector('a')).toBeNull()
     expect(desktop.querySelector('a [data-testid="series-swatch"]')).toBeNull()
+    // The swatch sits in a fixed slot BEFORE the figure, so the figure's
+    // right edge stays on the header's like every other numeric column.
+    const figure = spendCell.querySelector('.v2-tabular')!
+    expect(desktopSwatches[0]!.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // The colour is the chart's own token by index — the same
     // `seriesColor(0)` the first stacked segment is filled with.
     expect((desktopSwatches[0] as HTMLElement).style.backgroundColor).toBe(seriesColor(0))
@@ -226,6 +230,8 @@ describe('AgentsTable — one colour per agent, shared with the spend chart (#30
     const onlyResearch = seriesIndexByAgent(agents, [{ date: '2026-07-07', spent_by_agent: { [RESEARCH.id]: '1.00' }, refusals: 0 }])
     const one = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={onlyResearch} />)
     expect(desktopOf(one.container)!.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(1)
+    // The unplotted agent keeps the EMPTY slot, so its figure lines up too.
+    expect(desktopOf(one.container)!.querySelectorAll('[data-testid="series-swatch-slot"]')).toHaveLength(2)
     one.unmount()
     const none = mount()
     expect(none.container.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(0)

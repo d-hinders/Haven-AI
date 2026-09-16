@@ -256,18 +256,23 @@ export function StackedBarChart({
   const [caret, setCaret] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const tooltipRef = useRef<HTMLDivElement | null>(null)
-  // The callout's half-width as a fraction of the plot, measured after it
-  // paints, so the edge clamp is exactly as wide as the callout needs and
-  // no wider — a fixed 30/70 clamp (the first cut) parked the callout on
-  // its own bar at day 0 and over the wrong bar at day N (#3051 design
-  // re-review). Before the first measurement the max-width bound applies.
+  // The callout's half-width as a fraction of its containing block — the
+  // chart wrapper, which is the box its `left: %` and `max-w-[60%]` resolve
+  // against and, with no padding on either, the plot's width too — measured
+  // after it paints, so the edge clamp is exactly as wide as the callout
+  // needs and no wider: a fixed 30/70 clamp (the first cut) parked the
+  // callout on its own bar at day 0 and over the wrong bar at day N (#3051
+  // design re-review). The callout is `w-max`, so its width does not depend
+  // on `left` and the measurement is a fixed point (the second render reads
+  // the same number and the setter bails out). Before the first measurement
+  // — and in jsdom, where every box is 0 wide — the max-width bound applies.
   const [tipHalfPct, setTipHalfPct] = useState(30)
   useLayoutEffect(() => {
     const tip = tooltipRef.current
-    const plot = tip?.parentElement
-    if (!tip || !plot || plot.clientWidth === 0) return
-    const half = ((tip.offsetWidth / 2) / plot.clientWidth) * 100
-    // Keep it strictly inside the plot and never wider than the max-width
+    const wrapper = tip?.parentElement
+    if (!tip || !wrapper || wrapper.clientWidth === 0) return
+    const half = ((tip.offsetWidth / 2) / wrapper.clientWidth) * 100
+    // Keep it strictly inside the wrapper and never wider than the max-width
     // bound allows.
     setTipHalfPct(Math.min(30, Math.max(1, half + 0.5)))
   })

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StackedBarChart } from '../StackedBarChart'
 import type { StackedBarDay } from '../StackedBarChart'
 
@@ -236,6 +236,45 @@ describe('StackedBarChart — a partial day is drawn as one (#3051)', () => {
     const svg = container.querySelector('svg')!
     fireEvent.keyDown(svg, { key: 'Home' })
     expect(getByTestId('chart-tooltip-partial').textContent).toContain('partial day')
+  })
+})
+
+describe('StackedBarChart — the desktop callout is clamped by its own measured width (#3051 design re-review)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('anchors the callout over its day and clamps by the measured half-width, not a fixed 30/70', () => {
+    // jsdom lays nothing out: every box is 0 wide, so the effect bails and
+    // the max-width bound (30%) stands. Give the wrapper 600px and the
+    // callout 300px — a 25% half-width — and the clamp must follow.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(300)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    // Day 0's centre (22.7% of a three-bar plot) sits inside 25%, so the
+    // clamp binds: the callout's left edge lands on the wrapper's (plus
+    // the half-percent cushion) — neither the fixed 30% nor the raw centre.
+    expect(getByTestId('chart-tooltip').style.left).toBe('25.5%')
+    fireEvent.keyDown(svg, { key: 'End' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('74.5%')
+    // The callout is the wrapper's child — the box the measurement and the
+    // `left: %` both resolve against — not the plot's.
+    expect(getByTestId('chart-tooltip').parentElement).toBe(getByTestId('stacked-bar-chart'))
+  })
+
+  it('falls back to the max-width bound where nothing has a width (jsdom, first paint)', () => {
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('30%')
+    fireEvent.keyDown(svg, { key: 'End' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('70%')
   })
 })
 

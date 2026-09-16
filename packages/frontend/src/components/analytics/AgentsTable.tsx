@@ -201,14 +201,19 @@ export function AgentsTable({
                       name, where a coloured dot reads as a status light. An
                       agent with no bar gets no swatch. */}
                   <span className="inline-flex items-center justify-end gap-2">
+                    {/* A fixed-width slot BEFORE the figure: the dots form one
+                        column whatever the figure's width, and the figure's
+                        right edge stays on the SPEND header's like every other
+                        numeric column — an unplotted agent keeps the empty
+                        slot so its figure lines up too. */}
+                    <span className="inline-flex w-2.5 shrink-0 justify-center" data-testid="series-swatch-slot">
+                      {seriesIndexById?.get(agent.id) !== undefined && (
+                        <SeriesSwatch seriesIndex={seriesIndexById.get(agent.id) as number} />
+                      )}
+                    </span>
                     <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
                       {formatAnalyticsAmount(agent.spent, currency)}
                     </span>
-                    {/* After the figure, so the dots form one column at the
-                        cell's right edge whatever the figure's width. */}
-                    {seriesIndexById?.get(agent.id) !== undefined && (
-                      <SeriesSwatch seriesIndex={seriesIndexById.get(agent.id) as number} />
-                    )}
                   </span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right ${tableColumnClass('xl')}`}>

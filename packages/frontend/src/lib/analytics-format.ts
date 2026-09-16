@@ -218,7 +218,8 @@ export function formatAnalyticsDay(dayIso: string): string {
 }
 
 /**
- * The compacted balance figure for the chart's ticks and its table: a number
+ * The compacted balance figure for the chart's callout and its table (the
+ * axis ticks have their own, digit-free voice in `formatAnalyticsTick`): a number
  * through `Intl`, in the same voice `formatAnalyticsAmount` gives the tiles —
  * but it takes a NUMBER because that is what `AreaChart`'s `formatValue`
  * contract fixes (the caller formats every money figure; the primitive prints

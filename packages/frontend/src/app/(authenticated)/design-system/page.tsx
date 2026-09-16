@@ -44,6 +44,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
+import { formatAnalyticsTick } from '@/lib/analytics-format'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
@@ -2461,7 +2462,7 @@ export default function DesignSystemPage() {
             currency="USD"
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
-            formatTick={(n) => `$${Math.round(n)}`}
+            formatTick={(n) => formatAnalyticsTick(n, 'USD')}
           />
           {/* The narrow treatment, as the page mounts it below `lg`: wider
               tick gutter, dot legend, tap-to-pin panel. */}
@@ -2471,7 +2472,7 @@ export default function DesignSystemPage() {
               currency="USD"
               ariaLabel={DS_CHART_SUMMARY}
               formatValue={dsMoney}
-              formatTick={(n) => `$${Math.round(n)}`}
+              formatTick={(n) => formatAnalyticsTick(n, 'USD')}
               narrow
             />
           </div>

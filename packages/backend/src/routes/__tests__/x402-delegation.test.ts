@@ -1758,8 +1758,16 @@ describe('x402 delegation-rail settlement (#830)', () => {
       }
       return Promise.resolve({ rows: [] })
     })
-    mockPrepareFunding.mockResolvedValueOnce(PREPARED)
-    mockCreateIntent.mockResolvedValueOnce({ id: 'fresh-mint', status: 'pending_signature', expires_at: 'x' })
+    // Non-positional on purpose (#1227 ratchet): each mock answers exactly one
+    // call in this test and `beforeEach` resets both, so mockResolvedValue/
+    // mockImplementation wiring pins the same responses without lengthening
+    // the positional chain the ratchet exists to shrink.
+    mockPrepareFunding.mockResolvedValue(PREPARED)
+    mockCreateIntent.mockImplementation(async () => ({
+      id: 'fresh-mint',
+      status: 'pending_signature',
+      expires_at: 'x',
+    }))
     const res = await app.inject({
       method: 'POST', url: '/x402/authorize',
       headers: { authorization: 'Bearer sk_agent_test' },

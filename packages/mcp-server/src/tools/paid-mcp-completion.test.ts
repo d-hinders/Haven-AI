@@ -547,7 +547,7 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
   function allowancesFixture(remaining: string, rail: 'legacy' | 'delegation' = 'legacy') {
     return {
       agent_id: 'agt_1',
-      safe_address: '0xSafe',
+      account_address: '0xSafe',
       delegate_address: '0xDelegate',
       chain_id: 8453,
       allowances: [{

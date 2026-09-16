@@ -180,7 +180,7 @@ describe('--json contract, success paths', () => {
   // stdout (haven-reviewer, finding 4 @ 2d43d255). Without these, the shared
   // `data()`/`text()` plumbing is trusted rather than asserted.
   const ROUTES: Record<string, unknown> = {
-    'GET /user/accounts': { safes: [{ id: 's1', safe_address: '0xabc', chain_id: 8453, name: 'Ops', is_default: true }] },
+    'GET /user/accounts': { safes: [{ id: 's1', account_address: '0xabc', chain_id: 8453, name: 'Ops', is_default: true }] },
     'GET /user/accounts/s1/funding': {
       account_address: '0xabc',
       chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },
@@ -196,9 +196,7 @@ describe('--json contract, success paths', () => {
     'GET /transactions': {
       transactions: [{
         hash: '0xtx', direction: 'out', valueFormatted: '1.00', asset: 'USDC', timestamp: 1_700_000_000,
-        // OLD server shape on purpose: only `safeAddress`. The export must
-        // still fill BOTH columns from it (#2908).
-        safeAddress: '0xabc', chainId: 8453,
+        accountAddress: '0xabc', chainId: 8453,
       }],
     },
     'GET /catalog': { entries: [] },
@@ -265,40 +263,39 @@ describe('--json contract, success paths', () => {
   })
 
   /**
-   * #2908 (naming epic #2906): stdout has no version negotiation, so for the
-   * one-release window `--json` and the CSV header carry BOTH the
-   * account-vocabulary keys and the old ones, same values. Pinned here so the
-   * mutation "emit only the new key" fails this file; `safe_*` and the `safe`
-   * key leave at #2914.
+   * #2914 (naming epic #2906, phase 5 — the CONTRACTION): the #2908 window
+   * (stdout carrying BOTH the account-vocabulary keys and the old ones) is
+   * closed. `--json` and the CSV header now carry the account-vocabulary key
+   * ONLY; the mutation "reintroduce the old key" fails these three tests.
    */
-  it('wallets rename --json carries account_id AND safe_id, same value', async () => {
+  it('wallets rename --json carries account_id only', async () => {
     const { deps, out } = harness({ makeApi: () => stubApi() })
     await run(['wallets', 'rename', 's1', 'Ops', '--json'], deps)
     const body = soleJson(out) as Record<string, unknown>
-    expect(body).toMatchObject({ ok: true, account_id: 's1', safe_id: 's1', name: 'Ops' })
-    expect(body.account_id).toBe(body.safe_id)
+    expect(body).toMatchObject({ ok: true, account_id: 's1', name: 'Ops' })
+    expect(body).not.toHaveProperty('safe_id')
   })
 
-  it('wallets balances --json names the wallet under account AND safe', async () => {
+  it('wallets balances --json names the wallet under account only', async () => {
     const { deps, out } = harness({ makeApi: () => stubApi() })
     await run(['wallets', 'balances', '--json'], deps)
-    expect(soleJson(out)).toMatchObject({ account: 'Ops', safe: 'Ops', chainId: 8453 })
+    const body = soleJson(out) as Record<string, unknown>
+    expect(body).toMatchObject({ account: 'Ops', chainId: 8453 })
+    expect(body).not.toHaveProperty('safe')
   })
 
-  it('activity export CSV header carries safe_address AND (appended) account_address, same column value', async () => {
+  it('activity export CSV header carries account_address only, no safe_address column', async () => {
     const { deps, out } = harness({ makeApi: () => stubApi() })
     await run(['activity', 'export', '--json'], deps)
     const { content } = soleJson(out) as { content: string }
     const [header, row] = content.trim().split('\r\n')
     const columns = header.split(',')
-    expect(columns).toContain('safe_address')
+    expect(columns).not.toContain('safe_address')
     expect(columns).toContain('account_address')
-    // Appended, never reordered: the old column keeps its position.
+    // Still the last column, same append-only contract minus the retired one.
     expect(columns.indexOf('account_address')).toBe(columns.length - 1)
-    expect(columns.indexOf('safe_address')).toBe(8)
     const cells = row.split(',').map((c) => c.replace(/^"|"$/g, ''))
     expect(cells[columns.indexOf('account_address')]).toBe('0xabc')
-    expect(cells[columns.indexOf('safe_address')]).toBe('0xabc')
   })
 
   it('rotate-key puts the key in the object and the warning on stderr', async () => {

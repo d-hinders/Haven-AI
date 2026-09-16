@@ -115,8 +115,8 @@ describe('signSweepAuthorization', () => {
   })
 
   // #2247: `expectedSafe` is absent whenever no account address reaches the
-  // signer — `HAVEN_DELEGATE_KEY` set without `HAVEN_SAFE_ADDRESS` (the README
-  // quickstart), a credential whose `safe_address` is null, or an embedder
+  // signer — `HAVEN_DELEGATE_KEY` set without `HAVEN_ACCOUNT_ADDRESS` (the
+  // README quickstart), a credential whose `safe_address` is null, or an embedder
   // calling `resolveEdgeSigner({ delegateKey })`. These two pin what that costs
   // and what still holds, so neither can be changed silently.
   it('signs with `expectedSafe` absent even when `to` is not the credential Safe', async () => {

@@ -10,13 +10,21 @@ export interface SigningAuditEntry {
   tool: SignerToolName
   payload_hash: string
   delegate_address: string
+  /**
+   * Serialized key kept as `safe_address` deliberately (#2914 review): this
+   * is a persisted JSONL field, and an audit log written by an earlier
+   * release never rewrites itself — renaming the key here would fork the
+   * format mid-file. `SigningAuditContext.accountAddress` (the in-memory
+   * field this is built from) carries the account-vocabulary name; only the
+   * on-disk spelling stays put.
+   */
   safe_address?: string
   chain_id?: number
 }
 
 export interface SigningAuditContext {
   delegateAddress: string
-  safeAddress?: string
+  accountAddress?: string
   chainId?: number
   auditPath?: string
 }
@@ -47,7 +55,7 @@ export function createSigningAuditEntry(
     payload_hash: payloadHash,
     delegate_address: context.delegateAddress,
   }
-  if (context.safeAddress) entry.safe_address = context.safeAddress
+  if (context.accountAddress) entry.safe_address = context.accountAddress
   if (typeof context.chainId === 'number') entry.chain_id = context.chainId
   return entry
 }

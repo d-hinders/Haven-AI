@@ -170,7 +170,7 @@ describe('login', () => {
 })
 
 describe('budget grant/revoke (#2539)', () => {
-  const AGENT = { id: 'a1', name: 'Scout', status: 'active', account_type: 'delegator_hybrid', safe_address: '0x' + 'aa'.repeat(20), safe_chain_id: 84532 }
+  const AGENT = { id: 'a1', name: 'Scout', status: 'active', account_type: 'delegator_hybrid', account_address: '0x' + 'aa'.repeat(20), account_chain_id: 84532 }
   const HASH = '0x' + 'ab'.repeat(32)
   const BUILT = {
     delegation_hash: HASH,
@@ -341,7 +341,7 @@ describe('budget grant/revoke (#2539)', () => {
 describe('read commands', () => {
   it('lists wallets as a table and as json', async () => {
     const safes = [
-      { id: 's1', safe_address: '0x1111111111111111111111111111111111111111', chain_id: 8453, name: 'Main', is_default: true },
+      { id: 's1', account_address: '0x1111111111111111111111111111111111111111', chain_id: 8453, name: 'Main', is_default: true },
     ]
     const mk = () => fakeApi({ 'GET /user/accounts': { safes } })
 
@@ -374,7 +374,7 @@ describe('read commands', () => {
         get: async <T,>(path: string) => {
           calls.push(`GET ${path}`)
           if (path === '/user/accounts') {
-            return { safes: [{ id: 's1', safe_address: FUNDING.account_address, chain_id: 8453, name: 'Main', is_default: true }] } as T
+            return { safes: [{ id: 's1', account_address: FUNDING.account_address, chain_id: 8453, name: 'Main', is_default: true }] } as T
           }
           if (path === '/user/accounts/s1/funding') {
             const state = states[Math.min(i, states.length - 1)]
@@ -539,13 +539,9 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
-  it.each([
-    ['old-only server shape', { safe_address: '0xABC' }],
-    ['new-only server shape', { account_address: '0xABC' }],
-    ['both', { account_address: '0xABC', safe_address: '0xold' }],
-  ])('reads the wallet address from either name — %s (#2908)', async (_label, twins) => {
+  it('reads the wallet address from account_address (#2914: the only name left)', async () => {
     const api = fakeApi({
-      'GET /user/accounts': { safes: [{ id: 's1', ...twins, chain_id: 100, name: 'Main', is_default: true }] },
+      'GET /user/accounts': { safes: [{ id: 's1', account_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
       'GET /balances/0xABC': { balances: [] },
     })
     const { deps, out } = harness({ makeApi: () => api })
@@ -556,18 +552,31 @@ describe('read commands', () => {
     expect(await run(['wallets', 'balances', '--safe', '0xabc'], deps)).toBe(0)
   })
 
-  it('resolves activity --safe by address to an accountId filter (both keys for the #2908 window)', async () => {
+  it('an OLD-only server (safe_address alone) no longer resolves a wallet address (#2914)', async () => {
+    // The compat window is closed: `safe_address` is not read at all, so the
+    // account address resolves to '' — an explicit, visible failure (the
+    // balances call hits an unmocked/malformed path) rather than a silently
+    // reused stale field.
     const api = fakeApi({
       'GET /user/accounts': { safes: [{ id: 's1', safe_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
+    })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['wallets', 'balances'], deps)).not.toBe(0)
+    expect(api.calls).toContain('GET /balances/?chain_id=100')
+  })
+
+  it('resolves activity --safe by address to an accountId filter', async () => {
+    const api = fakeApi({
+      'GET /user/accounts': { safes: [{ id: 's1', account_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
       'GET /transactions': { transactions: [] },
     })
     const { deps } = harness({ makeApi: () => api })
     expect(await run(['activity', 'list', '--safe', '0xabc'], deps)).toBe(0)
     const txCall = api.calls.find((c) => c.startsWith('GET /transactions'))
     expect(txCall).toContain('accountId=s1')
-    // The old key rides along: an unknown query key is silently ignored, so a
-    // pre-#2907 server would otherwise answer with EVERY row.
-    expect(txCall).toContain('safeId=s1')
+    // #2914: the old query key is gone — a pre-#2907 server is no longer a
+    // supported target, so there is nothing left to keep filtering for it.
+    expect(txCall).not.toContain('safeId=s1')
   })
 
   it('passes --offset through to the transactions query', async () => {
@@ -606,7 +615,7 @@ describe('read commands', () => {
         hash: '0xabc', direction: 'out', valueFormatted: '12.50', asset: 'USDC',
         tokenSymbol: 'USDC', tokenAddress: '0xtok', timestamp: 1_700_000_000,
         from: '0xsafe', to: '0xmerchant', source: 'x402', chainId: 8453,
-        safeAddress: '0xsafe', agentName: '=cmd()',
+        accountAddress: '0xsafe', agentName: '=cmd()',
       },
     ]
     const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /transactions': { transactions } }) })
@@ -963,7 +972,7 @@ describe('haven login — device flow', () => {
 })
 
 describe('agents connect (#2527)', () => {
-  const SAFES = { safes: [{ id: 's1', safe_address: '0xsafe', chain_id: 84532, name: 'Wallet', is_default: true }] }
+  const SAFES = { safes: [{ id: 's1', account_address: '0xsafe', chain_id: 84532, name: 'Wallet', is_default: true }] }
   const BALANCES = {
     balances: [
       { symbol: 'ETH', address: null, decimals: 18 },
@@ -1037,13 +1046,13 @@ describe('agents connect (#2527)', () => {
     expect(api.calls).toContain('GET /balances/0xsafe?chain_id=84532')
   })
 
-  it('sends account_id AND safe_id, same value, so the request works against a server with either (#2908)', async () => {
+  it('sends account_id only (#2914: safe_id retired)', async () => {
     const { api, bodies } = recordingApi(ROUTES)
     const { deps } = harness({ makeApi: () => api })
     expect(await run([...CONNECT_ARGV, '--json'], deps)).toBe(0)
-    const body = bodies[0].body as { account_id: string; safe_id: string }
+    const body = bodies[0].body as { account_id: string; safe_id?: string }
     expect(body.account_id).toBe('s1')
-    expect(body.safe_id).toBe('s1')
+    expect(body).not.toHaveProperty('safe_id')
   })
 
   it('asks for balances on the WALLET\'s chain, which is not optional', async () => {

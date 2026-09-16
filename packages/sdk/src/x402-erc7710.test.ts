@@ -57,7 +57,7 @@ function harness(opts: { rail?: 'delegation' | 'legacy'; scheme?: string } = {})
     id: 'agent-1',
     name: 'A',
     status: 'active',
-    safeAddress: '0x1111111111111111111111111111111111111111',
+    accountAddress: '0x1111111111111111111111111111111111111111',
     delegateAddress: DELEGATE,
     chainId: 8453,
     executionRail: opts.rail ?? 'delegation',

@@ -14,7 +14,7 @@ describe('agent info helpers', () => {
         id: 'agent-1',
         name: 'Research agent',
         status: 'active',
-        safe_address: '0xSafe',
+        account_address: '0xSafe',
         delegate_address: '0xDelegate',
         chain_id: 8453,
         execution_rail: 'legacy',
@@ -27,9 +27,7 @@ describe('agent info helpers', () => {
       id: 'agent-1',
       name: 'Research agent',
       status: 'active',
-      // #2908: both names, same value; `safeAddress` is the deprecated alias.
       accountAddress: '0xSafe',
-      safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
       executionRail: 'legacy',
@@ -48,7 +46,7 @@ describe('agent info helpers', () => {
   it('coalesces CONCURRENT getAgent calls into one HTTP GET, but sequential calls stay fresh reads (#1348)', async () => {
     const agentBody = () =>
       new Response(JSON.stringify({
-        id: 'agent-1', name: 'A', status: 'active', safe_address: '0xSafe',
+        id: 'agent-1', name: 'A', status: 'active', account_address: '0xSafe',
         delegate_address: '0xDelegate', chain_id: 8453, execution_rail: 'legacy',
       }))
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => agentBody())
@@ -74,7 +72,7 @@ describe('agent info helpers', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'boom' }), { status: 500 }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({
-          id: 'agent-1', name: 'A', status: 'active', safe_address: '0xSafe',
+          id: 'agent-1', name: 'A', status: 'active', account_address: '0xSafe',
           delegate_address: '0xDelegate', chain_id: 8453, execution_rail: 'legacy',
         })),
       )
@@ -208,9 +206,7 @@ describe('agent info helpers', () => {
       id: 'agent-1',
       name: 'Research agent',
       status: 'active',
-      // #2908: both names, same value; `safeAddress` is the deprecated alias.
       accountAddress: '0xSafe',
-      safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 8453,
       executionRail: 'legacy',
@@ -529,7 +525,6 @@ describe('getPostPurchaseAllowanceSummary (#1310)', () => {
 const mappedAllowances = {
   agentId: 'agent-1',
   accountAddress: '0xSafe',
-  safeAddress: '0xSafe',
   delegateAddress: '0xDelegate',
   chainId: 8453,
   allowances: [{
@@ -556,7 +551,7 @@ function agentResponse(status: string, executionRail: 'legacy' | 'delegation' = 
     id: 'agent-1',
     name: 'Research agent',
     status,
-    safe_address: '0xSafe',
+    account_address: '0xSafe',
     delegate_address: '0xDelegate',
     chain_id: 8453,
     execution_rail: executionRail,
@@ -578,7 +573,7 @@ function delegationAllowancesResponse(
 ): Response {
   return new Response(JSON.stringify({
     agent_id: 'agent-1',
-    safe_address: '0xSafe',
+    account_address: '0xSafe',
     delegate_address: '0xDelegate',
     chain_id: 8453,
     allowances: budgets.map((b, i) => ({
@@ -606,7 +601,7 @@ function allowancesResponse(
 ): Response {
   return new Response(JSON.stringify({
     agent_id: 'agent-1',
-    safe_address: '0xSafe',
+    account_address: '0xSafe',
     delegate_address: '0xDelegate',
     chain_id: 8453,
     allowances: [{

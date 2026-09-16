@@ -611,7 +611,7 @@ export function createCatalogPurchaseHandlers(
                 'There is no approval queue — an over-budget redemption would revert ' +
                 'on-chain. Ask the wallet owner to grant or raise the budget in Haven before retrying.',
               statusCode: 403,
-              nextAction: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+              nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
               suggestedTool: 'haven_get_allowances',
             })
           }

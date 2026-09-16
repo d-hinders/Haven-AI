@@ -29,7 +29,7 @@ const input: ConsentInput = {
   apiKeyPrefix: 'sk_agent_ab',
   apiUrl: 'https://haven.example',
   agentId: 'agt_test',
-  safeAddress: '0xSafe',
+  accountAddress: '0xSafe',
   delegateAddress: '0xDelegate',
   chainId: 100,
   toolNames: ['haven_get_agent', 'haven_pay_x402_quote'],
@@ -67,7 +67,7 @@ describe('consent gate', () => {
     // Regression for PR #176 review P2: a credential swap with identical
     // token/amount/reset summary must invalidate the prior acknowledgement.
     const baseHash = computeConsentHash(input)
-    expect(computeConsentHash({ ...input, safeAddress: '0xOtherSafe' })).not.toBe(baseHash)
+    expect(computeConsentHash({ ...input, accountAddress: '0xOtherSafe' })).not.toBe(baseHash)
     expect(computeConsentHash({ ...input, delegateAddress: '0xOtherDelegate' })).not.toBe(baseHash)
     expect(computeConsentHash({ ...input, chainId: 137 })).not.toBe(baseHash)
     expect(computeConsentHash({ ...input, apiUrl: 'https://other.example' })).not.toBe(baseHash)
@@ -78,7 +78,7 @@ describe('consent gate', () => {
     const baseHash = computeConsentHash(input)
     const upper = computeConsentHash({
       ...input,
-      safeAddress: input.safeAddress?.toUpperCase(),
+      accountAddress: input.accountAddress?.toUpperCase(),
       delegateAddress: input.delegateAddress?.toUpperCase(),
     })
     expect(upper).toBe(baseHash)
@@ -367,7 +367,7 @@ describe('consent gate', () => {
       {
         apiKey: 'sk_agent_abcdef',
         agentId: 'agent-1',
-        safeAddress: '0xSafe',
+        accountAddress: '0xSafe',
         delegateAddress: '0xDelegate',
         chainId: 100,
         allowanceSummary: seedAllowance,
@@ -384,7 +384,7 @@ describe('consent gate', () => {
     const seedAllowance = [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }]
     const haven = {
       getAllowances: async () => ({
-        safeAddress: '0xSafeLive',
+        accountAddress: '0xSafeLive',
         delegateAddress: '0xDelegateLive',
         chainId: 100,
         allowances: [],
@@ -395,7 +395,7 @@ describe('consent gate', () => {
       haven as never,
       {
         apiKey: 'sk_agent_abcdef',
-        safeAddress: '0xSafe',
+        accountAddress: '0xSafe',
         delegateAddress: '0xDelegate',
         chainId: 100,
         allowanceSummary: seedAllowance,
@@ -404,14 +404,14 @@ describe('consent gate', () => {
     )
 
     expect(built.allowanceSummary).toEqual([])
-    expect(built.safeAddress).toBe('0xSafeLive')
+    expect(built.accountAddress).toBe('0xSafeLive')
     expect(built.delegateAddress).toBe('0xDelegateLive')
   })
 
   it('binds consent to live on-chain allowance instead of configured metadata', async () => {
     const haven = {
       getAllowances: async () => ({
-        safeAddress: '0xSafe',
+        accountAddress: '0xSafe',
         delegateAddress: '0xDelegate',
         chainId: 100,
         allowances: [
@@ -432,7 +432,7 @@ describe('consent gate', () => {
       haven as never,
       {
         apiKey: 'sk_agent_abcdef',
-        safeAddress: '0xSafe',
+        accountAddress: '0xSafe',
         delegateAddress: '0xDelegate',
         chainId: 100,
         allowanceSummary: [{ token: 'USDC', amount: '25000000', resetMinutes: 1440 }],

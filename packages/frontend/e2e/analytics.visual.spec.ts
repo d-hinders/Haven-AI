@@ -188,6 +188,15 @@ const COPY = {
   refusedCount: '2 refused payments',
   refusedAttempts: 'across 3 attempts',
   refusedAmount: '$3.00 attempted',
+  /**
+   * The #3013 ledger-floor clause (`RefusalsRecordedFromFootnote`) inside the
+   * Refused tile's footnote: the fixture's `basis.refusals_recorded_from`
+   * ('2026-05-28', the harness's own key at `screenshot.mjs:1433`) rendered by
+   * the client's `formatFloorDate` — en-GB day numeric + short month gives
+   * '28 May'. The date on screen is the response's, so the locator pins the
+   * response's value, not an invented one.
+   */
+  refusalsRecordedFrom: 'Refusals are recorded from 28 May',
   budgetBands: '1 of 2 agents above 75% of their period budget',
   feesOff: 'Haven is not charging fees.',
   gasSponsored: 'Haven sponsored 7 operations',
@@ -293,6 +302,14 @@ const SCENARIOS: Scenario[] = [
       await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedCount)).toHaveCount(1)
       await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedAttempts)).toHaveCount(1)
       await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedAmount)).toHaveCount(1)
+      // The #3013 ledger-floor clause rides the Refused tile's footnote when
+      // the response reports a floor (the fixture's basis carries '2026-05-28'):
+      // a floor the endpoint reports but the page drops is a silently larger
+      // refusals total, the same defect class the basis lines above pin.
+      await expect(
+        section(page, 'stat-tile-refused').getByText(COPY.refusalsRecordedFrom),
+        'the ledger floor the response reports must be named on the face of the tile',
+      ).toHaveCount(1)
       await expect(section(page, 'stat-tile-budget-used').getByText(COPY.budgetBands)).toHaveCount(1)
       await expect(section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.feesOff)).toHaveCount(1)
       await expect(
@@ -431,6 +448,11 @@ const SCENARIOS: Scenario[] = [
       await expect(page.getByTestId('area-chart')).toHaveCount(0)
       await expect(page.getByTestId('analytics-sparse-line')).toHaveCount(0)
 
+      // The empty response's floor is `null` (#3013), so the ledger-floor
+      // clause has no date to name — absence asserted, because a floor
+      // invented here would report a coverage the ledger does not hold.
+      await expect(page.getByText(COPY.refusalsRecordedFrom)).toHaveCount(0)
+
       // The header is rendered from the response the page did get, so the
       // window the report covers is still named, and the control is still on
       // the page to change it: an empty report is not an unavailable one.
@@ -465,6 +487,12 @@ const SCENARIOS: Scenario[] = [
       await expect(page.getByTestId('area-chart')).toHaveCount(0)
       await expect(page.getByTestId('analytics-sparse-line')).toHaveCount(0)
       await expect(page.getByText(COPY.emptyTitle)).toHaveCount(0)
+
+      // The error scenario serves no overview at all — no basis, no floor — so
+      // the ledger-floor clause has nothing to be printed from, and its absence
+      // is part of the "a failure is not a report" contract the tile absences
+      // above pin.
+      await expect(page.getByText(COPY.refusalsRecordedFrom)).toHaveCount(0)
 
       // The header survives its endpoint: the page still says which window it
       // tried to read and still offers the control, because what failed was the

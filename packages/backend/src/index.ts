@@ -57,6 +57,7 @@ import paymentRoutes from './routes/payments.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
 import userSafesRoutes from './routes/user-safes.js'
+import userSafesRetiredRoutes from './routes/user-safes-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
@@ -284,12 +285,14 @@ await app.register(paymentRoutes, { prefix: '/payments' })
 // AllowanceModule rail and its table is dropped; the routes went with it.
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
-await app.register(userSafesRoutes, { prefix: '/user/safes' })
-// #2907 (naming P0): additive `account`-vocabulary twin of every
-// `/user/safes*` route — same handler module registered a second time under
-// the new prefix, so behavior is identical by construction (no second
-// implementation to drift). Old paths stay registered above, deprecated in
-// the spec, for exactly one release.
+// #2914 (naming P5, the contraction): the `/user/safes*` prefix stops
+// serving and answers 410 with the replacement path. It is registered as a
+// TOMBSTONE module rather than dropped, because an absent registration is a
+// bare 404 — a transient-looking error for a path that is permanently gone.
+await app.register(userSafesRetiredRoutes, { prefix: '/user/safes' })
+// The account vocabulary is now the only one that serves. `userSafesRoutes`
+// keeps its filename for this slice: renaming the module is a pure rename
+// with its own diff, and #2909 already moved the repository layer.
 await app.register(userSafesRoutes, { prefix: '/user/accounts' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })

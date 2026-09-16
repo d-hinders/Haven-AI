@@ -83,6 +83,37 @@ import {
 /** The window's length for the caption, keyed off the control's own values. */
 const RANGE_DAYS: Record<AnalyticsRangeValue, 7 | 30 | 90> = { '7d': 7, '30d': 30, '90d': 90 }
 
+/**
+ * The Refused tile's limit-of-visibility clause (#3055, epic #3056 slice 4),
+ * shared by both arms of `refusedFootnote` — one string, not two literals, so
+ * the tile cannot say one thing beside a count and another beside a zero.
+ *
+ * The tile counts rows in the `payment_refusals` ledger, and the ledger only
+ * holds what the guardrails themselves refused. Two classes of refusal are
+ * raised outside it, and the count silently omits both, so the tile says it:
+ *
+ *   (a) a price cap the agent's own runtime applies. The cap lives in the
+ *       agent's code and its SDK; a runtime that declines before ever asking
+ *       Haven leaves no row anywhere, because there is no request to read.
+ *   (b) a budget the hosted tools decline at PREPARE — the step in
+ *       `haven_prepare_catalog_purchase` that compares the purchase against
+ *       the live delegation budget and refuses it (step 6). This is a
+ *       prepare-time refusal, never a quote-time one: the quote tools only
+ *       quote and refuse nothing, so the sentence must not name a quote.
+ *
+ * Who refuses is stated with each class, because the two are refused by
+ * different parties: (a) by the agent itself, (b) by Haven's hosted tools
+ * before any intent exists. Both are recorded nowhere; both are therefore
+ * named here rather than counted on the face of the tile.
+ *
+ * The clause is deliberately a temporary one. When epic #3056 slice 3 gives
+ * the hosted prepare-time refusal its server-side writer, (b) stops being
+ * unrecorded and this string narrows back to the price-cap sentence alone —
+ * that revert is the plan, and it is carried in #3055's issue, not here.
+ */
+const UNRECORDED_REFUSALS_NOTE =
+  "Price-cap refusals in your agent's runtime are not recorded, and neither are budget refusals raised when Haven's hosted tools prepare a purchase."
+
 /** The four figures, in the order the reader scans them. */
 function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currency: 'USD' | 'EUR' }) {
   if (data === null) return null
@@ -137,10 +168,10 @@ function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currenc
         {` · ${formatAnalyticsAmount(totals.refused_amount, currency)} attempted`}
         {refusalLedgerFloor}
         {' · '}
-        {"Price-cap refusals in your agent's runtime are not recorded."}
+        {UNRECORDED_REFUSALS_NOTE}
       </>
     ) : (
-      "Price-cap refusals in your agent's runtime are not recorded."
+      UNRECORDED_REFUSALS_NOTE
     )
 
   const bands = totals.budget_bands

@@ -84,7 +84,7 @@
  * media list to honour it.
  */
 
-import { useCallback, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
 
@@ -255,6 +255,22 @@ export function StackedBarChart({
   const [pinned, setPinned] = useState<number | null>(null)
   const [caret, setCaret] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const tooltipRef = useRef<HTMLDivElement | null>(null)
+  // The callout's half-width as a fraction of the plot, measured after it
+  // paints, so the edge clamp is exactly as wide as the callout needs and
+  // no wider — a fixed 30/70 clamp (the first cut) parked the callout on
+  // its own bar at day 0 and over the wrong bar at day N (#3051 design
+  // re-review). Before the first measurement the max-width bound applies.
+  const [tipHalfPct, setTipHalfPct] = useState(30)
+  useLayoutEffect(() => {
+    const tip = tooltipRef.current
+    const plot = tip?.parentElement
+    if (!tip || !plot || plot.clientWidth === 0) return
+    const half = ((tip.offsetWidth / 2) / plot.clientWidth) * 100
+    // Keep it strictly inside the plot and never wider than the max-width
+    // bound allows.
+    setTipHalfPct(Math.min(30, Math.max(1, half + 0.5)))
+  })
 
   // The entries the plot draws: geometry and tooltip read the same array, so
   // what is on the screen is what the panel reports.
@@ -375,7 +391,6 @@ export function StackedBarChart({
               strokeWidth={1}
             />
           ))}
-          {/* The abscissa. */}
           {/* Hatch patterns for partial days: the series token at full
               strength with diagonal ground-coloured stripes, so the mark is
               the same on both themes and the token's contrast survives. */}
@@ -397,6 +412,7 @@ export function StackedBarChart({
               ))}
             </defs>
           )}
+          {/* The abscissa. */}
           <line
             x1={pad.left}
             x2={VIEW_W - pad.right}
@@ -526,6 +542,7 @@ export function StackedBarChart({
           tooltip, two treatments, never a horizontal scroll. */}
       {entry !== null && (
         <div
+          ref={tooltipRef}
           data-testid="chart-tooltip"
           role="status"
           className={
@@ -535,12 +552,15 @@ export function StackedBarChart({
           }
           // Anchored over the day it describes rather than the plot's
           // centre (which covered its neighbours' bars and refusal caps —
-          // #3051 design review), clamped so the callout stays inside the
-          // card at either edge.
+          // #3051 design review), clamped by the callout's own measured
+          // half-width so it stays inside the plot at either edge without
+          // sliding onto a neighbour.
           style={
             narrow || active === null
               ? undefined
-              : { left: `${Math.min(70, Math.max(30, ((xOf(active) + barW / 2) / VIEW_W) * 100))}%` }
+              : {
+                  left: `${Math.min(100 - tipHalfPct, Math.max(tipHalfPct, ((xOf(active) + barW / 2) / VIEW_W) * 100))}%`,
+                }
           }
           onMouseEnter={() => setPinned(active)}
           onMouseLeave={() => {

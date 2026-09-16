@@ -2453,7 +2453,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="StackedBarChart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped, not faded: an opacity blend reads lighter on the light ground and darker on the dark one. Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped with the series token at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
@@ -2461,6 +2461,7 @@ export default function DesignSystemPage() {
             currency="USD"
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
+            formatTick={(n) => `$${Math.round(n)}`}
           />
           {/* The narrow treatment, as the page mounts it below `lg`: wider
               tick gutter, dot legend, tap-to-pin panel. */}
@@ -2470,6 +2471,7 @@ export default function DesignSystemPage() {
               currency="USD"
               ariaLabel={DS_CHART_SUMMARY}
               formatValue={dsMoney}
+              formatTick={(n) => `$${Math.round(n)}`}
               narrow
             />
           </div>

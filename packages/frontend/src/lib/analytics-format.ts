@@ -227,6 +227,15 @@ export function formatAnalyticsDay(dayIso: string): string {
  * performs for the tiles — so the wire's numeric strings are never re-typed
  * into numbers anywhere else.
  */
+export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
 /**
  * The y-axis tick: the same currency voice as `formatAnalyticsValue`, with
  * NO fraction digits — an axis needs no more precision than its grid, and a
@@ -241,13 +250,3 @@ export function formatAnalyticsTick(value: number, currency: AnalyticsCurrency):
     maximumFractionDigits: 0,
   }).format(value)
 }
-
-export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
-}
-

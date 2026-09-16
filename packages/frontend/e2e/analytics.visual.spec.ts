@@ -40,7 +40,7 @@
  * `product-routes.visual.spec.ts` captures whole pages (`/dashboard`,
  * `/transactions`); `settings-accounting.visual.spec.ts` clips one card. This
  * page is the former's shape — the thing at risk is the composition of the
- * whole report (four tiles, two tables, one chart, in that order), not a card
+ * whole report (four tiles, the agents table, the spend chart, the merchants table, the balance chart, in that order), not a card
  * isolated from its neighbours — so it is captured with `fullPage: true`,
  * un-clipped (#1738) and proven non-blank before it is allowed to stand as a
  * baseline (#1936/#1943).
@@ -68,8 +68,8 @@
  *     `last_payment_at` values would otherwise re-bucket on a calendar
  *     boundary and change the baseline with the wall clock. The frozen instant
  *     is chosen one day and some hours past the fixture window's `to`, which
- *     puts the two agents' rows in two DIFFERENT `timeAgo` buckets ("1d ago",
- *     "22h ago") — a frozen clock that freezes both rows onto the same string
+ *     puts the two agents' rows in two DIFFERENT `timeAgo` buckets ("2d ago",
+ *     "1d ago" — the `COPY.frozenLastPayment*` strings below) — a frozen clock that freezes both rows onto the same string
  *     would pin the calendar and prove nothing about the column.
  *   - Everything else the page paints is absolute already, by the fixture's
  *     own contract (`ANALYTICS_RANGE` is a fixed window ending 2026-07-10T14:30Z, and
@@ -206,7 +206,7 @@ const COPY = {
   merchantsHeading: 'Top merchants',
   balanceHeading: 'Balance over time',
   spendHeading: 'Spend over time',
-  /** The fixture window ends at 14:30Z with `tz: UTC`, so the last bucket (10 Jul) is a partial day: one lighter bar and this note (#3051). */
+  /** The fixture window ends at 14:30Z with `tz: UTC`, so the last bucket (10 Jul) is a partial day: one striped bar and this note (#3051). */
   spendPartialNote: 'The last bar is striped',
   nordshield: 'NordShield VPN',
   emptyTitle: 'No agent activity in this range',

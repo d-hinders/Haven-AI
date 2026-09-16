@@ -1419,7 +1419,15 @@ export const FIXTURE_ANALYTICS_BY_DAY = [
 // would roll past the month's end silently.
 const ANALYTICS_BALANCE_START = 12_354.52
 const ANALYTICS_BALANCE_END = FIXTURE_OVERVIEW.totals.usd
-const ANALYTICS_BALANCE_DAY_MS = Date.UTC(2026, 5, 11) // range `from` (2026-06-10T14:30Z) + 1 day
+// Derived from the range, not typed beside it: the day AFTER `from`'s date,
+// so an edit to ANALYTICS_RANGE cannot leave the series outside the window
+// the endpoint would return (re-verification of #3051 found the previous
+// hand-typed literal a day past `to`, green on every suite).
+const ANALYTICS_BALANCE_DAY_MS = Date.UTC(
+  new Date(ANALYTICS_RANGE.from).getUTCFullYear(),
+  new Date(ANALYTICS_RANGE.from).getUTCMonth(),
+  new Date(ANALYTICS_RANGE.from).getUTCDate() + 1,
+)
 const analyticsBalanceDate = (i) => new Date(ANALYTICS_BALANCE_DAY_MS + i * 86_400_000).toISOString().slice(0, 10)
 // Wire shape (B #2946): `value` is a numeric STRING like every money field on
 // the response, so the generator's number is stringified here, not at render.

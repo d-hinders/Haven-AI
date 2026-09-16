@@ -298,10 +298,10 @@ export default function AnalyticsClient() {
                 <AgentsTable agents={agents} currency={currency} seriesIndexById={seriesIndexById} />
               </div>
             )}
-            {/* Below the table, per the screen recipe ("the chart band and
-                the merchants section below the table"): the table is the
-                page's primary reading surface and stays on the first screen;
-                the chart is the same figures over time. No `by_day.length`
+            {/* Below the table, per screen-recipes.md § Analytics item 5
+                (table first, then the spend chart, merchants, balance): the
+                table is the page's primary reading surface and stays on the
+                first screen; the chart is the same figures over time. No `by_day.length`
                 guard here: the sparse branch above already requires
                 MIN_CHARTABLE_DAYS entries in it, so the section's own floor
                 can never fire on this path (the balance guard below is a

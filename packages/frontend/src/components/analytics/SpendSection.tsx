@@ -33,7 +33,7 @@ import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsRange } from '@/ty
  *   day covers less than a day (the OpenAPI description says so and says the
  *   page should treat them as partial). A bucket whose date is the local date
  *   of `range.from` or `range.to` — and that instant is not local midnight —
- *   is flagged `partial`: the primitive draws it lighter and names it in the
+ *   is flagged `partial`: the primitive hatches it and names it in the
  *   tooltip and the data table, and the note under the chart says WHICH end
  *   is cut (a window whose first day had no activity has no first bucket to
  *   flag, so "first and last" would over-claim). Never dropped: a cut day
@@ -200,7 +200,7 @@ export function SpendSection({
         <Card.Header
           as="h2"
           title="Spend over time"
-          description="One bar per day with activity, stacked by agent; a cap above a bar marks refused payments that day. Booked values in your display currency."
+          description="One bar per day with activity, stacked by agent — days with nothing to show are not drawn; a cap above a bar marks refused payments that day. Booked values in your display currency."
         />
         <div className="px-5 pb-5 pt-2">
           <div className="hidden lg:block" data-testid="analytics-spend-desktop">

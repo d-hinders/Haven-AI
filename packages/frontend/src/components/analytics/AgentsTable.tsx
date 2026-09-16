@@ -201,12 +201,14 @@ export function AgentsTable({
                       name, where a coloured dot reads as a status light. An
                       agent with no bar gets no swatch. */}
                   <span className="inline-flex items-center justify-end gap-2">
-                    {seriesIndexById?.get(agent.id) !== undefined && (
-                      <SeriesSwatch seriesIndex={seriesIndexById.get(agent.id)!} />
-                    )}
                     <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
                       {formatAnalyticsAmount(agent.spent, currency)}
                     </span>
+                    {/* After the figure, so the dots form one column at the
+                        cell's right edge whatever the figure's width. */}
+                    {seriesIndexById?.get(agent.id) !== undefined && (
+                      <SeriesSwatch seriesIndex={seriesIndexById.get(agent.id) as number} />
+                    )}
                   </span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right ${tableColumnClass('xl')}`}>

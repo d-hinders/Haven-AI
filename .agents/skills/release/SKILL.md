@@ -196,18 +196,46 @@ rather than greps. If the guard fires, read what it names.
 
 ## Satisfy The Contract-Doc Gate
 
-**Every release PR needs both of these.** The blocking `Contract-doc coupling`
-check fails without them, and forgetting is the single most common way a
-release PR goes red:
+**A bump implicates THREE contract docs, not two, and this step said two until
+2026-09-16.** The blocking `Contract-doc coupling` check fails without all
+three, and forgetting is the single most common way a release PR goes red.
+Measured rather than remembered — the gate's own answer for the files every
+bump writes:
+
+```sh
+node scripts/docs/coupling-gate.mjs --strict \
+  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/server.ts
+# BLOCKING: 3 contract doc(s) … mcp-runtime-compatibility.md,
+#           package-dev-channel.md, casp-risk-guardrails.md
+```
+
+Two must be **edited directly** (neither carries `satisfied-by:`, so no shard
+clears them); the third is cleared by the shard you write anyway:
 
 1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
    Manifest* table is re-pinned by the bump (#1790); update its
    `last-verified` date only after reading the table. Record the release's
    verification evidence in the PR and release shard rather than front matter.
-2. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
+2. `docs/operations/package-dev-channel.md` — **the one the old wording
+   dropped.** The bump rewrites `CONNECTOR_VERSION`
+   (`packages/connect/src/runtime.ts`), which is in this doc's `covers:`, so
+   every release couples it. It was never optional: the 0.1.37, 0.2.0 and
+   0.2.1 releases all touched it, the first two by bumping `last-verified`
+   alone. Prefer a scoped note saying what you actually re-verified — and if
+   `last-verified` already reads today from an earlier change, say so and do
+   NOT re-stamp it, because a rubber-stamped date is worse than a stale one
+   (#1366).
+3. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
    shard ending in a perimeter verdict. The **version**, not the PR number
    (#1789): the shard must exist before the PR is opened, because the gate blocks
    the PR without it, so a PR-numbered name cannot be written when it is needed.
+   This shard is what clears `casp-risk-guardrails.md`, whose front matter
+   declares `satisfied-by: docs/regulatory/casp-changelog/**` — which is why
+   the third contract doc needs no edit of its own.
+
+**Do not take this list on faith either.** Run the command above at the top of
+the release: it is the gate's own reckoning against the current front matter,
+and it is what a fourth doc joining the set would show first.
 
 `scripts/README.md` § *The contract-doc gate* has the required content of each.
 

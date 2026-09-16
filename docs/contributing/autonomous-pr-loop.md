@@ -423,7 +423,10 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      checks**, **MCP server checks**, **MCP checks**, **Connect checks**,
      **Signer checks** — and the blocking gates **Banned product-copy terms**
      (#902), **Design-system coupling (strict)** (#1023), **Docs front-matter &
-     agent skills** (#1023) and **Contract-doc coupling** (#646). Do **not**
+     agent skills** (#1023) and **Contract-doc coupling** (#646). Inside
+     *Backend checks*, the shrink-only ratchet steps gain the request-schema
+     ratchet (#3029) — a step, not a new required context: the context list
+     above is unchanged. Do **not**
      require **Docs links & style (advisory)** — it is the deliberately
      non-gating half of `docs.yml` (#1023) — and do **not** require **Vercel
      Preview Comments**, which isn't a quality gate.

@@ -189,13 +189,18 @@ function refusalField(error: ValidationCarrierError): string {
   const context = error.validationContext ?? 'request'
   const first = error.validation?.[0]
   // A missing-required error fires on the ROOT object: ajv reports it with an
-  // EMPTY instancePath and names the field in `params.missingProperty`. Without
-  // this branch every "required" refusal would collapse to the bare context
-  // (`body`) and a test could not tell which field the spec refused.
-  const pointer =
-    first && first.instancePath === '' && typeof first.params?.missingProperty === 'string'
-      ? `/${first.params.missingProperty}`
-      : (first?.instancePath ?? '')
+  // EMPTY instancePath and names the field in `params.missingProperty`. The
+  // `additionalProperties: false` refusal has the same shape — empty
+  // instancePath, the offending key in `params.additionalProperty` (the x402
+  // characterization, #3029). Without these branches every root-object refusal
+  // would collapse to the bare context (`body`) and a test could not tell
+  // which field the spec refused.
+  let pointer = first?.instancePath ?? ''
+  if (first && first.instancePath === '' && first.params && typeof first.params === 'object') {
+    const params = first.params as Record<string, unknown>
+    if (typeof params.missingProperty === 'string') pointer = `/${params.missingProperty}`
+    else if (typeof params.additionalProperty === 'string') pointer = `/${params.additionalProperty}`
+  }
   return `${context}${pointer}`
 }
 
@@ -290,7 +295,13 @@ export function installRequestValidation(app: FastifyInstance, options: RequestV
 
   // The request-side ajv — Fastify's request defaults, NO closeObjects (the
   // epic's settled "two ajv instances, one factory" decision; see ajv.ts).
-  const requestAjv = makeSpecAjv({ ...REQUEST_AJV_OPTIONS, closeObjects: false })
+  // The spec's component schemas are registered UNCLOSED so an operation whose
+  // requestBody is a `$ref` (`/x402/authorize` → X402AuthorizeRequest) compiles
+  // — without them fastify's boot fails with "can't resolve reference", and the
+  // contacts module hid this because its bodies are inline. The factory's
+  // `closeObjects: false` branch copies each definition; the served
+  // /openapi.json object is never mutated.
+  const requestAjv = makeSpecAjv({ ...REQUEST_AJV_OPTIONS, closeObjects: false }, spec.components.schemas)
 
   // RAW validate fn, never a wrapper — the `.errors` contract (header § spike).
   app.setValidatorCompiler(({ schema }) => requestAjv.compile(schema as Json))

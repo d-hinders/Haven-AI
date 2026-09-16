@@ -255,6 +255,14 @@ Isolation rules that are non-negotiable for a payments product:
   override on mainnet, mixed, or unbounded deployments. Leave it unset outside
   that deterministic test so the normal 15-minute merchant-report grace stays
   in force; never set it in production.
+- **Request-validation mode** — `HAVEN_REQUEST_VALIDATION` on the backend is
+  `off` (nothing runs) | `shadow` (default: log and count would-be refusals,
+  change nothing) | `enforce` (refuse off-spec requests with the documented
+  400 envelope). Per the OpenAPI spec, via the request-validation plugin
+  (#3029, epic #3028). Any other value refuses the boot rather than falling
+  back — a misspelled `enforce` must not silently mean `shadow`. **A mode
+  change is a RESTART**: the injected schemas are fixed at route
+  registration, so flipping the variable is a redeploy, not a live switch.
 
 The dev backend also runs the **Fortnox bookkeeping integration**: `FORTNOX_*`
 vars (client id/secret + redirect to the dev backend's

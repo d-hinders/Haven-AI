@@ -1,8 +1,3 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
-import fastifyJwt from '@fastify/jwt'
-import { readFile } from 'node:fs/promises'
-
 /**
  * The request-validation plugin's own contract (#3029, epic #3028 slice 1).
  *
@@ -13,6 +8,10 @@ import { readFile } from 'node:fs/promises'
  * `/contacts` operation where a requestBody is needed. The route-level
  * behaviour on the proof module lives in `routes/__tests__/contacts.test.ts`.
  */
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
+import fastifyJwt from '@fastify/jwt'
+import { readFile } from 'node:fs/promises'
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 vi.mock('../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
@@ -75,6 +74,11 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     // (userSafesRoutes at index.ts) — this mount owns the spec'd GET
     // /agent-activity/{id}/activity the coercion proof rides.
     await app.register(contactProbeRoutes, { prefix: '/agent-activity' })
+    // The x402 characterization surface: mounted at the REAL prefix
+    // (routes/x402.ts:203) so the plugin resolves the REAL /x402/authorize
+    // operation and injects its schema. The probe handler only echoes that
+    // the request arrived — shadow's job is to observe, not to run x402.
+    await app.register(x402AuthorizeProbeRoutes, { prefix: '/x402' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })
 
@@ -158,6 +162,61 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     const added = Object.keys(after.byRouteField).filter((k) => !(k in before.byRouteField))
     expect(added.length).toBe(1)
     expect(added[0]).toMatch(/^GET \/agent-activity\/:id\/activity params\/id$/)
+  })
+
+  it('CHARACTERIZATION: POST /x402/authorize with settlementScheme is NOT refused in shadow — it logs (#3029, the gap slice 3 closes)', async () => {
+    // The shipped SDK sends `settlementScheme`; the spec's X402AuthorizeRequest
+    // is additionalProperties: false and does not declare it — a known,
+    // owner-acknowledged spec gap. Shadow must DEMONSTRATE it (one would_refuse
+    // line, the request continues) and this slice must NOT fix the spec
+    // (a spec correction is a contract change: slice 3, #3031).
+    const lines: unknown[] = []
+    const originalInfo = app.log.info.bind(app.log)
+    ;(app.log as unknown as { info: (o: unknown, m?: string) => void }).info = (obj, msg) => {
+      if (msg === 'request_validation.would_refuse') lines.push(obj)
+      return originalInfo(obj as never, msg as never)
+    }
+
+    const before = requestValidationOpsSnapshot()
+    mockQuery.mockResolvedValueOnce({ rows: [] })
+    const res = await auth('POST', '/x402/authorize', {
+      url: 'https://merchant.example/mcp',
+      payTo: '0x' + 'ab'.repeat(20),
+      amount: '20000',
+      asset: '0x' + 'cd'.repeat(20),
+      network: 'base',
+      settlementScheme: 'erc7710',
+    })
+
+    // The route continues on its normal path — the probe answers, not a 400.
+    expect(res.statusCode).toBe(200)
+    // Exactly one would_refuse, naming the field the spec does not declare.
+    expect(lines.length).toBe(1)
+    expect(lines[0]).toMatchObject({
+      event: 'request_validation.would_refuse',
+      route: 'POST /x402/authorize',
+    })
+    expect(String((lines[0] as { field: string }).field)).toMatch(/^body\/settlementScheme$/)
+    expect(String((lines[0] as { message: string }).message)).toMatch(/additional/)
+    // And the counter moved.
+    expect(requestValidationOpsSnapshot().wouldRefuse).toBe(before.wouldRefuse + 1)
+    ;(app.log as unknown as { info: typeof originalInfo }).info = originalInfo
+  })
+
+  it('CHARACTERIZATION: the same x402 body WITHOUT settlementScheme produces no refusal at all', async () => {
+    // Proves the log above is caused by the undeclared field specifically —
+    // the conformant shape passes the spec as written today.
+    const before = requestValidationOpsSnapshot()
+    mockQuery.mockResolvedValueOnce({ rows: [] })
+    const res = await auth('POST', '/x402/authorize', {
+      url: 'https://merchant.example/mcp',
+      payTo: '0x' + 'ab'.repeat(20),
+      amount: '20000',
+      asset: '0x' + 'cd'.repeat(20),
+      network: 'base',
+    })
+    expect(res.statusCode).toBe(200)
+    expect(requestValidationOpsSnapshot().wouldRefuse).toBe(before.wouldRefuse)
   })
 })
 
@@ -301,6 +360,24 @@ async function contactProbeRoutes(app: FastifyInstance): Promise<void> {
     ;(err as unknown as { statusCode: number }).statusCode = 503
     throw err
   })
+}
+
+// The x402 characterization surface: the REAL prefix (routes/x402.ts:203) and
+// a handler that only echoes arrival. The plugin resolves the REAL
+// /x402/authorize operation and injects X402AuthorizeRequest — the probe never
+// touches the x402 module, so this exercises ONLY the validation edge.
+async function x402AuthorizeProbeRoutes(app: FastifyInstance): Promise<void> {
+  app.addHook('onRequest', (req, reply, done) => {
+    const header = req.headers.authorization
+    if (!header?.startsWith('Bearer ')) {
+      void reply.code(401).send({ error: 'Unauthorized' })
+      return
+    }
+    ;(req as unknown as { user: { sub: string } }).user = { sub: USER }
+    done()
+  })
+
+  app.post('/authorize', async () => ({ authorized: true }))
 }
 
 // The header of the source file under test must keep its registration contract

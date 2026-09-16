@@ -6,6 +6,8 @@ import {
   MAX_X_LABELS_DESKTOP,
   MAX_X_LABELS_MOBILE,
   MIN_CHARTABLE_DAYS,
+  MIN_X_LABEL_SEPARATION_NARROW,
+  MIN_X_LABEL_SEPARATION_WIDE,
   roundNiceStep,
   xLabelIndices,
 } from '../chart-scale'
@@ -149,17 +151,21 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
   })
 
   it('labels weekly for a month', () => {
-    // 30d → weekly ticks: days 0, 7, 14, 21, 28 — and the last day on the
-    // end, because the right edge is where the range finishes and a chart
-    // that stops its labels short of it hides the window it is about.
-    expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 28, 29])
+    // 30d → weekly ticks: days 0, 7, 14, 21 — and the last day on the end,
+    // because the right edge is where the range finishes and a chart that
+    // stops its labels short of it hides the window it is about. Day 28,
+    // where the stride's own last slot landed, is within a label-width of
+    // the endpoint on the desktop plot (#3037), so it is the slot that
+    // yields: the endpoint closes the axis alone.
+    expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 29])
   })
 
   it('labels fortnightly for a quarter', () => {
-    // 90d → fortnightly, on the same last-day rule: day 84 and day 89 are
-    // five apart, which is the price of never leaving the range unlabelled
-    // at its close.
-    expect(xLabelIndices(90)).toEqual([0, 14, 28, 42, 56, 70, 84, 89])
+    // 90d → fortnightly, on the same last-day rule. Day 84 sits within a
+    // label-width of the endpoint (five days over 89 is ~5.6% of the plot,
+    // under one `text-xs` calendar label), so 84 drops (#3037) and the
+    // endpoint carries the right edge by itself.
+    expect(xLabelIndices(90)).toEqual([0, 14, 28, 42, 56, 70, 89])
   })
 
   it('thins to the width it has rather than overprinting labels', () => {
@@ -214,6 +220,60 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
   it('returns nothing when there is nothing to label', () => {
     expect(xLabelIndices(0)).toEqual([])
     expect(xLabelIndices(-3)).toEqual([])
+  })
+
+  it('never returns two indices within a label-width of each other (the #3037 rule)', () => {
+    // The endpoint label is moved to the last index by stride arithmetic
+    // that does not look at the gap it lands with: on the shipped 30-day
+    // fixture the moved slot left the stride's day 28 one index behind day
+    // 29, and two `text-xs` calendar labels one index apart printed as the
+    // garbled `10 Ju11 Jul` cluster on /analytics. This pin IS the min-
+    // separation rule: for every range length and both treatments, each
+    // label except the endpoint sits at least one label-width (a fraction
+    // of the plot the constants own) from its right-hand neighbour — the
+    // endpoint's own gap is claimed by the edge-anchored rendering, which
+    // points INTO the plot over unoccupied axis, not out of it.
+    for (const count of [7, 8, 12, 30, 45, 60, 74, 90, 120, 365]) {
+      for (const narrow of [false, true]) {
+        const idx = xLabelIndices(count, { narrow })
+        const minSep = narrow ? MIN_X_LABEL_SEPARATION_NARROW : MIN_X_LABEL_SEPARATION_WIDE
+        const span = count - 1
+        for (let i = 1; i < idx.length - 1; i++) {
+          expect(
+            (idx[i + 1] - idx[i]) / span,
+            `labels ${idx[i]} and ${idx[i + 1]} of ${count}${narrow ? ' narrow' : ''} collide`,
+          ).toBeGreaterThanOrEqual(minSep)
+        }
+      }
+    }
+    // The two shapes the shipped page can be: the 30-day fixture renders
+    // exactly one label at the right edge in BOTH treatments (the stride
+    // slot one day behind the endpoint drops), and the 90-day desktop range
+    // drops the day-84 slot the endpoint move had left within a label-width.
+    expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 29])
+    expect(xLabelIndices(30, { narrow: true })).toEqual([0, 7, 14, 21, 29])
+    expect(xLabelIndices(90)).toEqual([0, 14, 28, 42, 56, 70, 89])
+  })
+
+  it('keeps the minimum separation without regressing the density it already had', () => {
+    // The rule thins the endpoint's neighbourhood and nothing else: the
+    // mid-plot stride the bands chose survives intact wherever it was
+    // already wider than a label (30d stays weekly through day 21, 90d
+    // stays fortnightly through day 70), the caps still hold, and the
+    // narrow 90-day list — five labels at the stride the density guard
+    // picked — is untouched, its endpoint gap 35 indices ≈ 39% of the plot.
+    expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 29])
+    expect(xLabelIndices(90, { narrow: true })).toEqual([0, 18, 36, 54, 89])
+    for (const count of [7, 30, 45, 90, 365]) {
+      for (const narrow of [false, true]) {
+        const idx = xLabelIndices(count, { narrow })
+        expect(idx.length, `${count}${narrow ? ' narrow' : ''} over the cap`).toBeLessThanOrEqual(
+          narrow ? MAX_X_LABELS_MOBILE : MAX_X_LABELS_DESKTOP,
+        )
+        expect(idx[idx.length - 1]).toBe(count - 1)
+        expect(idx[0]).toBe(0)
+      }
+    }
   })
 
   it('is the shared floor the primitives read for the sparse-data decision', () => {

@@ -108,13 +108,13 @@ export function transactionCsvRow(
     tx_hash: tx.hash,
     payment_id: tx.paymentId ?? '',
     agent_name: tx.agentName ?? '',
-    safe_address: tx.safeAddress,
+    safe_address: tx.accountAddress,
     // The raw attribution enum — `human` | `agent` | `unknown`, empty for
     // inbound and unattributed rows. Never the display string "You", so the
     // export stays unambiguous for an accountant reading it cold.
     initiator: tx.initiatedBy ?? '',
     // #2907: same value as `safe_address` above — dual-emit, not a rename.
-    account_address: tx.safeAddress,
+    account_address: tx.accountAddress,
   }
 }
 

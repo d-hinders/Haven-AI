@@ -202,7 +202,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
           detail: {
             error_code: 'delegation_budget_exceeded',
             phase: AgentPaymentPhase.InsufficientFunds,
-            next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+            next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
             remaining_atomic: fundingRemainingAtomic.toString(),
           },
         })
@@ -216,7 +216,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
               'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
             error_code: 'delegation_budget_exceeded',
             phase: AgentPaymentPhase.InsufficientFunds,
-            next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+            next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
             rail: AgentPaymentRail.X402,
             chain_id: agent.chain_id,
             token: tokenConfig.symbol,
@@ -403,7 +403,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         status: intent.status,
         expires_at: intent.expires_at,
         chain_id: agent.chain_id,
-        safe_address: agent.account_address,
+        account_address: agent.account_address,
         payer: agent.account_address,
         token: tokenConfig.symbol,
         amount: amountHuman,
@@ -419,13 +419,12 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
           // The account validates THIS typed data (not the bare 4337 hash).
           typed_data: fundingAuth.prepared.signingTypedData,
           components: {
-            safe: agent.account_address,
-            // #2907: payer_account is a same-value twin of the deprecated
-            // `safe` — NOT of `account` above, which already means the
-            // delegate account address here (a different address; owner
-            // review on #2906 rejected renaming into it, since the SDK's
-            // receipt-payer read at `sdk/src/x402-funding-leg.ts:312` would
-            // then resolve to the wrong address).
+            // #2914: `payer_account` is the account this payment is drawn
+            // from. It replaced the deprecated `safe` key and is deliberately
+            // NOT `account` below, which means the DELEGATE account address
+            // here — a different address (owner review on #2906 rejected
+            // merging the two, since the SDK's receipt-payer read would then
+            // resolve to the wrong address).
             payer_account: agent.account_address,
             account: fundingAuth.prepared.delegateAccountAddress,
             token: tokenAddress,
@@ -542,7 +541,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       detail: {
         error_code: 'delegation_budget_exceeded',
         phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
         remaining_atomic: remainingAtomic.toString(),
       },
     })
@@ -556,7 +555,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
           'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
         error_code: 'delegation_budget_exceeded',
         phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
         rail: AgentPaymentRail.X402,
         chain_id: agent.chain_id,
         token: tokenConfig.symbol,

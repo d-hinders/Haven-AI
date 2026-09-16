@@ -2,7 +2,7 @@
  * `/user/safes*` — the retired Safe-vocabulary paths (#2914, naming epic #2906
  * phase 5, the contraction).
  *
- * #2907 registered `userSafesRoutes` a second time under `/user/accounts` so
+ * #2907 registered `userAccountsRoutes` a second time under `/user/accounts` so
  * both vocabularies served the same handlers for exactly one release. #2908
  * shipped the consumer half, `0.2.0-alpha.0` reached `main` on 2026-09-14, and
  * the further promotion the slice waits for landed on 2026-09-16 — so the old
@@ -21,10 +21,10 @@
  * stopped working, not someone reading the epic.
  *
  * **Auth still runs first.** `authMiddleware` is an `onRequest` hook on this
- * module exactly as it is on `userSafesRoutes`, and Fastify runs `onRequest`
+ * module exactly as it is on `userAccountsRoutes`, and Fastify runs `onRequest`
  * before the handler, so an anonymous caller gets 401 rather than a 410 that
  * would tell an unauthenticated stranger which paths this deployment used to
- * serve. Pinned in `__tests__/user-safes-retired.test.ts`, not assumed — the
+ * serve. Pinned in `__tests__/user-accounts-retired.test.ts`, not assumed — the
  * same property `safe-inflow-retired.test.ts` pins for the inflow tombstones.
  *
  * The two inflow paths (`POST /user/safes`, `POST /user/safes/deploy`) were
@@ -38,15 +38,15 @@
 import type { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 
-/** Every method+path `userSafesRoutes` served under the retired prefix. */
+/** Every method+path `userAccountsRoutes` served under the retired prefix. */
 const RETIRED_ROUTES = [
   { method: 'GET', path: '/', replacement: 'GET /user/accounts' },
   { method: 'POST', path: '/', replacement: 'POST /user/accounts' },
   { method: 'POST', path: '/deploy', replacement: 'POST /user/accounts/deploy' },
-  { method: 'PUT', path: '/:safeId', replacement: 'PUT /user/accounts/:accountId' },
-  { method: 'PUT', path: '/:safeId/default', replacement: 'PUT /user/accounts/:accountId/default' },
-  { method: 'DELETE', path: '/:safeId', replacement: 'DELETE /user/accounts/:accountId' },
-  { method: 'GET', path: '/:safeId/funding', replacement: 'GET /user/accounts/:accountId/funding' },
+  { method: 'PUT', path: '/:id', replacement: 'PUT /user/accounts/:accountId' },
+  { method: 'PUT', path: '/:id/default', replacement: 'PUT /user/accounts/:accountId/default' },
+  { method: 'DELETE', path: '/:id', replacement: 'DELETE /user/accounts/:accountId' },
+  { method: 'GET', path: '/:id/funding', replacement: 'GET /user/accounts/:accountId/funding' },
 ] as const
 
 /**

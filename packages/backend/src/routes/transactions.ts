@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
+import { retiredSafeQuery } from '../middleware/retired-safe-names.js'
 import { agentExistsForUser } from '../infra/repositories/agents.js'
 import {
   findMachinePaymentEvidenceDetail,
@@ -24,7 +25,6 @@ import {
 } from '../modules/transactions/index.js'
 import { CSV_BOM } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
-import { withFailedAccountIdsAlias, withTransactionAccountAlias } from '../openapi/wire-aliases.js'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -114,15 +114,17 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid pagination params' })
     }
 
-    // #2907: `accountId` is the account-vocabulary twin of `safeId`; both are
-    // accepted and filter identically. An unknown query key is silently
-    // ignored by Fastify, so a missing alias here would have returned ALL
-    // transactions with no error — the failure mode `wire-aliases.test.ts`'s
-    // sibling filter test guards against.
-    const accountFilterId = request.query.accountId ?? request.query.safeId
+    // #2914: `safeId` is retired. It stays DECLARED so it can be refused —
+    // Fastify drops an undeclared query key silently, and a filter that
+    // quietly stops filtering returns every row rather than none.
+    if (request.query.safeId !== undefined) {
+      return reply.code(400).send(retiredSafeQuery('safeId', 'accountId'))
+    }
+
+    const accountFilterId = request.query.accountId
 
     if (accountFilterId && !UUID_RE.test(accountFilterId)) {
-      return reply.code(400).send({ error: 'Invalid safeId' })
+      return reply.code(400).send({ error: 'Invalid accountId' })
     }
 
     if (
@@ -143,7 +145,7 @@ export default async function transactionRoutes(
     if (accountFilterId) {
       safes = safes.filter((safe) => safe.id === accountFilterId)
       if (safes.length === 0) {
-        return reply.code(400).send({ error: 'Invalid safeId' })
+        return reply.code(400).send({ error: 'Invalid accountId' })
       }
     }
 
@@ -162,13 +164,12 @@ export default async function transactionRoutes(
         limit,
         hasMore: false,
         partialFailure: false,
-        failedSafeIds: [],
         failedAccountIds: [],
         truncated: false,
       }
     }
 
-    const { merged, failedSafeIds, truncated } = await aggregateAccountTransactions(
+    const { merged, failedAccountIds, truncated } = await aggregateAccountTransactions(
       safes,
       request.log,
       fresh,
@@ -182,20 +183,18 @@ export default async function transactionRoutes(
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
     // ledger query per response, and none for an unentitled account.
     const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
-    const transactions = enrichedPage.map(withTransactionAccountAlias)
-
-    return withFailedAccountIdsAlias({
-      transactions,
+    return {
+      transactions: enrichedPage,
       total: filtered.length,
       offset,
       limit,
       hasMore,
-      partialFailure: failedSafeIds.length > 0,
-      failedSafeIds: Array.from(new Set(failedSafeIds)),
+      partialFailure: failedAccountIds.length > 0,
+      failedAccountIds: Array.from(new Set(failedAccountIds)),
       // #2882: the rows above are capped at the explorer window per account,
       // so `total` is the truncated count, not the account's history.
       truncated,
-    })
+    }
   })
 
   app.get<{ Params: { paymentId: string } }>(
@@ -228,7 +227,7 @@ export default async function transactionRoutes(
    * GET /transactions/export.csv — the filtered list as a CSV file (#2871).
    *
    * Filter-faithful over the whole set the aggregation returned, not the page
-   * the dashboard has loaded: it accepts the same `safeId` / `agentId` /
+   * the dashboard has loaded: it accepts the same `accountId` / `agentId` /
    * `tokenKey` filters as `GET /`, plus the `direction` and `chainId` the
    * dashboard used to apply in the browser.
    *
@@ -252,11 +251,16 @@ export default async function transactionRoutes(
   }>('/export.csv', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const fresh = parseFreshFlag(request.query.fresh)
-    // #2907: `accountId` twins `safeId`; both accepted, both filter.
-    const accountFilterId = request.query.accountId ?? request.query.safeId
+    // #2914: see the sibling feed above — `safeId` is declared so it can be
+    // refused rather than silently widening the result set.
+    if (request.query.safeId !== undefined) {
+      return reply.code(400).send(retiredSafeQuery('safeId', 'accountId'))
+    }
+
+    const accountFilterId = request.query.accountId
 
     if (accountFilterId && !UUID_RE.test(accountFilterId)) {
-      return reply.code(400).send({ error: 'Invalid safeId' })
+      return reply.code(400).send({ error: 'Invalid accountId' })
     }
 
     if (
@@ -294,7 +298,7 @@ export default async function transactionRoutes(
     if (accountFilterId) {
       safes = safes.filter((safe) => safe.id === accountFilterId)
       if (safes.length === 0) {
-        return reply.code(400).send({ error: 'Invalid safeId' })
+        return reply.code(400).send({ error: 'Invalid accountId' })
       }
     }
 
@@ -336,7 +340,7 @@ export default async function transactionRoutes(
     // order, as the dashboard table.
     const contacts = await listContactsForUser(sub)
     const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
-    const safeNames = new Map(
+    const accountNames = new Map(
       allSafes.map((safe) => [accountNameKey(safe.account_address, safe.chain_id), safe.name]),
     )
 
@@ -344,7 +348,7 @@ export default async function transactionRoutes(
       resolveName: (address, addressChainId) => {
         const contactName = contactNames.get(address.toLowerCase())
         if (contactName) return contactName
-        return safeNames.get(accountNameKey(address, addressChainId)) ?? null
+        return accountNames.get(accountNameKey(address, addressChainId)) ?? null
       },
     })
 
@@ -376,22 +380,21 @@ export default async function transactionRoutes(
     }
   })
 
-  // #2907: `/:safeAddress` and its documented `{accountAddress}` twin
-  // (`openapi/spec.ts`) are the SAME Fastify route — a single dynamic path
-  // segment has no wire-visible name, so `GET /transactions/0xabc...` is
-  // already both paths at once; find-my-way also refuses two parametric
-  // routes with different param names at one position — verified against a
-  // live Fastify instance: `app.get('/transactions/:accountAddress', ...)`
-  // after the registration below throws `FST_ERR_DUPLICATED_ROUTE` at
-  // `app.ready()`, not a param-name-specific code — so registering a second
-  // one here would fail at boot. Unlike the
-  // multi-segment `/user/safes/...` twins, there is nothing to register
-  // twice.
+  // #2914: this is `GET /transactions/{accountAddress}` and nothing else now.
+  // A single dynamic path segment has no wire-visible name, so the old
+  // `{safeAddress}` spelling and the new one were always the SAME Fastify
+  // route — `GET /transactions/0xabc...` matched both documented paths at
+  // once. There is consequently nothing to retire here and no tombstone to
+  // register: an old client's URL is byte-identical to a new one's. (#2907
+  // verified the mechanics against a live instance: registering a second
+  // parametric route at one position throws `FST_ERR_DUPLICATED_ROUTE` at
+  // `app.ready()`, so the twin never could have been a second registration.)
+  // Only the multi-segment `/user/safes/...` paths needed 410 tombstones.
   app.get<{
-    Params: { safeAddress: string }
+    Params: { accountAddress: string }
     Querystring: { page?: string; limit?: string; fresh?: string; chain_id?: string }
-  }>('/:safeAddress', async (request, reply) => {
-    const { safeAddress: address } = request.params
+  }>('/:accountAddress', async (request, reply) => {
+    const { accountAddress: address } = request.params
     const { sub } = request.user as { sub: string }
     const page = parsePositiveInt(request.query.page, 1, 1, Number.MAX_SAFE_INTEGER)
     const limit = parsePositiveInt(request.query.limit, 25, 1, 100)
@@ -438,7 +441,7 @@ export default async function transactionRoutes(
 
     return {
       transactions: enriched.map(
-        ({ chainId: _chainId, safeId: _safeId, safeAddress: _safeAddress, safeName: _safeName, agentId: _agentId, ...tx }) => tx,
+        ({ chainId: _chainId, accountId: _accountId, accountAddress: _accountAddress, accountName: _accountName, agentId: _agentId, ...tx }) => tx,
       ),
       total,
       page,

@@ -53,8 +53,8 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-import userSafesRoutes from '../user-safes.js'
-import userSafesRetiredRoutes from '../user-safes-retired.js'
+import userAccountsRoutes from '../user-accounts.js'
+import userAccountsRetiredRoutes from '../user-accounts-retired.js'
 
 const USER = 'user-1'
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111'
@@ -80,8 +80,8 @@ describe('/user/safes is retired and answers 410 (#2914)', () => {
   beforeAll(async () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    await app.register(userSafesRetiredRoutes, { prefix: '/user/safes' })
-    await app.register(userSafesRoutes, { prefix: '/user/accounts' })
+    await app.register(userAccountsRetiredRoutes, { prefix: '/user/safes' })
+    await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })
 

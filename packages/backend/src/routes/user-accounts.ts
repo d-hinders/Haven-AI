@@ -13,7 +13,6 @@ import {
 import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { getChain } from '../domain/chains.js'
-import { withAccountAddressAlias, withAccountsEnvelopeAlias } from '../openapi/wire-aliases.js'
 import {
   formatTokenAmount,
   getFaucetUrl,
@@ -23,19 +22,11 @@ import {
 } from '@haven_ai/core'
 
 /**
- * #2911 (schema rename, epic #2906 phase 3): `withAccountAddressAlias`'s
- * input type (`SafeAddressed`, `openapi/wire-aliases.ts`) still names its
- * field `safe_address` — that file is the wire contract and is deliberately
- * untouched here (it dual-emits both wire names from whatever it is handed).
- * The repository row it used to read that field directly off of is renamed
- * (`account_address`), so this shim re-derives the `SafeAddressed` shape at
- * the call site — the read changes, the wire mapper and its output do not.
+ * #2914 (naming epic #2906 phase 5, the contraction): the dual-emit mapper
+ * (`withAccountAddressAlias`) and the `toSafeAddressed` shim that fed it are
+ * both gone. The repository row already carries `account_address`, so these
+ * handlers now return it unchanged — there is no projection left to do.
  */
-function toSafeAddressed<T extends { account_address: string }>(
-  row: T,
-): T & { safe_address: string } {
-  return { ...row, safe_address: row.account_address }
-}
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -45,23 +36,19 @@ interface RenameAccountBody {
 
 // ── Routes ────────────────────────────────────────────────────────
 
-export default async function userSafesRoutes(app: FastifyInstance): Promise<void> {
+export default async function userAccountsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /user/safes (and its #2907 twin GET /user/accounts) — list all
-  // linked accounts for the authenticated user. Dual-emits account_address
-  // alongside safe_address on every item (equality-tested,
-  // `openapi/wire-aliases.test.ts`).
+  // GET /user/accounts — list all linked accounts for the authenticated user.
+  // One envelope key (`accounts`) and one address name (`account_address`);
+  // the `safes` envelope key and the old address twin went with #2914.
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    const safes = (await listAccountsForUser(sub)).map(toSafeAddressed).map(withAccountAddressAlias)
-
-    // #2907: `accounts` twins the `safes` envelope key, same array.
-    return withAccountsEnvelopeAlias({ safes })
+    return { accounts: await listAccountsForUser(sub) }
   })
 
-  // POST /user/safes/deploy — TOMBSTONE (#1984 closed it, #1988 deleted the
+  // POST /user/accounts/deploy — TOMBSTONE (#1984 closed it, #1988 deleted the
   // body). It relay-sponsored a wallet-owned Safe deployment through
   // `relaySafeDeploy`, which is deleted with this slice. Note what it never
   // had: any check that the caller owned `owner_address`. The relayer paid gas
@@ -69,16 +56,16 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
   // global rate limit — a surface that is now gone rather than guarded.
   app.post('/deploy', retiredSafeInflowHandler('deploy'))
 
-  // POST /user/safes — TOMBSTONE (#1984 closed it, #1988 deleted the body).
+  // POST /user/accounts — TOMBSTONE (#1984 closed it, #1988 deleted the body).
   // Importing is the other half of creating; both are how a Safe entered Haven.
   app.post('/', retiredSafeInflowHandler('import'))
 
-  // PUT /user/safes/:safeId — rename a Safe
-  app.put<{ Params: { safeId: string }; Body: RenameAccountBody }>(
-    '/:safeId',
+  // PUT /user/accounts/:accountId — rename an account
+  app.put<{ Params: { accountId: string }; Body: RenameAccountBody }>(
+    '/:accountId',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const { safeId: accountId } = request.params
+      const { accountId } = request.params
       const { name } = request.body
 
       if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -88,24 +75,24 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
       const renamed = await renameAccountForUser(name.trim(), accountId, sub)
 
       if (!renamed) {
-        return reply.code(404).send({ error: 'Safe not found' })
+        return reply.code(404).send({ error: 'Account not found' })
       }
 
-      return withAccountAddressAlias(toSafeAddressed(renamed))
+      return renamed
     },
   )
 
-  // PUT /user/safes/:safeId/default — set a Safe as the default
-  app.put<{ Params: { safeId: string } }>(
-    '/:safeId/default',
+  // PUT /user/accounts/:accountId/default — set an account as the default
+  app.put<{ Params: { accountId: string } }>(
+    '/:accountId/default',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const { safeId: accountId } = request.params
+      const { accountId } = request.params
 
-      // Verify the Safe belongs to the user
+      // Verify the account belongs to the user
       const owned = await findOwnedAccountAddress(accountId, sub)
       if (!owned) {
-        return reply.code(404).send({ error: 'Safe not found' })
+        return reply.code(404).send({ error: 'Account not found' })
       }
 
       await setDefaultAccountForUser(accountId, owned.account_address, sub)
@@ -114,17 +101,17 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
     },
   )
 
-  // DELETE /user/safes/:safeId — remove (unlink) a Safe
-  app.delete<{ Params: { safeId: string } }>(
-    '/:safeId',
+  // DELETE /user/accounts/:accountId — remove (unlink) an account
+  app.delete<{ Params: { accountId: string } }>(
+    '/:accountId',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const { safeId: accountId } = request.params
+      const { accountId } = request.params
 
-      // Check the Safe exists and belongs to user
+      // Check the account exists and belongs to user
       const owned = await findOwnedAccountDefaultFlag(accountId, sub)
       if (!owned) {
-        return reply.code(404).send({ error: 'Safe not found' })
+        return reply.code(404).send({ error: 'Account not found' })
       }
 
       const deleted = await deleteAccountForUser(accountId, sub, owned.is_default)
@@ -140,7 +127,7 @@ export default async function userSafesRoutes(app: FastifyInstance): Promise<voi
 
   // ── Funding facts (#2534) ─────────────────────────────────────────
 //
-// `GET /user/safes/:safeId/funding` — the machine-readable funding hand-off.
+// `GET /user/accounts/:accountId/funding` — the machine-readable funding hand-off.
 //
 // Funding is a HUMAN step (a transfer from the user's own wallet or exchange);
 // today the only instruction is the address the dashboard renders, which an
@@ -167,29 +154,29 @@ interface FundingResponse {
   funded: boolean
 }
 
-app.get<{ Params: { safeId: string } }>(
-  '/:safeId/funding',
+app.get<{ Params: { accountId: string } }>(
+  '/:accountId/funding',
   async (request, reply): Promise<FundingResponse> => {
     const { sub } = request.user as { sub: string }
-    const { safeId: accountId } = request.params
+    const { accountId } = request.params
 
     // Format first: a malformed id cannot name a row, so answering 400 rather
     // than 404 keeps the two cases apart for a caller debugging a typo.
     if (!UUID_RE.test(accountId)) {
-      return reply.code(400).send({ error: 'Invalid Safe id' }) as never
+      return reply.code(400).send({ error: 'Invalid account id' }) as never
     }
 
-    // ONE tenant-scoped read: ownership, the Safe address and its chain, with
+    // ONE tenant-scoped read: ownership, the account address and its chain, with
     // the delegation-rail scope the account lists apply (#2413) — funding
     // instructions are for the account an agent spends from.
     const owned = await findOwnedAccountForFunding(accountId, sub)
     if (!owned) {
-      return reply.code(404).send({ error: 'Safe not found' }) as never
+      return reply.code(404).send({ error: 'Account not found' }) as never
     }
     const chainId = owned.chain_id
     const chain = getChain(chainId)
 
-    // The same ethers-backed balance read `GET /balances/:safeAddress` runs —
+    // The same ethers-backed balance read `GET /balances/:accountAddress` runs —
     // no new chain machinery, and a failed read reads as zero exactly as it
     // does there (a balance RPC hiccup must not 500 a hand-off whose whole
     // job is to be pasteable).
@@ -252,9 +239,9 @@ app.get<{ Params: { safeId: string } }>(
 
 // ── Approvers (Safe owners) — DELETED (#1988, epic #1440 slice 5) ────
   //
-  // Five routes lived here: `GET /user/safes/known-approvers`, `GET|POST
-  // /user/safes/:safeId/approvers`, `POST /user/safes/:safeId/approvers/tx`
-  // and `DELETE /user/safes/:safeId/approvers/:address`. They constructed and
+  // Five routes lived under the old prefix: a known-approvers list, a
+  // per-account approver list and add, an owner-change transaction builder,
+  // and a per-address removal. They constructed and
   // guarded Safe owner-change self-calls (Haven never signed one) and stored
   // the label/type decoration in `safe_approver_metadata` — the table the
   // epic's approved phase 5 drops in #1990. `modules/accounts/safe-owner-tx.ts`

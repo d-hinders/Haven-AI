@@ -262,11 +262,10 @@ async function replayIntentBody(
     sign_data: {
       hash: pi.sign_hash,
       components: {
-        safe: agent.account_address,
-        // #2907: payer_account is a same-value twin of `safe` — the clean
-        // case, since this shape carries no `account` key at all (unlike the
-        // delegation-authorize funding shape, where `account` already means
-        // the delegate account address).
+        // #2914: `payer_account` replaced the deprecated `safe` key. The
+        // clean case — this shape carries no `account` key at all, unlike the
+        // delegation-authorize funding shape where `account` already means
+        // the delegate account address.
         payer_account: agent.account_address,
         token: pi.token_address,
         to: pi.to_address,

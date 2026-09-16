@@ -56,8 +56,8 @@ import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
-import userSafesRoutes from './routes/user-safes.js'
-import userSafesRetiredRoutes from './routes/user-safes-retired.js'
+import userAccountsRoutes from './routes/user-accounts.js'
+import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
@@ -289,11 +289,9 @@ await app.register(x402Routes, { prefix: '/x402' })
 // serving and answers 410 with the replacement path. It is registered as a
 // TOMBSTONE module rather than dropped, because an absent registration is a
 // bare 404 — a transient-looking error for a path that is permanently gone.
-await app.register(userSafesRetiredRoutes, { prefix: '/user/safes' })
-// The account vocabulary is now the only one that serves. `userSafesRoutes`
-// keeps its filename for this slice: renaming the module is a pure rename
-// with its own diff, and #2909 already moved the repository layer.
-await app.register(userSafesRoutes, { prefix: '/user/accounts' })
+await app.register(userAccountsRetiredRoutes, { prefix: '/user/safes' })
+// The account vocabulary is now the only one that serves.
+await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })

@@ -21,7 +21,7 @@
  *   cross-tenant read of another user's payment history. Since #1179 there is
  *   no exception in this file: the one `user_id`-scoped statement moved to
  *   `approval-requests.ts`, where the aggregate that owns it lives.
- * - Safe identity is joined on the payment's STORED `safe_address` + chain,
+ * - Account identity is joined on the payment's STORED `account_address` + chain,
  *   not through `agents.account_id`. A payment keeps the account it was made
  *   from even after the agent is re-pointed or the Safe unlinked; joining
  *   through the agent would silently re-label historical rows.
@@ -46,7 +46,7 @@ export interface ActivityPaymentRow {
   id: string
   account_id: string | null
   account_address: string | null
-  safe_name: string | null
+  account_name: string | null
   chain_id: number
   token_symbol: string
   token_address: string
@@ -83,7 +83,7 @@ export interface AgentSpendStatsRow {
 export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
               us.id AS account_id,
               COALESCE(us.account_address, pi.account_address) AS account_address,
-              us.name AS safe_name,
+              us.name AS account_name,
               COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
               pi.token_address,
@@ -147,7 +147,7 @@ export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
               pi.agent_id,
               us.id AS account_id,
               COALESCE(us.account_address, pi.account_address) AS account_address,
-              us.name AS safe_name,
+              us.name AS account_name,
               COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
               pi.token_symbol,
               pi.token_address,
